@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-06-02 (sessão: mudança de paradigma — de "organizador gamificado" para "sistema operacional pessoal adaptativo"; input natural via IA; seção 1c adicionada)
+> Documento vivo de design. Última atualização: 2026-06-05 (sessão: arquitetura cognitiva consolidada — modelo em 4 camadas, memória semântica, continuidade narrativa; seções 1d e 1e adicionadas)
 > Para retomar o projeto em qualquer IA: cole este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -14,7 +14,9 @@
 **Público futuro:** Aberto ao público após o sistema estar bem estruturado e funcional
 
 ### Conceito central
-Um sistema operacional pessoal adaptativo: absorve a vida como ela é — caótica, não-linear, imprevisível — e organiza tudo em segundo plano. O usuário despeja informações naturalmente; o sistema extrai estrutura, detecta padrões e mantém continuidade sem exigir gerenciamento manual.
+Um **sistema de continuidade cognitiva pessoal**: absorve a vida como ela é — caótica, não-linear, imprevisível — e organiza tudo em segundo plano. O usuário despeja informações naturalmente; o sistema extrai estrutura, detecta padrões e mantém continuidade sem exigir gerenciamento manual.
+
+O verdadeiro núcleo é: captura natural de contexto humano → memória persistente → organização automática → reflexão contextualizada → continuidade narrativa da vida. A gamificação (XP, níveis, radar, eras, quests) existe como **camada de feedback visual/emocional** — transforma dados de vida em progressão tangível, não é o núcleo do produto.
 
 A camada de game (XP, níveis, eras, quests, radar) não é o núcleo — é o **feedback layer**: transforma dados de vida em progressão visual, sensação de avanço e contexto emocional. O usuário é o personagem, a vida é o mapa, o app é o HUD — mas o HUD se atualiza sozinho.
 
@@ -112,6 +114,100 @@ Se aumentar → provavelmente vai contra a filosofia central.
 Se reduzir → provavelmente está alinhado.
 
 **Consequência arquitetural:** o sistema deve favorecer texto livre, contexto contínuo, memória persistente e organização automática — e reduzir dependência de campos rígidos, categorização manual e fluxos baseados em formulários.
+
+---
+
+## 1d. Modelo cognitivo em camadas
+
+O sistema opera em 4 camadas. A ordem importa: cada camada depende da anterior.
+
+### Camada 1 — Memória bruta
+Armazena tudo que o usuário despeja: texto original, transcrição de áudio, pensamentos, registros, reflexões, ideias, contexto emocional.
+
+**Nada deve ser perdido. O texto bruto é extremamente importante.**
+
+O usuário não deve sentir que está "alimentando um sistema" — deve sentir que está despejando.
+
+### Camada 2 — Estrutura derivada
+A IA extrai automaticamente: pilares, sub-pilares, duração estimada, temas, entidades, humor, contexto emocional, intensidade, relações implícitas.
+
+Essa camada transforma vida narrada em dados computáveis — sem exigir esforço do usuário.
+
+### Camada 3 — Memória semântica
+O sistema aprende relações persistentes ao longo do tempo.
+
+Exemplos:
+- `"portal dos clientes"` → trabalho recorrente, contexto de estresse
+- `"skate"` → regulação emocional, lazer ativo
+- `"Anima"` → projeto central da vida atual
+- `"dias sem celular"` → padrão comportamental de desconexão intencional
+- `"Goma"` → máquina de IA pessoal
+
+Essa camada é responsável pela **continuidade cognitiva real**: o sistema sabe o que aquele contexto significa para *esta* pessoa — sem o usuário reexplicar.
+
+### Camada 4 — Insights e reflexão
+Somente depois das camadas anteriores existirem: insights, padrões, sugestões, previsões, reflexões, perguntas contextualizadas.
+
+**Critérios de qualidade dos insights:**
+- Raros (não frequentes a ponto de virar ruído)
+- Específicos (vinculados a dados reais do histórico da pessoa)
+- Contextualizados (fazem sentido *para esta pessoa*, não são genéricos)
+- Honestos (observações, não motivação artificial)
+
+**O que evitar:**
+- Frases motivacionais genéricas
+- Coaching automático não solicitado
+- Pseudo-psicologia
+- Respostas vagas que poderiam se aplicar a qualquer pessoa
+
+Exemplo de insight de qualidade:
+> "Nas últimas semanas, seus períodos de maior clareza mental coincidiram com dias onde houve atividade física e menor carga contínua de trabalho."
+
+---
+
+## 1e. Arquitetura de IA — princípios
+
+### Estrutura da organização automática
+A IA NÃO deve inventar livremente pilares ou a estrutura principal do sistema. A estabilidade da estrutura é intencional:
+
+| Nível | Estabilidade | Quem controla |
+|-------|-------------|---------------|
+| Pilares principais | Relativamente estável | Usuário define no onboarding; editável raramente |
+| Sub-pilares | Semi-dinâmico | Usuário define; IA pode sugerir; nunca cria sem confirmação |
+| Tags / contexto / entidades | Altamente dinâmico | IA extrai automaticamente de cada entrada |
+
+Isso mantém coerência, previsibilidade e qualidade dos insights. Um sistema com pilares flutuantes vira bagunça semântica impossível de usar para continuidade.
+
+### A inteligência não vem de modelos maiores
+O diferencial do Anima NÃO está em trocar `qwen2.5:14b` por GPT-4 ou Claude. Trocar modelos ajuda marginalmente.
+
+O ganho principal vem de:
+- **Memória contextual** — o sistema lembra quem é o usuário
+- **Retrieval eficiente** — encontra o contexto certo no momento certo
+- **Embeddings semânticos** — entende relações entre entradas distantes no tempo
+- **Estrutura semântica persistente** — Camada 3 acima
+- **Continuidade temporal** — o sistema sabe o que aconteceu antes
+- **Histórico persistente e rico** — quantidade + qualidade de memória bruta
+
+### Prioridade arquitetural (antes de expandir features)
+1. Refinar fluxo de entrada natural (reduzir fricção de captura)
+2. Melhorar parsing e contextualização (Camada 2 mais rica)
+3. Construir memória semântica consistente (Camada 3)
+4. Fortalecer timeline narrativa (acesso temporal ao histórico)
+5. Criar retrieval contextual temporal (busca semântica no histórico)
+
+Só depois: expansão de features, modelos maiores, integrações externas.
+
+### Objetivo emocional do produto (marco de sucesso)
+
+| Tempo de uso | O que o usuário deve sentir |
+|-------------|---------------------------|
+| Semana 1 | "Legal." |
+| Semana 3 | "Isso está entendendo minha rotina." |
+| Mês 2 | "Esse sistema está acompanhando minha vida." |
+| Mês 6 | "Esse app lembra coisas sobre mim que eu esqueceria." |
+
+O objetivo é criar: continuidade, confiança, sensação de memória persistente e clareza pessoal.
 
 ---
 
@@ -545,18 +641,34 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 
 ## 13. Próximos temas a explorar
 
-- [ ] **Pulso/entrada do dia** — experiência ainda mais leve, "quando der", sem pilar obrigatório, nunca streak
-- [ ] **Web: refatorar para input natural** — modal de registro ainda usa formulário estruturado; alinhar com o mobile
-- [ ] **Onboarding conversacional** — substituir os 5 steps por uma conversa com a IA (hipótese futura)
-- [ ] **Insights automáticos** — IA lendo timeline acumulada e gerando padrões entre pilares
-- [ ] **Criar sub-pilares pós-onboarding** — adicionar/editar pilares da home ou configurações
+> Ordenados pela prioridade arquitetural definida em jun/2026 (seção 1e). Features de captura e memória vêm antes de expansão de UX.
+
+### Prioridade 1 — Captura e memória (núcleo do produto)
+- [ ] **Testar input por áudio no mobile** — servidor Whisper na Goma (porta 9000); setup documentado na seção 12b
+- [ ] **Web: refatorar para input natural** — modal de registro ainda usa formulário estruturado; alinhar com o mobile (Camada 1)
+- [ ] **Memória semântica — Camada 3** — sistema aprende entidades persistentes do usuário (pessoas, lugares, projetos, padrões) a partir do histórico; retrieval semântico com embeddings
+- [ ] **Timeline narrativa** — acesso ao histórico como narrativa temporal, não só lista de atividades; base para insights contextualizados
+- [ ] **Retrieval contextual temporal** — busca semântica no histórico para alimentar chat e insights (embeddings + pgvector)
 - [ ] **Backfill com data passada** — registrar atividade com data anterior (decidido no PRD, não implementado)
+
+### Prioridade 2 — Reflexão e insights (Camada 4)
+- [ ] **Insights automáticos** — IA lendo timeline acumulada e gerando padrões entre pilares; critérios: raros, específicos, contextualizados, honestos (não coaching genérico)
+- [ ] **Pulso/entrada do dia** — experiência ainda mais leve, "quando der", sem pilar obrigatório, nunca streak
+
+### Prioridade 3 — UX e features complementares
+- [ ] **Criar sub-pilares pós-onboarding** — adicionar/editar pilares da home ou configurações
+- [ ] **Onboarding conversacional** — substituir os 5 steps por uma conversa com a IA (hipótese futura)
+- [ ] **Seleção de foco** — "Em quais pilares quer focar agora?" no onboarding + Configurações
+
+### Prioridade 4 — Integrações e expansão
 - [ ] **Adaptador Obsidian** — export markdown fase 1 (Postgres → markdown)
 - [ ] **Integrações passivas** — Apple Health, Google Fit, calendário (camada 0)
 - [ ] **Modelo de monetização** — quando abrir ao público
-- [ ] **Seleção de foco** — "Em quais pilares quer focar agora?" no onboarding + Configurações
+
+### Concluído
 - [x] **Dashboard hierárquico** — sub-pilares indentados sob os pais no home (web + mobile)
 - [x] **Input natural com IA** — texto livre + áudio; implementado no mobile
+- [x] **Chat com IA contextual** — streaming via Ollama; contexto completo do usuário; web
 
 ---
 
