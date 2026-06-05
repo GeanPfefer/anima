@@ -40,7 +40,7 @@ export default function IndexScreen() {
         if (profile?.onboarding_completed_at) {
           router.replace('/(app)/home');
         } else {
-          router.replace('/(onboarding)/step-1');
+          router.replace('/(onboarding)/welcome');
         }
       } catch {
         if (!cancelled) router.replace('/(auth)/login');

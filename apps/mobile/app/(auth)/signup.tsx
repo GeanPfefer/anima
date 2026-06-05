@@ -33,7 +33,7 @@ export default function SignupScreen() {
 
     // Usuário criado — vai direto pro onboarding (profile ainda não tem onboarding_completed_at)
     if (data.session) {
-      router.replace('/(onboarding)/step-1');
+      router.replace('/(onboarding)/welcome');
     } else {
       // Supabase pode exigir confirmação de e-mail
       setError('Verifique seu e-mail para confirmar a conta.');

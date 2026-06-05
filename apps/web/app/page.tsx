@@ -14,5 +14,5 @@ export default async function RootPage() {
     .single();
 
   if (profile?.onboarding_completed_at) redirect('/home');
-  redirect('/step-1');
+  redirect('/welcome');
 }
