@@ -4,6 +4,92 @@ import { createClient } from '@/lib/supabase/server';
 import { calculateBonusMultiplier } from '@anima/core';
 import type { ActivityBonusType } from '@anima/types';
 
+export type ParsedActivity = {
+  pillarName: string;
+  durationMinutes: number;
+  note: string;
+};
+
+export async function parseActivities(
+  text: string,
+  pillarNames: string[],
+): Promise<ParsedActivity[]> {
+  const ollamaUrl   = process.env.OLLAMA_URL   ?? 'http://100.68.239.78:11434';
+  const ollamaModel = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
+
+  const prompt = `Você extrai atividades de vida de textos escritos naturalmente.
+
+Pilares disponíveis (escolha sempre um deles): ${pillarNames.join(', ')}
+
+Para cada atividade identificada, crie um objeto com:
+- "pillarName": nome exato do pilar da lista acima
+- "durationMinutes": duração em minutos como número inteiro (0 se não mencionada)
+- "note": resumo curto do que foi feito, máx 80 caracteres
+
+Conversões de tempo: "1h"=60, "meia hora"=30, "2h30"=150, "45min"=45, "uma hora"=60
+Se uma atividade cobre dois pilares diferentes, crie dois objetos.
+Se a duração não for mencionada, use 0.
+
+Texto do usuário: "${text.replace(/"/g, "'").replace(/\n/g, ' ')}"
+
+Retorne APENAS um array JSON válido, sem texto adicional.`;
+
+  const controller = new AbortController();
+  const timeout    = setTimeout(() => controller.abort(), 30_000);
+
+  try {
+    const res = await fetch(`${ollamaUrl}/api/generate`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal:  controller.signal,
+      body: JSON.stringify({
+        model:   ollamaModel,
+        prompt,
+        stream:  false,
+        format:  'json',
+        options: { temperature: 0.1 },
+      }),
+    });
+
+    if (!res.ok) throw new Error(`Ollama retornou HTTP ${res.status}`);
+
+    const body = await res.json() as { response: string };
+
+    let activities: ParsedActivity[];
+    try {
+      const parsed = JSON.parse(body.response);
+      if (Array.isArray(parsed)) {
+        activities = parsed;
+      } else {
+        const inner = parsed?.activities ?? parsed?.data ?? parsed?.entries;
+        activities = Array.isArray(inner) ? inner : [];
+      }
+    } catch {
+      const match = body.response.match(/\[[\s\S]*?\]/);
+      if (!match) throw new Error('IA não retornou JSON válido');
+      activities = JSON.parse(match[0]);
+    }
+
+    return activities.filter(
+      (a): a is ParsedActivity =>
+        typeof a.pillarName === 'string' && a.pillarName.trim().length > 0,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function logMultipleActivities(
+  activities: Array<{ pillarId: string; durationMinutes: number; note: string }>,
+): Promise<{ totalXP: number; count: number }> {
+  let totalXP = 0;
+  for (const a of activities) {
+    const result = await logActivity(a);
+    totalXP += result.totalXP;
+  }
+  return { totalXP, count: activities.length };
+}
+
 export async function getActivityBonuses(pillarId: string): Promise<ActivityBonusType[]> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

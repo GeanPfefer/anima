@@ -345,3 +345,154 @@
   70%  { transform: scale(1.05); }
   100% { transform: scale(1); opacity: 1; }
 }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── Input phase ──────────────────────────────────────── */
+
+.inputPhase {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.inputArea {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 15px;
+  color: var(--text-primary);
+  outline: none;
+  resize: none;
+  width: 100%;
+  font-family: inherit;
+  line-height: 1.6;
+  transition: border-color 0.15s;
+  min-height: 120px;
+  box-sizing: border-box;
+}
+
+.inputArea:focus {
+  border-color: var(--border-focus);
+}
+
+.inputArea::placeholder {
+  color: var(--text-muted);
+}
+
+/* ─── Parsing state ─────────────────────────────────────── */
+
+.parsingState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 0;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.parsingMsg {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ─── Review phase ──────────────────────────────────────── */
+
+.reviewPhase {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reviewList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.reviewList::-webkit-scrollbar {
+  width: 4px;
+}
+
+.reviewList::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.entryCard {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.entryHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.entryXP {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.entryRemove {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: color 0.1s;
+}
+
+.entryRemove:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.entryNote {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.entryPillarRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.entryDurationRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.entryDurationLabel {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
