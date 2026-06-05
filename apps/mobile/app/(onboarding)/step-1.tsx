@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { validateStep1 } from '@anima/core';
 import { useOnboarding } from '@/contexts/onboarding-context';
@@ -16,6 +17,7 @@ import { colors, spacing, radius } from '@/constants/theme';
 
 export default function Step1Screen() {
   const router = useRouter();
+  const { top } = useSafeAreaInsets();
   const { state, setName } = useOnboarding();
   const [error, setError] = useState<string | null>(null);
 
@@ -31,19 +33,19 @@ export default function Step1Screen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingTop: top + spacing.md }]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
           <View style={styles.progress}>
-            {[1, 2, 3].map((n) => (
+            {[1, 2, 3, 4, 5].map((n) => (
               <View
                 key={n}
                 style={[styles.dot, n === 1 && styles.dotActive]}
               />
             ))}
           </View>
-          <Text style={styles.stepLabel}>Etapa 1 de 3</Text>
+          <Text style={styles.stepLabel}>Etapa 1 de 5</Text>
         </View>
 
         <Text style={styles.title}>Como você quer ser chamado?</Text>
@@ -82,7 +84,7 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     padding: spacing.lg,
-    paddingTop: spacing.xxl,
+    paddingTop: spacing.md,
   },
   header: {
     flexDirection: 'row',

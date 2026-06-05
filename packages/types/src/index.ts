@@ -21,13 +21,13 @@ export interface PillarConfig {
 }
 
 export const DEFAULT_PILLARS: PillarConfig[] = [
-  { id: 'mente',    name: 'Mente',     xpRate: 1.8, isDefault: true, isCustom: false },
-  { id: 'proposito',name: 'Propósito', xpRate: 1.6, isDefault: true, isCustom: false },
-  { id: 'trabalho', name: 'Trabalho',  xpRate: 1.4, isDefault: true, isCustom: false },
-  { id: 'saude',    name: 'Saúde',     xpRate: 1.2, isDefault: true, isCustom: false },
-  { id: 'relacoes', name: 'Relações',  xpRate: 1.2, isDefault: true, isCustom: false },
+  { id: 'mente',    name: 'Mente',     xpRate: 1.0, isDefault: true, isCustom: false },
+  { id: 'proposito',name: 'Propósito', xpRate: 1.0, isDefault: true, isCustom: false },
+  { id: 'trabalho', name: 'Trabalho',  xpRate: 1.0, isDefault: true, isCustom: false },
+  { id: 'saude',    name: 'Saúde',     xpRate: 1.0, isDefault: true, isCustom: false },
+  { id: 'relacoes', name: 'Relações',  xpRate: 1.0, isDefault: true, isCustom: false },
   { id: 'financas', name: 'Finanças',  xpRate: 1.0, isDefault: true, isCustom: false },
-  { id: 'lazer',    name: 'Lazer',     xpRate: 0.8, isDefault: true, isCustom: false },
+  { id: 'lazer',    name: 'Lazer',     xpRate: 1.0, isDefault: true, isCustom: false },
 ];
 
 export const MIN_ACTIVE_PILLARS = 1;

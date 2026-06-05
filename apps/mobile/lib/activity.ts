@@ -107,9 +107,31 @@ export async function logActivity(data: {
     bonus_multiplier: bonusMultiplier,
     total_xp: totalXP,
     bonuses,
-    note: data.note || null,
+    note: data.note?.trim() || null,
   });
 
   if (error) throw new Error(error.message);
   return { totalXP, bonuses };
+}
+
+/**
+ * Registra múltiplas atividades em sequência.
+ * Roda em série — não em paralelo — para que os bônus (first_of_day, etc.)
+ * sejam recalculados corretamente a cada registro.
+ */
+export async function logMultipleActivities(
+  entries: Array<{
+    userId: string;
+    pillarId: string;
+    durationMinutes: number;
+    note: string;
+    questId?: string;
+  }>,
+): Promise<{ totalXP: number; count: number }> {
+  let totalXP = 0;
+  for (const entry of entries) {
+    const { totalXP: xp } = await logActivity(entry);
+    totalXP += xp;
+  }
+  return { totalXP, count: entries.length };
 }

@@ -2,219 +2,213 @@ import { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { validateStep2 } from '@anima/core';
-import { DEFAULT_PILLARS, MIN_ACTIVE_PILLARS } from '@anima/types';
-import type { PillarId, PillarConfig } from '@anima/types';
 import { useOnboarding } from '@/contexts/onboarding-context';
+import {
+  ARCHETYPE_QUESTIONS,
+  ARCHETYPES,
+  calculateArchetype,
+  getDominantArchetype,
+} from '@/lib/archetypes';
+import type { ArchetypeResult } from '@/lib/archetypes';
 import { colors, spacing, radius } from '@/constants/theme';
+
+type Phase = 'quiz' | 'result';
 
 export default function Step2Screen() {
   const router = useRouter();
-  const { state, setPillars } = useOnboarding();
-  const [error, setError] = useState<string | null>(null);
-  const [newPillarName, setNewPillarName] = useState('');
+  const { top } = useSafeAreaInsets();
+  const { setArchetype } = useOnboarding();
 
-  const totalActive = state.selectedPillarIds.length + state.customPillars.length;
+  const [phase, setPhase]     = useState<Phase>('quiz');
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [result, setResult]   = useState<ArchetypeResult | null>(null);
 
-  function toggleDefault(id: PillarId) {
-    const isSelected = state.selectedPillarIds.includes(id);
-    const newIds = isSelected
-      ? state.selectedPillarIds.filter((p) => p !== id)
-      : [...state.selectedPillarIds, id];
-    setError(null);
-    setPillars(newIds, state.customPillars);
+  const answeredCount = Object.keys(answers).length;
+  const canSubmit     = answeredCount === ARCHETYPE_QUESTIONS.length;
+
+  function selectOption(questionId: string, label: string) {
+    setAnswers((prev) => ({ ...prev, [questionId]: label }));
   }
 
-  function addCustomPillar() {
-    const name = newPillarName.trim();
-    if (!name || name.length < 2) return;
-    const id = `custom_${name.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
-    const pillar: Pick<PillarConfig, 'id' | 'name' | 'xpRate'> = { id, name, xpRate: 1.0 };
-    setPillars(state.selectedPillarIds, [...state.customPillars, pillar]);
-    setNewPillarName('');
-  }
-
-  function removeCustom(id: PillarId) {
-    setPillars(
-      state.selectedPillarIds,
-      state.customPillars.filter((p) => p.id !== id),
-    );
+  function handleSubmit() {
+    const calc = calculateArchetype(answers);
+    setResult(calc);
+    setPhase('result');
   }
 
   function handleContinue() {
-    const err = validateStep2(state.selectedPillarIds, state.customPillars as PillarConfig[]);
-    if (err) { setError(err); return; }
+    if (!result) return;
+    setArchetype(answers, result);
     router.push('/(onboarding)/step-3');
   }
 
-  return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.scroll}>
+  function ProgressHeader({ label }: { label: string }) {
+    return (
       <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+          <Text style={styles.backBtn}>←</Text>
+        </TouchableOpacity>
         <View style={styles.progress}>
-          {[1, 2, 3].map((n) => (
+          {[1, 2, 3, 4, 5].map((n) => (
             <View key={n} style={[styles.dot, n === 2 && styles.dotActive]} />
           ))}
         </View>
-        <Text style={styles.stepLabel}>Etapa 2 de 3</Text>
+        <Text style={styles.stepLabel}>{label}</Text>
       </View>
+    );
+  }
 
-      <Text style={styles.title}>Quais pilares você quer acompanhar?</Text>
-      <Text style={styles.subtitle}>
-        Selecione pelo menos {MIN_ACTIVE_PILLARS}. Você pode ajustar depois.
-      </Text>
+  if (phase === 'result' && result) {
+    const dominant  = getDominantArchetype(result);
+    const archetype = ARCHETYPES[dominant];
+    const sorted    = (Object.entries(result) as [keyof ArchetypeResult, number][])
+      .sort((a, b) => b[1] - a[1]);
 
-      {/* Pilares padrão */}
-      <View style={styles.grid}>
-        {DEFAULT_PILLARS.map((pillar) => {
-          const selected = state.selectedPillarIds.includes(pillar.id);
-          return (
-            <TouchableOpacity
-              key={pillar.id}
-              style={[styles.pillarCard, selected && styles.pillarCardSelected]}
-              onPress={() => toggleDefault(pillar.id)}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.pillarName, selected && styles.pillarNameSelected]}>
-                {pillar.name}
+    return (
+      <ScrollView style={styles.root} contentContainerStyle={[styles.scroll, { paddingTop: top + spacing.md }]}>
+        <ProgressHeader label="Etapa 2 de 5" />
+
+        <Text style={styles.title}>Seu perfil</Text>
+        <Text style={styles.subtitle}>Combinação única baseada nas suas respostas</Text>
+
+        <View style={styles.resultCard}>
+          <Text style={styles.emoji}>{archetype.emoji}</Text>
+          <Text style={styles.archetypeName}>{archetype.name}</Text>
+          <Text style={styles.archetypeDesc}>{archetype.description}</Text>
+        </View>
+
+        <View style={styles.barsContainer}>
+          {sorted.map(([id, pct]) => (
+            <View key={id} style={styles.barRow}>
+              <Text style={styles.barLabel}>
+                {ARCHETYPES[id].emoji} {ARCHETYPES[id].name}
               </Text>
-              <Text style={[styles.pillarRate, selected && styles.pillarRateSelected]}>
-                {pillar.xpRate}× XP/min
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Pilares customizados */}
-      {state.customPillars.length > 0 && (
-        <View style={styles.customList}>
-          {state.customPillars.map((p) => (
-            <View key={p.id} style={styles.customTag}>
-              <Text style={styles.customTagText}>{p.name}</Text>
-              <TouchableOpacity onPress={() => removeCustom(p.id)} hitSlop={8}>
-                <Text style={styles.removeBtn}>×</Text>
-              </TouchableOpacity>
+              <View style={styles.barTrack}>
+                <View style={[styles.barFill, { width: `${pct}%` as `${number}%` }]} />
+              </View>
+              <Text style={styles.barPct}>{pct}%</Text>
             </View>
           ))}
         </View>
-      )}
 
-      {/* Adicionar pilar */}
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.customInput}
-          placeholder="+ Pilar personalizado"
-          placeholderTextColor={colors.textMuted}
-          value={newPillarName}
-          onChangeText={setNewPillarName}
-          maxLength={30}
-          returnKeyType="done"
-          onSubmitEditing={addCustomPillar}
-        />
-        {newPillarName.trim().length >= 2 && (
-          <TouchableOpacity onPress={addCustomPillar} style={styles.addBtn} activeOpacity={0.8}>
-            <Text style={styles.addBtnText}>Adicionar</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <View style={styles.footer}>
-        <Text style={styles.count}>
-          {totalActive} pilar{totalActive !== 1 ? 'es' : ''} selecionado{totalActive !== 1 ? 's' : ''}
-        </Text>
-        <TouchableOpacity
-          style={[styles.button, totalActive < MIN_ACTIVE_PILLARS && styles.buttonDisabled]}
-          onPress={handleContinue}
-          disabled={totalActive < MIN_ACTIVE_PILLARS}
-          activeOpacity={0.8}
-        >
+        <TouchableOpacity style={styles.button} onPress={handleContinue} activeOpacity={0.85}>
           <Text style={styles.buttonText}>Continuar →</Text>
         </TouchableOpacity>
+      </ScrollView>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.root} contentContainerStyle={[styles.scroll, { paddingTop: top + spacing.md }]}>
+      <ProgressHeader label={`Etapa 2 de 5 · ${answeredCount}/${ARCHETYPE_QUESTIONS.length} respondidas`} />
+
+      <Text style={styles.title}>Como você funciona?</Text>
+      <Text style={styles.subtitle}>Selecione a opção que mais te representa em cada pergunta.</Text>
+
+      <View style={styles.questions}>
+        {ARCHETYPE_QUESTIONS.map((q) => (
+          <View key={q.id} style={styles.question}>
+            <Text style={styles.questionText}>{q.text}</Text>
+            <View style={styles.options}>
+              {q.options.map((opt) => (
+                <TouchableOpacity
+                  key={opt.label}
+                  style={[styles.chip, answers[q.id] === opt.label && styles.chipSelected]}
+                  onPress={() => selectOption(q.id, opt.label)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.chipText, answers[q.id] === opt.label && styles.chipTextSelected]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ))}
       </View>
+
+      <TouchableOpacity
+        style={[styles.button, !canSubmit && styles.buttonDisabled]}
+        onPress={handleSubmit}
+        disabled={!canSubmit}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.buttonText}>Ver meu perfil →</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: spacing.lg, paddingTop: spacing.xxl, paddingBottom: spacing.xxl },
+  scroll: { padding: spacing.lg, paddingBottom: spacing.xxl },
+
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xl },
+  backBtn: { fontSize: 20, color: colors.textSecondary, paddingRight: spacing.xs },
   progress: { flexDirection: 'row', gap: spacing.xs },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.border },
   dotActive: { backgroundColor: colors.accent, width: 24 },
-  stepLabel: { color: colors.textMuted, fontSize: 13 },
-  title: { fontSize: 24, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },
-  subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 20 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
-  pillarCard: {
+  stepLabel: { color: colors.textMuted, fontSize: 12, flex: 1 },
+
+  title: { fontSize: 24, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.xs },
+  subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: spacing.xl, lineHeight: 20 },
+
+  questions: { gap: spacing.xl },
+  question: { gap: spacing.sm },
+  questionText: { fontSize: 15, fontWeight: '600', color: colors.textPrimary, lineHeight: 22 },
+  options: { gap: spacing.xs },
+  chip: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 4,
+    paddingVertical: spacing.sm + 2,
     backgroundColor: colors.bgSurface,
-    minWidth: '44%',
-    flex: 1,
   },
-  pillarCardSelected: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentSubtle,
-  },
-  pillarName: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
-  pillarNameSelected: { color: colors.accent },
-  pillarRate: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  pillarRateSelected: { color: colors.accentHover },
-  customList: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
-  customTag: {
-    flexDirection: 'row',
+  chipSelected: { borderColor: colors.accent, backgroundColor: colors.accentSubtle },
+  chipText: { color: colors.textSecondary, fontSize: 14 },
+  chipTextSelected: { color: colors.accent, fontWeight: '600' },
+
+  /* resultado */
+  resultCard: {
+    backgroundColor: colors.bgSurface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.bgElevated,
-    borderRadius: radius.xl,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
+    marginBottom: spacing.xl,
+    gap: spacing.sm,
   },
-  customTagText: { color: colors.textPrimary, fontSize: 13 },
-  removeBtn: { color: colors.textMuted, fontSize: 18, lineHeight: 18 },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
-  customInput: {
+  emoji: { fontSize: 40 },
+  archetypeName: { fontSize: 22, fontWeight: '700', color: colors.textPrimary },
+  archetypeDesc: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
+
+  barsContainer: { gap: spacing.md, marginBottom: spacing.xl },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  barLabel: { fontSize: 13, color: colors.textSecondary, width: 130 },
+  barTrack: {
     flex: 1,
-    backgroundColor: colors.bgSurface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    color: colors.textPrimary,
-    fontSize: 14,
-  },
-  addBtn: {
+    height: 6,
     backgroundColor: colors.bgElevated,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: 3,
+    overflow: 'hidden',
   },
-  addBtnText: { color: colors.textSecondary, fontSize: 13 },
-  error: { color: colors.danger, fontSize: 13, marginBottom: spacing.md },
-  footer: { marginTop: spacing.lg },
-  count: { color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: spacing.md },
+  barFill: { height: '100%', backgroundColor: colors.accent, borderRadius: 3 },
+  barPct: { fontSize: 12, color: colors.textMuted, width: 36, textAlign: 'right' },
+
   button: {
     backgroundColor: colors.accent,
     borderRadius: radius.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
+    marginTop: spacing.xl,
   },
   buttonDisabled: { opacity: 0.4 },
   buttonText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },

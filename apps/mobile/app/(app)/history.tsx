@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
@@ -7,6 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import type { Enums } from '@anima/types';
 import { colors, spacing, radius } from '@/constants/theme';
@@ -65,6 +67,7 @@ function formatDateHeading(dateStr: string): string {
 }
 
 export default function HistoryScreen() {
+  const { top } = useSafeAreaInsets();
   const [groups, setGroups] = useState<DayGroup[]>([]);
   const [pillarMap, setPillarMap] = useState<Map<string, string>>(new Map());
   const [weeklyXP, setWeeklyXP] = useState(0);
@@ -72,56 +75,61 @@ export default function HistoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) return;
 
-    const [pillarsRes, recordsRes] = await Promise.all([
-      supabase.from('user_pillars').select('id, name').eq('user_id', user.id),
-      supabase
-        .from('xp_records')
-        .select('id, pillar_id, duration_minutes, base_xp, bonus_multiplier, total_xp, bonuses, note, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(200),
-    ]);
+      const [pillarsRes, recordsRes] = await Promise.all([
+        supabase.from('user_pillars').select('id, name').eq('user_id', user.id),
+        supabase
+          .from('xp_records')
+          .select('id, pillar_id, duration_minutes, base_xp, bonus_multiplier, total_xp, bonuses, note, created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(200),
+      ]);
 
-    const map = new Map((pillarsRes.data ?? []).map((p) => [p.id, p.name]));
-    setPillarMap(map);
+      const map = new Map((pillarsRes.data ?? []).map((p) => [p.id, p.name]));
+      setPillarMap(map);
 
-    const allRecords = (recordsRes.data ?? []) as XPRecord[];
+      const allRecords = (recordsRes.data ?? []) as XPRecord[];
 
-    // XP semanal
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    setWeeklyXP(
-      allRecords
-        .filter((r) => new Date(r.created_at) >= weekAgo)
-        .reduce((s, r) => s + r.total_xp, 0),
-    );
+      // XP semanal
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      setWeeklyXP(
+        allRecords
+          .filter((r) => new Date(r.created_at) >= weekAgo)
+          .reduce((s, r) => s + r.total_xp, 0),
+      );
 
-    // Agrupar por dia
-    const grouped = new Map<string, XPRecord[]>();
-    for (const record of allRecords) {
-      const key = record.created_at.slice(0, 10);
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key)!.push(record);
+      // Agrupar por dia
+      const grouped = new Map<string, XPRecord[]>();
+      for (const record of allRecords) {
+        const key = record.created_at.slice(0, 10);
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(record);
+      }
+
+      setGroups(
+        Array.from(grouped.entries())
+          .sort(([a], [b]) => b.localeCompare(a))
+          .map(([dateKey, records]) => ({
+            dateKey,
+            dayXP: records.reduce((s, r) => s + r.total_xp, 0),
+            records,
+          })),
+      );
+    } catch (e) {
+      console.error('[History] erro ao carregar:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-
-    setGroups(
-      Array.from(grouped.entries())
-        .sort(([a], [b]) => b.localeCompare(a))
-        .map(([dateKey, records]) => ({
-          dateKey,
-          dayXP: records.reduce((s, r) => s + r.total_xp, 0),
-          records,
-        })),
-    );
-
-    setLoading(false);
-    setRefreshing(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   if (loading) {
     return (
@@ -134,7 +142,10 @@ export default function HistoryScreen() {
   return (
     <FlatList
       style={styles.root}
-      contentContainerStyle={groups.length === 0 ? styles.emptyContainer : styles.list}
+      contentContainerStyle={[
+        groups.length === 0 ? styles.emptyContainer : styles.list,
+        { paddingTop: top + spacing.md },
+      ]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -203,8 +214,8 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   centered: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  list: { padding: spacing.lg, paddingTop: spacing.lg + 16 },
-  emptyContainer: { flex: 1, padding: spacing.lg, paddingTop: spacing.lg + 16 },
+  list: { padding: spacing.lg },
+  emptyContainer: { flex: 1, padding: spacing.lg },
   header: { marginBottom: spacing.xl },
   title: { fontSize: 26, fontWeight: '700', color: colors.textPrimary },
   summary: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },

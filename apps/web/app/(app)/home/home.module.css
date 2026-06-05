@@ -94,6 +94,49 @@
   gap: 8px;
 }
 
+/* ─── Pillar group (raiz + filhos) ───────────────────── */
+
+.pillarGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ─── Sub-pilares ────────────────────────────────────── */
+
+.subPillarList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+  margin-left: 10px;
+}
+
+.subPillarCard {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  opacity: 0.85;
+}
+
+.subPillarName {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.subXpBar {
+  height: 3px;
+  background: var(--bg-surface);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
 .pillarCard {
   background: var(--bg-surface);
   border: 1px solid var(--border);

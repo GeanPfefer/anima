@@ -8,12 +8,13 @@ type PillarStat = {
   is_priority: boolean;
 };
 
-const SIZE = 260;
+const SIZE = 300;
 const CX = SIZE / 2;
 const CY = SIZE / 2;
-const MAX_R = 90;
-const LABEL_OFFSET = 22;
+const MAX_R = 95;
+const LABEL_OFFSET = 24;
 const MAX_LEVEL = 50;
+const MAX_LABEL = 8; // trunca nomes longos para caber no radar
 const GRIDS = [0.25, 0.5, 0.75, 1] as const;
 
 function xy(angle: number, r: number) {
@@ -110,7 +111,7 @@ export default function LifeRadar({ pillars }: { pillars: PillarStat[] }) {
             fontSize="11"
             fill={p.is_priority ? colors.accent : colors.textSecondary}
           >
-            {p.name}
+            {p.name.length > MAX_LABEL ? p.name.slice(0, MAX_LABEL) + '…' : p.name}
           </SvgText>
         );
       })}

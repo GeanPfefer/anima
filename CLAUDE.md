@@ -1,6 +1,6 @@
 # Anima
 
-Leia `lifegame-prd.md` antes de qualquer tarefa.
+Leia `anima-prd.md` antes de qualquer tarefa.
 
 ## Stack
 
@@ -24,7 +24,7 @@ lifegame/
 ├── packages/
 │   ├── core/            # lógica de XP, níveis, quests
 │   └── types/           # TypeScript types compartilhados
-├── lifegame-prd.md      # PRD com todas as decisões
+├── anima-prd.md         # PRD com todas as decisões
 └── CLAUDE.md            # este arquivo
 ```
 

@@ -5,6 +5,18 @@ import LifeRadar from './_components/LifeRadar';
 import LogActivityModal from './_components/LogActivityModal';
 import styles from './home.module.css';
 
+type Pillar = {
+  id: string;
+  name: string;
+  xp_rate: number;
+  xp_total: number;
+  level: number;
+  is_active: boolean;
+  is_priority: boolean;
+};
+
+type PillarWithChildren = Pillar & { children: Pillar[] };
+
 export default async function HomePage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -25,9 +37,91 @@ export default async function HomePage() {
     .eq('is_active', true)
     .order('sort_order');
 
-  const pillars = pillarsData ?? [];
-  const characterLevel = getCharacterLevel(pillars.map((p) => p.level));
+  const pillars: Pillar[] = pillarsData ?? [];
+
+  // Busca todas as relações pai→filho do usuário
+  const { data: relationsData } = await supabase
+    .from('pillar_relationships')
+    .select('parent_id, child_id')
+    .in('parent_id', pillars.map((p) => p.id));
+
+  const relations = relationsData ?? [];
+
+  // Conjunto de ids que são filhos (têm pelo menos um pai)
+  const childIds = new Set(relations.map((r) => r.child_id));
+
+  // Mapa filho → pais para montagem da árvore
+  const childrenByParent = new Map<string, string[]>();
+  for (const r of relations) {
+    const list = childrenByParent.get(r.parent_id) ?? [];
+    list.push(r.child_id);
+    childrenByParent.set(r.parent_id, list);
+  }
+
+  const pillarMap = new Map(pillars.map((p) => [p.id, p]));
+
+  // Pilares raiz (sem pais)
+  const rootPillars: PillarWithChildren[] = pillars
+    .filter((p) => !childIds.has(p.id))
+    .map((p) => ({
+      ...p,
+      children: (childrenByParent.get(p.id) ?? [])
+        .map((cid) => pillarMap.get(cid))
+        .filter((c): c is Pillar => c !== undefined),
+    }));
+
+  // Radar só usa pilares raiz
+  const radarPillars = rootPillars;
+  const characterLevel = getCharacterLevel(rootPillars.map((p) => p.level));
   const era = getEraForLevel(characterLevel);
+
+  // Todos os pilares disponíveis para o modal de registro (raiz + filhos)
+  const allPillarsForModal = pillars.map((p) => ({ id: p.id, name: p.name, xp_rate: p.xp_rate }));
+
+  function PillarCard({ p, sub = false }: { p: Pillar; sub?: boolean }) {
+    const levelStart = getTotalXPForLevel(p.level);
+    const levelEnd = getTotalXPForLevel(p.level + 1);
+    const progress =
+      levelEnd > levelStart
+        ? Math.max(0, (p.xp_total - levelStart) / (levelEnd - levelStart))
+        : 1;
+    const xpToNext = getXPToNextLevel(p.xp_total);
+
+    return (
+      <div
+        className={[
+          sub ? styles.subPillarCard : styles.pillarCard,
+          p.is_priority && !sub ? styles.pillarPriority : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        <div className={styles.pillarTop}>
+          <span className={sub ? styles.subPillarName : styles.pillarName}>{p.name}</span>
+          <span className={styles.pillarLevel}>Nv. {p.level}</span>
+        </div>
+        <div className={sub ? styles.subXpBar : styles.xpBar}>
+          <div
+            className={styles.xpFill}
+            style={{ width: `${Math.min(progress * 100, 100).toFixed(1)}%` }}
+          />
+        </div>
+        <div className={styles.pillarBottom}>
+          <span className={styles.xpTotal}>
+            {p.xp_total.toLocaleString('pt-BR')} XP
+          </span>
+          {p.level < 50 && (
+            <span className={styles.xpToNext}>
+              +{xpToNext} para Nv. {p.level + 1}
+            </span>
+          )}
+          {p.is_priority && !sub && (
+            <span className={styles.priorityBadge}>foco</span>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className={styles.container}>
@@ -43,8 +137,8 @@ export default async function HomePage() {
       <div className={styles.content}>
         <section className={styles.radarSection}>
           <p className={styles.sectionLabel}>Radar de vida</p>
-          {pillars.length >= 3 ? (
-            <LifeRadar pillars={pillars} />
+          {radarPillars.length >= 3 ? (
+            <LifeRadar pillars={radarPillars} />
           ) : (
             <p className={styles.empty}>Nenhum pilar registrado.</p>
           )}
@@ -52,57 +146,29 @@ export default async function HomePage() {
 
         <section className={styles.pillarsSection}>
           <p className={styles.sectionLabel}>Pilares</p>
-          {pillars.length === 0 ? (
+          {rootPillars.length === 0 ? (
             <p className={styles.empty}>Complete o onboarding para ver seus pilares.</p>
           ) : (
             <div className={styles.pillarList}>
-              {pillars.map((p) => {
-                const levelStart = getTotalXPForLevel(p.level);
-                const levelEnd = getTotalXPForLevel(p.level + 1);
-                const progress =
-                  levelEnd > levelStart
-                    ? Math.max(0, (p.xp_total - levelStart) / (levelEnd - levelStart))
-                    : 1;
-                const xpToNext = getXPToNextLevel(p.xp_total);
-
-                return (
-                  <div
-                    key={p.id}
-                    className={`${styles.pillarCard} ${p.is_priority ? styles.pillarPriority : ''}`}
-                  >
-                    <div className={styles.pillarTop}>
-                      <span className={styles.pillarName}>{p.name}</span>
-                      <span className={styles.pillarLevel}>Nv. {p.level}</span>
+              {rootPillars.map((p) => (
+                <div key={p.id} className={styles.pillarGroup}>
+                  <PillarCard p={p} />
+                  {p.children.length > 0 && (
+                    <div className={styles.subPillarList}>
+                      {p.children.map((child) => (
+                        <PillarCard key={child.id} p={child} sub />
+                      ))}
                     </div>
-                    <div className={styles.xpBar}>
-                      <div
-                        className={styles.xpFill}
-                        style={{ width: `${Math.min(progress * 100, 100).toFixed(1)}%` }}
-                      />
-                    </div>
-                    <div className={styles.pillarBottom}>
-                      <span className={styles.xpTotal}>
-                        {p.xp_total.toLocaleString('pt-BR')} XP
-                      </span>
-                      {p.level < 50 && (
-                        <span className={styles.xpToNext}>
-                          +{xpToNext} para Nv. {p.level + 1}
-                        </span>
-                      )}
-                      {p.is_priority && (
-                        <span className={styles.priorityBadge}>foco</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </section>
       </div>
 
       <div className={styles.footer}>
-        <LogActivityModal pillars={pillars.map(p => ({ id: p.id, name: p.name, xp_rate: p.xp_rate }))} />
+        <LogActivityModal pillars={allPillarsForModal} />
       </div>
     </main>
   );

@@ -27,7 +27,15 @@
       "bundler": "metro",
       "output": "static"
     },
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "O Anima precisa do microfone para transcrever suas entradas por voz."
+        }
+      ]
+    ],
     "experiments": {
       "typedRoutes": true
     }

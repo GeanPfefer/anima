@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, radius } from '@/constants/theme';
@@ -17,6 +18,7 @@ type Profile = { name: string; onboarding_completed_at: string | null };
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const { top } = useSafeAreaInsets();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(true);
@@ -30,7 +32,8 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
       if (!user) return;
       setEmail(user.email ?? '');
 
@@ -101,7 +104,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.scroll}>
+    <ScrollView style={styles.root} contentContainerStyle={[styles.scroll, { paddingTop: top + spacing.md }]}>
       <Text style={styles.title}>Configurações</Text>
 
       {/* Conta */}
@@ -174,7 +177,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   centered: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  scroll: { padding: spacing.lg, paddingTop: spacing.lg + 16, paddingBottom: spacing.xxl },
+  scroll: { padding: spacing.lg, paddingBottom: spacing.xxl },
   title: { fontSize: 26, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.xl },
   section: {
     backgroundColor: colors.bgSurface,

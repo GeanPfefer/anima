@@ -24,10 +24,30 @@ export default function LoginScreen() {
     if (!email.trim() || !password) return;
     setLoading(true);
     setError('');
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    setLoading(false);
-    if (error) setError(error.message);
-    // Sucesso: useAuth no _layout detecta a sessão e redireciona para /home
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (error) { setError(error.message); return; }
+
+      // Verifica se onboarding foi concluído para redirecionar corretamente
+      const userId = data.session?.user?.id;
+      if (!userId) { setError('Erro ao obter sessão.'); return; }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('onboarding_completed_at')
+        .eq('id', userId)
+        .single();
+
+      if (profile?.onboarding_completed_at) {
+        router.replace('/(app)/home');
+      } else {
+        router.replace('/(onboarding)/step-1');
+      }
+    } catch {
+      setError('Algo deu errado. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

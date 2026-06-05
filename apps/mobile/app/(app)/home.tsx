@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
@@ -7,6 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { getCharacterLevel, getEraForLevel, getTotalXPForLevel, getXPToNextLevel } from '@anima/core';
 import LifeRadar from '@/components/LifeRadar';
@@ -22,39 +24,88 @@ type PillarRow = {
   is_priority: boolean;
 };
 
+type PillarWithChildren = PillarRow & { children: PillarRow[] };
+
 type Profile = { name: string };
 
+function PillarCard({ p, sub = false }: { p: PillarRow; sub?: boolean }) {
+  const levelStart = getTotalXPForLevel(p.level);
+  const levelEnd = getTotalXPForLevel(p.level + 1);
+  const progress =
+    levelEnd > levelStart
+      ? Math.max(0, Math.min(1, (p.xp_total - levelStart) / (levelEnd - levelStart)))
+      : 1;
+  const xpToNext = getXPToNextLevel(p.xp_total);
+
+  return (
+    <View style={[
+      sub ? styles.subPillarCard : styles.pillarCard,
+      p.is_priority && !sub ? styles.pillarCardPriority : undefined,
+    ]}>
+      <View style={styles.pillarTop}>
+        <Text style={sub ? styles.subPillarName : styles.pillarName}>{p.name}</Text>
+        <Text style={styles.pillarLevel}>Nv. {p.level}</Text>
+      </View>
+      <View style={sub ? styles.subXpBarTrack : styles.xpBarTrack}>
+        <View style={[styles.xpBarFill, { width: `${(progress * 100).toFixed(1)}%` as `${number}%` }]} />
+      </View>
+      <View style={styles.pillarBottom}>
+        <Text style={styles.xpTotal}>
+          {p.xp_total.toLocaleString('pt-BR')} XP
+        </Text>
+        {p.level < 50 && (
+          <Text style={styles.xpToNext}>+{xpToNext} para Nv. {p.level + 1}</Text>
+        )}
+        {p.is_priority && !sub && <Text style={styles.priorityBadge}>foco</Text>}
+      </View>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
+  const { top } = useSafeAreaInsets();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [pillars, setPillars] = useState<PillarRow[]>([]);
+  const [rootPillars, setRootPillars] = useState<PillarWithChildren[]>([]);
+  const [allPillars, setAllPillars] = useState<PillarRow[]>([]);
   const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setUserId(user.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) { setLoading(false); setRefreshing(false); return; }
+      setUserId(user.id);
 
-    const [profileRes, pillarsRes] = await Promise.all([
-      supabase.from('profiles').select('name').eq('id', user.id).single(),
-      supabase
+      const profileRes = await supabase
+        .from('profiles').select('name').eq('id', user.id).single();
+
+      const pillarsRes = await supabase
         .from('user_pillars')
         .select('id, name, xp_rate, xp_total, level, is_priority')
         .eq('user_id', user.id)
         .eq('is_active', true)
-        .order('sort_order'),
-    ]);
+        .order('sort_order');
 
-    setProfile(profileRes.data ?? null);
-    setPillars(pillarsRes.data ?? []);
-    setLoading(false);
-    setRefreshing(false);
+      const pillars: PillarRow[] = pillarsRes.data ?? [];
+      const roots: PillarWithChildren[] = pillars.map((p) => ({ ...p, children: [] }));
+
+      setProfile(profileRes.data ?? null);
+      setAllPillars(pillars);
+      setRootPillars(roots);
+    } catch (e) {
+      // falha silenciosa — mostra tela vazia
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const characterLevel = getCharacterLevel(pillars.map((p) => p.level));
+  // Radar e nível do personagem usam só pilares raiz
+  const characterLevel = getCharacterLevel(rootPillars.map((p) => p.level));
   const era = getEraForLevel(characterLevel);
 
   if (loading) {
@@ -68,7 +119,7 @@ export default function HomeScreen() {
   return (
     <View style={styles.root}>
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingTop: top + spacing.md }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -87,51 +138,33 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Radar */}
+        {/* Radar — só pilares raiz */}
         <Text style={styles.sectionLabel}>Radar de vida</Text>
         <View style={styles.radarWrapper}>
-          {pillars.length >= 3
-            ? <LifeRadar pillars={pillars} />
+          {rootPillars.length >= 3
+            ? <LifeRadar pillars={rootPillars} />
             : <Text style={styles.empty}>Nenhum pilar registrado.</Text>
           }
         </View>
 
         {/* Pilares */}
         <Text style={styles.sectionLabel}>Pilares</Text>
-        {pillars.length === 0 ? (
+        {rootPillars.length === 0 ? (
           <Text style={styles.empty}>Complete o onboarding para ver seus pilares.</Text>
         ) : (
           <View style={styles.pillarList}>
-            {pillars.map((p) => {
-              const levelStart = getTotalXPForLevel(p.level);
-              const levelEnd = getTotalXPForLevel(p.level + 1);
-              const progress =
-                levelEnd > levelStart
-                  ? Math.max(0, Math.min(1, (p.xp_total - levelStart) / (levelEnd - levelStart)))
-                  : 1;
-              const xpToNext = getXPToNextLevel(p.xp_total);
-
-              return (
-                <View key={p.id} style={[styles.pillarCard, p.is_priority && styles.pillarCardPriority]}>
-                  <View style={styles.pillarTop}>
-                    <Text style={styles.pillarName}>{p.name}</Text>
-                    <Text style={styles.pillarLevel}>Nv. {p.level}</Text>
+            {rootPillars.map((p) => (
+              <View key={p.id} style={styles.pillarGroup}>
+                <PillarCard p={p} />
+                {p.children.length > 0 && (
+                  <View style={styles.subPillarList}>
+                    {p.children.map((child) => (
+                      <PillarCard key={child.id} p={child} sub />
+                    ))}
                   </View>
-                  <View style={styles.xpBarTrack}>
-                    <View style={[styles.xpBarFill, { width: `${(progress * 100).toFixed(1)}%` as `${number}%` }]} />
-                  </View>
-                  <View style={styles.pillarBottom}>
-                    <Text style={styles.xpTotal}>
-                      {p.xp_total.toLocaleString('pt-BR')} XP
-                    </Text>
-                    {p.level < 50 && (
-                      <Text style={styles.xpToNext}>+{xpToNext} para Nv. {p.level + 1}</Text>
-                    )}
-                    {p.is_priority && <Text style={styles.priorityBadge}>foco</Text>}
-                  </View>
-                </View>
-              );
-            })}
+                )}
+              </View>
+            ))}
           </View>
         )}
 
@@ -142,7 +175,7 @@ export default function HomeScreen() {
       {userId && (
         <LogActivityModal
           userId={userId}
-          pillars={pillars.map((p) => ({ id: p.id, name: p.name, xp_rate: p.xp_rate }))}
+          pillars={allPillars.map((p) => ({ id: p.id, name: p.name, xp_rate: p.xp_rate }))}
           onSuccess={load}
         />
       )}
@@ -153,7 +186,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   centered: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  scroll: { padding: spacing.lg, paddingTop: spacing.lg + 16 },
+  scroll: { padding: spacing.lg },
   header: { marginBottom: spacing.xl },
   name: { fontSize: 26, fontWeight: '700', color: colors.textPrimary },
   characterMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: 4 },
@@ -170,7 +203,12 @@ const styles = StyleSheet.create({
   },
   radarWrapper: { alignItems: 'center', marginBottom: spacing.xl },
   empty: { color: colors.textMuted, fontSize: 14, textAlign: 'center', marginBottom: spacing.xl },
+
+  /* ─── Pillar list ─── */
   pillarList: { gap: spacing.sm },
+  pillarGroup: { gap: 4 },
+
+  /* ─── Root pillar card ─── */
   pillarCard: {
     backgroundColor: colors.bgSurface,
     borderWidth: 1,
@@ -200,6 +238,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+
+  /* ─── Sub-pillar ─── */
+  subPillarList: {
+    marginLeft: 10,
+    paddingLeft: spacing.md,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.border,
+    gap: 4,
+  },
+  subPillarCard: {
+    backgroundColor: colors.bgElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    padding: spacing.sm + 4,
+    opacity: 0.85,
+  },
+  subPillarName: { fontSize: 13, fontWeight: '500', color: colors.textSecondary },
+  subXpBarTrack: {
+    height: 3,
+    backgroundColor: colors.bg,
+    borderRadius: 2,
+    marginBottom: spacing.sm,
     overflow: 'hidden',
   },
 });

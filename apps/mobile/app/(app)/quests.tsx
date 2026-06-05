@@ -5,6 +5,7 @@ import {
   Platform, Alert, RefreshControl,
 } from 'react-native';
 import { supabase } from '@/lib/supabase';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { colors, spacing, radius } from '@/constants/theme';
 
@@ -56,6 +57,7 @@ const TYPE_COLORS: Record<QuestType, string> = {
 // ─── componente principal ─────────────────────────────────────
 
 export default function QuestsScreen() {
+  const { top } = useSafeAreaInsets();
   const [quests, setQuests]         = useState<QuestRow[]>([]);
   const [pillars, setPillars]       = useState<PillarRow[]>([]);
   const [userId, setUserId]         = useState('');
@@ -67,7 +69,8 @@ export default function QuestsScreen() {
 
   // ── carregar dados ─────────────────────────────────────────
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return;
     setUserId(user.id);
 
@@ -214,7 +217,7 @@ export default function QuestsScreen() {
   return (
     <View style={styles.root}>
       {/* cabeçalho */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: top + spacing.sm }]}>
         <Text style={styles.headerTitle}>Quests</Text>
         <TouchableOpacity style={styles.newBtn} onPress={() => setShowCreate(true)} activeOpacity={0.8}>
           <Text style={styles.newBtnText}>+ Nova</Text>
@@ -632,7 +635,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: spacing.lg, paddingTop: spacing.xxl, paddingBottom: spacing.md,
+    paddingHorizontal: spacing.lg, paddingBottom: spacing.md,
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   headerTitle: { fontSize: 24, fontWeight: '700', color: colors.textPrimary },
