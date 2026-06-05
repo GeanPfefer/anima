@@ -17,7 +17,7 @@ Leia `anima-prd.md` antes de qualquer tarefa.
 ## Estrutura
 
 ```
-lifegame/
+anima/
 ├── apps/
 │   ├── mobile/          # React Native + Expo Router
 │   └── web/             # Next.js (web + API Routes)
@@ -70,6 +70,7 @@ Copie `.env.example` → `.env.local` em cada app e preencha:
 ## Regras do sistema (resumo do PRD)
 
 - XP = tempo (min) × taxa do pilar × multiplicador de bônus (teto ×2,5)
-- 50 níveis por pilar, 5 eras, nível do personagem = média dos pilares
-- Mínimo 3 pilares ativos por usuário
+- 50 níveis por pilar, 5 eras, nível do personagem = média dos pilares raiz ativos
+- Pilares são **emergentes** — inferidos pela IA, não configurados pelo usuário
+- Onboarding = primeira conversa natural (sem wizard de steps)
 - Lógica de XP e níveis já implementada em `packages/core`

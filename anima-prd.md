@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-06-05 (sessão: arquitetura cognitiva consolidada — modelo em 4 camadas, memória semântica, continuidade narrativa; seções 1d e 1e adicionadas)
+> Documento vivo de design. Última atualização: 2026-06-05 (sessão: paradigma de pilares emergentes — onboarding conversacional substitui wizard de 5 steps; arquétipo inferido comportamentalmente; seções 1c/1d/1e/2/7/8/10/13 reescritas)
 > Para retomar o projeto em qualquer IA: cole este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -14,17 +14,21 @@
 **Público futuro:** Aberto ao público após o sistema estar bem estruturado e funcional
 
 ### Conceito central
-Um **sistema de continuidade cognitiva pessoal**: absorve a vida como ela é — caótica, não-linear, imprevisível — e organiza tudo em segundo plano. O usuário despeja informações naturalmente; o sistema extrai estrutura, detecta padrões e mantém continuidade sem exigir gerenciamento manual.
 
-O verdadeiro núcleo é: captura natural de contexto humano → memória persistente → organização automática → reflexão contextualizada → continuidade narrativa da vida. A gamificação (XP, níveis, radar, eras, quests) existe como **camada de feedback visual/emocional** — transforma dados de vida em progressão tangível, não é o núcleo do produto.
+> **"Um sistema operacional pessoal baseado em memória narrativa, organização implícita e continuidade cognitiva."**
 
-A camada de game (XP, níveis, eras, quests, radar) não é o núcleo — é o **feedback layer**: transforma dados de vida em progressão visual, sensação de avanço e contexto emocional. O usuário é o personagem, a vida é o mapa, o app é o HUD — mas o HUD se atualiza sozinho.
+O Anima não é um app de produtividade, um diário gamificado, um chatbot ou um life tracker tradicional. É um **sistema de continuidade cognitiva pessoal** — absorve a vida como ela é (caótica, não-linear, imprevisível) e organiza tudo invisível e continuamente.
 
-**Diferencial principal:** Outros apps pedem que o usuário se organize *para* o sistema. O Anima se organiza *para* o usuário. A interação principal é escrever sobre a vida — o sistema classifica, conecta e evolui automaticamente.
+**Princípio central atualizado:**
+> O sistema aprende o modelo mental do usuário — não o contrário.
 
-**A lente do produto (definida em jun/2026):** na prática, o Anima se comporta como uma **agenda + diário** organizada por pilares, com a camada de game (XP, níveis, eras, quests) por cima. A interação principal é *escrever* o que aconteceu ou se planeja — não preencher formulários. Insight central: logar dados é fricção que as pessoas abandonam; escrever um diário é algo que a pessoa já quer fazer. Quando o ato de organizar a vida *é* a interação, o input deixa de ser custo e vira o próprio valor.
+O usuário nunca configura a própria vida. Nunca escolhe pilares, preenche formulários nem categoriza. O sistema observa, infere e aprende quem a pessoa é enquanto ela simplesmente vive e escreve.
 
-**Standalone primeiro, integrações depois:** o app é 100% autossuficiente. Qualquer integração externa (Obsidian, Apple Health, etc.) só *adiciona* — nunca é dependência. Ver seção 13b.
+**O que o Anima NÃO é:** app de produtividade, diário gamificado, chatbot, life tracker tradicional, agenda de pilares.
+
+**O que o Anima É:** uma memória viva capaz de entender, organizar e contextualizar a vida do usuário ao longo do tempo. A gamificação (XP, níveis, radar, eras, quests) é a **camada de feedback visual/emocional** — não o núcleo.
+
+**Standalone primeiro, integrações depois:** 100% autossuficiente. Integrações externas (Obsidian, Apple Health, etc.) só *adicionam* — nunca são dependência. Ver seção 13b.
 
 ---
 
@@ -37,9 +41,9 @@ A frequência de input deve **espelhar a velocidade com que cada coisa muda**. N
 
 | O que | Velocidade de mudança | Como é capturado |
 |-------|----------------------|------------------|
-| Identidade, pilares | Raríssima | Onboarding + edição esporádica |
+| Identidade, pilares | Emergente e contínua | IA infere da primeira conversa e do comportamento acumulado; nunca configurado manualmente |
 | Humor / energia / o dia | Diária | Pulso/entrada do dia (quando der) |
-| Atividades | Ao longo do dia | Registro oportunista |
+| Atividades | Ao longo do dia | Registro oportunista via texto livre |
 | Eventos de vida, mudanças de estado | Rara | Orientado a evento |
 | Sono, passos, treino (futuro) | Contínua | Passivo via integração |
 
@@ -87,23 +91,22 @@ A gamificação não é o núcleo do produto. É a **camada de feedback**:
 
 O que o usuário realmente ganha é **clareza sobre a própria vida** — a gamificação torna essa clareza tangível e motivadora.
 
-### Papel da IA (esclarecido em jun/2026)
-A IA atua em duas camadas complementares — não mutuamente exclusivas:
+### Papel da IA (atualizado jun/2026)
+A IA opera em dois modos que se complementam:
 
-**Camada primária — organizadora implícita (trabalha em segundo plano):**
-- Absorve texto livre e extrai estrutura automaticamente
-- Mantém contexto ao longo do tempo sem o usuário recontá-lo
-- Conecta áreas da vida sem o usuário modelar as relações manualmente
-- Detecta padrões invisíveis no histórico acumulado
-- Mantém continuidade narrativa sem exigir organização explícita
+**Modo 1 — Conversa (porta de entrada e reflexão intencional):**
+O chat é a **primeira interação do usuário** com o sistema — a "primeira conversa" substitui o onboarding. Depois, volta a ser usado para reflexão, planejamento e brainstorming com contexto completo da vida.
+- Primeira conversa: acolhe, infere contexto, detecta pilares iniciais, inicia memória narrativa
+- Uso recorrente: reflexão sobre padrões, planejamento, decisões, perguntas sobre a própria vida
 
-**Camada secundária — chat intencional (quando o usuário quer):**
-- Brainstorming sobre a própria vida ("o que está acontecendo com meu pilar de Trabalho?")
-- Reflexão orientada por perguntas
-- Planejamento de quests e objetivos
-- Qualquer conversa com contexto completo da vida
+Tom ideal: curioso, observador, humano, leve, acolhedor, não-invasivo. Sem coaching genérico, sem pseudo-psicologia, sem perguntas excessivas.
 
-O chat não é o modo padrão — é uma ferramenta para quando o usuário quer uma conversa intencionalmente. A diferença é que a camada primária funciona sem esforço; o chat requer intenção.
+**Modo 2 — Organização implícita (segundo plano, constante):**
+- Absorve texto livre e extrai estrutura automaticamente (pilares, duração, humor, entidades)
+- Mantém contexto acumulado sem o usuário recontá-lo
+- Infere arquétipo comportamental ao longo do tempo
+- Constrói memória semântica (Camada 3)
+- Detecta padrões invisíveis no histórico
 
 ### Diretriz de feature
 Toda nova feature deve responder:
@@ -213,7 +216,11 @@ O objetivo é criar: continuidade, confiança, sensação de memória persistent
 
 ## 2. Pilares de vida
 
-O usuário escolhe quais pilares acompanhar durante o onboarding. Os pilares padrão são:
+Os pilares são **estruturas emergentes** — não configuradas explicitamente pelo usuário, mas inferidas pela IA a partir da primeira conversa e do comportamento acumulado. O usuário nunca precisa "escolher pilares" para começar.
+
+**Como emergem:** a IA detecta temas recorrentes na escrita do usuário e sugere/cria pilares silenciosamente. O usuário pode confirmar, renomear ou adicionar a qualquer momento — mas nunca é obrigado a.
+
+**Pilares padrão disponíveis** (a IA usa como ponto de partida):
 
 | Pilar | Foco | Taxa XP/min |
 |-------|------|-------------|
@@ -228,11 +235,10 @@ O usuário escolhe quais pilares acompanhar durante o onboarding. Os pilares pad
 > **Decisão jun/2026:** Todas as taxas igualadas a 1,0×. O valor está no tempo dedicado, não na hierarquia de importância entre pilares — cada área de vida vale igual.
 
 **Regras dos pilares:**
-- O usuário pode remover pilares padrão (mínimo 1 ativo)
-- O usuário pode adicionar pilares personalizados (ex: Espiritualidade, Criatividade, Aventura)
-- Pilares são definidos no onboarding e podem ser editados depois
+- Pilares emergem organicamente — nenhum é obrigatório no início
+- O usuário pode adicionar, renomear ou desativar pilares a qualquer momento
 - Cada pilar tem seu próprio nível (1–50)
-- O nível geral do personagem é a média dos níveis de todos os pilares ativos
+- O nível geral do personagem é a média dos níveis de todos os pilares raiz ativos
 
 **Conexões entre pilares:**
 - Saúde impacta fortemente Mente e Trabalho (detectável em 1–2 dias)
@@ -368,36 +374,54 @@ O app sugere quests e ações disponíveis com base em:
 
 ---
 
-## 7. Onboarding (primeiro login)
+## 7. Onboarding — primeira conversa natural
 
-**5 etapas** (web e mobile). Duas etapas do design original foram removidas — ver decisões de design.
+> **O onboarding tradicional (5 steps rígidos) foi removido.** Substituído por uma primeira conversa com a IA.
 
-### Etapa 1 — Nome
-- Campo: nome (como quer ser chamado)
+### Princípio
+O onboarding nunca deve parecer setup, formulário, questionário ou configuração de sistema. Deve parecer o início de uma relação — um espaço leve onde a pessoa simplesmente conta o que está acontecendo na vida.
 
-### Etapa 2 — Arquétipo
-- Quiz de 5 perguntas com chips de resposta
-- Resultado: combinação percentual de 4 arquétipos (Explorador, Focado, Construtor, Visionário)
-- Salvo em `profiles.archetype`; injetado no system prompt da IA
+### Fluxo
 
-### Etapa 3 — Pilares
-- Apresenta os 7 pilares padrão pré-selecionados
-- Usuário pode desmarcar (mínimo 1) e adicionar pilares personalizados
-- Permite criar sub-pilares vinculados a pais (hierarquia)
+**1. Tela inicial pós-signup:** só pede o nome (como quer ser chamado). Nenhuma outra configuração.
 
-### Etapa 4 — Contexto por pilar
-- Para cada pilar selecionado: perguntas com chips multiselect + opção "Outro" (texto livre, múltiplas)
-- Respostas salvas em `user_pillars.context` (JSONB); usadas no system prompt da IA
+**2. Primeira conversa:** a IA inicia com uma pergunta aberta de baixa fricção.
 
-### Etapa 5 — Resumo / Personagem
-- Exibe o personagem criado: nome, Nível 1, Era: Despertar, arquétipo dominante
-- Lista os pilares ativos com a taxa de XP
-- CTA: "Começar a jornada"
-- Ao confirmar: salva `name` e `onboarding_completed_at` no perfil, insere pilares em `user_pillars`
+Exemplos de abertura:
+- "O que fez você baixar o Anima?"
+- "O que está ocupando sua mente ultimamente?"
+- "Sem pressa — me conta o que está acontecendo na sua vida agora."
 
-### O que foi REMOVIDO do design original
-- ~~Sliders de baseline (1–10)~~ — diagnóstico visual sem impacto no sistema; fricção sem valor
-- ~~Seleção de prioridades~~ — afetava apenas sugestões de quest (ainda não implementadas); fricção desnecessária
+**3. A IA trabalha em segundo plano durante a conversa:**
+- Acolhe a resposta (tom: curioso, humano, não-invasivo)
+- Infere pilares iniciais dos temas mencionados
+- Detecta arquétipo comportamental preliminar pela linguagem e foco
+- Inicia a memória narrativa (Camada 1 e 2)
+
+**4. Encerramento natural:** quando há contexto suficiente (sem critério rígido), a IA propõe ir para o dashboard. Sem "conclusão" formal — o onboarding é contínuo.
+
+### O que a primeira conversa NÃO é
+- Não é um quiz
+- Não é uma entrevista de diagnóstico
+- Não é um formulário disfarçado
+- Não é coaching
+- Não tem número mínimo de perguntas ou etapas obrigatórias
+
+### Descoberta progressiva de identidade
+O sistema não assume que o usuário sabe quem é, o que quer ou quais áreas priorizar. A identidade emerge ao longo do uso. O "onboarding" nunca termina formalmente — o sistema aprende continuamente.
+
+### Arquétipo inferido (não mais quiz)
+Os 4 arquétipos (Explorador, Focado, Construtor, Visionário) passam a ser um **modelo comportamental vivo**, inferido pela IA com base em:
+- Forma e frequência de escrita
+- Temas recorrentes
+- Padrões de decisão
+- Linguagem e intensidade emocional
+
+O resultado em `profiles.archetype` é atualizado continuamente — não fixado num momento inicial.
+
+### Estado técnico
+- **⚠️ Pendente refatoração:** o código atual (steps 1–5) implementa o onboarding antigo. Precisa ser substituído pelo fluxo conversacional descrito acima.
+- O campo `onboarding_completed_at` ainda é usado como guard de rota. No novo modelo, é setado após a primeira conversa ter contexto suficiente (a definir).
 
 ---
 
@@ -406,16 +430,17 @@ O app sugere quests e ações disponíveis com base em:
 ### Rotas
 | Rota | Comportamento |
 |------|--------------|
-| `/` | Roteador inteligente: sem sessão → `/login`; com sessão + onboarding feito → `/home`; com sessão sem onboarding → `/step-1` |
+| `/` | Roteador inteligente: sem sessão → `/login`; com sessão + onboarding feito → `/home`; com sessão sem onboarding → `/welcome` |
 | `/login` | Server Action via Supabase Auth; sucesso → `/home` |
-| `/signup` | Server Action via Supabase Auth; sucesso → `/step-1` |
+| `/signup` | Server Action via Supabase Auth; sucesso → `/welcome` |
+| `/welcome` | ⚠️ Pendente: tela de nome + primeira conversa (substitui `/step-1` a `/step-5`) |
 | `/forgot-password` | Envia e-mail de reset via `supabase.auth.resetPasswordForEmail`; em dev, e-mail chega no Mailpit (porta 54324) |
 | `/auth/callback` | Route Handler que troca o `code` por sessão (PKCE); redireciona para `?next=` |
 | `/reset-password` | Define nova senha via `supabase.auth.updateUser`; redireciona para `/home` |
 | `/settings` | Exibe dados da conta e formulário de troca de senha |
 | `/history` | Timeline de atividades registradas agrupada por dia |
-| `/step-1` a `/step-3` | Protegidas por auth guard no layout do grupo `(onboarding)` |
 | `/home` | Protegida por auth guard no layout do grupo `(app)` |
+| ~~`/step-1` a `/step-5`~~ | ~~Deprecated — substituídas por `/welcome`~~ |
 
 ### Decisões técnicas de auth
 - Auth via `@supabase/ssr` com cookies — necessário para Server Components lerem a sessão
@@ -468,9 +493,9 @@ O app sugere quests e ações disponíveis com base em:
 | Frequência punindo XP | Removida | Desmotivador |
 | Nível inicial pelo onboarding | Removido | XP deve ser ganho, não declarado |
 | Stack técnica | React Native + Expo + Next.js + Supabase + TypeScript | Multiplataforma real, compartilhamento de lógica, início rápido sem infra |
-| Pilares | Customizáveis por usuário | Cada vida é diferente |
+| Pilares | **Emergentes** — IA infere e sugere; usuário nunca configura explicitamente | Configuração forçada é fricção; pilares devem refletir a vida real observada, não a ideal declarada |
 | XP de quests | Definido antes de começar | Remove viés de inflação pós-conclusão |
-| Etapas 3 e 4 do onboarding | Removidas | Baseline sem impacto no sistema; prioridades sem quests implementadas — fricção desnecessária no fluxo inicial |
+| ~~Onboarding em 5 steps~~ | ~~Removido~~ | Substituído por primeira conversa natural; wizard rígido contradiz filosofia central |
 | Auth via Server Actions | Escolhido sobre client-side | Cookie setado server-side é necessário para SSR ler a sessão |
 | `xp_records` imutável | Update bloqueado por design no schema | Histórico de XP não pode ser editado — integridade do sistema |
 | Bônus recalculados no save | Não confia no preview do cliente | Evita race condition se outro registro acontece entre preview e submit |
@@ -491,12 +516,12 @@ O app sugere quests e ações disponíveis com base em:
 | IA local (Ollama) | Modelos open-source rodando na máquina do usuário (Goma) via API HTTP | Privacidade total, custo zero, sem dependência de terceiros; qualidade inferior ao GPT-4 mas aceitável para uso pessoal |
 | Arquitetura IA | Notebook → API Next.js → Ollama na Goma (100.68.239.78:11434) | Separação de responsabilidades: notebook para dev, Goma para inferência pesada |
 | Modelo padrão | qwen2.5:14b (general purpose, não coder) | Respostas mais naturais para contexto pessoal vs. coder que é técnico/seco |
-| Sistema de arquétipos | 4 arquétipos (Explorador, Focado, Construtor, Visionário) com % combinados por pessoa | Personalidade não é binária; combinação única captura melhor quem a pessoa é |
-| Arquétipo no onboarding | Quiz de 5 perguntas com chips antes da seleção de pilares | Contexto de personalidade molda como a IA orienta desde o primeiro dia |
+| Sistema de arquétipos | 4 arquétipos (Explorador, Focado, Construtor, Visionário) com % combinados — **inferidos comportamentalmente** | Personalidade não é binária; arquétipo vivo é mais preciso que resultado de quiz pontual |
+| ~~Quiz de arquétipo~~ | ~~Removido~~ | Substituído por inferência contínua da IA a partir de escrita, padrões e comportamento |
 | Sub-pilares | Hierarquia infinita com múltiplos pais; XP propaga 100% para todos os ancestrais | Tudo na vida é correlacionado — 1h de Skate melhora Saúde E Lazer de verdade, não 50% de cada |
 | Sub-pilares excluídos do nível | character_stats só conta pilares raiz (sem pais) | Sub-pilares já propagam XP para pais — incluí-los causaria dupla contagem no nível do personagem |
-| Contexto de pilar | Perguntas com chips multiselect + "Outro" (texto livre, múltiplas); salvo como JSONB | Cada pilar tem intenções diferentes; contexto rico melhora orientação da IA |
-| "Outro" em perguntas | Enter confirma como chip selecionado e abre novo input vazio; toque no chip remove | Permite múltiplas opções customizadas por pergunta; fluxo natural igual ao web |
+| Contexto de pilar | **Inferido pela IA** da primeira conversa e entradas acumuladas; salvo em `user_pillars.context` (JSONB) | Perguntas de contexto explícitas são fricção; IA extrai contexto da conversa natural |
+| ~~Perguntas estruturadas de contexto~~ | ~~Removidas~~ | Substituídas pela inferência via primeira conversa e comportamento acumulado |
 | XP de quests limitado | Máx 10.000 XP por quest e por missão | Evita distorções extremas no sistema de progressão |
 | Taxas XP iguais | Todos os pilares em 1,0× XP/min | Tempo vale igual em qualquer área da vida — sem hierarquia implícita |
 | Auth guard no index.tsx (mobile) | `index.tsx` faz getUser() + checa DB; `_layout.tsx` é estático | Expo Router 54 não tolera retorno condicional no root layout sem quebrar navegação |
@@ -556,17 +581,11 @@ anima/
 - [x] Autenticação — login, signup, logout explícito (botão em Configurações)
 - [x] Recuperação de senha — forgot-password → e-mail (Mailpit em dev) → reset-password
 - [x] Roteamento inteligente na raiz (`/`)
-- [x] Onboarding em 5 etapas — `/step-1` a `/step-5` com botão "← Voltar" em todas
-  - Step 1: nome do usuário
-  - Step 2: quiz de arquétipo (5 perguntas → resultado com % por arquétipo)
-  - Step 3: seleção de pilares com criação de sub-pilares vinculados a pais
-  - Step 4: contexto por pilar — perguntas com chips multiselect + "Outro" (texto livre)
-  - Step 5: resumo completo — frase personalizada, barras de arquétipo, pilares com tags de contexto
-- [x] Sistema de arquétipos — 4 tipos (Explorador, Focado, Construtor, Visionário) com combinação % única por pessoa; salvo em `profiles.archetype`; injetado no system prompt da IA
 - [x] Sub-pilares hierárquicos — `pillar_relationships` (muitos-para-muitos); XP propaga 100% recursivamente para todos os ancestrais; sub-pilares excluídos do cálculo de nível do personagem
-- [x] Contexto de pilar — respostas do onboarding salvas em `user_pillars.context` (JSONB); IA usa no system prompt
+- [x] Contexto de pilar — salvo em `user_pillars.context` (JSONB); IA usa no system prompt
 - [x] Dashboard home — radar de vida SVG, cards de pilares com barra de XP
-- [x] Registro de atividades — modal com seleção de pilar, tempo, preview de XP ao vivo, bônus automáticos *(ainda usa formulário estruturado — pendente refatoração para input natural, como no mobile)*
+- [x] Registro de atividades — input natural via IA (texto livre → 5 fases → registro)
+- ⚠️ **Onboarding em 5 steps** — implementado mas **pendente substituição** pelo onboarding conversacional (ver seção 7). Código em `app/(onboarding)/step-1` a `step-5` está deprecated.
 - [x] Histórico de atividades — timeline agrupada por dia, total de XP diário e semanal, badges de bônus
 - [x] Configurações — dados da conta, troca de senha, logout
 - [x] Nav compartilhada — AppNav com Home, Quests, Histórico, IA, Configurações
@@ -581,11 +600,7 @@ anima/
 - [x] Auth — login e signup nativos; login redireciona explicitamente (checa `onboarding_completed_at` no DB)
 - [x] Sessão persistida em `AsyncStorage`; `getUser()` valida no servidor na abertura (detecta sessão stale após `db reset`)
 - [x] Roteamento inteligente — `app/index.tsx` resolve auth + onboarding e redireciona; `_layout.tsx` é estático (só renderiza Stack)
-- [x] Onboarding em 5 etapas (nome → arquétipo quiz → pilares com sub-pilares → contexto → resumo)
-  - Input "Outro" em contexto: chips múltiplos — Enter confirma e abre novo campo vazio; toque no chip remove
-  - Sub-pilares: `allPillarOptions` exclui filhos (não pais) do picker; múltiplos sub-pilares com mesmo pai funcionam
-  - Todos os steps: `useSafeAreaInsets` para respeitar Dynamic Island / notch do iPhone
-  - Step-5: `router.replace('/(app)/home')` direto após salvar (sem depender de refreshSession)
+- ⚠️ **Onboarding em 5 steps** — implementado mas **pendente substituição** pelo onboarding conversacional. Código em `app/(onboarding)/step-1` a `step-5` está deprecated.
 - [x] Dashboard home — radar de vida SVG (SIZE=300, labels truncados em 8 chars), cards de pilares, `useFocusEffect` (recarrega ao voltar à aba)
 - [x] Registro de atividades — input natural com áudio ou texto: texto livre → IA detecta pilares, duração e nota → usuário confirma; 5 fases: input → parsing → reviewing → submitting → success; mic button grava → Whisper transcreve → preenche o campo; `logMultipleActivities` registra em série; bônus recalculados server-side
 - [x] Histórico — `useFocusEffect` (recarrega ao entrar na aba após registrar atividade ou concluir quest); XP semanal
@@ -641,34 +656,36 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 
 ## 13. Próximos temas a explorar
 
-> Ordenados pela prioridade arquitetural definida em jun/2026 (seção 1e). Features de captura e memória vêm antes de expansão de UX.
+> Prioridade P0 adicionada em jun/2026: onboarding conversacional é a base de tudo.
 
-### Prioridade 1 — Captura e memória (núcleo do produto)
+### P0 — Onboarding conversacional (bloqueante)
+- [ ] **Substituir steps 1–5 por primeira conversa** — web e mobile; rota `/welcome`; a IA acolhe, infere pilares e arquétipo iniciais, inicia memória narrativa; `onboarding_completed_at` setado após contexto suficiente
+- [ ] **Deprecar e remover código dos steps** — `app/(onboarding)/step-1` a `step-5`, `lib/archetypes.ts` (quiz), `lib/pillar-questions.ts`
+
+### P1 — Captura e memória (núcleo do produto)
 - [ ] **Testar input por áudio no mobile** — servidor Whisper na Goma (porta 9000); setup documentado na seção 12b
-- [ ] **Web: refatorar para input natural** — modal de registro ainda usa formulário estruturado; alinhar com o mobile (Camada 1)
-- [ ] **Memória semântica — Camada 3** — sistema aprende entidades persistentes do usuário (pessoas, lugares, projetos, padrões) a partir do histórico; retrieval semântico com embeddings
-- [ ] **Timeline narrativa** — acesso ao histórico como narrativa temporal, não só lista de atividades; base para insights contextualizados
-- [ ] **Retrieval contextual temporal** — busca semântica no histórico para alimentar chat e insights (embeddings + pgvector)
-- [ ] **Backfill com data passada** — registrar atividade com data anterior (decidido no PRD, não implementado)
+- [ ] **Memória semântica — Camada 3** — sistema aprende entidades persistentes do usuário (pessoas, lugares, projetos, padrões); retrieval semântico com embeddings + pgvector
+- [ ] **Timeline narrativa** — histórico como narrativa temporal, não só lista; base para insights
+- [ ] **Retrieval contextual temporal** — busca semântica no histórico para alimentar chat e insights
+- [ ] **Backfill com data passada** — registrar atividade com data anterior (decidido, não implementado)
 
-### Prioridade 2 — Reflexão e insights (Camada 4)
-- [ ] **Insights automáticos** — IA lendo timeline acumulada e gerando padrões entre pilares; critérios: raros, específicos, contextualizados, honestos (não coaching genérico)
-- [ ] **Pulso/entrada do dia** — experiência ainda mais leve, "quando der", sem pilar obrigatório, nunca streak
+### P2 — Reflexão e insights (Camada 4)
+- [ ] **Insights automáticos** — IA lendo timeline; critérios: raros, específicos, contextualizados, honestos (sem coaching genérico)
+- [ ] **Pulso/entrada do dia** — entrada ultra-leve, "quando der", sem pilar obrigatório, nunca streak
 
-### Prioridade 3 — UX e features complementares
-- [ ] **Criar sub-pilares pós-onboarding** — adicionar/editar pilares da home ou configurações
-- [ ] **Onboarding conversacional** — substituir os 5 steps por uma conversa com a IA (hipótese futura)
-- [ ] **Seleção de foco** — "Em quais pilares quer focar agora?" no onboarding + Configurações
+### P3 — UX complementar
+- [ ] **Editar pilares pós-onboarding** — confirmar/renomear pilares inferidos pela IA
+- [ ] **Seleção de foco** — "Em que quer focar agora?" nas configurações
 
-### Prioridade 4 — Integrações e expansão
+### P4 — Integrações e expansão
 - [ ] **Adaptador Obsidian** — export markdown fase 1 (Postgres → markdown)
 - [ ] **Integrações passivas** — Apple Health, Google Fit, calendário (camada 0)
 - [ ] **Modelo de monetização** — quando abrir ao público
 
 ### Concluído
-- [x] **Dashboard hierárquico** — sub-pilares indentados sob os pais no home (web + mobile)
-- [x] **Input natural com IA** — texto livre + áudio; implementado no mobile
+- [x] **Input natural com IA** — texto livre + áudio (web + mobile); 5 fases
 - [x] **Chat com IA contextual** — streaming via Ollama; contexto completo do usuário; web
+- [x] **Dashboard hierárquico** — sub-pilares indentados sob pais; web + mobile
 
 ---
 
