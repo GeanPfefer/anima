@@ -71,8 +71,22 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
       const parsed = await parseActivities(text, pillars.map(p => p.name));
 
       if (parsed.length === 0) {
-        setErrorMsg('Não consegui identificar atividades. Descreva o que você fez e quanto tempo durou.');
-        setPhase('input');
+        // Nenhuma atividade detectada → registra como presença (duration=0, sem XP)
+        const fallback = pillars[0];
+        if (!fallback) {
+          setErrorMsg('Nenhum pilar disponível.');
+          setPhase('input');
+          return;
+        }
+        const bonuses = await getActivityBonuses(fallback.id, activityDate);
+        setEntries([{
+          id:              String(counterRef.current++),
+          pillarId:        fallback.id,
+          durationMinutes: 0,
+          note:            text.trim().slice(0, 500),
+          bonuses,
+        }]);
+        setPhase('reviewing');
         return;
       }
 
@@ -197,7 +211,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
           <div className={styles.inputPhase}>
             <textarea
               className={styles.inputArea}
-              placeholder="O que você fez? Escreva livremente — a IA vai interpretar tudo."
+              placeholder="O que aconteceu? Escreva livremente — tempo é opcional."
               value={text}
               onChange={e => setText(e.target.value)}
               rows={5}
@@ -283,7 +297,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
               onClick={handleSubmit}
               disabled={isSubmitting || entries.length === 0}
             >
-              {isSubmitting ? 'Registrando…' : `Registrar · +${totalXPPreview} XP`}
+              {isSubmitting ? 'Registrando…' : totalXPPreview > 0 ? `Registrar · +${totalXPPreview} XP` : 'Registrar'}
             </button>
           </div>
         )}

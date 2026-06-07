@@ -214,8 +214,20 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
       );
 
       if (parsed.length === 0) {
-        setParseError('Não identifiquei atividades no texto. Tente detalhar mais.');
-        setPhase('input');
+        // Nenhuma atividade detectada → registra como presença (duration=0, sem XP)
+        const fallbackPillar = pillars[0];
+        const newEntries: ReviewEntry[] = [{
+          localId:         `${Date.now()}-0`,
+          pillarId:        fallbackPillar?.id ?? null,
+          durationMinutes: 0,
+          note:            text.trim().slice(0, 120),
+          editingDuration: false,
+          durationDraft:   '',
+          pillarExpanded:  !fallbackPillar,
+        }];
+        setEntries(newEntries);
+        await loadBonuses(newEntries.map((e) => e.pillarId));
+        setPhase('reviewing');
         return;
       }
 
@@ -393,7 +405,7 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
                   textAlignVertical="top"
                 />
                 <Text style={styles.inputHint}>
-                  ex: "corri 45min e li por meia hora depois"
+                  ex: "corri 45min e li por meia hora" · tempo é opcional
                 </Text>
                 {parseError ? (
                   <Text style={styles.error}>{parseError}</Text>

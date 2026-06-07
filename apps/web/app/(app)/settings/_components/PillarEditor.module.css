@@ -1,0 +1,173 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.15s;
+}
+
+.rowInactive {
+  opacity: 0.45;
+}
+
+.nameInput {
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.nameInput:focus {
+  border-color: var(--border-focus);
+}
+
+.nameInput:disabled {
+  opacity: 0.5;
+}
+
+.toggle {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.toggleOn {
+  background: rgba(124, 92, 252, 0.12);
+  color: var(--accent);
+  border: 1px solid transparent;
+}
+
+.toggleOn:hover:not(:disabled) {
+  background: rgba(124, 92, 252, 0.2);
+}
+
+.toggleOff {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.toggleOff:hover:not(:disabled) {
+  color: var(--text-secondary);
+  border-color: var(--border-focus);
+}
+
+.toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.deleteBtn {
+  font-size: 16px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius);
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.deleteBtn:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.deleteBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.deleteDisabled {
+  font-size: 16px;
+  color: var(--border);
+  padding: 4px 6px;
+  flex-shrink: 0;
+  cursor: default;
+  line-height: 1;
+}
+
+.addRow {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.addInput {
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.addInput:focus {
+  border-color: var(--border-focus);
+}
+
+.addInput::placeholder {
+  color: var(--text-muted);
+}
+
+.addBtn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.addBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.addBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.error {
+  font-size: 12px;
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+.empty {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0;
+}

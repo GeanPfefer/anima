@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabase';
 import { colors, spacing, radius } from '@/constants/theme';
 
 type Profile = { name: string; onboarding_completed_at: string | null };
+type Pillar = { id: string; name: string; is_active: boolean; xp_total: number };
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -22,6 +23,14 @@ export default function SettingsScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState('');
+
+  // Pilares
+  const [pillars, setPillars] = useState<Pillar[]>([]);
+  const [editedNames, setEditedNames] = useState<Record<string, string>>({});
+  const [savingPillar, setSavingPillar] = useState<Record<string, boolean>>({});
+  const [newPillarName, setNewPillarName] = useState('');
+  const [creating, setCreating] = useState(false);
 
   // Change password form
   const [currentPassword, setCurrentPassword] = useState('');
@@ -33,20 +42,96 @@ export default function SettingsScreen() {
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
+      const user = session?.user;
       if (!user) return;
       setEmail(user.email ?? '');
+      setUserId(user.id);
 
-      const { data } = await supabase
-        .from('profiles')
-        .select('name, onboarding_completed_at')
-        .eq('id', user.id)
-        .single();
+      const [profileRes, pillarsRes] = await Promise.all([
+        supabase.from('profiles').select('name, onboarding_completed_at').eq('id', user.id).single(),
+        supabase.from('user_pillars').select('id, name, is_active, xp_total').eq('user_id', user.id).order('sort_order'),
+      ]);
 
-      setProfile(data ?? null);
+      setProfile(profileRes.data ?? null);
+      setPillars(pillarsRes.data ?? []);
       setLoading(false);
     })();
   }, []);
+
+  async function savePillarName(pillar: Pillar) {
+    const name = (editedNames[pillar.id] ?? pillar.name).trim();
+    if (!name || name === pillar.name) {
+      setEditedNames((prev) => { const next = { ...prev }; delete next[pillar.id]; return next; });
+      return;
+    }
+    setSavingPillar((s) => ({ ...s, [pillar.id]: true }));
+    const { error } = await supabase
+      .from('user_pillars')
+      .update({ name })
+      .eq('id', pillar.id);
+    setSavingPillar((s) => ({ ...s, [pillar.id]: false }));
+    if (error) {
+      Alert.alert('Erro', 'Não foi possível salvar o nome.');
+    } else {
+      setPillars((prev) => prev.map((p) => p.id === pillar.id ? { ...p, name } : p));
+      setEditedNames((prev) => { const next = { ...prev }; delete next[pillar.id]; return next; });
+    }
+  }
+
+  async function createPillar() {
+    const name = newPillarName.trim();
+    if (!name || creating || !userId) return;
+    setCreating(true);
+    const { data, error } = await supabase
+      .from('user_pillars')
+      .insert({ user_id: userId, name, xp_rate: 1.0, is_active: true, sort_order: pillars.length })
+      .select('id, name, is_active, xp_total')
+      .single();
+    setCreating(false);
+    if (error || !data) {
+      Alert.alert('Erro', 'Não foi possível criar o pilar.');
+    } else {
+      setPillars((prev) => [...prev, data as Pillar]);
+      setNewPillarName('');
+    }
+  }
+
+  async function deletePillar(pillar: Pillar) {
+    Alert.alert(
+      'Apagar pilar',
+      `Apagar "${pillar.name}"? Isso é permanente.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Apagar',
+          style: 'destructive',
+          onPress: async () => {
+            setSavingPillar((s) => ({ ...s, [pillar.id]: true }));
+            const { error } = await supabase.from('user_pillars').delete().eq('id', pillar.id);
+            setSavingPillar((s) => ({ ...s, [pillar.id]: false }));
+            if (error) {
+              Alert.alert('Erro', 'Não foi possível apagar o pilar.');
+            } else {
+              setPillars((prev) => prev.filter((p) => p.id !== pillar.id));
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  async function togglePillarActive(pillar: Pillar) {
+    setSavingPillar((s) => ({ ...s, [pillar.id]: true }));
+    const is_active = !pillar.is_active;
+    const { error } = await supabase
+      .from('user_pillars')
+      .update({ is_active })
+      .eq('id', pillar.id);
+    setSavingPillar((s) => ({ ...s, [pillar.id]: false }));
+    if (!error) {
+      setPillars((prev) => prev.map((p) => p.id === pillar.id ? { ...p, is_active } : p));
+    }
+  }
 
   async function handleChangePassword() {
     if (!newPassword || newPassword.length < 6) {
@@ -57,7 +142,6 @@ export default function SettingsScreen() {
     setPwError('');
     setPwSuccess(false);
 
-    // Re-autentica com a senha atual antes de atualizar
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password: currentPassword,
@@ -103,6 +187,11 @@ export default function SettingsScreen() {
     );
   }
 
+  const sortedPillars = [...pillars].sort((a, b) => {
+    if (a.is_active === b.is_active) return 0;
+    return a.is_active ? -1 : 1;
+  });
+
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.scroll, { paddingTop: top + spacing.md }]}>
       <Text style={styles.title}>Configurações</Text>
@@ -121,6 +210,108 @@ export default function SettingsScreen() {
           <Text style={styles.rowValue} numberOfLines={1}>{email}</Text>
         </View>
       </View>
+
+      {/* Pilares */}
+      {sortedPillars.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Pilares</Text>
+          {sortedPillars.map((p, i) => {
+            const edited = editedNames[p.id];
+            const currentName = edited ?? p.name;
+            const isDirty = edited !== undefined && edited.trim() !== p.name;
+            const isSaving = !!savingPillar[p.id];
+            const isLast = i === sortedPillars.length - 1;
+            return (
+              <View key={p.id} style={[styles.pillarRow, isLast && styles.pillarRowLast, !p.is_active && styles.pillarRowInactive]}>
+                <TextInput
+                  style={styles.pillarInput}
+                  value={currentName}
+                  onChangeText={(v) => setEditedNames((n) => ({ ...n, [p.id]: v }))}
+                  onBlur={() => savePillarName(p)}
+                  onSubmitEditing={() => savePillarName(p)}
+                  returnKeyType="done"
+                  editable={!isSaving}
+                  placeholderTextColor={colors.textMuted}
+                />
+                {isDirty && !isSaving && (
+                  <TouchableOpacity style={styles.saveBtn} onPress={() => savePillarName(p)} activeOpacity={0.8}>
+                    <Text style={styles.saveBtnText}>Salvar</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.toggleBtn, p.is_active ? styles.toggleBtnOn : styles.toggleBtnOff]}
+                  onPress={() => togglePillarActive(p)}
+                  disabled={isSaving}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.toggleBtnText, p.is_active ? styles.toggleBtnTextOn : styles.toggleBtnTextOff]}>
+                    {p.is_active ? 'ativo' : 'inativo'}
+                  </Text>
+                </TouchableOpacity>
+                {p.xp_total === 0 && (
+                  <TouchableOpacity
+                    onPress={() => deletePillar(p)}
+                    disabled={isSaving}
+                    hitSlop={8}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.deleteBtn}>×</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+          {/* Adicionar novo pilar */}
+          <View style={styles.pillarAddRow}>
+            <TextInput
+              style={styles.pillarAddInput}
+              placeholder="Novo pilar…"
+              placeholderTextColor={colors.textMuted}
+              value={newPillarName}
+              onChangeText={setNewPillarName}
+              onSubmitEditing={createPillar}
+              returnKeyType="done"
+              editable={!creating}
+              maxLength={40}
+            />
+            <TouchableOpacity
+              style={[styles.pillarAddBtn, (!newPillarName.trim() || creating) && styles.buttonDisabled]}
+              onPress={createPillar}
+              disabled={!newPillarName.trim() || creating}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.pillarAddBtnText}>{creating ? '…' : '+'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {sortedPillars.length === 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Pilares</Text>
+          <View style={styles.pillarAddRow}>
+            <TextInput
+              style={styles.pillarAddInput}
+              placeholder="Novo pilar…"
+              placeholderTextColor={colors.textMuted}
+              value={newPillarName}
+              onChangeText={setNewPillarName}
+              onSubmitEditing={createPillar}
+              returnKeyType="done"
+              editable={!creating}
+              maxLength={40}
+            />
+            <TouchableOpacity
+              style={[styles.pillarAddBtn, (!newPillarName.trim() || creating) && styles.buttonDisabled]}
+              onPress={createPillar}
+              disabled={!newPillarName.trim() || creating}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.pillarAddBtnText}>{creating ? '…' : '+'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* Alterar senha */}
       <View style={styles.section}>
@@ -209,6 +400,85 @@ const styles = StyleSheet.create({
   rowLast: { borderBottomWidth: 0 },
   rowLabel: { fontSize: 14, color: colors.textSecondary },
   rowValue: { fontSize: 14, color: colors.textPrimary, fontWeight: '500', maxWidth: '60%' },
+
+  // Pillar rows
+  pillarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  pillarRowLast: { borderBottomWidth: 0 },
+  pillarRowInactive: { opacity: 0.45 },
+  pillarInput: {
+    flex: 1,
+    backgroundColor: colors.bgElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 6,
+    color: colors.textPrimary,
+    fontSize: 14,
+  },
+  saveBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+  },
+  saveBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  toggleBtn: {
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderWidth: 1,
+    flexShrink: 0,
+  },
+  toggleBtnOn: {
+    backgroundColor: 'rgba(124, 92, 252, 0.12)',
+    borderColor: 'transparent',
+  },
+  toggleBtnOff: {
+    backgroundColor: 'transparent',
+    borderColor: colors.border,
+  },
+  toggleBtnText: { fontSize: 12, fontWeight: '600' },
+  toggleBtnTextOn: { color: colors.accent },
+  toggleBtnTextOff: { color: colors.textMuted },
+  deleteBtn: { fontSize: 18, color: colors.textMuted, paddingHorizontal: 2 },
+  pillarAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+  },
+  pillarAddInput: {
+    flex: 1,
+    backgroundColor: colors.bgElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 6,
+    color: colors.textPrimary,
+    fontSize: 14,
+  },
+  pillarAddBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.sm,
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillarAddBtnText: { color: '#fff', fontSize: 18, fontWeight: '700', lineHeight: 22 },
+
   field: { padding: spacing.md, paddingBottom: 0 },
   label: { fontSize: 13, color: colors.textSecondary, marginBottom: spacing.xs },
   input: {

@@ -106,22 +106,37 @@ async function extractFromConversation(messages: Message[], name: string): Promi
     .map(m => `${m.role === 'user' ? name : 'Anima'}: ${m.content}`)
     .join('\n');
 
-  const prompt = `Com base nesta primeira conversa entre o Anima e ${name}:
+  const prompt = `Com base nesta conversa inicial entre o Anima e ${name}, extraia o perfil.
 
+CONVERSA:
 ${conversationText}
 
-Extraia o perfil inicial. Retorne APENAS um JSON válido:
+Retorne APENAS um JSON válido com exatamente estas chaves:
 {
-  "pillars": ["Trabalho", "Saúde"],
-  "subPillars": [{"name": "Skate", "parentName": "Saúde"}],
+  "pillars": ["NomePilar1", "NomePilar2", "NomePilar3"],
+  "subPillars": [{"name": "TopicoEspecifico", "parentName": "NomePilar1"}],
   "archetype": {"explorer": 40, "focused": 30, "builder": 20, "visionary": 10}
 }
 
-Regras:
-- pillars: somente da lista [Mente, Propósito, Trabalho, Saúde, Relações, Finanças, Lazer]; máx 5; mínimo 1
-- subPillars: temas específicos claramente mencionados (ex: skate, música, ansiedade); array vazio se não houver
-- archetype: percentuais somando exatamente 100
-- Se conversa insuficiente: use pillars padrão e archetype igualado`;
+REGRAS PARA pillars:
+- Escolha APENAS da lista: [Mente, Propósito, Trabalho, Saúde, Relações, Finanças, Lazer]
+- Inclua entre 3 e 5 pilares — os mais relevantes para esta pessoa
+- Infira mesmo de menções indiretas:
+    projeto/empresa/código/carreira → Trabalho
+    família/amigos/amor/parceiro → Relações
+    exercício/sono/alimentação/energia → Saúde
+    leitura/aprendizado/foco/clareza → Mente
+    propósito/valores/missão/legado → Propósito
+    dinheiro/renda/dívida/investimento → Finanças
+    hobby/descanso/viagem/jogo/lazer → Lazer
+- NÃO copie o exemplo acima — analise a conversa real
+
+REGRAS PARA subPillars:
+- Apenas temas bem específicos e claramente mencionados (ex: "skate", "Anima", "ansiedade")
+- Array vazio se não houver nada suficientemente específico
+
+REGRAS PARA archetype:
+- Percentuais inteiros somando exatamente 100`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);

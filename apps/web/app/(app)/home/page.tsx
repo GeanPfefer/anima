@@ -3,7 +3,6 @@ import { createClient } from '@/lib/supabase/server';
 import { getXPToNextLevel, getTotalXPForLevel, getEraForLevel, getCharacterLevel } from '@anima/core';
 import LifeRadar from './_components/LifeRadar';
 import LogActivityModal from './_components/LogActivityModal';
-import PulsoWidget from './_components/PulsoWidget';
 import InsightCard from './_components/InsightCard';
 import styles from './home.module.css';
 
@@ -159,9 +158,6 @@ export default async function HomePage() {
           <span className={styles.era}>{era.name}</span>
         </div>
       </header>
-
-      {/* Pulso do dia */}
-      <PulsoWidget />
 
       {/* Insight automático (Camada 4) */}
       <InsightCard
