@@ -4,6 +4,94 @@ import { createClient } from '@/lib/supabase/server';
 import { calculateBonusMultiplier } from '@anima/core';
 import type { ActivityBonusType } from '@anima/types';
 
+// ─── Pulso do dia ──────────────────────────────────────────────────────────────
+
+export async function logPulso(
+  text: string,
+): Promise<{ pillarName: string; recordId: string }> {
+  if (!text.trim()) throw new Error('Texto vazio');
+
+  const supabase    = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Não autenticado');
+
+  // Busca pilares ativos (raiz)
+  const { data: pillarsData } = await supabase
+    .from('user_pillars')
+    .select('id, name')
+    .eq('user_id', user.id)
+    .eq('is_active', true);
+
+  const pillars = pillarsData ?? [];
+  if (pillars.length === 0) throw new Error('Nenhum pilar ativo');
+
+  const ollamaUrl   = process.env.OLLAMA_URL   ?? 'http://100.68.239.78:11434';
+  const ollamaModel = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
+
+  // Classifica o texto em um pilar (call leve, direto ao ponto)
+  let pillarId   = pillars[0]!.id;
+  let pillarName = pillars[0]!.name;
+
+  try {
+    const prompt = `Classifique o texto abaixo em exatamente um pilar de vida.
+
+Pilares disponíveis: ${pillars.map(p => p.name).join(', ')}
+
+Texto: "${text.replace(/"/g, "'").slice(0, 200)}"
+
+Retorne APENAS o nome de um pilar da lista, sem explicação.`;
+
+    const controller = new AbortController();
+    const timeout    = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await fetch(`${ollamaUrl}/api/generate`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal:  controller.signal,
+        body: JSON.stringify({
+          model:   ollamaModel,
+          prompt,
+          stream:  false,
+          options: { temperature: 0.1 },
+        }),
+      });
+      if (res.ok) {
+        const body = await res.json() as { response: string };
+        const raw  = body.response.trim();
+        const match = pillars.find(p =>
+          raw.toLowerCase().includes(p.name.toLowerCase()),
+        );
+        if (match) { pillarId = match.id; pillarName = match.name; }
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    // Usa o primeiro pilar como fallback
+  }
+
+  const activityDate = new Date().toISOString().slice(0, 10);
+  const { data: record, error } = await supabase
+    .from('xp_records')
+    .insert({
+      user_id:          user.id,
+      pillar_id:        pillarId,
+      duration_minutes: 0,
+      base_xp:          0,
+      bonus_multiplier: 1.00,
+      total_xp:         0,
+      bonuses:          [],
+      note:             text.trim().slice(0, 500),
+      activity_date:    activityDate,
+    })
+    .select('id')
+    .single();
+
+  if (error || !record) throw new Error(error?.message ?? 'Erro ao salvar pulso');
+
+  return { pillarName, recordId: record.id };
+}
+
 export type ParsedActivity = {
   pillarName: string;
   durationMinutes: number;

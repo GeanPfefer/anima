@@ -1,0 +1,79 @@
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex: 1;
+}
+
+.age {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.dismiss {
+  background: none;
+  border: none;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: color 0.1s;
+}
+
+.dismiss:hover {
+  color: var(--text-primary);
+}
+
+.text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Animação de loading (3 pontos pulsando) */
+.loading {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.4;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.8); }
+  50%       { opacity: 1;   transform: scale(1.2); }
+}

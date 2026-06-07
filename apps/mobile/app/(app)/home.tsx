@@ -3,16 +3,23 @@ import { useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
+  TextInput,
+  TouchableOpacity,
   ScrollView,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { getCharacterLevel, getEraForLevel, getTotalXPForLevel, getXPToNextLevel } from '@anima/core';
 import LifeRadar from '@/components/LifeRadar';
 import LogActivityModal from '@/components/LogActivityModal';
+import { logPulso } from '@/lib/pulso';
+import { extractEntitiesForRecord } from '@/lib/extract-entities';
+import { embedEntryForRecord } from '@/lib/embed-entry';
 import { colors, spacing, radius } from '@/constants/theme';
 
 type PillarRow = {
@@ -68,8 +75,16 @@ export default function HomeScreen() {
   const [rootPillars, setRootPillars] = useState<PillarWithChildren[]>([]);
   const [allPillars, setAllPillars] = useState<PillarRow[]>([]);
   const [userId, setUserId] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Pulso do dia
+  const [pulsoText, setPulsoText]   = useState('');
+  const [pulsoSaving, setPulsoSaving] = useState(false);
+  const [pulsoSaved, setPulsoSaved]   = useState(''); // nome do pilar onde foi salvo
+
+  // Insight do dia
+  const [insight, setInsight]       = useState<{ id: string; text: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -94,6 +109,17 @@ export default function HomeScreen() {
       setProfile(profileRes.data ?? null);
       setAllPillars(pillars);
       setRootPillars(roots);
+
+      // Carrega insight mais recente não dispensado
+      const { data: ins } = await supabase
+        .from('insights')
+        .select('id, text')
+        .eq('user_id', user.id)
+        .is('dismissed_at', null)
+        .order('generated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setInsight(ins ?? null);
     } catch (e) {
       // falha silenciosa — mostra tela vazia
     } finally {
@@ -103,6 +129,36 @@ export default function HomeScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  async function handlePulso() {
+    if (!pulsoText.trim() || pulsoSaving || !userId) return;
+    setPulsoSaving(true);
+    try {
+      const { pillarName, recordId } = await logPulso(
+        pulsoText,
+        userId,
+        allPillars.map(p => ({ id: p.id, name: p.name })),
+      );
+      setPulsoSaved(pillarName);
+      setPulsoText('');
+      extractEntitiesForRecord(pulsoText, recordId, userId).catch(() => {});
+      embedEntryForRecord(pulsoText, recordId, userId).catch(() => {});
+      setTimeout(() => { setPulsoSaved(''); load(); }, 2500);
+    } catch {
+      // falha silenciosa
+    } finally {
+      setPulsoSaving(false);
+    }
+  }
+
+  async function handleDismissInsight() {
+    if (!insight) return;
+    await supabase
+      .from('insights')
+      .update({ dismissed_at: new Date().toISOString() })
+      .eq('id', insight.id);
+    setInsight(null);
+  }
 
   // Radar e nível do personagem usam só pilares raiz
   const characterLevel = getCharacterLevel(rootPillars.map((p) => p.level));
@@ -137,6 +193,52 @@ export default function HomeScreen() {
             <Text style={styles.era}>{era.name}</Text>
           </View>
         </View>
+
+        {/* Pulso do dia */}
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={styles.pulsoBox}>
+            {pulsoSaved ? (
+              <Text style={styles.pulsoSaved}>✓ Registrado em {pulsoSaved}</Text>
+            ) : (
+              <>
+                <TextInput
+                  style={styles.pulsoInput}
+                  placeholder="O que está acontecendo?"
+                  placeholderTextColor={colors.textMuted}
+                  value={pulsoText}
+                  onChangeText={setPulsoText}
+                  onSubmitEditing={handlePulso}
+                  returnKeyType="send"
+                  multiline={false}
+                  editable={!pulsoSaving}
+                />
+                {pulsoText.length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.pulsoBtn, pulsoSaving && styles.pulsoBtnDisabled]}
+                    onPress={handlePulso}
+                    disabled={pulsoSaving}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.pulsoBtnText}>{pulsoSaving ? '…' : '↵'}</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+
+        {/* Insight automático */}
+        {insight && (
+          <View style={styles.insightCard}>
+            <View style={styles.insightHeader}>
+              <Text style={styles.insightLabel}>INSIGHT</Text>
+              <TouchableOpacity onPress={handleDismissInsight} hitSlop={8}>
+                <Text style={styles.insightDismiss}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.insightText}>{insight.text}</Text>
+          </View>
+        )}
 
         {/* Radar — só pilares raiz */}
         <Text style={styles.sectionLabel}>Radar de vida</Text>
@@ -184,10 +286,59 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
+  root:     { flex: 1, backgroundColor: colors.bg },
   centered: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  scroll: { padding: spacing.lg },
-  header: { marginBottom: spacing.xl },
+  scroll:   { padding: spacing.lg },
+  header:   { marginBottom: spacing.lg },
+
+  // Pulso do dia
+  pulsoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bgSurface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  pulsoInput: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 14,
+    paddingVertical: 4,
+  },
+  pulsoBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.sm,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pulsoBtnDisabled: { opacity: 0.4 },
+  pulsoBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  pulsoSaved: { color: colors.textSecondary, fontSize: 14, flex: 1, textAlign: 'center', paddingVertical: 6 },
+
+  // Insight
+  insightCard: {
+    backgroundColor: colors.bgSurface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: spacing.xs,
+  },
+  insightHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  insightLabel: { fontSize: 10, fontWeight: '700', color: colors.accent, letterSpacing: 0.8 },
+  insightDismiss: { color: colors.textMuted, fontSize: 14 },
+  insightText: { fontSize: 14, color: colors.textSecondary, lineHeight: 21 },
+
   name: { fontSize: 26, fontWeight: '700', color: colors.textPrimary },
   characterMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: 4 },
   level: { fontSize: 15, color: colors.accent, fontWeight: '600' },

@@ -1,0 +1,61 @@
+.widget {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: none;
+  width: 100%;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sendBtn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+
+.sendBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.savedMsg {
+  font-size: 14px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 6px 0;
+  margin: 0;
+}

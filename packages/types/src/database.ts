@@ -147,6 +147,38 @@ export type Database = {
           },
         ]
       }
+      insights: {
+        Row: {
+          dismissed_at: string | null
+          generated_at: string
+          id: string
+          text: string
+          user_id: string
+        }
+        Insert: {
+          dismissed_at?: string | null
+          generated_at?: string
+          id?: string
+          text: string
+          user_id: string
+        }
+        Update: {
+          dismissed_at?: string | null
+          generated_at?: string
+          id?: string
+          text?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "insights_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       life_events: {
         Row: {
           anchor_type: Database["public"]["Enums"]["context_anchor"] | null

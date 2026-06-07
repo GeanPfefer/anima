@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { getXPToNextLevel, getTotalXPForLevel, getEraForLevel, getCharacterLevel } from '@anima/core';
 import LifeRadar from './_components/LifeRadar';
 import LogActivityModal from './_components/LogActivityModal';
+import PulsoWidget from './_components/PulsoWidget';
+import InsightCard from './_components/InsightCard';
 import styles from './home.module.css';
 
 type Pillar = {
@@ -29,6 +31,30 @@ export default async function HomePage() {
     .single();
 
   if (!profile) redirect('/step-1');
+
+  // ── Insight mais recente não dispensado ───────────────────────
+  const { data: latestInsight } = await supabase
+    .from('insights')
+    .select('id, text, generated_at')
+    .eq('user_id', user.id)
+    .is('dismissed_at', null)
+    .order('generated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Condição para disparar nova geração (cliente decide, server apenas conta)
+  const { count: recentEntryCount } = await supabase
+    .from('xp_records')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .gt(
+      'created_at',
+      latestInsight?.generated_at ?? new Date(0).toISOString(),
+    );
+
+  const shouldTriggerInsight =
+    !latestInsight &&
+    (recentEntryCount ?? 0) >= 5;
 
   const { data: pillarsData } = await supabase
     .from('user_pillars')
@@ -133,6 +159,15 @@ export default async function HomePage() {
           <span className={styles.era}>{era.name}</span>
         </div>
       </header>
+
+      {/* Pulso do dia */}
+      <PulsoWidget />
+
+      {/* Insight automático (Camada 4) */}
+      <InsightCard
+        insight={latestInsight ?? null}
+        shouldTrigger={shouldTriggerInsight}
+      />
 
       <div className={styles.content}>
         <section className={styles.radarSection}>
