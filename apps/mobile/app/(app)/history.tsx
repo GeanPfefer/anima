@@ -23,6 +23,7 @@ type XPRecord = {
   bonuses: Enums<'activity_bonus'>[];
   note: string | null;
   created_at: string;
+  activity_date: string;
 };
 
 type DayGroup = {
@@ -84,9 +85,10 @@ export default function HistoryScreen() {
         supabase.from('user_pillars').select('id, name').eq('user_id', user.id),
         supabase
           .from('xp_records')
-          .select('id, pillar_id, duration_minutes, base_xp, bonus_multiplier, total_xp, bonuses, note, created_at')
+          .select('id, pillar_id, duration_minutes, base_xp, bonus_multiplier, total_xp, bonuses, note, created_at, activity_date')
           .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
+          .order('activity_date', { ascending: false })
+          .order('created_at',    { ascending: false })
           .limit(200),
       ]);
 
@@ -95,19 +97,20 @@ export default function HistoryScreen() {
 
       const allRecords = (recordsRes.data ?? []) as XPRecord[];
 
-      // XP semanal
+      // XP semanal (por activity_date)
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
+      const weekAgoStr = weekAgo.toISOString().slice(0, 10);
       setWeeklyXP(
         allRecords
-          .filter((r) => new Date(r.created_at) >= weekAgo)
+          .filter((r) => r.activity_date >= weekAgoStr)
           .reduce((s, r) => s + r.total_xp, 0),
       );
 
-      // Agrupar por dia
+      // Agrupar por activity_date
       const grouped = new Map<string, XPRecord[]>();
       for (const record of allRecords) {
-        const key = record.created_at.slice(0, 10);
+        const key = record.activity_date;
         if (!grouped.has(key)) grouped.set(key, []);
         grouped.get(key)!.push(record);
       }

@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -62,6 +62,45 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      entity_mentions: {
+        Row: {
+          context_snippet: string | null
+          created_at: string
+          entity_id: string
+          id: string
+          xp_record_id: string
+        }
+        Insert: {
+          context_snippet?: string | null
+          created_at?: string
+          entity_id: string
+          id?: string
+          xp_record_id: string
+        }
+        Update: {
+          context_snippet?: string | null
+          created_at?: string
+          entity_id?: string
+          id?: string
+          xp_record_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_mentions_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "semantic_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_mentions_xp_record_id_fkey"
+            columns: ["xp_record_id"]
+            isOneToOne: false
+            referencedRelation: "xp_records"
             referencedColumns: ["id"]
           },
         ]
@@ -316,6 +355,50 @@ export type Database = {
           },
         ]
       }
+      semantic_entities: {
+        Row: {
+          context: string | null
+          created_at: string
+          entity_type: string
+          first_seen_at: string
+          id: string
+          last_seen_at: string
+          name: string
+          occurrence_count: number
+          user_id: string
+        }
+        Insert: {
+          context?: string | null
+          created_at?: string
+          entity_type?: string
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          name: string
+          occurrence_count?: number
+          user_id: string
+        }
+        Update: {
+          context?: string | null
+          created_at?: string
+          entity_type?: string
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          name?: string
+          occurrence_count?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "semantic_entities_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_pillars: {
         Row: {
           baseline_score: number | null
@@ -384,6 +467,7 @@ export type Database = {
       }
       xp_records: {
         Row: {
+          activity_date: string
           base_xp: number
           bonus_multiplier: number
           bonuses: Database["public"]["Enums"]["activity_bonus"][]
@@ -397,6 +481,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          activity_date?: string
           base_xp: number
           bonus_multiplier?: number
           bonuses?: Database["public"]["Enums"]["activity_bonus"][]
@@ -410,6 +495,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          activity_date?: string
           base_xp?: number
           bonus_multiplier?: number
           bonuses?: Database["public"]["Enums"]["activity_bonus"][]

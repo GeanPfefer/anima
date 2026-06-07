@@ -4,58 +4,54 @@ import type { ActivityBonusType } from '@anima/types';
 
 /**
  * Detecta automaticamente quais bônus se aplicam ao registrar uma atividade.
- * Replica a lógica do Server Action do web (apps/web/app/(app)/home/actions.ts).
+ * Bônus são calculados relativos a activityDate, não a created_at
+ * (PRD §1b: backfill com data passada).
  */
 export async function getActivityBonuses(
   pillarId: string,
   userId: string,
+  activityDate?: string, // YYYY-MM-DD; padrão: hoje
 ): Promise<ActivityBonusType[]> {
   const bonuses: ActivityBonusType[] = [];
-  const now = new Date();
-  const todayStart = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-  ).toISOString();
 
-  // first_of_day: nenhum registro hoje (qualquer pilar)
-  const { count: todayCount } = await supabase
+  const targetDate = activityDate ?? new Date().toISOString().slice(0, 10);
+  const target     = new Date(targetDate + 'T12:00:00');
+  const minus5Days = new Date(target.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const minus7Days = new Date(target.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  // first_of_day: nenhum registro com activity_date = targetDate
+  const { count: sameDayCount } = await supabase
     .from('xp_records')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', userId)
-    .gte('created_at', todayStart);
-  if ((todayCount ?? 0) === 0) bonuses.push('first_of_day');
+    .eq('activity_date', targetDate);
+  if ((sameDayCount ?? 0) === 0) bonuses.push('first_of_day');
 
-  // forgotten_pillar: nenhum registro neste pilar nos últimos 5 dias
-  const fiveDaysAgo = new Date(
-    now.getTime() - 5 * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  // forgotten_pillar: nenhum registro neste pilar nos 5 dias antes da targetDate
   const { count: recentCount } = await supabase
     .from('xp_records')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', userId)
     .eq('pillar_id', pillarId)
-    .gte('created_at', fiveDaysAgo);
+    .gte('activity_date', minus5Days)
+    .lt('activity_date', targetDate);
   if ((recentCount ?? 0) === 0) bonuses.push('forgotten_pillar');
 
   // active_streak: registro nos 6 dias anteriores = 7º dia consecutivo
-  const sevenDaysAgo = new Date(
-    now.getTime() - 7 * 24 * 60 * 60 * 1000,
-  ).toISOString();
   const { data: streakRecords } = await supabase
     .from('xp_records')
-    .select('created_at')
+    .select('activity_date')
     .eq('user_id', userId)
     .eq('pillar_id', pillarId)
-    .gte('created_at', sevenDaysAgo)
-    .lt('created_at', todayStart);
+    .gte('activity_date', minus7Days)
+    .lt('activity_date', targetDate);
 
   const daysWithRecords = new Set(
-    (streakRecords ?? []).map((r) => r.created_at.slice(0, 10)),
+    (streakRecords ?? []).map((r) => r.activity_date),
   );
   let hasStreak = true;
   for (let i = 1; i <= 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const d = new Date(target.getFullYear(), target.getMonth(), target.getDate() - i);
     const dayStr = d.toISOString().slice(0, 10);
     if (!daysWithRecords.has(dayStr)) {
       hasStreak = false;
@@ -81,8 +77,9 @@ export async function logActivity(data: {
   pillarId: string;
   durationMinutes: number;
   note: string;
+  activityDate?: string; // YYYY-MM-DD; padrão: hoje
   questId?: string;
-}): Promise<{ totalXP: number; bonuses: ActivityBonusType[] }> {
+}): Promise<{ totalXP: number; bonuses: ActivityBonusType[]; recordId: string }> {
   const { data: pillar } = await supabase
     .from('user_pillars')
     .select('xp_rate')
@@ -92,32 +89,38 @@ export async function logActivity(data: {
 
   if (!pillar) throw new Error('Pilar não encontrado');
 
-  // Recalcula bônus no save — evita race condition entre preview e submit
-  const bonuses = await getActivityBonuses(data.pillarId, data.userId);
+  const activityDate = data.activityDate ?? new Date().toISOString().slice(0, 10);
+
+  // Recalcula bônus no save com a data correta
+  const bonuses = await getActivityBonuses(data.pillarId, data.userId, activityDate);
   const baseXP = Math.round(data.durationMinutes * pillar.xp_rate);
   const bonusMultiplier = calculateBonusMultiplier(bonuses);
   const totalXP = Math.round(baseXP * bonusMultiplier);
 
-  const { error } = await supabase.from('xp_records').insert({
-    user_id: data.userId,
-    pillar_id: data.pillarId,
-    quest_id: data.questId ?? null,
-    duration_minutes: data.durationMinutes,
-    base_xp: baseXP,
-    bonus_multiplier: bonusMultiplier,
-    total_xp: totalXP,
-    bonuses,
-    note: data.note?.trim() || null,
-  });
+  const { data: record, error } = await supabase
+    .from('xp_records')
+    .insert({
+      user_id:          data.userId,
+      pillar_id:        data.pillarId,
+      quest_id:         data.questId ?? null,
+      duration_minutes: data.durationMinutes,
+      base_xp:          baseXP,
+      bonus_multiplier: bonusMultiplier,
+      total_xp:         totalXP,
+      bonuses,
+      note:             data.note?.trim() || null,
+      activity_date:    activityDate,
+    })
+    .select('id')
+    .single();
 
-  if (error) throw new Error(error.message);
-  return { totalXP, bonuses };
+  if (error || !record) throw new Error(error?.message ?? 'Erro ao inserir registro');
+  return { totalXP, bonuses, recordId: record.id };
 }
 
 /**
  * Registra múltiplas atividades em sequência.
- * Roda em série — não em paralelo — para que os bônus (first_of_day, etc.)
- * sejam recalculados corretamente a cada registro.
+ * Série (não paralelo) para que os bônus sejam recalculados corretamente.
  */
 export async function logMultipleActivities(
   entries: Array<{
@@ -125,13 +128,16 @@ export async function logMultipleActivities(
     pillarId: string;
     durationMinutes: number;
     note: string;
+    activityDate?: string;
     questId?: string;
   }>,
-): Promise<{ totalXP: number; count: number }> {
+): Promise<{ totalXP: number; count: number; entries: Array<{ recordId: string; note: string }> }> {
   let totalXP = 0;
+  const logged: Array<{ recordId: string; note: string }> = [];
   for (const entry of entries) {
-    const { totalXP: xp } = await logActivity(entry);
+    const { totalXP: xp, recordId } = await logActivity(entry);
     totalXP += xp;
+    logged.push({ recordId, note: entry.note });
   }
-  return { totalXP, count: entries.length };
+  return { totalXP, count: entries.length, entries: logged };
 }

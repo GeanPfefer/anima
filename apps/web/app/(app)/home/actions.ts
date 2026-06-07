@@ -80,66 +80,88 @@ Retorne APENAS um array JSON válido, sem texto adicional.`;
 }
 
 export async function logMultipleActivities(
-  activities: Array<{ pillarId: string; durationMinutes: number; note: string }>,
-): Promise<{ totalXP: number; count: number }> {
+  activities: Array<{ pillarId: string; durationMinutes: number; note: string; activityDate?: string }>,
+): Promise<{ totalXP: number; count: number; entries: Array<{ recordId: string; note: string }> }> {
+  const entries: Array<{ recordId: string; note: string }> = [];
   let totalXP = 0;
   for (const a of activities) {
     const result = await logActivity(a);
     totalXP += result.totalXP;
+    entries.push({ recordId: result.recordId, note: a.note });
   }
-  return { totalXP, count: activities.length };
+  return { totalXP, count: activities.length, entries };
 }
 
-export async function getActivityBonuses(pillarId: string): Promise<ActivityBonusType[]> {
+export async function getActivityBonuses(
+  pillarId: string,
+  activityDate?: string, // YYYY-MM-DD; padrão: hoje
+): Promise<ActivityBonusType[]> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
   const bonuses: ActivityBonusType[] = [];
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
-  // first_of_day: nenhum registro hoje (qualquer pilar)
-  const { count: todayCount } = await supabase
+  // Normaliza a data alvo
+  const targetDate = activityDate
+    ? activityDate  // já em YYYY-MM-DD
+    : new Date().toISOString().slice(0, 10);
+
+  // Calcula datas relativas
+  const target     = new Date(targetDate + 'T12:00:00');
+  const minus5Days = new Date(target.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const minus7Days = new Date(target.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  // first_of_day: nenhum registro com activity_date = targetDate
+  const { count: sameDayCount } = await supabase
     .from('xp_records')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', user.id)
-    .gte('created_at', todayStart);
+    .eq('activity_date', targetDate);
 
-  if ((todayCount ?? 0) === 0) bonuses.push('first_of_day');
+  if ((sameDayCount ?? 0) === 0) bonuses.push('first_of_day');
 
-  // forgotten_pillar: nenhum registro neste pilar nos últimos 5 dias
-  const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString();
+  // forgotten_pillar: nenhum registro neste pilar nos 5 dias antes da targetDate
   const { count: recentCount } = await supabase
     .from('xp_records')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', user.id)
     .eq('pillar_id', pillarId)
-    .gte('created_at', fiveDaysAgo);
+    .gte('activity_date', minus5Days)
+    .lt('activity_date', targetDate);
 
   if ((recentCount ?? 0) === 0) bonuses.push('forgotten_pillar');
 
-  // active_streak: registro neste pilar em cada um dos 6 dias anteriores (7º dia consecutivo)
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  // active_streak: registro neste pilar em cada um dos 6 dias antes da targetDate
   const { data: streakRecords } = await supabase
     .from('xp_records')
-    .select('created_at')
+    .select('activity_date')
     .eq('user_id', user.id)
     .eq('pillar_id', pillarId)
-    .gte('created_at', sevenDaysAgo)
-    .lt('created_at', todayStart);
+    .gte('activity_date', minus7Days)
+    .lt('activity_date', targetDate);
 
   const daysWithRecords = new Set(
-    (streakRecords ?? []).map(r => r.created_at.slice(0, 10))
+    (streakRecords ?? []).map(r => r.activity_date),
   );
 
   let hasStreak = true;
   for (let i = 1; i <= 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const d = new Date(target.getFullYear(), target.getMonth(), target.getDate() - i);
     const dayStr = d.toISOString().slice(0, 10);
     if (!daysWithRecords.has(dayStr)) { hasStreak = false; break; }
   }
   if (hasStreak) bonuses.push('active_streak');
+
+  // active_quest: existe quest ativa para este pilar
+  const { count: activeQuestCount } = await supabase
+    .from('quests')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('pillar_id', pillarId)
+    .in('status', ['open', 'in_progress']);
+
+  if ((activeQuestCount ?? 0) > 0) bonuses.push('active_quest');
 
   return bonuses;
 }
@@ -148,7 +170,9 @@ export async function logActivity(data: {
   pillarId: string;
   durationMinutes: number;
   note: string;
-}): Promise<{ totalXP: number; bonuses: ActivityBonusType[] }> {
+  activityDate?: string; // YYYY-MM-DD; padrão: hoje
+  questId?: string;
+}): Promise<{ totalXP: number; bonuses: ActivityBonusType[]; recordId: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Não autenticado');
@@ -162,23 +186,32 @@ export async function logActivity(data: {
 
   if (!pillar) throw new Error('Pilar não encontrado');
 
-  const bonuses = await getActivityBonuses(data.pillarId);
+  const activityDate = data.activityDate ?? new Date().toISOString().slice(0, 10);
+
+  // Recalcula bônus no save com a data correta — evita race condition e garante backfill correto
+  const bonuses = await getActivityBonuses(data.pillarId, activityDate);
   const baseXP = Math.round(data.durationMinutes * pillar.xp_rate);
   const bonusMultiplier = calculateBonusMultiplier(bonuses);
   const totalXP = Math.round(baseXP * bonusMultiplier);
 
-  const { error } = await supabase.from('xp_records').insert({
-    user_id: user.id,
-    pillar_id: data.pillarId,
-    duration_minutes: data.durationMinutes,
-    base_xp: baseXP,
-    bonus_multiplier: bonusMultiplier,
-    total_xp: totalXP,
-    bonuses,
-    note: data.note || null,
-  });
+  const { data: record, error } = await supabase
+    .from('xp_records')
+    .insert({
+      user_id:          user.id,
+      pillar_id:        data.pillarId,
+      quest_id:         data.questId ?? null,
+      duration_minutes: data.durationMinutes,
+      base_xp:          baseXP,
+      bonus_multiplier: bonusMultiplier,
+      total_xp:         totalXP,
+      bonuses,
+      note:             data.note || null,
+      activity_date:    activityDate,
+    })
+    .select('id')
+    .single();
 
-  if (error) throw new Error(error.message);
+  if (error || !record) throw new Error(error?.message ?? 'Erro ao inserir registro');
 
-  return { totalXP, bonuses };
+  return { totalXP, bonuses, recordId: record.id };
 }

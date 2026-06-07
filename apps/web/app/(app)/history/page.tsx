@@ -56,26 +56,40 @@ export default async function HistoryPage() {
 
   const pillarMap = new Map((pillarsData ?? []).map(p => [p.id, p.name]));
 
-  // XP records ordered by most recent
+  // XP records ordered by activity_date desc, então created_at desc
   const { data: records } = await supabase
     .from('xp_records')
-    .select('id, pillar_id, duration_minutes, base_xp, bonus_multiplier, total_xp, bonuses, note, created_at')
+    .select('id, pillar_id, duration_minutes, base_xp, bonus_multiplier, total_xp, bonuses, note, created_at, activity_date')
     .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
+    .order('activity_date', { ascending: false })
+    .order('created_at',    { ascending: false })
     .limit(200);
 
-  const allRecords = records ?? [];
+  const allRecords = (records ?? []) as Array<{
+    id: string;
+    pillar_id: string;
+    duration_minutes: number;
+    base_xp: number;
+    bonus_multiplier: number;
+    total_xp: number;
+    bonuses: Enums<'activity_bonus'>[];
+    note: string | null;
+    created_at: string;
+    activity_date: string;
+  }>;
 
-  // Weekly summary
+  // Weekly summary (últimos 7 dias de activity_date)
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
-  const weeklyRecords = allRecords.filter(r => new Date(r.created_at) >= weekAgo);
-  const weeklyXP = weeklyRecords.reduce((s, r) => s + r.total_xp, 0);
+  const weekAgoStr = weekAgo.toISOString().slice(0, 10);
+  const weeklyXP = allRecords
+    .filter(r => r.activity_date >= weekAgoStr)
+    .reduce((s, r) => s + r.total_xp, 0);
 
-  // Group by date (YYYY-MM-DD)
+  // Group by activity_date (YYYY-MM-DD)
   const groups = new Map<string, typeof allRecords>();
   for (const record of allRecords) {
-    const dateKey = record.created_at.slice(0, 10);
+    const dateKey = record.activity_date;
     if (!groups.has(dateKey)) groups.set(dateKey, []);
     groups.get(dateKey)!.push(record);
   }

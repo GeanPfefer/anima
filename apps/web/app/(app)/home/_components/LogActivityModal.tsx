@@ -38,15 +38,20 @@ function calcXP(entry: ReviewEntry, pillars: Pillar[]): number {
   return Math.round(base * calculateBonusMultiplier(entry.bonuses));
 }
 
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
   const router = useRouter();
-  const [open, setOpen]         = useState(false);
-  const [phase, setPhase]       = useState<Phase>('input');
-  const [text, setText]         = useState('');
-  const [entries, setEntries]   = useState<ReviewEntry[]>([]);
-  const [totalXP, setTotalXP]   = useState(0);
-  const [errorMsg, setErrorMsg] = useState('');
-  const counterRef              = useRef(0);
+  const [open, setOpen]               = useState(false);
+  const [phase, setPhase]             = useState<Phase>('input');
+  const [text, setText]               = useState('');
+  const [entries, setEntries]         = useState<ReviewEntry[]>([]);
+  const [totalXP, setTotalXP]         = useState(0);
+  const [errorMsg, setErrorMsg]       = useState('');
+  const [activityDate, setActivityDate] = useState(todayStr());
+  const counterRef                    = useRef(0);
 
   const handleClose = () => {
     setOpen(false);
@@ -55,6 +60,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
     setEntries([]);
     setTotalXP(0);
     setErrorMsg('');
+    setActivityDate(todayStr());
   };
 
   const handleParse = async () => {
@@ -70,16 +76,18 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
         return;
       }
 
-      const matched = parsed.map(a => ({
-        pillar: matchPillar(a.pillarName, pillars) ?? pillars[0],
-        durationMinutes: a.durationMinutes,
-        note: a.note,
-      }));
+      const matched = parsed
+        .map(a => ({
+          pillar: matchPillar(a.pillarName, pillars) ?? pillars[0],
+          durationMinutes: a.durationMinutes,
+          note: a.note,
+        }))
+        .filter((m): m is { pillar: Pillar; durationMinutes: number; note: string } => !!m.pillar);
 
       const uniqueIds = [...new Set(matched.map(m => m.pillar.id))];
       const bonusMap: Record<string, ActivityBonusType[]> = {};
       await Promise.all(uniqueIds.map(async id => {
-        bonusMap[id] = await getActivityBonuses(id);
+        bonusMap[id] = await getActivityBonuses(id, activityDate);
       }));
 
       setEntries(matched.map(m => ({
@@ -97,7 +105,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
   };
 
   const handleChangePillar = async (entryId: string, pillarId: string) => {
-    const bonuses = await getActivityBonuses(pillarId);
+    const bonuses = await getActivityBonuses(pillarId, activityDate);
     setEntries(prev => prev.map(e => e.id === entryId ? { ...e, pillarId, bonuses } : e));
   };
 
@@ -120,11 +128,28 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
     setPhase('submitting');
     setErrorMsg('');
     try {
-      const { totalXP: xp } = await logMultipleActivities(
-        entries.map(e => ({ pillarId: e.pillarId, durationMinutes: e.durationMinutes, note: e.note })),
+      const { totalXP: xp, entries: logged } = await logMultipleActivities(
+        entries.map(e => ({
+          pillarId:        e.pillarId,
+          durationMinutes: e.durationMinutes,
+          note:            e.note,
+          activityDate,
+        })),
       );
       setTotalXP(xp);
       setPhase('success');
+
+      // Extração de entidades semânticas — fire-and-forget, não bloqueia o usuário
+      for (const { recordId, note } of logged) {
+        if (note) {
+          fetch('/api/ai/extract-entities', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ note, recordId }),
+          }).catch(() => {});
+        }
+      }
+
       setTimeout(() => { router.refresh(); handleClose(); }, 2000);
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Erro ao registrar');
@@ -134,6 +159,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
 
   const totalXPPreview = entries.reduce((sum, e) => sum + calcXP(e, pillars), 0);
   const isSubmitting   = phase === 'submitting';
+  const isToday        = activityDate === todayStr();
 
   if (!open) {
     return (
@@ -164,7 +190,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
           <div className={styles.inputPhase}>
             <textarea
               className={styles.inputArea}
-              placeholder="O que você fez hoje? Escreva livremente — a IA vai interpretar tudo."
+              placeholder="O que você fez? Escreva livremente — a IA vai interpretar tudo."
               value={text}
               onChange={e => setText(e.target.value)}
               rows={5}
@@ -187,6 +213,20 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
 
         {(phase === 'reviewing' || phase === 'submitting') && (
           <div className={styles.reviewPhase}>
+            {/* Seletor de data — permite backfill com datas passadas */}
+            <div className={styles.dateRow}>
+              <span className={styles.dateLabel}>Data</span>
+              <input
+                type="date"
+                className={styles.dateInput}
+                value={activityDate}
+                max={todayStr()}
+                onChange={e => setActivityDate(e.target.value)}
+                disabled={isSubmitting}
+              />
+              {isToday && <span className={styles.dateTodayBadge}>hoje</span>}
+            </div>
+
             <div className={styles.reviewList}>
               {entries.map(entry => {
                 const entryXP = calcXP(entry, pillars);
@@ -246,6 +286,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
             <div className={styles.successXP}>+{totalXP} XP</div>
             <p className={styles.successMsg}>
               {entries.length > 1 ? `${entries.length} entradas registradas` : 'Entrada registrada'}
+              {!isToday && ` · ${new Date(activityDate + 'T12:00:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}`}
             </p>
           </div>
         )}

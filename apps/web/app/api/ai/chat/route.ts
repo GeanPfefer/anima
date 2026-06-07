@@ -20,18 +20,20 @@ export async function POST(req: NextRequest) {
   if (!message?.trim()) return new Response('Mensagem vazia', { status: 400 });
 
   // ── Contexto do usuário ────────────────────────────────────────
-  const [profileRes, pillarsRes, recentRes, questsRes] = await Promise.all([
+  const [profileRes, pillarsRes, recentRes, questsRes, entitiesRes] = await Promise.all([
     supabase.from('profiles').select('name, archetype').eq('id', user.id).single(),
     supabase.from('user_pillars').select('name, xp_total, level, xp_rate, context').eq('user_id', user.id).eq('is_active', true).order('level', { ascending: false }),
-    supabase.from('xp_records').select('note, total_xp, duration_minutes, created_at, user_pillars(name)').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10),
+    supabase.from('xp_records').select('note, total_xp, duration_minutes, activity_date, user_pillars(name)').eq('user_id', user.id).order('activity_date', { ascending: false }).order('created_at', { ascending: false }).limit(10),
     supabase.from('quests').select('title, type, status, pillar_id, user_pillars(name)').eq('user_id', user.id).in('status', ['open', 'in_progress']).limit(5),
+    supabase.from('semantic_entities').select('name, entity_type, context, occurrence_count').eq('user_id', user.id).order('occurrence_count', { ascending: false }).limit(20),
   ]);
 
   const name      = profileRes.data?.name ?? 'usuário';
   const archetype = profileRes.data?.archetype as Record<string, number> | null;
-  const pillars   = pillarsRes.data ?? [];
-  const recent    = recentRes.data  ?? [];
-  const quests    = questsRes.data  ?? [];
+  const pillars   = pillarsRes.data   ?? [];
+  const recent    = recentRes.data    ?? [];
+  const quests    = questsRes.data    ?? [];
+  const entities  = entitiesRes.data  ?? [];
 
   const charLevel = pillars.length > 0
     ? Math.round(pillars.reduce((s, p) => s + p.level, 0) / pillars.length)
@@ -49,10 +51,18 @@ export async function POST(req: NextRequest) {
     ? recent.map(r => {
         const up = r.user_pillars as { name: string } | { name: string }[] | null;
         const pillarName = (Array.isArray(up) ? up[0]?.name : up?.name) ?? '?';
-        const date = new Date(r.created_at).toLocaleDateString('pt-BR');
+        const ad = (r as unknown as { activity_date?: string }).activity_date;
+        const date = ad ? new Date(ad + 'T12:00:00').toLocaleDateString('pt-BR') : '?';
         return `  • [${date}] ${pillarName} — ${r.duration_minutes}min → ${r.total_xp} XP${r.note ? ` ("${r.note}")` : ''}`;
       }).join('\n')
     : '  (sem registros recentes)';
+
+  const entitiesText = entities.length > 0
+    ? entities.map(e => {
+        const ctx = e.context ? ` — ${e.context}` : '';
+        return `  • ${e.name} [${e.entity_type}]${ctx} (${e.occurrence_count}x)`;
+      }).join('\n')
+    : '';
 
   const questsText = quests.length > 0
     ? quests.map(q => {
@@ -77,7 +87,7 @@ export async function POST(req: NextRequest) {
     : '';
 
   const systemPrompt = `Você é o Anima, o assistente pessoal de ${name}.
-Você conhece a vida do usuário através dos pilares e histórico de atividades dele.
+Você conhece a vida do usuário através dos pilares, histórico de atividades e memória semântica.
 Seja direto, honesto e útil. Fale em português. Não seja excessivamente animado ou use muitos emojis.
 Quando perceber padrões ou desequilíbrios, aponte com naturalidade.
 ${archetypeText}
@@ -98,7 +108,7 @@ ${recentText}
 
 Quests em andamento:
 ${questsText}
-
+${entitiesText ? `\nEntidades conhecidas do usuário (memória semântica):\n${entitiesText}` : ''}
 == FIM DO PERFIL ==
 
 Responda à mensagem do usuário levando em conta o contexto acima quando relevante.`;

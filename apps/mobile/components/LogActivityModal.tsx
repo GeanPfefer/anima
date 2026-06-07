@@ -15,8 +15,28 @@ import { calculateBonusMultiplier } from '@anima/core';
 import { getActivityBonuses, logMultipleActivities } from '@/lib/activity';
 import { parseActivityText, type ParsedActivity } from '@/lib/parse-activity';
 import { startRecording, type RecordingHandle } from '@/lib/transcribe';
+import { extractEntitiesForRecord } from '@/lib/extract-entities';
 import type { ActivityBonusType } from '@anima/types';
 import { colors, spacing, radius } from '@/constants/theme';
+
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Retorna as últimas N datas como YYYY-MM-DD
+function recentDates(n: number): Array<{ label: string; value: string }> {
+  const result = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const val = d.toISOString().slice(0, 10);
+    result.push({
+      label: i === 0 ? 'Hoje' : i === 1 ? 'Ontem' : `Há ${i} dias`,
+      value: val,
+    });
+  }
+  return result;
+}
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
 
@@ -79,13 +99,14 @@ type Props = {
 };
 
 export default function LogActivityModal({ userId, pillars, onSuccess }: Props) {
-  const [open, setOpen]           = useState(false);
-  const [text, setText]           = useState('');
-  const [phase, setPhase]         = useState<Phase>('input');
-  const [entries, setEntries]     = useState<ReviewEntry[]>([]);
-  const [bonusCache, setBonusCache] = useState<BonusCache>({});
-  const [parseError, setParseError] = useState('');
-  const [successXP, setSuccessXP] = useState<number | null>(null);
+  const [open, setOpen]               = useState(false);
+  const [text, setText]               = useState('');
+  const [phase, setPhase]             = useState<Phase>('input');
+  const [entries, setEntries]         = useState<ReviewEntry[]>([]);
+  const [bonusCache, setBonusCache]   = useState<BonusCache>({});
+  const [parseError, setParseError]   = useState('');
+  const [successXP, setSuccessXP]     = useState<number | null>(null);
+  const [activityDate, setActivityDate] = useState(todayStr());
 
   // Gravação de áudio
   const [recState, setRecState]     = useState<RecState>('idle');
@@ -119,6 +140,7 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
     setBonusCache({});
     setParseError('');
     setSuccessXP(null);
+    setActivityDate(todayStr());
   }
 
   // ── Gravação de áudio ─────────────────────────────────────────────
@@ -164,20 +186,18 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
   const loadBonuses = useCallback(
     async (pillarIds: (string | null)[]) => {
       const ids = [...new Set(pillarIds.filter((id): id is string => !!id))];
-      const missing = ids.filter((id) => !(id in bonusCache));
-      if (missing.length === 0) return;
-
+      // Sempre recarrega — activityDate pode ter mudado
       const results = await Promise.all(
-        missing.map((id) => getActivityBonuses(id, userId)),
+        ids.map((id) => getActivityBonuses(id, userId, activityDate)),
       );
 
       setBonusCache((prev) => {
         const next = { ...prev };
-        missing.forEach((id, i) => { next[id] = results[i] ?? []; });
+        ids.forEach((id, i) => { next[id] = results[i] ?? []; });
         return next;
       });
     },
-    [bonusCache, userId],
+    [userId, activityDate],
   );
 
   // ── Interpretar texto com IA ─────────────────────────────────────
@@ -281,22 +301,30 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
     setPhase('submitting');
 
     try {
-      const { totalXP } = await logMultipleActivities(
+      const { totalXP, entries: logged } = await logMultipleActivities(
         valid.map((e) => ({
           userId,
           pillarId:        e.pillarId!,
           durationMinutes: e.durationMinutes,
           note:            e.note,
+          activityDate,
         })),
       );
       setSuccessXP(totalXP);
       setPhase('success');
+
+      // Extração de entidades — fire-and-forget, não bloqueia o usuário
+      for (const { recordId, note } of logged) {
+        if (note) {
+          extractEntitiesForRecord(note, recordId, userId).catch(() => {});
+        }
+      }
+
       setTimeout(() => {
         onSuccess();
         handleClose();
       }, 2000);
-    } catch (err) {
-      // Volta para reviewing com erro
+    } catch {
       setPhase('reviewing');
     }
   }
@@ -429,6 +457,41 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
                   contentContainerStyle={styles.sheetContent}
                   keyboardShouldPersistTaps="handled"
                 >
+                  {/* Seletor de data — backfill com datas passadas */}
+                  <View style={styles.dateSection}>
+                    <Text style={styles.dateSectionLabel}>DATA DA ATIVIDADE</Text>
+                    <View style={styles.dateChips}>
+                      {recentDates(4).map(({ label, value }) => (
+                        <TouchableOpacity
+                          key={value}
+                          style={[
+                            styles.dateChip,
+                            activityDate === value && styles.dateChipActive,
+                          ]}
+                          onPress={() => {
+                            setActivityDate(value);
+                            // Recarrega bônus para a nova data
+                            const ids = [...new Set(entries.map(e => e.pillarId).filter((id): id is string => !!id))];
+                            Promise.all(ids.map(id => getActivityBonuses(id, userId, value))).then(results => {
+                              setBonusCache(prev => {
+                                const next = { ...prev };
+                                ids.forEach((id, i) => { next[id] = results[i] ?? []; });
+                                return next;
+                              });
+                            }).catch(() => {});
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[
+                            styles.dateChipText,
+                            activityDate === value && styles.dateChipTextActive,
+                          ]}>
+                            {label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
                   {entries.length === 0 ? (
                     <Text style={styles.emptyMsg}>Todas as entradas foram removidas.</Text>
                   ) : (
@@ -846,6 +909,44 @@ const styles = StyleSheet.create({
   pillarPickerChipActive: { borderColor: colors.accent, backgroundColor: colors.accentSubtle },
   pillarPickerChipText:   { color: colors.textSecondary, fontSize: 13 },
   pillarPickerChipTextActive: { color: colors.accent, fontWeight: '600' },
+
+  // Date section
+  dateSection: {
+    marginBottom: spacing.md,
+    gap: spacing.xs,
+  },
+  dateSectionLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
+    letterSpacing: 0.6,
+    marginBottom: spacing.xs,
+  },
+  dateChips: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+  },
+  dateChip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.bgSurface,
+  },
+  dateChipActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSubtle,
+  },
+  dateChipText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  dateChipTextActive: {
+    color: colors.accent,
+    fontWeight: '600',
+  },
 
   // Footer do reviewing
   reviewFooter: {
