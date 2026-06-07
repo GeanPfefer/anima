@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
+import { generateEmbedding } from '@/app/api/ai/embed-entry/route';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -72,6 +73,31 @@ export async function POST(req: NextRequest) {
       }).join('\n')
     : '  (sem quests ativas)';
 
+  // ── Retrieval contextual: busca entradas semanticamente similares à mensagem
+  let retrievalText = '';
+  try {
+    const queryEmbedding = await generateEmbedding(message);
+    if (queryEmbedding) {
+      const vectorStr = `[${queryEmbedding.join(',')}]`;
+      const { data: similar } = await supabase.rpc('match_entries', {
+        query_embedding: vectorStr,
+        match_threshold: 0.55,
+        match_count:     4,
+      });
+      if (similar && similar.length > 0) {
+        retrievalText = '\nMemórias relevantes para esta conversa:\n' +
+          (similar as Array<{ note: string; activity_date: string; pillar_name: string; similarity: number }>)
+            .map(s => {
+              const date = new Date(s.activity_date + 'T12:00:00').toLocaleDateString('pt-BR');
+              return `  • [${date}] ${s.pillar_name}: "${s.note}"`;
+            })
+            .join('\n');
+      }
+    }
+  } catch {
+    // Retrieval falhou (embedding ou DB) — continua sem ele
+  }
+
   const archetypeMap: Record<string, string> = {
     explorer:  'Explorador: muda de interesse com facilidade, se motiva por novidade. Nunca pressione consistência ou streak. Sugira experimentar coisas novas.',
     focused:   'Focado: prefere ir fundo em poucos pilares de cada vez. Valorize conclusões e profundidade. Sugira 1-2 áreas prioritárias.',
@@ -108,7 +134,7 @@ ${recentText}
 
 Quests em andamento:
 ${questsText}
-${entitiesText ? `\nEntidades conhecidas do usuário (memória semântica):\n${entitiesText}` : ''}
+${entitiesText ? `\nEntidades conhecidas do usuário (memória semântica):\n${entitiesText}` : ''}${retrievalText}
 == FIM DO PERFIL ==
 
 Responda à mensagem do usuário levando em conta o contexto acima quando relevante.`;

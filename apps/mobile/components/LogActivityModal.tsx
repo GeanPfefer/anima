@@ -16,6 +16,7 @@ import { getActivityBonuses, logMultipleActivities } from '@/lib/activity';
 import { parseActivityText, type ParsedActivity } from '@/lib/parse-activity';
 import { startRecording, type RecordingHandle } from '@/lib/transcribe';
 import { extractEntitiesForRecord } from '@/lib/extract-entities';
+import { embedEntryForRecord } from '@/lib/embed-entry';
 import type { ActivityBonusType } from '@anima/types';
 import { colors, spacing, radius } from '@/constants/theme';
 
@@ -313,10 +314,11 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
       setSuccessXP(totalXP);
       setPhase('success');
 
-      // Extração de entidades — fire-and-forget, não bloqueia o usuário
+      // Processamento semântico — fire-and-forget, não bloqueia o usuário
       for (const { recordId, note } of logged) {
         if (note) {
           extractEntitiesForRecord(note, recordId, userId).catch(() => {});
+          embedEntryForRecord(note, recordId, userId).catch(() => {});
         }
       }
 

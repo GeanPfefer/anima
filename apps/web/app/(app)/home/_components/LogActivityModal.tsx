@@ -139,10 +139,17 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
       setTotalXP(xp);
       setPhase('success');
 
-      // Extração de entidades semânticas — fire-and-forget, não bloqueia o usuário
+      // Processamento semântico — fire-and-forget, não bloqueia o usuário
       for (const { recordId, note } of logged) {
         if (note) {
+          // Extração de entidades (Camada 3)
           fetch('/api/ai/extract-entities', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ note, recordId }),
+          }).catch(() => {});
+          // Geração de embedding para retrieval contextual
+          fetch('/api/ai/embed-entry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ note, recordId }),

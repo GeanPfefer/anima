@@ -105,6 +105,48 @@ export type Database = {
           },
         ]
       }
+      entry_embeddings: {
+        Row: {
+          created_at: string
+          embedding: string | null
+          id: string
+          model_used: string
+          user_id: string
+          xp_record_id: string
+        }
+        Insert: {
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          model_used?: string
+          user_id: string
+          xp_record_id: string
+        }
+        Update: {
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          model_used?: string
+          user_id?: string
+          xp_record_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entry_embeddings_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entry_embeddings_xp_record_id_fkey"
+            columns: ["xp_record_id"]
+            isOneToOne: true
+            referencedRelation: "xp_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       life_events: {
         Row: {
           anchor_type: Database["public"]["Enums"]["context_anchor"] | null
@@ -557,6 +599,20 @@ export type Database = {
       lifegame_get_level_from_xp: {
         Args: { p_total_xp: number }
         Returns: number
+      }
+      match_entries: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          activity_date: string
+          note: string
+          pillar_name: string
+          similarity: number
+          xp_record_id: string
+        }[]
       }
     }
     Enums: {

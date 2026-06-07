@@ -31,7 +31,25 @@ function formatDateHeading(dateStr: string): string {
   if (isToday) return 'Hoje';
   if (isYesterday) return 'Ontem';
 
-  return date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' });
+  return date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+function formatWeekRange(startDate: string, endDate: string): string {
+  const start = new Date(startDate + 'T12:00:00');
+  const end   = new Date(endDate   + 'T12:00:00');
+  const startFmt = start.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' });
+  const endFmt   = end.toLocaleDateString('pt-BR',   { day: 'numeric', month: 'short' });
+  return `${startFmt} – ${endFmt}`;
+}
+
+// Retorna a segunda-feira da semana de uma data YYYY-MM-DD
+function weekKey(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00');
+  const day = d.getDay(); // 0=dom, 1=seg...
+  const diff = (day + 6) % 7; // dias desde segunda
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - diff);
+  return monday.toISOString().slice(0, 10);
 }
 
 const BONUS_LABELS: Record<Enums<'activity_bonus'>, string> = {
@@ -41,6 +59,29 @@ const BONUS_LABELS: Record<Enums<'activity_bonus'>, string> = {
   active_quest:    'Quest ativa',
 };
 
+// ─── Tipos ────────────────────────────────────────────────────
+
+type XPRecord = {
+  id: string;
+  pillar_id: string;
+  duration_minutes: number;
+  total_xp: number;
+  bonuses: Enums<'activity_bonus'>[];
+  note: string | null;
+  activity_date: string;
+};
+
+type DayGroup = {
+  dateKey: string;
+  records: XPRecord[];
+};
+
+type WeekGroup = {
+  weekStart: string;
+  days: DayGroup[];
+};
+
+
 // ─── Page ─────────────────────────────────────────────────────
 
 export default async function HistoryPage() {
@@ -48,7 +89,6 @@ export default async function HistoryPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  // Pillar name map
   const { data: pillarsData } = await supabase
     .from('user_pillars')
     .select('id, name')
@@ -56,55 +96,48 @@ export default async function HistoryPage() {
 
   const pillarMap = new Map((pillarsData ?? []).map(p => [p.id, p.name]));
 
-  // XP records ordered by activity_date desc, então created_at desc
-  const { data: records } = await supabase
+  const { data: rawRecords } = await supabase
     .from('xp_records')
-    .select('id, pillar_id, duration_minutes, base_xp, bonus_multiplier, total_xp, bonuses, note, created_at, activity_date')
+    .select('id, pillar_id, duration_minutes, total_xp, bonuses, note, activity_date')
     .eq('user_id', user.id)
     .order('activity_date', { ascending: false })
     .order('created_at',    { ascending: false })
-    .limit(200);
+    .limit(300);
 
-  const allRecords = (records ?? []) as Array<{
-    id: string;
-    pillar_id: string;
-    duration_minutes: number;
-    base_xp: number;
-    bonus_multiplier: number;
-    total_xp: number;
-    bonuses: Enums<'activity_bonus'>[];
-    note: string | null;
-    created_at: string;
-    activity_date: string;
-  }>;
+  const allRecords = (rawRecords ?? []) as XPRecord[];
 
-  // Weekly summary (últimos 7 dias de activity_date)
-  const weekAgo = new Date();
-  weekAgo.setDate(weekAgo.getDate() - 7);
-  const weekAgoStr = weekAgo.toISOString().slice(0, 10);
-  const weeklyXP = allRecords
-    .filter(r => r.activity_date >= weekAgoStr)
-    .reduce((s, r) => s + r.total_xp, 0);
+  // ── Resumo semanal ────────────────────────────────────────
+  const weekAgoStr = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
+  const weeklyXP   = allRecords.filter(r => r.activity_date >= weekAgoStr)
+                               .reduce((s, r) => s + r.total_xp, 0);
 
-  // Group by activity_date (YYYY-MM-DD)
-  const groups = new Map<string, typeof allRecords>();
+  // ── Agrupar por semana → dia ─────────────────────────────
+  const weekMap = new Map<string, Map<string, XPRecord[]>>();
   for (const record of allRecords) {
-    const dateKey = record.activity_date;
-    if (!groups.has(dateKey)) groups.set(dateKey, []);
-    groups.get(dateKey)!.push(record);
+    const wk  = weekKey(record.activity_date);
+    const day = record.activity_date;
+    if (!weekMap.has(wk))  weekMap.set(wk, new Map());
+    const dayMap = weekMap.get(wk)!;
+    if (!dayMap.has(day))  dayMap.set(day, []);
+    dayMap.get(day)!.push(record);
   }
 
-  const sortedDays = Array.from(groups.entries()).sort(([a], [b]) => b.localeCompare(a));
+  const sortedWeeks: WeekGroup[] = Array.from(weekMap.entries())
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([weekStart, dayMap]) => ({
+      weekStart,
+      days: Array.from(dayMap.entries())
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([dateKey, records]) => ({ dateKey, records })),
+    }));
 
   return (
     <main className={styles.container}>
       <div className={styles.header}>
         <h1 className={styles.title}>Histórico</h1>
-        {allRecords.length > 0 && (
+        {weeklyXP > 0 && (
           <p className={styles.summary}>
-            {weeklyXP > 0
-              ? `${weeklyXP.toLocaleString('pt-BR')} XP nos últimos 7 dias`
-              : 'Nenhuma atividade esta semana'}
+            {weeklyXP.toLocaleString('pt-BR')} XP nos últimos 7 dias
           </p>
         )}
       </div>
@@ -119,46 +152,80 @@ export default async function HistoryPage() {
         </div>
       ) : (
         <div className={styles.timeline}>
-          {sortedDays.map(([dateKey, dayRecords]) => {
-            const dayXP = dayRecords.reduce((s, r) => s + r.total_xp, 0);
+          {sortedWeeks.map(({ weekStart, days }) => {
+            // Calcula totais da semana
+            const allDayRecords = days.flatMap(d => d.records);
+            const weekXP        = allDayRecords.reduce((s, r) => s + r.total_xp, 0);
+            const weekMins      = allDayRecords.reduce((s, r) => s + r.duration_minutes, 0);
+            const weekPillars   = [...new Set(allDayRecords.map(r => pillarMap.get(r.pillar_id) ?? ''))].filter(Boolean);
+            const lastDay       = days[0]?.dateKey ?? weekStart;
+            const isCurrentWeek = weekStart === weekKey(new Date().toISOString().slice(0, 10));
+
             return (
-              <div key={dateKey} className={styles.dayGroup}>
-                <div className={styles.dayHeader}>
-                  <span className={styles.dayLabel}>{formatDateHeading(dateKey)}</span>
-                  <span className={styles.dayXP}>+{dayXP.toLocaleString('pt-BR')} XP</span>
+              <div key={weekStart} className={styles.weekGroup}>
+                {/* Cabeçalho de semana */}
+                <div className={styles.weekHeader}>
+                  <span className={styles.weekLabel}>
+                    {isCurrentWeek ? 'Esta semana' : formatWeekRange(weekStart, lastDay)}
+                  </span>
+                  <span className={styles.weekStats}>
+                    {formatDuration(weekMins)}
+                    {weekPillars.length > 0 && (
+                      <span className={styles.weekPillars}> · {weekPillars.slice(0, 3).join(' · ')}</span>
+                    )}
+                    <span className={styles.weekXP}> · +{weekXP.toLocaleString('pt-BR')} XP</span>
+                  </span>
                 </div>
 
-                <div className={styles.recordList}>
-                  {dayRecords.map(record => (
-                    <div key={record.id} className={styles.record}>
-                      <div className={styles.recordTop}>
-                        <span className={styles.pillarName}>
-                          {pillarMap.get(record.pillar_id) ?? 'Pilar'}
+                {/* Dias dentro da semana */}
+                {days.map(({ dateKey, records }) => {
+                  const dayMins = records.reduce((s, r) => s + r.duration_minutes, 0);
+                  const dayXP   = records.reduce((s, r) => s + r.total_xp, 0);
+
+                  return (
+                    <div key={dateKey} className={styles.dayGroup}>
+                      <div className={styles.dayHeader}>
+                        <span className={styles.dayLabel}>{formatDateHeading(dateKey)}</span>
+                        <span className={styles.dayMeta}>
+                          {formatDuration(dayMins)}
+                          <span className={styles.dayXP}> · +{dayXP.toLocaleString('pt-BR')} XP</span>
                         </span>
-                        <div className={styles.recordMeta}>
-                          <span className={styles.duration}>
-                            {formatDuration(record.duration_minutes)}
-                          </span>
-                          <span className={styles.xp}>+{record.total_xp} XP</span>
-                        </div>
                       </div>
 
-                      {record.bonuses.length > 0 && (
-                        <div className={styles.bonuses}>
-                          {record.bonuses.map(b => (
-                            <span key={b} className={styles.bonusTag}>
-                              ⚡ {BONUS_LABELS[b]}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <div className={styles.entryList}>
+                        {records.map(record => (
+                          <div key={record.id} className={styles.entry}>
+                            {/* Nota como conteúdo principal */}
+                            {record.note ? (
+                              <p className={styles.entryNote}>{record.note}</p>
+                            ) : (
+                              <p className={styles.entryNotePlaceholder}>—</p>
+                            )}
 
-                      {record.note && (
-                        <p className={styles.note}>"{record.note}"</p>
-                      )}
+                            {/* Metadata secundária */}
+                            <div className={styles.entryMeta}>
+                              <span className={styles.entryPillar}>
+                                {pillarMap.get(record.pillar_id) ?? 'Pilar'}
+                              </span>
+                              {record.duration_minutes > 0 && (
+                                <span className={styles.entryDuration}>
+                                  {formatDuration(record.duration_minutes)}
+                                </span>
+                              )}
+                              <span className={styles.entryXP}>+{record.total_xp} XP</span>
+
+                              {record.bonuses.map(b => (
+                                <span key={b} className={styles.bonusTag}>
+                                  ⚡ {BONUS_LABELS[b]}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             );
           })}
