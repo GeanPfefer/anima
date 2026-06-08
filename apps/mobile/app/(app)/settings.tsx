@@ -8,11 +8,13 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, radius } from '@/constants/theme';
+import { useHealthSync } from '@/hooks/use-health-sync';
 
 type Profile = { name: string; onboarding_completed_at: string | null };
 type Pillar = { id: string; name: string; is_active: boolean; xp_total: number };
@@ -31,6 +33,13 @@ export default function SettingsScreen() {
   const [savingPillar, setSavingPillar] = useState<Record<string, boolean>>({});
   const [newPillarName, setNewPillarName] = useState('');
   const [creating, setCreating] = useState(false);
+
+  // Health sync
+  const healthPillarId = pillars.find(
+    p => p.name.toLowerCase().includes('saúde') || p.name.toLowerCase().includes('saude')
+  )?.id ?? null;
+  const { sync: syncHealth, status: healthStatus, importedCount, error: healthError } =
+    useHealthSync(userId, healthPillarId);
 
   // Change password form
   const [currentPassword, setCurrentPassword] = useState('');
@@ -313,6 +322,50 @@ export default function SettingsScreen() {
         </View>
       )}
 
+      {/* Integrações */}
+      {Platform.OS === 'ios' && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Integrações</Text>
+          <View style={styles.integrationRow}>
+            <View style={styles.integrationInfo}>
+              <Text style={styles.integrationName}>Apple Health</Text>
+              <Text style={styles.integrationDesc}>
+                Importa sono, exercício e passos dos últimos 30 dias como entradas no pilar Saúde.
+              </Text>
+              {healthStatus === 'unavailable' && (
+                <Text style={styles.integrationNote}>
+                  Requer dev build (não disponível no Expo Go).
+                </Text>
+              )}
+              {healthStatus === 'done' && importedCount > 0 && (
+                <Text style={styles.integrationSuccess}>
+                  {importedCount} entrada{importedCount !== 1 ? 's' : ''} importada{importedCount !== 1 ? 's' : ''}.
+                </Text>
+              )}
+              {healthStatus === 'done' && importedCount === 0 && (
+                <Text style={styles.integrationSuccess}>Tudo já sincronizado.</Text>
+              )}
+              {healthError ? <Text style={styles.error}>{healthError}</Text> : null}
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.integrationBtn,
+                (healthStatus === 'requesting' || healthStatus === 'syncing') && styles.buttonDisabled,
+              ]}
+              onPress={() => syncHealth(30)}
+              disabled={healthStatus === 'requesting' || healthStatus === 'syncing'}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.integrationBtnText}>
+                {healthStatus === 'requesting' ? '…'
+                  : healthStatus === 'syncing'   ? 'Sync…'
+                  : 'Sincronizar'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Alterar senha */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Alterar senha</Text>
@@ -510,4 +563,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoutText: { color: colors.danger, fontSize: 15, fontWeight: '600' },
+
+  // Integrações
+  integrationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    gap: spacing.md,
+  },
+  integrationInfo: { flex: 1, gap: 4 },
+  integrationName: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
+  integrationDesc: { fontSize: 12, color: colors.textSecondary, lineHeight: 17 },
+  integrationNote: { fontSize: 11, color: colors.textMuted, fontStyle: 'italic', marginTop: 2 },
+  integrationSuccess: { fontSize: 12, color: colors.success, marginTop: 2 },
+  integrationBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    flexShrink: 0,
+  },
+  integrationBtnText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
 });

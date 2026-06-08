@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import ChangePasswordForm from './_components/ChangePasswordForm';
 import { LogoutButton } from './_components/LogoutButton';
 import PillarEditor from './_components/PillarEditor';
+import ObsidianExport from './_components/ObsidianExport';
 import styles from './settings.module.css';
 
 export default async function SettingsPage() {
@@ -43,6 +44,11 @@ export default async function SettingsPage() {
       <section className={styles.card}>
         <h2 className={styles.sectionTitle}>Pilares</h2>
         <PillarEditor initialPillars={pillars} userId={user.id} />
+      </section>
+
+      <section className={styles.card}>
+        <h2 className={styles.sectionTitle}>Integrações</h2>
+        <ObsidianExport />
       </section>
 
       <section className={styles.card}>

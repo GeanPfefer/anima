@@ -206,7 +206,7 @@ export default function WelcomeScreen() {
       const { data: catalog } = await supabase.from('pillar_catalog').select('id, name');
       const catalogMap = new Map((catalog ?? []).map(p => [norm(p.name), p]));
 
-      const pillarRows = extracted.pillars.map((n, i) => ({
+      const pillarRows = extracted.pillars.map((n: string, i: number) => ({
         user_id:    user.id,
         catalog_id: catalogMap.get(norm(n))?.id ?? null,
         name:       n,
