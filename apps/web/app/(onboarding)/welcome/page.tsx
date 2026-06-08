@@ -95,12 +95,23 @@ export default function WelcomePage() {
       <div className={styles.namePhase}>
         <div className={styles.nameCard}>
           <h1 className={styles.logo}>Anima</h1>
-          <p className={styles.nameSub}>Como posso te chamar?</p>
+          <p className={styles.nameSub}>Uma memória viva da sua vida.</p>
+
+          <div className={styles.pillarsPreview}>
+            <p className={styles.pillarsLabel}>O que o Anima aprende a rastrear</p>
+            <div className={styles.pillarsChips}>
+              {['Trabalho', 'Saúde', 'Relações', 'Mente', 'Lazer', 'Finanças', 'Propósito'].map(p => (
+                <span key={p} className={styles.pillarsChip}>{p}</span>
+              ))}
+            </div>
+            <p className={styles.pillarsHint}>detectado pela IA · você não configura nada</p>
+          </div>
+
           <form onSubmit={handleNameSubmit} className={styles.nameForm}>
             <input
               className={styles.nameInput}
               type="text"
-              placeholder="Seu nome"
+              placeholder="Como posso te chamar?"
               value={nameVal}
               onChange={e => setNameVal(e.target.value)}
               autoFocus
