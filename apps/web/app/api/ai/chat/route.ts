@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
-import { generateEmbedding } from '@/app/api/ai/embed-entry/route';
+import { generateEmbedding } from '@/lib/generate-embedding';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
