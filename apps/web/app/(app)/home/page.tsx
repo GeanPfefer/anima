@@ -21,7 +21,7 @@ type PillarWithChildren = Pillar & { children: Pillar[] };
 export default async function HomePage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/step-1');
+  if (!user) redirect('/(onboarding)/welcome');
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -29,7 +29,7 @@ export default async function HomePage() {
     .eq('id', user.id)
     .single();
 
-  if (!profile) redirect('/step-1');
+  if (!profile) redirect('/(onboarding)/welcome');
 
   // ── Insight mais recente não dispensado ───────────────────────
   const { data: latestInsight } = await supabase
