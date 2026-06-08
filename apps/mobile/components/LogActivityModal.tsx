@@ -14,7 +14,9 @@ import {
 import { calculateBonusMultiplier } from '@anima/core';
 import { getActivityBonuses, logMultipleActivities } from '@/lib/activity';
 import { parseActivityText, type ParsedActivity } from '@/lib/parse-activity';
-import { startRecording, type RecordingHandle } from '@/lib/transcribe';
+import { startRecording, transcribeFromUri, type RecordingHandle } from '@/lib/transcribe';
+import { enqueueRecording } from '@/lib/recording-queue';
+import { useRecordingQueue } from '@/hooks/use-recording-queue';
 import { extractEntitiesForRecord } from '@/lib/extract-entities';
 import { embedEntryForRecord } from '@/lib/embed-entry';
 import type { ActivityBonusType } from '@anima/types';
@@ -115,6 +117,14 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
   const recHandleRef = useRef<RecordingHandle | null>(null);
   const recTimerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Fila offline
+  const {
+    count:         queueCount,
+    processStatus: queueProcessStatus,
+    processNext,
+    refresh:       queueRefresh,
+  } = useRecordingQueue();
+
   // Limpa timer ao desmontar
   useEffect(() => {
     return () => {
@@ -167,19 +177,66 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
       recTimerRef.current = null;
     }
     setRecState('transcribing');
+
+    // Passo 1: para a gravação e obtém o URI sem transcrever ainda
+    let uri: string | null = null;
     try {
-      const transcribed = await recHandleRef.current?.stop() ?? '';
+      uri = await recHandleRef.current?.stopSilent() ?? null;
       recHandleRef.current = null;
+    } catch {
+      recHandleRef.current = null;
+      setParseError('Erro ao parar gravação.');
+      setRecState('idle');
+      setRecSeconds(0);
+      return;
+    }
+
+    if (!uri) {
+      setRecState('idle');
+      setRecSeconds(0);
+      return;
+    }
+
+    // Passo 2: tenta transcrever via Whisper
+    try {
+      const transcribed = await transcribeFromUri(uri);
       if (transcribed) {
-        setText((prev) => (prev.trim() ? `${prev.trim()} ${transcribed}` : transcribed));
+        setText(prev => prev.trim() ? `${prev.trim()} ${transcribed}` : transcribed);
       }
     } catch (err) {
-      setParseError(
-        err instanceof Error ? err.message : 'Não foi possível transcrever o áudio.',
+      // Falha de rede → salva na fila para depois
+      const isNetwork = err instanceof Error && (
+        err.name === 'AbortError' ||
+        err.message.includes('Timeout') ||
+        err.message.includes('fetch') ||
+        err.message.includes('ECONNREFUSED')
       );
+      if (isNetwork) {
+        try {
+          await enqueueRecording(uri);
+          void queueRefresh();
+          setParseError('Sem conexão — gravação salva na fila 🎙');
+        } catch {
+          setParseError('Sem conexão e não foi possível salvar a gravação.');
+        }
+      } else {
+        setParseError(err instanceof Error ? err.message : 'Não foi possível transcrever o áudio.');
+      }
     } finally {
       setRecState('idle');
       setRecSeconds(0);
+    }
+  }
+
+  async function handleProcessQueue() {
+    setParseError('');
+    try {
+      const text = await processNext();
+      if (text) {
+        setText(prev => prev.trim() ? `${prev.trim()} ${text}` : text);
+      }
+    } catch {
+      setParseError('Whisper não respondeu. Verifique a conexão com a Goma.');
     }
   }
 
@@ -407,6 +464,28 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
                 <Text style={styles.inputHint}>
                   ex: "corri 45min e li por meia hora" · tempo é opcional
                 </Text>
+
+                {/* Banner: gravações offline aguardando transcrição */}
+                {queueCount > 0 && (
+                  <TouchableOpacity
+                    style={styles.queueBanner}
+                    onPress={handleProcessQueue}
+                    disabled={queueProcessStatus === 'transcribing'}
+                    activeOpacity={0.85}
+                  >
+                    {queueProcessStatus === 'transcribing' ? (
+                      <>
+                        <ActivityIndicator size="small" color={colors.accent} />
+                        <Text style={styles.queueBannerText}>Transcrevendo...</Text>
+                      </>
+                    ) : (
+                      <Text style={styles.queueBannerText}>
+                        🎙 {queueCount} gravação{queueCount !== 1 ? 'ões' : ''} na fila — transcrever →
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+
                 {parseError ? (
                   <Text style={styles.error}>{parseError}</Text>
                 ) : null}
@@ -421,6 +500,11 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
                       activeOpacity={0.8}
                     >
                       <Text style={styles.micIcon}>🎙</Text>
+                      {queueCount > 0 && (
+                        <View style={styles.micQueueBadge}>
+                          <Text style={styles.micQueueBadgeText}>{queueCount}</Text>
+                        </View>
+                      )}
                     </TouchableOpacity>
                   )}
                   {recState === 'recording' && (
@@ -769,6 +853,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.bgElevated,
     gap: 4,
+    overflow: 'visible',
   },
   micBtnRecording: {
     borderColor: colors.danger,
@@ -960,6 +1045,42 @@ const styles = StyleSheet.create({
   dateChipTextActive: {
     color: colors.accent,
     fontWeight: '600',
+  },
+
+  // Fila offline
+  queueBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.accentSubtle,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  queueBannerText: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '600' as const,
+    flex: 1,
+  },
+  micQueueBadge: {
+    position: 'absolute' as const,
+    top: -5,
+    right: -5,
+    backgroundColor: colors.danger,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingHorizontal: 3,
+  },
+  micQueueBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700' as const,
   },
 
   // Footer do reviewing

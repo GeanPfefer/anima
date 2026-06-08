@@ -6,6 +6,8 @@ const WHISPER_MODEL = process.env.EXPO_PUBLIC_WHISPER_MODEL ?? 'whisper-1';
 export type RecordingHandle = {
   /** Para a gravação, envia o áudio para Whisper e retorna o texto. */
   stop: () => Promise<string>;
+  /** Para a gravação sem transcrever. Retorna o URI do arquivo — use para enfileirar. */
+  stopSilent: () => Promise<string>;
   /** Aborta sem transcrever (usado no handleClose). */
   cancel: () => Promise<void>;
 };
@@ -47,10 +49,24 @@ export async function startRecording(): Promise<RecordingHandle> {
       if (!uri) throw new Error('Nenhum áudio gravado');
       return transcribeAudio(uri);
     },
+    stopSilent: async () => {
+      await cleanup();
+      const uri = recording.getURI();
+      if (!uri) throw new Error('Nenhum áudio gravado');
+      return uri;
+    },
     cancel: async () => {
       await cleanup();
     },
   };
+}
+
+/**
+ * Transcreve um arquivo de áudio a partir de um URI local.
+ * Exportado para uso pela fila de gravações offline.
+ */
+export function transcribeFromUri(uri: string): Promise<string> {
+  return transcribeAudio(uri);
 }
 
 /**
@@ -70,7 +86,7 @@ async function transcribeAudio(uri: string): Promise<string> {
   formData.append('language', 'pt');
 
   const controller = new AbortController();
-  const timeout    = setTimeout(() => controller.abort(), 40_000);
+  const timeout    = setTimeout(() => controller.abort(), 90_000);
 
   try {
     const res = await fetch(`${WHISPER_URL}/v1/audio/transcriptions`, {
@@ -89,7 +105,7 @@ async function transcribeAudio(uri: string): Promise<string> {
     return (json.text ?? '').trim();
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
-      throw new Error('Timeout: Whisper demorou mais de 40s para responder.');
+      throw new Error('Timeout: Whisper demorou mais de 90s para responder.');
     }
     throw err;
   } finally {
