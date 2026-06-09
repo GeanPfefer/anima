@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-06-09 (sessão: chat unificado — onboarding + logging + conversa = um único fluxo; notas como objeto central; modos de exibição; detecção três destinos; captura silenciosa de alimentação/gastos; pilares pendentes; Fase 1 implementada)
+> Documento vivo de design. Última atualização: 2026-06-09 (sessão: arquitetura de pilares livres — 3 pilares raiz fixos + emergência livre pela IA; catálogo pré-definido removido; seções 1e/2/9/10/13 atualizadas)
 > Para retomar o projeto em qualquer IA: cole este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -171,15 +171,14 @@ Exemplo de insight de qualidade:
 ## 1e. Arquitetura de IA — princípios
 
 ### Estrutura da organização automática
-A IA NÃO deve inventar livremente pilares ou a estrutura principal do sistema. A estabilidade da estrutura é intencional:
 
 | Nível | Estabilidade | Quem controla |
 |-------|-------------|---------------|
-| Pilares principais | Relativamente estável | Usuário define no onboarding; editável raramente |
-| Sub-pilares | Semi-dinâmico | Usuário define; IA pode sugerir; nunca cria sem confirmação |
+| 3 pilares raiz (Saúde, Mente, Relações) | **Fixo** — sempre existem para qualquer pessoa | Sistema — criados automaticamente no signup |
+| Pilares emergentes | Semi-dinâmico | IA cria silenciosamente quando detecta área nova; usuário pode renomear/remover |
 | Tags / contexto / entidades | Altamente dinâmico | IA extrai automaticamente de cada entrada |
 
-Isso mantém coerência, previsibilidade e qualidade dos insights. Um sistema com pilares flutuantes vira bagunça semântica impossível de usar para continuidade.
+Os 3 pilares raiz são universais: todo ser humano tem corpo, mente e conexões humanas. Os demais emergem da vida real de cada pessoa — sem lista pré-definida, sem catálogo fixo. O usuário que nunca mencionar dinheiro nunca verá "Finanças" no radar.
 
 ### A inteligência não vem de modelos maiores
 O diferencial do Anima NÃO está em trocar `qwen2.5:14b` por GPT-4 ou Claude. Trocar modelos ajuda marginalmente.
@@ -216,36 +215,49 @@ O objetivo é criar: continuidade, confiança, sensação de memória persistent
 
 ## 2. Pilares de vida
 
-Os pilares são **estruturas emergentes** — não configuradas explicitamente pelo usuário, mas inferidas pela IA a partir da primeira conversa e do comportamento acumulado. O usuário nunca precisa "escolher pilares" para começar.
+Os pilares são **estruturas emergentes** — não configuradas pelo usuário, inferidas pela IA a partir da vida real de cada pessoa.
 
-**Como emergem:** a IA detecta temas recorrentes na escrita do usuário e sugere/cria pilares silenciosamente. O usuário pode confirmar, renomear ou adicionar a qualquer momento — mas nunca é obrigado a.
+### Pilares raiz (fixos — universais)
 
-**Pilares padrão disponíveis** (a IA usa como ponto de partida):
+Criados automaticamente no signup para todo usuário. Representam dimensões que todo ser humano possui, independente de fase de vida, cultura ou situação.
 
-| Pilar | Foco | Taxa XP/min |
-|-------|------|-------------|
-| Mente | clareza, aprendizado, foco | 1,0 |
-| Propósito | valores, legado, visão | 1,0 |
-| Trabalho | produção, metas, carreira | 1,0 |
-| Saúde | sono, exercício, energia | 1,0 |
-| Relações | família, amigos, amor | 1,0 |
-| Finanças | gastos, reserva, metas | 1,0 |
-| Lazer | hobbies, descanso | 1,0 |
+| Pilar | Por quê é universal |
+|-------|---------------------|
+| **Saúde** | Todo mundo tem um corpo: dorme, move, adoece, envelhece |
+| **Mente** | Todo mundo pensa, aprende, sente, processa |
+| **Relações** | Todo mundo tem (ou ausência de) conexão humana |
 
-> **Decisão jun/2026:** Todas as taxas igualadas a 1,0×. O valor está no tempo dedicado, não na hierarquia de importância entre pilares — cada área de vida vale igual.
+Estes 3 pilares **sempre existem** no perfil do usuário. Ele pode desativá-los se quiser, mas nunca precisa criá-los.
+
+### Pilares emergentes (livres — inferidos pela IA)
+
+Surgem silenciosamente quando a IA detecta um padrão recorrente na vida da pessoa. Não há catálogo pré-definido — o nome, o momento de criação e a relevância são determinados exclusivamente pelo comportamento observado.
+
+**Exemplos de emergência:**
+- Alguém que menciona trabalho frequentemente → pilar **Trabalho** aparece
+- Alguém que fala de dinheiro/dívidas → pilar **Finanças** aparece
+- Alguém com família e casa para cuidar → pilar **Casa** pode aparecer
+- Alguém religioso → pilar **Espiritualidade** pode aparecer
+- Ninguém tem os mesmos pilares — é um espelho da vida real, não uma planilha
+
+**Pilares que emergem com frequência** (sem serem obrigatórios):
+
+| Pilar | Quando costuma aparecer |
+|-------|------------------------|
+| Trabalho | carreira, projetos profissionais, entregas |
+| Finanças | dinheiro, renda, dívidas, investimentos |
+| Lazer | hobbies, descanso, diversão, criatividade pessoal |
+| Crescimento | valores, terapia, identidade, vida interior |
+| Casa | moradia, família, organização doméstica |
+
+> **Decisão jun/2026:** Catálogo fixo de 7 pilares removido. A taxa XP é 1,0× para todos os pilares — sem hierarquia implícita entre áreas de vida. O `pillar_catalog` existe no schema mas está vazio.
 
 **Regras dos pilares:**
-- Pilares emergem organicamente — nenhum é obrigatório no início
-- O usuário pode adicionar, renomear ou desativar pilares a qualquer momento
+- Os 3 raiz são criados pelo trigger `handle_new_user` no signup — sem onboarding necessário
+- Pilares emergentes são criados pela função `getOrCreatePillar` quando a IA os detecta
+- O usuário pode renomear, desativar ou remover pilares emergentes a qualquer momento
 - Cada pilar tem seu próprio nível (1–50)
 - O nível geral do personagem é a média dos níveis de todos os pilares raiz ativos
-
-**Conexões entre pilares:**
-- Saúde impacta fortemente Mente e Trabalho (detectável em 1–2 dias)
-- Saúde impacta medianamente Relações e Lazer
-- Saúde impacta fracamente Finanças e Propósito
-- Mente e Saúde são bidirecionais (estresse afeta saúde; saúde afeta clareza mental)
-- O app detecta e exibe esses padrões como insights automáticos
 
 ---
 
@@ -587,9 +599,9 @@ Os dados são idênticos em qualquer modo. A estrutura subjacente (XP, pilares, 
 
 | Tabela | Função |
 |--------|--------|
-| `profiles` | Dados do usuário (nome, onboarding_completed_at, display_mode) |
-| `pillar_catalog` | Catálogo dos 7 pilares padrão com taxas XP |
-| `user_pillars` | Pilares ativos por usuário (xp_total, level, is_active, status: active/pending) |
+| `profiles` | Dados do usuário (nome, onboarding_completed_at) |
+| `pillar_catalog` | Legado — estrutura existe, dados vazios (catálogo fixo removido em jun/2026) |
+| `user_pillars` | Pilares do usuário — raiz (criados pelo trigger) + emergentes (criados pela IA) |
 | `xp_records` | Histórico imutável de atividades registradas |
 | `notes` | ⚠️ Pendente — notas de alimentação, gastos, humor, ideias (ver seção 7b) |
 | `life_events` | Eventos sem duração (marcos, conquistas, mudanças de estado) |
@@ -600,7 +612,7 @@ Os dados são idênticos em qualquer modo. A estrutura subjacente (XP, pilares, 
 | `semantic_entities` | Entidades persistentes extraídas pela IA (pessoas, lugares, projetos) |
 
 ### Triggers automáticos
-- `on_auth_user_created` → cria row em `profiles` automaticamente no signup
+- `on_auth_user_created` → cria row em `profiles` + os 3 pilares raiz (Saúde, Mente, Relações) em `user_pillars`
 - `on_xp_record_insert` → atualiza `xp_total` e `level` em `user_pillars` ao inserir atividade
 - `on_life_event_insert` → mesmo comportamento para eventos de vida
 - `on_mission_completed` → auto-completa a quest quando todas as missões estão concluídas
@@ -657,6 +669,9 @@ Os dados são idênticos em qualquer modo. A estrutura subjacente (XP, pilares, 
 | ~~Perguntas estruturadas de contexto~~ | ~~Removidas~~ | Substituídas pela inferência via primeira conversa e comportamento acumulado |
 | XP de quests limitado | Máx 10.000 XP por quest e por missão | Evita distorções extremas no sistema de progressão |
 | Taxas XP iguais | Todos os pilares em 1,0× XP/min | Tempo vale igual em qualquer área da vida — sem hierarquia implícita |
+| 3 pilares raiz fixos | Saúde, Mente, Relações criados automaticamente no signup | Universais — todo ser humano tem corpo, mente e conexões; elimina onboarding obrigatório |
+| Catálogo de pilares removido | `pillar_catalog` vazio; pilares emergem livremente via `getOrCreatePillar` | Catálogo pré-definido (7 pilares) era contradição com filosofia de sistema que aprende — a vida real não tem lista fixa |
+| Nomes de pilares emergentes | IA nomeia livremente em português, máx 20 chars | Sem restrição de vocabulário — "Casa", "Espiritualidade", "Skate" são tão válidos quanto "Trabalho" |
 | Auth guard no index.tsx (mobile) | `index.tsx` faz getUser() + checa DB; `_layout.tsx` é estático | Expo Router 54 não tolera retorno condicional no root layout sem quebrar navegação |
 | getUser() na abertura (mobile) | Em vez de getSession() | Valida sessão no servidor; detecta usuário deletado após db reset e limpa AsyncStorage |
 | SafeAreaProvider na raiz (mobile) | `app/_layout.tsx` envolve tudo | useSafeAreaInsets() crasha silenciosamente sem o provider |
@@ -803,57 +818,27 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 
 > Atualizado em jun/2026: Fase 1 (chat unificado) concluída. Fase 2 (pilares pendentes) e Fase 3 (dissolução do /welcome) são os próximos passos de unificação.
 
-### Fase 2 — Pilares pendentes (próximo)
-- [ ] Adicionar coluna `status` em `user_pillars` (`'active' | 'pending'`)
-- [ ] No `detect-activity.ts`: quando pilar detectado não existe → criar com `status: 'pending'` e XP acumulado
-- [ ] No dashboard: mostrar card "Percebi que você praticou X — quer criar um pilar para isso?" ao abrir
-- [ ] Confirmar: pilar vira `active`, XP original aplicado; ignorar: pilar deletado sem rastro
+### Próximo
+- **QA áudio** — testar Whisper no iPhone em condições reais (código pronto; Docker na Goma `:9000`)
+- **Obsidian import** — fase 2: import com resolução de conflito (fase futura)
+- **Google Fit** — quando necessário (Health Connect Android)
+- **Modelo de monetização** — quando abrir ao público
 
-### Fase 3 — Dissolução do /welcome no chat (pendente)
-- [ ] Remover rota `/welcome` e código dos steps 1–5
-- [ ] No chat: detectar primeiro uso (sem `onboarding_completed_at`) e adaptar tone da primeira mensagem
-- [ ] Substituir `/signup → /welcome` por `/signup → /chat`
-- [ ] `onboarding_completed_at` setado quando pilares iniciais são criados (primeira sessão de chat)
-- [ ] Deprecar: `app/(onboarding)/step-1` a `step-5`, `lib/archetypes.ts` (quiz), `lib/pillar-questions.ts`
-
-### Notas — implementação (pendente)
-- [ ] Migration SQL: tabela `notes` (ver schema na seção 7b)
-- [ ] Adicionar coluna `display_mode` em `profiles`
-- [ ] No `detect-activity.ts` (ou novo `classify-message.ts`): terceiro destino — quando conteúdo é alimentação/gasto/humor → rota para `notes` em vez de descartar
-- [ ] Tela de notas (web + mobile)
-- [ ] Relatórios mensais: alimentação, gastos, humor ao longo do mês
-
-### Modos de exibição (pendente)
-- [ ] Adicionar `display_mode` em `profiles` (`'game' | 'analytical' | 'minimal'`)
-- [ ] Alternância via configurações
-- [ ] Implementar layout analítico (gráficos de linha, calendário de atividade)
-- [ ] Implementar layout minimal (lista limpa, sem game elements)
-
-### P1 — Captura e memória (núcleo do produto)
-- [ ] **Memória semântica — Camada 3** — sistema aprende entidades persistentes do usuário (pessoas, lugares, projetos, padrões); retrieval semântico com embeddings + pgvector
-- [ ] **Timeline narrativa** — histórico como narrativa temporal, não só lista; base para insights
-- [ ] **Backfill com data passada** — registrar atividade com data anterior (decidido, não implementado)
-- [ ] **Chat no mobile** — adicionar aba de chat no app mobile (atualmente só web)
-
-### P2 — Reflexão e insights (Camada 4)
-- [ ] **Insights automáticos** — IA lendo timeline; critérios: raros, específicos, contextualizados, honestos (sem coaching genérico)
-- [ ] **Pulso/entrada do dia** — entrada ultra-leve, "quando der", sem pilar obrigatório, nunca streak
-
-### P3 — UX complementar
-- [ ] **Editar pilares pós-onboarding** — confirmar/renomear pilares inferidos pela IA
-- [ ] **Seleção de foco** — "Em que quer focar agora?" nas configurações
-
-### P4 — Integrações e expansão
-- [ ] **Adaptador Obsidian** — export markdown fase 1 (Postgres → markdown)
-- [ ] **Integrações passivas** — Apple Health, Google Fit, calendário (camada 0)
-- [ ] **Modelo de monetização** — quando abrir ao público
-
-### Concluído
-- [x] **Chat unificado — Fase 1** — detecção + logging automático via chat; tom da IA humano e direto; match estrito de pilares; `X-Activity-Logged` header; `router.refresh()` no cliente
-- [x] **Input natural com IA** — texto livre + áudio (web + mobile); 5 fases
-- [x] **Chat com IA contextual** — streaming via Ollama; contexto completo do usuário; retrieval semântico; web
-- [x] **Dashboard hierárquico** — sub-pilares indentados sob pais; web + mobile
-- [x] **Onboarding conversacional (parcial)** — `/welcome` com chat; extração de pilares com regras rígidas (sem nome do app, sem hábitos ruins, sem nomes próprios)
+### Concluído (P0–P4)
+- [x] **P0 — Onboarding conversacional** — primeira conversa substitui wizard; IA infere pilares e arquétipo; web + mobile
+- [x] **P0 — Steps deprecated e removidos** — `step-1..5`, `archetypes.ts`, `pillar-questions.ts` removidos
+- [x] **P1 — Input natural com IA** — texto livre + áudio (web + mobile); 5 fases
+- [x] **P1 — Memória semântica** — Camada 3: `semantic_entities`, `entry_embeddings`, `match_entries` (pgvector)
+- [x] **P1 — Timeline narrativa** — histórico como narrativa temporal; web + mobile
+- [x] **P1 — Retrieval contextual** — busca semântica no histórico alimenta o chat
+- [x] **P1 — Backfill com data passada** — `activity_date` separado de `created_at`
+- [x] **P2 — Insights automáticos** — Camada 4; trigger por ≥5 entradas + ≥3 dias; Ollama gera; `dismissed_at`
+- [x] **P2 — Pulso do dia** — entrada ultra-leve sem duração (XP=0); classifica pilar em background
+- [x] **P3 — Editor de pilares** — renomear/desativar pilares pós-onboarding; web + mobile
+- [x] **P3 — Chat com IA contextual** — streaming via Ollama; contexto completo; web
+- [x] **P4 — Adaptador Obsidian** — export ZIP com .md (web/settings); fase 1 concluída
+- [x] **P4 — Apple Health scaffold** — infraestrutura pronta; requer dev build (não Expo Go)
+- [x] **Arquitetura de pilares livres** — 3 raiz fixos (Saúde, Mente, Relações) + emergência livre pela IA; catálogo pré-definido removido
 
 ---
 
