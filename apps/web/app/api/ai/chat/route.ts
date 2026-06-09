@@ -2,9 +2,22 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { generateEmbedding } from '@/lib/generate-embedding';
+import { detectActivities } from '@/lib/detect-activity';
+import { logActivity } from '@/lib/log-activity';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
+
+function norm(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+type LoggedActivity = {
+  pillar: string;
+  durationMinutes: number;
+  totalXP: number;
+  note: string;
+};
 
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
@@ -23,7 +36,7 @@ export async function POST(req: NextRequest) {
   // ── Contexto do usuário ────────────────────────────────────────
   const [profileRes, pillarsRes, recentRes, questsRes, entitiesRes] = await Promise.all([
     supabase.from('profiles').select('name, archetype').eq('id', user.id).single(),
-    supabase.from('user_pillars').select('name, xp_total, level, xp_rate, context').eq('user_id', user.id).eq('is_active', true).order('level', { ascending: false }),
+    supabase.from('user_pillars').select('id, name, xp_total, level, xp_rate, context').eq('user_id', user.id).eq('is_active', true).order('level', { ascending: false }),
     supabase.from('xp_records').select('note, total_xp, duration_minutes, activity_date, user_pillars(name)').eq('user_id', user.id).order('activity_date', { ascending: false }).order('created_at', { ascending: false }).limit(10),
     supabase.from('quests').select('title, type, status, pillar_id, user_pillars(name)').eq('user_id', user.id).in('status', ['open', 'in_progress']).limit(5),
     supabase.from('semantic_entities').select('name, entity_type, context, occurrence_count').eq('user_id', user.id).order('occurrence_count', { ascending: false }).limit(20),
@@ -36,15 +49,62 @@ export async function POST(req: NextRequest) {
   const quests    = questsRes.data    ?? [];
   const entities  = entitiesRes.data  ?? [];
 
+  const pillarNames = pillars.map(p => p.name);
+
+  // ── Detecção de atividade + embedding em paralelo ──────────────
+  const [detectedActivities, queryEmbedding] = await Promise.all([
+    detectActivities(message, pillarNames),
+    generateEmbedding(message),
+  ]);
+
+  // ── Loga atividades detectadas ─────────────────────────────────
+  const loggedActivities: LoggedActivity[] = [];
+
+  for (const da of detectedActivities) {
+    const pillar = pillars.find(p => norm(p.name) === norm(da.pillarName))
+                ?? pillars.find(p => norm(p.name).includes(norm(da.pillarName)) || norm(da.pillarName).includes(norm(p.name)));
+    if (!pillar) continue;
+
+    try {
+      const result = await logActivity({
+        pillarId:        pillar.id,
+        durationMinutes: da.durationMinutes,
+        note:            da.note,
+      });
+      loggedActivities.push({
+        pillar:          pillar.name,
+        durationMinutes: da.durationMinutes,
+        totalXP:         result.totalXP,
+        note:            da.note,
+      });
+
+      // Embedding fire-and-forget — para retrieval futuro
+      if (da.note) {
+        generateEmbedding(da.note)
+          .then(async emb => {
+            if (!emb) return;
+            await supabase.from('entry_embeddings').upsert({
+              user_id:      user.id,
+              xp_record_id: result.recordId,
+              embedding:    `[${emb.join(',')}]`,
+              model_used:   process.env.OLLAMA_EMBED_MODEL ?? 'nomic-embed-text',
+            }, { onConflict: 'xp_record_id' });
+          })
+          .catch(() => {});
+      }
+    } catch {
+      // falha silenciosa — não interrompe a conversa
+    }
+  }
+
+  // ── Contexto textual para o system prompt ──────────────────────
   const charLevel = pillars.length > 0
     ? Math.round(pillars.reduce((s, p) => s + p.level, 0) / pillars.length)
     : 1;
 
   const pillarsText = pillars.map(p => {
     const ctx = p.context as Record<string, string> | null;
-    const ctxText = ctx
-      ? '\n    Contexto: ' + Object.values(ctx).filter(Boolean).join(' | ')
-      : '';
+    const ctxText = ctx ? '\n    Contexto: ' + Object.values(ctx).filter(Boolean).join(' | ') : '';
     return `  • ${p.name}: Nível ${p.level} | ${p.xp_total} XP total${ctxText}`;
   }).join('\n');
 
@@ -73,14 +133,12 @@ export async function POST(req: NextRequest) {
       }).join('\n')
     : '  (sem quests ativas)';
 
-  // ── Retrieval contextual: busca entradas semanticamente similares à mensagem
+  // ── Retrieval contextual ───────────────────────────────────────
   let retrievalText = '';
   try {
-    const queryEmbedding = await generateEmbedding(message);
     if (queryEmbedding) {
-      const vectorStr = `[${queryEmbedding.join(',')}]`;
       const { data: similar } = await supabase.rpc('match_entries', {
-        query_embedding: vectorStr,
+        query_embedding: `[${queryEmbedding.join(',')}]`,
         match_threshold: 0.55,
         match_count:     4,
       });
@@ -95,7 +153,7 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch {
-    // Retrieval falhou (embedding ou DB) — continua sem ele
+    // Retrieval falhou — continua sem ele
   }
 
   const archetypeMap: Record<string, string> = {
@@ -112,6 +170,15 @@ export async function POST(req: NextRequest) {
         .join('\n')
     : '';
 
+  // Bloco injetado quando atividades foram registradas nesta mensagem
+  const activityContext = loggedActivities.length > 0
+    ? `\n[Atividades registradas automaticamente nesta mensagem]\n` +
+      loggedActivities.map(a =>
+        `- ${a.pillar}: ${a.durationMinutes > 0 ? `${a.durationMinutes}min · ` : ''}+${a.totalXP} XP${a.note ? ` ("${a.note}")` : ''}`
+      ).join('\n') +
+      `\nConfirme brevemente no início da sua resposta, de forma natural. Não mencione "sistema" ou termos técnicos.\n`
+    : '';
+
   const systemPrompt = `Você é o Anima, o assistente pessoal de ${name}.
 Você conhece a vida do usuário através dos pilares, histórico de atividades e memória semântica.
 Seja direto, honesto e útil. Fale em português. Não seja excessivamente animado ou use muitos emojis.
@@ -122,12 +189,12 @@ Formatação:
 - Use markdown diretamente: **negrito**, listas com -, títulos com ##
 - NUNCA envolva sua resposta em blocos de código (\`\`\`). Blocos de código só para exemplos de código real.
 - Respostas curtas e diretas quando a pergunta for simples.
-
+${activityContext}
 == PERFIL DE ${name.toUpperCase()} ==
 Nível geral do personagem: ${charLevel}
 
 Pilares ativos:
-${pillarsText}
+${pillarsText || '  (nenhum pilar ainda — usuário em início de jornada)'}
 
 Últimas atividades registradas:
 ${recentText}
@@ -139,7 +206,7 @@ ${entitiesText ? `\nEntidades conhecidas do usuário (memória semântica):\n${e
 
 Responda à mensagem do usuário levando em conta o contexto acima quando relevante.`;
 
-  // ── Histórico recente de conversa (últimas 10 mensagens) ───────
+  // ── Histórico recente de conversa ──────────────────────────────
   const { data: history } = await supabase
     .from('ai_conversations')
     .select('role, content')
@@ -148,11 +215,10 @@ Responda à mensagem do usuário levando em conta o contexto acima quando releva
     .limit(10);
 
   const pastMessages = (history ?? []).reverse().map(m => ({
-    role: m.role as 'user' | 'assistant',
+    role:    m.role as 'user' | 'assistant',
     content: m.content,
   }));
 
-  // ── Salva mensagem do usuário ──────────────────────────────────
   await supabase.from('ai_conversations').insert({ user_id: user.id, role: 'user', content: message });
 
   // ── Chama Ollama (streaming) ───────────────────────────────────
@@ -172,18 +238,18 @@ Responda à mensagem do usuário levando em conta o contexto acima quando releva
 
   if (!ollamaRes?.ok) {
     return new Response(
-      JSON.stringify({ error: 'Não foi possível conectar ao Ollama. Verifique se ele está rodando na Goma.' }),
+      JSON.stringify({ error: 'Não foi possível conectar ao Ollama.' }),
       { status: 502, headers: { 'Content-Type': 'application/json' } },
     );
   }
 
-  // ── Stream de volta para o cliente + coleta resposta completa ──
+  // ── Stream para o cliente + salva resposta ────────────────────
   let fullResponse = '';
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
-      const reader = ollamaRes.body!.getReader();
+      const reader  = ollamaRes.body!.getReader();
       const decoder = new TextDecoder();
 
       try {
@@ -201,10 +267,9 @@ Responda à mensagem do usuário levando em conta o contexto acima quando releva
                 controller.enqueue(encoder.encode(token));
               }
               if (json.done) {
-                // Salva resposta completa no histórico
                 await supabase.from('ai_conversations').insert({
                   user_id: user.id,
-                  role: 'assistant',
+                  role:    'assistant',
                   content: fullResponse,
                 });
               }
@@ -219,7 +284,14 @@ Responda à mensagem do usuário levando em conta o contexto acima quando releva
     },
   });
 
-  return new Response(stream, {
-    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff' },
-  });
+  const responseHeaders: Record<string, string> = {
+    'Content-Type':           'text/plain; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+  };
+
+  if (loggedActivities.length > 0) {
+    responseHeaders['X-Activity-Logged'] = JSON.stringify(loggedActivities);
+  }
+
+  return new Response(stream, { headers: responseHeaders });
 }

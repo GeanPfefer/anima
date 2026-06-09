@@ -1,8 +1,11 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { calculateBonusMultiplier } from '@anima/core';
+import { getActivityBonuses, logActivity } from '@/lib/log-activity';
 import type { ActivityBonusType } from '@anima/types';
+
+// Re-exporta para uso nos componentes client
+export { getActivityBonuses, logActivity };
 
 // ─── Pulso do dia ──────────────────────────────────────────────────────────────
 
@@ -11,11 +14,10 @@ export async function logPulso(
 ): Promise<{ pillarName: string; recordId: string }> {
   if (!text.trim()) throw new Error('Texto vazio');
 
-  const supabase    = await createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Não autenticado');
 
-  // Busca pilares ativos (raiz)
   const { data: pillarsData } = await supabase
     .from('user_pillars')
     .select('id, name')
@@ -25,10 +27,9 @@ export async function logPulso(
   const pillars = pillarsData ?? [];
   if (pillars.length === 0) throw new Error('Nenhum pilar ativo');
 
-  const ollamaUrl   = process.env.OLLAMA_URL   ?? 'http://100.68.239.78:11434';
+  const ollamaUrl   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
   const ollamaModel = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
 
-  // Classifica o texto em um pilar (call leve, direto ao ponto)
   let pillarId   = pillars[0]!.id;
   let pillarName = pillars[0]!.name;
 
@@ -48,26 +49,18 @@ Retorne APENAS o nome de um pilar da lista, sem explicação.`;
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         signal:  controller.signal,
-        body: JSON.stringify({
-          model:   ollamaModel,
-          prompt,
-          stream:  false,
-          options: { temperature: 0.1 },
-        }),
+        body: JSON.stringify({ model: ollamaModel, prompt, stream: false, options: { temperature: 0.1 } }),
       });
       if (res.ok) {
-        const body = await res.json() as { response: string };
-        const raw  = body.response.trim();
-        const match = pillars.find(p =>
-          raw.toLowerCase().includes(p.name.toLowerCase()),
-        );
+        const body  = await res.json() as { response: string };
+        const match = pillars.find(p => body.response.trim().toLowerCase().includes(p.name.toLowerCase()));
         if (match) { pillarId = match.id; pillarName = match.name; }
       }
     } finally {
       clearTimeout(timeout);
     }
   } catch {
-    // Usa o primeiro pilar como fallback
+    // fallback: primeiro pilar
   }
 
   const activityDate = new Date().toISOString().slice(0, 10);
@@ -92,6 +85,8 @@ Retorne APENAS o nome de um pilar da lista, sem explicação.`;
   return { pillarName, recordId: record.id };
 }
 
+// ─── Parsing e log em lote (usado pelo modal) ──────────────────────────────────
+
 export type ParsedActivity = {
   pillarName: string;
   durationMinutes: number;
@@ -102,7 +97,7 @@ export async function parseActivities(
   text: string,
   pillarNames: string[],
 ): Promise<ParsedActivity[]> {
-  const ollamaUrl   = process.env.OLLAMA_URL   ?? 'http://100.68.239.78:11434';
+  const ollamaUrl   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
   const ollamaModel = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
 
   const prompt = `Você extrai atividades de vida de textos escritos naturalmente.
@@ -130,13 +125,7 @@ Retorne APENAS um array JSON válido, sem texto adicional.`;
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       signal:  controller.signal,
-      body: JSON.stringify({
-        model:   ollamaModel,
-        prompt,
-        stream:  false,
-        format:  'json',
-        options: { temperature: 0.1 },
-      }),
+      body: JSON.stringify({ model: ollamaModel, prompt, stream: false, format: 'json', options: { temperature: 0.1 } }),
     });
 
     if (!res.ok) throw new Error(`Ollama retornou HTTP ${res.status}`);
@@ -146,12 +135,7 @@ Retorne APENAS um array JSON válido, sem texto adicional.`;
     let activities: ParsedActivity[];
     try {
       const parsed = JSON.parse(body.response);
-      if (Array.isArray(parsed)) {
-        activities = parsed;
-      } else {
-        const inner = parsed?.activities ?? parsed?.data ?? parsed?.entries;
-        activities = Array.isArray(inner) ? inner : [];
-      }
+      activities = Array.isArray(parsed) ? parsed : (parsed?.activities ?? parsed?.data ?? parsed?.entries ?? []);
     } catch {
       const match = body.response.match(/\[[\s\S]*?\]/);
       if (!match) throw new Error('IA não retornou JSON válido');
@@ -159,8 +143,7 @@ Retorne APENAS um array JSON válido, sem texto adicional.`;
     }
 
     return activities.filter(
-      (a): a is ParsedActivity =>
-        typeof a.pillarName === 'string' && a.pillarName.trim().length > 0,
+      (a): a is ParsedActivity => typeof a.pillarName === 'string' && a.pillarName.trim().length > 0,
     );
   } finally {
     clearTimeout(timeout);
@@ -178,128 +161,4 @@ export async function logMultipleActivities(
     entries.push({ recordId: result.recordId, note: a.note });
   }
   return { totalXP, count: activities.length, entries };
-}
-
-export async function getActivityBonuses(
-  pillarId: string,
-  activityDate?: string, // YYYY-MM-DD; padrão: hoje
-): Promise<ActivityBonusType[]> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
-
-  const bonuses: ActivityBonusType[] = [];
-
-  // Normaliza a data alvo
-  const targetDate = activityDate
-    ? activityDate  // já em YYYY-MM-DD
-    : new Date().toISOString().slice(0, 10);
-
-  // Calcula datas relativas
-  const target     = new Date(targetDate + 'T12:00:00');
-  const minus5Days = new Date(target.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const minus7Days = new Date(target.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-  // first_of_day: nenhum registro com activity_date = targetDate
-  const { count: sameDayCount } = await supabase
-    .from('xp_records')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-    .eq('activity_date', targetDate);
-
-  if ((sameDayCount ?? 0) === 0) bonuses.push('first_of_day');
-
-  // forgotten_pillar: nenhum registro neste pilar nos 5 dias antes da targetDate
-  const { count: recentCount } = await supabase
-    .from('xp_records')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-    .eq('pillar_id', pillarId)
-    .gte('activity_date', minus5Days)
-    .lt('activity_date', targetDate);
-
-  if ((recentCount ?? 0) === 0) bonuses.push('forgotten_pillar');
-
-  // active_streak: registro neste pilar em cada um dos 6 dias antes da targetDate
-  const { data: streakRecords } = await supabase
-    .from('xp_records')
-    .select('activity_date')
-    .eq('user_id', user.id)
-    .eq('pillar_id', pillarId)
-    .gte('activity_date', minus7Days)
-    .lt('activity_date', targetDate);
-
-  const daysWithRecords = new Set(
-    (streakRecords ?? []).map(r => r.activity_date),
-  );
-
-  let hasStreak = true;
-  for (let i = 1; i <= 6; i++) {
-    const d = new Date(target.getFullYear(), target.getMonth(), target.getDate() - i);
-    const dayStr = d.toISOString().slice(0, 10);
-    if (!daysWithRecords.has(dayStr)) { hasStreak = false; break; }
-  }
-  if (hasStreak) bonuses.push('active_streak');
-
-  // active_quest: existe quest ativa para este pilar
-  const { count: activeQuestCount } = await supabase
-    .from('quests')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-    .eq('pillar_id', pillarId)
-    .in('status', ['open', 'in_progress']);
-
-  if ((activeQuestCount ?? 0) > 0) bonuses.push('active_quest');
-
-  return bonuses;
-}
-
-export async function logActivity(data: {
-  pillarId: string;
-  durationMinutes: number;
-  note: string;
-  activityDate?: string; // YYYY-MM-DD; padrão: hoje
-  questId?: string;
-}): Promise<{ totalXP: number; bonuses: ActivityBonusType[]; recordId: string }> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Não autenticado');
-
-  const { data: pillar } = await supabase
-    .from('user_pillars')
-    .select('xp_rate')
-    .eq('id', data.pillarId)
-    .eq('user_id', user.id)
-    .single();
-
-  if (!pillar) throw new Error('Pilar não encontrado');
-
-  const activityDate = data.activityDate ?? new Date().toISOString().slice(0, 10);
-
-  // Recalcula bônus no save com a data correta — evita race condition e garante backfill correto
-  const bonuses = await getActivityBonuses(data.pillarId, activityDate);
-  const baseXP = Math.round(data.durationMinutes * pillar.xp_rate);
-  const bonusMultiplier = calculateBonusMultiplier(bonuses);
-  const totalXP = Math.round(baseXP * bonusMultiplier);
-
-  const { data: record, error } = await supabase
-    .from('xp_records')
-    .insert({
-      user_id:          user.id,
-      pillar_id:        data.pillarId,
-      quest_id:         data.questId ?? null,
-      duration_minutes: data.durationMinutes,
-      base_xp:          baseXP,
-      bonus_multiplier: bonusMultiplier,
-      total_xp:         totalXP,
-      bonuses,
-      note:             data.note || null,
-      activity_date:    activityDate,
-    })
-    .select('id')
-    .single();
-
-  if (error || !record) throw new Error(error?.message ?? 'Erro ao inserir registro');
-
-  return { totalXP, bonuses, recordId: record.id };
 }

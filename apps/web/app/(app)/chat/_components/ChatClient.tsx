@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import styles from './chat.module.css';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
 export function ChatClient() {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput]       = useState('');
   const [loading, setLoading]   = useState(false);
@@ -42,6 +44,7 @@ export function ChatClient() {
         throw new Error(err.error ?? 'Erro na resposta');
       }
 
+      const activityHeader = res.headers.get('X-Activity-Logged');
       const reader  = res.body!.getReader();
       const decoder = new TextDecoder();
 
@@ -58,6 +61,11 @@ export function ChatClient() {
           };
           return updated;
         });
+      }
+
+      // Atualiza XP e histórico no dashboard se alguma atividade foi registrada
+      if (activityHeader) {
+        router.refresh();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao conectar com a IA');
