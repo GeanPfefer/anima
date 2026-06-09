@@ -3,6 +3,49 @@ import { calculateBonusMultiplier } from '@anima/core';
 import type { ActivityBonusType } from '@anima/types';
 
 /**
+ * Retorna o id do pilar com esse nome para o usuário,
+ * criando-o se ainda não existir.
+ * Busca case-insensitive — evita duplicatas de capitalização.
+ */
+export async function getOrCreatePillar(
+  userId: string,
+  name: string,
+): Promise<{ id: string; name: string; xp_rate: number; isNew: boolean }> {
+  const normalized = name.trim();
+
+  const { data: existing } = await supabase
+    .from('user_pillars')
+    .select('id, name, xp_rate')
+    .eq('user_id', userId)
+    .ilike('name', normalized)
+    .maybeSingle();
+
+  if (existing) return { ...existing, isNew: false };
+
+  // Obtém sort_order para o novo pilar
+  const { count } = await supabase
+    .from('user_pillars')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  const { data: created, error } = await supabase
+    .from('user_pillars')
+    .insert({
+      user_id:    userId,
+      catalog_id: null,
+      name:       normalized,
+      xp_rate:    1.0,
+      sort_order: count ?? 10,
+    })
+    .select('id, name, xp_rate')
+    .single();
+
+  if (error || !created) throw new Error(`Não foi possível criar pilar "${normalized}": ${error?.message}`);
+
+  return { ...created, isNew: true };
+}
+
+/**
  * Detecta automaticamente quais bônus se aplicam ao registrar uma atividade.
  * Bônus são calculados relativos a activityDate, não a created_at
  * (PRD §1b: backfill com data passada).

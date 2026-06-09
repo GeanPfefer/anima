@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { calculateBonusMultiplier } from '@anima/core';
-import { parseActivities, getActivityBonuses, logMultipleActivities } from '../actions';
+import { parseActivities, getActivityBonuses, logMultipleActivities, getOrCreatePillar } from '../actions';
 import type { ActivityBonusType } from '@anima/types';
 import styles from './LogActivityModal.module.css';
 
@@ -51,6 +51,8 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
   const [totalXP, setTotalXP]         = useState(0);
   const [errorMsg, setErrorMsg]       = useState('');
   const [activityDate, setActivityDate] = useState(todayStr());
+  // Pilares locais: inclui os do prop + novos inferidos pela IA durante esta sessão
+  const [localPillars, setLocalPillars] = useState<Pillar[]>(pillars);
   const counterRef                    = useRef(0);
 
   const handleClose = () => {
@@ -61,6 +63,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
     setTotalXP(0);
     setErrorMsg('');
     setActivityDate(todayStr());
+    setLocalPillars(pillars);
   };
 
   const handleParse = async () => {
@@ -68,11 +71,11 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
     setPhase('parsing');
     setErrorMsg('');
     try {
-      const parsed = await parseActivities(text, pillars.map(p => p.name));
+      const parsed = await parseActivities(text, localPillars.map(p => p.name));
 
       if (parsed.length === 0) {
         // Nenhuma atividade detectada → registra como presença (duration=0, sem XP)
-        const fallback = pillars[0];
+        const fallback = localPillars[0];
         if (!fallback) {
           setErrorMsg('Nenhum pilar disponível.');
           setPhase('input');
@@ -90,13 +93,31 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
         return;
       }
 
-      const matched = parsed
-        .map(a => ({
-          pillar: matchPillar(a.pillarName, pillars) ?? pillars[0],
-          durationMinutes: a.durationMinutes,
-          note: a.note,
-        }))
-        .filter((m): m is { pillar: Pillar; durationMinutes: number; note: string } => !!m.pillar);
+      // Resolve pilares: usa existente ou cria novo quando a IA inferiu um nome novo
+      const workingPillars = [...localPillars];
+      const matched: Array<{ pillar: Pillar; durationMinutes: number; note: string }> = [];
+
+      for (const a of parsed) {
+        let pillar = matchPillar(a.pillarName, workingPillars);
+
+        if (!pillar && a.pillarName.trim()) {
+          try {
+            const created = await getOrCreatePillar(a.pillarName);
+            pillar = { id: created.id, name: created.name, xp_rate: created.xp_rate };
+            if (!workingPillars.find(p => p.id === created.id)) {
+              workingPillars.push(pillar);
+            }
+          } catch {
+            pillar = workingPillars[0]; // fallback
+          }
+        }
+
+        if (pillar) matched.push({ pillar, durationMinutes: a.durationMinutes, note: a.note });
+      }
+
+      if (workingPillars.length !== localPillars.length) {
+        setLocalPillars(workingPillars);
+      }
 
       const uniqueIds = [...new Set(matched.map(m => m.pillar.id))];
       const bonusMap: Record<string, ActivityBonusType[]> = {};
@@ -178,7 +199,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
     }
   };
 
-  const totalXPPreview = entries.reduce((sum, e) => sum + calcXP(e, pillars), 0);
+  const totalXPPreview = entries.reduce((sum, e) => sum + calcXP(e, localPillars), 0);
   const isSubmitting   = phase === 'submitting';
   const isToday        = activityDate === todayStr();
 
@@ -250,7 +271,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
 
             <div className={styles.reviewList}>
               {entries.map(entry => {
-                const entryXP = calcXP(entry, pillars);
+                const entryXP = calcXP(entry, localPillars);
                 return (
                   <div key={entry.id} className={styles.entryCard}>
                     <div className={styles.entryHeader}>
@@ -262,7 +283,7 @@ export default function LogActivityModal({ pillars }: { pillars: Pillar[] }) {
                     </div>
                     {entry.note && <p className={styles.entryNote}>{entry.note}</p>}
                     <div className={styles.entryPillarRow}>
-                      {pillars.map(p => (
+                      {localPillars.map(p => (
                         <button
                           key={p.id}
                           className={`${styles.pill} ${entry.pillarId === p.id ? styles.pillActive : ''}`}

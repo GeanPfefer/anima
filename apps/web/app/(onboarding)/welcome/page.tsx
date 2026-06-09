@@ -98,13 +98,14 @@ export default function WelcomePage() {
           <p className={styles.nameSub}>Uma memória viva da sua vida.</p>
 
           <div className={styles.pillarsPreview}>
-            <p className={styles.pillarsLabel}>O que o Anima aprende a rastrear</p>
+            <p className={styles.pillarsLabel}>O que o Anima rastreia automaticamente</p>
             <div className={styles.pillarsChips}>
-              {['Trabalho', 'Saúde', 'Relações', 'Mente', 'Lazer', 'Finanças', 'Propósito'].map(p => (
+              {['Saúde', 'Mente', 'Relações'].map(p => (
                 <span key={p} className={styles.pillarsChip}>{p}</span>
               ))}
+              <span className={styles.pillarsChip}>+ o que aparecer na sua vida</span>
             </div>
-            <p className={styles.pillarsHint}>detectado pela IA · você não configura nada</p>
+            <p className={styles.pillarsHint}>inferido pela IA a partir do que você conta · sem configuração</p>
           </div>
 
           <form onSubmit={handleNameSubmit} className={styles.nameForm}>

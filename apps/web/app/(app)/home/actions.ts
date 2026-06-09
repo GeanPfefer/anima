@@ -100,12 +100,15 @@ export async function parseActivities(
   const ollamaUrl   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
   const ollamaModel = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
 
+  const pillarCtx = pillarNames.length > 0 ? pillarNames.join(', ') : 'Saúde, Mente, Relações';
+
   const prompt = `Você extrai atividades de vida de textos escritos naturalmente.
 
-Pilares disponíveis (escolha sempre um deles): ${pillarNames.join(', ')}
+Pilares do usuário: ${pillarCtx}
+Regra: use um pilar existente se a atividade se encaixar bem. Crie um nome novo APENAS se necessário — nome simples em português, máx 20 caracteres (ex: "Trabalho", "Finanças", "Lazer", "Crescimento").
 
 Para cada atividade identificada, crie um objeto com:
-- "pillarName": nome exato do pilar da lista acima
+- "pillarName": nome do pilar (existente ou novo)
 - "durationMinutes": duração em minutos como número inteiro (0 se não mencionada)
 - "note": resumo curto do que foi feito, máx 80 caracteres
 
@@ -148,6 +151,44 @@ Retorne APENAS um array JSON válido, sem texto adicional.`;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Retorna o id do pilar com esse nome para o usuário autenticado,
+ * criando-o se não existir.
+ */
+export async function getOrCreatePillar(
+  name: string,
+): Promise<{ id: string; name: string; xp_rate: number; isNew: boolean }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Não autenticado');
+
+  const normalized = name.trim();
+
+  const { data: existing } = await supabase
+    .from('user_pillars')
+    .select('id, name, xp_rate')
+    .eq('user_id', user.id)
+    .ilike('name', normalized)
+    .maybeSingle();
+
+  if (existing) return { ...existing, isNew: false };
+
+  const { count } = await supabase
+    .from('user_pillars')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id);
+
+  const { data: created, error } = await supabase
+    .from('user_pillars')
+    .insert({ user_id: user.id, catalog_id: null, name: normalized, xp_rate: 1.0, sort_order: count ?? 10 })
+    .select('id, name, xp_rate')
+    .single();
+
+  if (error || !created) throw new Error(`Não foi possível criar pilar "${normalized}"`);
+
+  return { ...created, isNew: true };
 }
 
 export async function logMultipleActivities(

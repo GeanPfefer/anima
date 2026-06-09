@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { calculateBonusMultiplier } from '@anima/core';
-import { getActivityBonuses, logMultipleActivities } from '@/lib/activity';
+import { getActivityBonuses, logMultipleActivities, getOrCreatePillar } from '@/lib/activity';
 import { parseActivityText, type ParsedActivity } from '@/lib/parse-activity';
 import { startRecording, transcribeFromUri, type RecordingHandle } from '@/lib/transcribe';
 import { enqueueRecording } from '@/lib/recording-queue';
@@ -110,6 +110,10 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
   const [parseError, setParseError]   = useState('');
   const [successXP, setSuccessXP]     = useState<number | null>(null);
   const [activityDate, setActivityDate] = useState(todayStr());
+
+  // Pilares locais: inclui os do prop + novos inferidos pela IA durante esta sessão
+  const [localPillars, setLocalPillars] = useState<Pillar[]>(pillars);
+  useEffect(() => { if (open) setLocalPillars(pillars); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Gravação de áudio
   const [recState, setRecState]     = useState<RecState>('idle');
@@ -272,7 +276,7 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
 
       if (parsed.length === 0) {
         // Nenhuma atividade detectada → registra como presença (duration=0, sem XP)
-        const fallbackPillar = pillars[0];
+        const fallbackPillar = localPillars[0];
         const newEntries: ReviewEntry[] = [{
           localId:         `${Date.now()}-0`,
           pillarId:        fallbackPillar?.id ?? null,
@@ -288,15 +292,40 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
         return;
       }
 
-      const newEntries: ReviewEntry[] = parsed.map((a, i) => ({
-        localId:        `${Date.now()}-${i}`,
-        pillarId:       matchPillar(a.pillarName, pillars)?.id ?? null,
-        durationMinutes: Math.max(0, Math.round(a.durationMinutes ?? 0)),
-        note:           (a.note ?? '').slice(0, 120),
-        editingDuration: false,
-        durationDraft:  '',
-        pillarExpanded: false,
-      }));
+      // Resolve pilares: usa existente ou cria novo quando a IA inferiu um nome novo
+      const workingPillars = [...localPillars];
+      const newEntries: ReviewEntry[] = [];
+
+      for (let i = 0; i < parsed.length; i++) {
+        const a = parsed[i];
+        let pillar = matchPillar(a.pillarName, workingPillars);
+
+        if (!pillar && a.pillarName.trim()) {
+          try {
+            const created = await getOrCreatePillar(userId, a.pillarName);
+            pillar = { id: created.id, name: created.name, xp_rate: created.xp_rate };
+            if (!workingPillars.find((p) => p.id === created.id)) {
+              workingPillars.push(pillar);
+            }
+          } catch {
+            // Criação falhou — pillarId fica null, usuário escolhe manualmente
+          }
+        }
+
+        newEntries.push({
+          localId:         `${Date.now()}-${i}`,
+          pillarId:        pillar?.id ?? null,
+          durationMinutes: Math.max(0, Math.round(a.durationMinutes ?? 0)),
+          note:            (a.note ?? '').slice(0, 120),
+          editingDuration: false,
+          durationDraft:   '',
+          pillarExpanded:  !pillar,
+        });
+      }
+
+      if (workingPillars.length !== localPillars.length) {
+        setLocalPillars(workingPillars);
+      }
 
       setEntries(newEntries);
 
@@ -402,7 +431,7 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
 
   // ── XP total estimado ────────────────────────────────────────────
   const totalXPEstimate = entries.reduce(
-    (sum, e) => sum + xpForEntry(e, pillars, bonusCache),
+    (sum, e) => sum + xpForEntry(e, localPillars, bonusCache),
     0,
   );
 
@@ -594,8 +623,8 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
                     <Text style={styles.emptyMsg}>Todas as entradas foram removidas.</Text>
                   ) : (
                     entries.map((entry) => {
-                      const pillar = pillars.find((p) => p.id === entry.pillarId);
-                      const xp     = xpForEntry(entry, pillars, bonusCache);
+                      const pillar = localPillars.find((p) => p.id === entry.pillarId);
+                      const xp     = xpForEntry(entry, localPillars, bonusCache);
                       const bonuses = entry.pillarId ? (bonusCache[entry.pillarId] ?? []) : [];
 
                       return (
@@ -698,7 +727,7 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
                               contentContainerStyle={styles.pillarPickerContent}
                               keyboardShouldPersistTaps="handled"
                             >
-                              {pillars.map((p) => (
+                              {localPillars.map((p) => (
                                 <TouchableOpacity
                                   key={p.id}
                                   style={[

@@ -12,7 +12,9 @@ import { colors, spacing, radius } from '@/constants/theme';
 const OLLAMA_URL   = process.env.EXPO_PUBLIC_OLLAMA_URL   ?? 'http://100.68.239.78:11434';
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL ?? 'qwen2.5:14b';
 
-const DEFAULT_PILLARS   = ['Mente', 'Trabalho', 'Saúde', 'Relações', 'Lazer'];
+// Os 3 pilares raiz (Saúde, Mente, Relações) já são criados pelo trigger de signup.
+// O onboarding só adiciona pilares EXTRAS inferidos da conversa.
+const DEFAULT_PILLARS   = [] as string[];
 const DEFAULT_ARCHETYPE = { explorer: 25, focused: 25, builder: 25, visionary: 25 };
 
 type Message    = { role: 'user' | 'assistant'; content: string };
@@ -94,33 +96,32 @@ async function extractProfile(messages: Message[], name: string) {
     .map(m => `${m.role === 'user' ? name : 'Anima'}: ${m.content}`)
     .join('\n');
 
-  const prompt = `Com base nesta conversa inicial entre o Anima e ${name}, extraia o perfil.
+  const prompt = `Com base nesta conversa inicial entre o Anima e ${name}, identifique as áreas de vida relevantes.
 
 CONVERSA:
 ${conversationText}
 
 Retorne APENAS um JSON válido com exatamente estas chaves:
 {
-  "pillars": ["NomePilar1", "NomePilar2", "NomePilar3"],
+  "pillars": ["NomePilar1", "NomePilar2"],
   "subPillars": [{"name": "TopicoEspecifico", "parentName": "NomePilar1"}],
   "archetype": {"explorer": 40, "focused": 30, "builder": 20, "visionary": 10}
 }
 
 REGRAS PARA pillars:
-- Escolha APENAS da lista: [Mente, Propósito, Trabalho, Saúde, Relações, Finanças, Lazer]
-- Inclua entre 3 e 5 pilares — os mais relevantes para esta pessoa
-- Infira mesmo de menções indiretas:
+- Os pilares Saúde, Mente e Relações JÁ EXISTEM — NÃO os inclua aqui
+- Apenas pilares ADICIONAIS claramente evidenciados na conversa
+- Nomes simples em português, máx 20 chars (ex: "Trabalho", "Finanças", "Lazer", "Crescimento")
+- Se não houver nada claro além dos 3 base, retorne array vazio []
+- Máximo 4 pilares adicionais
+- Infira de menções:
     projeto/empresa/código/carreira → Trabalho
-    família/amigos/amor/parceiro → Relações
-    exercício/sono/alimentação/energia → Saúde
-    leitura/aprendizado/foco/clareza → Mente
-    propósito/valores/missão/legado → Propósito
+    hobby/descanso/criatividade/arte → Lazer
     dinheiro/renda/dívida/investimento → Finanças
-    hobby/descanso/viagem/jogo/lazer → Lazer
-- NÃO copie o exemplo acima — analise a conversa real
+    propósito/valores/missão/identidade → Crescimento
 
 REGRAS PARA subPillars:
-- Apenas temas bem específicos e claramente mencionados (ex: "skate", "Anima", "ansiedade")
+- Apenas temas muito específicos e claramente mencionados (ex: "skate", "meditação")
 - Array vazio se não houver nada suficientemente específico
 
 REGRAS PARA archetype:
@@ -217,27 +218,39 @@ export default function WelcomeScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Não autenticado');
 
-      const { data: catalog } = await supabase.from('pillar_catalog').select('id, name');
-      const catalogMap = new Map((catalog ?? []).map(p => [norm(p.name), p]));
-
-      const pillarRows = extracted.pillars.map((n: string, i: number) => ({
-        user_id:    user.id,
-        catalog_id: catalogMap.get(norm(n))?.id ?? null,
-        name:       n,
-        xp_rate:    1.0,
-        sort_order: i,
-      }));
-
-      const { data: insertedPillars } = await supabase
+      // Pilares raiz (Saúde, Mente, Relações) já criados pelo trigger de signup.
+      // Busca pilares já existentes para evitar duplicatas.
+      const { data: existingPillars } = await supabase
         .from('user_pillars')
-        .insert(pillarRows)
-        .select('id, name');
+        .select('name')
+        .eq('user_id', user.id);
+      const existingNames = new Set((existingPillars ?? []).map((p: { name: string }) => norm(p.name)));
 
-      if (extracted.subPillars.length > 0 && insertedPillars) {
+      const newPillarNames = (extracted.pillars as string[]).filter(n => !existingNames.has(norm(n)));
+
+      let insertedPillars: Array<{ id: string; name: string }> = [];
+      if (newPillarNames.length > 0) {
+        const pillarRows = newPillarNames.map((n, i) => ({
+          user_id:    user.id,
+          catalog_id: null,
+          name:       n,
+          xp_rate:    1.0,
+          sort_order: (existingPillars?.length ?? 3) + i,
+        }));
+
+        const { data } = await supabase
+          .from('user_pillars')
+          .insert(pillarRows)
+          .select('id, name');
+        insertedPillars = data ?? [];
+      }
+
+      if (extracted.subPillars.length > 0 && insertedPillars.length > 0) {
+        const baseOrder = (existingPillars?.length ?? 3) + insertedPillars.length;
         const subRows = extracted.subPillars.map((sp: { name: string }, i: number) => ({
           user_id: user.id, catalog_id: null,
           name: sp.name, xp_rate: 1.0,
-          sort_order: extracted.pillars.length + i,
+          sort_order: baseOrder + i,
         }));
         const { data: insertedSubs } = await supabase
           .from('user_pillars').insert(subRows).select('id, name');

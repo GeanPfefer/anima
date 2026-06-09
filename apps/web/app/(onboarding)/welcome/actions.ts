@@ -13,7 +13,8 @@ type Extracted = {
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
 
-const DEFAULT_PILLARS   = ['Mente', 'Trabalho', 'Saúde', 'Relações', 'Lazer'];
+// Os 3 pilares raiz (Saúde, Mente, Relações) já são criados pelo trigger de signup.
+const DEFAULT_PILLARS   = [] as string[];
 const DEFAULT_ARCHETYPE = { explorer: 25, focused: 25, builder: 25, visionary: 25 };
 
 function norm(s: string) {
@@ -40,23 +41,32 @@ export async function completeOnboarding(messages: Message[]): Promise<void> {
 
   const extracted = await extractFromConversation(messages, profile?.name ?? 'usuário');
 
-  // Busca catálogo de pilares para fazer o match por nome
-  const { data: catalog } = await supabase.from('pillar_catalog').select('id, name');
-  const catalogMap = new Map((catalog ?? []).map(p => [norm(p.name), p]));
-
-  // Insere pilares principais
-  const pillarRows = extracted.pillars.map((name, i) => ({
-    user_id:    user.id,
-    catalog_id: catalogMap.get(norm(name))?.id ?? null,
-    name,
-    xp_rate:    1.0,
-    sort_order: i,
-  }));
-
-  const { data: insertedPillars } = await supabase
+  // Pilares raiz (Saúde, Mente, Relações) já criados pelo trigger de signup.
+  // Busca pilares existentes para evitar duplicatas.
+  const { data: existingPillars } = await supabase
     .from('user_pillars')
-    .insert(pillarRows)
-    .select('id, name');
+    .select('name')
+    .eq('user_id', user.id);
+  const existingNames = new Set((existingPillars ?? []).map(p => norm(p.name)));
+
+  const newPillarNames = extracted.pillars.filter(n => !existingNames.has(norm(n)));
+
+  let insertedPillars: Array<{ id: string; name: string }> = [];
+  if (newPillarNames.length > 0) {
+    const pillarRows = newPillarNames.map((name, i) => ({
+      user_id:    user.id,
+      catalog_id: null,
+      name,
+      xp_rate:    1.0,
+      sort_order: (existingPillars?.length ?? 3) + i,
+    }));
+
+    const { data } = await supabase
+      .from('user_pillars')
+      .insert(pillarRows)
+      .select('id, name');
+    insertedPillars = data ?? [];
+  }
 
   // Insere sub-pilares inferidos
   if (extracted.subPillars.length > 0 && insertedPillars) {
@@ -106,29 +116,29 @@ async function extractFromConversation(messages: Message[], name: string): Promi
     .map(m => `${m.role === 'user' ? name : 'Anima'}: ${m.content}`)
     .join('\n');
 
-  const prompt = `Com base nesta conversa inicial entre o Anima e ${name}, extraia o perfil.
+  const prompt = `Com base nesta conversa inicial entre o Anima e ${name}, identifique as áreas de vida relevantes.
 
 CONVERSA:
 ${conversationText}
 
 Retorne APENAS um JSON válido com exatamente estas chaves:
 {
-  "pillars": ["NomePilar1", "NomePilar2", "NomePilar3"],
+  "pillars": ["NomePilar1", "NomePilar2"],
   "subPillars": [{"name": "TopicoEspecifico", "parentName": "NomePilar1"}],
   "archetype": {"explorer": 40, "focused": 30, "builder": 20, "visionary": 10}
 }
 
 REGRAS PARA pillars:
-- Escolha APENAS da lista: [Mente, Propósito, Trabalho, Saúde, Relações, Finanças, Lazer]
-- Inclua entre 3 e 5 pilares — os mais relevantes para esta pessoa
-- Infira mesmo de menções indiretas:
+- Os pilares Saúde, Mente e Relações JÁ EXISTEM — NÃO os inclua aqui
+- Apenas pilares ADICIONAIS claramente evidenciados na conversa
+- Nomes simples em português, máx 20 chars (ex: "Trabalho", "Finanças", "Lazer", "Crescimento")
+- Se não houver nada claro além dos 3 base, retorne array vazio []
+- Máximo 4 pilares adicionais
+- Infira de menções:
     projeto/empresa/código/carreira → Trabalho
-    família/amigos/amor/parceiro → Relações
-    exercício/sono/alimentação/energia → Saúde
-    leitura/aprendizado/foco/clareza → Mente
-    propósito/valores/missão/legado → Propósito
+    hobby/descanso/criatividade/arte → Lazer
     dinheiro/renda/dívida/investimento → Finanças
-    hobby/descanso/viagem/jogo/lazer → Lazer
+    propósito/valores/missão/identidade → Crescimento
 - NÃO copie o exemplo acima — analise a conversa real
 - NUNCA inclua o nome do app (Anima), hábitos ruins (fumar, beber) ou nomes próprios como pilares
 

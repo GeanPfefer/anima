@@ -15,12 +15,17 @@ export async function parseActivityText(
   text: string,
   availablePillars: string[],
 ): Promise<ParsedActivity[]> {
+  const pillarCtx = availablePillars.length > 0
+    ? availablePillars.join(', ')
+    : 'Saúde, Mente, Relações';
+
   const prompt = `Você extrai atividades de vida de textos escritos naturalmente.
 
-Pilares disponíveis (escolha sempre um deles): ${availablePillars.join(', ')}
+Pilares do usuário: ${pillarCtx}
+Regra: use um pilar existente se a atividade se encaixar bem. Crie um nome novo APENAS se necessário — nome simples em português, máx 20 caracteres (ex: "Trabalho", "Finanças", "Lazer", "Crescimento").
 
 Para cada atividade identificada, crie um objeto com:
-- "pillarName": nome exato do pilar da lista acima
+- "pillarName": nome do pilar (existente ou novo)
 - "durationMinutes": duração em minutos como número inteiro (0 se não mencionada)
 - "note": resumo curto do que foi feito, máx 80 caracteres
 
