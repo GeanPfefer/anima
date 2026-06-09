@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-06-05 (sessão: paradigma de pilares emergentes — onboarding conversacional substitui wizard de 5 steps; arquétipo inferido comportamentalmente; seções 1c/1d/1e/2/7/8/10/13 reescritas)
+> Documento vivo de design. Última atualização: 2026-06-09 (sessão: chat unificado — onboarding + logging + conversa = um único fluxo; notas como objeto central; modos de exibição; detecção três destinos; captura silenciosa de alimentação/gastos; pilares pendentes; Fase 1 implementada)
 > Para retomar o projeto em qualquer IA: cole este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -374,54 +374,183 @@ O app sugere quests e ações disponíveis com base em:
 
 ---
 
-## 7. Onboarding — primeira conversa natural
+## 7. Chat unificado — onboarding + logging + conversa
 
-> **O onboarding tradicional (5 steps rígidos) foi removido.** Substituído por uma primeira conversa com a IA.
+> **Decisão fundamental de jun/2026:** onboarding, chat e registro de atividades são **um único fluxo**. Não existem dois modos separados. O mesmo chat serve desde a primeira mensagem até o uso diário.
 
 ### Princípio
-O onboarding nunca deve parecer setup, formulário, questionário ou configuração de sistema. Deve parecer o início de uma relação — um espaço leve onde a pessoa simplesmente conta o que está acontecendo na vida.
+O chat é a superfície de entrada universal. O usuário nunca precisa:
+- Abrir um "modal de nova entrada"
+- Clicar em "Registrar atividade"
+- Preencher formulários de pilares e duração
+- Ter um "modo onboarding" separado do "modo uso"
 
-### Fluxo
+Tudo isso acontece **na mesma conversa**, silenciosamente, em segundo plano.
 
-**1. Tela inicial pós-signup:** só pede o nome (como quer ser chamado). Nenhuma outra configuração.
+### O que acontece em cada mensagem enviada (Fase 1 — implementado)
 
-**2. Primeira conversa:** a IA inicia com uma pergunta aberta de baixa fricção.
+Ao receber qualquer mensagem o backend:
 
-Exemplos de abertura:
-- "O que fez você baixar o Anima?"
-- "O que está ocupando sua mente ultimamente?"
-- "Sem pressa — me conta o que está acontecendo na sua vida agora."
+1. **Detecta atividades intencionais** (Ollama, conservador — temperatura 0.1, timeout 15s)
+   - Registra automaticamente no `xp_records` se encontrar algo válido
+   - Retorna header `X-Activity-Logged` com JSON das atividades logadas
+   - A IA confirma brevemente no início da resposta, de forma natural
 
-**3. A IA trabalha em segundo plano durante a conversa:**
-- Acolhe a resposta (tom: curioso, humano, não-invasivo)
-- Infere pilares iniciais dos temas mencionados
-- Detecta arquétipo comportamental preliminar pela linguagem e foco
-- Inicia a memória narrativa (Camada 1 e 2)
+2. **Gera embedding semântico** da mensagem (em paralelo com a detecção)
+   - Usado para retrieval contextual no mesmo turno
+   - Embedding das notas das atividades salvo em `entry_embeddings` (fire-and-forget)
 
-**4. Encerramento natural:** quando há contexto suficiente (sem critério rígido), a IA propõe ir para o dashboard. Sem "conclusão" formal — o onboarding é contínuo.
+3. **Responde como IA** com contexto completo do usuário:
+   - Pilares ativos (nível, XP, contexto)
+   - Atividades recentes
+   - Quests ativas
+   - Memória semântica
+   - Retrieval contextual (entradas similares da história do usuário)
 
-### O que a primeira conversa NÃO é
-- Não é um quiz
-- Não é uma entrevista de diagnóstico
-- Não é um formulário disfarçado
-- Não é coaching
-- Não tem número mínimo de perguntas ou etapas obrigatórias
+4. **O cliente atualiza o dashboard** via `router.refresh()` se atividades foram logadas
 
-### Descoberta progressiva de identidade
-O sistema não assume que o usuário sabe quem é, o que quer ou quais áreas priorizar. A identidade emerge ao longo do uso. O "onboarding" nunca termina formalmente — o sistema aprende continuamente.
+### Modelo de detecção — três destinos
+
+Cada mensagem passa por classificação silenciosa com três saídas possíveis:
+
+| Tipo de conteúdo | Destino | XP |
+|------------------|---------|-----|
+| Atividade intencional (esporte, estudo, trabalho, criação...) | `xp_records` + pilar | Fórmula: tempo × taxa × bônus |
+| Nota (alimentação, gasto, sentimento, ideia, reflexão) | `notes` (futuro) | 5–20 XP flat (baseado em profundidade da nota) |
+| Conversa pura (pergunta, planejamento, bate-papo) | Nenhum registro | 0 XP |
+
+### O que NÃO é registrado como atividade
+A detecção é conservadora por design. Falso negativo é melhor que registrar lixo:
+- ❌ Comer, beber, almoçar, jantar, tomar café ou qualquer refeição
+- ❌ Dormir, descansar, assistir TV, rolar o feed
+- ❌ Deslocamento comum (ir ao trabalho, pegar ônibus)
+- ❌ Compras rotineiras
+- ❌ Perguntas, planos futuros, sentimentos sem ação concreta
+
+### Matching de pilares — estrito
+A atividade só é registrada se o pilar detectado corresponder **exatamente** (normalizado, sem acentos) a um pilar ativo do usuário. Sem fallback fuzzy — evita jogar atividades no pilar errado por falta de opção.
+
+### Tom da IA (decisão de jun/2026)
+- **Direto.** Sem "Claro!", "Ótima pergunta!", introduções ou rodeios
+- **Humano.** Como um amigo que presta atenção, não um assistente que quer agradar
+- **Sem perguntas de encerramento.** "Como posso ajudar?" e "Há algo mais?" não existem
+- **Sem emojis** na maioria das respostas
+- **Prosa em vez de listas** quando o conteúdo for conversacional
+- Quando perguntam "o que você é?": responde com o que FAZ na prática, com exemplos reais do histórico do usuário
+
+### Onboarding dentro do chat (Fase 3 — pendente)
+A primeira conversa já acontece no chat. A rota `/welcome` será dissolvida — o chat detecta que é o primeiro uso e adapta o comportamento:
+- Primeira mensagem: acolhe e pergunta o que está acontecendo na vida
+- Em segundo plano: infere pilares iniciais, arquétipo, inicia memória narrativa
+- `onboarding_completed_at` é setado após contexto suficiente (sem critério rígido)
+- O usuário nunca percebe a transição — é o mesmo chat desde o primeiro dia
+
+### Pilares pendentes (Fase 2 — pendente)
+Quando o chat detecta uma atividade em pilar ainda não criado para o usuário:
+- Cria o pilar com status `pending` (sem aparecer no dashboard)
+- Na próxima abertura do dashboard ou ao fim da conversa: "Percebi que você começou kung fu — quer que eu crie um pilar para isso?"
+- O usuário confirma (nome editável) ou ignora
+- Confirmado → pilar vira `active`; XP da atividade original é aplicado
 
 ### Arquétipo inferido (não mais quiz)
-Os 4 arquétipos (Explorador, Focado, Construtor, Visionário) passam a ser um **modelo comportamental vivo**, inferido pela IA com base em:
-- Forma e frequência de escrita
-- Temas recorrentes
-- Padrões de decisão
-- Linguagem e intensidade emocional
-
-O resultado em `profiles.archetype` é atualizado continuamente — não fixado num momento inicial.
+Os 4 arquétipos (Explorador, Focado, Construtor, Visionário) são um **modelo comportamental vivo**, inferido continuamente pela IA. O campo `profiles.archetype` é atualizado a cada nova conversa — não fixado num momento inicial.
 
 ### Estado técnico
-- **⚠️ Pendente refatoração:** o código atual (steps 1–5) implementa o onboarding antigo. Precisa ser substituído pelo fluxo conversacional descrito acima.
-- O campo `onboarding_completed_at` ainda é usado como guard de rota. No novo modelo, é setado após a primeira conversa ter contexto suficiente (a definir).
+- **✅ Fase 1:** detecção + logging automático via chat implementado (`/api/ai/chat`)
+- **⚠️ Fase 2:** pilares pendentes — não implementado
+- **⚠️ Fase 3:** dissolver `/welcome` no chat — não implementado; código dos steps 1–5 está deprecated
+
+---
+
+---
+
+## 7b. Notas — captura silenciosa sem comentário da IA
+
+> **Decisão de jun/2026.** Notas são um objeto central do sistema — tão importantes quanto atividades. São capturadas silenciosamente, sem que a IA comente ou avalie o conteúdo.
+
+### O que é uma nota
+Uma nota é qualquer registro que **não se encaixa como atividade intencional**, mas que o usuário quer preservar para análise futura:
+- Alimentação (o que comeu, bebeu, onde)
+- Gastos e transações financeiras
+- Humor e estado emocional
+- Ideias, reflexões, observações
+- Acontecimentos do dia sem pilar claro
+
+### Por que não é atividade
+Comer, beber, sentir algo, gastar dinheiro — são parte da vida, não investimentos intencionais em pilares. Registrar "tomar sorvete" como atividade de Saúde distorce o sistema e cria ruído.
+
+### Filosofia de captura silenciosa
+**A IA não comenta, avalia, elogia nem questiona o conteúdo das notas.**
+
+Exemplos do que a IA NÃO faz com notas:
+- ❌ "Boa escolha de alimentação!"
+- ❌ "Você tem comido muitos carboidratos..."
+- ❌ "Isso pode afetar sua saúde!"
+- ❌ "Quanto gastou no total hoje?"
+
+A IA simplesmente registra. O usuário vê os padrões por conta própria nos relatórios mensais.
+
+### Contexto implícito das notas
+Cada nota carrega contexto pelo tipo de conteúdo detectado:
+- Alimento → saúde implícita (para relatório de hábitos alimentares)
+- Gasto → finanças implícitas (para relatório de gastos)
+- Humor → emocional (para relatório de padrões emocionais)
+
+Esse contexto é armazenado, mas **nunca exibido como julgamento em tempo real**.
+
+### XP de notas (decisão pendente de calibrar)
+- Notas geram XP flat com base na profundidade inferida pela IA
+- Faixa: 5–20 XP por nota (sem multiplicador de tempo — notas não têm duração)
+- Racional: registrar algo tem valor; a quantidade de detalhes indica intenção
+
+### Relatórios mensais — onde as notas fazem sentido
+Os dados das notas são apresentados no relatório mensal do usuário:
+- Frequência e variedade alimentar
+- Total gasto e distribuição de categorias
+- Padrão emocional ao longo do mês
+- Correlações detectadas (ex: humor baixo nos dias sem exercício)
+
+**Os relatórios são para o usuário ver e interpretar — a IA não apresenta conclusões, apenas organiza os dados.**
+
+### Tabela `notes` (schema planejado — não implementado)
+```sql
+notes (
+  id            uuid primary key,
+  user_id       uuid references auth.users,
+  content       text not null,          -- texto bruto da nota
+  note_type     text,                   -- 'food', 'expense', 'mood', 'idea', 'other'
+  context       jsonb,                  -- dados estruturados extraídos (valor, item, humor...)
+  pillar_hint   text,                   -- pilar implícito (para filtros nos relatórios)
+  xp_awarded    int default 0,
+  note_date     date not null,
+  created_at    timestamptz default now()
+)
+```
+
+### Estado técnico
+- **⚠️ Pendente:** migração SQL, detecção no chat (atualmente alimentos chegam ao detect-activity e são descartados; precisam ser roteados para notes), tela de notas, relatórios mensais
+
+---
+
+## 7c. Modos de exibição
+
+> **Decisão de jun/2026.** Os mesmos dados podem ser apresentados em três modos visuais. O usuário alterna conforme seu estado — não muda o que é registrado, só a apresentação.
+
+### Os três modos
+
+| Modo | Visual | Para quem / quando |
+|------|--------|--------------------|
+| **Game** | Radar de vida, níveis, XP, eras, conquistas em destaque | Usuário que quer motivação visual, sensação de progresso, o "jogo" |
+| **Analítico** | Gráficos de linha, calendário de atividade, estatísticas por pilar, tendências | Usuário em modo de análise, quer padrões, números, comparativos |
+| **Minimal** | Lista limpa de entradas e notas, sem game elements, sem métricas | Usuário que quer só escrever e registrar sem distração |
+
+### Princípio
+Os dados são idênticos em qualquer modo. A estrutura subjacente (XP, pilares, notas) não muda — só a interface de visualização.
+
+### Implementação
+- Campo `display_mode` em `profiles` (`'game' | 'analytical' | 'minimal'`, padrão: `'game'`)
+- Alternância via configurações, sem reload
+- Estado técnico: **⚠️ Pendente** — não implementado
 
 ---
 
@@ -458,13 +587,17 @@ O resultado em `profiles.archetype` é atualizado continuamente — não fixado 
 
 | Tabela | Função |
 |--------|--------|
-| `profiles` | Dados do usuário (nome, onboarding_completed_at) |
+| `profiles` | Dados do usuário (nome, onboarding_completed_at, display_mode) |
 | `pillar_catalog` | Catálogo dos 7 pilares padrão com taxas XP |
-| `user_pillars` | Pilares ativos por usuário (xp_total, level, is_active) |
+| `user_pillars` | Pilares ativos por usuário (xp_total, level, is_active, status: active/pending) |
 | `xp_records` | Histórico imutável de atividades registradas |
+| `notes` | ⚠️ Pendente — notas de alimentação, gastos, humor, ideias (ver seção 7b) |
 | `life_events` | Eventos sem duração (marcos, conquistas, mudanças de estado) |
 | `quests` | Quests do usuário |
 | `quest_missions` | Sub-missões de uma quest |
+| `ai_conversations` | Histórico de mensagens do chat |
+| `entry_embeddings` | Embeddings semânticos das notas de atividades (pgvector) |
+| `semantic_entities` | Entidades persistentes extraídas pela IA (pessoas, lugares, projetos) |
 
 ### Triggers automáticos
 - `on_auth_user_created` → cria row em `profiles` automaticamente no signup
@@ -531,6 +664,15 @@ O resultado em `profiles.archetype` é atualizado continuamente — não fixado 
 | PillarCard fora do componente (mobile) | Componente definido no módulo, não dentro do pai | Componentes definidos dentro de outros criam novo tipo a cada render → chave duplicada e remount desnecessário |
 | Padrão de adaptador p/ integrações | Núcleo agnóstico + conector plugável na borda | Mesmo encaixe serve depois para Health/Fit; não acopla o app a ferramenta externa |
 | Sync Obsidian inicial | Só export, mão única (Postgres → markdown) | Duas vias (conflito/parsing) poderia quebrar e "atrapalhar"; fica para fase 2 |
+| Chat como superfície única | Chat = onboarding + logging + conversa; sem modal separado de "nova entrada" | Unifica o ponto de entrada; reduz fricção; a IA organiza em segundo plano |
+| Notas vs Atividades | Alimentação, gastos, humor → `notes`; esportes, estudo, trabalho → `xp_records` | Comer não é investimento em pilar; registrar tudo como atividade distorce o sistema |
+| IA silenciosa em notas | A IA não comenta, avalia nem questiona o conteúdo das notas | Usuário quer registrar, não ser julgado; padrões ficam para os relatórios mensais |
+| Relatórios mensais | Dados de notas apresentados mensalmente para o usuário interpretar | IA organiza, usuário interpreta — sem conclusões automáticas |
+| Modos de exibição | game / analytical / minimal — mesmos dados, apresentações diferentes | Diferentes estados do usuário pedem diferentes interfaces; sem criar dois produtos |
+| Pilares pendentes | Novo pilar detectado → status `pending` → confirmação do usuário | Evita criar pilares errados; confirma intenção sem bloquear o fluxo |
+| Tom da IA (jun/2026) | Direto, humano, sem "Claro!", sem perguntas de encerramento, prosa > listas | Respostas corporativas afastam; o diferencial é parecer um amigo, não um assistente |
+| Detecção estrita de pilares | Match normalizado exato — sem fallback fuzzy | Falso negativo é melhor que registrar em pilar errado |
+| Alimentos → notas, não Saúde | Comida e bebida nunca viram atividade de pilar | Comer é rotina básica; registrar como atividade cria ruído e dilui o valor de Saúde |
 
 ---
 
@@ -592,6 +734,9 @@ anima/
 - [x] Quests — lista, criação com sub-missões, XP máx 10.000, conclusão e abandono
 - [x] Chat com IA local — `/chat`; streaming via Ollama (qwen2.5:14b na Goma); contexto completo do usuário (pilares, arquétipo, histórico, quests); histórico salvo em `ai_conversations`; markdown renderizado; botão limpar histórico; 3 pontinhos animados enquanto processa
 - [x] Dashboard hierárquico — sub-pilares indentados sob os pais; borda lateral esquerda; card mais compacto/sutil; radar e nível do personagem usam só pilares raiz
+- [x] **Chat unificado — Fase 1** — detecção automática de atividades em cada mensagem do chat; logging direto no `xp_records`; pilares só registrados com match exato (sem fuzzy fallback); `X-Activity-Logged` header → `router.refresh()` no cliente; embedding fire-and-forget salvo em `entry_embeddings`; IA confirma naturalmente (sem linguagem corporativa) (`/api/ai/chat`, `lib/detect-activity.ts`, `lib/log-activity.ts`, `lib/generate-embedding.ts`)
+- [x] **Tom da IA corrigido** — novo system prompt: direto, humano, sem introduções, sem perguntas de encerramento, sem listas desnecessárias; responde "o que você é?" com exemplos do histórico real do usuário
+- [x] **Onboarding melhorado** — extração de pilares com proibições explícitas (nome do app, hábitos ruins, nomes próprios não viram pilares); sub-pilares limitados a 3; match estrito com catálogo
 
 ---
 
@@ -656,18 +801,39 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 
 ## 13. Próximos temas a explorar
 
-> Prioridade P0 adicionada em jun/2026: onboarding conversacional é a base de tudo.
+> Atualizado em jun/2026: Fase 1 (chat unificado) concluída. Fase 2 (pilares pendentes) e Fase 3 (dissolução do /welcome) são os próximos passos de unificação.
 
-### P0 — Onboarding conversacional (bloqueante)
-- [ ] **Substituir steps 1–5 por primeira conversa** — web e mobile; rota `/welcome`; a IA acolhe, infere pilares e arquétipo iniciais, inicia memória narrativa; `onboarding_completed_at` setado após contexto suficiente
-- [ ] **Deprecar e remover código dos steps** — `app/(onboarding)/step-1` a `step-5`, `lib/archetypes.ts` (quiz), `lib/pillar-questions.ts`
+### Fase 2 — Pilares pendentes (próximo)
+- [ ] Adicionar coluna `status` em `user_pillars` (`'active' | 'pending'`)
+- [ ] No `detect-activity.ts`: quando pilar detectado não existe → criar com `status: 'pending'` e XP acumulado
+- [ ] No dashboard: mostrar card "Percebi que você praticou X — quer criar um pilar para isso?" ao abrir
+- [ ] Confirmar: pilar vira `active`, XP original aplicado; ignorar: pilar deletado sem rastro
+
+### Fase 3 — Dissolução do /welcome no chat (pendente)
+- [ ] Remover rota `/welcome` e código dos steps 1–5
+- [ ] No chat: detectar primeiro uso (sem `onboarding_completed_at`) e adaptar tone da primeira mensagem
+- [ ] Substituir `/signup → /welcome` por `/signup → /chat`
+- [ ] `onboarding_completed_at` setado quando pilares iniciais são criados (primeira sessão de chat)
+- [ ] Deprecar: `app/(onboarding)/step-1` a `step-5`, `lib/archetypes.ts` (quiz), `lib/pillar-questions.ts`
+
+### Notas — implementação (pendente)
+- [ ] Migration SQL: tabela `notes` (ver schema na seção 7b)
+- [ ] Adicionar coluna `display_mode` em `profiles`
+- [ ] No `detect-activity.ts` (ou novo `classify-message.ts`): terceiro destino — quando conteúdo é alimentação/gasto/humor → rota para `notes` em vez de descartar
+- [ ] Tela de notas (web + mobile)
+- [ ] Relatórios mensais: alimentação, gastos, humor ao longo do mês
+
+### Modos de exibição (pendente)
+- [ ] Adicionar `display_mode` em `profiles` (`'game' | 'analytical' | 'minimal'`)
+- [ ] Alternância via configurações
+- [ ] Implementar layout analítico (gráficos de linha, calendário de atividade)
+- [ ] Implementar layout minimal (lista limpa, sem game elements)
 
 ### P1 — Captura e memória (núcleo do produto)
-- [ ] **Testar input por áudio no mobile** — servidor Whisper na Goma (porta 9000); setup documentado na seção 12b
 - [ ] **Memória semântica — Camada 3** — sistema aprende entidades persistentes do usuário (pessoas, lugares, projetos, padrões); retrieval semântico com embeddings + pgvector
 - [ ] **Timeline narrativa** — histórico como narrativa temporal, não só lista; base para insights
-- [ ] **Retrieval contextual temporal** — busca semântica no histórico para alimentar chat e insights
 - [ ] **Backfill com data passada** — registrar atividade com data anterior (decidido, não implementado)
+- [ ] **Chat no mobile** — adicionar aba de chat no app mobile (atualmente só web)
 
 ### P2 — Reflexão e insights (Camada 4)
 - [ ] **Insights automáticos** — IA lendo timeline; critérios: raros, específicos, contextualizados, honestos (sem coaching genérico)
@@ -683,9 +849,11 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 - [ ] **Modelo de monetização** — quando abrir ao público
 
 ### Concluído
+- [x] **Chat unificado — Fase 1** — detecção + logging automático via chat; tom da IA humano e direto; match estrito de pilares; `X-Activity-Logged` header; `router.refresh()` no cliente
 - [x] **Input natural com IA** — texto livre + áudio (web + mobile); 5 fases
-- [x] **Chat com IA contextual** — streaming via Ollama; contexto completo do usuário; web
+- [x] **Chat com IA contextual** — streaming via Ollama; contexto completo do usuário; retrieval semântico; web
 - [x] **Dashboard hierárquico** — sub-pilares indentados sob pais; web + mobile
+- [x] **Onboarding conversacional (parcial)** — `/welcome` com chat; extração de pilares com regras rígidas (sem nome do app, sem hábitos ruins, sem nomes próprios)
 
 ---
 
