@@ -130,10 +130,13 @@ REGRAS PARA pillars:
     dinheiro/renda/dívida/investimento → Finanças
     hobby/descanso/viagem/jogo/lazer → Lazer
 - NÃO copie o exemplo acima — analise a conversa real
+- NUNCA inclua o nome do app (Anima), hábitos ruins (fumar, beber) ou nomes próprios como pilares
 
 REGRAS PARA subPillars:
-- Apenas temas bem específicos e claramente mencionados (ex: "skate", "Anima", "ansiedade")
-- Array vazio se não houver nada suficientemente específico
+- Sub-pilares são atividades ou temas ESPECÍFICOS mencionados explicitamente (ex: "corrida", "meditação", "violão")
+- NUNCA inclua: nome do app (Anima), nomes de pessoas, hábitos prejudiciais, conceitos abstratos
+- Array vazio se a conversa for curta ou não mencionar nada suficientemente específico
+- Máximo 3 sub-pilares
 
 REGRAS PARA archetype:
 - Percentuais inteiros somando exatamente 100`;
