@@ -10,7 +10,7 @@ async function signUp(formData: FormData) {
     password: formData.get('password') as string,
   });
   if (error) redirect('/signup?error=' + encodeURIComponent(error.message));
-  redirect('/welcome');
+  redirect('/chat');
 }
 
 type Props = { searchParams: Promise<{ error?: string }> };

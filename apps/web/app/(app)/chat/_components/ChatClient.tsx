@@ -7,18 +7,63 @@ import styles from './chat.module.css';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
-export function ChatClient() {
+type Props = {
+  isFirstTime: boolean;
+  userName:    string;
+};
+
+export function ChatClient({ isFirstTime, userName }: Props) {
   const router = useRouter();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput]       = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
-  const bottomRef    = useRef<HTMLDivElement>(null);
-  const textareaRef  = useRef<HTMLTextAreaElement>(null);
+  const [messages, setMessages]       = useState<Message[]>([]);
+  const [input, setInput]             = useState('');
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState('');
+  const [isOnboarding, setIsOnboarding] = useState(isFirstTime);
+  const bottomRef   = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Primeira visita: IA abre a conversa automaticamente
+  useEffect(() => {
+    if (!isOnboarding) return;
+    fetchOnboardingMessage([]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function fetchOnboardingMessage(msgs: Message[]) {
+    setLoading(true);
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+
+    try {
+      const res = await fetch('/api/ai/onboarding', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ name: userName, messages: msgs }),
+      });
+      if (!res.ok || !res.body) throw new Error('Erro na API');
+
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let aiText    = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        aiText += decoder.decode(value, { stream: true });
+        setMessages(prev => {
+          const next = [...prev];
+          next[next.length - 1] = { role: 'assistant', content: aiText };
+          return next;
+        });
+      }
+    } finally {
+      setLoading(false);
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+  }
 
   async function send() {
     const text = input.trim();
@@ -26,52 +71,77 @@ export function ChatClient() {
 
     setInput('');
     setError('');
-    setMessages((prev) => [...prev, { role: 'user', content: text }]);
+    const newMessages: Message[] = [...messages, { role: 'user', content: text }];
+    setMessages(newMessages);
     setLoading(true);
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
-    // Placeholder vazio — cursor piscando aparece enquanto content === ''
-    setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
+    const isFirstUserMessage = newMessages.filter(m => m.role === 'user').length === 1;
 
     try {
-      const res = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
-        throw new Error(err.error ?? 'Erro na resposta');
-      }
-
-      const activityHeader = res.headers.get('X-Activity-Logged');
-      const reader  = res.body!.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          updated[updated.length - 1] = {
-            role: 'assistant',
-            content: (last?.content ?? '') + chunk,
-          };
-          return updated;
-        });
-      }
-
-      // Atualiza XP e histórico no dashboard se alguma atividade foi registrada
-      if (activityHeader) {
-        router.refresh();
+      if (isOnboarding) {
+        await streamOnboarding(newMessages);
+        // Completa onboarding em background após a primeira resposta do usuário
+        if (isFirstUserMessage) {
+          fetch('/api/ai/complete-onboarding', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ messages: newMessages }),
+          }).then(() => router.refresh()).catch(() => {});
+          setIsOnboarding(false);
+        }
+      } else {
+        await streamChat(text);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao conectar com a IA');
-      setMessages((prev) => prev.slice(0, -1));
+      setMessages(prev => prev.slice(0, -1));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function streamOnboarding(msgs: Message[]) {
+    const res = await fetch('/api/ai/onboarding', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name: userName, messages: msgs }),
+    });
+    if (!res.ok) throw new Error('Erro na resposta');
+    await readStream(res);
+  }
+
+  async function streamChat(text: string) {
+    const res = await fetch('/api/ai/chat', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ message: text }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
+      throw new Error(err.error ?? 'Erro na resposta');
+    }
+    const activityHeader = res.headers.get('X-Activity-Logged');
+    await readStream(res);
+    if (activityHeader) router.refresh();
+  }
+
+  async function readStream(res: Response) {
+    const reader  = res.body!.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      setMessages(prev => {
+        const updated = [...prev];
+        const last    = updated[updated.length - 1];
+        updated[updated.length - 1] = {
+          role:    'assistant',
+          content: (last?.content ?? '') + chunk,
+        };
+        return updated;
+      });
     }
   }
 
@@ -96,9 +166,13 @@ export function ChatClient() {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Anima IA</h1>
-          <p className={styles.subtitle}>Seu assistente pessoal — conhece seus pilares e histórico</p>
+          <p className={styles.subtitle}>
+            {isOnboarding
+              ? 'Primeira conversa — conte o que está acontecendo na sua vida'
+              : 'Seu assistente pessoal — conhece seus pilares e histórico'}
+          </p>
         </div>
-        {messages.length > 0 && (
+        {messages.length > 0 && !isOnboarding && (
           <button className={styles.clearBtn} onClick={clearHistory} title="Limpar histórico">
             Limpar
           </button>
@@ -106,7 +180,7 @@ export function ChatClient() {
       </div>
 
       <div className={styles.messages}>
-        {messages.length === 0 && (
+        {messages.length === 0 && !isOnboarding && (
           <div className={styles.empty}>
             <p className={styles.emptyIcon}>🧠</p>
             <p className={styles.emptyText}>Como posso te ajudar hoje?</p>
@@ -131,7 +205,6 @@ export function ChatClient() {
         {messages.map((m, i) => (
           <div key={i} className={`${styles.message} ${styles[m.role]}`}>
             <div className={styles.bubble}>
-              {/* Indicador de digitação: cursor piscando enquanto a IA não começou a responder */}
               {m.role === 'assistant' && m.content === '' && isTyping
                 ? <span className={styles.typingDots}><span /><span /><span /></span>
                 : m.role === 'assistant'
@@ -153,7 +226,9 @@ export function ChatClient() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Digite uma mensagem... (Enter para enviar, Shift+Enter para nova linha)"
+          placeholder={isOnboarding
+            ? 'Escreva aqui… (Enter para enviar)'
+            : 'Digite uma mensagem… (Enter para enviar, Shift+Enter para nova linha)'}
           rows={2}
           disabled={loading}
         />

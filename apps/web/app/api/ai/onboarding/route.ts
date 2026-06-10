@@ -45,6 +45,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Salva mensagem do usuário no histórico (não salva o "." placeholder inicial)
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  if (lastUserMsg && lastUserMsg.content !== '.') {
+    await supabase.from('ai_conversations').insert({
+      user_id: user.id,
+      role:    'user',
+      content: lastUserMsg.content,
+    });
+  }
+
+  let fullResponse = '';
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -57,9 +68,19 @@ export async function POST(req: NextRequest) {
           const chunk = decoder.decode(value, { stream: true });
           for (const line of chunk.split('\n').filter(Boolean)) {
             try {
-              const json = JSON.parse(line) as { message?: { content?: string } };
+              const json = JSON.parse(line) as { message?: { content?: string }; done?: boolean };
               const token = json.message?.content ?? '';
-              if (token) controller.enqueue(encoder.encode(token));
+              if (token) {
+                fullResponse += token;
+                controller.enqueue(encoder.encode(token));
+              }
+              if (json.done && fullResponse) {
+                await supabase.from('ai_conversations').insert({
+                  user_id: user.id,
+                  role:    'assistant',
+                  content: fullResponse,
+                });
+              }
             } catch { /* linha não-JSON, ignora */ }
           }
         }
