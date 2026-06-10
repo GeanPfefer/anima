@@ -4,8 +4,8 @@ export type DetectedActivity = {
   note: string;
 };
 
-// Detecta atividades concretas já realizadas em mensagens do usuário.
-// Retorna [] para perguntas, planos futuros ou conversas sem ação concreta.
+// Detecta atividades intencionais realizadas em mensagens do usuário.
+// Conservador por design — falso negativo é melhor que registrar lixo.
 export async function detectActivities(
   message: string,
   pillarNames: string[],
@@ -15,35 +15,46 @@ export async function detectActivities(
   const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
   const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
 
-  const prompt = `Você detecta registros de atividades em mensagens de conversa.
+  const prompt = `Detecte atividades intencionais realizadas na mensagem abaixo.
 
 Pilares disponíveis: ${pillarNames.join(', ')}
 
-Sua tarefa: identificar APENAS atividades concretas já realizadas pelo usuário.
+REGISTRE — atividades com esforço intencional:
+✅ exercício, esporte, treino (corrida, academia, skate, kung fu, natação...)
+✅ estudo, leitura, curso, aprendizado
+✅ trabalho, projeto, tarefa concluída
+✅ meditação, terapia, prática espiritual
+✅ criação (música, arte, escrita, código)
+✅ cuidado ativo com saúde (consulta, tratamento)
+✅ atividade social intencional (encontro planejado, ligação importante)
 
-REGISTRE (ação passada concreta):
-✅ "fiz 45min de kung fu" → Saúde, 45min
-✅ "li por uma hora antes de dormir" → Mente, 60min
-✅ "terminei aquele módulo do curso" → Trabalho ou Mente, 0min
-✅ "fui na academia hoje" → Saúde, 0min
+NÃO REGISTRE — rotina básica ou ações passivas:
+❌ comer, beber, tomar sorvete, almoçar, jantar, tomar café
+❌ dormir, descansar, assistir TV, rolar o feed
+❌ deslocamento comum (ir ao trabalho, pegar ônibus)
+❌ compras rotineiras
+❌ perguntas, planos futuros, sentimentos sem ação concreta
 
-NÃO REGISTRE (não são atividades concretas):
-❌ "quero fazer kung fu" (plano futuro)
-❌ "o que acha de eu começar a meditar?" (pergunta)
-❌ "hoje foi um dia difícil" (estado emocional, sem atividade)
-❌ "como estão meus pilares?" (pergunta sobre o sistema)
+PILAR — escolha apenas se houver correspondência clara com a lista:
+- Saúde: exercício, corpo, consulta médica
+- Mente: estudo, leitura, aprendizado, foco
+- Trabalho: profissional, projetos, carreira
+- Relações: conexões sociais intencionais
+- Lazer: hobby ativo, diversão com esforço
+- Finanças: gestão financeira ativa
+- Propósito: reflexão profunda sobre valores
+IMPORTANTE: se nenhum pilar da lista se encaixa claramente → não registre (retorne [])
 
-Para cada atividade encontrada:
-- "pillarName": nome exato de um pilar da lista
+Para cada atividade válida:
+- "pillarName": nome EXATO de um pilar da lista acima
 - "durationMinutes": duração em minutos como inteiro (0 se não mencionada)
-- "note": descrição curta do que foi feito, máx 80 chars
+- "note": descrição curta, máx 80 chars
 
-Conversões de tempo: "1h"=60, "meia hora"=30, "2h30"=150, "45min"=45, "uma hora"=60
-Se uma atividade cobre dois pilares, crie dois objetos.
+Conversões: "1h"=60, "meia hora"=30, "2h30"=150, "45min"=45, "uma hora"=60
 
 Mensagem: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 500)}"
 
-Retorne APENAS um array JSON. Se não há atividade concreta, retorne [].`;
+Retorne APENAS um array JSON. Se nada se encaixa, retorne [].`;
 
   const controller = new AbortController();
   const timeout    = setTimeout(() => controller.abort(), 15_000);

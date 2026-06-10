@@ -61,8 +61,8 @@ export async function POST(req: NextRequest) {
   const loggedActivities: LoggedActivity[] = [];
 
   for (const da of detectedActivities) {
-    const pillar = pillars.find(p => norm(p.name) === norm(da.pillarName))
-                ?? pillars.find(p => norm(p.name).includes(norm(da.pillarName)) || norm(da.pillarName).includes(norm(p.name)));
+    // Só registra se o pilar bater exatamente — evita jogar atividade no pilar errado por falta de opção
+    const pillar = pillars.find(p => norm(p.name) === norm(da.pillarName));
     if (!pillar) continue;
 
     try {
