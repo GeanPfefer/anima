@@ -44,6 +44,13 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
+        name="chat"
+        options={{
+          title: 'IA',
+          tabBarIcon: ({ color }) => <TabIcon label="✦" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="notes"
         options={{
           title: 'Notas',

@@ -32,12 +32,150 @@
   font-weight: 600;
 }
 
+/* ─── Era panel ──────────────────────────────────────── */
+
+.eraPanel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.eraHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.eraName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-right: 8px;
+}
+
+.eraRange {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.eraLevel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.eraBar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.eraBarFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.eraUnlocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.eraFeatureUnlocked {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated, rgba(255,255,255,0.05));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+
+.eraNext {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.eraNextLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.eraFeatureLocked {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  opacity: 0.6;
+}
+
 /* ─── Analytical view ────────────────────────────────── */
 
 .analyticalView {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.analyticalSummary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+}
+
+.summaryCard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.summaryValue {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summaryLabel {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chartSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.xpChart {
+  width: 100%;
+  display: block;
+  overflow: visible;
 }
 
 .statsTable {

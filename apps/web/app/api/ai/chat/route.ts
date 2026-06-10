@@ -300,19 +300,19 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
                   content: fullResponse,
                 });
                 // Atualiza arquétipo a cada ~15 mensagens (fire-and-forget)
-                supabase.from('ai_conversations')
-                  .select('*', { count: 'exact', head: true })
-                  .eq('user_id', user.id)
-                  .then(({ count }) => {
-                    if ((count ?? 0) % 15 === 0 && (count ?? 0) > 0) {
-                      inferAndSaveArchetype(
-                        user.id,
-                        [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }],
-                        pillars.map(p => ({ name: p.name, level: p.level, xp_total: p.xp_total })),
-                      ).catch(() => {});
-                    }
-                  })
-                  .catch(() => {});
+                ;(async () => {
+                  const { count } = await supabase
+                    .from('ai_conversations')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('user_id', user.id);
+                  if ((count ?? 0) % 15 === 0 && (count ?? 0) > 0) {
+                    await inferAndSaveArchetype(
+                      user.id,
+                      [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }],
+                      pillars.map(p => ({ name: p.name, level: p.level, xp_total: p.xp_total })),
+                    );
+                  }
+                })().catch(() => {});
               }
             } catch {
               // linha não é JSON válido, ignora

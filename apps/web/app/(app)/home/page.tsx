@@ -88,18 +88,29 @@ export default async function HomePage() {
 
   const recentActivities = (recentData ?? []) as XPRecord[];
 
-  // ── XP semanal por pilar (para modo analítico) ────────────────
-  const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
-  const { data: weeklyData } = await supabase
-    .from('xp_records')
-    .select('pillar_id, total_xp')
-    .eq('user_id', user.id)
-    .gte('activity_date', weekAgo);
+  // ── XP semanal por pilar + XP diário 30 dias (modo analítico) ──
+  const weekAgo    = new Date(Date.now() -  7 * 86400_000).toISOString().slice(0, 10);
+  const monthAgo   = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  const [weeklyData, dailyData] = await Promise.all([
+    supabase.from('xp_records').select('pillar_id, total_xp').eq('user_id', user.id).gte('activity_date', weekAgo),
+    supabase.from('xp_records').select('activity_date, total_xp').eq('user_id', user.id).gte('activity_date', monthAgo).order('activity_date'),
+  ]);
 
   const weeklyXpByPillar: Record<string, number> = {};
-  for (const r of weeklyData ?? []) {
+  for (const r of weeklyData.data ?? []) {
     weeklyXpByPillar[r.pillar_id] = (weeklyXpByPillar[r.pillar_id] ?? 0) + r.total_xp;
   }
+
+  const dailyXpMap: Record<string, number> = {};
+  for (const r of dailyData.data ?? []) {
+    dailyXpMap[r.activity_date] = (dailyXpMap[r.activity_date] ?? 0) + r.total_xp;
+  }
+  const today    = new Date().toISOString().slice(0, 10);
+  const dailyXP: { date: string; xp: number }[] = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(Date.now() - (29 - i) * 86400_000).toISOString().slice(0, 10);
+    return { date: d, xp: dailyXpMap[d] ?? 0 };
+  });
+  void today;
 
   const pillarMap: Record<string, string> = Object.fromEntries(pillars.map(p => [p.id, p.name]));
 
@@ -115,6 +126,7 @@ export default async function HomePage() {
       shouldTriggerInsight={shouldTriggerInsight}
       pendingPillars={pendingPillars}
       weeklyXpByPillar={weeklyXpByPillar}
+      dailyXP={dailyXP}
       recentActivities={recentActivities}
       pillarMap={pillarMap}
     />

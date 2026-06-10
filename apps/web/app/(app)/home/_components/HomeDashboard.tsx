@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { getXPToNextLevel, getTotalXPForLevel, getEraForLevel, getCharacterLevel } from '@anima/core';
+import { getXPToNextLevel, getTotalXPForLevel, getEraForLevel, getCharacterLevel, ERAS } from '@anima/core';
+import type { Era } from '@anima/types';
 import LifeRadar from './LifeRadar';
 import LogActivityModal from './LogActivityModal';
 import InsightCard from './InsightCard';
@@ -49,6 +50,7 @@ export type HomeDashboardProps = {
   shouldTriggerInsight: boolean;
   pendingPillars:      PendingPillar[];
   weeklyXpByPillar:    Record<string, number>;
+  dailyXP:             { date: string; xp: number }[];
   recentActivities:    XPRecord[];
   pillarMap:           Record<string, string>;
 };
@@ -110,11 +112,61 @@ function PillarCard({ p, sub = false }: { p: Pillar; sub?: boolean }) {
   );
 }
 
+// ─── Era unlocks ─────────────────────────────────────────────
+
+const ERA_UNLOCKS: Record<number, string[]> = {
+  1: ['Radar de vida', 'Pilares', 'Quests simples', 'Histórico'],
+  2: ['Insights automáticos', 'Conexões entre pilares', 'Quests com sub-missões'],
+  3: ['Relatórios mensais', 'Análise de padrões', 'Quests de longo prazo'],
+  4: ['Relatório anual', 'Predição de tendências', 'Exportação de dados'],
+  5: ['Perfil público', 'Mentoria de quests'],
+};
+
+function EraPanel({ era, characterLevel }: { era: Era; characterLevel: number }) {
+  const eraIndex   = ERAS.indexOf(era);
+  const eraNum     = eraIndex + 1;
+  const range      = era.maxLevel - era.minLevel + 1;
+  const progress   = Math.max(0, Math.min(1, (characterLevel - era.minLevel) / range));
+  const nextEra    = ERAS[eraIndex + 1];
+  const unlocks    = ERA_UNLOCKS[eraNum]    ?? [];
+  const nextUnlocks = ERA_UNLOCKS[eraNum + 1] ?? [];
+
+  return (
+    <div className={dash.eraPanel}>
+      <div className={dash.eraHeader}>
+        <div>
+          <span className={dash.eraName}>{era.name}</span>
+          <span className={dash.eraRange}>Níveis {era.minLevel}–{era.maxLevel}</span>
+        </div>
+        <span className={dash.eraLevel}>Nv. {characterLevel}</span>
+      </div>
+      <div className={dash.eraBar}>
+        <div className={dash.eraBarFill} style={{ width: `${(progress * 100).toFixed(1)}%` }} />
+      </div>
+      <div className={dash.eraUnlocks}>
+        {unlocks.map(u => (
+          <span key={u} className={dash.eraFeatureUnlocked}>✓ {u}</span>
+        ))}
+      </div>
+      {nextEra && nextUnlocks.length > 0 && (
+        <div className={dash.eraNext}>
+          <span className={dash.eraNextLabel}>{nextEra.name} (Nv. {nextEra.minLevel}):</span>
+          {nextUnlocks.map(u => (
+            <span key={u} className={dash.eraFeatureLocked}>⌒ {u}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── GameView ─────────────────────────────────────────────────
 
-function GameView({ rootPillars }: { rootPillars: PillarWithChildren[] }) {
+function GameView({ rootPillars, era, characterLevel }: { rootPillars: PillarWithChildren[]; era: Era; characterLevel: number }) {
   return (
     <div className={styles.content}>
+      <EraPanel era={era} characterLevel={characterLevel} />
+
       <section className={styles.radarSection}>
         <p className={styles.sectionLabel}>Radar de vida</p>
         {rootPillars.length >= 3
@@ -147,17 +199,86 @@ function GameView({ rootPillars }: { rootPillars: PillarWithChildren[] }) {
 
 // ─── AnalyticalView ──────────────────────────────────────────
 
+function XPBarChart({ data }: { data: { date: string; xp: number }[] }) {
+  const maxXP = Math.max(...data.map(d => d.xp), 1);
+  const W = 560; const H = 80; const barW = Math.floor((W - 20) / data.length) - 1;
+
+  function labelDate(date: string) {
+    const d = new Date(date + 'T12:00:00');
+    return d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' });
+  }
+
+  // Label every ~7 days
+  const labelIndices = new Set([0, 6, 13, 20, 27, data.length - 1]);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H + 20}`} className={dash.xpChart}>
+      {data.map((d, i) => {
+        const barH   = Math.max(2, Math.round((d.xp / maxXP) * H));
+        const x      = 10 + i * (barW + 1);
+        const y      = H - barH;
+        const active = d.xp > 0;
+        return (
+          <g key={d.date}>
+            <rect
+              x={x} y={y} width={barW} height={barH}
+              fill={active ? 'var(--accent)' : 'var(--border)'}
+              opacity={active ? 0.85 : 0.4}
+              rx={1}
+            >
+              <title>{labelDate(d.date)}: {d.xp} XP</title>
+            </rect>
+            {labelIndices.has(i) && (
+              <text x={x + barW / 2} y={H + 14} textAnchor="middle" fontSize="9" fill="var(--text-muted)">
+                {new Date(d.date + 'T12:00:00').getDate()}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function AnalyticalView({
   rootPillars,
   weeklyXpByPillar,
+  dailyXP,
 }: {
   rootPillars:      PillarWithChildren[];
   weeklyXpByPillar: Record<string, number>;
+  dailyXP:          { date: string; xp: number }[];
 }) {
-  const allPillars = rootPillars.flatMap(p => [p, ...p.children]);
+  const allPillars  = rootPillars.flatMap(p => [p, ...p.children]);
+  const totalXP30d  = dailyXP.reduce((s, d) => s + d.xp, 0);
+  const activeDays  = dailyXP.filter(d => d.xp > 0).length;
+  const maxPillar   = allPillars.reduce<{ name: string; xp: number } | null>((best, p) =>
+    (!best || p.xp_total > best.xp) ? { name: p.name, xp: p.xp_total } : best, null);
 
   return (
     <div className={dash.analyticalView}>
+      <div className={dash.analyticalSummary}>
+        <div className={dash.summaryCard}>
+          <span className={dash.summaryValue}>{totalXP30d.toLocaleString('pt-BR')}</span>
+          <span className={dash.summaryLabel}>XP últimos 30d</span>
+        </div>
+        <div className={dash.summaryCard}>
+          <span className={dash.summaryValue}>{activeDays}</span>
+          <span className={dash.summaryLabel}>dias ativos</span>
+        </div>
+        {maxPillar && (
+          <div className={dash.summaryCard}>
+            <span className={dash.summaryValue}>{maxPillar.name}</span>
+            <span className={dash.summaryLabel}>pilar líder</span>
+          </div>
+        )}
+      </div>
+
+      <div className={dash.chartSection}>
+        <p className={styles.sectionLabel}>XP por dia — últimos 30 dias</p>
+        <XPBarChart data={dailyXP} />
+      </div>
+
       <p className={styles.sectionLabel}>Pilares — estatísticas</p>
       <div className={dash.statsTable}>
         <div className={dash.statsHeader}>
@@ -246,6 +367,7 @@ export default function HomeDashboard({
   shouldTriggerInsight,
   pendingPillars,
   weeklyXpByPillar,
+  dailyXP,
   recentActivities,
   pillarMap,
 }: HomeDashboardProps) {
@@ -283,9 +405,9 @@ export default function HomeDashboard({
 
       <InsightCard insight={latestInsight} shouldTrigger={shouldTriggerInsight} />
 
-      {mode === 'game'       && <GameView rootPillars={rootPillars} />}
+      {mode === 'game'       && <GameView rootPillars={rootPillars} era={era} characterLevel={characterLevel} />}
       {mode === 'analytical' && (
-        <AnalyticalView rootPillars={rootPillars} weeklyXpByPillar={weeklyXpByPillar} />
+        <AnalyticalView rootPillars={rootPillars} weeklyXpByPillar={weeklyXpByPillar} dailyXP={dailyXP} />
       )}
       {mode === 'minimal'    && (
         <MinimalView

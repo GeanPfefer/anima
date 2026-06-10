@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: '/history',  label: 'Histórico' },
   { href: '/notes',    label: 'Notas' },
   { href: '/chat',     label: 'IA' },
+  { href: '/reports',  label: 'Relatórios' },
   { href: '/settings', label: 'Config' },
 ];
 
