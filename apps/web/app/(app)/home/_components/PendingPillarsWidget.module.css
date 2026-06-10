@@ -1,0 +1,97 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #f0a500;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f0a500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+  font-style: italic;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nameInput {
+  flex: 1;
+  min-width: 120px;
+  background: var(--bg-input, var(--bg-surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.nameInput:focus {
+  border-color: #f0a500;
+}
+
+.confirmBtn {
+  padding: 6px 14px;
+  background: #f0a500;
+  color: #000;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.confirmBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.confirmBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dismissBtn {
+  background: none;
+  border: none;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px 4px;
+  transition: color 0.1s;
+}
+
+.dismissBtn:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.dismissBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

@@ -528,7 +528,9 @@ export type Database = {
           is_priority: boolean
           level: number
           name: string
+          pending_activity: Json | null
           sort_order: number
+          status: string
           updated_at: string
           user_id: string
           xp_rate: number
@@ -544,7 +546,9 @@ export type Database = {
           is_priority?: boolean
           level?: number
           name: string
+          pending_activity?: Json | null
           sort_order?: number
+          status?: string
           updated_at?: string
           user_id: string
           xp_rate: number
@@ -560,7 +564,9 @@ export type Database = {
           is_priority?: boolean
           level?: number
           name?: string
+          pending_activity?: Json | null
           sort_order?: number
+          status?: string
           updated_at?: string
           user_id?: string
           xp_rate?: number

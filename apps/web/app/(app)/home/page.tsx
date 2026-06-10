@@ -4,6 +4,7 @@ import { getXPToNextLevel, getTotalXPForLevel, getEraForLevel, getCharacterLevel
 import LifeRadar from './_components/LifeRadar';
 import LogActivityModal from './_components/LogActivityModal';
 import InsightCard from './_components/InsightCard';
+import PendingPillarsWidget from './_components/PendingPillarsWidget';
 import styles from './home.module.css';
 
 type Pillar = {
@@ -54,6 +55,16 @@ export default async function HomePage() {
   const shouldTriggerInsight =
     !latestInsight &&
     (recentEntryCount ?? 0) >= 5;
+
+  // Pilares pendentes — detectados pela IA, aguardando confirmação do usuário
+  const { data: pendingPillarsData } = await supabase
+    .from('user_pillars')
+    .select('id, name, pending_activity')
+    .eq('user_id', user.id)
+    .eq('status', 'pending');
+
+  type PendingPillar = { id: string; name: string; pending_activity: { durationMinutes: number; note: string } | null };
+  const pendingPillars = (pendingPillarsData ?? []) as PendingPillar[];
 
   const { data: pillarsData } = await supabase
     .from('user_pillars')
@@ -158,6 +169,9 @@ export default async function HomePage() {
           <span className={styles.era}>{era.name}</span>
         </div>
       </header>
+
+      {/* Pilares detectados pela IA aguardando confirmação */}
+      <PendingPillarsWidget pillars={pendingPillars} />
 
       {/* Insight automático (Camada 4) */}
       <InsightCard

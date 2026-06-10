@@ -6,6 +6,7 @@ import { detectActivities } from '@/lib/detect-activity';
 import { detectNotes } from '@/lib/detect-note';
 import { logActivity } from '@/lib/log-activity';
 import { logNote } from '@/lib/log-note';
+import { getOrCreatePendingPillar } from '@/lib/get-or-create-pending-pillar';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -64,9 +65,17 @@ export async function POST(req: NextRequest) {
   const loggedActivities: LoggedActivity[] = [];
 
   for (const da of detectedActivities) {
-    // Só registra se o pilar bater exatamente — evita jogar atividade no pilar errado por falta de opção
+    // Só registra se o pilar bater exatamente — evita jogar atividade no pilar errado
     const pillar = pillars.find(p => norm(p.name) === norm(da.pillarName));
-    if (!pillar) continue;
+    if (!pillar) {
+      // Pilar não existe: cria como pendente para o usuário confirmar no dashboard
+      getOrCreatePendingPillar({
+        pillarName:      da.pillarName,
+        durationMinutes: da.durationMinutes,
+        note:            da.note,
+      }).catch(() => {});
+      continue;
+    }
 
     try {
       const result = await logActivity({
