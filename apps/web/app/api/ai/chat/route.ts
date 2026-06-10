@@ -7,6 +7,7 @@ import { detectNotes } from '@/lib/detect-note';
 import { logActivity } from '@/lib/log-activity';
 import { logNote } from '@/lib/log-note';
 import { getOrCreatePendingPillar } from '@/lib/get-or-create-pending-pillar';
+import { inferAndSaveArchetype } from '@/lib/infer-archetype';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -298,6 +299,20 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
                   role:    'assistant',
                   content: fullResponse,
                 });
+                // Atualiza arquétipo a cada ~15 mensagens (fire-and-forget)
+                supabase.from('ai_conversations')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('user_id', user.id)
+                  .then(({ count }) => {
+                    if ((count ?? 0) % 15 === 0 && (count ?? 0) > 0) {
+                      inferAndSaveArchetype(
+                        user.id,
+                        [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }],
+                        pillars.map(p => ({ name: p.name, level: p.level, xp_total: p.xp_total })),
+                      ).catch(() => {});
+                    }
+                  })
+                  .catch(() => {});
               }
             } catch {
               // linha não é JSON válido, ignora

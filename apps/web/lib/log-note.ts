@@ -1,5 +1,13 @@
 import { createClient } from '@/lib/supabase/server';
 
+function calcNoteXP(content: string, context: Record<string, unknown>): number {
+  const ctxKeys = Object.keys(context).length;
+  const len     = content.length;
+  if (len >= 70 || ctxKeys >= 2) return 20;
+  if (len >= 40 || ctxKeys >= 1) return 10;
+  return 5;
+}
+
 export async function logNote(data: {
   content: string;
   noteType: string;
@@ -19,7 +27,7 @@ export async function logNote(data: {
     note_type:   data.noteType,
     context:     data.context as import('@anima/types').Json,
     pillar_hint: data.pillarHint,
-    xp_awarded:  0,
+    xp_awarded:  calcNoteXP(data.content, data.context),
     note_date:   noteDate,
   });
 }
