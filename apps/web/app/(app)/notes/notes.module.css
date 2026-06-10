@@ -1,0 +1,148 @@
+/* ─── Layout ────────────────────────────────────────────── */
+
+.container {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+.header {
+  margin-bottom: 40px;
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+  margin: 0 0 6px;
+}
+
+.summary {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ─── Empty state ────────────────────────────────────────── */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 64px 0;
+  gap: 8px;
+}
+
+.emptyTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.emptyText {
+  font-size: 14px;
+  color: var(--text-muted);
+  max-width: 300px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.emptyLink {
+  font-size: 14px;
+  color: var(--accent);
+  text-decoration: none;
+  margin-top: 12px;
+}
+
+.emptyLink:hover {
+  text-decoration: underline;
+}
+
+/* ─── Timeline ──────────────────────────────────────────── */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* ─── Day group ─────────────────────────────────────────── */
+
+.dayGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dayHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dayLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.dayCount {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ─── Note card ──────────────────────────────────────────── */
+
+.noteList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.note {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.typeBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Cores por tipo */
+.type_food    { background: rgba(52, 199, 89, 0.15);  color: #34c759; }
+.type_expense { background: rgba(255, 204, 0, 0.15);  color: #d4a017; }
+.type_mood    { background: rgba(90, 200, 250, 0.15); color: #5ac8fa; }
+.type_idea    { background: rgba(175, 82, 222, 0.15); color: #af52de; }
+.type_other   { background: var(--surface-raised, rgba(255,255,255,0.06)); color: var(--text-muted); }
+
+.noteContent {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.45;
+  flex: 1;
+}
+
+.pillarHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}

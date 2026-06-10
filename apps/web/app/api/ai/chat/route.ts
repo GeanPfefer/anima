@@ -3,7 +3,9 @@ import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { generateEmbedding } from '@/lib/generate-embedding';
 import { detectActivities } from '@/lib/detect-activity';
+import { detectNotes } from '@/lib/detect-note';
 import { logActivity } from '@/lib/log-activity';
+import { logNote } from '@/lib/log-note';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -51,9 +53,10 @@ export async function POST(req: NextRequest) {
 
   const pillarNames = pillars.map(p => p.name);
 
-  // ── Detecção de atividade + embedding em paralelo ──────────────
-  const [detectedActivities, queryEmbedding] = await Promise.all([
+  // ── Detecção de atividades + notas + embedding em paralelo ───────
+  const [detectedActivities, detectedNotes, queryEmbedding] = await Promise.all([
     detectActivities(message, pillarNames),
+    detectNotes(message),
     generateEmbedding(message),
   ]);
 
@@ -95,6 +98,16 @@ export async function POST(req: NextRequest) {
     } catch {
       // falha silenciosa — não interrompe a conversa
     }
+  }
+
+  // ── Loga notas silenciosamente (fire-and-forget — IA não menciona) ─
+  for (const dn of detectedNotes) {
+    logNote({
+      content:    dn.content,
+      noteType:   dn.noteType,
+      context:    dn.context,
+      pillarHint: dn.pillarHint,
+    }).catch(() => {});
   }
 
   // ── Contexto textual para o system prompt ──────────────────────

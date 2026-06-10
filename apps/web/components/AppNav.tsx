@@ -7,8 +7,9 @@ const NAV_ITEMS = [
   { href: '/home',     label: 'Home' },
   { href: '/quests',   label: 'Quests' },
   { href: '/history',  label: 'Histórico' },
+  { href: '/notes',    label: 'Notas' },
   { href: '/chat',     label: 'IA' },
-  { href: '/settings', label: 'Configurações' },
+  { href: '/settings', label: 'Config' },
 ];
 
 export default function AppNav() {

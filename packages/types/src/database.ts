@@ -179,6 +179,50 @@ export type Database = {
           },
         ]
       }
+      notes: {
+        Row: {
+          content: string
+          context: Json | null
+          created_at: string
+          id: string
+          note_date: string
+          note_type: string | null
+          pillar_hint: string | null
+          user_id: string
+          xp_awarded: number
+        }
+        Insert: {
+          content: string
+          context?: Json | null
+          created_at?: string
+          id?: string
+          note_date?: string
+          note_type?: string | null
+          pillar_hint?: string | null
+          user_id: string
+          xp_awarded?: number
+        }
+        Update: {
+          content?: string
+          context?: Json | null
+          created_at?: string
+          id?: string
+          note_date?: string
+          note_type?: string | null
+          pillar_hint?: string | null
+          user_id?: string
+          xp_awarded?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       life_events: {
         Row: {
           anchor_type: Database["public"]["Enums"]["context_anchor"] | null
