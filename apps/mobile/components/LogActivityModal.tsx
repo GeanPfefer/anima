@@ -14,6 +14,9 @@ import {
 import { calculateBonusMultiplier } from '@anima/core';
 import { getActivityBonuses, logMultipleActivities, getOrCreatePillar } from '@/lib/activity';
 import { parseActivityText, type ParsedActivity } from '@/lib/parse-activity';
+import { detectNotes } from '@/lib/detect-note';
+import { logNotes } from '@/lib/log-note';
+import { supabase } from '@/lib/supabase';
 import { startRecording, transcribeFromUri, type RecordingHandle } from '@/lib/transcribe';
 import { enqueueRecording } from '@/lib/recording-queue';
 import { useRecordingQueue } from '@/hooks/use-recording-queue';
@@ -53,6 +56,7 @@ type ReviewEntry = {
   editingDuration: boolean;
   durationDraft: string;
   pillarExpanded: boolean;
+  isPending?: boolean;
 };
 
 type Phase = 'input' | 'parsing' | 'reviewing' | 'submitting' | 'success';
@@ -300,10 +304,12 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
         const a = parsed[i];
         let pillar = matchPillar(a.pillarName, workingPillars);
 
+        let isPending = false;
         if (!pillar && a.pillarName.trim()) {
           try {
             const created = await getOrCreatePillar(userId, a.pillarName);
             pillar = { id: created.id, name: created.name, xp_rate: created.xp_rate };
+            isPending = created.isPending;
             if (!workingPillars.find((p) => p.id === created.id)) {
               workingPillars.push(pillar);
             }
@@ -320,6 +326,7 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
           editingDuration: false,
           durationDraft:   '',
           pillarExpanded:  !pillar,
+          isPending,
         });
       }
 
@@ -399,26 +406,54 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
     if (valid.length === 0) return;
     setPhase('submitting');
 
+    const pendingEntries = valid.filter((e) => e.isPending);
+    const regularEntries = valid.filter((e) => !e.isPending);
+
     try {
-      const { totalXP, entries: logged } = await logMultipleActivities(
-        valid.map((e) => ({
-          userId,
-          pillarId:        e.pillarId!,
-          durationMinutes: e.durationMinutes,
-          note:            e.note,
-          activityDate,
-        })),
-      );
+      // Pilares pendentes: salva atividade para confirmar depois — sem XP agora
+      for (const e of pendingEntries) {
+        await supabase
+          .from('user_pillars')
+          .update({
+            pending_activity: {
+              durationMinutes: e.durationMinutes,
+              note: e.note,
+              detectedAt: new Date().toISOString(),
+            },
+          })
+          .eq('id', e.pillarId!);
+      }
+
+      let totalXP = 0;
+      let logged: Array<{ recordId: string; note: string }> = [];
+
+      if (regularEntries.length > 0) {
+        const result = await logMultipleActivities(
+          regularEntries.map((e) => ({
+            userId,
+            pillarId:        e.pillarId!,
+            durationMinutes: e.durationMinutes,
+            note:            e.note,
+            activityDate,
+          })),
+        );
+        totalXP = result.totalXP;
+        logged  = result.entries;
+      }
+
       setSuccessXP(totalXP);
       setPhase('success');
 
-      // Processamento semântico — fire-and-forget, não bloqueia o usuário
+      // Processamento semântico — fire-and-forget
       for (const { recordId, note } of logged) {
         if (note) {
           extractEntitiesForRecord(note, recordId, userId).catch(() => {});
           embedEntryForRecord(note, recordId, userId).catch(() => {});
         }
       }
+
+      // Detecção de notas — fire-and-forget, silenciosa
+      detectNotes(text).then((notes) => logNotes(notes, userId)).catch(() => {});
 
       setTimeout(() => {
         onSuccess();
@@ -628,7 +663,10 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
                       const bonuses = entry.pillarId ? (bonusCache[entry.pillarId] ?? []) : [];
 
                       return (
-                        <View key={entry.localId} style={styles.entryCard}>
+                        <View key={entry.localId} style={[styles.entryCard, entry.isPending && styles.entryCardPending]}>
+                          {entry.isPending && (
+                            <Text style={styles.pendingLabel}>Novo pilar — aguarda confirmação no dashboard</Text>
+                          )}
                           {/* Linha de chips */}
                           <View style={styles.entryChipRow}>
                             {/* Pilar */}
@@ -957,6 +995,15 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
     gap: spacing.xs,
+  },
+  entryCardPending: {
+    borderColor: colors.warning,
+    borderLeftWidth: 3,
+  },
+  pendingLabel: {
+    fontSize: 11,
+    color: colors.warning,
+    fontWeight: '600',
   },
   entryChipRow: {
     flexDirection: 'row',

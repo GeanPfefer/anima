@@ -3,24 +3,32 @@ import { calculateBonusMultiplier } from '@anima/core';
 import type { ActivityBonusType } from '@anima/types';
 
 /**
- * Retorna o id do pilar com esse nome para o usuário,
- * criando-o se ainda não existir.
+ * Retorna o pilar com esse nome para o usuário.
+ * Se não existir, cria com status='pending' (aguarda confirmação no dashboard).
  * Busca case-insensitive — evita duplicatas de capitalização.
  */
 export async function getOrCreatePillar(
   userId: string,
   name: string,
-): Promise<{ id: string; name: string; xp_rate: number; isNew: boolean }> {
+): Promise<{ id: string; name: string; xp_rate: number; isNew: boolean; isPending: boolean }> {
   const normalized = name.trim();
 
   const { data: existing } = await supabase
     .from('user_pillars')
-    .select('id, name, xp_rate')
+    .select('id, name, xp_rate, status')
     .eq('user_id', userId)
     .ilike('name', normalized)
     .maybeSingle();
 
-  if (existing) return { ...existing, isNew: false };
+  if (existing) {
+    return {
+      id: existing.id,
+      name: existing.name,
+      xp_rate: existing.xp_rate,
+      isNew: false,
+      isPending: existing.status === 'pending',
+    };
+  }
 
   // Obtém sort_order para o novo pilar
   const { count } = await supabase
@@ -36,13 +44,48 @@ export async function getOrCreatePillar(
       name:       normalized,
       xp_rate:    1.0,
       sort_order: count ?? 10,
+      is_active:  false,
+      status:     'pending',
     })
     .select('id, name, xp_rate')
     .single();
 
   if (error || !created) throw new Error(`Não foi possível criar pilar "${normalized}": ${error?.message}`);
 
-  return { ...created, isNew: true };
+  return { ...created, isNew: true, isPending: true };
+}
+
+export async function confirmPendingPillar(pillarId: string, userId: string): Promise<void> {
+  const { data: pillar } = await supabase
+    .from('user_pillars')
+    .select('pending_activity, name')
+    .eq('id', pillarId)
+    .eq('user_id', userId)
+    .single();
+
+  await supabase
+    .from('user_pillars')
+    .update({ is_active: true, status: 'active', pending_activity: null })
+    .eq('id', pillarId);
+
+  const pa = pillar?.pending_activity as { durationMinutes?: number; note?: string } | null;
+  if (pa?.durationMinutes && pa.durationMinutes > 0) {
+    await logActivity({
+      userId,
+      pillarId,
+      durationMinutes: pa.durationMinutes,
+      note: pa.note ?? '',
+    });
+  }
+}
+
+export async function dismissPendingPillar(pillarId: string, userId: string): Promise<void> {
+  await supabase
+    .from('user_pillars')
+    .delete()
+    .eq('id', pillarId)
+    .eq('user_id', userId)
+    .eq('status', 'pending');
 }
 
 /**

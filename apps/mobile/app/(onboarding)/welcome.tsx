@@ -165,8 +165,10 @@ export default function WelcomeScreen() {
   const [waiting, setWaiting]         = useState(false);
   const [completing, setCompleting]   = useState(false);
   const [showDashBtn, setShowDashBtn] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
-  const nameRef   = useRef('');
+  const [profileReady, setProfileReady] = useState(false);
+  const scrollRef    = useRef<ScrollView>(null);
+  const nameRef      = useRef('');
+  const completedRef = useRef(false);
 
   useEffect(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
@@ -194,6 +196,62 @@ export default function WelcomeScreen() {
     }
   };
 
+  // Extrai perfil e salva em background após primeira troca
+  const handleBackgroundComplete = async (msgs: Message[]) => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    try {
+      const extracted = await extractProfile(msgs, nameRef.current);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: existingPillars } = await supabase
+        .from('user_pillars').select('name').eq('user_id', user.id);
+      const existingNames = new Set((existingPillars ?? []).map((p: { name: string }) => norm(p.name)));
+      const newPillarNames = (extracted.pillars as string[]).filter((n) => !existingNames.has(norm(n)));
+
+      let insertedPillars: Array<{ id: string; name: string }> = [];
+      if (newPillarNames.length > 0) {
+        const { data } = await supabase.from('user_pillars').insert(
+          newPillarNames.map((n, i) => ({
+            user_id: user.id, catalog_id: null, name: n, xp_rate: 1.0,
+            sort_order: (existingPillars?.length ?? 3) + i,
+          })),
+        ).select('id, name');
+        insertedPillars = data ?? [];
+      }
+
+      if (extracted.subPillars.length > 0 && insertedPillars.length > 0) {
+        const baseOrder = (existingPillars?.length ?? 3) + insertedPillars.length;
+        const { data: insertedSubs } = await supabase.from('user_pillars').insert(
+          extracted.subPillars.map((sp: { name: string }, i: number) => ({
+            user_id: user.id, catalog_id: null, name: sp.name, xp_rate: 1.0,
+            sort_order: baseOrder + i,
+          })),
+        ).select('id, name');
+        if (insertedSubs) {
+          const rels = extracted.subPillars
+            .map((sp: { name: string; parentName: string }) => ({
+              child:  insertedSubs.find((s: { name: string }) => norm(s.name) === norm(sp.name)),
+              parent: insertedPillars.find((p: { name: string }) => norm(p.name) === norm(sp.parentName)),
+            }))
+            .filter((r: { child?: { id: string }; parent?: { id: string } }) => r.child && r.parent)
+            .map((r: { child: { id: string }; parent: { id: string } }) => ({ parent_id: r.parent.id, child_id: r.child.id }));
+          if (rels.length > 0) await supabase.from('pillar_relationships').insert(rels);
+        }
+      }
+
+      await supabase.from('profiles').update({
+        onboarding_completed_at: new Date().toISOString(),
+        archetype: extracted.archetype,
+      }).eq('id', user.id);
+
+      setProfileReady(true);
+    } catch {
+      completedRef.current = false;
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim() || waiting) return;
     const userMsg: Message = { role: 'user', content: input.trim() };
@@ -203,7 +261,13 @@ export default function WelcomeScreen() {
     setWaiting(true);
     try {
       const text = await callOllama(next, nameRef.current);
-      setMessages(prev => [...prev, { role: 'assistant', content: text }]);
+      const updated = [...next, { role: 'assistant' as const, content: text }];
+      setMessages(updated);
+
+      // Após primeira mensagem do usuário: extrai perfil em background
+      if (next.filter((m) => m.role === 'user').length === 1) {
+        handleBackgroundComplete(updated);
+      }
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Ops, tive um problema. Pode tentar de novo?' }]);
     } finally {
@@ -212,6 +276,11 @@ export default function WelcomeScreen() {
   };
 
   const handleComplete = async () => {
+    // Se o perfil já foi salvo em background, só navega
+    if (profileReady) {
+      router.replace('/(app)/home');
+      return;
+    }
     setCompleting(true);
     try {
       const extracted = await extractProfile(messages, nameRef.current);
@@ -353,7 +422,9 @@ export default function WelcomeScreen() {
           >
             {completing
               ? <ActivityIndicator color={colors.accent} size="small" />
-              : <Text style={s.dashBtnText}>Explorar meu dashboard →</Text>
+              : <Text style={s.dashBtnText}>
+                  {profileReady ? 'Ir para o dashboard →' : 'Explorar meu dashboard →'}
+                </Text>
             }
           </TouchableOpacity>
         )}
