@@ -352,6 +352,7 @@ export type Database = {
         Row: {
           archetype: Json | null
           created_at: string
+          display_mode: string
           id: string
           name: string
           onboarding_completed_at: string | null
@@ -360,6 +361,7 @@ export type Database = {
         Insert: {
           archetype?: Json | null
           created_at?: string
+          display_mode?: string
           id: string
           name: string
           onboarding_completed_at?: string | null
@@ -368,6 +370,7 @@ export type Database = {
         Update: {
           archetype?: Json | null
           created_at?: string
+          display_mode?: string
           id?: string
           name?: string
           onboarding_completed_at?: string | null

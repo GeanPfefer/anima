@@ -1,36 +1,20 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getXPToNextLevel, getTotalXPForLevel, getEraForLevel, getCharacterLevel } from '@anima/core';
-import LifeRadar from './_components/LifeRadar';
-import LogActivityModal from './_components/LogActivityModal';
-import InsightCard from './_components/InsightCard';
-import PendingPillarsWidget from './_components/PendingPillarsWidget';
-import styles from './home.module.css';
-
-type Pillar = {
-  id: string;
-  name: string;
-  xp_rate: number;
-  xp_total: number;
-  level: number;
-  is_active: boolean;
-  is_priority: boolean;
-};
-
-type PillarWithChildren = Pillar & { children: Pillar[] };
+import HomeDashboard from './_components/HomeDashboard';
+import type { DisplayMode, Pillar, PillarWithChildren, PendingPillar, XPRecord } from './_components/HomeDashboard';
 
 export default async function HomePage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/(onboarding)/welcome');
+  if (!user) redirect('/chat');
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('name')
+    .select('name, display_mode')
     .eq('id', user.id)
     .single();
 
-  if (!profile) redirect('/(onboarding)/welcome');
+  if (!profile) redirect('/chat');
 
   // ── Insight mais recente não dispensado ───────────────────────
   const { data: latestInsight } = await supabase
@@ -42,30 +26,24 @@ export default async function HomePage() {
     .limit(1)
     .maybeSingle();
 
-  // Condição para disparar nova geração (cliente decide, server apenas conta)
   const { count: recentEntryCount } = await supabase
     .from('xp_records')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', user.id)
-    .gt(
-      'created_at',
-      latestInsight?.generated_at ?? new Date(0).toISOString(),
-    );
+    .gt('created_at', latestInsight?.generated_at ?? new Date(0).toISOString());
 
-  const shouldTriggerInsight =
-    !latestInsight &&
-    (recentEntryCount ?? 0) >= 5;
+  const shouldTriggerInsight = !latestInsight && (recentEntryCount ?? 0) >= 5;
 
-  // Pilares pendentes — detectados pela IA, aguardando confirmação do usuário
+  // ── Pilares pendentes ─────────────────────────────────────────
   const { data: pendingPillarsData } = await supabase
     .from('user_pillars')
     .select('id, name, pending_activity')
     .eq('user_id', user.id)
     .eq('status', 'pending');
 
-  type PendingPillar = { id: string; name: string; pending_activity: { durationMinutes: number; note: string } | null };
   const pendingPillars = (pendingPillarsData ?? []) as PendingPillar[];
 
+  // ── Pilares ativos ────────────────────────────────────────────
   const { data: pillarsData } = await supabase
     .from('user_pillars')
     .select('id, name, xp_rate, xp_total, level, is_active, is_priority')
@@ -75,146 +53,71 @@ export default async function HomePage() {
 
   const pillars: Pillar[] = pillarsData ?? [];
 
-  // Busca todas as relações pai→filho do usuário
   const { data: relationsData } = await supabase
     .from('pillar_relationships')
     .select('parent_id, child_id')
-    .in('parent_id', pillars.map((p) => p.id));
+    .in('parent_id', pillars.map(p => p.id));
 
-  const relations = relationsData ?? [];
-
-  // Conjunto de ids que são filhos (têm pelo menos um pai)
-  const childIds = new Set(relations.map((r) => r.child_id));
-
-  // Mapa filho → pais para montagem da árvore
+  const relations  = relationsData ?? [];
+  const childIds   = new Set(relations.map(r => r.child_id));
   const childrenByParent = new Map<string, string[]>();
   for (const r of relations) {
     const list = childrenByParent.get(r.parent_id) ?? [];
     list.push(r.child_id);
     childrenByParent.set(r.parent_id, list);
   }
+  const pillarById = new Map(pillars.map(p => [p.id, p]));
 
-  const pillarMap = new Map(pillars.map((p) => [p.id, p]));
-
-  // Pilares raiz (sem pais)
   const rootPillars: PillarWithChildren[] = pillars
-    .filter((p) => !childIds.has(p.id))
-    .map((p) => ({
+    .filter(p => !childIds.has(p.id))
+    .map(p => ({
       ...p,
       children: (childrenByParent.get(p.id) ?? [])
-        .map((cid) => pillarMap.get(cid))
+        .map(cid => pillarById.get(cid))
         .filter((c): c is Pillar => c !== undefined),
     }));
 
-  // Radar só usa pilares raiz
-  const radarPillars = rootPillars;
-  const characterLevel = getCharacterLevel(rootPillars.map((p) => p.level));
-  const era = getEraForLevel(characterLevel);
+  // ── Atividades recentes (para modo minimal) ───────────────────
+  const { data: recentData } = await supabase
+    .from('xp_records')
+    .select('id, pillar_id, duration_minutes, total_xp, note, activity_date')
+    .eq('user_id', user.id)
+    .order('activity_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(8);
 
-  // Todos os pilares disponíveis para o modal de registro (raiz + filhos)
-  const allPillarsForModal = pillars.map((p) => ({ id: p.id, name: p.name, xp_rate: p.xp_rate }));
+  const recentActivities = (recentData ?? []) as XPRecord[];
 
-  function PillarCard({ p, sub = false }: { p: Pillar; sub?: boolean }) {
-    const levelStart = getTotalXPForLevel(p.level);
-    const levelEnd = getTotalXPForLevel(p.level + 1);
-    const progress =
-      levelEnd > levelStart
-        ? Math.max(0, (p.xp_total - levelStart) / (levelEnd - levelStart))
-        : 1;
-    const xpToNext = getXPToNextLevel(p.xp_total);
+  // ── XP semanal por pilar (para modo analítico) ────────────────
+  const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
+  const { data: weeklyData } = await supabase
+    .from('xp_records')
+    .select('pillar_id, total_xp')
+    .eq('user_id', user.id)
+    .gte('activity_date', weekAgo);
 
-    return (
-      <div
-        className={[
-          sub ? styles.subPillarCard : styles.pillarCard,
-          p.is_priority && !sub ? styles.pillarPriority : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        <div className={styles.pillarTop}>
-          <span className={sub ? styles.subPillarName : styles.pillarName}>{p.name}</span>
-          <span className={styles.pillarLevel}>Nv. {p.level}</span>
-        </div>
-        <div className={sub ? styles.subXpBar : styles.xpBar}>
-          <div
-            className={styles.xpFill}
-            style={{ width: `${Math.min(progress * 100, 100).toFixed(1)}%` }}
-          />
-        </div>
-        <div className={styles.pillarBottom}>
-          <span className={styles.xpTotal}>
-            {p.xp_total.toLocaleString('pt-BR')} XP
-          </span>
-          {p.level < 50 && (
-            <span className={styles.xpToNext}>
-              +{xpToNext} para Nv. {p.level + 1}
-            </span>
-          )}
-          {p.is_priority && !sub && (
-            <span className={styles.priorityBadge}>foco</span>
-          )}
-        </div>
-      </div>
-    );
+  const weeklyXpByPillar: Record<string, number> = {};
+  for (const r of weeklyData ?? []) {
+    weeklyXpByPillar[r.pillar_id] = (weeklyXpByPillar[r.pillar_id] ?? 0) + r.total_xp;
   }
 
+  const pillarMap: Record<string, string> = Object.fromEntries(pillars.map(p => [p.id, p.name]));
+
+  const allPillarsForModal = pillars.map(p => ({ id: p.id, name: p.name, xp_rate: p.xp_rate }));
+
   return (
-    <main className={styles.container}>
-      <header className={styles.header}>
-        <h1 className={styles.name}>{profile.name}</h1>
-        <div className={styles.characterMeta}>
-          <span className={styles.level}>Nível {characterLevel}</span>
-          <span className={styles.separator}>·</span>
-          <span className={styles.era}>{era.name}</span>
-        </div>
-      </header>
-
-      {/* Pilares detectados pela IA aguardando confirmação */}
-      <PendingPillarsWidget pillars={pendingPillars} />
-
-      {/* Insight automático (Camada 4) */}
-      <InsightCard
-        insight={latestInsight ?? null}
-        shouldTrigger={shouldTriggerInsight}
-      />
-
-      <div className={styles.content}>
-        <section className={styles.radarSection}>
-          <p className={styles.sectionLabel}>Radar de vida</p>
-          {radarPillars.length >= 3 ? (
-            <LifeRadar pillars={radarPillars} />
-          ) : (
-            <p className={styles.empty}>Nenhum pilar registrado.</p>
-          )}
-        </section>
-
-        <section className={styles.pillarsSection}>
-          <p className={styles.sectionLabel}>Pilares</p>
-          {rootPillars.length === 0 ? (
-            <p className={styles.empty}>Complete o onboarding para ver seus pilares.</p>
-          ) : (
-            <div className={styles.pillarList}>
-              {rootPillars.map((p) => (
-                <div key={p.id} className={styles.pillarGroup}>
-                  <PillarCard p={p} />
-                  {p.children.length > 0 && (
-                    <div className={styles.subPillarList}>
-                      {p.children.map((child) => (
-                        <PillarCard key={child.id} p={child} sub />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-
-      <div className={styles.footer}>
-        <LogActivityModal pillars={allPillarsForModal} />
-      </div>
-    </main>
+    <HomeDashboard
+      profileName={profile.name}
+      initialMode={(profile.display_mode as DisplayMode) ?? 'game'}
+      rootPillars={rootPillars}
+      allPillarsForModal={allPillarsForModal}
+      latestInsight={latestInsight ?? null}
+      shouldTriggerInsight={shouldTriggerInsight}
+      pendingPillars={pendingPillars}
+      weeklyXpByPillar={weeklyXpByPillar}
+      recentActivities={recentActivities}
+      pillarMap={pillarMap}
+    />
   );
 }
+
