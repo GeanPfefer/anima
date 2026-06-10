@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-06-09 (sessão: arquitetura de pilares livres — 3 pilares raiz fixos + emergência livre pela IA; catálogo pré-definido removido; seções 1e/2/9/10/13 atualizadas)
+> Documento vivo de design. Última atualização: 2026-06-10 (sessão: notas com XP e pillar_hint; pilares pendentes; modos de exibição; arquétipo contínuo; features por era; analítico rico; relatórios mensais; chat mobile)
 > Para retomar o projeto em qualquer IA: cole este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -356,7 +356,9 @@ Eventos são ações sem duração — um momento, não uma atividade. Existem 3
 **Construção (11–20):** histórico de evolução, conexões entre pilares, quests com sub-missões, insights automáticos  
 **Expansão (21–35):** análise de padrões mensais, comparativo de períodos, quests de longo prazo, pilares customizáveis  
 **Maestria (36–45):** relatório anual de vida, predição de tendências, modo foco com IA, exportação de dados  
-**Lenda (46–50):** perfil público (quando abrir ao público), mentoria de quests, acesso antecipado a features  
+**Lenda (46–50):** perfil público (quando abrir ao público), mentoria de quests, acesso antecipado a features
+
+> **Estado técnico:** ✅ Implementado — `EraPanel` no modo Game do dashboard mostra era atual, barra de progresso dentro da era, chips de features desbloqueadas e prévia da próxima era (tracejadas). Lógica em `packages/core/src/levels.ts` (`ERAS`, `getEraForLevel`).  
 
 ---
 
@@ -469,8 +471,10 @@ Os 4 arquétipos (Explorador, Focado, Construtor, Visionário) são um **modelo 
 
 ### Estado técnico
 - **✅ Fase 1:** detecção + logging automático via chat implementado (`/api/ai/chat`)
-- **⚠️ Fase 2:** pilares pendentes — não implementado
-- **⚠️ Fase 3:** dissolver `/welcome` no chat — não implementado; código dos steps 1–5 está deprecated
+- **✅ Fase 2:** pilares pendentes — pilar novo detectado → `status='pending', is_active=false`; widget no dashboard com confirmação/descarte; XP da atividade original aplicado ao confirmar
+- **✅ Fase 3:** `/welcome` dissolvido no `/chat`; onboarding acontece na primeira conversa; `onboarding_completed_at` setado após contexto suficiente
+- **✅ Notas no chat:** `detect-note.ts` detecta food/expense/mood/idea/other; XP 5–20 por heurística; `pillar_hint` inferido; IA silenciosa (não comenta)
+- **✅ Arquétipo contínuo:** `infer-archetype.ts` infere 4 arquétipos (explorer/focused/builder/visionary) em % via Ollama; fire-and-forget a cada ~15 mensagens; salvo em `profiles.archetype`
 
 ---
 
@@ -524,23 +528,24 @@ Os dados das notas são apresentados no relatório mensal do usuário:
 
 **Os relatórios são para o usuário ver e interpretar — a IA não apresenta conclusões, apenas organiza os dados.**
 
-### Tabela `notes` (schema planejado — não implementado)
+### Tabela `notes` (implementada)
 ```sql
 notes (
   id            uuid primary key,
   user_id       uuid references auth.users,
-  content       text not null,          -- texto bruto da nota
+  content       text not null,
   note_type     text,                   -- 'food', 'expense', 'mood', 'idea', 'other'
-  context       jsonb,                  -- dados estruturados extraídos (valor, item, humor...)
-  pillar_hint   text,                   -- pilar implícito (para filtros nos relatórios)
-  xp_awarded    int default 0,
+  context       jsonb,                  -- dados estruturados extraídos
+  pillar_hint   text,                   -- pilar implícito (Saúde, Finanças, Mente ou null)
+  xp_awarded    int default 0,          -- 5/10/20 XP por comprimento+riqueza de contexto
   note_date     date not null,
   created_at    timestamptz default now()
 )
 ```
 
 ### Estado técnico
-- **⚠️ Pendente:** migração SQL, detecção no chat (atualmente alimentos chegam ao detect-activity e são descartados; precisam ser roteados para notes), tela de notas, relatórios mensais
+- **✅ Implementado:** migração SQL (`20260609000001_notes.sql`), detecção no chat (`lib/detect-note.ts` web + mobile), tela de notas (web + mobile), XP de notas (5/10/20 por heurística de comprimento/contexto), `pillar_hint` inferido pelo Ollama
+- **✅ Relatórios mensais:** página `/reports` (web) com navegação por mês, XP por dia (gráfico), tempo por pilar (barras), notas por tipo, maiores sessões
 
 ---
 
@@ -561,8 +566,11 @@ Os dados são idênticos em qualquer modo. A estrutura subjacente (XP, pilares, 
 
 ### Implementação
 - Campo `display_mode` em `profiles` (`'game' | 'analytical' | 'minimal'`, padrão: `'game'`)
-- Alternância via configurações, sem reload
-- Estado técnico: **⚠️ Pendente** — não implementado
+- Alternância via toggle no header do dashboard, persiste no DB via `/api/profile/display-mode`
+- **Game:** radar SVG + cards de pilares + `EraPanel` (progresso de era, features desbloqueadas)
+- **Analítico:** 3 cards de resumo (XP 30d, dias ativos, pilar líder) + gráfico SVG de barras diárias (30d) + tabela de pilares com XP 7d
+- **Minimal:** lista de pilares + registros recentes
+- Estado técnico: **✅ Implementado** — web (`HomeDashboard.tsx`) + mobile (`home.tsx`)
 
 ---
 
@@ -745,13 +753,20 @@ anima/
 - ⚠️ **Onboarding em 5 steps** — implementado mas **pendente substituição** pelo onboarding conversacional (ver seção 7). Código em `app/(onboarding)/step-1` a `step-5` está deprecated.
 - [x] Histórico de atividades — timeline agrupada por dia, total de XP diário e semanal, badges de bônus
 - [x] Configurações — dados da conta, troca de senha, logout
-- [x] Nav compartilhada — AppNav com Home, Quests, Histórico, IA, Configurações
+- [x] Nav compartilhada — AppNav com Home, Quests, Histórico, Notas, IA, Relatórios, Config
 - [x] Quests — lista, criação com sub-missões, XP máx 10.000, conclusão e abandono
-- [x] Chat com IA local — `/chat`; streaming via Ollama (qwen2.5:14b na Goma); contexto completo do usuário (pilares, arquétipo, histórico, quests); histórico salvo em `ai_conversations`; markdown renderizado; botão limpar histórico; 3 pontinhos animados enquanto processa
+- [x] Chat com IA local — `/chat`; streaming via Ollama (qwen2.5:14b na Goma); contexto completo do usuário (pilares, arquétipo, histórico, quests, retrieval semântico); histórico salvo em `ai_conversations`; markdown renderizado; botão limpar histórico; 3 pontinhos animados enquanto processa
 - [x] Dashboard hierárquico — sub-pilares indentados sob os pais; borda lateral esquerda; card mais compacto/sutil; radar e nível do personagem usam só pilares raiz
-- [x] **Chat unificado — Fase 1** — detecção automática de atividades em cada mensagem do chat; logging direto no `xp_records`; pilares só registrados com match exato (sem fuzzy fallback); `X-Activity-Logged` header → `router.refresh()` no cliente; embedding fire-and-forget salvo em `entry_embeddings`; IA confirma naturalmente (sem linguagem corporativa) (`/api/ai/chat`, `lib/detect-activity.ts`, `lib/log-activity.ts`, `lib/generate-embedding.ts`)
+- [x] **Chat unificado — Fase 1** — detecção automática de atividades em cada mensagem do chat; logging direto no `xp_records`; pilares só registrados com match exato (sem fuzzy fallback); `X-Activity-Logged` header → `router.refresh()` no cliente; embedding fire-and-forget salvo em `entry_embeddings`; IA confirma naturalmente (sem linguagem corporativa)
 - [x] **Tom da IA corrigido** — novo system prompt: direto, humano, sem introduções, sem perguntas de encerramento, sem listas desnecessárias; responde "o que você é?" com exemplos do histórico real do usuário
-- [x] **Onboarding melhorado** — extração de pilares com proibições explícitas (nome do app, hábitos ruins, nomes próprios não viram pilares); sub-pilares limitados a 3; match estrito com catálogo
+- [x] **Onboarding melhorado** — extração de pilares com proibições explícitas; sub-pilares limitados a 3; match estrito; `onboarding_completed_at` setado após contexto suficiente
+- [x] **Notas — captura silenciosa** — `lib/detect-note.ts` detecta food/expense/mood/idea/other via Ollama; XP 5–20 por heurística de comprimento+contexto; `pillar_hint` inferido; IA não comenta; tela `/notes` com agrupamento por data e badges de tipo
+- [x] **Pilares pendentes** — novo pilar detectado no chat → `status='pending'`; `PendingPillarsWidget` no dashboard com confirmação (ativa pilar + loga atividade original) ou descarte
+- [x] **Modos de exibição** — Game (radar + EraPanel), Analítico (cards de resumo + gráfico 30d + tabela), Minimal (lista limpa); persiste em `profiles.display_mode`
+- [x] **Features por era** — `EraPanel` no modo Game: barra de progresso dentro da era, chips de features ativas, prévia tracejada da próxima era
+- [x] **Analítico mais rico** — 3 cards (XP 30d, dias ativos, pilar líder) + gráfico SVG de barras diárias (30d) com tooltips
+- [x] **Relatórios mensais** — `/reports`; navegação por mês (query params); XP por dia, tempo por pilar (barras horizontais), notas por tipo, maiores sessões; server-rendered
+- [x] **Arquétipo contínuo** — `lib/infer-archetype.ts`; Ollama infere 4 arquétipos (explorer/focused/builder/visionary) em %; fire-and-forget a cada ~15 mensagens; salvo em `profiles.archetype`
 
 ---
 
@@ -767,6 +782,11 @@ anima/
 - [x] Configurações — `useSafeAreaInsets`; dados da conta, troca de senha, logout
 - [x] Quests — `useSafeAreaInsets` no header; XP de quest e missão propagado via trigger `on_life_event_insert` → `user_pillars`
 - [x] `SafeAreaProvider` na raiz (`app/_layout.tsx`) para todas as telas usarem `useSafeAreaInsets`
+- [x] **Notas** — `lib/detect-note.ts` com pillar_hint + XP 5–20; `lib/log-note.ts`; tela `/notes` agrupada por data com badges de tipo
+- [x] **Pilares pendentes** — novo pilar detectado → `status='pending'`; `PendingPillarsWidget` na home com confirmação/descarte via `Alert`
+- [x] **Modos de exibição** — Game (radar + EraPanel), Analítico (tabela de stats + XP semanal), Minimal (lista limpa); persiste em `profiles.display_mode`
+- [x] **Chat com IA** — `app/(app)/chat.tsx`; streaming via Ollama (qwen2.5:14b); contexto completo (pilares, atividades recentes, arquétipo); histórico em `ai_conversations`; detecção de atividades e notas fire-and-forget em cada mensagem; botão limpar histórico
+- [x] **XP de notas + pillar_hint** — `lib/log-note.ts` e `lib/detect-note.ts` replicados do web com env vars `EXPO_PUBLIC_`
 
 ### Arquitetura mobile (estado atual)
 | Arquivo | Responsabilidade |
@@ -775,13 +795,19 @@ anima/
 | `app/index.tsx` | Porteiro de auth: `getUser()` + checa `onboarding_completed_at`; redireciona; spinner enquanto resolve |
 | `hooks/use-auth.ts` | Exporta `{ session, profile, loading }` via `onAuthStateChange`; carrega profile separadamente quando userId muda |
 | `lib/supabase.ts` | `createClient` com `AsyncStorage`; URL via `EXPO_PUBLIC_SUPABASE_URL` |
-| `lib/activity.ts` | Detecção de bônus + `logActivity` + `logMultipleActivities` (série) |
-| `lib/parse-activity.ts` | `parseActivityText` → Ollama → `[{pillarName, durationMinutes, note}]`; timeout 30s |
+| `lib/activity.ts` | Detecção de bônus + `logActivity` + `logMultipleActivities` + `getOrCreatePillar` (pending) + `confirmPendingPillar` + `dismissPendingPillar` |
+| `lib/parse-activity.ts` | `parseActivityText` → Ollama → `[{pillarName, durationMinutes, note}]`; timeout 30s; usado no LogActivityModal |
+| `lib/detect-activity.ts` | `detectActivities` conservador (bloqueia food/sleep/etc); usado no chat mobile |
+| `lib/detect-note.ts` | `detectNotes` → Ollama → `[{note_type, content, context, pillarHint}]` |
+| `lib/log-note.ts` | Persiste notas com XP 5–20 e pillar_hint |
+| `lib/mobile-chat.ts` | Streaming via Ollama; salva em `ai_conversations`; detecção fire-and-forget |
 | `lib/transcribe.ts` | `startRecording` via expo-av → `stop()` envia áudio ao Whisper → texto; `cancel()` descarta |
 | `contexts/onboarding-context.tsx` | `allPillarOptions` exclui sub-pilares (filhos), não pais |
 | `components/LifeRadar.tsx` | SVG 300×300; labels truncados em 8 chars; `MAX_R=95` |
-| `components/LogActivityModal.tsx` | 5 fases (input → parsing → reviewing → submitting → success); mic button; pillar picker inline |
-| `app/(app)/home.tsx` | `useFocusEffect`; `PillarCard` definida fora do componente pai |
+| `components/LogActivityModal.tsx` | 5 fases + detecção de notas fire-and-forget + pilares pendentes com estilo âmbar |
+| `app/(app)/home.tsx` | `useFocusEffect`; modos Game/Analítico/Minimal; `PendingPillarsWidget`; `PillarCard` fora do componente pai |
+| `app/(app)/chat.tsx` | Chat com streaming, histórico, input, `KeyboardAvoidingView`, clear |
+| `app/(app)/notes.tsx` | `SectionList` agrupada por data; badges de tipo |
 | `app/(app)/history.tsx` | `useFocusEffect`; try/catch/finally garante `setLoading(false)` |
 | `app/(app)/quests.tsx` | `useSafeAreaInsets` no header; XP via `life_events` → trigger SQL |
 | `app/(app)/settings.tsx` | `useSafeAreaInsets` |
@@ -816,10 +842,13 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 
 ## 13. Próximos temas a explorar
 
-> Atualizado em jun/2026: Fase 1 (chat unificado) concluída. Fase 2 (pilares pendentes) e Fase 3 (dissolução do /welcome) são os próximos passos de unificação.
+> Atualizado em jun/2026: todas as features P0–P4 concluídas. Sistema com cobertura completa em web e mobile. Próximos passos são refinamento de UX, QA e integrações externas.
 
 ### Próximo
 - **QA áudio** — testar Whisper no iPhone em condições reais (código pronto; Docker na Goma `:9000`)
+- **Onboarding mobile** — dissolver steps deprecated e usar o chat como entrada; espelhar o que foi feito no web
+- **Relatórios mais ricos** — correlações entre notas (ex: humor × exercício); relatório anual
+- **Refinamento do analítico** — comparativo entre meses; tendência por pilar
 - **Obsidian import** — fase 2: import com resolução de conflito (fase futura)
 - **Google Fit** — quando necessário (Health Connect Android)
 - **Modelo de monetização** — quando abrir ao público
@@ -835,10 +864,18 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 - [x] **P2 — Insights automáticos** — Camada 4; trigger por ≥5 entradas + ≥3 dias; Ollama gera; `dismissed_at`
 - [x] **P2 — Pulso do dia** — entrada ultra-leve sem duração (XP=0); classifica pilar em background
 - [x] **P3 — Editor de pilares** — renomear/desativar pilares pós-onboarding; web + mobile
-- [x] **P3 — Chat com IA contextual** — streaming via Ollama; contexto completo; web
+- [x] **P3 — Chat com IA contextual** — streaming via Ollama; contexto completo; web + mobile
 - [x] **P4 — Adaptador Obsidian** — export ZIP com .md (web/settings); fase 1 concluída
 - [x] **P4 — Apple Health scaffold** — infraestrutura pronta; requer dev build (não Expo Go)
 - [x] **Arquitetura de pilares livres** — 3 raiz fixos (Saúde, Mente, Relações) + emergência livre pela IA; catálogo pré-definido removido
+- [x] **Notas — captura silenciosa** — `notes` table; detecção via Ollama; XP 5–20; pillar_hint; tela dedicada; web + mobile
+- [x] **Pilares pendentes** — novo pilar detectado → pending; confirmação no dashboard; web + mobile
+- [x] **Modos de exibição** — Game / Analítico / Minimal; persiste no DB; web + mobile
+- [x] **Features por era** — EraPanel no modo Game com progresso, unlocks e prévia da próxima era
+- [x] **Analítico mais rico** — cards de resumo + gráfico SVG de barras diárias (30d)
+- [x] **Relatórios mensais** — `/reports` (web); navegação por mês; XP por dia, por pilar, por tipo de nota
+- [x] **Arquétipo contínuo** — inferência Ollama fire-and-forget a cada ~15 mensagens; salvo em `profiles.archetype`
+- [x] **XP de notas** — heurística 5/10/20 XP por comprimento + riqueza de contexto; web + mobile
 
 ---
 
