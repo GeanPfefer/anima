@@ -20,15 +20,17 @@ export async function extractEntities(
 ): Promise<void> {
   if (!note?.trim() || note.trim().length < 10 || !recordId) return;
 
-  const prompt = `Analise o seguinte texto pessoal e extraia entidades específicas e relevantes.
+  // Sem format:json — ele enviesa o qwen a devolver UM objeto só, perdendo
+  // entidades. Forçar array por exemplo + parsing tolerante é mais confiável.
+  const prompt = `Extraia TODAS as entidades nomeadas do texto: pessoas, projetos específicos, lugares, ferramentas/apps, hábitos nomeados.
+Ignore palavras genéricas (trabalho, exercício, manhã, dia).
 
 Texto: "${note.replace(/"/g, "'").replace(/\n/g, ' ')}"
 
-Entidades de interesse: nomes próprios de pessoas, projetos específicos, locais frequentes, ferramentas/apps, hábitos nomeados.
-Ignore palavras genéricas como "trabalho", "exercício", "manhã", "dia".
+Responda SOMENTE com um array JSON, um objeto por entidade, sem texto extra:
+[{"name":"FL Studio","type":"ferramenta","context":"app de música"},{"name":"Marina","type":"pessoa","context":"amiga"}]
 
-Retorne APENAS um array JSON válido (pode ser vazio se não houver entidades relevantes):
-[{"name": "...", "type": "pessoa|lugar|projeto|ferramenta|habito|conceito", "context": "descrição em até 45 chars"}]`;
+Tipos válidos: pessoa, lugar, projeto, ferramenta, habito, conceito. context = até 45 chars. Se não houver entidade, retorne [].`;
 
   const controller = new AbortController();
   const timeout    = setTimeout(() => controller.abort(), 20_000);
@@ -44,25 +46,29 @@ Retorne APENAS um array JSON válido (pode ser vazio se não houver entidades re
         model:   OLLAMA_MODEL,
         prompt,
         stream:  false,
-        format:  'json',
         options: { temperature: 0.1 },
       }),
     });
 
     if (res.ok) {
       const data = await res.json() as { response: string };
+      let parsed: unknown;
       try {
-        const parsed = JSON.parse(data.response) as unknown;
-        const arr = Array.isArray(parsed) ? parsed
-          : Array.isArray((parsed as { entities?: unknown[] })?.entities) ? (parsed as { entities: unknown[] }).entities
-          : [];
-        entities = (arr as unknown[]).filter(
-          (e): e is ExtractedEntity =>
-            typeof e === 'object' && e !== null &&
-            typeof (e as ExtractedEntity).name === 'string' &&
-            (e as ExtractedEntity).name.trim().length > 1,
-        );
-      } catch { /* JSON inválido — ignora */ }
+        parsed = JSON.parse(data.response);
+      } catch {
+        const m = data.response.match(/\[[\s\S]*\]/);
+        parsed = m ? JSON.parse(m[0]) : [];
+      }
+      const arr = Array.isArray(parsed) ? parsed
+        : Array.isArray((parsed as { entities?: unknown[] })?.entities) ? (parsed as { entities: unknown[] }).entities
+        : (parsed && typeof parsed === 'object' && typeof (parsed as ExtractedEntity).name === 'string') ? [parsed]
+        : [];
+      entities = (arr as unknown[]).filter(
+        (e): e is ExtractedEntity =>
+          typeof e === 'object' && e !== null &&
+          typeof (e as ExtractedEntity).name === 'string' &&
+          (e as ExtractedEntity).name.trim().length > 1,
+      );
     }
   } catch {
     // timeout/rede — ignora
