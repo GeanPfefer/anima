@@ -10,16 +10,20 @@ type PendingPillar = {
   pending_activity: { durationMinutes: number; note: string } | null;
 };
 
+type ParentOption = { id: string; name: string };
+
 type Props = {
   pillars: PendingPillar[];
+  parentOptions?: ParentOption[];
 };
 
-export default function PendingPillarsWidget({ pillars: initial }: Props) {
+export default function PendingPillarsWidget({ pillars: initial, parentOptions = [] }: Props) {
   const router = useRouter();
   const [pillars, setPillars] = useState(initial);
   const [names, setNames]     = useState<Record<string, string>>(
     Object.fromEntries(initial.map(p => [p.id, p.name])),
   );
+  const [parentIds, setParentIds] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   if (pillars.length === 0) return null;
@@ -29,10 +33,11 @@ export default function PendingPillarsWidget({ pillars: initial }: Props) {
     if (!name || busy[pillar.id]) return;
     setBusy(b => ({ ...b, [pillar.id]: true }));
 
+    const parentId = parentIds[pillar.id] || undefined;
     await fetch('/api/pillars/confirm', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ pillarId: pillar.id, name }),
+      body:    JSON.stringify({ pillarId: pillar.id, name, parentId }),
     }).catch(() => {});
 
     setPillars(ps => ps.filter(p => p.id !== pillar.id));
@@ -72,6 +77,20 @@ export default function PendingPillarsWidget({ pillars: initial }: Props) {
                 maxLength={20}
                 disabled={busy[pillar.id]}
               />
+              {parentOptions.length > 0 && (
+                <select
+                  className={styles.parentSelect}
+                  value={parentIds[pillar.id] ?? ''}
+                  onChange={e => setParentIds(p => ({ ...p, [pillar.id]: e.target.value }))}
+                  disabled={busy[pillar.id]}
+                  title="Faz parte de (opcional)"
+                >
+                  <option value="">— sem pai —</option>
+                  {parentOptions.map(o => (
+                    <option key={o.id} value={o.id}>faz parte de {o.name}</option>
+                  ))}
+                </select>
+              )}
               <button
                 className={styles.confirmBtn}
                 onClick={() => handleConfirm(pillar)}

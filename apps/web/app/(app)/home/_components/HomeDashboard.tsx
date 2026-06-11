@@ -398,7 +398,10 @@ export default function HomeDashboard({
         <ModeToggle mode={mode} onChange={handleModeChange} />
       </header>
 
-      <PendingPillarsWidget pillars={pendingPillars} />
+      <PendingPillarsWidget
+        pillars={pendingPillars}
+        parentOptions={rootPillars.flatMap(p => [p, ...p.children]).map(p => ({ id: p.id, name: p.name }))}
+      />
 
       <InsightCard insight={latestInsight} shouldTrigger={shouldTriggerInsight} />
 

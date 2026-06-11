@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { logActivity } from '@/lib/log-activity';
+import { linkPillar } from '@/lib/link-pillar';
 
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 
-  const { pillarId, name } = await req.json() as { pillarId: string; name: string };
+  const { pillarId, name, parentId } = await req.json() as { pillarId: string; name: string; parentId?: string };
   if (!pillarId || !name?.trim()) {
     return NextResponse.json({ error: 'Dados inválidos' }, { status: 400 });
   }
@@ -55,6 +56,11 @@ export async function POST(req: NextRequest) {
       durationMinutes: pa.durationMinutes!,
       note:            pa.note ?? '',
     }).catch(() => {});
+  }
+
+  // Aninha sob o pai escolhido, se houver
+  if (parentId) {
+    await linkPillar({ childId: pillarId, parentId }).catch(() => {});
   }
 
   return NextResponse.json({ ok: true });

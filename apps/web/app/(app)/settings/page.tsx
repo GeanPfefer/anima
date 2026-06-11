@@ -11,16 +11,27 @@ export default async function SettingsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [{ data: profile }, { data: pillarsData }] = await Promise.all([
+  const [{ data: profile }, { data: pillarsData }, { data: relsData }] = await Promise.all([
     supabase.from('profiles').select('name').eq('id', user.id).single(),
     supabase
       .from('user_pillars')
       .select('id, name, is_active, xp_total')
       .eq('user_id', user.id)
       .order('sort_order'),
+    supabase
+      .from('pillar_relationships')
+      .select('parent_id, child_id'),
   ]);
 
   const pillars = pillarsData ?? [];
+  // parentByChild: vínculo atual de cada pilar (no máximo um pai)
+  const parentByChild: Record<string, string> = {};
+  const pillarIds = new Set(pillars.map(p => p.id));
+  for (const r of relsData ?? []) {
+    if (pillarIds.has(r.child_id) && pillarIds.has(r.parent_id)) {
+      parentByChild[r.child_id] = r.parent_id;
+    }
+  }
 
   return (
     <main className={styles.container}>
@@ -43,7 +54,7 @@ export default async function SettingsPage() {
 
       <section className={styles.card}>
         <h2 className={styles.sectionTitle}>Pilares</h2>
-        <PillarEditor initialPillars={pillars} userId={user.id} />
+        <PillarEditor initialPillars={pillars} initialParents={parentByChild} userId={user.id} />
       </section>
 
       <section className={styles.card}>

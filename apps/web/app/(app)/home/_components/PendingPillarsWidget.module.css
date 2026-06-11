@@ -55,6 +55,23 @@
   border-color: #f0a500;
 }
 
+.parentSelect {
+  background: var(--bg-input, var(--bg-surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 6px 8px;
+  outline: none;
+  cursor: pointer;
+  max-width: 160px;
+  transition: border-color 0.15s;
+}
+
+.parentSelect:focus {
+  border-color: #f0a500;
+}
+
 .confirmBtn {
   padding: 6px 14px;
   background: #f0a500;

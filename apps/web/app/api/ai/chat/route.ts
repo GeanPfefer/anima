@@ -5,6 +5,7 @@ import { generateEmbedding } from '@/lib/generate-embedding';
 import { detectActivities } from '@/lib/detect-activity';
 import { detectNotes } from '@/lib/detect-note';
 import { detectQuests } from '@/lib/detect-quest';
+import { detectPillarLinks } from '@/lib/detect-pillar-link';
 import { logActivity } from '@/lib/log-activity';
 import { logNote } from '@/lib/log-note';
 import { getOrCreatePendingPillar } from '@/lib/get-or-create-pending-pillar';
@@ -61,11 +62,13 @@ export async function POST(req: NextRequest) {
   const detectedActivities = await detectActivities(message, pillarNames, today);
   const detectedNotes      = await detectNotes(message, today);
   const detectedQuests     = await detectQuests(message, pillarNames);
+  const detectedLinks      = await detectPillarLinks(message, pillarNames);
   const queryEmbedding     = await generateEmbedding(message);
 
   console.log('[chat/detect] activities:', detectedActivities.length, detectedActivities.map(a => `${a.pillarName}/${a.durationMinutes}min`));
   console.log('[chat/detect] notes:', detectedNotes.length, detectedNotes.map(n => n.noteType));
   console.log('[chat/detect] quests:', detectedQuests.length, detectedQuests.map(q => q.title));
+  console.log('[chat/detect] links:', detectedLinks.length, detectedLinks.map(l => `${l.childName}→${l.parentName}`));
 
   // ── Loga atividades detectadas ─────────────────────────────────
   const loggedActivities: LoggedActivity[] = [];
@@ -184,6 +187,50 @@ export async function POST(req: NextRequest) {
       });
       if (!error) createdQuests.push({ title: dq.title, pillar: pillar.name, type: dq.type });
     } catch { /* silencioso */ }
+  }
+
+  // ── Propõe agrupamentos de pilar (confirmação inline no chat) ────
+  type ProposedLink = {
+    childId: string; childName: string;
+    parentId: string | null; parentName: string;
+  };
+  const proposedLinks: ProposedLink[] = [];
+
+  if (detectedLinks.length > 0) {
+    // Re-busca todos os pilares (inclui pendentes criados nesta mensagem)
+    const { data: allPillars } = await supabase
+      .from('user_pillars')
+      .select('id, name')
+      .eq('user_id', user.id);
+    const all = allPillars ?? [];
+
+    const { data: existingRels } = await supabase
+      .from('pillar_relationships')
+      .select('parent_id, child_id');
+    const existingLinkSet = new Set((existingRels ?? []).map(r => `${r.parent_id}|${r.child_id}`));
+
+    const seenLinks = new Set<string>();
+    for (const dl of detectedLinks) {
+      const child = all.find(p => norm(p.name) === norm(dl.childName));
+      if (!child) continue; // filho não existe como pilar — nada a vincular
+
+      const parent = all.find(p => norm(p.name) === norm(dl.parentName));
+      if (parent && parent.id === child.id) continue;
+
+      // Já vinculado? não propõe de novo
+      if (parent && existingLinkSet.has(`${parent.id}|${child.id}`)) continue;
+
+      const key = `${norm(dl.childName)}|${norm(dl.parentName)}`;
+      if (seenLinks.has(key)) continue;
+      seenLinks.add(key);
+
+      proposedLinks.push({
+        childId:    child.id,
+        childName:  child.name,
+        parentId:   parent?.id ?? null,
+        parentName: parent?.name ?? dl.parentName,
+      });
+    }
   }
 
   // ── Contexto textual para o system prompt ──────────────────────
@@ -402,6 +449,10 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
 
   if (loggedActivities.length > 0) {
     responseHeaders['X-Activity-Logged'] = JSON.stringify(loggedActivities);
+  }
+
+  if (proposedLinks.length > 0) {
+    responseHeaders['X-Pillar-Links'] = JSON.stringify(proposedLinks);
   }
 
   return new Response(stream, { headers: responseHeaders });

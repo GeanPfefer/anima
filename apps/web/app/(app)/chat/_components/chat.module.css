@@ -249,3 +249,79 @@
 .sendBtn:hover:not(:disabled) {
   opacity: 0.85;
 }
+
+.linkCards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.linkCard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: flex-start;
+  max-width: 80%;
+}
+
+.linkLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.linkText {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.linkText em {
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+.linkActions {
+  display: flex;
+  gap: 8px;
+}
+
+.linkYes {
+  padding: 6px 16px;
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.linkYes:hover { opacity: 0.85; }
+
+.linkNo {
+  padding: 6px 16px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.linkNo:hover {
+  color: var(--text-primary);
+  border-color: var(--border-focus);
+}

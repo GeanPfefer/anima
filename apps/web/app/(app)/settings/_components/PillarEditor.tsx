@@ -8,16 +8,42 @@ type Pillar = { id: string; name: string; is_active: boolean; xp_total: number }
 
 export default function PillarEditor({
   initialPillars,
+  initialParents,
   userId,
 }: {
   initialPillars: Pillar[];
+  initialParents?: Record<string, string>;
   userId: string;
 }) {
   const supabase = createClient();
   const [pillars, setPillars] = useState<Pillar[]>(initialPillars);
+  const [parents, setParents] = useState<Record<string, string>>(initialParents ?? {});
   const [editedNames, setEditedNames] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function changeParent(pillar: Pillar, parentId: string) {
+    setSaving((s) => ({ ...s, [pillar.id]: true }));
+    setErrors((e) => ({ ...e, [pillar.id]: '' }));
+    const endpoint = parentId ? '/api/pillars/link' : '/api/pillars/unlink';
+    const body = parentId ? { childId: pillar.id, parentId } : { childId: pillar.id };
+    const res = await fetch(endpoint, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    }).catch(() => null);
+    setSaving((s) => ({ ...s, [pillar.id]: false }));
+    if (!res?.ok) {
+      const reason = res ? (await res.json().catch(() => ({}))).error : null;
+      setErrors((e) => ({ ...e, [pillar.id]: reason === 'cycle' ? 'Isso criaria um ciclo' : 'Erro ao vincular' }));
+      return;
+    }
+    setParents((prev) => {
+      const next = { ...prev };
+      if (parentId) next[pillar.id] = parentId; else delete next[pillar.id];
+      return next;
+    });
+  }
 
   // Novo pilar
   const [newName, setNewName] = useState('');
@@ -111,6 +137,21 @@ export default function PillarEditor({
                 disabled={isSaving}
                 aria-label={`Nome do pilar ${p.name}`}
               />
+              <select
+                className={styles.parentSelect}
+                value={parents[p.id] ?? ''}
+                onChange={(e) => changeParent(p, e.target.value)}
+                disabled={isSaving}
+                aria-label={`Pilar pai de ${p.name}`}
+                title="Faz parte de"
+              >
+                <option value="">— sem pai —</option>
+                {pillars
+                  .filter((o) => o.id !== p.id)
+                  .map((o) => (
+                    <option key={o.id} value={o.id}>faz parte de {o.name}</option>
+                  ))}
+              </select>
               <button
                 className={[styles.toggle, p.is_active ? styles.toggleOn : styles.toggleOff].join(' ')}
                 onClick={() => toggleActive(p)}

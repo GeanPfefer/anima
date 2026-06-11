@@ -41,6 +41,28 @@
   opacity: 0.5;
 }
 
+.parentSelect {
+  font-size: 12px;
+  padding: 7px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  max-width: 150px;
+  flex-shrink: 0;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.parentSelect:focus {
+  border-color: var(--border-focus);
+}
+
+.parentSelect:disabled {
+  opacity: 0.5;
+}
+
 .toggle {
   font-size: 12px;
   font-weight: 600;

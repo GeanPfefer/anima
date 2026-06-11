@@ -7,6 +7,13 @@ import styles from './chat.module.css';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
+type ProposedLink = {
+  childId:    string;
+  childName:  string;
+  parentId:   string | null;
+  parentName: string;
+};
+
 type Props = {
   isFirstTime: boolean;
   userName:    string;
@@ -19,6 +26,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState('');
   const [isOnboarding, setIsOnboarding] = useState(isFirstTime);
+  const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -135,8 +143,35 @@ export function ChatClient({ isFirstTime, userName }: Props) {
       throw new Error(err.error ?? 'Erro na resposta');
     }
     const activityHeader = res.headers.get('X-Activity-Logged');
+    const linksHeader    = res.headers.get('X-Pillar-Links');
     await readStream(res);
+    if (linksHeader) {
+      try {
+        const links = JSON.parse(linksHeader) as ProposedLink[];
+        setPendingLinks(prev => {
+          const seen = new Set(prev.map(l => `${l.childId}|${l.parentName.toLowerCase()}`));
+          return [...prev, ...links.filter(l => !seen.has(`${l.childId}|${l.parentName.toLowerCase()}`))];
+        });
+      } catch { /* header inválido, ignora */ }
+    }
     if (activityHeader) router.refresh();
+  }
+
+  async function applyLink(link: ProposedLink) {
+    const body = link.parentId
+      ? { childId: link.childId, parentId: link.parentId }
+      : { childId: link.childId, parentName: link.parentName };
+    const res = await fetch('/api/pillars/link', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    }).catch(() => null);
+    setPendingLinks(prev => prev.filter(l => l !== link));
+    if (res?.ok) router.refresh();
+  }
+
+  function dismissLink(link: ProposedLink) {
+    setPendingLinks(prev => prev.filter(l => l !== link));
   }
 
   async function readStream(res: Response) {
@@ -227,6 +262,24 @@ export function ChatClient({ isFirstTime, userName }: Props) {
             </div>
           </div>
         ))}
+
+        {pendingLinks.length > 0 && (
+          <div className={styles.linkCards}>
+            {pendingLinks.map((link, i) => (
+              <div key={`${link.childId}-${i}`} className={styles.linkCard}>
+                <span className={styles.linkLabel}>Agrupar pilares</span>
+                <p className={styles.linkText}>
+                  Quer que <strong>{link.childName}</strong> faça parte de <strong>{link.parentName}</strong>
+                  {link.parentId === null && <em> (novo pilar)</em>}?
+                </p>
+                <div className={styles.linkActions}>
+                  <button className={styles.linkYes} onClick={() => applyLink(link)}>Sim</button>
+                  <button className={styles.linkNo}  onClick={() => dismissLink(link)}>Não</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {error && <p className={styles.error}>{error}</p>}
         <div ref={bottomRef} />
