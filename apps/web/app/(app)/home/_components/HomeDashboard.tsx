@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { getXPToNextLevel, getTotalXPForLevel, getEraForLevel, getCharacterLevel, ERAS } from '@anima/core';
 import type { Era } from '@anima/types';
 import LifeRadar from './LifeRadar';
-import LogActivityModal from './LogActivityModal';
 import InsightCard from './InsightCard';
 import PendingPillarsWidget from './PendingPillarsWidget';
 import styles from '../home.module.css';
@@ -45,7 +44,6 @@ export type HomeDashboardProps = {
   profileName:         string;
   initialMode:         DisplayMode;
   rootPillars:         PillarWithChildren[];
-  allPillarsForModal:  { id: string; name: string; xp_rate: number }[];
   latestInsight:       { id: string; text: string; generated_at: string } | null;
   shouldTriggerInsight: boolean;
   pendingPillars:      PendingPillar[];
@@ -362,7 +360,6 @@ export default function HomeDashboard({
   profileName,
   initialMode,
   rootPillars,
-  allPillarsForModal,
   latestInsight,
   shouldTriggerInsight,
   pendingPillars,
@@ -417,9 +414,6 @@ export default function HomeDashboard({
         />
       )}
 
-      <div className={styles.footer}>
-        <LogActivityModal pillars={allPillarsForModal} />
-      </div>
     </main>
   );
 }

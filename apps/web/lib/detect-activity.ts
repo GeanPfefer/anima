@@ -17,7 +17,8 @@ export async function detectActivities(
 
   const prompt = `Detecte atividades intencionais realizadas na mensagem abaixo.
 
-Pilares disponíveis: ${pillarNames.join(', ')}
+PILARES DISPONÍVEIS (use EXATAMENTE estes nomes, sem variações):
+${pillarNames.map(n => `- "${n}"`).join('\n')}
 
 REGISTRE — atividades com esforço intencional:
 ✅ exercício, esporte, treino (corrida, academia, skate, kung fu, natação...)
@@ -29,35 +30,30 @@ REGISTRE — atividades com esforço intencional:
 ✅ atividade social intencional (encontro planejado, ligação importante)
 
 NÃO REGISTRE — rotina básica ou ações passivas:
-❌ comer, beber, tomar sorvete, almoçar, jantar, tomar café
+❌ comer, beber, almoçar, jantar, tomar café
 ❌ dormir, descansar, assistir TV, rolar o feed
 ❌ deslocamento comum (ir ao trabalho, pegar ônibus)
 ❌ compras rotineiras
 ❌ perguntas, planos futuros, sentimentos sem ação concreta
 
-PILAR — escolha apenas se houver correspondência clara com a lista:
-- Saúde: exercício, corpo, consulta médica
-- Mente: estudo, leitura, aprendizado, foco
-- Trabalho: profissional, projetos, carreira
-- Relações: conexões sociais intencionais
-- Lazer: hobby ativo, diversão com esforço
-- Finanças: gestão financeira ativa
-- Propósito: reflexão profunda sobre valores
-IMPORTANTE: se nenhum pilar da lista se encaixa claramente → não registre (retorne [])
+REGRA DE PILAR: mapeie cada atividade para o pilar da lista que melhor se encaixa.
+Use contexto: exercício/saúde/corpo → "Saúde" (ou similar); estudo/livro/curso → "Mente" (ou similar);
+trabalho/projeto/código → pilar profissional; amigos/família → pilar social.
+IMPORTANTE: use SOMENTE nomes da lista acima. Se nenhum se encaixa → não registre essa atividade.
 
 Para cada atividade válida:
-- "pillarName": nome EXATO de um pilar da lista acima
+- "pillarName": nome EXATO de um dos pilares listados acima
 - "durationMinutes": duração em minutos como inteiro (0 se não mencionada)
-- "note": descrição curta, máx 80 chars
+- "note": descrição curta da atividade, máx 80 chars
 
 Conversões: "1h"=60, "meia hora"=30, "2h30"=150, "45min"=45, "uma hora"=60
 
-Mensagem: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 500)}"
+Mensagem: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 600)}"
 
-Retorne APENAS um array JSON. Se nada se encaixa, retorne [].`;
+Retorne APENAS um array JSON válido. Se nada se encaixa, retorne [].`;
 
   const controller = new AbortController();
-  const timeout    = setTimeout(() => controller.abort(), 15_000);
+  const timeout    = setTimeout(() => controller.abort(), 25_000);
 
   try {
     const res = await fetch(`${OLLAMA_URL}/api/generate`, {

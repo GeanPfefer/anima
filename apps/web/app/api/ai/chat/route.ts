@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
         note:            da.note,
       });
 
-      // Embedding fire-and-forget — para retrieval futuro
+      // Embedding + extração de entidades — fire-and-forget
       if (da.note) {
         generateEmbedding(da.note)
           .then(async emb => {
@@ -104,6 +104,13 @@ export async function POST(req: NextRequest) {
             }, { onConflict: 'xp_record_id' });
           })
           .catch(() => {});
+
+        // Extração de entidades semânticas (Camada 3)
+        fetch(new URL('/api/ai/extract-entities', process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000').toString(), {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ note: da.note, recordId: result.recordId }),
+        }).catch(() => {});
       }
     } catch {
       // falha silenciosa — não interrompe a conversa

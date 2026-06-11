@@ -114,14 +114,11 @@ export default async function HomePage() {
 
   const pillarMap: Record<string, string> = Object.fromEntries(pillars.map(p => [p.id, p.name]));
 
-  const allPillarsForModal = pillars.map(p => ({ id: p.id, name: p.name, xp_rate: p.xp_rate }));
-
   return (
     <HomeDashboard
       profileName={profile.name}
       initialMode={(profile.display_mode as DisplayMode) ?? 'game'}
       rootPillars={rootPillars}
-      allPillarsForModal={allPillarsForModal}
       latestInsight={latestInsight ?? null}
       shouldTriggerInsight={shouldTriggerInsight}
       pendingPillars={pendingPillars}

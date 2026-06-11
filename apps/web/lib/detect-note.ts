@@ -41,7 +41,7 @@ Mensagem: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 500)}"
 Retorne APENAS um array JSON. Se não há nota, retorne [].`;
 
   const controller = new AbortController();
-  const timeout    = setTimeout(() => controller.abort(), 15_000);
+  const timeout    = setTimeout(() => controller.abort(), 25_000);
 
   try {
     const res = await fetch(`${OLLAMA_URL}/api/generate`, {
