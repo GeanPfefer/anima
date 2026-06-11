@@ -19,11 +19,19 @@ export async function POST(req: NextRequest) {
   if (!user) return new Response('Não autorizado', { status: 401 });
 
   const { name, messages } = await req.json() as { name: string; messages: Message[] };
+  const displayName = name?.trim() || null;
 
-  // Conversa vazia → IA inicia com pergunta aberta
-  const ollamaMessages: Message[] = messages.length === 0
-    ? [{ role: 'user', content: '.' }]
-    : messages;
+  // Primeira mensagem: saudação hardcoded — sem round-trip ao Ollama
+  if (messages.length === 0) {
+    const greeting = displayName
+      ? `O que tá rolando na sua vida ultimamente, ${displayName}?`
+      : `O que tá rolando na sua vida ultimamente?`;
+    return new Response(greeting, {
+      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' },
+    });
+  }
+
+  const ollamaMessages: Message[] = messages;
 
   const ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
@@ -32,7 +40,7 @@ export async function POST(req: NextRequest) {
       model: OLLAMA_MODEL,
       stream: true,
       messages: [
-        { role: 'system', content: buildSystemPrompt(name) },
+        { role: 'system', content: buildSystemPrompt(displayName) },
         ...ollamaMessages,
       ],
     }),
@@ -95,12 +103,13 @@ export async function POST(req: NextRequest) {
   });
 }
 
-function buildSystemPrompt(name: string): string {
-  return `Você é o Anima. Esta é sua primeira conversa com ${name}.
+function buildSystemPrompt(name: string | null): string {
+  const ref = name ?? 'esta pessoa';
+  return `Você é o Anima. Esta é sua primeira conversa com ${ref}.
 
-MISSÃO (nunca diga isso): ouvir e entender como é a vida de ${name} agora.
+MISSÃO (nunca diga isso): ouvir e entender como é a vida de ${ref} agora.
 Não aconselhar. Não planejar. Não ajudar. Só entender.
-
+${!name ? '\nVocê ainda não sabe o nome da pessoa. Se surgir naturalmente, use-o nas próximas mensagens.' : ''}
 PROIBIDO — estas respostas destroem a experiência:
 ❌ "Vamos focar em uma área específica"
 ❌ "Qual área da sua vida você quer melhorar?"
@@ -123,6 +132,5 @@ PERMITIDO:
 Após 3+ trocas com contexto real da vida da pessoa, encerre naturalmente com algo como:
 "Já tenho uma boa ideia de como é a sua vida agora. Pode explorar seu perfil quando quiser."
 
-Idioma: português brasileiro informal.
-Primeira mensagem (ao receber "."): algo genuíno como "O que tá rolando na sua vida ultimamente, ${name}?"`;
+Idioma: português brasileiro informal.`;
 }

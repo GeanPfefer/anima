@@ -13,10 +13,13 @@ export default async function ChatPage() {
     .eq('id', user.id)
     .single();
 
+  // Normaliza: null ou placeholder 'Jogador' → string vazia (IA não sabe o nome ainda)
+  const userName = (profile?.name && profile.name !== 'Jogador') ? profile.name : '';
+
   return (
     <ChatClient
       isFirstTime={!profile?.onboarding_completed_at}
-      userName={profile?.name ?? 'você'}
+      userName={userName}
     />
   );
 }

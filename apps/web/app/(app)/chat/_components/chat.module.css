@@ -134,10 +134,10 @@
 }
 
 .assistant .bubble {
-  background: var(--surface);
+  background: transparent;
   color: var(--text-primary);
-  border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
+  padding-left: 0;
 }
 
 /* ── Indicador de digitação ── */
