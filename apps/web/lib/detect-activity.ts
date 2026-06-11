@@ -1,5 +1,5 @@
 export type DetectedActivity = {
-  pillarName: string;      // nome exato existente ou nome novo (será criado como pendente)
+  pillarName: string;      // pilar existente ou nome novo (criado como pendente)
   durationMinutes: number;
   note: string;
   activityDate?: string;   // ISO yyyy-mm-dd, inferida do texto
@@ -7,7 +7,6 @@ export type DetectedActivity = {
 
 // Detecta atividades intencionais em mensagens do usuário.
 // Suporta múltiplos dias numa mesma mensagem.
-// Permite sugerir novos nomes de pilares — o chat route os cria como pendentes.
 export async function detectActivities(
   message: string,
   pillarNames: string[],
@@ -16,59 +15,38 @@ export async function detectActivities(
   const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
   const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
 
-  // Calendar reference so the model can map "segunda-feira", "ontem" → ISO date
+  // Compact calendar reference: "seg=2026-06-09, ter=2026-06-10, ..."
   const todayDate = new Date(today + 'T12:00:00');
-  const weekdays  = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
-  const calLines  = Array.from({ length: 8 }, (_, i) => {
+  const abbr = ['dom','seg','ter','qua','qui','sex','sáb'];
+  const calRef = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(todayDate);
     d.setDate(todayDate.getDate() - i);
-    const label = i === 0 ? 'hoje' : i === 1 ? 'ontem' : weekdays[d.getDay()]!;
-    return `  ${label} = ${d.toISOString().slice(0, 10)}`;
-  }).join('\n');
+    const label = i === 0 ? 'hoje' : i === 1 ? 'ontem' : abbr[d.getDay()]!;
+    return `${label}=${d.toISOString().slice(0, 10)}`;
+  }).join(', ');
 
-  const existingList = pillarNames.length > 0
-    ? pillarNames.join(', ')
-    : 'Saúde, Mente, Relações';
+  const pillarCtx = pillarNames.length > 0 ? pillarNames.join(', ') : 'Saúde, Mente, Relações';
 
+  // Keep this prompt short — same structure as parseActivities (which works reliably).
   const prompt = `Você extrai atividades de vida de textos escritos naturalmente. A mensagem pode cobrir vários dias.
+Hoje=${today}. Datas: ${calRef}
 
-HOJE = ${today}
-CALENDÁRIO (para inferir activityDate):
-${calLines}
+Pilares do usuário: ${pillarCtx}
+Regra: use um pilar existente se encaixar. Crie nome novo apenas se necessário (ex: "Arte", "Finanças", "Lazer").
 
-PILARES EXISTENTES DO USUÁRIO: ${existingList}
-Regra: use um pilar existente se a atividade se encaixar bem.
-Crie um nome NOVO apenas se necessário — português, máx 20 chars (ex: "Arte", "Finanças", "Lazer", "Espiritualidade").
-
-REGISTRE — atividades com esforço intencional:
-+ exercício, esporte, treino (corrida, academia, yoga, natação...)
-+ estudo, leitura, curso, aprendizado
-+ trabalho, projeto, reunião produtiva, tarefa concluída
-+ meditação, terapia, prática espiritual
-+ criação (música, arte, escrita, código, pintura)
-+ consulta médica, tratamento de saúde
-+ atividade social intencional (encontro planejado, ligação importante)
-
-NÃO REGISTRE:
-- comer, beber, almoçar, jantar, dormir, descansar
-- assistir TV, rolar o feed, compras rotineiras
-- deslocamento comum, perguntas, planos futuros, sentimentos sem ação
-
-Cada item:
-  "pillarName": string — pilar existente ou nome novo
-  "durationMinutes": number — minutos (0 se não mencionado)
-  "note": string — resumo curto, máx 80 chars
-  "activityDate": string? — ISO yyyy-mm-dd inferida do texto (omitir se incerta)
+Para cada atividade identificada:
+- "pillarName": pilar existente ou nome novo em português, máx 20 chars
+- "durationMinutes": minutos como inteiro (0 se não mencionado)
+- "note": resumo curto, máx 80 chars
+- "activityDate": data ISO inferida do contexto (opcional — omitir se incerto)
 
 Conversões: 1h=60, meia hora=30, 2h30=150, 45min=45.
-Se uma atividade cobre dois pilares diferentes, crie dois objetos.
+Se uma atividade cobre dois pilares, crie dois objetos.
+Não registre: comer, dormir, descansar, assistir TV, deslocamento, compras, sentimentos sem ação.
 
-Texto:
-"""
-${message.replace(/"""/g, "'''").slice(0, 2500)}
-"""
+Texto: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 1800)}"
 
-Retorne APENAS array JSON válido. Se nada se encaixa, retorne [].`;
+Retorne APENAS um array JSON válido, sem texto adicional.`;
 
   const controller = new AbortController();
   const timeout    = setTimeout(() => controller.abort(), 30_000);

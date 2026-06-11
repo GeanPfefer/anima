@@ -387,7 +387,10 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
         attr.needsUpdate = true;
       }
 
-      // ── Raycast (done after mesh positions are updated) ──────────
+      // ── Raycast ───────────────────────────────────────────────────
+      // updateMatrixWorld must be called before raycasting because
+      // renderer.render() (which normally does it) comes after.
+      world.updateMatrixWorld(true);
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObjects(simNodes.map(n => n.mesh));
 
