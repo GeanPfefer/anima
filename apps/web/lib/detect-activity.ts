@@ -1,24 +1,22 @@
 export type DetectedActivity = {
-  pillarName: string;
+  pillarName: string;      // nome exato existente ou nome novo (será criado como pendente)
   durationMinutes: number;
   note: string;
-  activityDate?: string; // ISO yyyy-mm-dd, inferida do texto
+  activityDate?: string;   // ISO yyyy-mm-dd, inferida do texto
 };
 
-// Detecta atividades intencionais realizadas em mensagens do usuário.
-// Suporta mensagens que cobrem múltiplos dias (infere a data de cada atividade).
-// Conservador por design — falso negativo é melhor que registrar lixo.
+// Detecta atividades intencionais em mensagens do usuário.
+// Suporta múltiplos dias numa mesma mensagem.
+// Permite sugerir novos nomes de pilares — o chat route os cria como pendentes.
 export async function detectActivities(
   message: string,
   pillarNames: string[],
   today: string = new Date().toISOString().slice(0, 10),
 ): Promise<DetectedActivity[]> {
-  if (!pillarNames.length) return [];
-
   const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
   const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
 
-  // Build a reference calendar so the model can resolve weekday names to ISO dates
+  // Calendar reference so the model can map "segunda-feira", "ontem" → ISO date
   const todayDate = new Date(today + 'T12:00:00');
   const weekdays  = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
   const calLines  = Array.from({ length: 8 }, (_, i) => {
@@ -28,55 +26,49 @@ export async function detectActivities(
     return `  ${label} = ${d.toISOString().slice(0, 10)}`;
   }).join('\n');
 
-  const pillarList = pillarNames.map(n => `  - "${n}"`).join('\n');
+  const existingList = pillarNames.length > 0
+    ? pillarNames.join(', ')
+    : 'Saúde, Mente, Relações';
 
-  const prompt = [
-    'Detecte atividades intencionais realizadas na mensagem abaixo.',
-    'A mensagem pode cobrir VÁRIOS dias — extraia uma entrada por atividade.',
-    '',
-    `HOJE = ${today}`,
-    'CALENDÁRIO DE REFERÊNCIA (para inferir activityDate):',
-    calLines,
-    'Se a data não puder ser inferida com segurança, omita "activityDate".',
-    '',
-    'PILARES DISPONÍVEIS (use EXATAMENTE estes nomes):',
-    pillarList,
-    '',
-    'REGISTRE — atividades com esforço intencional:',
-    '+ exercício, esporte, treino (corrida, academia, natação, yoga...)',
-    '+ estudo, leitura, curso, aprendizado',
-    '+ trabalho, projeto, tarefa concluída, reunião produtiva',
-    '+ meditação, terapia, prática espiritual',
-    '+ criação (música, arte, escrita, código)',
-    '+ cuidado ativo com saúde (consulta, tratamento)',
-    '+ atividade social intencional (encontro planejado, ligação importante)',
-    '',
-    'NÃO REGISTRE — rotina básica:',
-    '- comer, beber, almoçar, jantar',
-    '- dormir, descansar, assistir TV',
-    '- deslocamento comum, compras rotineiras',
-    '- perguntas, planos futuros, sentimentos sem ação',
-    '',
-    'REGRA DE PILAR: mapeie para o pilar da lista que melhor se encaixa.',
-    'exercício/saúde/corpo → pilar de saúde; estudo/livro → pilar de mente;',
-    'trabalho/projeto/código → pilar profissional; amigos/família → pilar social.',
-    'Use SOMENTE nomes da lista. Se nenhum encaixa → não registre.',
-    '',
-    'Cada item do array deve ter:',
-    '  "pillarName": string — nome EXATO de um pilar da lista',
-    '  "durationMinutes": number — minutos (0 se não mencionado)',
-    '  "note": string — descrição curta, máx 80 chars',
-    '  "activityDate": string? — ISO yyyy-mm-dd (omitir se incerta)',
-    '',
-    'Conversões: 1h=60, meia hora=30, 2h30=150, 45min=45, uma hora=60',
-    '',
-    'Mensagem:',
-    '"""',
-    message.replace(/"""/g, "'''").slice(0, 2500),
-    '"""',
-    '',
-    'Retorne APENAS um array JSON válido. Se nada se encaixa, retorne [].',
-  ].join('\n');
+  const prompt = `Você extrai atividades de vida de textos escritos naturalmente. A mensagem pode cobrir vários dias.
+
+HOJE = ${today}
+CALENDÁRIO (para inferir activityDate):
+${calLines}
+
+PILARES EXISTENTES DO USUÁRIO: ${existingList}
+Regra: use um pilar existente se a atividade se encaixar bem.
+Crie um nome NOVO apenas se necessário — português, máx 20 chars (ex: "Arte", "Finanças", "Lazer", "Espiritualidade").
+
+REGISTRE — atividades com esforço intencional:
++ exercício, esporte, treino (corrida, academia, yoga, natação...)
++ estudo, leitura, curso, aprendizado
++ trabalho, projeto, reunião produtiva, tarefa concluída
++ meditação, terapia, prática espiritual
++ criação (música, arte, escrita, código, pintura)
++ consulta médica, tratamento de saúde
++ atividade social intencional (encontro planejado, ligação importante)
+
+NÃO REGISTRE:
+- comer, beber, almoçar, jantar, dormir, descansar
+- assistir TV, rolar o feed, compras rotineiras
+- deslocamento comum, perguntas, planos futuros, sentimentos sem ação
+
+Cada item:
+  "pillarName": string — pilar existente ou nome novo
+  "durationMinutes": number — minutos (0 se não mencionado)
+  "note": string — resumo curto, máx 80 chars
+  "activityDate": string? — ISO yyyy-mm-dd inferida do texto (omitir se incerta)
+
+Conversões: 1h=60, meia hora=30, 2h30=150, 45min=45.
+Se uma atividade cobre dois pilares diferentes, crie dois objetos.
+
+Texto:
+"""
+${message.replace(/"""/g, "'''").slice(0, 2500)}
+"""
+
+Retorne APENAS array JSON válido. Se nada se encaixa, retorne [].`;
 
   const controller = new AbortController();
   const timeout    = setTimeout(() => controller.abort(), 30_000);

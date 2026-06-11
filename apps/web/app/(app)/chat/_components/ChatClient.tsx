@@ -26,10 +26,23 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Primeira visita: IA abre a conversa automaticamente
+  // Carrega histórico persistido ao montar (evita reset ao trocar de aba)
   useEffect(() => {
-    if (!isOnboarding) return;
-    fetchOnboardingMessage([]);
+    if (isOnboarding) {
+      fetchOnboardingMessage([]);
+      return;
+    }
+    fetch('/api/ai/history')
+      .then(r => r.ok ? r.json() : [])
+      .then((history: { role: string; content: string }[]) => {
+        if (history.length > 0) {
+          setMessages(history.map(m => ({
+            role:    m.role as 'user' | 'assistant',
+            content: m.content,
+          })));
+        }
+      })
+      .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
