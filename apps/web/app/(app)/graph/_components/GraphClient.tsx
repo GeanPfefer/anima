@@ -18,46 +18,12 @@ export type GraphEdge = {
   type: 'relation' | 'cooccurrence' | 'note';
 };
 
-// ─── Window manager ───────────────────────────────────────────────────────────
-
-const WM_KEY = 'anima_graph_windows';
-type WinEntry = { x: number; y: number; w: number; h: number; ts: number };
-
-class WindowManager {
-  readonly id = Math.random().toString(36).slice(2, 10);
-
-  tick() {
-    const all = this.read();
-    const now = Date.now();
-    for (const k of Object.keys(all)) {
-      if (now - (all[k]?.ts ?? 0) > 2000) delete all[k];
-    }
-    all[this.id] = {
-      x: window.screenX, y: window.screenY,
-      w: window.innerWidth, h: window.innerHeight,
-      ts: now,
-    };
-    try { localStorage.setItem(WM_KEY, JSON.stringify(all)); } catch { /* quota */ }
-  }
-
-  read(): Record<string, WinEntry> {
-    try { return JSON.parse(localStorage.getItem(WM_KEY) ?? '{}') as Record<string, WinEntry>; }
-    catch { return {}; }
-  }
-
-  dispose() {
-    const all = this.read();
-    delete all[this.id];
-    try { localStorage.setItem(WM_KEY, JSON.stringify(all)); } catch { /* quota */ }
-  }
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function nodeColor(name: string): THREE.Color {
   const n = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  if (n === 'saude') return new THREE.Color(0x22c55e);
-  if (n === 'mente') return new THREE.Color(0x7c5cfc);
+  if (n === 'saude')    return new THREE.Color(0x22c55e);
+  if (n === 'mente')    return new THREE.Color(0x7c5cfc);
   if (n === 'relacoes') return new THREE.Color(0xf59e0b);
   let h = 5381;
   for (let i = 0; i < name.length; i++) h = ((h << 5) + h) ^ name.charCodeAt(i);
@@ -108,6 +74,10 @@ interface SimNode extends GraphNode {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+//
+// Coordenadas ancoradas na VIEWPORT: a origem (0,0) é o centro da tela.
+// Nada depende da posição da janela no monitor — cada nó é mantido dentro
+// dos limites visíveis por um clamp rígido, então nunca some da tela.
 
 export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -125,37 +95,17 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
     // ── Scene ─────────────────────────────────────────────────────
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x020408);
-    scene.fog = new THREE.FogExp2(0x020408, 0.0004);
-
-    // ── Orthographic camera (1 unit = 1 CSS pixel) ────────────────
-    const makeCamera = () => {
-      const w = window.innerWidth, h = window.innerHeight;
-      const cam = new THREE.OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, -10000, 10000);
-      cam.position.z = 2;
-      return cam;
-    };
-    const camera = makeCamera();
-
-    // ── World group — shifted by window position ───────────────────
-    const world = new THREE.Group();
-    scene.add(world);
     scene.add(new THREE.AmbientLight(0x223344, 3));
 
-    // ── Window manager ────────────────────────────────────────────
-    const wm = new WindowManager();
-
-    // Nodes are initialised at the current viewport centre so they're
-    // always visible, even on non-maximised windows. The gravity target
-    // tracks the viewport centre each frame, so the multi-window effect
-    // still works: each window pulls nodes toward its own screen position.
-    const initCX = () => window.screenX + window.innerWidth  / 2;
-    const initCY = () => window.screenY + window.innerHeight / 2;
-    const SPREAD = Math.max(160, Math.min(window.screen.width, window.screen.height) * 0.15);
+    // ── Orthographic camera (origem = centro da viewport) ─────────
+    const w0 = window.innerWidth, h0 = window.innerHeight;
+    const camera = new THREE.OrthographicCamera(-w0 / 2, w0 / 2, h0 / 2, -h0 / 2, -10000, 10000);
+    camera.position.z = 10;
 
     // ── Build simulation nodes ────────────────────────────────────
+    const ringR = Math.min(180, Math.max(90, Math.min(w0, h0) * 0.18));
     const simNodes: SimNode[] = nodes.map((n, i) => {
-      const angle  = (i / nodes.length) * Math.PI * 2;
-      const r      = SPREAD * (0.5 + Math.random() * 0.6);
+      const angle  = (i / Math.max(1, nodes.length)) * Math.PI * 2;
       const color  = nodeColor(n.name);
       const radius = Math.min(42, 12 + n.level * 2.5);
 
@@ -189,14 +139,13 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       const label = new THREE.Sprite(labelMat);
       label.scale.set(160, 30, 1);
 
-      world.add(mesh, halo, light, label);
+      scene.add(mesh, halo, light, label);
 
-      const cx = initCX(), cy = initCY();
       return {
         ...n,
-        x: cx + Math.cos(angle) * r,
-        y: cy + Math.sin(angle) * r,
-        z: (Math.random() - 0.5) * SPREAD * 0.35,
+        x: Math.cos(angle) * ringR * (0.7 + Math.random() * 0.5),
+        y: Math.sin(angle) * ringR * (0.7 + Math.random() * 0.5),
+        z: (Math.random() - 0.5) * 60,
         vx: 0, vy: 0, vz: 0,
         radius,
         mesh, halo, light, label,
@@ -218,7 +167,7 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       const opacity =
         e.type === 'relation'     ? 0.75 :
         e.type === 'cooccurrence' ? 0.42 : 0.24;
-      const w = Math.min(1, e.weight / 5);
+      const ww  = Math.min(1, e.weight / 5);
       const mid = new THREE.Color().lerpColors(nodeColor(a.name), nodeColor(b.name), 0.5);
 
       const positions = new Float32Array(6);
@@ -228,31 +177,31 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       const mat = new THREE.LineBasicMaterial({
         color: mid,
         transparent: true,
-        opacity: opacity * w,
+        opacity: opacity * ww,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
       const line = new THREE.Line(geo, mat);
-      world.add(line);
+      scene.add(line);
       edgeMeshes.push({ line, src: e.source, tgt: e.target });
     }
 
-    // ── Force simulation constants ─────────────────────────────────
-    const K_REP = 90000;
-    const K_ATT = 0.0020;
-    const REST  = 260;
-    const K_CTR = 0.00035;
-    const DAMP  = 0.87;
+    // ── Força (amornada + cooling) ────────────────────────────────
+    const K_REP = 26000;   // repulsão node↔node
+    const K_ATT = 0.012;   // mola das arestas
+    const REST  = 150;     // comprimento de repouso da aresta
+    const K_CTR = 0.015;   // gravidade pro centro
+    const DAMP  = 0.82;
+    let   alpha = 1;        // esfria ao longo do tempo pra assentar
 
     function simTick() {
-      // Gravity toward current viewport centre (in screen coords)
-      const cx = window.screenX + window.innerWidth  / 2;
-      const cy = window.screenY + window.innerHeight / 2;
+      const cool = Math.max(0.04, alpha);
 
       for (let i = 0; i < simNodes.length; i++) {
         const a = simNodes[i]!;
-        a.vx += (cx - a.x) * K_CTR;
-        a.vy += (cy - a.y) * K_CTR;
+        // gravidade pro centro (origem)
+        a.vx += (-a.x) * K_CTR * cool;
+        a.vy += (-a.y) * K_CTR * cool;
         a.vz += (-a.z) * K_CTR;
 
         for (let j = i + 1; j < simNodes.length; j++) {
@@ -260,7 +209,7 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
           const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
           const d2 = dx * dx + dy * dy + dz * dz + 1;
           const d  = Math.sqrt(d2);
-          const f  = K_REP / d2;
+          const f  = (K_REP / d2) * cool;
           const ux = dx / d, uy = dy / d, uz = dz / d;
           a.vx -= f * ux; a.vy -= f * uy; a.vz -= f * uz;
           b.vx += f * ux; b.vy += f * uy; b.vz += f * uz;
@@ -272,40 +221,44 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
         if (!a || !b) continue;
         const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
         const d  = Math.sqrt(dx * dx + dy * dy + dz * dz) + 0.01;
-        const f  = K_ATT * (d - REST) * e.weight;
+        const f  = K_ATT * (d - REST) * Math.min(e.weight, 4) * cool;
         const ux = dx / d, uy = dy / d, uz = dz / d;
         a.vx += f * ux; a.vy += f * uy; a.vz += f * uz;
         b.vx -= f * ux; b.vy -= f * uy; b.vz -= f * uz;
       }
 
+      // Limites da viewport — nós nunca saem da tela
+      const halfW = window.innerWidth  / 2;
+      const halfH = window.innerHeight / 2;
+
       for (const n of simNodes) {
         n.vx *= DAMP; n.vy *= DAMP; n.vz *= DAMP;
         n.x  += n.vx; n.y  += n.vy; n.z  += n.vz;
+
+        const mx = halfW - n.radius - 30;
+        const my = halfH - n.radius - 50; // espaço extra embaixo pro label
+        if (n.x >  mx) { n.x =  mx; n.vx *= -0.4; }
+        if (n.x < -mx) { n.x = -mx; n.vx *= -0.4; }
+        if (n.y >  my) { n.y =  my; n.vy *= -0.4; }
+        if (n.y < -my) { n.y = -my; n.vy *= -0.4; }
       }
+
+      if (alpha > 0.04) alpha *= 0.99;
     }
 
     // ── Raycaster + tooltip ───────────────────────────────────────
     const raycaster = new THREE.Raycaster();
-    const mouse     = new THREE.Vector2(-99, -99); // off-screen by default
+    const mouse     = new THREE.Vector2(-99, -99);
     let   hoveredId: number | null = null;
 
-    // Tooltip DOM element — created imperatively to avoid React re-render on every mouse move
     const tooltip = document.createElement('div');
     tooltip.style.cssText = [
-      'position:fixed',
-      'pointer-events:none',
-      'display:none',
-      'background:rgba(5,8,20,0.88)',
-      'border:1px solid rgba(255,255,255,0.12)',
-      'border-radius:10px',
-      'padding:10px 14px',
-      'font-family:system-ui,sans-serif',
-      'font-size:13px',
-      'color:#e2e8f0',
-      'line-height:1.6',
-      'z-index:20',
-      'backdrop-filter:blur(8px)',
-      'box-shadow:0 4px 24px rgba(0,0,0,0.5)',
+      'position:fixed', 'pointer-events:none', 'display:none',
+      'background:rgba(5,8,20,0.88)', 'border:1px solid rgba(255,255,255,0.12)',
+      'border-radius:10px', 'padding:10px 14px',
+      'font-family:system-ui,sans-serif', 'font-size:13px',
+      'color:#e2e8f0', 'line-height:1.6', 'z-index:20',
+      'backdrop-filter:blur(8px)', 'box-shadow:0 4px 24px rgba(0,0,0,0.5)',
       'max-width:220px',
     ].join(';');
     mount.appendChild(tooltip);
@@ -313,16 +266,14 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
     const onMouseMove = (e: MouseEvent) => {
       mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
       mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-
-      // Tooltip follows mouse — actual hit-test happens in the render loop
       tooltip.style.left = `${e.clientX + 16}px`;
       tooltip.style.top  = `${e.clientY - 8}px`;
-
-      // Keep tooltip inside viewport on the right edge
       const rect = tooltip.getBoundingClientRect();
       if (rect.right > window.innerWidth - 20) {
         tooltip.style.left = `${e.clientX - rect.width - 16}px`;
       }
+      // qualquer interação reaquece um pouco a simulação
+      alpha = Math.max(alpha, 0.2);
     };
 
     const onMouseLeave = () => {
@@ -343,13 +294,8 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       raf = requestAnimationFrame(loop);
       t  += 0.012;
 
-      world.position.x = -(window.screenX + window.innerWidth  / 2);
-      world.position.y =   window.screenY + window.innerHeight / 2;
-      wm.tick();
-
       simTick();
 
-      // Update mesh positions
       for (const n of simNodes) {
         const tx = n.x;
         const ty = -n.y;  // screen y-down → THREE y-up
@@ -357,22 +303,17 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
 
         const isHovered = n.mesh.id === hoveredId;
         const phase = t * 1.6 + n.id.charCodeAt(0) * 0.31;
-        const pulse = isHovered
-          ? 1.35
-          : 1 + 0.055 * Math.sin(phase);
+        const pulse = isHovered ? 1.35 : 1 + 0.055 * Math.sin(phase);
 
         n.mesh.position.set(tx, ty, tz);
         n.mesh.scale.setScalar(pulse);
 
-        const hs = n.radius * 8 * (isHovered
-          ? 1.5
-          : 1 + 0.13 * Math.sin(phase * 0.7));
+        const hs = n.radius * 8 * (isHovered ? 1.5 : 1 + 0.13 * Math.sin(phase * 0.7));
         n.halo.position.set(tx, ty, tz - 2);
         n.halo.scale.set(hs, hs, 1);
 
         n.light.position.set(tx, ty, tz);
         n.label.position.set(tx, ty - n.radius * 2.2 - 18, tz);
-        // Fade label out when a different node is hovered
         (n.label.material as THREE.SpriteMaterial).opacity =
           hoveredId === null ? 0.9 : (isHovered ? 1 : 0.2);
       }
@@ -387,18 +328,15 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
         attr.needsUpdate = true;
       }
 
-      // ── Raycast ───────────────────────────────────────────────────
-      // updateMatrixWorld must be called before raycasting because
-      // renderer.render() (which normally does it) comes after.
-      world.updateMatrixWorld(true);
+      // raycast precisa das matrizes atualizadas antes do render
+      scene.updateMatrixWorld(true);
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObjects(simNodes.map(n => n.mesh));
 
       if (hits.length > 0) {
-        const hit  = hits[0]!;
-        const node = meshToNode.get(hit.object.id);
+        const node = meshToNode.get(hits[0]!.object.id);
         if (node) {
-          hoveredId = hit.object.id;
+          hoveredId = hits[0]!.object.id;
           mount!.style.cursor = 'pointer';
           tooltip.style.display = 'block';
           tooltip.innerHTML =
@@ -429,6 +367,7 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       camera.left   = -w / 2; camera.right  = w / 2;
       camera.top    =  h / 2; camera.bottom = -h / 2;
       camera.updateProjectionMatrix();
+      alpha = Math.max(alpha, 0.3); // reassenta dentro dos novos limites
     };
     window.addEventListener('resize', onResize);
 
@@ -438,7 +377,6 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       renderer.domElement.removeEventListener('mousemove', onMouseMove);
       renderer.domElement.removeEventListener('mouseleave', onMouseLeave);
       if (mount.contains(tooltip)) mount.removeChild(tooltip);
-      wm.dispose();
       renderer.dispose();
       if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
     };
@@ -459,7 +397,6 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
     <>
       <div ref={mountRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />
 
-      {/* Node/edge count */}
       <div style={{
         position: 'fixed', top: 64, right: 20, zIndex: 10,
         color: 'rgba(255,255,255,0.3)', fontSize: 11,
@@ -468,7 +405,6 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
         {nodes.length} pilares · {edges.length} conexões
       </div>
 
-      {/* Legend */}
       <div style={{
         position: 'fixed', bottom: 24, left: 24, zIndex: 10,
         color: 'rgba(255,255,255,0.4)', fontSize: 12, lineHeight: 1.8,
@@ -480,7 +416,7 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
           <span style={{ opacity: 0.35 }}>─</span> correlação de notas
         </div>
         <div style={{ opacity: 0.3, fontSize: 11 }}>
-          tamanho dos nós ∝ nível · abra em múltiplas janelas para o efeito de espaço compartilhado
+          tamanho dos nós ∝ nível · passe o mouse para ver detalhes
         </div>
       </div>
     </>
