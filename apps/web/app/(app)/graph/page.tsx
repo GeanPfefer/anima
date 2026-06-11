@@ -1,12 +1,7 @@
-import dynamic from 'next/dynamic';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import GraphClient from './_components/GraphClient';
 import type { GraphNode, GraphEdge } from './_components/GraphClient';
-
-const GraphClient = dynamic<{ nodes: GraphNode[]; edges: GraphEdge[] }>(
-  () => import('./_components/GraphClient'),
-  { ssr: false },
-);
 
 export default async function GraphPage() {
   const supabase = await createClient();
