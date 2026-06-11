@@ -36,6 +36,7 @@ export async function getOrCreatePendingPillar(data: {
       name:       data.pillarName,
       xp_rate:    1.0,
       is_active:  false,
+      status:     'pending',
       sort_order: (count ?? 3) + 10,
       pending_activity: {
         durationMinutes: data.durationMinutes,

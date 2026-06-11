@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
     .from('user_pillars')
     .update({
       is_active: true,
+      status:    'active',
       name:      name.trim().slice(0, 20),
     })
     .eq('id', pillarId)

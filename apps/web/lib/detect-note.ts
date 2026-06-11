@@ -75,11 +75,16 @@ Retorne APENAS array JSON válido. Se não há notas, retorne [].`;
       parsed = match ? JSON.parse(match[0]) : [];
     }
 
-    if (!Array.isArray(parsed)) return [];
+    // qwen com format:json às vezes embrulha em {"notes":[...]} em vez de array puro
+    const arr = Array.isArray(parsed)
+      ? parsed
+      : ((parsed as Record<string, unknown>)?.notes ??
+         (parsed as Record<string, unknown>)?.data ?? []);
+    if (!Array.isArray(arr)) return [];
 
     const VALID_TYPES = new Set(['food', 'expense', 'mood', 'idea', 'other']);
 
-    return parsed
+    return arr
       .filter((n): n is Record<string, unknown> =>
         typeof n === 'object' && n !== null &&
         typeof n.noteType === 'string' &&

@@ -18,17 +18,44 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Response('Não autorizado', { status: 401 });
 
-  const { name, messages } = await req.json() as { name: string; messages: Message[] };
-  const displayName = name?.trim() || null;
+  const { name: clientName, messages } = await req.json() as { name: string; messages: Message[] };
 
-  // Primeira mensagem: saudação hardcoded — sem round-trip ao Ollama
-  if (messages.length === 0) {
-    const greeting = displayName
-      ? `O que tá rolando na sua vida ultimamente, ${displayName}?`
-      : `O que tá rolando na sua vida ultimamente?`;
-    return new Response(greeting, {
+  // Fonte da verdade do nome = profile (o valor do cliente pode estar defasado)
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('name')
+    .eq('id', user.id)
+    .single();
+
+  const PLACEHOLDER = new Set(['Jogador', 'usuário', '']);
+  const fromProfile = profile?.name && !PLACEHOLDER.has(profile.name) ? profile.name : null;
+  const fromClient  = clientName?.trim() && !PLACEHOLDER.has(clientName.trim()) ? clientName.trim() : null;
+  const displayName = fromProfile ?? fromClient;
+
+  const plain = (body: string) =>
+    new Response(body, {
       headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' },
     });
+
+  // Primeira mensagem: cumprimenta e pede o nome se ainda não souber
+  if (messages.length === 0) {
+    return plain(displayName
+      ? `O que tá rolando na sua vida ultimamente, ${displayName}?`
+      : `Oi! Antes da gente começar — como você quer que eu te chame?`);
+  }
+
+  // Nome ainda desconhecido: a resposta do usuário é o nome
+  if (!displayName) {
+    const lastUser = [...messages].reverse().find(m => m.role === 'user')?.content ?? '';
+    const extracted = extractName(lastUser);
+    if (extracted) {
+      await supabase.from('profiles').update({ name: extracted }).eq('id', user.id);
+      await supabase.from('ai_conversations').insert({ user_id: user.id, role: 'user', content: lastUser });
+      const reply = `Prazer, ${extracted}! Então me conta — o que tá rolando na sua vida ultimamente?`;
+      await supabase.from('ai_conversations').insert({ user_id: user.id, role: 'assistant', content: reply });
+      return plain(reply);
+    }
+    // Não deu pra extrair um nome: segue o onboarding normal sem nome
   }
 
   const ollamaMessages: Message[] = messages;
@@ -101,6 +128,20 @@ export async function POST(req: NextRequest) {
   return new Response(stream, {
     headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff' },
   });
+}
+
+// Extrai o primeiro nome de uma resposta livre ("meu nome é João" → "João").
+function extractName(raw: string): string | null {
+  let s = raw.trim().replace(/[.!?]+$/, '');
+  s = s.replace(/^(oi|olá|ola|opa|e a[ií]|eai)[\s,]+/i, '');
+  s = s.replace(/^(meu nome (é|e)|me chamo|pode me chamar de|me chama de|chamo-me|sou o|sou a|sou)[\s]+/i, '');
+  s = s.trim();
+  if (!s) return null;
+
+  const first = s.split(/\s+/)[0]!.replace(/[^\p{L}]/gu, '');
+  if (first.length < 2 || first.length > 20) return null;
+
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
 }
 
 function buildSystemPrompt(name: string | null): string {

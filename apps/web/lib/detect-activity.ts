@@ -31,8 +31,13 @@ export async function detectActivities(
   const prompt = `Você extrai atividades de vida de textos escritos naturalmente. A mensagem pode cobrir vários dias.
 Hoje=${today}. Datas: ${calRef}
 
-Pilares do usuário: ${pillarCtx}
-Regra: use um pilar existente se encaixar. Crie nome novo apenas se necessário (ex: "Arte", "Finanças", "Lazer").
+Pilares já existentes: ${pillarCtx}
+Mapeie cada atividade ao pilar existente cujo TEMA realmente descreve a atividade:
+- exercício físico (corrida, academia, yoga, pedal, treino) → pilar de saúde/corpo
+- estudo, leitura, programação, foco, idiomas → pilar de mente/estudo
+- conversa, família, amigos, encontro → pilar de relações
+- dinheiro, investir, gastos → pilar de finanças
+Só crie nome novo se NENHUM pilar existente for do mesmo tema. Nunca force em pilar de tema diferente (ex: idioma não vai em finanças, yoga não vai em corrida).
 
 Para cada atividade identificada:
 - "pillarName": pilar existente ou nome novo em português, máx 20 chars

@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
 
   // ── Loga atividades detectadas ─────────────────────────────────
   const loggedActivities: LoggedActivity[] = [];
+  const seenActivities = new Set<string>(); // dedup dentro da própria mensagem
 
   for (const da of detectedActivities) {
     // Só registra se o pilar bater exatamente — evita jogar atividade no pilar errado
@@ -82,6 +83,20 @@ export async function POST(req: NextRequest) {
       }).catch(() => {});
       continue;
     }
+
+    const activityDate = da.activityDate ?? today;
+    const dupeKey = `${pillar.id}|${activityDate}|${norm(da.note ?? '')}`;
+    if (seenActivities.has(dupeKey)) continue;
+    seenActivities.add(dupeKey);
+
+    // Dedup contra o banco: mesmo pilar + data + nota já registrados (re-envio)
+    const { data: existing } = await supabase
+      .from('xp_records')
+      .select('note')
+      .eq('user_id', user.id)
+      .eq('pillar_id', pillar.id)
+      .eq('activity_date', activityDate);
+    if ((existing ?? []).some(r => norm(r.note ?? '') === norm(da.note ?? ''))) continue;
 
     try {
       const result = await logActivity({
@@ -138,7 +153,19 @@ export async function POST(req: NextRequest) {
   type CreatedQuest = { title: string; pillar: string; type: string };
   const createdQuests: CreatedQuest[] = [];
 
+  // Dedup de quests: títulos já existentes (qualquer status) + dentro da mensagem
+  const { data: existingQuests } = await supabase
+    .from('quests')
+    .select('title')
+    .eq('user_id', user.id);
+  const existingQuestTitles = new Set((existingQuests ?? []).map(q => norm(q.title)));
+  const seenQuests = new Set<string>();
+
   for (const dq of detectedQuests) {
+    const qKey = norm(dq.title);
+    if (existingQuestTitles.has(qKey) || seenQuests.has(qKey)) continue;
+    seenQuests.add(qKey);
+
     const pillar = pillars.find(p => norm(p.name) === norm(dq.pillarName));
     if (!pillar) {
       // Pilar não existe — cria como pendente, não bloqueia a resposta
