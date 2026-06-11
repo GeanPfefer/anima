@@ -1,22 +1,43 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 
 export type GraphNode = {
   id: string;
   name: string;
-  xpTotal: number;
-  level: number;
-  isRoot: boolean;
+  kind: 'pillar' | 'entity';
+  // pilares
+  xpTotal?: number;
+  level?: number;
+  isRoot?: boolean;
+  // entidades
+  entityType?: string;
+  occurrences?: number;
 };
 
 export type GraphEdge = {
   source: string;
   target: string;
   weight: number;
-  type: 'relation' | 'cooccurrence' | 'note';
+  type: 'relation' | 'cooccurrence' | 'note' | 'entity';
 };
+
+const ENTITY_TYPE_LABEL: Record<string, string> = {
+  pessoa: 'pessoa', lugar: 'lugar', projeto: 'projeto',
+  ferramenta: 'ferramenta', habito: 'hábito', conceito: 'conceito',
+};
+
+function entityColor(type?: string): THREE.Color {
+  switch (type) {
+    case 'pessoa':     return new THREE.Color(0xec4899);
+    case 'lugar':      return new THREE.Color(0x14b8a6);
+    case 'projeto':    return new THREE.Color(0x3b82f6);
+    case 'ferramenta': return new THREE.Color(0xf97316);
+    case 'habito':     return new THREE.Color(0x84cc16);
+    default:           return new THREE.Color(0x94a3b8);
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,8 +100,14 @@ interface SimNode extends GraphNode {
 // Nada depende da posição da janela no monitor — cada nó é mantido dentro
 // dos limites visíveis por um clamp rígido, então nunca some da tela.
 
+const colorOf = (n: GraphNode): THREE.Color =>
+  n.kind === 'entity' ? entityColor(n.entityType) : nodeColor(n.name);
+
 export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
   const mountRef = useRef<HTMLDivElement>(null);
+  const hasEntities = nodes.some(n => n.kind === 'entity');
+  const [showEntities, setShowEntities] = useState(true);
+  const showEntitiesRef = useRef(true);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -105,15 +132,18 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
     // ── Build simulation nodes ────────────────────────────────────
     const ringR = Math.min(180, Math.max(90, Math.min(w0, h0) * 0.18));
     const simNodes: SimNode[] = nodes.map((n, i) => {
-      const angle  = (i / Math.max(1, nodes.length)) * Math.PI * 2;
-      const color  = nodeColor(n.name);
-      const radius = Math.min(42, 12 + n.level * 2.5);
+      const angle    = (i / Math.max(1, nodes.length)) * Math.PI * 2;
+      const isEntity = n.kind === 'entity';
+      const color    = colorOf(n);
+      const radius   = isEntity
+        ? Math.min(13, 6 + (n.occurrences ?? 1) * 1.2)
+        : Math.min(42, 12 + (n.level ?? 1) * 2.5);
 
-      const geo = new THREE.SphereGeometry(radius, 32, 20);
+      const geo = new THREE.SphereGeometry(radius, isEntity ? 18 : 32, isEntity ? 12 : 20);
       const mat = new THREE.MeshStandardMaterial({
         color: color.clone().multiplyScalar(0.15),
         emissive: color,
-        emissiveIntensity: 2.0,
+        emissiveIntensity: isEntity ? 1.4 : 2.0,
         roughness: 0.25,
         metalness: 0.5,
       });
@@ -124,20 +154,22 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         transparent: true,
+        opacity: isEntity ? 0.5 : 1,
       });
       const halo = new THREE.Sprite(haloMat);
-      halo.scale.set(radius * 8, radius * 8, 1);
+      const haloScale = radius * (isEntity ? 5 : 8);
+      halo.scale.set(haloScale, haloScale, 1);
 
-      const light = new THREE.PointLight(color.getHex(), 2.5, radius * 22);
+      const light = new THREE.PointLight(color.getHex(), isEntity ? 1 : 2.5, radius * 22);
 
       const labelMat = new THREE.SpriteMaterial({
         map: makeLabelTexture(n.name),
         transparent: true,
         depthWrite: false,
-        opacity: 0.9,
+        opacity: isEntity ? 0.65 : 0.9,
       });
       const label = new THREE.Sprite(labelMat);
-      label.scale.set(160, 30, 1);
+      label.scale.set(isEntity ? 110 : 160, isEntity ? 22 : 30, 1);
 
       scene.add(mesh, halo, light, label);
 
@@ -156,7 +188,7 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
     const meshToNode = new Map(simNodes.map(n => [n.mesh.id, n]));
 
     // ── Edge geometries ───────────────────────────────────────────
-    type EdgeEntry = { line: THREE.Line; src: string; tgt: string };
+    type EdgeEntry = { line: THREE.Line; src: string; tgt: string; isEntity: boolean };
     const edgeMeshes: EdgeEntry[] = [];
 
     for (const e of edges) {
@@ -166,9 +198,10 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
 
       const opacity =
         e.type === 'relation'     ? 0.75 :
-        e.type === 'cooccurrence' ? 0.42 : 0.24;
+        e.type === 'cooccurrence' ? 0.42 :
+        e.type === 'entity'       ? 0.30 : 0.24;
       const ww  = Math.min(1, e.weight / 5);
-      const mid = new THREE.Color().lerpColors(nodeColor(a.name), nodeColor(b.name), 0.5);
+      const mid = new THREE.Color().lerpColors(colorOf(a), colorOf(b), 0.5);
 
       const positions = new Float32Array(6);
       const geo = new THREE.BufferGeometry();
@@ -183,7 +216,7 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       });
       const line = new THREE.Line(geo, mat);
       scene.add(line);
-      edgeMeshes.push({ line, src: e.source, tgt: e.target });
+      edgeMeshes.push({ line, src: e.source, tgt: e.target, isEntity: e.type === 'entity' });
     }
 
     // ── Força (amornada + cooling) ────────────────────────────────
@@ -296,7 +329,14 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
 
       simTick();
 
+      const showEnt = showEntitiesRef.current;
+
       for (const n of simNodes) {
+        const visible = n.kind !== 'entity' || showEnt;
+        n.mesh.visible = visible; n.halo.visible = visible;
+        n.label.visible = visible; n.light.visible = visible;
+        if (!visible) continue;
+
         const tx = n.x;
         const ty = -n.y;  // screen y-down → THREE y-up
         const tz = n.z;
@@ -321,6 +361,8 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       for (const em of edgeMeshes) {
         const a = nodeById.get(em.src), b = nodeById.get(em.tgt);
         if (!a || !b) continue;
+        em.line.visible = !em.isEntity || showEnt;
+        if (!em.line.visible) continue;
         const attr = em.line.geometry.getAttribute('position') as THREE.BufferAttribute;
         const arr  = attr.array as Float32Array;
         arr[0] = a.x;  arr[1] = -a.y; arr[2] = a.z;
@@ -339,15 +381,24 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
           hoveredId = hits[0]!.object.id;
           mount!.style.cursor = 'pointer';
           tooltip.style.display = 'block';
-          tooltip.innerHTML =
-            `<div style="font-weight:700;font-size:14px;margin-bottom:4px">${node.name}</div>` +
-            `<div style="color:rgba(255,255,255,0.55);font-size:12px">` +
-              `Nível <b style="color:#e2e8f0">${node.level}</b>&nbsp;&nbsp;` +
-              `${node.xpTotal.toLocaleString('pt-BR')} XP` +
-            `</div>` +
-            (node.isRoot
-              ? `<div style="margin-top:4px;font-size:11px;color:rgba(255,255,255,0.3)">pilar raiz</div>`
-              : `<div style="margin-top:4px;font-size:11px;color:rgba(255,255,255,0.3)">pilar emergente</div>`);
+          if (node.kind === 'entity') {
+            tooltip.innerHTML =
+              `<div style="font-weight:700;font-size:14px;margin-bottom:4px">${node.name}</div>` +
+              `<div style="color:rgba(255,255,255,0.55);font-size:12px">` +
+                `${ENTITY_TYPE_LABEL[node.entityType ?? ''] ?? 'entidade'} · ${node.occurrences ?? 1}× mencionado` +
+              `</div>` +
+              `<div style="margin-top:4px;font-size:11px;color:rgba(255,255,255,0.3)">entidade</div>`;
+          } else {
+            tooltip.innerHTML =
+              `<div style="font-weight:700;font-size:14px;margin-bottom:4px">${node.name}</div>` +
+              `<div style="color:rgba(255,255,255,0.55);font-size:12px">` +
+                `Nível <b style="color:#e2e8f0">${node.level ?? 1}</b>&nbsp;&nbsp;` +
+                `${(node.xpTotal ?? 0).toLocaleString('pt-BR')} XP` +
+              `</div>` +
+              (node.isRoot
+                ? `<div style="margin-top:4px;font-size:11px;color:rgba(255,255,255,0.3)">pilar raiz</div>`
+                : `<div style="margin-top:4px;font-size:11px;color:rgba(255,255,255,0.3)">pilar emergente</div>`);
+          }
         }
       } else {
         hoveredId = null;
@@ -399,10 +450,29 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
 
       <div style={{
         position: 'fixed', top: 64, right: 20, zIndex: 10,
-        color: 'rgba(255,255,255,0.3)', fontSize: 11,
-        fontFamily: 'monospace', pointerEvents: 'none',
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
       }}>
-        {nodes.length} pilares · {edges.length} conexões
+        <div style={{
+          color: 'rgba(255,255,255,0.3)', fontSize: 11, fontFamily: 'monospace',
+        }}>
+          {nodes.filter(n => n.kind === 'pillar').length} pilares
+          {hasEntities && ` · ${nodes.filter(n => n.kind === 'entity').length} entidades`}
+          {' · '}{edges.length} conexões
+        </div>
+        {hasEntities && (
+          <button
+            onClick={() => setShowEntities(v => { showEntitiesRef.current = !v; return !v; })}
+            style={{
+              fontSize: 12, fontFamily: 'system-ui, sans-serif',
+              padding: '5px 12px', borderRadius: 8, cursor: 'pointer',
+              background: showEntities ? 'rgba(124,92,252,0.18)' : 'transparent',
+              color: showEntities ? '#c4b5fd' : 'rgba(255,255,255,0.45)',
+              border: `1px solid ${showEntities ? 'rgba(124,92,252,0.5)' : 'rgba(255,255,255,0.15)'}`,
+            }}
+          >
+            {showEntities ? '● entidades' : '○ entidades'}
+          </button>
+        )}
       </div>
 
       <div style={{
@@ -415,6 +485,11 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
           <span style={{ opacity: 0.55 }}>─</span> co-ocorrência &nbsp;
           <span style={{ opacity: 0.35 }}>─</span> correlação de notas
         </div>
+        {hasEntities && (
+          <div style={{ marginBottom: 2, opacity: 0.5, fontSize: 11 }}>
+            nós menores = entidades (pessoas, lugares, projetos) ligadas aos pilares onde aparecem
+          </div>
+        )}
         <div style={{ opacity: 0.3, fontSize: 11 }}>
           tamanho dos nós ∝ nível · passe o mouse para ver detalhes
         </div>

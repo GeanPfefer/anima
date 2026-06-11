@@ -23,6 +23,7 @@ export default async function GraphPage() {
   const nodes: GraphNode[] = pillars.map(p => ({
     id:      p.id,
     name:    p.name,
+    kind:    'pillar' as const,
     xpTotal: p.xp_total,
     level:   p.level,
     isRoot:  ROOT_NAMES.has(p.name.toLowerCase()),
@@ -110,6 +111,58 @@ export default async function GraphPage() {
     if (count < 2) continue;
     const [src, tgt] = key.split('|');
     if (src && tgt) addEdge(src, tgt, Math.min(count, 8), 'note');
+  }
+
+  // ── Entity nodes (entidade ↔ pilar, derivado das menções) ─────
+  const { data: entitiesData } = await supabase
+    .from('semantic_entities')
+    .select('id, name, entity_type, occurrence_count')
+    .eq('user_id', user.id);
+
+  const entityList = entitiesData ?? [];
+
+  if (entityList.length > 0) {
+    const entityIds = entityList.map(e => e.id);
+
+    const { data: mentions } = await supabase
+      .from('entity_mentions')
+      .select('entity_id, xp_record_id')
+      .in('entity_id', entityIds);
+
+    const recIds = [...new Set((mentions ?? []).map(m => m.xp_record_id))];
+    const { data: recs } = recIds.length > 0
+      ? await supabase.from('xp_records').select('id, pillar_id').in('id', recIds)
+      : { data: [] as { id: string; pillar_id: string }[] };
+    const pillarByRec = new Map((recs ?? []).map(r => [r.id, r.pillar_id]));
+
+    // peso entidade↔pilar = nº de menções naquele pilar
+    const linkCount: Record<string, number> = {}; // `${entityId}|${pillarId}`
+    for (const m of mentions ?? []) {
+      const pid = pillarByRec.get(m.xp_record_id);
+      if (!pid || !pillarIds.has(pid)) continue;
+      linkCount[`${m.entity_id}|${pid}`] = (linkCount[`${m.entity_id}|${pid}`] ?? 0) + 1;
+    }
+
+    // só inclui entidades que tenham ao menos um vínculo a um pilar ativo
+    const linkedEntityIds = new Set(Object.keys(linkCount).map(k => k.split('|')[0]!));
+
+    for (const e of entityList) {
+      if (!linkedEntityIds.has(e.id)) continue;
+      nodes.push({
+        id:          `entity:${e.id}`,
+        name:        e.name,
+        kind:        'entity',
+        entityType:  e.entity_type,
+        occurrences: e.occurrence_count,
+      });
+    }
+
+    for (const [key, count] of Object.entries(linkCount)) {
+      const [eid, pid] = key.split('|');
+      if (eid && pid) {
+        edges.push({ source: `entity:${eid}`, target: pid, weight: Math.min(count, 6), type: 'entity' });
+      }
+    }
   }
 
   return <GraphClient nodes={nodes} edges={edges} />;
