@@ -6,6 +6,7 @@ import { detectActivities } from '@/lib/detect-activity';
 import { detectNotes } from '@/lib/detect-note';
 import { detectQuests } from '@/lib/detect-quest';
 import { detectPillarLinks } from '@/lib/detect-pillar-link';
+import { extractEntities } from '@/lib/extract-entities';
 import { logActivity } from '@/lib/log-activity';
 import { logNote } from '@/lib/log-note';
 import { getOrCreatePendingPillar } from '@/lib/get-or-create-pending-pillar';
@@ -129,12 +130,9 @@ export async function POST(req: NextRequest) {
           })
           .catch(() => {});
 
-        // Extração de entidades semânticas (Camada 3)
-        fetch(new URL('/api/ai/extract-entities', process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000').toString(), {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ note: da.note, recordId: result.recordId }),
-        }).catch(() => {});
+        // Extração de entidades semânticas (Camada 3) — chamada direta,
+        // sem fetch interno (que caía em 401 por não repassar os cookies)
+        extractEntities(supabase, user.id, da.note, result.recordId).catch(() => {});
       }
     } catch {
       // falha silenciosa — não interrompe a conversa
