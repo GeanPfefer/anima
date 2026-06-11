@@ -13,8 +13,8 @@ export default async function ChatPage() {
     .eq('id', user.id)
     .single();
 
-  // Normaliza: null ou placeholder 'Jogador' → string vazia (IA não sabe o nome ainda)
-  const userName = (profile?.name && profile.name !== 'Jogador') ? profile.name : '';
+  const PLACEHOLDER = new Set(['Jogador', 'usuário']);
+  const userName = (profile?.name && !PLACEHOLDER.has(profile.name)) ? profile.name : '';
 
   return (
     <ChatClient
