@@ -56,9 +56,10 @@ export async function POST(req: NextRequest) {
   const pillarNames = pillars.map(p => p.name);
 
   // ── Detecção de atividades + notas + embedding em paralelo ───────
+  const today = new Date().toISOString().slice(0, 10);
   const [detectedActivities, detectedNotes, queryEmbedding] = await Promise.all([
-    detectActivities(message, pillarNames),
-    detectNotes(message),
+    detectActivities(message, pillarNames, today),
+    detectNotes(message, today),
     generateEmbedding(message),
   ]);
 
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest) {
         pillarId:        pillar.id,
         durationMinutes: da.durationMinutes,
         note:            da.note,
+        activityDate:    da.activityDate,
       });
       loggedActivities.push({
         pillar:          pillar.name,
@@ -124,6 +126,7 @@ export async function POST(req: NextRequest) {
       noteType:   dn.noteType,
       context:    dn.context,
       pillarHint: dn.pillarHint,
+      noteDate:   dn.noteDate,
     }).catch(() => {});
   }
 
