@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/notes',    label: 'Notas' },
   { href: '/chat',     label: 'IA' },
   { href: '/reports',  label: 'Relatórios' },
+  { href: '/graph',    label: 'Graph' },
   { href: '/settings', label: 'Config' },
 ];
 
