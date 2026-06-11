@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 import { generateEmbedding } from '@/lib/generate-embedding';
 import { detectActivities } from '@/lib/detect-activity';
 import { detectNotes } from '@/lib/detect-note';
+import { detectQuests } from '@/lib/detect-quest';
 import { logActivity } from '@/lib/log-activity';
 import { logNote } from '@/lib/log-note';
 import { getOrCreatePendingPillar } from '@/lib/get-or-create-pending-pillar';
@@ -55,13 +56,16 @@ export async function POST(req: NextRequest) {
 
   const pillarNames = pillars.map(p => p.name);
 
-  // ── Detecção de atividades + notas + embedding em paralelo ───────
+  // ── Detecção sequencial (evita sobrecarga do Ollama com chamadas simultâneas) ─
   const today = new Date().toISOString().slice(0, 10);
-  const [detectedActivities, detectedNotes, queryEmbedding] = await Promise.all([
-    detectActivities(message, pillarNames, today),
-    detectNotes(message, today),
-    generateEmbedding(message),
-  ]);
+  const detectedActivities = await detectActivities(message, pillarNames, today);
+  const detectedNotes      = await detectNotes(message, today);
+  const detectedQuests     = await detectQuests(message, pillarNames);
+  const queryEmbedding     = await generateEmbedding(message);
+
+  console.log('[chat/detect] activities:', detectedActivities.length, detectedActivities.map(a => `${a.pillarName}/${a.durationMinutes}min`));
+  console.log('[chat/detect] notes:', detectedNotes.length, detectedNotes.map(n => n.noteType));
+  console.log('[chat/detect] quests:', detectedQuests.length, detectedQuests.map(q => q.title));
 
   // ── Loga atividades detectadas ─────────────────────────────────
   const loggedActivities: LoggedActivity[] = [];
@@ -119,7 +123,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Loga notas silenciosamente (fire-and-forget — IA não menciona) ─
+  // ── Loga notas silenciosamente (fire-and-forget) ─────────────────
   for (const dn of detectedNotes) {
     logNote({
       content:    dn.content,
@@ -128,6 +132,31 @@ export async function POST(req: NextRequest) {
       pillarHint: dn.pillarHint,
       noteDate:   dn.noteDate,
     }).catch(() => {});
+  }
+
+  // ── Cria quests detectadas ─────────────────────────────────────
+  type CreatedQuest = { title: string; pillar: string; type: string };
+  const createdQuests: CreatedQuest[] = [];
+
+  for (const dq of detectedQuests) {
+    const pillar = pillars.find(p => norm(p.name) === norm(dq.pillarName));
+    if (!pillar) {
+      // Pilar não existe — cria como pendente, não bloqueia a resposta
+      getOrCreatePendingPillar({ pillarName: dq.pillarName, durationMinutes: 0, note: dq.title }).catch(() => {});
+      continue;
+    }
+    try {
+      const { error } = await supabase.from('quests').insert({
+        user_id:     user.id,
+        pillar_id:   pillar.id,
+        title:       dq.title,
+        description: dq.description ?? null,
+        type:        dq.type,
+        xp_reward:   dq.xpReward,
+        status:      'open',
+      });
+      if (!error) createdQuests.push({ title: dq.title, pillar: pillar.name, type: dq.type });
+    } catch { /* silencioso */ }
   }
 
   // ── Contexto textual para o system prompt ──────────────────────
@@ -203,13 +232,17 @@ export async function POST(req: NextRequest) {
         .join('\n')
     : '';
 
-  // Bloco injetado quando atividades foram registradas nesta mensagem
-  const activityContext = loggedActivities.length > 0
-    ? `\n[Atividades registradas automaticamente nesta mensagem]\n` +
-      loggedActivities.map(a =>
-        `- ${a.pillar}: ${a.durationMinutes > 0 ? `${a.durationMinutes}min · ` : ''}+${a.totalXP} XP${a.note ? ` ("${a.note}")` : ''}`
-      ).join('\n') +
-      `\nConfirme brevemente no início da sua resposta, de forma natural. Não mencione "sistema" ou termos técnicos.\n`
+  // Bloco injetado quando algo foi registrado nesta mensagem
+  const registeredLines: string[] = [
+    ...loggedActivities.map(a =>
+      `- Atividade ${a.pillar}: ${a.durationMinutes > 0 ? `${a.durationMinutes}min · ` : ''}+${a.totalXP} XP${a.note ? ` ("${a.note}")` : ''}`
+    ),
+    ...createdQuests.map(q =>
+      `- Quest criada "${q.title}" [${q.type}] em ${q.pillar}`
+    ),
+  ];
+  const activityContext = registeredLines.length > 0
+    ? `\n[Registrado automaticamente nesta mensagem]\n${registeredLines.join('\n')}\nConfirme brevemente no início da resposta, de forma natural. Não mencione "sistema" ou termos técnicos.\n`
     : '';
 
   const systemPrompt = `Você é o Anima. Fala com ${name}.
