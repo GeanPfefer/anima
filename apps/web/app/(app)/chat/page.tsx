@@ -14,11 +14,16 @@ export default async function ChatPage() {
     .single();
 
   const PLACEHOLDER = new Set(['Jogador', 'usuário']);
-  const userName = (profile?.name && !PLACEHOLDER.has(profile.name)) ? profile.name : '';
+  const hasRealName = Boolean(profile?.name && !PLACEHOLDER.has(profile.name));
+  const userName = hasRealName ? profile!.name! : '';
+
+  // isFirstTime = true se onboarding nunca ocorreu OU se o nome real nunca foi coletado
+  // (evita que onboarding marcado como completo sem nome trave o usuário no modo regular)
+  const isFirstTime = !profile?.onboarding_completed_at || !hasRealName;
 
   return (
     <ChatClient
-      isFirstTime={!profile?.onboarding_completed_at}
+      isFirstTime={isFirstTime}
       userName={userName}
     />
   );
