@@ -11,19 +11,40 @@ function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+type PillarContext = {
+  id: string;
+  name: string;
+  xp_rate: number;
+  isPending: boolean;
+};
+
 async function buildContext(userId: string) {
-  const [profileRes, pillarsRes, recentRes] = await Promise.all([
+  const [profileRes, activePillarsRes, pendingPillarsRes, recentRes] = await Promise.all([
     supabase.from('profiles').select('name, archetype').eq('id', userId).single(),
-    supabase.from('user_pillars').select('id, name, xp_total, level, xp_rate').eq('user_id', userId).eq('is_active', true).order('level', { ascending: false }),
-    supabase.from('xp_records').select('note, total_xp, duration_minutes, activity_date, user_pillars(name)').eq('user_id', userId).order('activity_date', { ascending: false }).order('created_at', { ascending: false }).limit(10),
+    supabase.from('user_pillars').select('id, name, xp_total, level, xp_rate')
+      .eq('user_id', userId).eq('is_active', true).order('level', { ascending: false }),
+    supabase.from('user_pillars').select('id, name, xp_rate')
+      .eq('user_id', userId).eq('status', 'pending'),
+    supabase.from('xp_records')
+      .select('note, total_xp, duration_minutes, activity_date, user_pillars(name)')
+      .eq('user_id', userId)
+      .order('activity_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(10),
   ]);
 
   const name      = profileRes.data?.name ?? 'usuário';
   const archetype = profileRes.data?.archetype as Record<string, number> | null;
-  const pillars   = pillarsRes.data ?? [];
-  const recent    = recentRes.data  ?? [];
+  const active    = activePillarsRes.data  ?? [];
+  const pending   = pendingPillarsRes.data ?? [];
+  const recent    = recentRes.data         ?? [];
 
-  const pillarsText = pillars.map(p => `  • ${p.name}: Nível ${p.level} | ${p.xp_total} XP total`).join('\n');
+  const pillars: PillarContext[] = [
+    ...active.map(p => ({ ...p, isPending: false })),
+    ...pending.map(p => ({ ...p, isPending: true })),
+  ];
+
+  const pillarsText = active.map(p => `  • ${p.name}: Nível ${p.level} | ${p.xp_total} XP total`).join('\n');
 
   const recentText = recent.length > 0
     ? recent.map(r => {
@@ -87,33 +108,57 @@ export async function sendChatMessage(
   pastMessages: ChatMessage[],
   onToken: (token: string) => void,
 ): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
   const { systemPrompt, pillars } = await buildContext(userId);
 
-  // Save user message
   await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message });
 
-  // Fire-and-forget: activity + note detection
+  // Fire-and-forget: detecção de atividades e notas
   ;(async () => {
-    const pillarNames   = pillars.map(p => p.name);
+    const allNames    = pillars.map(p => p.name);
+    const activePillars = pillars.filter(p => !p.isPending);
+
     const [activities, notes] = await Promise.all([
-      detectActivities(message, pillarNames),
-      detectNotes(message),
+      detectActivities(message, allNames, today),
+      detectNotes(message, today),
     ]);
 
     for (const da of activities) {
-      const pillar = pillars.find(p => norm(p.name) === norm(da.pillarName));
-      if (pillar) {
+      const normName = norm(da.pillarName);
+
+      // Tenta encontrar em pilares ativos primeiro (log imediato)
+      const activePillar = activePillars.find(p => norm(p.name) === normName);
+      if (activePillar) {
         const { logActivity } = await import('./activity');
-        logActivity({ userId, pillarId: pillar.id, durationMinutes: da.durationMinutes, note: da.note }).catch(() => {});
-      } else if (da.pillarName) {
+        logActivity({
+          userId,
+          pillarId:        activePillar.id,
+          durationMinutes: da.durationMinutes,
+          note:            da.note,
+          activityDate:    da.activityDate,
+        }).catch(() => {});
+        continue;
+      }
+
+      // Tenta encontrar em pilares pendentes existentes (atualiza pending_activity)
+      const pendingPillar = pillars.find(p => p.isPending && norm(p.name) === normName);
+      if (pendingPillar) {
+        if (da.durationMinutes > 0 || da.note) {
+          void supabase.from('user_pillars')
+            .update({ pending_activity: { durationMinutes: da.durationMinutes, note: da.note, activityDate: da.activityDate } })
+            .eq('id', pendingPillar.id);
+        }
+        continue;
+      }
+
+      // Pilar desconhecido — cria como pendente
+      if (da.pillarName) {
         getOrCreatePillar(userId, da.pillarName)
           .then(p => {
             if (p.isNew && (da.durationMinutes > 0 || da.note)) {
-              ;(async () => {
-                await supabase.from('user_pillars')
-                  .update({ pending_activity: { durationMinutes: da.durationMinutes, note: da.note } })
-                  .eq('id', p.id);
-              })().catch(() => {});
+              void supabase.from('user_pillars')
+                .update({ pending_activity: { durationMinutes: da.durationMinutes, note: da.note, activityDate: da.activityDate } })
+                .eq('id', p.id);
             }
           })
           .catch(() => {});
@@ -125,23 +170,37 @@ export async function sendChatMessage(
     }
   })().catch(() => {});
 
-  // Call Ollama streaming
-  const res = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model:   OLLAMA_MODEL,
-      stream:  true,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...pastMessages,
-        { role: 'user', content: message },
-      ],
-    }),
-  });
+  // Streaming do Ollama com timeout de 2 minutos
+  const controller = new AbortController();
+  const chatTimeout = setTimeout(() => controller.abort(), 120_000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal:  controller.signal,
+      body: JSON.stringify({
+        model:   OLLAMA_MODEL,
+        stream:  true,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...pastMessages,
+          { role: 'user', content: message },
+        ],
+      }),
+    });
+  } catch (err) {
+    clearTimeout(chatTimeout);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('timeout');
+    }
+    throw new Error('connection');
+  }
 
   if (!res.ok || !res.body) {
-    throw new Error('Não foi possível conectar ao Ollama.');
+    clearTimeout(chatTimeout);
+    throw new Error(`http_${res.status}`);
   }
 
   const reader  = res.body.getReader();
@@ -169,11 +228,18 @@ export async function sendChatMessage(
             });
           }
         } catch {
-          // linha não é JSON válido
+          // linha não é JSON válido — ignora
         }
       }
     }
+  } catch (err) {
+    clearTimeout(chatTimeout);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('timeout');
+    }
+    throw err;
   } finally {
+    clearTimeout(chatTimeout);
     reader.releaseLock();
   }
 }

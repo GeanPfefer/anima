@@ -15,7 +15,6 @@ import { supabase } from '@/lib/supabase';
 import { getCharacterLevel, getEraForLevel, getTotalXPForLevel, getXPToNextLevel } from '@anima/core';
 import { confirmPendingPillar, dismissPendingPillar } from '@/lib/activity';
 import LifeRadar from '@/components/LifeRadar';
-import LogActivityModal from '@/components/LogActivityModal';
 import { colors, spacing, radius } from '@/constants/theme';
 
 // ─── Tipos ─────────────────────────────────────────────────────────────────────
@@ -295,7 +294,6 @@ export default function HomeScreen() {
   const { top } = useSafeAreaInsets();
   const [profile, setProfile]   = useState<{ name: string } | null>(null);
   const [rootPillars, setRootPillars] = useState<PillarRow[]>([]);
-  const [allPillars, setAllPillars]   = useState<PillarRow[]>([]);
   const [userId, setUserId]     = useState('');
   const [loading, setLoading]   = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -331,7 +329,6 @@ export default function HomeScreen() {
       setProfile(profileRes.data ? { name: profileRes.data.name } : null);
       setMode((profileRes.data?.display_mode as DisplayMode | null) ?? 'game');
       setRootPillars(pillars);
-      setAllPillars(pillars);
       setPendingPillars((pendingRes.data ?? []) as PendingPillar[]);
       setInsight(insightRes.data ?? null);
       setPillarMap(Object.fromEntries(pillars.map((p) => [p.id, p.name])));
@@ -449,16 +446,8 @@ export default function HomeScreen() {
           />
         )}
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: 32 }} />
       </ScrollView>
-
-      {userId && (
-        <LogActivityModal
-          userId={userId}
-          pillars={allPillars.map((p) => ({ id: p.id, name: p.name, xp_rate: p.xp_rate }))}
-          onSuccess={load}
-        />
-      )}
     </View>
   );
 }

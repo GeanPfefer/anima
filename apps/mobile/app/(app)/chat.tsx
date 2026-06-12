@@ -75,10 +75,14 @@ export default function ChatScreen() {
       const updated = await loadHistory(userId);
       setMessages(updated);
       setStreamingContent('');
-    } catch {
+    } catch (err) {
+      const isTimeout = err instanceof Error && err.message === 'timeout';
+      const msg = isTimeout
+        ? 'O Anima está demorando muito para responder. O Ollama pode estar ocupado — tente novamente em alguns instantes.'
+        : 'Não foi possível conectar ao Anima. Verifique se o Ollama está rodando em ' + (process.env.EXPO_PUBLIC_OLLAMA_URL ?? 'http://100.68.239.78:11434');
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: 'Não foi possível conectar ao Anima. Verifique a conexão com o Ollama.' },
+        { role: 'assistant', content: msg },
       ]);
       setStreamingContent('');
     } finally {

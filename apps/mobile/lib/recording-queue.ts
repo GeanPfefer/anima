@@ -68,7 +68,7 @@ export async function getQueueCount(): Promise<number> {
 export async function peekNext(): Promise<{ id: string; uri: string } | null> {
   const q = await loadQueue();
   if (q.length === 0) return null;
-  return { id: q[0].id, uri: q[0].localUri };
+  return { id: q[0]!.id, uri: q[0]!.localUri };
 }
 
 /**

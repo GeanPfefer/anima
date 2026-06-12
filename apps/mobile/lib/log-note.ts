@@ -14,13 +14,13 @@ export async function logNotes(notes: DetectedNote[], userId: string): Promise<v
   const today = new Date().toISOString().slice(0, 10);
   await supabase.from('notes').insert(
     notes.map((n) => ({
-      user_id:    userId,
-      content:    n.content,
-      note_type:  n.note_type,
-      context:    (n.context ?? null) as import('@anima/types').Json | null,
+      user_id:     userId,
+      content:     n.content,
+      note_type:   n.noteType,
+      context:     (n.context ?? null) as import('@anima/types').Json | null,
       pillar_hint: n.pillarHint,
-      xp_awarded: calcNoteXP(n.content, n.context ?? {}),
-      note_date:  today,
+      xp_awarded:  calcNoteXP(n.content, n.context ?? {}),
+      note_date:   n.noteDate ?? today,
     })),
   );
 }

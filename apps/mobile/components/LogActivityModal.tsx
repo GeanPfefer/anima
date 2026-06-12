@@ -301,7 +301,7 @@ export default function LogActivityModal({ userId, pillars, onSuccess }: Props) 
       const newEntries: ReviewEntry[] = [];
 
       for (let i = 0; i < parsed.length; i++) {
-        const a = parsed[i];
+        const a = parsed[i]!;
         let pillar = matchPillar(a.pillarName, workingPillars);
 
         let isPending = false;

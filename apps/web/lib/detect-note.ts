@@ -1,13 +1,16 @@
 export type DetectedNote = {
-  noteType: 'food' | 'expense' | 'mood' | 'idea' | 'other';
+  noteType: 'food' | 'expense' | 'mood' | 'idea' | 'interest' | 'other';
   content: string;
   context: Record<string, unknown>;
   pillarHint: string | null;
   noteDate?: string; // ISO yyyy-mm-dd
 };
 
-// Detecta notas silenciosas (alimentação, gastos, humor, ideias).
-// Suporta múltiplos dias. Nunca captura atividades intencionais.
+const VALID_TYPES = new Set(['food', 'expense', 'mood', 'idea', 'interest', 'other']);
+
+// Captura o CONTEXTO de qualquer coisa que a pessoa compartilha e que não é
+// uma atividade cronometrada: interesses, descobertas, fatos, preferências,
+// planos, reflexões — além de comida/gasto/humor. Suporta múltiplos dias.
 export async function detectNotes(
   message: string,
   today: string = new Date().toISOString().slice(0, 10),
@@ -24,27 +27,25 @@ export async function detectNotes(
     return `${label}=${d.toISOString().slice(0, 10)}`;
   }).join(', ');
 
-  const prompt = `Detecte notas de captura no texto abaixo. A mensagem pode cobrir vários dias.
+  // Sem format:json (enviesa o qwen a um objeto só). Força array por exemplo.
+  const prompt = `Capture o CONTEXTO relevante desta mensagem como notas — qualquer coisa que valha a pena lembrar sobre a pessoa.
+Inclua: interesses e gostos, descobertas, fatos sobre ela, preferências, opiniões, planos, reflexões, e também comida, gastos, humor.
+NÃO capture: saudações vazias, perguntas ao assistente, ou atividades já feitas com duração (essas são registradas à parte).
+
 Hoje=${today}. Datas: ${calRef}
 
-REGISTRE apenas:
-- Alimentação: o que comeu/bebeu ("pizza", "açaí", "café")
-- Gasto/compra: valor ou item ("R$50", "tênis", "supermercado")
-- Humor/estado: como se sentiu ("ansioso", "bem", "esgotado", "confiante")
-- Ideia/reflexão: insight ("percebi que...", "ideia de...")
-
-NÃO registre: exercício, estudo, trabalho, meditação, atividades intencionais.
-
-Cada item:
-- "noteType": "food" | "expense" | "mood" | "idea" | "other"
-- "content": descrição curta, máx 100 chars
-- "context": objeto JSON (food→{item,meal}, expense→{amount,currency,item}, mood→{mood,intensity}, idea→{topic}, other→{})
-- "pillarHint": "Saúde" | "Finanças" | "Mente" | null
-- "noteDate": data ISO inferida (opcional — omitir se incerto)
+Cada nota:
+- "content": o contexto em 1 frase clara (até 140 chars)
+- "noteType": food|expense|mood|idea|interest|other (use "interest" para gostos/descobertas; "other" para fatos gerais)
+- "context": objeto JSON com detalhes úteis ({} se não houver)
+- "pillarHint": área de vida relacionada ("Música","Saúde","Finanças"...) ou null
+- "noteDate": data ISO se houver (opcional)
 
 Texto: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 1800)}"
 
-Retorne APENAS array JSON válido. Se não há notas, retorne [].`;
+Responda SOMENTE com um array JSON, sem texto extra. Exemplo:
+[{"content":"Ama hip hop e cultura samurai","noteType":"interest","context":{"temas":["hip hop","samurai"]},"pillarHint":"Música"}]
+Se não houver nada relevante, retorne [].`;
 
   const controller = new AbortController();
   const timeout    = setTimeout(() => controller.abort(), 30_000);
@@ -58,8 +59,7 @@ Retorne APENAS array JSON válido. Se não há notas, retorne [].`;
         model:   OLLAMA_MODEL,
         prompt,
         stream:  false,
-        format:  'json',
-        options: { temperature: 0.1 },
+        options: { temperature: 0.2 },
       }),
     });
 
@@ -75,24 +75,21 @@ Retorne APENAS array JSON válido. Se não há notas, retorne [].`;
       parsed = match ? JSON.parse(match[0]) : [];
     }
 
-    // qwen com format:json às vezes embrulha em {"notes":[...]} em vez de array puro
     const arr = Array.isArray(parsed)
       ? parsed
-      : ((parsed as Record<string, unknown>)?.notes ??
-         (parsed as Record<string, unknown>)?.data ?? []);
-    if (!Array.isArray(arr)) return [];
+      : Array.isArray((parsed as { notes?: unknown[] })?.notes) ? (parsed as { notes: unknown[] }).notes
+      : (parsed && typeof parsed === 'object' && typeof (parsed as DetectedNote).content === 'string') ? [parsed]
+      : [];
 
-    const VALID_TYPES = new Set(['food', 'expense', 'mood', 'idea', 'other']);
-
-    return arr
+    return (arr as unknown[])
       .filter((n): n is Record<string, unknown> =>
         typeof n === 'object' && n !== null &&
-        typeof n.noteType === 'string' &&
-        typeof n.content  === 'string' && (n.content as string).length > 0,
+        typeof (n as Record<string, unknown>).content === 'string' &&
+        ((n as Record<string, unknown>).content as string).trim().length > 0,
       )
       .map(n => ({
         noteType:  (VALID_TYPES.has(n.noteType as string) ? n.noteType : 'other') as DetectedNote['noteType'],
-        content:   String(n.content).slice(0, 100),
+        content:   String(n.content).slice(0, 140),
         context:   (typeof n.context === 'object' && n.context !== null)
           ? n.context as Record<string, unknown>
           : {},

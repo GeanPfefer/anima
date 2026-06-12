@@ -5,50 +5,52 @@ export type DetectedActivity = {
   pillarName: string;
   durationMinutes: number;
   note: string;
+  activityDate?: string; // ISO yyyy-mm-dd, inferida do texto
 };
 
 export async function detectActivities(
   message: string,
   pillarNames: string[],
+  today: string = new Date().toISOString().slice(0, 10),
 ): Promise<DetectedActivity[]> {
-  if (!pillarNames.length) return [];
+  const todayDate = new Date(today + 'T12:00:00');
+  const abbr = ['dom','seg','ter','qua','qui','sex','sáb'];
+  const calRef = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(todayDate);
+    d.setDate(todayDate.getDate() - i);
+    const label = i === 0 ? 'hoje' : i === 1 ? 'ontem' : abbr[d.getDay()]!;
+    return `${label}=${d.toISOString().slice(0, 10)}`;
+  }).join(', ');
 
-  const prompt = `Detecte atividades intencionais realizadas na mensagem abaixo.
+  const pillarCtx = pillarNames.length > 0 ? pillarNames.join(', ') : 'Saúde, Mente, Relações';
 
-Pilares disponíveis: ${pillarNames.join(', ')}
+  const prompt = `Você extrai atividades de vida de textos escritos naturalmente. A mensagem pode cobrir vários dias.
+Hoje=${today}. Datas: ${calRef}
 
-REGISTRE — atividades com esforço intencional:
-✅ exercício, esporte, treino (corrida, academia, skate, kung fu, natação...)
-✅ estudo, leitura, curso, aprendizado
-✅ trabalho, projeto, tarefa concluída
-✅ meditação, terapia, prática espiritual
-✅ criação (música, arte, escrita, código)
-✅ cuidado ativo com saúde (consulta, tratamento)
-✅ atividade social intencional (encontro planejado, ligação importante)
+Pilares já existentes: ${pillarCtx}
+Mapeie cada atividade ao pilar existente cujo TEMA realmente descreve a atividade:
+- exercício físico (corrida, academia, yoga, pedal, treino) → pilar de saúde/corpo
+- estudo, leitura, programação, foco, idiomas → pilar de mente/estudo
+- conversa, família, amigos, encontro → pilar de relações
+- dinheiro, investir, gastos → pilar de finanças
+Só crie nome novo se NENHUM pilar existente for do mesmo tema. Nunca force em pilar de tema diferente.
 
-NÃO REGISTRE — rotina básica ou ações passivas:
-❌ comer, beber, tomar sorvete, almoçar, jantar, tomar café
-❌ dormir, descansar, assistir TV, rolar o feed
-❌ deslocamento comum (ir ao trabalho, pegar ônibus)
-❌ compras rotineiras
-❌ perguntas, planos futuros, sentimentos sem ação concreta
+Para cada atividade identificada:
+- "pillarName": pilar existente ou nome novo em português, máx 20 chars
+- "durationMinutes": minutos como inteiro (0 se não mencionado)
+- "note": resumo curto, máx 80 chars
+- "activityDate": data ISO inferida do contexto (opcional — omitir se incerto)
 
-PILAR — escolha apenas com correspondência clara com a lista de pilares disponíveis.
-IMPORTANTE: se nenhum pilar da lista se encaixa → retorne []
+Conversões: 1h=60, meia hora=30, 2h30=150, 45min=45.
+Se uma atividade cobre dois pilares, crie dois objetos.
+Não registre: comer, dormir, descansar, assistir TV, deslocamento, compras, sentimentos sem ação.
 
-Para cada atividade válida:
-- "pillarName": nome EXATO de um pilar da lista acima
-- "durationMinutes": duração em minutos como inteiro (0 se não mencionada)
-- "note": descrição curta, máx 80 chars
+Texto: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 1800)}"
 
-Conversões: "1h"=60, "meia hora"=30, "2h30"=150, "45min"=45, "uma hora"=60
-
-Mensagem: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 500)}"
-
-Retorne APENAS um array JSON. Se nada se encaixa, retorne [].`;
+Retorne APENAS um array JSON válido, sem texto adicional.`;
 
   const controller = new AbortController();
-  const timeout    = setTimeout(() => controller.abort(), 15_000);
+  const timeout    = setTimeout(() => controller.abort(), 30_000);
 
   try {
     const res = await fetch(`${OLLAMA_URL}/api/generate`, {
@@ -72,7 +74,7 @@ Retorne APENAS um array JSON. Se nada se encaixa, retorne [].`;
     try {
       result = JSON.parse(body.response);
     } catch {
-      const m = body.response.match(/\[[\s\S]*?\]/);
+      const m = body.response.match(/\[[\s\S]*\]/);
       result = m ? JSON.parse(m[0]) : [];
     }
 

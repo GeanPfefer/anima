@@ -105,6 +105,52 @@ export type Database = {
           },
         ]
       }
+      entity_pillars: {
+        Row: {
+          created_at: string
+          entity_id: string
+          pillar_id: string
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          created_at?: string
+          entity_id: string
+          pillar_id: string
+          user_id: string
+          weight?: number
+        }
+        Update: {
+          created_at?: string
+          entity_id?: string
+          pillar_id?: string
+          user_id?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_pillars_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "semantic_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_pillars_pillar_id_fkey"
+            columns: ["pillar_id"]
+            isOneToOne: false
+            referencedRelation: "user_pillars"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_pillars_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       entry_embeddings: {
         Row: {
           created_at: string
@@ -179,50 +225,6 @@ export type Database = {
           },
         ]
       }
-      notes: {
-        Row: {
-          content: string
-          context: Json | null
-          created_at: string
-          id: string
-          note_date: string
-          note_type: string | null
-          pillar_hint: string | null
-          user_id: string
-          xp_awarded: number
-        }
-        Insert: {
-          content: string
-          context?: Json | null
-          created_at?: string
-          id?: string
-          note_date?: string
-          note_type?: string | null
-          pillar_hint?: string | null
-          user_id: string
-          xp_awarded?: number
-        }
-        Update: {
-          content?: string
-          context?: Json | null
-          created_at?: string
-          id?: string
-          note_date?: string
-          note_type?: string | null
-          pillar_hint?: string | null
-          user_id?: string
-          xp_awarded?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "notes_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       life_events: {
         Row: {
           anchor_type: Database["public"]["Enums"]["context_anchor"] | null
@@ -287,6 +289,50 @@ export type Database = {
           },
           {
             foreignKeyName: "life_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notes: {
+        Row: {
+          content: string
+          context: Json | null
+          created_at: string
+          id: string
+          note_date: string
+          note_type: string | null
+          pillar_hint: string | null
+          user_id: string
+          xp_awarded: number
+        }
+        Insert: {
+          content: string
+          context?: Json | null
+          created_at?: string
+          id?: string
+          note_date?: string
+          note_type?: string | null
+          pillar_hint?: string | null
+          user_id: string
+          xp_awarded?: number
+        }
+        Update: {
+          content?: string
+          context?: Json | null
+          created_at?: string
+          id?: string
+          note_date?: string
+          note_type?: string | null
+          pillar_hint?: string | null
+          user_id?: string
+          xp_awarded?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -576,13 +622,6 @@ export type Database = {
           xp_total?: number
         }
         Relationships: [
-          {
-            foreignKeyName: "user_pillars_catalog_id_fkey"
-            columns: ["catalog_id"]
-            isOneToOne: false
-            referencedRelation: "pillar_catalog"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "user_pillars_user_id_fkey"
             columns: ["user_id"]

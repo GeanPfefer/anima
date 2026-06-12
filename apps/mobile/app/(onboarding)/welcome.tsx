@@ -56,9 +56,11 @@ Idioma: português brasileiro informal.
 Primeira mensagem (ao receber "."): algo genuíno como "O que tá rolando na sua vida ultimamente, ${name}?"`;
 }
 
-async function callOllama(msgs: Message[], name: string): Promise<string> {
+async function callOllama(msgs: Message[], name: string, attempt = 0): Promise<string> {
   const controller = new AbortController();
-  const timeout    = setTimeout(() => controller.abort(), 30_000);
+  // Primeiro call pode precisar carregar o modelo (até 2 min); calls seguintes são mais rápidos
+  const timeoutMs  = attempt === 0 ? 120_000 : 60_000;
+  const timeout    = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const ollamaMessages = msgs.length === 0
@@ -79,9 +81,16 @@ async function callOllama(msgs: Message[], name: string): Promise<string> {
       }),
     });
 
-    if (!res.ok) throw new Error('Ollama error');
+    if (!res.ok) throw new Error(`http_${res.status}`);
     const data = await res.json() as { message?: { content?: string } };
     return data.message?.content ?? '';
+  } catch (err) {
+    // Retry uma vez em caso de timeout (modelo pode estar carregando)
+    if (err instanceof Error && err.name === 'AbortError' && attempt === 0) {
+      clearTimeout(timeout);
+      return callOllama(msgs, name, 1);
+    }
+    throw err;
   } finally {
     clearTimeout(timeout);
   }
