@@ -58,6 +58,13 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
+        name="graph"
+        options={{
+          title: 'Grafo',
+          tabBarIcon: ({ color }) => <TabIcon label="⬡" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Config',
