@@ -26,19 +26,21 @@ type Section = {
 };
 
 const TYPE_LABEL: Record<string, string> = {
-  food:    'Alimentação',
-  expense: 'Gasto',
-  mood:    'Humor',
-  idea:    'Ideia',
-  other:   'Nota',
+  food:     'Alimentação',
+  expense:  'Gasto',
+  mood:     'Humor',
+  idea:     'Ideia',
+  interest: 'Interesse',
+  other:    'Nota',
 };
 
 const TYPE_COLOR: Record<string, string> = {
-  food:    '#16a34a',
-  expense: '#ca8a04',
-  mood:    '#2563eb',
-  idea:    '#7c3aed',
-  other:   '#6b7280',
+  food:     '#16a34a',
+  expense:  '#ca8a04',
+  mood:     '#2563eb',
+  idea:     '#7c3aed',
+  interest: '#0891b2',
+  other:    '#6b7280',
 };
 
 function formatDate(dateStr: string): string {
