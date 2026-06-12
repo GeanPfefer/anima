@@ -1,0 +1,97 @@
+const OLLAMA_URL   = process.env.EXPO_PUBLIC_OLLAMA_URL   ?? 'http://100.68.239.78:11434';
+const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL ?? 'qwen2.5:14b';
+
+export type DetectedQuest = {
+  title:       string;
+  pillarName:  string;
+  type:        'main' | 'habit' | 'learning' | 'challenge';
+  description?: string;
+  xpReward:    number;
+};
+
+export async function detectQuests(
+  message: string,
+  pillarNames: string[],
+): Promise<DetectedQuest[]> {
+  const pillarCtx = pillarNames.length > 0 ? pillarNames.join(', ') : 'Saúde, Mente, Relações';
+
+  const prompt = `Detecte intenções de meta ou hábito no texto abaixo.
+
+REGISTRE apenas declarações EXPLÍCITAS de objetivo:
++ "quero começar X regularmente" → habit
++ "vou tentar Y toda manhã/semana" → habit
++ "quero aprender Z" → learning
++ "desafio de N dias" → challenge
++ "meu objetivo é W" → main
+
+NÃO registre: planos vagos, desejos passageiros, atividades que já foram feitas.
+
+Pilares: ${pillarCtx}
+Regra: use pilar existente ou crie nome novo (ex: "Finanças", "Arte").
+
+Cada item:
+- "title": título curto da quest, máx 60 chars
+- "pillarName": pilar existente ou nome novo
+- "type": "habit" | "learning" | "challenge" | "main"
+- "description": uma frase descrevendo o objetivo (opcional)
+- "xpReward": XP estimado (habit=200, learning=500, challenge=300, main=1000)
+
+Texto: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 1500)}"
+
+Retorne APENAS array JSON válido. Se não há meta explícita, retorne [].`;
+
+  const controller = new AbortController();
+  const timeout    = setTimeout(() => controller.abort(), 20_000);
+
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal:  controller.signal,
+      body: JSON.stringify({
+        model:   OLLAMA_MODEL,
+        prompt,
+        stream:  false,
+        format:  'json',
+        options: { temperature: 0.1 },
+      }),
+    });
+
+    if (!res.ok) return [];
+
+    const body = await res.json() as { response: string };
+
+    let result: unknown;
+    try {
+      result = JSON.parse(body.response);
+    } catch {
+      const m = body.response.match(/\[[\s\S]*\]/);
+      result = m ? JSON.parse(m[0]) : [];
+    }
+
+    const arr = Array.isArray(result)
+      ? result
+      : ((result as Record<string, unknown>)?.quests ?? []);
+
+    const VALID_TYPES = new Set(['main', 'habit', 'learning', 'challenge']);
+
+    return (Array.isArray(arr) ? arr : [])
+      .filter(
+        (q): q is DetectedQuest =>
+          typeof (q as DetectedQuest)?.title      === 'string' &&
+          typeof (q as DetectedQuest)?.pillarName === 'string' &&
+          (q as DetectedQuest).title.trim().length > 0,
+      )
+      .map(q => ({
+        title:       String(q.title).slice(0, 60),
+        pillarName:  String(q.pillarName),
+        type:        (VALID_TYPES.has(q.type) ? q.type : 'habit') as DetectedQuest['type'],
+        description: typeof q.description === 'string' ? q.description : undefined,
+        xpReward:    typeof q.xpReward === 'number' && q.xpReward > 0 ? q.xpReward : 200,
+      }));
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
