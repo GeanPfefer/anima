@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-06-10 (sessão: notas com XP e pillar_hint; pilares pendentes; modos de exibição; arquétipo contínuo; features por era; analítico rico; relatórios mensais; chat mobile)
+> Documento vivo de design. Última atualização: 2026-06-12 (sessão: grafo 3D de vida; extração de entidades corrigida; hierarquia de pilares via chat; analítico com gráfico de linha e calendário de atividade; dedup de atividades/quests; deprecação do /welcome)
 > Para retomar o projeto em qualquer IA: cole este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -452,9 +452,10 @@ A atividade só é registrada se o pilar detectado corresponder **exatamente** (
 - **Prosa em vez de listas** quando o conteúdo for conversacional
 - Quando perguntam "o que você é?": responde com o que FAZ na prática, com exemplos reais do histórico do usuário
 
-### Onboarding dentro do chat (Fase 3 — pendente)
-A primeira conversa já acontece no chat. A rota `/welcome` será dissolvida — o chat detecta que é o primeiro uso e adapta o comportamento:
-- Primeira mensagem: acolhe e pergunta o que está acontecendo na vida
+### Onboarding dentro do chat (Fase 3 — implementado)
+A primeira conversa acontece no `/chat`. A rota `/welcome` foi dissolvida — o chat detecta que é o primeiro uso e adapta o comportamento:
+- Primeira mensagem: acolhe e pergunta o nome; `api/ai/onboarding/route.ts` extrai via heurística `extractName` e salva no profile
+- Depois do nome: chat segue normalmente com detecção de atividades e pilares
 - Em segundo plano: infere pilares iniciais, arquétipo, inicia memória narrativa
 - `onboarding_completed_at` é setado após contexto suficiente (sem critério rígido)
 - O usuário nunca percebe a transição — é o mesmo chat desde o primeiro dia
@@ -475,6 +476,7 @@ Os 4 arquétipos (Explorador, Focado, Construtor, Visionário) são um **modelo 
 - **✅ Fase 3:** `/welcome` dissolvido no `/chat`; onboarding acontece na primeira conversa; `onboarding_completed_at` setado após contexto suficiente
 - **✅ Notas no chat:** `detect-note.ts` detecta food/expense/mood/idea/other; XP 5–20 por heurística; `pillar_hint` inferido; IA silenciosa (não comenta)
 - **✅ Arquétipo contínuo:** `infer-archetype.ts` infere 4 arquétipos (explorer/focused/builder/visionary) em % via Ollama; fire-and-forget a cada ~15 mensagens; salvo em `profiles.archetype`
+- **✅ Hierarquia via chat:** `detect-pillar-link.ts` detecta intenção de criar sub-pilar na conversa; header `X-Pillar-Links` + cards Sim/Não no `ChatClient`; `lib/link-pillar.ts` com validação anti-ciclo e pai único; dropdown também disponível no editor de Config e no card de pilar pendente
 
 ---
 
@@ -568,9 +570,44 @@ Os dados são idênticos em qualquer modo. A estrutura subjacente (XP, pilares, 
 - Campo `display_mode` em `profiles` (`'game' | 'analytical' | 'minimal'`, padrão: `'game'`)
 - Alternância via toggle no header do dashboard, persiste no DB via `/api/profile/display-mode`
 - **Game:** radar SVG + cards de pilares + `EraPanel` (progresso de era, features desbloqueadas)
-- **Analítico:** 3 cards de resumo (XP 30d, dias ativos, pilar líder) + gráfico SVG de barras diárias (30d) + tabela de pilares com XP 7d
+- **Analítico:** 3 cards de resumo (XP 30d, dias ativos, pilar líder) + gráfico de linha SVG de XP diário (30d) com tooltips + calendário de atividade (heatmap de dias ativos) + tabela de pilares com XP 7d
 - **Minimal:** lista de pilares + registros recentes
 - Estado técnico: **✅ Implementado** — web (`HomeDashboard.tsx`) + mobile (`home.tsx`)
+
+---
+
+## 7d. Grafo de vida — visualização das conexões
+
+> **Implementado em jun/2026.** Visualização interativa das relações emergentes entre pilares e entidades extraídas da história do usuário.
+
+### O que é o grafo
+O grafo de vida representa visualmente as conexões que emergem dos dados do usuário — sem configuração manual. É uma janela sobre o que o sistema aprendeu sobre a vida da pessoa: como as áreas se correlacionam, quais entidades (pessoas, projetos, lugares) aparecem em cada contexto.
+
+### Estrutura visual
+
+| Elemento | O que representa |
+|----------|-----------------|
+| Nó de pilar | Cada pilar ativo — tamanho proporcional ao nível; cor por era |
+| Nó de entidade | Pessoa, lugar ou projeto extraído das entradas — nó menor; exibido via toggle |
+| Aresta pilar↔pilar | Correlação por co-ocorrência temporal (atividades no mesmo período) |
+| Aresta entidade↔pilar | Entidade mencionada em atividades daquele pilar |
+
+### Física e interação
+- **Force-directed:** nós se repelem, arestas os atraem; simulação contínua de física
+- **Viewport anchored:** bounds clampados — nós não escapam da tela
+- **Toggle de entidades:** exibe/oculta nós de entidades sem recarregar o grafo
+- **Drag:** o usuário pode arrastar nós para explorar
+
+### Implementação
+- Página `/graph` (web)
+- Three.js + física force-directed customizada
+- `GraphClient.tsx` — renderização e simulação no cliente
+- Conexão entidade↔pilar: many-to-many emergente via `entity_mentions → xp_records → user_pillars` — **sem tabela extra** (relação já existe implicitamente nos dados)
+- `lib/extract-entities.ts` chamado direto no chat route (fix: antes fazia fetch interno sem cookies → 401)
+- `scripts/backfill-entities.mjs` — reprocessa entradas históricas com a extração corrigida
+
+### Estado técnico
+- **✅ Implementado** — `/graph` (web); pilares + correlações + entidades com toggle; viewport anchored
 
 ---
 
@@ -579,17 +616,22 @@ Os dados são idênticos em qualquer modo. A estrutura subjacente (XP, pilares, 
 ### Rotas
 | Rota | Comportamento |
 |------|--------------|
-| `/` | Roteador inteligente: sem sessão → `/login`; com sessão + onboarding feito → `/home`; com sessão sem onboarding → `/welcome` |
+| `/` | Roteador inteligente: sem sessão → `/login`; com sessão + onboarding feito → `/home`; com sessão sem onboarding → `/chat` |
 | `/login` | Server Action via Supabase Auth; sucesso → `/home` |
-| `/signup` | Server Action via Supabase Auth; sucesso → `/welcome` |
-| `/welcome` | ⚠️ Pendente: tela de nome + primeira conversa (substitui `/step-1` a `/step-5`) |
+| `/signup` | Server Action via Supabase Auth; sucesso → `/chat` (onboarding dissolve na primeira conversa) |
+| `/chat` | Chat unificado — onboarding (primeira conversa, extrai nome via `api/ai/onboarding`) + logging + conversa recorrente; detecta automaticamente se é primeiro uso |
+| `/home` | Dashboard — radar, pilares, modo Game/Analítico/Minimal; protegida por auth guard |
+| `/history` | Timeline de atividades agrupada por dia com XP diário/semanal e badges de bônus |
+| `/notes` | Lista de notas agrupadas por data com badges de tipo (food/expense/mood/idea) |
+| `/quests` | Lista, criação, sub-missões, conclusão e abandono de quests |
+| `/reports` | Relatórios mensais — XP por dia, tempo por pilar, notas por tipo, maiores sessões; navegação por mês |
+| `/graph` | Grafo de vida — Three.js force-directed; nós=pilares+entidades; arestas=correlações |
+| `/settings` | Dados da conta, troca de senha, logout, export Obsidian |
 | `/forgot-password` | Envia e-mail de reset via `supabase.auth.resetPasswordForEmail`; em dev, e-mail chega no Mailpit (porta 54324) |
 | `/auth/callback` | Route Handler que troca o `code` por sessão (PKCE); redireciona para `?next=` |
 | `/reset-password` | Define nova senha via `supabase.auth.updateUser`; redireciona para `/home` |
-| `/settings` | Exibe dados da conta e formulário de troca de senha |
-| `/history` | Timeline de atividades registradas agrupada por dia |
-| `/home` | Protegida por auth guard no layout do grupo `(app)` |
-| ~~`/step-1` a `/step-5`~~ | ~~Deprecated — substituídas por `/welcome`~~ |
+| ~~`/welcome`~~ | ~~Deprecated — dissolvida no `/chat`~~ |
+| ~~`/step-1` a `/step-5`~~ | ~~Deprecated — substituídas pelo onboarding conversacional no `/chat`~~ |
 
 ### Decisões técnicas de auth
 - Auth via `@supabase/ssr` com cookies — necessário para Server Components lerem a sessão
@@ -611,13 +653,14 @@ Os dados são idênticos em qualquer modo. A estrutura subjacente (XP, pilares, 
 | `pillar_catalog` | Legado — estrutura existe, dados vazios (catálogo fixo removido em jun/2026) |
 | `user_pillars` | Pilares do usuário — raiz (criados pelo trigger) + emergentes (criados pela IA) |
 | `xp_records` | Histórico imutável de atividades registradas |
-| `notes` | ⚠️ Pendente — notas de alimentação, gastos, humor, ideias (ver seção 7b) |
+| `notes` | Notas de alimentação, gastos, humor, ideias (ver seção 7b) |
 | `life_events` | Eventos sem duração (marcos, conquistas, mudanças de estado) |
 | `quests` | Quests do usuário |
 | `quest_missions` | Sub-missões de uma quest |
 | `ai_conversations` | Histórico de mensagens do chat |
 | `entry_embeddings` | Embeddings semânticos das notas de atividades (pgvector) |
 | `semantic_entities` | Entidades persistentes extraídas pela IA (pessoas, lugares, projetos) |
+| `entity_mentions` | Vínculo entre entidade e entrada (`xp_records`); fonte para o grafo de vida |
 
 ### Triggers automáticos
 - `on_auth_user_created` → cria row em `profiles` + os 3 pilares raiz (Saúde, Mente, Relações) em `user_pillars`
@@ -696,6 +739,11 @@ Os dados são idênticos em qualquer modo. A estrutura subjacente (XP, pilares, 
 | Tom da IA (jun/2026) | Direto, humano, sem "Claro!", sem perguntas de encerramento, prosa > listas | Respostas corporativas afastam; o diferencial é parecer um amigo, não um assistente |
 | Detecção estrita de pilares | Match normalizado exato — sem fallback fuzzy | Falso negativo é melhor que registrar em pilar errado |
 | Alimentos → notas, não Saúde | Comida e bebida nunca viram atividade de pilar | Comer é rotina básica; registrar como atividade cria ruído e dilui o valor de Saúde |
+| Grafo de vida | Nós = pilares (tamanho por nível) + entidades (toggle); arestas = correlações por co-ocorrência temporal | Visualização das relações emergentes — padrão deriva dos dados sem configuração manual |
+| Entidades no grafo via `entity_mentions` | Many-to-many entidade↔pilar emerge de `entity_mentions → xp_records → pillar`; sem tabela extra | Relação já existe implicitamente nos dados de menções; tabela explícita seria redundante |
+| Hierarquia de pilares via chat | `detect-pillar-link.ts` detecta intenção de aninhamento em linguagem natural; cards Sim/Não inline | Reduz fricção: usuário expressa a relação conversando, sistema confirma sem sair do chat |
+| Dedup de atividades/quests | Pilar+data+nota e título de quest deduplicados antes de persistir no chat route | Previne duplicatas quando o modelo detecta a mesma atividade em mensagens similares consecutive |
+| Extração de entidades direta | `lib/extract-entities.ts` chamado como lib, não via `fetch` interno | Fetch interno no Route Handler não carrega cookies de auth → 401; chamada direta resolve |
 
 ---
 
@@ -764,9 +812,13 @@ anima/
 - [x] **Pilares pendentes** — novo pilar detectado no chat → `status='pending'`; `PendingPillarsWidget` no dashboard com confirmação (ativa pilar + loga atividade original) ou descarte
 - [x] **Modos de exibição** — Game (radar + EraPanel), Analítico (cards de resumo + gráfico 30d + tabela), Minimal (lista limpa); persiste em `profiles.display_mode`
 - [x] **Features por era** — `EraPanel` no modo Game: barra de progresso dentro da era, chips de features ativas, prévia tracejada da próxima era
-- [x] **Analítico mais rico** — 3 cards (XP 30d, dias ativos, pilar líder) + gráfico SVG de barras diárias (30d) com tooltips
+- [x] **Analítico mais rico** — 3 cards (XP 30d, dias ativos, pilar líder) + gráfico de linha SVG de XP diário (30d) com tooltips + calendário de atividade (heatmap de dias ativos)
 - [x] **Relatórios mensais** — `/reports`; navegação por mês (query params); XP por dia, tempo por pilar (barras horizontais), notas por tipo, maiores sessões; server-rendered
 - [x] **Arquétipo contínuo** — `lib/infer-archetype.ts`; Ollama infere 4 arquétipos (explorer/focused/builder/visionary) em %; fire-and-forget a cada ~15 mensagens; salvo em `profiles.archetype`
+- [x] **Hierarquia de pilares via chat** — `lib/detect-pillar-link.ts` detecta intenção de aninhamento na conversa (ex: "Anima é um sub-pilar de Trabalho"); header `X-Pillar-Links` + cards Sim/Não inline no `ChatClient`; `lib/link-pillar.ts` com validação anti-ciclo e pai único; `/api/pillars/link` e `/api/pillars/unlink`; também disponível via dropdown no editor de Config e no card de pilar pendente
+- [x] **Extração de entidades corrigida** — `lib/extract-entities.ts` chamado direto no chat route (antes fazia `fetch` interno sem cookies → 401); `format:json` removido do prompt (o qwen retornava 1 objeto só, perdendo entidades — agora força array); `scripts/backfill-entities.mjs` reprocessa histórico
+- [x] **Grafo de vida** — `/graph`; Three.js + física force-directed; nós de pilares (tamanho por nível) + nós de entidades (toggle on/off); arestas de correlação por co-ocorrência temporal entre pilares + arestas entidade↔pilar via `entity_mentions`; viewport anchored (bounds clampados)
+- [x] **Dedup de atividades e quests no chat** — pilar+data+nota e título de quest deduplicados antes de persistir no route do chat; evita duplicatas quando detecção roda em mensagens similares
 
 ---
 
@@ -842,13 +894,15 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 
 ## 13. Próximos temas a explorar
 
-> Atualizado em jun/2026: todas as features P0–P4 concluídas. Sistema com cobertura completa em web e mobile. Próximos passos são refinamento de UX, QA e integrações externas.
+> Atualizado em jun/2026: features P0–P4 + grafo de vida concluídas. Sistema com cobertura completa em web e mobile. Próximos passos são refinamento de UX, QA e integrações externas.
 
 ### Próximo
 - **QA áudio** — testar Whisper no iPhone em condições reais (código pronto; Docker na Goma `:9000`)
 - **Onboarding mobile** — dissolver steps deprecated e usar o chat como entrada; espelhar o que foi feito no web
+- **Grafo mobile** — portar `/graph` para o mobile (Three.js → biblioteca 2D nativa ou WebView)
 - **Relatórios mais ricos** — correlações entre notas (ex: humor × exercício); relatório anual
 - **Refinamento do analítico** — comparativo entre meses; tendência por pilar
+- **Qualidade do grafo** — threshold de correlação configurável; cores por era; animação de entrada dos nós
 - **Obsidian import** — fase 2: import com resolução de conflito (fase futura)
 - **Google Fit** — quando necessário (Health Connect Android)
 - **Modelo de monetização** — quando abrir ao público
@@ -872,10 +926,14 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 - [x] **Pilares pendentes** — novo pilar detectado → pending; confirmação no dashboard; web + mobile
 - [x] **Modos de exibição** — Game / Analítico / Minimal; persiste no DB; web + mobile
 - [x] **Features por era** — EraPanel no modo Game com progresso, unlocks e prévia da próxima era
-- [x] **Analítico mais rico** — cards de resumo + gráfico SVG de barras diárias (30d)
+- [x] **Analítico mais rico** — 3 cards de resumo (XP 30d, dias ativos, pilar líder) + gráfico de linha SVG de XP diário (30d) com tooltips + calendário de atividade (heatmap de dias ativos) + tabela de pilares com XP 7d
 - [x] **Relatórios mensais** — `/reports` (web); navegação por mês; XP por dia, por pilar, por tipo de nota
 - [x] **Arquétipo contínuo** — inferência Ollama fire-and-forget a cada ~15 mensagens; salvo em `profiles.archetype`
 - [x] **XP de notas** — heurística 5/10/20 XP por comprimento + riqueza de contexto; web + mobile
+- [x] **Hierarquia de pilares via chat** — `detect-pillar-link.ts`; header `X-Pillar-Links`; cards Sim/Não inline no `ChatClient`; `lib/link-pillar.ts`
+- [x] **Extração de entidades corrigida** — chamada direta (sem fetch interno); `format:json` removido; `backfill-entities.mjs`
+- [x] **Grafo de vida** — `/graph` (web); Three.js + física force-directed; pilares + entidades; correlações por co-ocorrência; viewport anchored
+- [x] **Dedup de atividades/quests** — deduplicação no chat route evita registros duplicados
 
 ---
 

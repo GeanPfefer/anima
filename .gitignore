@@ -12,3 +12,6 @@ build/
 .env.production.local
 .DS_Store
 *.log
+
+# Config local de máquina (Ollama host no registro do Windows)
+set-ollama-host.reg

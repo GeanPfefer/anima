@@ -18,6 +18,7 @@ import {
   loadHistory,
   sendChatMessage,
   clearHistory,
+  getOnboardingGreeting,
   type ChatMessage,
 } from '@/lib/mobile-chat';
 import { colors, spacing, radius } from '@/constants/theme';
@@ -40,7 +41,18 @@ export default function ChatScreen() {
       if (!userId) return;
       setLoading(true);
       loadHistory(userId)
-        .then(setMessages)
+        .then(async (history) => {
+          if (history.length === 0) {
+            const greeting = await getOnboardingGreeting(userId);
+            if (greeting) {
+              setMessages([{ role: 'assistant', content: greeting }]);
+            } else {
+              setMessages([]);
+            }
+          } else {
+            setMessages(history);
+          }
+        })
         .catch(() => {})
         .finally(() => setLoading(false));
     }, [userId]),

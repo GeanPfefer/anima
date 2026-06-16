@@ -40,7 +40,7 @@ export default function IndexScreen() {
         if (profile?.onboarding_completed_at) {
           router.replace('/(app)/home');
         } else {
-          router.replace('/(onboarding)/welcome');
+          router.replace('/(app)/chat');
         }
       } catch {
         if (!cancelled) router.replace('/(auth)/login');

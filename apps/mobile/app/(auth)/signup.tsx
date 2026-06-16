@@ -31,9 +31,8 @@ export default function SignupScreen() {
     const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
     if (error) { setError(error.message); setLoading(false); return; }
 
-    // Usuário criado — vai direto pro onboarding (profile ainda não tem onboarding_completed_at)
     if (data.session) {
-      router.replace('/(onboarding)/welcome');
+      router.replace('/(app)/chat');
     } else {
       // Supabase pode exigir confirmação de e-mail
       setError('Verifique seu e-mail para confirmar a conta.');

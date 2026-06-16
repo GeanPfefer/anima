@@ -10,8 +10,53 @@ import { logNotes } from './log-note';
 const OLLAMA_URL   = process.env.EXPO_PUBLIC_OLLAMA_URL   ?? 'http://100.68.239.78:11434';
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL ?? 'qwen2.5:14b';
 
+const PLACEHOLDER = new Set(['Jogador', 'usuário', '']);
+
 function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function extractName(raw: string): string | null {
+  let s = raw.trim().replace(/[.!?]+$/, '');
+  s = s.replace(/^(oi|olá|ola|opa|e a[ií]|eai)[\s,]+/i, '');
+  s = s.replace(/^(meu nome (é|e)|me chamo|pode me chamar de|me chama de|chamo-me|sou o|sou a|sou)[\s]+/i, '');
+  s = s.trim();
+  if (!s) return null;
+  const first = s.split(/\s+/)[0]!.replace(/[^\p{L}]/gu, '');
+  if (first.length < 2 || first.length > 20) return null;
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+}
+
+function buildOnboardingSystemPrompt(name: string | null): string {
+  const ref = name ?? 'esta pessoa';
+  return `Você é o Anima. Esta é sua primeira conversa com ${ref}.
+
+MISSÃO (nunca diga isso): ouvir e entender como é a vida de ${ref} agora.
+Não aconselhar. Não planejar. Não ajudar. Só entender.
+${!name ? '\nVocê ainda não sabe o nome da pessoa. Se surgir naturalmente, use-o nas próximas mensagens.' : ''}
+PROIBIDO — estas respostas destroem a experiência:
+❌ "Vamos focar em uma área específica"
+❌ "Qual área da sua vida você quer melhorar?"
+❌ Listar categorias como opções para o usuário escolher
+❌ "Vamos criar um planejamento / plano de ação"
+❌ "Qual é o seu maior desafio?"
+❌ Dar conselhos ou sugestões não pedidos
+❌ Mais de uma pergunta por mensagem
+❌ Mencionar "pilares", "XP", "níveis", "dashboard" ou termos do sistema
+
+SE o usuário perguntar "quais áreas existem?" ou "o que você rastreia?":
+→ Diga algo como: "O sistema detecta sozinho o que é relevante pra você a partir das conversas — não tem uma lista fixa. Vai aparecendo no seu perfil conforme você conta mais."
+
+PERMITIDO:
+✅ Perguntas sobre o dia a dia, o que está acontecendo agora
+✅ Curiosidade sobre o presente — não sobre metas futuras
+✅ Resposta curta (máx 2 frases) + uma pergunta
+✅ Tom de amigo que acabou de te conhecer — leve, sem pressão
+
+Após 3+ trocas com contexto real da vida da pessoa, encerre naturalmente com algo como:
+"Já tenho uma boa ideia de como é a sua vida agora. Pode explorar seu perfil quando quiser."
+
+Idioma: português brasileiro informal.`;
 }
 
 type PillarContext = {
@@ -25,7 +70,7 @@ type PillarContext = {
 
 async function buildContext(userId: string) {
   const [profileRes, activePillarsRes, pendingPillarsRes, recentRes, questsRes] = await Promise.all([
-    supabase.from('profiles').select('name, archetype').eq('id', userId).single(),
+    supabase.from('profiles').select('name, archetype, onboarding_completed_at').eq('id', userId).single(),
     supabase.from('user_pillars').select('id, name, xp_total, level, xp_rate')
       .eq('user_id', userId).eq('is_active', true).order('level', { ascending: false }),
     supabase.from('user_pillars').select('id, name, xp_rate')
@@ -43,8 +88,12 @@ async function buildContext(userId: string) {
       .limit(5),
   ]);
 
-  const name      = profileRes.data?.name ?? 'usuário';
-  const archetype = profileRes.data?.archetype as Record<string, number> | null;
+  const name        = profileRes.data?.name ?? 'usuário';
+  const archetype   = profileRes.data?.archetype as Record<string, number> | null;
+  const onboardingAt = profileRes.data?.onboarding_completed_at as string | null | undefined;
+  const displayName  = !PLACEHOLDER.has(name) ? name : null;
+  const isOnboarding = !onboardingAt;
+
   const active    = activePillarsRes.data  ?? [];
   const pending   = pendingPillarsRes.data ?? [];
   const recent    = recentRes.data         ?? [];
@@ -85,7 +134,9 @@ async function buildContext(userId: string) {
         .map(([id, pct]) => `${archetypeMap[id] ?? id} (${pct}%)`).join(', ')
     : '';
 
-  const systemPrompt = `Você é o Anima. Fala com ${name}.
+  const systemPrompt = isOnboarding
+    ? buildOnboardingSystemPrompt(displayName)
+    : `Você é o Anima. Fala com ${name}.
 
 Sua natureza:
 - Você acompanha a vida de ${name} — atividades, padrões, pilares, o que está indo bem e o que não está
@@ -106,7 +157,7 @@ Atividades recentes:
 ${recentText}
 == FIM DO CONTEXTO ==`;
 
-  return { systemPrompt, pillars, activePillars: active, name };
+  return { systemPrompt, pillars, activePillars: active, name, isOnboarding };
 }
 
 export type ChatMessage = {
@@ -124,6 +175,23 @@ export async function loadHistory(userId: string): Promise<ChatMessage[]> {
   return (data ?? []).reverse().map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 }
 
+export async function getOnboardingGreeting(userId: string): Promise<string | null> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('name, onboarding_completed_at')
+    .eq('id', userId)
+    .single();
+
+  if (profile?.onboarding_completed_at) return null;
+
+  const name = profile?.name;
+  const displayName = name && !PLACEHOLDER.has(name) ? name : null;
+
+  return displayName
+    ? `O que tá rolando na sua vida ultimamente, ${displayName}?`
+    : 'Oi! Antes da gente começar — como você quer que eu te chame?';
+}
+
 export async function sendChatMessage(
   userId: string,
   message: string,
@@ -131,8 +199,104 @@ export async function sendChatMessage(
   onToken: (token: string) => void,
 ): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
-  const { systemPrompt, pillars, activePillars, name } = await buildContext(userId);
+  const { systemPrompt, pillars, activePillars, name, isOnboarding } = await buildContext(userId);
 
+  // ── Onboarding: fluxo simplificado sem detecção de atividades ────
+  if (isOnboarding) {
+    const isFirstExchange = pastMessages.filter(m => m.role === 'user').length === 0;
+
+    if (isFirstExchange) {
+      // Persiste a saudação exibida localmente antes de salvar a mensagem do usuário
+      const greeting = pastMessages.find(m => m.role === 'assistant');
+      if (greeting) {
+        await supabase.from('ai_conversations').insert({
+          user_id: userId, role: 'assistant', content: greeting.content,
+        });
+      }
+      // Tenta extrair o nome da primeira resposta do usuário
+      const extracted = extractName(message);
+      if (extracted) {
+        await supabase.from('profiles').update({ name: extracted }).eq('id', userId);
+      }
+    }
+
+    await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message });
+
+    const controller  = new AbortController();
+    const chatTimeout = setTimeout(() => controller.abort(), 120_000);
+
+    let res: Response;
+    try {
+      res = await fetch(`${OLLAMA_URL}/api/chat`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal:  controller.signal,
+        body: JSON.stringify({
+          model:   OLLAMA_MODEL,
+          stream:  true,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...pastMessages,
+            { role: 'user', content: message },
+          ],
+        }),
+      });
+    } catch (err) {
+      clearTimeout(chatTimeout);
+      if (err instanceof Error && err.name === 'AbortError') throw new Error('timeout');
+      throw new Error('connection');
+    }
+
+    if (!res.ok || !res.body) {
+      clearTimeout(chatTimeout);
+      throw new Error(`http_${res.status}`);
+    }
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullResponse = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split('\n').filter(Boolean)) {
+          try {
+            const json = JSON.parse(line) as { message?: { content?: string }; done?: boolean };
+            const token = json.message?.content ?? '';
+            if (token) {
+              fullResponse += token;
+              onToken(token);
+            }
+            if (json.done && fullResponse) {
+              await supabase.from('ai_conversations').insert({
+                user_id: userId,
+                role:    'assistant',
+                content: fullResponse,
+              });
+            }
+          } catch { /* linha não é JSON válido — ignora */ }
+        }
+      }
+    } catch (err) {
+      clearTimeout(chatTimeout);
+      if (err instanceof Error && err.name === 'AbortError') throw new Error('timeout');
+      throw err;
+    } finally {
+      clearTimeout(chatTimeout);
+      reader.releaseLock();
+    }
+
+    // Marca onboarding como concluído após primeira resposta bem-sucedida
+    void supabase.from('profiles').update({
+      onboarding_completed_at: new Date().toISOString(),
+    }).eq('id', userId);
+
+    return;
+  }
+
+  // ── Chat regular ────────────────────────────────────────────────
   await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message });
 
   // Fire-and-forget: detecção completa (sequencial para não sobrecarregar Ollama)
@@ -145,7 +309,7 @@ export async function sendChatMessage(
     const quests       = await detectQuests(message, activeNames);
     const pillarLinks  = await detectPillarLinks(message, allNames);
 
-    // ── Atividades ──────────────────────────────────────────────
+    // ── Atividades ──────────────────────────────────────────────────
     for (const da of activities) {
       const normName = norm(da.pillarName);
 
@@ -185,12 +349,12 @@ export async function sendChatMessage(
       }
     }
 
-    // ── Notas ───────────────────────────────────────────────────
+    // ── Notas ───────────────────────────────────────────────────────
     if (notes.length > 0) {
       logNotes(notes as DetectedNote[], userId).catch(() => {});
     }
 
-    // ── Quests ──────────────────────────────────────────────────
+    // ── Quests ──────────────────────────────────────────────────────
     if (quests.length > 0) {
       const { data: existingQuests } = await supabase
         .from('quests').select('title').eq('user_id', userId);
@@ -215,7 +379,7 @@ export async function sendChatMessage(
       }
     }
 
-    // ── Links de pilar ──────────────────────────────────────────
+    // ── Links de pilar ──────────────────────────────────────────────
     if (pillarLinks.length > 0) {
       const { data: allPillarRows } = await supabase
         .from('user_pillars').select('id, name').eq('user_id', userId);
@@ -239,7 +403,7 @@ export async function sendChatMessage(
       }
     }
 
-    // ── Inferência de arquétipo a cada ~15 mensagens ────────────
+    // ── Inferência de arquétipo a cada ~15 mensagens ────────────────
     const totalMessages = pastMessages.length + 1;
     if (totalMessages > 0 && totalMessages % 15 === 0) {
       const recentWindow = [...pastMessages.slice(-20), { role: 'user', content: message }];
@@ -247,7 +411,7 @@ export async function sendChatMessage(
     }
   })().catch(() => {});
 
-  // ── Streaming do Ollama com timeout de 2 minutos ────────────────
+  // ── Streaming do Ollama com timeout de 2 minutos ────────────────────
   const controller  = new AbortController();
   const chatTimeout = setTimeout(() => controller.abort(), 120_000);
 
@@ -316,7 +480,6 @@ export async function sendChatMessage(
     reader.releaseLock();
   }
 
-  // Persiste o nome inferido da conversa (onboarding retroativo)
   void name;
 }
 
