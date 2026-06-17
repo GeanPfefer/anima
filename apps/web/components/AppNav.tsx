@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: '/quests',   label: 'Quests' },
   { href: '/history',  label: 'Histórico' },
   { href: '/notes',    label: 'Notas' },
+  { href: '/entities', label: 'Entidades' },
   { href: '/chat',     label: 'Chat' },
   { href: '/reports',  label: 'Relatórios' },
   { href: '/graph',    label: 'Graph' },
