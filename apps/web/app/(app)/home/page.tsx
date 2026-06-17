@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { computeEffectiveXP, getLevelFromTotalXP } from '@anima/core';
 import { createClient } from '@/lib/supabase/server';
 import HomeDashboard from './_components/HomeDashboard';
 import type { DisplayMode, Pillar, PillarWithChildren, PendingPillar, XPRecord } from './_components/HomeDashboard';
@@ -66,9 +67,16 @@ export default async function HomePage() {
     list.push(r.child_id);
     childrenByParent.set(r.parent_id, list);
   }
-  const pillarById = new Map(pillars.map(p => [p.id, p]));
 
-  const rootPillars: PillarWithChildren[] = pillars
+  // Propagação de XP: cada pilar exibe o XP próprio + de todos os descendentes.
+  const effectiveXP = computeEffectiveXP(pillars, relations);
+  const pillarsEff: Pillar[] = pillars.map(p => {
+    const xp = effectiveXP[p.id] ?? p.xp_total;
+    return { ...p, xp_total: xp, level: getLevelFromTotalXP(xp) };
+  });
+  const pillarById = new Map(pillarsEff.map(p => [p.id, p]));
+
+  const rootPillars: PillarWithChildren[] = pillarsEff
     .filter(p => !childIds.has(p.id))
     .map(p => ({
       ...p,

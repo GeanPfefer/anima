@@ -804,7 +804,7 @@ anima/
 - [x] Autenticação — login, signup, logout explícito (botão em Configurações)
 - [x] Recuperação de senha — forgot-password → e-mail (Mailpit em dev) → reset-password
 - [x] Roteamento inteligente na raiz (`/`)
-- [x] Sub-pilares hierárquicos — `pillar_relationships` (muitos-para-muitos); XP propaga 100% recursivamente para todos os ancestrais; sub-pilares excluídos do cálculo de nível do personagem
+- [x] Sub-pilares hierárquicos — `pillar_relationships` (muitos-para-muitos); **múltiplos pais** por pilar (link aditivo, anti-ciclo de grafo, jun/2026); XP propaga 100% recursivamente para todos os ancestrais via `computeEffectiveXP` (`packages/core`, cálculo em tempo de leitura — dedup de descendentes por ancestral, seguro para diamantes e ciclos); sub-pilares excluídos do cálculo de nível do personagem
 - [x] Contexto de pilar — salvo em `user_pillars.context` (JSONB); IA usa no system prompt
 - [x] Dashboard home — radar de vida SVG, cards de pilares com barra de XP
 - [x] Registro de atividades — input natural via IA (texto livre → 5 fases → registro)

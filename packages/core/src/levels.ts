@@ -56,3 +56,40 @@ export function getCharacterLevel(pillarLevels: number[]): number {
   const avg = pillarLevels.reduce((sum, l) => sum + l, 0) / pillarLevels.length;
   return Math.max(MIN_LEVEL, Math.round(avg));
 }
+
+/**
+ * XP efetivo de cada pilar = XP próprio + XP de TODOS os descendentes
+ * (propagação 100% para os ancestrais, conforme o design de sub-pilares).
+ * Calculado em tempo de leitura — sempre consistente com a hierarquia atual,
+ * sem denormalização. Seguro para múltiplos pais ("diamantes": cada descendente
+ * é contado uma vez por ancestral) e para ciclos (conjunto de visitados).
+ */
+export function computeEffectiveXP(
+  pillars: { id: string; xp_total: number }[],
+  relations: { parent_id: string; child_id: string }[],
+): Record<string, number> {
+  const ownXP = new Map(pillars.map((p) => [p.id, p.xp_total]));
+  const childrenOf = new Map<string, string[]>();
+  for (const r of relations) {
+    const list = childrenOf.get(r.parent_id) ?? [];
+    list.push(r.child_id);
+    childrenOf.set(r.parent_id, list);
+  }
+
+  const effective: Record<string, number> = {};
+  for (const p of pillars) {
+    // Semeia com o próprio nó: conta-o uma vez e evita recontagem via ciclo.
+    const visited = new Set<string>([p.id]);
+    const stack = [...(childrenOf.get(p.id) ?? [])];
+    while (stack.length > 0) {
+      const c = stack.pop()!;
+      if (visited.has(c)) continue;
+      visited.add(c);
+      for (const gc of childrenOf.get(c) ?? []) stack.push(gc);
+    }
+    let sum = 0;
+    for (const id of visited) sum += ownXP.get(id) ?? 0;
+    effective[p.id] = sum;
+  }
+  return effective;
+}
