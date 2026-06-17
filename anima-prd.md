@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-06-12 (sessão: grafo 3D de vida; extração de entidades corrigida; hierarquia de pilares via chat; analítico com gráfico de linha e calendário de atividade; dedup de atividades/quests; deprecação do /welcome)
+> Documento vivo de design. Última atualização: 2026-06-17 (sessão: evolução da visão — Anima Core + personas Anima/Prisma + Identidade Emergente; propagação de XP por hierarquia; múltiplos pais por pilar; correções de detecção do chat)
 > Para retomar o projeto em qualquer IA: cole este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -29,6 +29,97 @@ O usuário nunca configura a própria vida. Nunca escolhe pilares, preenche form
 **O que o Anima É:** uma memória viva capaz de entender, organizar e contextualizar a vida do usuário ao longo do tempo. A gamificação (XP, níveis, radar, eras, quests) é a **camada de feedback visual/emocional** — não o núcleo.
 
 **Standalone primeiro, integrações depois:** 100% autossuficiente. Integrações externas (Obsidian, Apple Health, etc.) só *adicionam* — nunca são dependência. Ver seção 13b.
+
+---
+
+## 1a. Evolução da visão — Anima Core e Personas
+
+> **Decisão de jun/2026.** Esta seção **evolui** a visão original (não a substitui). O Anima deixa de ser visto só como um app de registros e passa a ser uma **infraestrutura pessoal de memória e reflexão**. Formaliza o que o PRD já vinha construindo (camadas cognitivas, memória semântica, arquétipo) sob uma arquitetura única.
+
+### Topologia
+
+```
+Usuário
+  ↓
+Anima Core  (memória viva — fonte única da verdade)
+  ↓
+Personas Conversacionais
+  ├── 🟠 Anima   (registra e organiza)
+  └── 🟣 Prisma  (reflete e amplia perspectivas)
+```
+
+### Anima Core
+O **Core** é a fonte única da verdade. Responsável por: memórias, notas, registros, entidades, relações, embeddings, contexto e **identidade emergente**. Consolida as camadas cognitivas já descritas (ver §1d Camadas 1–4) e os objetos já implementados (`xp_records`, `notes`, `semantic_entities`, `entity_pillars`, `pillar_relationships`, embeddings).
+
+**O Core não tem personalidade.** Ele só organiza, compreende e disponibiliza informação. As personas conversam com o usuário **através** do Core.
+
+### Personas conversacionais
+Não existe mais um app separado "Prisma". As duas são **manifestações da mesma inteligência** dentro de **um único chat** (ver §7). O usuário não troca de tela — troca de lente.
+
+**🟠 Anima** — registrar, organizar, resumir, lembrar.
+- Tom: breve, objetiva, factual, pouco interpretativa.
+- Exemplo:
+  > 🟠 Anima — ✓ Registro salvo. Pilares: Carreira, Criatividade. Emoções: Entusiasmo, Ansiedade.
+
+**🟣 Prisma** — refletir, gerar hipóteses, revelar perspectivas, identificar padrões e tensões, ampliar a consciência do usuário.
+- Tom: curioso, reflexivo, **não diretivo**.
+- Exemplo:
+  > 🟣 Prisma — Observei uma possível tensão. Você demonstra entusiasmo ao falar do Anima, mas preocupação quando fala de estabilidade financeira. Essa interpretação faz sentido pra você?
+
+> A persona Anima é a evolução do papel de registro/detecção do chat atual; a Prisma é a Camada 4 (insights/reflexão) do PRD feita conversa.
+
+### Regra fundamental do Prisma
+O Prisma **não** toma decisões, não define objetivos, não determina caminhos, não substitui a autonomia do usuário. Seu papel é formular perguntas e mostrar perspectivas, riscos, oportunidades e padrões. **Toda conclusão é hipótese ou interpretação — nunca verdade absoluta.**
+
+- ❌ "Você deve fazer isso."
+- ✅ "Observei estes fatores. Como você enxerga essa situação?"
+
+O objetivo é **ampliar a capacidade de reflexão**, não pensar pelo usuário.
+
+### Identidade Emergente (nova camada conceitual)
+A identidade **não é cadastrada — emerge da memória.** O sistema gera **hipóteses** sobre valores, objetivos, interesses, crenças, medos, motivações e padrões comportamentais, cada uma com **evidências** e **confiança (%)**.
+
+Exemplo:
+> **Hipótese:** Autonomia parece ser importante pra você.
+> **Evidências:** interesse por IA local · projetos próprios · preocupação com independência financeira.
+> **Confiança:** 87%
+
+> Generaliza o `profiles.archetype` (4 arquétipos contínuos, já implementado) para um conjunto aberto e evidenciado de traços. Apoiada na memória semântica (`semantic_entities`, `entity_pillars`) e no histórico.
+
+### Hipóteses dinâmicas
+Nenhuma hipótese é permanente — a identidade é **viva**. A força de cada hipótese é influenciada por: frequência, recorrência, intensidade emocional, decisões relacionadas e registros recentes. Os registros cotidianos **alimentam as hipóteses automaticamente** — o usuário não reconfirma manualmente; as próprias experiências reforçam, enfraquecem ou transformam hipóteses.
+
+Exemplo:
+> Valor: Autonomia · Confiança: 82% · Última evidência: ontem · Baseado em: 47 registros.
+
+O objetivo não é definir **quem o usuário é**, e sim observar **o que parece importante pra ele neste momento da vida.**
+
+### Confirmação conversacional
+**Sem telas de configuração.** Toda confirmação acontece na conversa:
+> 🟣 Prisma — Observei um possível padrão.  ☐ Faz sentido  ☐ Não faz sentido  ☐ Ainda não sei
+
+Hipóteses confirmadas passam a integrar a Identidade Emergente. (Coerente com o princípio do PRD: nada de wizard/formulário — ver §1c.)
+
+### Arquitetura da IA (camadas do prompt)
+A IA **não** é uma representação do usuário e não finge ser ele — ela o **compreende profundamente**. O prompt é montado em três camadas:
+1. **Prompt base** — regras permanentes (tom, limites de cada persona).
+2. **Identidade Emergente** — valores, objetivos, padrões e interesses observados.
+3. **Contexto atual** — memórias recentes, conversa atual, situação atual.
+
+O sistema evolui junto com o usuário.
+
+### Controle das personas
+O usuário escolhe a participação das personas — `[✓] Anima  [✓] Prisma` — podendo deixar **só Anima**, **só Prisma** ou **ambas**, adaptando o nível de reflexão desejado a cada momento.
+
+### Convocação explícita (roadmap futuro)
+Direcionar uma mensagem a uma persona sem trocar de tela: `@anima` / `@prisma` (ou `/anima` / `/prisma`).
+
+### Filosofia central (reforço)
+- O Anima **não** é produtividade, gerenciador de tarefas ou coach.
+- O Anima é uma **memória viva**. O Prisma é uma **lente de reflexão** construída sobre essa memória.
+- Nem Anima nem Prisma definem quem o usuário é — apenas observam **quem ele parece estar se tornando**.
+
+> **Frase guia:** "O Anima registra a jornada. O Prisma ajuda a enxergar perspectivas. A decisão continua sendo do usuário."
 
 ---
 
@@ -907,6 +998,13 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 > Atualizado em jun/2026: features P0–P4 + grafo de vida concluídas. Sistema com cobertura completa em web e mobile. Próximos passos são refinamento de UX, QA e integrações externas.
 
 ### Próximo
+- **Anima Core + Personas (visão jun/2026, ver §1a)** — evolução estrutural:
+  - **Persona Prisma** — modo reflexivo conversacional no mesmo chat (gera hipóteses/perspectivas, não diretivo); separar do papel de registro (persona Anima)
+  - **Identidade Emergente** — camada de hipóteses (valores, objetivos, medos, padrões) com evidências e confiança %, viva (reforça/enfraquece com novos registros); generaliza `profiles.archetype`
+  - **Confirmação conversacional** de hipóteses (sem telas) + injeção da Identidade Emergente no prompt
+  - **Controle de personas** (`[✓] Anima [✓] Prisma`) e **convocação explícita** `@anima`/`@prisma` (futuro)
+- **Tela de entidades** — visualizar `semantic_entities`/`entity_pillars` (agrupadas por pilar/tipo, ocorrências, contexto); hoje só aparecem no grafo
+- **Filtro no grafo** — toggles pilares/entidades, foco por pilar, filtro por tipo de entidade
 - **QA áudio** — testar Whisper no iPhone em condições reais (código pronto; Docker na Goma `:9000`)
 - **Onboarding mobile** — dissolver steps deprecated e usar o chat como entrada; espelhar o que foi feito no web
 - **Grafo mobile** — portar `/graph` para o mobile (Three.js → biblioteca 2D nativa ou WebView)
