@@ -7,7 +7,11 @@
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321';
-const SUPABASE_KEY = process.env.SUPABASE_SECRET ?? '***REMOVED***';
+const SUPABASE_KEY = process.env.SUPABASE_SECRET;
+if (!SUPABASE_KEY) {
+  console.error('Defina SUPABASE_SECRET no ambiente antes de rodar (service/secret key do Supabase).');
+  process.exit(1);
+}
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://127.0.0.1:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
 
