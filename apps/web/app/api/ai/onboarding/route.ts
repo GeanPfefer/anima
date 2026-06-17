@@ -130,18 +130,26 @@ export async function POST(req: NextRequest) {
   });
 }
 
-// Extrai o primeiro nome de uma resposta livre ("meu nome é João" → "João").
+// Extrai o nome de uma resposta livre ("meu nome é João" → "João").
 function extractName(raw: string): string | null {
-  let s = raw.trim().replace(/[.!?]+$/, '');
+  const cleaned = raw.trim();
+  const pick = (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+
+  // Apelido explícito vence o nome formal, em qualquer posição da frase:
+  // "Me chamo Gean, mas pode me chamar de Naeg" → Naeg
+  const nick = cleaned.match(/(?:pode me chamar de|me chama de|me chame de|prefiro(?: que me chamem?)? de)\s+([\p{L}]{2,20})/iu)?.[1];
+  if (nick) return pick(nick);
+
+  let s = cleaned.replace(/[.!?]+$/, '');
   s = s.replace(/^(oi|olá|ola|opa|e a[ií]|eai)[\s,]+/i, '');
-  s = s.replace(/^(meu nome (é|e)|me chamo|pode me chamar de|me chama de|chamo-me|sou o|sou a|sou)[\s]+/i, '');
+  s = s.replace(/^(meu nome (é|e)|me chamo|chamo-me|sou o|sou a|sou)[\s]+/i, '');
   s = s.trim();
   if (!s) return null;
 
   const first = s.split(/\s+/)[0]!.replace(/[^\p{L}]/gu, '');
   if (first.length < 2 || first.length > 20) return null;
 
-  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+  return pick(first);
 }
 
 function buildSystemPrompt(name: string | null): string {

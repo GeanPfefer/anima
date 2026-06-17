@@ -148,6 +148,8 @@ Exemplos:
 
 Essa camada é responsável pela **continuidade cognitiva real**: o sistema sabe o que aquele contexto significa para *esta* pessoa — sem o usuário reexplicar.
 
+Implementação (jun/2026): entidades nomeadas são extraídas de qualquer mensagem (`detect-entities.ts`) e ligadas a pilares via `entity_pillars` (`link-entities.ts`), além da ligação derivada de atividades via `entity_mentions`. Interesses que não geram atividade ("amo Nujabes") passam a ancorar um pilar emergente (ex: Música).
+
 ### Camada 4 — Insights e reflexão
 Somente depois das camadas anteriores existirem: insights, padrões, sugestões, previsões, reflexões, perguntas contextualizadas.
 
@@ -423,15 +425,19 @@ Ao receber qualquer mensagem o backend:
 
 4. **O cliente atualiza o dashboard** via `router.refresh()` se atividades foram logadas
 
-### Modelo de detecção — três destinos
+### Modelo de detecção — destinos paralelos
 
-Cada mensagem passa por classificação silenciosa com três saídas possíveis:
+Cada mensagem passa por classificação silenciosa. Os detectores rodam em sequência (para não sobrecarregar o Ollama) e cada um pode gerar um destino diferente:
 
 | Tipo de conteúdo | Destino | XP |
 |------------------|---------|-----|
 | Atividade intencional (esporte, estudo, trabalho, criação...) | `xp_records` + pilar | Fórmula: tempo × taxa × bônus |
-| Nota (alimentação, gasto, sentimento, ideia, reflexão) | `notes` (futuro) | 5–20 XP flat (baseado em profundidade da nota) |
+| Nota (alimentação, gasto, humor, ideia, interesse) | `notes` | 5–20 XP flat (profundidade da nota) |
+| Meta / objetivo / hábito explícito | `quests` | XP de recompensa ao concluir |
+| Entidade nomeada (pessoa, obra, lugar, ferramenta...) | `semantic_entities` + `entity_pillars` | — |
 | Conversa pura (pergunta, planejamento, bate-papo) | Nenhum registro | 0 XP |
+
+**Dedup entre destinos (decisão de jun/2026).** Atividades e quests são detectadas primeiro; suas descrições viram exclusões passadas ao detector de notas, e um filtro determinístico na rota descarta notas que descrevem uma atividade cronometrada (duração no texto) ou que repetem muito uma nota de atividade. Evita que "corri 40min" vire ao mesmo tempo XP e nota, ou que "meu objetivo é X" vire nota em vez de quest.
 
 ### O que NÃO é registrado como atividade
 A detecção é conservadora por design. Falso negativo é melhor que registrar lixo:
@@ -454,7 +460,7 @@ A atividade só é registrada se o pilar detectado corresponder **exatamente** (
 
 ### Onboarding dentro do chat (Fase 3 — implementado)
 A primeira conversa acontece no `/chat`. A rota `/welcome` foi dissolvida — o chat detecta que é o primeiro uso e adapta o comportamento:
-- Primeira mensagem: acolhe e pergunta o nome; `api/ai/onboarding/route.ts` extrai via heurística `extractName` e salva no profile
+- Primeira mensagem: acolhe e pergunta o nome; `api/ai/onboarding/route.ts` extrai via heurística `extractName` e salva no profile. Apelido explícito ("pode me chamar de X") tem prioridade sobre o nome formal quando os dois aparecem na mesma frase (fix jun/2026)
 - Depois do nome: chat segue normalmente com detecção de atividades e pilares
 - Em segundo plano: infere pilares iniciais, arquétipo, inicia memória narrativa
 - `onboarding_completed_at` é setado após contexto suficiente (sem critério rígido)
@@ -474,9 +480,12 @@ Os 4 arquétipos (Explorador, Focado, Construtor, Visionário) são um **modelo 
 - **✅ Fase 1:** detecção + logging automático via chat implementado (`/api/ai/chat`)
 - **✅ Fase 2:** pilares pendentes — pilar novo detectado → `status='pending', is_active=false`; widget no dashboard com confirmação/descarte; XP da atividade original aplicado ao confirmar
 - **✅ Fase 3:** `/welcome` dissolvido no `/chat`; onboarding acontece na primeira conversa; `onboarding_completed_at` setado após contexto suficiente
-- **✅ Notas no chat:** `detect-note.ts` detecta food/expense/mood/idea/other; XP 5–20 por heurística; `pillar_hint` inferido; IA silenciosa (não comenta)
+- **✅ Notas no chat:** `detect-note.ts` detecta food/expense/mood/idea/interest/other; XP 5–20 por heurística; `pillar_hint` inferido; IA silenciosa (não comenta). Excluem atividades/quests já detectadas (dedup); item de comida com valor gera duas notas (food + expense) (jun/2026)
+- **✅ Detecção de quest robusta (jun/2026):** `detect-quest.ts` sem `format:json` (que enviesava o qwen a retornar `[]`); prompt captura metas mesmo no meio de mensagens multitema ("meu objetivo é aprender japonês" → quest `learning`)
+- **✅ Entidades ↔ pilares (jun/2026):** `detect-entities.ts` extrai entidades nomeadas da mensagem inteira (não só de atividades) com `pillarHint`; `link-entities.ts` faz upsert em `semantic_entities` e popula `entity_pillars` (ligação direta entidade↔pilar). Quando o `pillarHint` é uma área nova, cria pilar `pending` para o usuário confirmar — captando interesses/identidade que não geram atividade (ex: "amo Nujabes" → pilar Música)
+- **✅ Pilar pendente sem duplicata (jun/2026):** os 3 caminhos que criam pilar pendente (atividade, quest, entidade) usam o helper `create-pending-pillar.ts` (select-or-insert tolerante a corrida); migração `20260617000000` consolida duplicatas e impõe unique index `user_pillars(user_id, lower(name))`
 - **✅ Arquétipo contínuo:** `infer-archetype.ts` infere 4 arquétipos (explorer/focused/builder/visionary) em % via Ollama; fire-and-forget a cada ~15 mensagens; salvo em `profiles.archetype`
-- **✅ Hierarquia via chat:** `detect-pillar-link.ts` detecta intenção de criar sub-pilar na conversa; header `X-Pillar-Links` + cards Sim/Não no `ChatClient`; `lib/link-pillar.ts` com validação anti-ciclo e pai único; dropdown também disponível no editor de Config e no card de pilar pendente
+- **✅ Hierarquia via chat:** `detect-pillar-link.ts` detecta intenção de criar sub-pilar na conversa; header `X-Pillar-Links` + cards Sim/Não no `ChatClient`; `lib/link-pillar.ts` com validação anti-ciclo e múltiplos pais (vínculo aditivo, idempotente por aresta — alinha com o design de "múltiplos pais" da seção de sub-pilares); dropdown também disponível no editor de Config e no card de pilar pendente
 
 ---
 
@@ -536,7 +545,7 @@ notes (
   id            uuid primary key,
   user_id       uuid references auth.users,
   content       text not null,
-  note_type     text,                   -- 'food', 'expense', 'mood', 'idea', 'other'
+  note_type     text,                   -- 'food', 'expense', 'mood', 'idea', 'interest', 'other'
   context       jsonb,                  -- dados estruturados extraídos
   pillar_hint   text,                   -- pilar implícito (Saúde, Finanças, Mente ou null)
   xp_awarded    int default 0,          -- 5/10/20 XP por comprimento+riqueza de contexto
@@ -547,6 +556,7 @@ notes (
 
 ### Estado técnico
 - **✅ Implementado:** migração SQL (`20260609000001_notes.sql`), detecção no chat (`lib/detect-note.ts` web + mobile), tela de notas (web + mobile), XP de notas (5/10/20 por heurística de comprimento/contexto), `pillar_hint` inferido pelo Ollama
+- **✅ Tipo `interest` (jun/2026):** migração `20260612000001_notes_interest_type.sql` adiciona `interest` ao check constraint — para gostos/descobertas (música, mídia, hobbies); distinto de atividade e de meta
 - **✅ Relatórios mensais:** página `/reports` (web) com navegação por mês, XP por dia (gráfico), tempo por pilar (barras), notas por tipo, maiores sessões
 
 ---
@@ -815,7 +825,7 @@ anima/
 - [x] **Analítico mais rico** — 3 cards (XP 30d, dias ativos, pilar líder) + gráfico de linha SVG de XP diário (30d) com tooltips + calendário de atividade (heatmap de dias ativos)
 - [x] **Relatórios mensais** — `/reports`; navegação por mês (query params); XP por dia, tempo por pilar (barras horizontais), notas por tipo, maiores sessões; server-rendered
 - [x] **Arquétipo contínuo** — `lib/infer-archetype.ts`; Ollama infere 4 arquétipos (explorer/focused/builder/visionary) em %; fire-and-forget a cada ~15 mensagens; salvo em `profiles.archetype`
-- [x] **Hierarquia de pilares via chat** — `lib/detect-pillar-link.ts` detecta intenção de aninhamento na conversa (ex: "Anima é um sub-pilar de Trabalho"); header `X-Pillar-Links` + cards Sim/Não inline no `ChatClient`; `lib/link-pillar.ts` com validação anti-ciclo e pai único; `/api/pillars/link` e `/api/pillars/unlink`; também disponível via dropdown no editor de Config e no card de pilar pendente
+- [x] **Hierarquia de pilares via chat** — `lib/detect-pillar-link.ts` detecta intenção de aninhamento na conversa (ex: "Anima é um sub-pilar de Trabalho"); header `X-Pillar-Links` + cards Sim/Não inline no `ChatClient`; `lib/link-pillar.ts` com validação anti-ciclo e múltiplos pais (vínculo aditivo, idempotente por aresta — alinha com o design de "múltiplos pais" da seção de sub-pilares); `/api/pillars/link` e `/api/pillars/unlink`; também disponível via dropdown no editor de Config e no card de pilar pendente
 - [x] **Extração de entidades corrigida** — `lib/extract-entities.ts` chamado direto no chat route (antes fazia `fetch` interno sem cookies → 401); `format:json` removido do prompt (o qwen retornava 1 objeto só, perdendo entidades — agora força array); `scripts/backfill-entities.mjs` reprocessa histórico
 - [x] **Grafo de vida** — `/graph`; Three.js + física force-directed; nós de pilares (tamanho por nível) + nós de entidades (toggle on/off); arestas de correlação por co-ocorrência temporal entre pilares + arestas entidade↔pilar via `entity_mentions`; viewport anchored (bounds clampados)
 - [x] **Dedup de atividades e quests no chat** — pilar+data+nota e título de quest deduplicados antes de persistir no route do chat; evita duplicatas quando detecção roda em mensagens similares

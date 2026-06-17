@@ -43,7 +43,12 @@ Para cada atividade identificada:
 
 Conversões: 1h=60, meia hora=30, 2h30=150, 45min=45.
 Se uma atividade cobre dois pilares, crie dois objetos.
-Não registre: comer, dormir, descansar, assistir TV, deslocamento, compras, sentimentos sem ação.
+Registre SOMENTE algo que a pessoa FEZ de fato (ação concreta no passado).
+NÃO registre:
+- comer, dormir, descansar, assistir TV, deslocamento, compras, sentimentos sem ação
+- metas/intenções/decisões futuras ("vou correr uma maratona", "decidi treinar") — são quests
+- afirmações de organização ("corrida faz parte de Saúde", "considera o violão como Música") — são links de pilar
+- gostos/descobertas sem ação cronometrada ("descobri J Dilla", "virei fã de X") — são interesses
 
 Texto: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 1800)}"
 

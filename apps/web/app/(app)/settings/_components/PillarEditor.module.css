@@ -41,6 +41,52 @@
   opacity: 0.5;
 }
 
+.parentsCell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.parentChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 4px 4px 4px 9px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.parentChipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.parentChipRemove:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
+.parentChipRemove:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .parentSelect {
   font-size: 12px;
   padding: 7px 8px;

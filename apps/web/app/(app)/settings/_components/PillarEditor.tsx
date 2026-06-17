@@ -12,25 +12,24 @@ export default function PillarEditor({
   userId,
 }: {
   initialPillars: Pillar[];
-  initialParents?: Record<string, string>;
+  initialParents?: Record<string, string[]>;
   userId: string;
 }) {
   const supabase = createClient();
   const [pillars, setPillars] = useState<Pillar[]>(initialPillars);
-  const [parents, setParents] = useState<Record<string, string>>(initialParents ?? {});
+  const [parents, setParents] = useState<Record<string, string[]>>(initialParents ?? {});
   const [editedNames, setEditedNames] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  async function changeParent(pillar: Pillar, parentId: string) {
+  async function addParent(pillar: Pillar, parentId: string) {
+    if (!parentId) return;
     setSaving((s) => ({ ...s, [pillar.id]: true }));
     setErrors((e) => ({ ...e, [pillar.id]: '' }));
-    const endpoint = parentId ? '/api/pillars/link' : '/api/pillars/unlink';
-    const body = parentId ? { childId: pillar.id, parentId } : { childId: pillar.id };
-    const res = await fetch(endpoint, {
+    const res = await fetch('/api/pillars/link', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(body),
+      body:    JSON.stringify({ childId: pillar.id, parentId }),
     }).catch(() => null);
     setSaving((s) => ({ ...s, [pillar.id]: false }));
     if (!res?.ok) {
@@ -39,10 +38,25 @@ export default function PillarEditor({
       return;
     }
     setParents((prev) => {
-      const next = { ...prev };
-      if (parentId) next[pillar.id] = parentId; else delete next[pillar.id];
-      return next;
+      const cur = prev[pillar.id] ?? [];
+      return cur.includes(parentId) ? prev : { ...prev, [pillar.id]: [...cur, parentId] };
     });
+  }
+
+  async function removeParent(pillar: Pillar, parentId: string) {
+    setSaving((s) => ({ ...s, [pillar.id]: true }));
+    setErrors((e) => ({ ...e, [pillar.id]: '' }));
+    const res = await fetch('/api/pillars/unlink', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ childId: pillar.id, parentId }),
+    }).catch(() => null);
+    setSaving((s) => ({ ...s, [pillar.id]: false }));
+    if (!res?.ok) {
+      setErrors((e) => ({ ...e, [pillar.id]: 'Erro ao remover vínculo' }));
+      return;
+    }
+    setParents((prev) => ({ ...prev, [pillar.id]: (prev[pillar.id] ?? []).filter((id) => id !== parentId) }));
   }
 
   // Novo pilar
@@ -137,21 +151,41 @@ export default function PillarEditor({
                 disabled={isSaving}
                 aria-label={`Nome do pilar ${p.name}`}
               />
-              <select
-                className={styles.parentSelect}
-                value={parents[p.id] ?? ''}
-                onChange={(e) => changeParent(p, e.target.value)}
-                disabled={isSaving}
-                aria-label={`Pilar pai de ${p.name}`}
-                title="Faz parte de"
-              >
-                <option value="">— sem pai —</option>
-                {pillars
-                  .filter((o) => o.id !== p.id)
-                  .map((o) => (
-                    <option key={o.id} value={o.id}>faz parte de {o.name}</option>
-                  ))}
-              </select>
+              <div className={styles.parentsCell}>
+                {(parents[p.id] ?? []).map((parentId) => {
+                  const parent = pillars.find((o) => o.id === parentId);
+                  if (!parent) return null;
+                  return (
+                    <span key={parentId} className={styles.parentChip}>
+                      {parent.name}
+                      <button
+                        className={styles.parentChipRemove}
+                        onClick={() => removeParent(p, parentId)}
+                        disabled={isSaving}
+                        aria-label={`Desvincular ${p.name} de ${parent.name}`}
+                        title="Remover este pai"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+                })}
+                <select
+                  className={styles.parentSelect}
+                  value=""
+                  onChange={(e) => { addParent(p, e.target.value); e.target.value = ''; }}
+                  disabled={isSaving}
+                  aria-label={`Adicionar pai de ${p.name}`}
+                  title="Faz parte de"
+                >
+                  <option value="">+ faz parte de…</option>
+                  {pillars
+                    .filter((o) => o.id !== p.id && !(parents[p.id] ?? []).includes(o.id))
+                    .map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ))}
+                </select>
+              </div>
               <button
                 className={[styles.toggle, p.is_active ? styles.toggleOn : styles.toggleOff].join(' ')}
                 onClick={() => toggleActive(p)}

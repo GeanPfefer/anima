@@ -17,22 +17,22 @@ export async function detectQuests(
 
   const pillarCtx = pillarNames.length > 0 ? pillarNames.join(', ') : 'Saúde, Mente, Relações';
 
-  const prompt = `Detecte intenções de meta ou hábito no texto abaixo.
+  const prompt = `Detecte intenções de META, OBJETIVO ou HÁBITO no texto, MESMO que apareçam no meio de uma mensagem sobre outros assuntos.
 
-REGISTRE apenas declarações EXPLÍCITAS de objetivo:
-+ "quero começar X regularmente" → habit
-+ "vou tentar Y toda manhã/semana" → habit
-+ "quero aprender Z" → learning
-+ "desafio de N dias" → challenge
+REGISTRE toda declaração de intenção futura:
++ "quero aprender japonês (esse ano)" → learning
 + "meu objetivo é W" → main
++ "vou tentar Y toda manhã/semana" → habit
++ "quero começar a fazer Z regularmente" → habit
++ "desafio de N dias de W" → challenge
 
-NÃO registre: planos vagos, desejos passageiros, atividades que já foram feitas.
+NÃO registre: atividades já feitas no passado (com duração), desejos vagos sem ação.
 
 Pilares: ${pillarCtx}
-Regra: use pilar existente ou crie nome novo (ex: "Finanças", "Arte").
+Regra: use pilar existente quando encaixar, senão crie nome novo (ex: "Idiomas", "Finanças", "Arte").
 
 Cada item:
-- "title": título curto da quest, máx 60 chars
+- "title": título curto e acionável, máx 60 chars (ex: "Aprender japonês")
 - "pillarName": pilar existente ou nome novo
 - "type": "habit" | "learning" | "challenge" | "main"
 - "description": uma frase descrevendo o objetivo (opcional)
@@ -40,7 +40,8 @@ Cada item:
 
 Texto: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 1500)}"
 
-Retorne APENAS array JSON válido. Se não há meta explícita, retorne [].`;
+Retorne APENAS um array JSON válido. Exemplo: [{"title":"Aprender japonês","pillarName":"Idiomas","type":"learning","xpReward":500}]
+Se não há meta, retorne [].`;
 
   const controller = new AbortController();
   const timeout    = setTimeout(() => controller.abort(), 20_000);
@@ -54,7 +55,6 @@ Retorne APENAS array JSON válido. Se não há meta explícita, retorne [].`;
         model:   OLLAMA_MODEL,
         prompt,
         stream:  false,
-        format:  'json',
         options: { temperature: 0.1 },
       }),
     });

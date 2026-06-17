@@ -6,10 +6,13 @@ import { detectActivities } from '@/lib/detect-activity';
 import { detectNotes } from '@/lib/detect-note';
 import { detectQuests } from '@/lib/detect-quest';
 import { detectPillarLinks } from '@/lib/detect-pillar-link';
+import { detectEntities } from '@/lib/detect-entities';
 import { extractEntities } from '@/lib/extract-entities';
+import { linkEntitiesToPillars } from '@/lib/link-entities';
 import { logActivity } from '@/lib/log-activity';
 import { logNote } from '@/lib/log-note';
 import { getOrCreatePendingPillar } from '@/lib/get-or-create-pending-pillar';
+import { createPendingPillar } from '@/lib/create-pending-pillar';
 import { inferAndSaveArchetype } from '@/lib/infer-archetype';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
@@ -59,23 +62,40 @@ export async function POST(req: NextRequest) {
   const pillarNames = pillars.map(p => p.name);
 
   // ── Detecção sequencial (evita sobrecarga do Ollama com chamadas simultâneas) ─
+  // Atividades e quests primeiro: o que elas capturam é excluído das notas (dedup).
   const today = new Date().toISOString().slice(0, 10);
   const detectedActivities = await detectActivities(message, pillarNames, today);
-  const detectedNotes      = await detectNotes(message, today);
   const detectedQuests     = await detectQuests(message, pillarNames);
+
+  const noteExclusions = [
+    ...detectedActivities.map(a => a.note).filter((n): n is string => !!n?.trim()),
+    ...detectedQuests.map(q => q.title),
+  ];
+  const detectedNotes      = await detectNotes(message, today, noteExclusions);
   const detectedLinks      = await detectPillarLinks(message, pillarNames);
+  const detectedEntities   = await detectEntities(message, pillarNames);
   const queryEmbedding     = await generateEmbedding(message);
 
   console.log('[chat/detect] activities:', detectedActivities.length, detectedActivities.map(a => `${a.pillarName}/${a.durationMinutes}min`));
   console.log('[chat/detect] notes:', detectedNotes.length, detectedNotes.map(n => n.noteType));
   console.log('[chat/detect] quests:', detectedQuests.length, detectedQuests.map(q => q.title));
   console.log('[chat/detect] links:', detectedLinks.length, detectedLinks.map(l => `${l.childName}→${l.parentName}`));
+  console.log('[chat/detect] entities:', detectedEntities.length, detectedEntities.map(e => `${e.name}→${e.pillarHint ?? '?'}`));
 
   // ── Loga atividades detectadas ─────────────────────────────────
   const loggedActivities: LoggedActivity[] = [];
   const seenActivities = new Set<string>(); // dedup dentro da própria mensagem
 
+  // Reforço determinístico: notas que são meta/decisão futura, organização de
+  // pilar ou gosto/descoberta não são atividade (o detector às vezes as captura
+  // como 0-min). Evita "atividade fantasma" no histórico de XP.
+  const NON_ACTIVITY_NOTE_RE = /\b(decis[ãa]o|decidi|vou |pretendo|quero |meta\b|objetivo|planejo|faz(?:em)? parte|como parte|parte d[eo]|descobri|virei f[ãa]|sou f[ãa]|viciad)/i;
+
   for (const da of detectedActivities) {
+    // Só descarta como "fantasma" se for 0-min — atividade cronometrada real
+    // nunca é meta/link/interesse, mesmo que a nota mencione "vou"/"quero".
+    if (da.durationMinutes === 0 && NON_ACTIVITY_NOTE_RE.test(da.note ?? '')) continue;
+
     // Só registra se o pilar bater exatamente — evita jogar atividade no pilar errado
     const pillar = pillars.find(p => norm(p.name) === norm(da.pillarName));
     if (!pillar) {
@@ -140,7 +160,26 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Loga notas silenciosamente (fire-and-forget) ─────────────────
-  for (const dn of detectedNotes) {
+  // Dedup determinístico contra atividades: descarta notas que descrevem uma
+  // atividade cronometrada (duração no texto) ou que repetem muito uma nota
+  // de atividade já registrada — o detector de nota às vezes ignora a regra.
+  const DURATION_RE = /\b\d+\s*(?:min|minutos?|h|horas?|hr)\b/i;
+  const toTokens = (s: string) => new Set(norm(s).split(/\s+/).filter(w => w.length > 3));
+  const activityTokenSets = detectedActivities
+    .filter(a => a.note)
+    .map(a => toTokens(`${a.pillarName} ${a.note}`));
+
+  const notesToLog = detectedNotes.filter(dn => {
+    if (DURATION_RE.test(dn.content)) return false;
+    const nt = toTokens(dn.content);
+    return !activityTokenSets.some(at => {
+      let overlap = 0;
+      for (const w of nt) if (at.has(w)) overlap++;
+      return overlap >= 2;
+    });
+  });
+
+  for (const dn of notesToLog) {
     logNote({
       content:    dn.content,
       noteType:   dn.noteType,
@@ -149,6 +188,9 @@ export async function POST(req: NextRequest) {
       noteDate:   dn.noteDate,
     }).catch(() => {});
   }
+
+  // ── Entidades semânticas da mensagem → teia entidade↔pilar (fire-and-forget) ─
+  linkEntitiesToPillars(supabase, user.id, detectedEntities).catch(() => {});
 
   // ── Cria quests detectadas ─────────────────────────────────────
   type CreatedQuest = { title: string; pillar: string; type: string };
@@ -167,23 +209,21 @@ export async function POST(req: NextRequest) {
     if (existingQuestTitles.has(qKey) || seenQuests.has(qKey)) continue;
     seenQuests.add(qKey);
 
-    const pillar = pillars.find(p => norm(p.name) === norm(dq.pillarName));
-    if (!pillar) {
-      // Pilar não existe — cria como pendente, não bloqueia a resposta
-      getOrCreatePendingPillar({ pillarName: dq.pillarName, durationMinutes: 0, note: dq.title }).catch(() => {});
-      continue;
-    }
+    // Cria a quest mesmo em pilar novo (vira pendente) — não descarta a meta.
+    const pillarId = await createPendingPillar(supabase, user.id, dq.pillarName);
+    if (!pillarId) continue;
+
     try {
       const { error } = await supabase.from('quests').insert({
         user_id:     user.id,
-        pillar_id:   pillar.id,
+        pillar_id:   pillarId,
         title:       dq.title,
         description: dq.description ?? null,
         type:        dq.type,
         xp_reward:   dq.xpReward,
         status:      'open',
       });
-      if (!error) createdQuests.push({ title: dq.title, pillar: pillar.name, type: dq.type });
+      if (!error) createdQuests.push({ title: dq.title, pillar: dq.pillarName, type: dq.type });
     } catch { /* silencioso */ }
   }
 

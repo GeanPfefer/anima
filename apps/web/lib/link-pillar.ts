@@ -8,8 +8,9 @@ export type LinkResult =
   | { ok: true; parentId: string; parentName: string; createdParent: boolean }
   | { ok: false; reason: 'not_found' | 'self' | 'cycle' | 'error' };
 
-// Atribui um pai a um pilar (relação parent→child). Um pilar tem no máximo um pai:
-// re-linkar substitui o vínculo anterior. Cria o pai por nome se ele não existir.
+// Adiciona um pai a um pilar (relação parent→child). Um pilar pode ter VÁRIOS
+// pais (ex: "Idiomas" sob Mente e Relações) — vincular é aditivo, idempotente
+// por aresta. Cria o pai por nome se ele não existir.
 export async function linkPillar(input: {
   childId:     string;
   parentId?:   string | null;
@@ -59,21 +60,32 @@ export async function linkPillar(input: {
   if (!parent) return { ok: false, reason: 'not_found' };
   if (parent.id === child.id) return { ok: false, reason: 'self' };
 
-  // Evita ciclo: o pai proposto não pode ser descendente do filho.
+  // Múltiplos pais permitidos — percorre o grafo por TODAS as arestas.
   const { data: rels } = await supabase
     .from('pillar_relationships')
     .select('parent_id, child_id');
-  const parentOf = new Map<string, string>();
-  for (const r of rels ?? []) parentOf.set(r.child_id, r.parent_id);
-
-  let cursor: string | undefined = parent.id;
-  for (let i = 0; i < 50 && cursor; i++) {
-    if (cursor === child.id) return { ok: false, reason: 'cycle' };
-    cursor = parentOf.get(cursor);
+  const parentsOf = new Map<string, string[]>();
+  for (const r of rels ?? []) {
+    const list = parentsOf.get(r.child_id) ?? [];
+    list.push(r.parent_id);
+    parentsOf.set(r.child_id, list);
   }
 
-  // Um pai por filho: remove vínculo anterior antes de inserir o novo.
-  await supabase.from('pillar_relationships').delete().eq('child_id', child.id);
+  // Já vinculado a esse pai? idempotente, não duplica a aresta.
+  if ((parentsOf.get(child.id) ?? []).includes(parent.id)) {
+    return { ok: true, parentId: parent.id, parentName: parent.name, createdParent };
+  }
+
+  // Evita ciclo: subindo do pai proposto por qualquer caminho não pode alcançar o filho.
+  const stack = [parent.id];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (cur === child.id) return { ok: false, reason: 'cycle' };
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    for (const p of parentsOf.get(cur) ?? []) stack.push(p);
+  }
 
   const { error } = await supabase
     .from('pillar_relationships')
@@ -83,7 +95,8 @@ export async function linkPillar(input: {
   return { ok: true, parentId: parent.id, parentName: parent.name, createdParent };
 }
 
-export async function unlinkPillar(childId: string): Promise<boolean> {
+// Remove o vínculo com um pai específico (parentId) ou, se omitido, com todos.
+export async function unlinkPillar(childId: string, parentId?: string): Promise<boolean> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return false;
@@ -97,9 +110,8 @@ export async function unlinkPillar(childId: string): Promise<boolean> {
     .maybeSingle();
   if (!child) return false;
 
-  const { error } = await supabase
-    .from('pillar_relationships')
-    .delete()
-    .eq('child_id', childId);
+  let q = supabase.from('pillar_relationships').delete().eq('child_id', childId);
+  if (parentId) q = q.eq('parent_id', parentId);
+  const { error } = await q;
   return !error;
 }

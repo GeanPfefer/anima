@@ -14,6 +14,7 @@ const VALID_TYPES = new Set(['food', 'expense', 'mood', 'idea', 'interest', 'oth
 export async function detectNotes(
   message: string,
   today: string = new Date().toISOString().slice(0, 10),
+  excludeHints: string[] = [],
 ): Promise<DetectedNote[]> {
   const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
   const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -27,24 +28,37 @@ export async function detectNotes(
     return `${label}=${d.toISOString().slice(0, 10)}`;
   }).join(', ');
 
-  // Sem format:json (enviesa o qwen a um objeto só). Força array por exemplo.
-  const prompt = `Capture o CONTEXTO relevante desta mensagem como notas — qualquer coisa que valha a pena lembrar sobre a pessoa.
-Inclua: interesses e gostos, descobertas, fatos sobre ela, preferências, opiniões, planos, reflexões, e também comida, gastos, humor.
-NÃO capture: saudações vazias, perguntas ao assistente, ou atividades já feitas com duração (essas são registradas à parte).
+  const exclusionBlock = excludeHints.length > 0
+    ? `\nJÁ REGISTRADO à parte — NÃO repita como nota: ${excludeHints.slice(0, 8).join('; ')}.\n`
+    : '';
 
+  // Sem format:json (enviesa o qwen a um objeto só). Força array por exemplo.
+  const prompt = `Capture o CONTEXTO relevante desta mensagem como notas — fatos sobre a pessoa que valham a pena lembrar.
+Inclua: interesses e gostos, descobertas, preferências, opiniões, comida, gastos, humor.
+
+NÃO capture:
+- saudações vazias ou perguntas ao assistente
+- atividades cronometradas já feitas (ex: "corri 40min", "estudei 1h30") — são registradas à parte
+- metas e objetivos futuros (ex: "quero aprender X", "meu objetivo é Y", "vou começar Z") — são registrados como quest
+${exclusionBlock}
 Hoje=${today}. Datas: ${calRef}
 
 Cada nota:
 - "content": o contexto em 1 frase clara (até 140 chars)
-- "noteType": food|expense|mood|idea|interest|other (use "interest" para gostos/descobertas; "other" para fatos gerais)
+- "noteType": food|expense|mood|idea|interest|other
+   • interest = gostos e preferências de consumo (música, filmes, séries, comida favorita, hobbies) — NÃO uma atividade nem uma meta
+   • food = algo que comeu/bebeu | expense = um gasto com valor | mood = estado emocional | idea = ideia/insight | other = fato geral
 - "context": objeto JSON com detalhes úteis ({} se não houver)
 - "pillarHint": área de vida relacionada ("Música","Saúde","Finanças"...) ou null
 - "noteDate": data ISO se houver (opcional)
 
+Se um item for comida COM valor gasto (ex: "almoço de R$30"), gere DUAS notas: uma "food" e uma "expense".
+
 Texto: "${message.replace(/"/g, "'").replace(/\n/g, ' ').slice(0, 1800)}"
 
-Responda SOMENTE com um array JSON, sem texto extra. Exemplo:
+Responda SOMENTE com um array JSON, sem texto extra. Exemplos:
 [{"content":"Ama hip hop e cultura samurai","noteType":"interest","context":{"temas":["hip hop","samurai"]},"pillarHint":"Música"}]
+[{"content":"Comeu um açaí","noteType":"food","context":{},"pillarHint":null},{"content":"Gastou R$25 num açaí","noteType":"expense","context":{"valor":25},"pillarHint":"Finanças"}]
 Se não houver nada relevante, retorne [].`;
 
   const controller = new AbortController();

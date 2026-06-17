@@ -3,6 +3,9 @@ import { detectActivities } from './detect-activity';
 import { detectNotes, type DetectedNote } from './detect-note';
 import { detectQuests } from './detect-quest';
 import { detectPillarLinks } from './detect-pillar-link';
+import { detectEntities } from './detect-entities';
+import { linkEntitiesToPillars } from './link-entities';
+import { createPendingPillar } from './create-pending-pillar';
 import { inferAndSaveArchetype } from './infer-archetype';
 import { getOrCreatePillar } from './activity';
 import { logNotes } from './log-note';
@@ -17,14 +20,22 @@ function norm(s: string) {
 }
 
 function extractName(raw: string): string | null {
-  let s = raw.trim().replace(/[.!?]+$/, '');
+  const cleaned = raw.trim();
+  const pick = (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+
+  // Apelido explícito vence o nome formal, em qualquer posição da frase:
+  // "Me chamo Gean, mas pode me chamar de Naeg" → Naeg
+  const nick = cleaned.match(/(?:pode me chamar de|me chama de|me chame de|prefiro(?: que me chamem?)? de)\s+([\p{L}]{2,20})/iu)?.[1];
+  if (nick) return pick(nick);
+
+  let s = cleaned.replace(/[.!?]+$/, '');
   s = s.replace(/^(oi|olá|ola|opa|e a[ií]|eai)[\s,]+/i, '');
-  s = s.replace(/^(meu nome (é|e)|me chamo|pode me chamar de|me chama de|chamo-me|sou o|sou a|sou)[\s]+/i, '');
+  s = s.replace(/^(meu nome (é|e)|me chamo|chamo-me|sou o|sou a|sou)[\s]+/i, '');
   s = s.trim();
   if (!s) return null;
   const first = s.split(/\s+/)[0]!.replace(/[^\p{L}]/gu, '');
   if (first.length < 2 || first.length > 20) return null;
-  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+  return pick(first);
 }
 
 function buildOnboardingSystemPrompt(name: string | null): string {
@@ -304,13 +315,29 @@ export async function sendChatMessage(
     const allNames    = pillars.map(p => p.name);
     const activeNames = activePillars.map(p => p.name);
 
+    // Atividades e quests primeiro: o que capturam é excluído das notas (dedup).
     const activities   = await detectActivities(message, allNames, today);
-    const notes        = await detectNotes(message, today);
     const quests       = await detectQuests(message, activeNames);
+
+    const noteExclusions = [
+      ...activities.map(a => a.note).filter((n): n is string => !!n?.trim()),
+      ...quests.map(q => q.title),
+    ];
+    const notes        = await detectNotes(message, today, noteExclusions);
     const pillarLinks  = await detectPillarLinks(message, allNames);
+    const entities     = await detectEntities(message, allNames);
 
     // ── Atividades ──────────────────────────────────────────────────
+    // Reforço determinístico: notas que são meta/decisão futura, organização de
+    // pilar ou gosto/descoberta não são atividade (o detector às vezes as captura
+    // como 0-min). Evita "atividade fantasma" no histórico de XP.
+    const NON_ACTIVITY_NOTE_RE = /\b(decis[ãa]o|decidi|vou |pretendo|quero |meta\b|objetivo|planejo|faz(?:em)? parte|como parte|parte d[eo]|descobri|virei f[ãa]|sou f[ãa]|viciad)/i;
+
     for (const da of activities) {
+      // Só descarta como "fantasma" se for 0-min — atividade cronometrada real
+      // nunca é meta/link/interesse, mesmo que a nota mencione "vou"/"quero".
+      if (da.durationMinutes === 0 && NON_ACTIVITY_NOTE_RE.test(da.note ?? '')) continue;
+
       const normName = norm(da.pillarName);
 
       const activePillar = activePillars.find(p => norm(p.name) === normName);
@@ -350,8 +377,32 @@ export async function sendChatMessage(
     }
 
     // ── Notas ───────────────────────────────────────────────────────
-    if (notes.length > 0) {
-      logNotes(notes as DetectedNote[], userId).catch(() => {});
+    // Dedup determinístico contra atividades: descarta notas que descrevem
+    // uma atividade cronometrada (duração no texto) ou que repetem muito uma
+    // nota de atividade — o detector de nota às vezes ignora a regra.
+    const DURATION_RE = /\b\d+\s*(?:min|minutos?|h|horas?|hr)\b/i;
+    const toTokens = (s: string) => new Set(norm(s).split(/\s+/).filter(w => w.length > 3));
+    const activityTokenSets = activities
+      .filter(a => a.note)
+      .map(a => toTokens(`${a.pillarName} ${a.note}`));
+
+    const notesToLog = notes.filter(dn => {
+      if (DURATION_RE.test(dn.content)) return false;
+      const nt = toTokens(dn.content);
+      return !activityTokenSets.some(at => {
+        let overlap = 0;
+        for (const w of nt) if (at.has(w)) overlap++;
+        return overlap >= 2;
+      });
+    });
+
+    if (notesToLog.length > 0) {
+      logNotes(notesToLog as DetectedNote[], userId).catch(() => {});
+    }
+
+    // ── Entidades semânticas → teia entidade↔pilar ──────────────────
+    if (entities.length > 0) {
+      linkEntitiesToPillars(userId, entities).catch(() => {});
     }
 
     // ── Quests ──────────────────────────────────────────────────────
@@ -364,12 +415,13 @@ export async function sendChatMessage(
         if (existing.has(norm(dq.title))) continue;
         existing.add(norm(dq.title));
 
-        const pillar = activePillars.find(p => norm(p.name) === norm(dq.pillarName));
-        if (!pillar) continue;
+        // Cria a quest mesmo em pilar novo (vira pendente) — não descarta a meta.
+        const pillarId = await createPendingPillar(userId, dq.pillarName);
+        if (!pillarId) continue;
 
         void supabase.from('quests').insert({
           user_id:     userId,
-          pillar_id:   pillar.id,
+          pillar_id:   pillarId,
           title:       dq.title,
           description: dq.description ?? null,
           type:        dq.type,
