@@ -1,7 +1,17 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import * as THREE from 'three';
+
+function chipStyle(active: boolean, inactiveColor = 'rgba(255,255,255,0.55)'): CSSProperties {
+  return {
+    fontSize: 11, fontFamily: 'system-ui, sans-serif',
+    padding: '4px 9px', borderRadius: 7, cursor: 'pointer', whiteSpace: 'nowrap',
+    background: active ? 'rgba(34,197,94,0.18)' : 'transparent',
+    color: active ? '#86efac' : inactiveColor,
+    border: `1px solid ${active ? 'rgba(34,197,94,0.5)' : 'rgba(255,255,255,0.15)'}`,
+  };
+}
 
 export type GraphNode = {
   id: string;
@@ -106,8 +116,12 @@ const colorOf = (n: GraphNode): THREE.Color =>
 export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edges: GraphEdge[] }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const hasEntities = nodes.some(n => n.kind === 'entity');
+  const pillarNodes = nodes.filter(n => n.kind === 'pillar');
   const [showEntities, setShowEntities] = useState(true);
   const showEntitiesRef = useRef(true);
+  // Foco: id do pilar isolado (mostra só ele + vizinhos diretos) ou null = todos.
+  const [focusPillar, setFocusPillar] = useState<string | null>(null);
+  const focusRef = useRef<string | null>(null);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -186,6 +200,13 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
 
     const nodeById   = new Map(simNodes.map(n => [n.id, n]));
     const meshToNode = new Map(simNodes.map(n => [n.mesh.id, n]));
+
+    // Vizinhos diretos de cada nó (para o foco por pilar).
+    const neighbors = new Map<string, Set<string>>();
+    for (const e of edges) {
+      (neighbors.get(e.source) ?? neighbors.set(e.source, new Set()).get(e.source)!).add(e.target);
+      (neighbors.get(e.target) ?? neighbors.set(e.target, new Set()).get(e.target)!).add(e.source);
+    }
 
     // ── Edge geometries ───────────────────────────────────────────
     type EdgeEntry = { line: THREE.Line; src: string; tgt: string; isEntity: boolean };
@@ -330,9 +351,14 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       simTick();
 
       const showEnt = showEntitiesRef.current;
+      const focus   = focusRef.current;
+      const focusSet = focus ? neighbors.get(focus) : null;
 
       for (const n of simNodes) {
-        const visible = n.kind !== 'entity' || showEnt;
+        let visible = n.kind !== 'entity' || showEnt;
+        if (visible && focus) {
+          visible = n.id === focus || (focusSet?.has(n.id) ?? false);
+        }
         n.mesh.visible = visible; n.halo.visible = visible;
         n.label.visible = visible; n.light.visible = visible;
         if (!visible) continue;
@@ -361,7 +387,8 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
       for (const em of edgeMeshes) {
         const a = nodeById.get(em.src), b = nodeById.get(em.tgt);
         if (!a || !b) continue;
-        em.line.visible = !em.isEntity || showEnt;
+        // visível só se ambos os nós estão visíveis (respeita toggle + foco)
+        em.line.visible = a.mesh.visible && b.mesh.visible;
         if (!em.line.visible) continue;
         const attr = em.line.geometry.getAttribute('position') as THREE.BufferAttribute;
         const arr  = attr.array as Float32Array;
@@ -472,6 +499,38 @@ export default function GraphClient({ nodes, edges }: { nodes: GraphNode[]; edge
           >
             {showEntities ? '● entidades' : '○ entidades'}
           </button>
+        )}
+
+        {pillarNodes.length > 1 && (
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end',
+            gap: 6, maxWidth: 260,
+          }}>
+            {focusPillar && (
+              <button
+                onClick={() => { focusRef.current = null; setFocusPillar(null); }}
+                style={chipStyle(false, 'rgba(255,255,255,0.5)')}
+              >
+                ✕ todos
+              </button>
+            )}
+            {pillarNodes.map(p => {
+              const active = focusPillar === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    const next = active ? null : p.id;
+                    focusRef.current = next;
+                    setFocusPillar(next);
+                  }}
+                  style={chipStyle(active)}
+                >
+                  {p.name}
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
 
