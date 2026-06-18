@@ -132,16 +132,16 @@ export default function ReportsScreen() {
   const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (y: number, m: number) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) return;
 
-      const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
-      const nextMonth  = month === 12
-        ? `${year + 1}-01-01`
-        : `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      const monthStart = `${y}-${String(m).padStart(2, '0')}-01`;
+      const nextMonth  = m === 12
+        ? `${y + 1}-01-01`
+        : `${y}-${String(m + 1).padStart(2, '0')}-01`;
 
       const [xpRes, notesRes, pillarsRes] = await Promise.all([
         supabase
@@ -176,9 +176,9 @@ export default function ReportsScreen() {
       const pillarMap = Object.fromEntries(pillars.map(p => [p.id, p.name]));
 
       // XP por dia
-      const daysInMonth = new Date(year, month, 0).getDate();
+      const daysInMonth = new Date(y, m, 0).getDate();
       const dailyXP: DailyXP[] = Array.from({ length: daysInMonth }, (_, i) => {
-        const d = `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`;
+        const d = `${y}-${String(m).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`;
         return { date: d, xp: 0 };
       });
       for (const r of records) {
@@ -193,12 +193,9 @@ export default function ReportsScreen() {
         xpByPillar[r.pillar_id]   = (xpByPillar[r.pillar_id]   ?? 0) + r.total_xp;
         minsByPillar[r.pillar_id] = (minsByPillar[r.pillar_id] ?? 0) + (r.duration_minutes ?? 0);
       }
-      const maxPillarXP = Math.max(...Object.values(xpByPillar), 1);
       const sortedPillars: PillarStat[] = Object.entries(xpByPillar)
         .sort(([, a], [, b]) => b - a)
         .map(([id, xp]) => ({ id, name: pillarMap[id] ?? id, xp, mins: minsByPillar[id] ?? 0 }));
-      // Attach maxPillarXP via closure — used in render
-      void maxPillarXP;
 
       // Notas por tipo
       const noteTypeMap: Record<string, number> = {};
@@ -238,17 +235,25 @@ export default function ReportsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [year, month]);
+  }, []);
 
-  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
+  useFocusEffect(useCallback(() => { setLoading(true); load(year, month); }, [load, year, month]));
 
   function prevMonth() {
-    if (month === 1) { setYear(y => y - 1); setMonth(12); }
-    else             { setMonth(m => m - 1); }
+    const nm = month === 1 ? 12 : month - 1;
+    const ny = month === 1 ? year - 1 : year;
+    setYear(ny);
+    setMonth(nm);
+    setLoading(true);
+    load(ny, nm);
   }
   function nextMonthFn() {
-    if (month === 12) { setYear(y => y + 1); setMonth(1); }
-    else              { setMonth(m => m + 1); }
+    const nm = month === 12 ? 1 : month + 1;
+    const ny = month === 12 ? year + 1 : year;
+    setYear(ny);
+    setMonth(nm);
+    setLoading(true);
+    load(ny, nm);
   }
 
   if (loading) {
@@ -268,7 +273,7 @@ export default function ReportsScreen() {
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
-          onRefresh={() => { setRefreshing(true); load(); }}
+          onRefresh={() => { setRefreshing(true); load(year, month); }}
           tintColor={colors.accent}
         />
       }

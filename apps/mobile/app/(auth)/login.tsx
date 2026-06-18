@@ -41,7 +41,7 @@ export default function LoginScreen() {
       if (profile?.onboarding_completed_at) {
         router.replace('/(app)/home');
       } else {
-        router.replace('/(onboarding)/welcome');
+        router.replace('/(app)/chat');
       }
     } catch {
       setError('Algo deu errado. Tente novamente.');

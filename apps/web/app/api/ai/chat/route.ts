@@ -45,20 +45,22 @@ export async function POST(req: NextRequest) {
   if (!message?.trim()) return new Response('Mensagem vazia', { status: 400 });
 
   // ── Contexto do usuário ────────────────────────────────────────
-  const [profileRes, pillarsRes, recentRes, questsRes, entitiesRes] = await Promise.all([
+  const [profileRes, pillarsRes, recentRes, questsRes, entitiesRes, identityRes] = await Promise.all([
     supabase.from('profiles').select('name, archetype').eq('id', user.id).single(),
     supabase.from('user_pillars').select('id, name, xp_total, level, xp_rate, context').eq('user_id', user.id).eq('is_active', true).order('level', { ascending: false }),
     supabase.from('xp_records').select('note, total_xp, duration_minutes, activity_date, user_pillars(name)').eq('user_id', user.id).order('activity_date', { ascending: false }).order('created_at', { ascending: false }).limit(10),
     supabase.from('quests').select('title, type, status, pillar_id, user_pillars(name)').eq('user_id', user.id).in('status', ['open', 'in_progress']).limit(5),
     supabase.from('semantic_entities').select('name, entity_type, context, occurrence_count').eq('user_id', user.id).order('occurrence_count', { ascending: false }).limit(20),
+    supabase.from('identity_hypotheses').select('type, label, description, confidence').eq('user_id', user.id).eq('status', 'confirmed').order('confidence', { ascending: false }).limit(8),
   ]);
 
-  const name      = profileRes.data?.name ?? 'usuário';
-  const archetype = profileRes.data?.archetype as Record<string, number> | null;
-  const pillars   = pillarsRes.data   ?? [];
-  const recent    = recentRes.data    ?? [];
-  const quests    = questsRes.data    ?? [];
-  const entities  = entitiesRes.data  ?? [];
+  const name              = profileRes.data?.name ?? 'usuário';
+  const archetype         = profileRes.data?.archetype as Record<string, number> | null;
+  const pillars           = pillarsRes.data   ?? [];
+  const recent            = recentRes.data    ?? [];
+  const quests            = questsRes.data    ?? [];
+  const entities          = entitiesRes.data  ?? [];
+  const confirmedIdentity = identityRes.data  ?? [];
 
   const pillarNames = pillars.map(p => p.name);
 
@@ -345,6 +347,42 @@ export async function POST(req: NextRequest) {
         .join('\n')
     : '';
 
+  const identityTypeSections: Record<string, string> = {
+    value:      'Valores',
+    goal:       'Objetivos',
+    belief:     'Crenças',
+    motivation: 'Motivações',
+    fear:       'Preocupações recorrentes',
+    interest:   'Interesses',
+    pattern:    'Padrões de comportamento',
+  };
+
+  const identityText = (() => {
+    if (confirmedIdentity.length === 0) return '';
+
+    const byType = new Map<string, string[]>();
+    for (const h of confirmedIdentity) {
+      const section = identityTypeSections[h.type] ?? h.type;
+      if (!byType.has(section)) byType.set(section, []);
+      byType.get(section)!.push(h.label);
+    }
+
+    const sections = [...byType.entries()]
+      .map(([section, labels]) => `${section}:\n${labels.map(l => `- ${l}`).join('\n')}`)
+      .join('\n\n');
+
+    return `
+Há evidências observadas de que os seguintes temas parecem importantes para ${name} neste momento:
+
+${sections}
+
+Quando utilizar essas informações:
+- Trate-as como observações, não como definições
+- Não assuma que continuam válidas — a identidade muda com o tempo
+- Use-as apenas quando ajudarem a contextualizar a resposta
+- Nunca force interpretações a partir delas`;
+  })();
+
   // Bloco injetado quando algo foi registrado nesta mensagem
   const registeredLines: string[] = [
     ...loggedActivities.map(a =>
@@ -374,6 +412,7 @@ Tom e estilo:
 - Sem emojis, exceto se o contexto pedir
 - Respostas curtas quando a pergunta for simples. Não expanda o que não precisa ser expandido
 ${archetypeText}
+${identityText}
 ${activityContext}
 == CONTEXTO DE ${name.toUpperCase()} ==
 Nível geral: ${charLevel}

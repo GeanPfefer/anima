@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-06-17 (sessão: evolução da visão — Anima Core + personas Anima/Prisma + Identidade Emergente; propagação de XP por hierarquia; múltiplos pais por pilar; correções de detecção do chat)
+> Documento vivo de design. Última atualização: 2026-06-18 (sessão: Chat-First Total — chat passa a ser o único ponto de entrada; todos os modais e formulários de captura de dados eliminados)
 > Para retomar o projeto em qualquer IA: cole este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -103,7 +103,7 @@ Hipóteses confirmadas passam a integrar a Identidade Emergente. (Coerente com o
 ### Arquitetura da IA (camadas do prompt)
 A IA **não** é uma representação do usuário e não finge ser ele — ela o **compreende profundamente**. O prompt é montado em três camadas:
 1. **Prompt base** — regras permanentes (tom, limites de cada persona).
-2. **Identidade Emergente** — valores, objetivos, padrões e interesses observados.
+2. **Identidade Emergente** — valores, objetivos, padrões e interesses observados. ✅ Conectada ao prompt (jun/2026): hipóteses `confirmed` injetadas agrupadas por tipo, sem percentuais, com instrução explícita ao modelo para tratar como observações contextuais — nunca como definições.
 3. **Contexto atual** — memórias recentes, conversa atual, situação atual.
 
 O sistema evolui junto com o usuário.
@@ -185,10 +185,10 @@ O que o usuário realmente ganha é **clareza sobre a própria vida** — a gami
 ### Papel da IA (atualizado jun/2026)
 A IA opera em dois modos que se complementam:
 
-**Modo 1 — Conversa (porta de entrada e reflexão intencional):**
-O chat é a **primeira interação do usuário** com o sistema — a "primeira conversa" substitui o onboarding. Depois, volta a ser usado para reflexão, planejamento e brainstorming com contexto completo da vida.
+**Modo 1 — Conversa (único ponto de entrada e reflexão intencional):**
+O chat é a **única superfície de entrada do sistema**. Toda informação entra pelo chat — atividades, registros de tempo, eventos de vida, quests, mudanças de estado, reflexões. O usuário nunca "registra algo": ele conta o que aconteceu. A IA interpreta e estrutura automaticamente.
 - Primeira conversa: acolhe, infere contexto, detecta pilares iniciais, inicia memória narrativa
-- Uso recorrente: reflexão sobre padrões, planejamento, decisões, perguntas sobre a própria vida
+- Uso recorrente: continua sendo o único ponto de entrada — o usuário narra, a IA organiza; reflexão e brainstorming acontecem no mesmo chat que o registro cotidiano
 
 Tom ideal: curioso, observador, humano, leve, acolhedor, não-invasivo. Sem coaching genérico, sem pseudo-psicologia, sem perguntas excessivas.
 
@@ -207,7 +207,7 @@ Toda nova feature deve responder:
 Se aumentar → provavelmente vai contra a filosofia central.  
 Se reduzir → provavelmente está alinhado.
 
-**Consequência arquitetural:** o sistema deve favorecer texto livre, contexto contínuo, memória persistente e organização automática — e reduzir dependência de campos rígidos, categorização manual e fluxos baseados em formulários.
+**Consequência arquitetural:** o sistema deve favorecer texto livre, contexto contínuo, memória persistente e organização automática — e **eliminar completamente** campos rígidos, categorização manual e fluxos baseados em formulários ou modais de entrada. A UI é exclusivamente de visualização e navegação — nunca de captura.
 
 ---
 
@@ -485,14 +485,20 @@ O app sugere quests e ações disponíveis com base em:
 
 > **Decisão fundamental de jun/2026:** onboarding, chat e registro de atividades são **um único fluxo**. Não existem dois modos separados. O mesmo chat serve desde a primeira mensagem até o uso diário.
 
-### Princípio
-O chat é a superfície de entrada universal. O usuário nunca precisa:
-- Abrir um "modal de nova entrada"
-- Clicar em "Registrar atividade"
-- Preencher formulários de pilares e duração
-- Ter um "modo onboarding" separado do "modo uso"
+### Princípio (Chat-First Total — decisão definitiva jun/2026)
+O chat é o **único** ponto de entrada do sistema. Toda informação entra pelo chat, sem exceções:
+- atividades do dia, registros de tempo, eventos de vida
+- quests, mudanças de estado, reflexões
+- qualquer input do usuário
 
-Tudo isso acontece **na mesma conversa**, silenciosamente, em segundo plano.
+O usuário nunca precisa de:
+- Modal de nova entrada / "Registrar atividade"
+- Formulários de pilares e duração
+- Inputs estruturados fora do chat
+
+Esses elementos **não existem** no produto. A UI é exclusivamente de **visualização, exploração e navegação** — nunca captura dados.
+
+Toda entrada passa pelo chat e é estruturada pela IA: `xp_records`, `life_events`, `quests`, atualização de pilares e memória semântica são gerados pela interpretação do chat — nunca por formulários.
 
 ### O que acontece em cada mensagem enviada (Fase 1 — implementado)
 
@@ -802,9 +808,10 @@ O grafo de vida representa visualmente as conexões que emergem dos dados do usu
 | Input natural com IA | Campo único de texto livre; IA detecta pilares, duração e nota | Formulário estruturado gerava fricção — usuário não devia "administrar o sistema"; IA absorve a classificação silenciosamente |
 | Registro multi-entrada | Um texto pode gerar múltiplas entradas (ex: "corri 45min e li 30min") | Vida não é atômica; um momento pode nutrir vários pilares simultaneamente |
 | Papel da gamificação | Camada de feedback, não núcleo do produto | XP/níveis tornam a clareza tangível — mas o diferencial real é a auto-organização invisível; gamificação sem essa base é só estética |
-| Papel da IA | Duas camadas: organizadora implícita (segundo plano) + chat intencional (brainstorming) | IA trabalha silenciosamente no input natural; chat existe para quando o usuário quer conversar ativamente — as duas camadas se complementam |
-| Chat como camada complementar | Chat existe e é válido para brainstorming/reflexão; não é a interação primária nem o modo padrão | Input implícito é mais frequente e sustentável; chat requer intenção e é usado esporadicamente |
-| Entrada por áudio | Mic button no modal de nova entrada: grava → Whisper transcreve → preenche campo de texto → usuário toca "Interpretar →" | Falar é mais natural que digitar; alinha com o princípio de input caótico/natural |
+| Papel da IA | Duas camadas: organizadora implícita (segundo plano) + chat como único ponto de entrada | IA organiza silenciosamente o que o usuário narra; chat é onde toda informação entra — tanto registro cotidiano quanto reflexão e brainstorming |
+| ~~Chat como camada complementar~~ | ~~Não é a interação primária nem o modo padrão~~ | **Decisão revertida (jun/2026):** Chat-First Total — chat é o único ponto de entrada; ver linha abaixo |
+| Chat-First Total | Chat é o único ponto de entrada do sistema; UI serve apenas para visualização, exploração e navegação — nunca captura | Todo registro que não passa pelo chat cria fricção e contradiz a filosofia central; a IA é o único parser do sistema |
+| Entrada por áudio | Mic button no **chat**: grava → Whisper transcreve → insere no campo de texto do chat | Falar é mais natural que digitar; alinha com o princípio de input caótico/natural; modal de entrada de áudio eliminado pelo Chat-First Total |
 | Diretriz de feature | "Reduz ou aumenta a carga mental organizacional?" | Critério de priorização de toda nova feature; detalhado na seção 1c |
 | Acolhimento da ausência | App nunca pune ausência; voltar depois de dias é acolhido | Criador passa dias sem o celular; streak punitivo faria largar o app |
 | Streak punitivo | Nunca existirá | Mesma razão; consistência só recompensa |
@@ -873,9 +880,9 @@ anima/
 │   ├── mobile/                    # React Native + Expo
 │   └── web/
 │       ├── app/
-│       │   ├── (app)/home/        # Dashboard + registro de atividades
-│       │   ├── (app)/quests/      # Quests (lista, criação, sub-missões)
-│       │   ├── (onboarding)/      # Steps 1–3 com auth guard
+│       │   ├── (app)/home/        # Dashboard — visualização, radar, pilares
+│       │   ├── (app)/quests/      # Quests — visualização e acompanhamento
+│       │   ├── (onboarding)/      # Deprecated — dissolvido no /chat
 │       │   ├── login/             # Página de login
 │       │   ├── signup/            # Página de cadastro
 │       │   └── page.tsx           # Roteador raiz inteligente
@@ -898,8 +905,8 @@ anima/
 - [x] Sub-pilares hierárquicos — `pillar_relationships` (muitos-para-muitos); **múltiplos pais** por pilar (link aditivo, anti-ciclo de grafo, jun/2026); XP propaga 100% recursivamente para todos os ancestrais via `computeEffectiveXP` (`packages/core`, cálculo em tempo de leitura — dedup de descendentes por ancestral, seguro para diamantes e ciclos); sub-pilares excluídos do cálculo de nível do personagem
 - [x] Contexto de pilar — salvo em `user_pillars.context` (JSONB); IA usa no system prompt
 - [x] Dashboard home — radar de vida SVG, cards de pilares com barra de XP
-- [x] Registro de atividades — input natural via IA (texto livre → 5 fases → registro)
-- ⚠️ **Onboarding em 5 steps** — implementado mas **pendente substituição** pelo onboarding conversacional (ver seção 7). Código em `app/(onboarding)/step-1` a `step-5` está deprecated.
+- ~~Registro de atividades via modal/formulário~~ — **eliminado** pela diretriz Chat-First Total; toda entrada de atividades acontece exclusivamente pelo chat (ver §7)
+- ⚠️ **Onboarding em 5 steps** — implementado mas **pendente remoção** (deprecated). Código em `app/(onboarding)/step-1` a `step-5` está deprecated.
 - [x] Histórico de atividades — timeline agrupada por dia, total de XP diário e semanal, badges de bônus
 - [x] Configurações — dados da conta, troca de senha, logout
 - [x] Nav compartilhada — AppNav com Home, Quests, Histórico, Notas, IA, Relatórios, Config
@@ -928,9 +935,9 @@ anima/
 - [x] Auth — login e signup nativos; login redireciona explicitamente (checa `onboarding_completed_at` no DB)
 - [x] Sessão persistida em `AsyncStorage`; `getUser()` valida no servidor na abertura (detecta sessão stale após `db reset`)
 - [x] Roteamento inteligente — `app/index.tsx` resolve auth + onboarding e redireciona; `_layout.tsx` é estático (só renderiza Stack)
-- ⚠️ **Onboarding em 5 steps** — implementado mas **pendente substituição** pelo onboarding conversacional. Código em `app/(onboarding)/step-1` a `step-5` está deprecated.
+- ⚠️ **Onboarding em 5 steps** — implementado mas **pendente remoção** (deprecated). Código em `app/(onboarding)/step-1` a `step-5` está deprecated.
 - [x] Dashboard home — radar de vida SVG (SIZE=300, labels truncados em 8 chars), cards de pilares, `useFocusEffect` (recarrega ao voltar à aba)
-- [x] Registro de atividades — input natural com áudio ou texto: texto livre → IA detecta pilares, duração e nota → usuário confirma; 5 fases: input → parsing → reviewing → submitting → success; mic button grava → Whisper transcreve → preenche o campo; `logMultipleActivities` registra em série; bônus recalculados server-side
+- ⚠️ **LogActivityModal (5 fases)** — implementado mas **pendente remoção** pela diretriz Chat-First Total (ver §7); toda entrada de atividades deve acontecer pelo chat; `logMultipleActivities` e bônus server-side serão migrados para o fluxo do chat mobile
 - [x] Histórico — `useFocusEffect` (recarrega ao entrar na aba após registrar atividade ou concluir quest); XP semanal
 - [x] Configurações — `useSafeAreaInsets`; dados da conta, troca de senha, logout
 - [x] Quests — `useSafeAreaInsets` no header; XP de quest e missão propagado via trigger `on_life_event_insert` → `user_pillars`
@@ -949,7 +956,7 @@ anima/
 | `hooks/use-auth.ts` | Exporta `{ session, profile, loading }` via `onAuthStateChange`; carrega profile separadamente quando userId muda |
 | `lib/supabase.ts` | `createClient` com `AsyncStorage`; URL via `EXPO_PUBLIC_SUPABASE_URL` |
 | `lib/activity.ts` | Detecção de bônus + `logActivity` + `logMultipleActivities` + `getOrCreatePillar` (pending) + `confirmPendingPillar` + `dismissPendingPillar` |
-| `lib/parse-activity.ts` | `parseActivityText` → Ollama → `[{pillarName, durationMinutes, note}]`; timeout 30s; usado no LogActivityModal |
+| ~~`lib/parse-activity.ts`~~ | ~~`parseActivityText` → Ollama → `[{pillarName, durationMinutes, note}]`; timeout 30s; usado no LogActivityModal~~ — **deprecated (Chat-First Total; §7)** |
 | `lib/detect-activity.ts` | `detectActivities` conservador (bloqueia food/sleep/etc); usado no chat mobile |
 | `lib/detect-note.ts` | `detectNotes` → Ollama → `[{note_type, content, context, pillarHint}]` |
 | `lib/log-note.ts` | Persiste notas com XP 5–20 e pillar_hint |
@@ -957,7 +964,7 @@ anima/
 | `lib/transcribe.ts` | `startRecording` via expo-av → `stop()` envia áudio ao Whisper → texto; `cancel()` descarta |
 | `contexts/onboarding-context.tsx` | `allPillarOptions` exclui sub-pilares (filhos), não pais |
 | `components/LifeRadar.tsx` | SVG 300×300; labels truncados em 8 chars; `MAX_R=95` |
-| `components/LogActivityModal.tsx` | 5 fases + detecção de notas fire-and-forget + pilares pendentes com estilo âmbar |
+| ~~`components/LogActivityModal.tsx`~~ | ~~5 fases + detecção de notas fire-and-forget + pilares pendentes com estilo âmbar~~ — **deprecated (Chat-First Total; §7; pendente remoção)** |
 | `app/(app)/home.tsx` | `useFocusEffect`; modos Game/Analítico/Minimal; `PendingPillarsWidget`; `PillarCard` fora do componente pai |
 | `app/(app)/chat.tsx` | Chat com streaming, histórico, input, `KeyboardAvoidingView`, clear |
 | `app/(app)/notes.tsx` | `SectionList` agrupada por data; badges de tipo |
@@ -1005,7 +1012,8 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
   - **Controle de personas** (`[✓] Anima [✓] Prisma`) e **convocação explícita** `@anima`/`@prisma` (futuro)
 - **✅ Tela de entidades (`/entities`)** — `semantic_entities`/`entity_pillars` agrupadas por pilar, com tipo e ocorrências
 - **✅ Filtro no grafo** — toggle de entidades + foco por pilar (isola pilar + vizinhos)
-- **QA áudio** — testar Whisper no iPhone em condições reais (código pronto; Docker na Goma `:9000`)
+- **Chat-First Total — limpeza mobile (próximo)** — remover `LogActivityModal.tsx` e `lib/parse-activity.ts`; migrar mic button para o input do chat; garantir que toda entrada de atividades passa pelo chat; web já alinhado (nunca teve modal como entrada primária)
+- **QA áudio** — testar Whisper no iPhone em condições reais; mic button no chat (não no modal)
 - **Onboarding mobile** — dissolver steps deprecated e usar o chat como entrada; espelhar o que foi feito no web
 - **Grafo mobile** — portar `/graph` para o mobile (Three.js → biblioteca 2D nativa ou WebView)
 - **Relatórios mais ricos** — correlações entre notas (ex: humor × exercício); relatório anual
@@ -1016,9 +1024,10 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 - **Modelo de monetização** — quando abrir ao público
 
 ### Concluído (P0–P4)
+- [x] **P0 — Chat-First Total (jun/2026)** — diretriz arquitetural definitiva: chat é o único ponto de entrada; UI serve apenas visualização/exploração/navegação; modais e formulários de entrada eliminados; web alinhado; mobile com remoção do LogActivityModal pendente
 - [x] **P0 — Onboarding conversacional** — primeira conversa substitui wizard; IA infere pilares e arquétipo; web + mobile
 - [x] **P0 — Steps deprecated e removidos** — `step-1..5`, `archetypes.ts`, `pillar-questions.ts` removidos
-- [x] **P1 — Input natural com IA** — texto livre + áudio (web + mobile); 5 fases
+- [x] **P1 — Input natural com IA** — texto livre + áudio via chat (web + mobile)
 - [x] **P1 — Memória semântica** — Camada 3: `semantic_entities`, `entry_embeddings`, `match_entries` (pgvector)
 - [x] **P1 — Timeline narrativa** — histórico como narrativa temporal; web + mobile
 - [x] **P1 — Retrieval contextual** — busca semântica no histórico alimenta o chat
