@@ -455,19 +455,25 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
                   role:    'assistant',
                   content: fullResponse,
                 });
-                // Arquétipo + Identidade Emergente a cada ~15 mensagens (fire-and-forget)
+                // Arquétipo + Identidade Emergente em cadência (fire-and-forget).
+                // Conta só mensagens do USUÁRIO (passo de 1) — gatilho confiável;
+                // contar user+assistant (passo de 2) podia nunca bater no módulo.
                 ;(async () => {
                   const { count } = await supabase
                     .from('ai_conversations')
                     .select('*', { count: 'exact', head: true })
-                    .eq('user_id', user.id);
-                  if ((count ?? 0) % 15 === 0 && (count ?? 0) > 0) {
-                    const window = [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }];
+                    .eq('user_id', user.id)
+                    .eq('role', 'user');
+                  const n = count ?? 0;
+                  const window = [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }];
+                  if (n > 0 && n % 10 === 0) {
                     await inferAndSaveArchetype(
                       user.id,
                       window,
                       pillars.map(p => ({ name: p.name, level: p.level, xp_total: p.xp_total })),
                     );
+                  }
+                  if (n > 0 && n % 5 === 0) {
                     await inferAndSaveIdentity(user.id, window);
                   }
                 })().catch(() => {});
