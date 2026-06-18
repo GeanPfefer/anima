@@ -193,6 +193,104 @@ export type Database = {
           },
         ]
       }
+      identity_evidence: {
+        Row: {
+          created_at: string
+          hypothesis_id: string
+          id: string
+          snippet: string | null
+          source_id: string | null
+          source_type: string
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          created_at?: string
+          hypothesis_id: string
+          id?: string
+          snippet?: string | null
+          source_id?: string | null
+          source_type: string
+          user_id: string
+          weight?: number
+        }
+        Update: {
+          created_at?: string
+          hypothesis_id?: string
+          id?: string
+          snippet?: string | null
+          source_id?: string | null
+          source_type?: string
+          user_id?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "identity_evidence_hypothesis_id_fkey"
+            columns: ["hypothesis_id"]
+            isOneToOne: false
+            referencedRelation: "identity_hypotheses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "identity_evidence_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      identity_hypotheses: {
+        Row: {
+          confidence: number
+          created_at: string
+          description: string | null
+          evidence_count: number
+          id: string
+          label: string
+          last_evidence_at: string | null
+          status: string
+          type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          confidence?: number
+          created_at?: string
+          description?: string | null
+          evidence_count?: number
+          id?: string
+          label: string
+          last_evidence_at?: string | null
+          status?: string
+          type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          description?: string | null
+          evidence_count?: number
+          id?: string
+          label?: string
+          last_evidence_at?: string | null
+          status?: string
+          type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "identity_hypotheses_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       insights: {
         Row: {
           dismissed_at: string | null

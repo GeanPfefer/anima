@@ -999,12 +999,12 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 
 ### Próximo
 - **Anima Core + Personas (visão jun/2026, ver §1a)** — evolução estrutural:
-  - **Persona Prisma** — modo reflexivo conversacional no mesmo chat (gera hipóteses/perspectivas, não diretivo); separar do papel de registro (persona Anima)
-  - **Identidade Emergente** — camada de hipóteses (valores, objetivos, medos, padrões) com evidências e confiança %, viva (reforça/enfraquece com novos registros); generaliza `profiles.archetype`
-  - **Confirmação conversacional** de hipóteses (sem telas) + injeção da Identidade Emergente no prompt
+  - **✅ Identidade Emergente — fundação (jun/2026):** tabelas `identity_hypotheses` + `identity_evidence` (migração `20260617000001`); gerador `infer-identity.ts` (Ollama, fire-and-forget na cadência do arquétipo) propõe/atualiza hipóteses com evidências rastreáveis e reforço de confiança; tela `/identity` (agrupada por tipo, barras de confiança, "por quê?" com evidências, confirmar/rejeitar). Generaliza `profiles.archetype`
+  - **Persona Prisma (próximo)** — modo reflexivo conversacional no mesmo chat (usa a Identidade + memória + contexto, não diretivo); v1 por convocação manual `@prisma`, antes de ativação automática
+  - **Confirmação conversacional** de hipóteses pelo Prisma (além da tela) + injeção da Identidade Emergente no prompt
   - **Controle de personas** (`[✓] Anima [✓] Prisma`) e **convocação explícita** `@anima`/`@prisma` (futuro)
-- **Tela de entidades** — visualizar `semantic_entities`/`entity_pillars` (agrupadas por pilar/tipo, ocorrências, contexto); hoje só aparecem no grafo
-- **Filtro no grafo** — toggles pilares/entidades, foco por pilar, filtro por tipo de entidade
+- **✅ Tela de entidades (`/entities`)** — `semantic_entities`/`entity_pillars` agrupadas por pilar, com tipo e ocorrências
+- **✅ Filtro no grafo** — toggle de entidades + foco por pilar (isola pilar + vizinhos)
 - **QA áudio** — testar Whisper no iPhone em condições reais (código pronto; Docker na Goma `:9000`)
 - **Onboarding mobile** — dissolver steps deprecated e usar o chat como entrada; espelhar o que foi feito no web
 - **Grafo mobile** — portar `/graph` para o mobile (Three.js → biblioteca 2D nativa ou WebView)

@@ -14,6 +14,7 @@ import { logNote } from '@/lib/log-note';
 import { getOrCreatePendingPillar } from '@/lib/get-or-create-pending-pillar';
 import { createPendingPillar } from '@/lib/create-pending-pillar';
 import { inferAndSaveArchetype } from '@/lib/infer-archetype';
+import { inferAndSaveIdentity } from '@/lib/infer-identity';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -454,18 +455,20 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
                   role:    'assistant',
                   content: fullResponse,
                 });
-                // Atualiza arquétipo a cada ~15 mensagens (fire-and-forget)
+                // Arquétipo + Identidade Emergente a cada ~15 mensagens (fire-and-forget)
                 ;(async () => {
                   const { count } = await supabase
                     .from('ai_conversations')
                     .select('*', { count: 'exact', head: true })
                     .eq('user_id', user.id);
                   if ((count ?? 0) % 15 === 0 && (count ?? 0) > 0) {
+                    const window = [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }];
                     await inferAndSaveArchetype(
                       user.id,
-                      [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }],
+                      window,
                       pillars.map(p => ({ name: p.name, level: p.level, xp_total: p.xp_total })),
                     );
+                    await inferAndSaveIdentity(user.id, window);
                   }
                 })().catch(() => {});
               }

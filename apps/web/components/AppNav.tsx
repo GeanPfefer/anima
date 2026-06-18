@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: '/history',  label: 'Histórico' },
   { href: '/notes',    label: 'Notas' },
   { href: '/entities', label: 'Entidades' },
+  { href: '/identity', label: 'Identidade' },
   { href: '/chat',     label: 'Chat' },
   { href: '/reports',  label: 'Relatórios' },
   { href: '/graph',    label: 'Graph' },
