@@ -1074,3 +1074,38 @@ O núcleo do app **não conhece** nenhuma ferramenta externa. Integrações vive
 - Adicione à seção "Decisões de design registradas"
 - Atualize a seção relevante com o novo conceito
 - Mova itens da lista "Próximos temas" para "O que está implementado" quando concluídos
+
+---
+
+## 15. Como subir o Anima localmente (runbook)
+
+> Passo a passo para rodar e testar quando quiser. O web depende de **Docker + Supabase local + Ollama**.
+
+### Pré-requisitos (uma vez)
+- **Docker Desktop** instalado
+- **Node** + dependências: `npm install` na raiz
+- **Ollama** rodando com os modelos: `qwen2.5:14b` (chat/detecção) e `nomic-embed-text` (embeddings)
+  - conferir: `ollama list` (deve listar os dois)
+- `.env.local` em `apps/web` com `NEXT_PUBLIC_SUPABASE_URL` (→ `127.0.0.1:54321`), `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `OLLAMA_URL`, `OLLAMA_MODEL`
+
+### Subir (cada vez)
+1. **Docker Desktop aberto e rodando** (`docker info` deve responder)
+2. **Supabase local:** `npx supabase start` (Postgres 54322 · API/Auth 54321 · Studio 54323)
+   - conferir Auth: `curl http://127.0.0.1:54321/auth/v1/health` → 200
+3. **Migrations em dia:** `npx supabase migration up` (ou `npx supabase db reset` para zerar o banco do zero)
+4. **Ollama** no ar: `curl http://localhost:11434/api/tags` lista os modelos
+5. **Web:** `npm run dev:web` → abrir `http://localhost:3000`
+
+### Sintomas comuns
+- **Login dá "fetch failed"** → Supabase está fora. Causa quase sempre é **Docker parado**. Suba o Docker, depois `npx supabase start`. (Erro nos logs: `ECONNREFUSED 127.0.0.1:54321`.)
+- **Chat não detecta nada / "não foi possível conectar ao Ollama"** → Ollama fora ou modelo errado. Confira `ollama list` e `OLLAMA_MODEL`.
+- **Inferência de identidade/arquétipo não dispara** → roda em cadência (Identidade a cada 5 msgs do usuário, arquétipo a cada 10). Mande mensagens suficientes.
+
+### Regenerar tipos após mudar o schema
+`npx supabase gen types typescript --local 2>/dev/null | sed '/^Connecting to db/d' > packages/types/src/database.ts`
+(o `sed` remove a linha de ruído do CLI que quebra o typecheck)
+
+### Comandos úteis
+- Typecheck: `npm run typecheck` · Build: `npm run build`
+- Inspecionar o banco: `docker exec supabase_db_anima psql -U postgres -d postgres -c "..."`
+- Parar tudo: `npx supabase stop` (containers) — o Docker pode continuar aberto
