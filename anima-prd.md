@@ -852,6 +852,8 @@ O grafo de vida representa visualmente as conexões que emergem dos dados do usu
 | Hierarquia de pilares via chat | `detect-pillar-link.ts` detecta intenção de aninhamento em linguagem natural; cards Sim/Não inline | Reduz fricção: usuário expressa a relação conversando, sistema confirma sem sair do chat |
 | Dedup de atividades/quests | Pilar+data+nota e título de quest deduplicados antes de persistir no chat route | Previne duplicatas quando o modelo detecta a mesma atividade em mensagens similares consecutive |
 | Extração de entidades direta | `lib/extract-entities.ts` chamado como lib, não via `fetch` interno | Fetch interno no Route Handler não carrega cookies de auth → 401; chamada direta resolve |
+| Banco único multi-máquina (jun/2026) | Goma é a única fonte de Postgres; qualquer notebook cliente novo (ex: Nomad) aponta `.env.local` para a Goma via Tailscale em vez de rodar Supabase local | `supabase start` cria um Postgres isolado por máquina — cada notebook com banco próprio duplicava conta e histórico do usuário; ver §15 |
+| GRANT ausente em tabelas de migration | Nova migration `20260620000000_grant_default_privileges.sql`: `GRANT ALL` + `ALTER DEFAULT PRIVILEGES` em `public` para `anon`/`authenticated`/`service_role` | Tabelas criadas por migration (role `postgres`) não recebem GRANT automático como as criadas pela role `supabase_admin` — PostgREST nega acesso antes de avaliar RLS, silenciosamente (o chat engole o erro). Só aparece num banco 100% do zero; a Goma nunca teve esse problema (corrigida manualmente em algum momento, fora de migration) |
 
 ---
 
@@ -1088,33 +1090,71 @@ O núcleo do app **não conhece** nenhuma ferramenta externa. Integrações vive
 
 ## 15. Como subir o Anima localmente (runbook)
 
-> Passo a passo para rodar e testar quando quiser. O web depende de **Docker + Supabase local + Ollama**.
+> Passo a passo para rodar e testar quando quiser.
 
-### Pré-requisitos (uma vez)
-- **Docker Desktop** instalado
-- **Node** + dependências: `npm install` na raiz
-- **Ollama** rodando com os modelos: `qwen2.5:14b` (chat/detecção) e `nomic-embed-text` (embeddings)
-  - conferir: `ollama list` (deve listar os dois)
-- `.env.local` em `apps/web` com `NEXT_PUBLIC_SUPABASE_URL` (→ `127.0.0.1:54321`), `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `OLLAMA_URL`, `OLLAMA_MODEL`
+### Arquitetura de ambientes (multi-máquina, jun/2026)
 
-### Subir (cada vez)
-1. **Docker Desktop aberto e rodando** (`docker info` deve responder)
-2. **Supabase local:** `npx supabase start` (Postgres 54322 · API/Auth 54321 · Studio 54323)
-   - conferir Auth: `curl http://127.0.0.1:54321/auth/v1/health` → 200
-3. **Migrations em dia:** `npx supabase migration up` (ou `npx supabase db reset` para zerar o banco do zero)
-4. **Ollama** no ar: `curl http://localhost:11434/api/tags` lista os modelos
-5. **Web:** `npm run dev:web` → abrir `http://localhost:3000`
+O Anima roda em **duas máquinas físicas**, ligadas por Tailscale:
+
+| Papel | Máquina | O que roda lá |
+|-------|---------|---------------|
+| **Servidor** | Goma (`100.68.239.78`) | Supabase completo (Postgres + Auth + Studio), Ollama (`qwen2.5:14b`, `nomic-embed-text`), Whisper (`:9000`) |
+| **Cliente** | Notebook novo (ex: Nomad) | Só `npm run dev:web` — sem Docker, sem Supabase local, sem Ollama local |
+
+**Banco único na Goma.** Cada `supabase start` cria um Postgres isolado naquela máquina — se cada notebook rodasse o seu, o usuário teria conta e histórico diferentes em cada lugar (foi exatamente o que aconteceu ao configurar o Nomad: pilares e XP zerados, sem nada do que já existia na Goma). Por isso todo cliente novo aponta `NEXT_PUBLIC_SUPABASE_URL` e `OLLAMA_URL` para a Goma via Tailscale — nunca para `127.0.0.1`. Só a Goma roda Postgres local; qualquer outra máquina é cliente fino.
+
+> Rodar Supabase local num cliente ainda funciona tecnicamente (ex: dev 100% offline) — só significa dados isolados daquela máquina, sem sincronia com a Goma. Use sabendo dessa troca.
+
+### Pré-requisitos
+
+**Na Goma (servidor — uma vez):**
+- Docker Desktop + `npx supabase start`
+- Ollama com `qwen2.5:14b` e `nomic-embed-text` (`ollama list` confere)
+- Whisper rodando na porta `:9000`
+- Tailscale logado, IP conhecido pelos clientes
+
+**Num cliente novo (ex: Nomad — uma vez):**
+- Git + Node LTS + `npm install` na raiz
+- Tailscale logado na mesma conta — `tailscale status` precisa listar a Goma
+- `apps/web/.env.local`:
+  ```
+  NEXT_PUBLIC_SUPABASE_URL=http://100.68.239.78:54321
+  NEXT_PUBLIC_SUPABASE_ANON_KEY=<ver nota>
+  OLLAMA_URL=http://100.68.239.78:11434
+  OLLAMA_MODEL=qwen2.5:14b
+  ```
+  - **Nota sobre a anon key:** nenhuma das máquinas customizou o JWT secret do Supabase local, então a anon key padrão de qualquer instância local não customizada funciona em ambas — já vem em `apps/web/.env.example`, não precisa rodar `supabase status` na Goma para pegar uma nova.
+- **Não precisa Docker nem Ollama/Whisper local** — tudo roda na Goma
+
+### Subir
+
+**Servidor (Goma):**
+1. Docker Desktop aberto (`docker info` responde)
+2. `npx supabase start` (Postgres 54322 · API/Auth 54321 · Studio 54323)
+3. `npx supabase migration up` (ou `db reset` para zerar o banco do zero)
+4. Ollama e Whisper no ar
+
+**Cliente (ex: Nomad):**
+1. Confirma que a Goma está alcançável: `curl http://100.68.239.78:54321/auth/v1/health` → 200
+2. `npm run dev:web` → abrir `http://localhost:3000`
+3. Não roda Docker nem `supabase start` localmente
 
 ### Sintomas comuns
-- **Login dá "fetch failed"** → Supabase está fora. Causa quase sempre é **Docker parado**. Suba o Docker, depois `npx supabase start`. (Erro nos logs: `ECONNREFUSED 127.0.0.1:54321`.)
-- **Chat não detecta nada / "não foi possível conectar ao Ollama"** → Ollama fora ou modelo errado. Confira `ollama list` e `OLLAMA_MODEL`.
+- **Login dá "fetch failed"** → Supabase inacessível.
+  - Setup com banco local: Docker parado — suba o Docker, depois `npx supabase start`. (Erro nos logs: `ECONNREFUSED 127.0.0.1:54321`.)
+  - Setup cliente (apontando pra Goma): Goma desligada, Tailscale desconectado, ou IP errado no `.env.local`. Confira `tailscale status` e o health check acima.
+- **Login dá "Invalid login credentials"** → isso não é bug de conexão, é senha errada mesmo (a Auth respondeu certo). Resetar via Admin API se necessário: `PUT /auth/v1/admin/users/{id}` com `service_role` key e `{ "password": "..." }`.
+- **Chat não detecta nada / "não foi possível conectar ao Ollama"** → Ollama fora ou modelo errado (local ou na Goma). Confira `ollama list` e `OLLAMA_MODEL`.
+- **Atividade aparece na resposta do chat mas `xp_records` continua vazio** → PostgREST está negando acesso a tabelas, silenciosamente (a chamada do chat engole o erro — ver `app/api/ai/chat/route.ts`). Acontece em banco criado só com `supabase db reset`/migrations do zero, sem a migration `20260620000000_grant_default_privileges.sql` (ver §10): só tabelas criadas pela role `supabase_admin` recebem GRANT automático para `anon`/`authenticated`/`service_role`; tabelas das suas próprias migrations (role `postgres`) não recebem. Aplique a migration e teste de novo. Pra confirmar o diagnóstico: `curl` no REST (`/rest/v1/<tabela>`) com a `service_role` key — `permission denied for table X` é esse bug; resultado vazio `[]` é só RLS filtrando, banco está ok.
 - **Inferência de identidade/arquétipo não dispara** → roda em cadência (Identidade a cada 5 msgs do usuário, arquétipo a cada 10). Mande mensagens suficientes.
 
 ### Regenerar tipos após mudar o schema
 `npx supabase gen types typescript --local 2>/dev/null | sed '/^Connecting to db/d' > packages/types/src/database.ts`
-(o `sed` remove a linha de ruído do CLI que quebra o typecheck)
+(o `sed` remove a linha de ruído do CLI que quebra o typecheck; roda na máquina com o Postgres — normalmente a Goma)
 
 ### Comandos úteis
 - Typecheck: `npm run typecheck` · Build: `npm run build`
-- Inspecionar o banco: `docker exec supabase_db_anima psql -U postgres -d postgres -c "..."`
-- Parar tudo: `npx supabase stop` (containers) — o Docker pode continuar aberto
+- Inspecionar o banco local: `docker exec supabase_db_anima psql -U postgres -d postgres -c "..."`
+- Inspecionar/gerenciar o banco remoto (cliente sem Docker local): Admin API (`/auth/v1/admin/...`) e REST (`/rest/v1/<tabela>`) da Goma, com a `service_role` key
+- Aplicar migration num Postgres remoto: `supabase migration up --db-url "postgresql://postgres:postgres@<IP>:54322/postgres"` — **atenção:** o CLI tenta TLS por padrão e o Postgres local recusa (`tls error: server refused TLS connection`); quando isso acontece, aplique a migration direto na máquina que hospeda o banco em vez de forçar a conexão remota
+- Parar tudo (servidor): `npx supabase stop` (containers) — o Docker pode continuar aberto
