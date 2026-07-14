@@ -335,10 +335,16 @@ export async function sendChatMessage(
     const entities     = await detectEntities(message, allNames);
 
     // ── Atividades ──────────────────────────────────────────────────
+    const NON_ACTIVITY_NOTE_RE =
+      /\b(decis[ãa]o|decidi|vou |pretendo|quero |meta\b|objetivo|planejo|faz(?:em)? parte|como parte|parte d[eo]|descobri|virei f[ãa]|sou f[ãa]|viciad)/i;
+
     for (const da of activities) {
-      // Atividade real e cronometrada sempre tem duração > 0. Um 0-min é
-      // sempre ruído do detector (meta, conversa, menção sem tempo).
-      if (da.durationMinutes === 0) continue;
+      if (
+        da.durationMinutes === 0 &&
+        NON_ACTIVITY_NOTE_RE.test(da.note ?? '')
+      ) {
+        continue;
+      }
 
       const normName = norm(da.pillarName);
 

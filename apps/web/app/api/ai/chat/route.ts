@@ -89,11 +89,16 @@ export async function POST(req: NextRequest) {
   const loggedActivities: LoggedActivity[] = [];
   const seenActivities = new Set<string>(); // dedup dentro da própria mensagem
 
+  const NON_ACTIVITY_NOTE_RE =
+    /\b(decis[ãa]o|decidi|vou |pretendo|quero |meta\b|objetivo|planejo|faz(?:em)? parte|como parte|parte d[eo]|descobri|virei f[ãa]|sou f[ãa]|viciad)/i;
+
   for (const da of detectedActivities) {
-    // Atividade real e cronometrada sempre tem duração > 0. Um 0-min é sempre
-    // ruído do detector (meta, conversa, menção sem tempo) — nunca é atividade
-    // de fato, então descarta sem depender de regex de palavras-chave.
-    if (da.durationMinutes === 0) continue;
+    if (
+      da.durationMinutes === 0 &&
+      NON_ACTIVITY_NOTE_RE.test(da.note ?? '')
+    ) {
+      continue;
+    }
 
     // Só registra se o pilar bater exatamente — evita jogar atividade no pilar errado
     const pillar = pillars.find(p => norm(p.name) === norm(da.pillarName));
