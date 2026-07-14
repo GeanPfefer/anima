@@ -96,13 +96,30 @@
   justify-content: flex-start;
 }
 
-.bubble {
+.bubbleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   max-width: 75%;
+}
+
+.user .bubbleWrap { align-items: flex-end; }
+
+.bubble {
   padding: 10px 14px;
   border-radius: 16px;
   font-size: 0.92rem;
   line-height: 1.55;
   word-break: break-word;
+}
+
+/* Etiqueta da persona reflexiva (Prisma 🟣) */
+.personaPrisma {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #a78bfa;
+  padding-left: 2px;
 }
 
 /* Markdown dentro das bolhas do assistente */
@@ -324,4 +341,13 @@
 .linkNo:hover {
   color: var(--text-primary);
   border-color: var(--border-focus);
+}
+
+/* Card de confirmação de hipótese (Prisma) — variante roxa */
+.probeCard {
+  border-left-color: #a78bfa;
+}
+
+.probeLabel {
+  color: #a78bfa;
 }

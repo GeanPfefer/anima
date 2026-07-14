@@ -5,13 +5,22 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import styles from './chat.module.css';
 
-type Message = { role: 'user' | 'assistant'; content: string };
+type Persona = 'anima' | 'prisma';
+
+type Message = { role: 'user' | 'assistant'; content: string; persona?: Persona };
 
 type ProposedLink = {
   childId:    string;
   childName:  string;
   parentId:   string | null;
   parentName: string;
+};
+
+type IdentityProbe = {
+  id:          string;
+  type:        string;
+  label:       string;
+  description: string | null;
 };
 
 type Props = {
@@ -27,6 +36,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [error, setError]             = useState('');
   const [isOnboarding, setIsOnboarding] = useState(isFirstTime);
   const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
+  const [pendingProbes, setPendingProbes] = useState<IdentityProbe[]>([]);
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -144,17 +154,46 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     }
     const activityHeader = res.headers.get('X-Activity-Logged');
     const linksHeader    = res.headers.get('X-Pillar-Links');
+    const persona        = (res.headers.get('X-Persona') as Persona | null) ?? 'anima';
+    const probeHeader    = res.headers.get('X-Identity-Probe');
+
+    // Marca a bolha em streaming com a persona antes de receber o texto
+    setMessages(prev => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last?.role === 'assistant') next[next.length - 1] = { ...last, persona };
+      return next;
+    });
+
     await readStream(res);
+
     if (linksHeader) {
       try {
-        const links = JSON.parse(linksHeader) as ProposedLink[];
+        const links = JSON.parse(decodeURIComponent(linksHeader)) as ProposedLink[];
         setPendingLinks(prev => {
           const seen = new Set(prev.map(l => `${l.childId}|${l.parentName.toLowerCase()}`));
           return [...prev, ...links.filter(l => !seen.has(`${l.childId}|${l.parentName.toLowerCase()}`))];
         });
       } catch { /* header inválido, ignora */ }
     }
+    if (probeHeader) {
+      try {
+        const probe = JSON.parse(decodeURIComponent(probeHeader)) as IdentityProbe;
+        setPendingProbes(prev => prev.some(p => p.id === probe.id) ? prev : [...prev, probe]);
+      } catch { /* header inválido, ignora */ }
+    }
     if (activityHeader) router.refresh();
+  }
+
+  async function resolveProbe(probe: IdentityProbe, status: 'confirmed' | 'rejected' | 'pending') {
+    setPendingProbes(prev => prev.filter(p => p.id !== probe.id));
+    // "Ainda não sei" só dispensa o card — a hipótese segue pendente
+    if (status === 'pending') return;
+    await fetch('/api/identity/status', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id: probe.id, status }),
+    }).catch(() => {});
   }
 
   async function applyLink(link: ProposedLink) {
@@ -185,6 +224,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
         const updated = [...prev];
         const last    = updated[updated.length - 1];
         updated[updated.length - 1] = {
+          ...last,
           role:    'assistant',
           content: (last?.content ?? '') + chunk,
         };
@@ -217,7 +257,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
           <p className={styles.subtitle}>
             {isOnboarding
               ? 'Primeira conversa — conte o que está acontecendo na sua vida'
-              : 'Seu assistente pessoal — conhece seus pilares e histórico'}
+              : 'Anima registra e organiza · escreva @prisma para refletir'}
           </p>
         </div>
         {messages.length > 0 && !isOnboarding && (
@@ -235,8 +275,8 @@ export function ChatClient({ isFirstTime, userName }: Props) {
             <div className={styles.suggestions}>
               {[
                 'Como estão meus pilares?',
-                'Qual pilar devo focar esta semana?',
                 'O que tenho registrado recentemente?',
+                '@prisma o que você percebe em mim?',
               ].map((s) => (
                 <button
                   key={s}
@@ -252,13 +292,18 @@ export function ChatClient({ isFirstTime, userName }: Props) {
 
         {messages.map((m, i) => (
           <div key={i} className={`${styles.message} ${styles[m.role]}`}>
-            <div className={styles.bubble}>
-              {m.role === 'assistant' && m.content === '' && isTyping
-                ? <span className={styles.typingDots}><span /><span /><span /></span>
-                : m.role === 'assistant'
-                  ? <ReactMarkdown>{m.content}</ReactMarkdown>
-                  : m.content
-              }
+            <div className={styles.bubbleWrap}>
+              {m.role === 'assistant' && m.persona === 'prisma' && (
+                <span className={styles.personaPrisma}>🟣 Prisma</span>
+              )}
+              <div className={styles.bubble}>
+                {m.role === 'assistant' && m.content === '' && isTyping
+                  ? <span className={styles.typingDots}><span /><span /><span /></span>
+                  : m.role === 'assistant'
+                    ? <ReactMarkdown>{m.content}</ReactMarkdown>
+                    : m.content
+                }
+              </div>
             </div>
           </div>
         ))}
@@ -275,6 +320,22 @@ export function ChatClient({ isFirstTime, userName }: Props) {
                 <div className={styles.linkActions}>
                   <button className={styles.linkYes} onClick={() => applyLink(link)}>Sim</button>
                   <button className={styles.linkNo}  onClick={() => dismissLink(link)}>Não</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {pendingProbes.length > 0 && (
+          <div className={styles.linkCards}>
+            {pendingProbes.map((probe) => (
+              <div key={probe.id} className={`${styles.linkCard} ${styles.probeCard}`}>
+                <span className={`${styles.linkLabel} ${styles.probeLabel}`}>🟣 Prisma · faz sentido?</span>
+                <p className={styles.linkText}>{probe.description || probe.label}</p>
+                <div className={styles.linkActions}>
+                  <button className={styles.linkYes} onClick={() => resolveProbe(probe, 'confirmed')}>Faz sentido</button>
+                  <button className={styles.linkNo}  onClick={() => resolveProbe(probe, 'rejected')}>Não faz</button>
+                  <button className={styles.linkNo}  onClick={() => resolveProbe(probe, 'pending')}>Ainda não sei</button>
                 </div>
               </div>
             ))}

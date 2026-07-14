@@ -44,6 +44,18 @@ export async function POST(req: NextRequest) {
   const { message } = await req.json() as { message: string };
   if (!message?.trim()) return new Response('Mensagem vazia', { status: 400 });
 
+  // ── Persona (Anima registra · Prisma reflete — §1a do PRD) ──────
+  // v1: convocação manual por prefixo "@prisma" / "/prisma" (e "@anima").
+  // Anima é o padrão. O usuário não troca de tela, troca de lente: o Prisma
+  // não registra nada (atividade, nota, quest, link) — só reflete.
+  const personaMatch = message.match(/^\s*[@/](prisma|anima)\b[\s:,.-]*/i);
+  const persona: 'anima' | 'prisma' =
+    personaMatch?.[1]?.toLowerCase() === 'prisma' ? 'prisma' : 'anima';
+  const stripped = personaMatch ? message.slice(personaMatch[0].length).trim() : message.trim();
+  const cleanMessage = stripped || (persona === 'prisma'
+    ? 'Reflita sobre o momento atual da minha vida com base no que você sabe sobre mim.'
+    : message.trim());
+
   // ── Contexto do usuário ────────────────────────────────────────
   const [profileRes, pillarsRes, recentRes, questsRes, entitiesRes, identityRes] = await Promise.all([
     supabase.from('profiles').select('name, archetype').eq('id', user.id).single(),
@@ -62,22 +74,38 @@ export async function POST(req: NextRequest) {
   const entities          = entitiesRes.data  ?? [];
   const confirmedIdentity = identityRes.data  ?? [];
 
+  // Hipóteses ainda não confirmadas — o Prisma as explora e pede validação na
+  // conversa (confirmação conversacional). Só busca no modo reflexivo.
+  const pendingIdentity = persona === 'prisma'
+    ? (await supabase
+        .from('identity_hypotheses')
+        .select('id, type, label, description, confidence')
+        .eq('user_id', user.id)
+        .eq('status', 'pending')
+        .order('confidence', { ascending: false })
+        .limit(4)).data ?? []
+    : [];
+
   const pillarNames = pillars.map(p => p.name);
 
   // ── Detecção sequencial (evita sobrecarga do Ollama com chamadas simultâneas) ─
   // Atividades e quests primeiro: o que elas capturam é excluído das notas (dedup).
+  // Só a persona Anima registra — no modo Prisma a detecção inteira é pulada
+  // (reflexão pura, sem efeitos colaterais no Core). O embedding roda nos dois
+  // porque o retrieval contextual serve as duas lentes.
   const today = new Date().toISOString().slice(0, 10);
-  const detectedActivities = await detectActivities(message, pillarNames, today);
-  const detectedQuests     = await detectQuests(message, pillarNames);
+  const isAnima = persona === 'anima';
+  const detectedActivities = isAnima ? await detectActivities(cleanMessage, pillarNames, today) : [];
+  const detectedQuests     = isAnima ? await detectQuests(cleanMessage, pillarNames) : [];
 
   const noteExclusions = [
     ...detectedActivities.map(a => a.note).filter((n): n is string => !!n?.trim()),
     ...detectedQuests.map(q => q.title),
   ];
-  const detectedNotes      = await detectNotes(message, today, noteExclusions);
-  const detectedLinks      = await detectPillarLinks(message, pillarNames);
-  const detectedEntities   = await detectEntities(message, pillarNames);
-  const queryEmbedding     = await generateEmbedding(message);
+  const detectedNotes      = isAnima ? await detectNotes(cleanMessage, today, noteExclusions) : [];
+  const detectedLinks      = isAnima ? await detectPillarLinks(cleanMessage, pillarNames) : [];
+  const detectedEntities   = isAnima ? await detectEntities(cleanMessage, pillarNames) : [];
+  const queryEmbedding     = await generateEmbedding(cleanMessage);
 
   console.log('[chat/detect] activities:', detectedActivities.length, detectedActivities.map(a => `${a.pillarName}/${a.durationMinutes}min`));
   console.log('[chat/detect] notes:', detectedNotes.length, detectedNotes.map(n => n.noteType));
@@ -89,15 +117,11 @@ export async function POST(req: NextRequest) {
   const loggedActivities: LoggedActivity[] = [];
   const seenActivities = new Set<string>(); // dedup dentro da própria mensagem
 
-  // Reforço determinístico: notas que são meta/decisão futura, organização de
-  // pilar ou gosto/descoberta não são atividade (o detector às vezes as captura
-  // como 0-min). Evita "atividade fantasma" no histórico de XP.
-  const NON_ACTIVITY_NOTE_RE = /\b(decis[ãa]o|decidi|vou |pretendo|quero |meta\b|objetivo|planejo|faz(?:em)? parte|como parte|parte d[eo]|descobri|virei f[ãa]|sou f[ãa]|viciad)/i;
-
   for (const da of detectedActivities) {
-    // Só descarta como "fantasma" se for 0-min — atividade cronometrada real
-    // nunca é meta/link/interesse, mesmo que a nota mencione "vou"/"quero".
-    if (da.durationMinutes === 0 && NON_ACTIVITY_NOTE_RE.test(da.note ?? '')) continue;
+    // Atividade real e cronometrada sempre tem duração > 0. Um 0-min é sempre
+    // ruído do detector (meta, conversa, menção sem tempo) — nunca é atividade
+    // de fato, então descarta sem depender de regex de palavras-chave.
+    if (da.durationMinutes === 0) continue;
 
     // Só registra se o pilar bater exatamente — evita jogar atividade no pilar errado
     const pillar = pillars.find(p => norm(p.name) === norm(da.pillarName));
@@ -166,8 +190,13 @@ export async function POST(req: NextRequest) {
   // Dedup determinístico contra atividades: descarta notas que descrevem uma
   // atividade cronometrada (duração no texto) ou que repetem muito uma nota
   // de atividade já registrada — o detector de nota às vezes ignora a regra.
+  // Prefixo de 4 letras em vez da palavra inteira: captura variações como
+  // "corrida"/"correr" ou "estudei"/"estudo" que descrevem o mesmo evento
+  // com palavras diferentes, sem precisar de matching semântico de verdade.
   const DURATION_RE = /\b\d+\s*(?:min|minutos?|h|horas?|hr)\b/i;
-  const toTokens = (s: string) => new Set(norm(s).split(/\s+/).filter(w => w.length > 3));
+  const toTokens = (s: string) => new Set(
+    norm(s).split(/\s+/).filter(w => w.length > 3).map(w => w.slice(0, 4)),
+  );
   const activityTokenSets = detectedActivities
     .filter(a => a.note)
     .map(a => toTokens(`${a.pillarName} ${a.note}`));
@@ -182,7 +211,19 @@ export async function POST(req: NextRequest) {
     });
   });
 
+  // Tipos de nota que sinalizam área de vida nova (não comida/gasto/humor,
+  // cujo pillarHint costuma ser genérico demais para virar pilar).
+  const PILLAR_WORTHY_NOTE_TYPES = new Set(['interest', 'idea', 'other']);
+
   for (const dn of notesToLog) {
+    if (
+      dn.pillarHint &&
+      PILLAR_WORTHY_NOTE_TYPES.has(dn.noteType) &&
+      !pillars.find(p => norm(p.name) === norm(dn.pillarHint!))
+    ) {
+      createPendingPillar(supabase, user.id, dn.pillarHint).catch(() => {});
+    }
+
     logNote({
       content:    dn.content,
       noteType:   dn.noteType,
@@ -252,8 +293,16 @@ export async function POST(req: NextRequest) {
 
     const seenLinks = new Set<string>();
     for (const dl of detectedLinks) {
-      const child = all.find(p => norm(p.name) === norm(dl.childName));
-      if (!child) continue; // filho não existe como pilar — nada a vincular
+      let child = all.find(p => norm(p.name) === norm(dl.childName));
+      if (!child) {
+        // Filho ainda não existe como pilar (ex: "skate é sub-área de lazer"
+        // mencionando Skate por nome pela primeira vez) — cria como pendente
+        // para que o link tenha o que vincular; usuário confirma os dois juntos.
+        const newId = await createPendingPillar(supabase, user.id, dl.childName);
+        if (!newId) continue;
+        child = { id: newId, name: dl.childName };
+        all.push(child);
+      }
 
       const parent = all.find(p => norm(p.name) === norm(dl.parentName));
       if (parent && parent.id === child.id) continue;
@@ -396,25 +445,7 @@ Quando utilizar essas informações:
     ? `\n[Registrado automaticamente nesta mensagem]\n${registeredLines.join('\n')}\nConfirme brevemente no início da resposta, de forma natural. Não mencione "sistema" ou termos técnicos.\n`
     : '';
 
-  const systemPrompt = `Você é o Anima. Fala com ${name}.
-
-Sua natureza:
-- Você acompanha a vida de ${name} — atividades, padrões, pilares, o que está indo bem e o que não está
-- Você não é um assistente de agenda, não é um coach, não é um chatbot genérico
-- Você conhece ${name} de verdade, pelo histórico real — use isso
-- Quando perguntarem "o que você é" ou "para que serve": responda com o que você FAZ na prática, com exemplos concretos da vida de ${name} se houver dados. Nunca liste funcionalidades como um manual.
-
-Tom e estilo:
-- Direto. Sem enrolação, sem introduções, sem "Claro!", sem "Ótima pergunta!"
-- Humano. Como um amigo que presta atenção, não um assistente que quer agradar
-- Sem perguntas de encerramento ("Como posso ajudar?", "Há algo mais?") — encerre quando terminar
-- Use listas APENAS quando o conteúdo for genuinamente uma lista. Para respostas conversacionais, use prosa
-- Sem emojis, exceto se o contexto pedir
-- Respostas curtas quando a pergunta for simples. Não expanda o que não precisa ser expandido
-${archetypeText}
-${identityText}
-${activityContext}
-== CONTEXTO DE ${name.toUpperCase()} ==
+  const contextBlock = `== CONTEXTO DE ${name.toUpperCase()} ==
 Nível geral: ${charLevel}
 
 Pilares:
@@ -427,6 +458,59 @@ Quests:
 ${questsText}
 ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
 == FIM DO CONTEXTO ==`;
+
+  const animaPrompt = `Você é o Anima. Fala com ${name}.
+
+Sua natureza:
+- Você acompanha a vida de ${name} — atividades, padrões, pilares, o que está indo bem e o que não está
+- Você não é um assistente de agenda, não é um coach, não é um chatbot genérico
+- Você conhece ${name} de verdade, pelo histórico real — use isso
+- Quando perguntarem "o que você é" ou "para que serve": responda com o que você FAZ na prática, com exemplos concretos da vida de ${name} se houver dados. Nunca liste funcionalidades como um manual.
+
+Tom e estilo:
+- Direto. Sem enrolação, sem introduções, sem "Claro!", sem "Ótima pergunta!"
+- Nunca abra frase com "Legal!", "Show!", "Ótimo!", "Parabéns!", "Que bom!" ou qualquer variação entusiasmada — não é torcida, é observação
+- Humano. Como um amigo que presta atenção, não um assistente que quer agradar
+- Sem perguntas de encerramento ("Como posso ajudar?", "Há algo mais?", "Como foi seu dia?", "Que tal...?") — encerre quando terminar, não force continuação
+- Use listas APENAS quando o conteúdo for genuinamente uma lista. Para respostas conversacionais, use prosa
+- Sem emojis, exceto se o contexto pedir
+- Respostas curtas quando a pergunta for simples. Não expanda o que não precisa ser expandido
+- Nunca invente funcionalidades, telas ou processos que não existem (ex: "área de sugestões", "ticket"). Se não souber, não responda como se soubesse
+- Comida, bebida, gastos, humor e estados emocionais mencionados de passagem são registrados em segundo plano, silenciosamente — NUNCA comente, avalie, elogie, dê conselho ou questione esse conteúdo (nada de "cuidado com o orçamento", "equilibre com verduras", "respira fundo"). Reaja só ao que a pessoa trouxe como assunto da conversa
+${archetypeText}
+${identityText}
+${activityContext}
+${contextBlock}`;
+
+  // Hipóteses pendentes que o Prisma pode levantar e pedir validação na conversa
+  const pendingIdentityText = persona === 'prisma' && pendingIdentity.length > 0
+    ? `\nHipóteses ainda não confirmadas — você pode trazê-las à tona como pergunta e pedir que ${name} valide, NUNCA como afirmação:\n${
+        pendingIdentity.map(h => `- [${identityTypeSections[h.type] ?? h.type}] ${h.label}${h.description ? ` — ${h.description}` : ''}`).join('\n')
+      }`
+    : '';
+
+  const prismaPrompt = `Você é o Prisma — a lente reflexiva do Anima. Fala com ${name}.
+
+Seu papel:
+- Refletir, levantar hipóteses, revelar perspectivas, padrões e tensões na vida de ${name}
+- Ampliar a consciência de ${name} sobre si mesmo — nunca decidir nem pensar por ${name}
+- Toda conclusão sua é HIPÓTESE ou interpretação, jamais verdade absoluta
+
+Regras invioláveis:
+- Nada de ordens, metas ou "você deveria". Ofereça observações e perguntas, não direções
+- ❌ "Você deve fazer isso."  ·  ✅ "Observei estes fatores. Como você enxerga isso?"
+- Você não registra atividades nem fala de XP/pilares como sistema — seu território é a reflexão
+- Ao propor uma interpretação, convide ${name} a validar ("Isso faz sentido pra você?")
+
+Tom e estilo:
+- Curioso, reflexivo, calmo. Como alguém que ajuda a pensar, não que entrega respostas prontas
+- Direto e humano, sem bajulação ("Ótima pergunta!"), sem emojis, sem perguntas de encerramento vazias
+- Prosa, não listas (salvo quando a lista for genuína)
+- Apoie-se nas observações abaixo como pistas — nunca como definições fixas de quem ${name} é
+${identityText}${pendingIdentityText}
+${contextBlock}`;
+
+  const systemPrompt = persona === 'prisma' ? prismaPrompt : animaPrompt;
 
   // ── Histórico recente de conversa ──────────────────────────────
   const { data: history } = await supabase
@@ -453,8 +537,12 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
       messages: [
         { role: 'system', content: systemPrompt },
         ...pastMessages,
-        { role: 'user', content: message },
+        { role: 'user', content: cleanMessage },
       ],
+      // Sem isso o Ollama usa o padrão do runtime (2048-4096 tokens), que o
+      // systemPrompt + histórico facilmente excede — o truncamento gera
+      // degeneração de saída (texto incoerente/multilíngue no meio da resposta).
+      options: { num_ctx: 8192 },
     }),
   }).catch(() => null);
 
@@ -504,7 +592,7 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
                     .eq('user_id', user.id)
                     .eq('role', 'user');
                   const n = count ?? 0;
-                  const window = [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }];
+                  const window = [...pastMessages, { role: 'user', content: cleanMessage }, { role: 'assistant', content: fullResponse }];
                   if (n > 0 && n % 10 === 0) {
                     await inferAndSaveArchetype(
                       user.id,
@@ -531,14 +619,30 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
   const responseHeaders: Record<string, string> = {
     'Content-Type':           'text/plain; charset=utf-8',
     'X-Content-Type-Options': 'nosniff',
+    'X-Persona':              persona,
   };
 
+  // Headers HTTP são latin1: JSON com acentos (pilares, hipóteses em pt-BR)
+  // corromperia (mojibake). encodeURIComponent deixa o valor ASCII-safe; o
+  // cliente faz decodeURIComponent antes do JSON.parse.
   if (loggedActivities.length > 0) {
-    responseHeaders['X-Activity-Logged'] = JSON.stringify(loggedActivities);
+    responseHeaders['X-Activity-Logged'] = encodeURIComponent(JSON.stringify(loggedActivities));
   }
 
   if (proposedLinks.length > 0) {
-    responseHeaders['X-Pillar-Links'] = JSON.stringify(proposedLinks);
+    responseHeaders['X-Pillar-Links'] = encodeURIComponent(JSON.stringify(proposedLinks));
+  }
+
+  // Confirmação conversacional: o Prisma expõe a hipótese pendente mais forte
+  // como card de validação inline (faz sentido / não faz / ainda não sei).
+  const topHypothesis = pendingIdentity[0];
+  if (persona === 'prisma' && topHypothesis) {
+    responseHeaders['X-Identity-Probe'] = encodeURIComponent(JSON.stringify({
+      id:          topHypothesis.id,
+      type:        topHypothesis.type,
+      label:       topHypothesis.label,
+      description: topHypothesis.description ?? null,
+    }));
   }
 
   return new Response(stream, { headers: responseHeaders });

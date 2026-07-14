@@ -92,6 +92,14 @@ export async function linkPillar(input: {
     .insert({ parent_id: parent.id, child_id: child.id });
   if (error) return { ok: false, reason: 'error' };
 
+  // Confirmar o link confirma o próprio filho — se ele estava pendente
+  // (criado na hora pelo chat para poder ser vinculado), vira ativo agora.
+  await supabase
+    .from('user_pillars')
+    .update({ is_active: true, status: 'active' })
+    .eq('id', child.id)
+    .eq('status', 'pending');
+
   return { ok: true, parentId: parent.id, parentName: parent.name, createdParent };
 }
 

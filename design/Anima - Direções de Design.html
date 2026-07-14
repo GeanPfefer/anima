@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Anima — Direções de Design</title>
+  <link rel="stylesheet" href="anima-themes.css" />
+  <style>
+    html, body { margin: 0; height: 100%; background: #f0eee9; }
+    * { box-sizing: border-box; }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="anima-data.js"></script>
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="anima-screens.jsx"></script>
+  <script type="text/babel" src="anima-graph.jsx"></script>
+
+  <script type="text/babel" data-presets="react">
+    const PHONE = { width: 340, height: 740 };
+    const card = (bg) => ({ background: bg, borderRadius: 34, boxShadow: '0 2px 6px rgba(0,0,0,.18), 0 16px 48px rgba(0,0,0,.16)' });
+    const dirs = [
+      { theme: 'thm-eclipse',  bg: '#0a0a0b', label: 'A · Eclipse' },
+      { theme: 'thm-penumbra', bg: '#14110d', label: 'B · Penumbra' },
+      { theme: 'thm-lumen',    bg: '#06070c', label: 'C · Lumen' },
+    ];
+
+    function App() {
+      return (
+        <DesignCanvas>
+          <DCSection id="dirs-chat" title="Três direções visuais — Chat"
+            subtitle="O núcleo do Anima: onboarding, registro e reflexão num só fluxo. Personas Anima 🟠 (registra) e Prisma 🟣 (reflete).">
+            {dirs.map((d) => (
+              <DCArtboard key={d.theme} id={d.theme} label={d.label} width={PHONE.width} height={PHONE.height} style={card(d.bg)}>
+                <ChatScreen theme={d.theme} />
+              </DCArtboard>
+            ))}
+          </DCSection>
+
+          <DCSection id="dirs-home" title="As mesmas direções — Home"
+            subtitle="Radar de vida no modo Game · painel de Era · pilares raiz e emergentes.">
+            {dirs.map((d) => (
+              <DCArtboard key={d.theme} id={'home-' + d.theme} label={d.label} width={PHONE.width} height={PHONE.height} style={card(d.bg)}>
+                <HomeScreen theme={d.theme} />
+              </DCArtboard>
+            ))}
+          </DCSection>
+
+          <DCSection id="graph" title="Grafo de vida — reimaginado"
+            subtitle="Como o grafo poderia ficar ao máximo. Duas metáforas; ambas com filtro por pilar e toggle de entidades.">
+            <DCArtboard id="g-const" label="Constelação · luminosa, com inspetor" width={980} height={600} style={{ borderRadius: 10, background: '#05060b', boxShadow: '0 2px 6px rgba(0,0,0,.2), 0 16px 48px rgba(0,0,0,.18)' }}>
+              <div className="thm thm-lumen" style={{ width: '100%', height: '100%' }}>
+                <LifeGraph width={980} height={600} mode="constellation" />
+              </div>
+            </DCArtboard>
+            <DCArtboard id="g-orbit" label="Órbita · contemplativa, radial" width={760} height={600} style={{ borderRadius: 10, background: '#05060b', boxShadow: '0 2px 6px rgba(0,0,0,.2), 0 16px 48px rgba(0,0,0,.18)' }}>
+              <div className="thm thm-lumen" style={{ width: '100%', height: '100%' }}>
+                <LifeGraph width={760} height={600} mode="orbit" />
+              </div>
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
