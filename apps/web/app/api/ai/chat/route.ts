@@ -89,15 +89,11 @@ export async function POST(req: NextRequest) {
   const loggedActivities: LoggedActivity[] = [];
   const seenActivities = new Set<string>(); // dedup dentro da própria mensagem
 
-  // Reforço determinístico: notas que são meta/decisão futura, organização de
-  // pilar ou gosto/descoberta não são atividade (o detector às vezes as captura
-  // como 0-min). Evita "atividade fantasma" no histórico de XP.
-  const NON_ACTIVITY_NOTE_RE = /\b(decis[ãa]o|decidi|vou |pretendo|quero |meta\b|objetivo|planejo|faz(?:em)? parte|como parte|parte d[eo]|descobri|virei f[ãa]|sou f[ãa]|viciad)/i;
-
   for (const da of detectedActivities) {
-    // Só descarta como "fantasma" se for 0-min — atividade cronometrada real
-    // nunca é meta/link/interesse, mesmo que a nota mencione "vou"/"quero".
-    if (da.durationMinutes === 0 && NON_ACTIVITY_NOTE_RE.test(da.note ?? '')) continue;
+    // Atividade real e cronometrada sempre tem duração > 0. Um 0-min é sempre
+    // ruído do detector (meta, conversa, menção sem tempo) — nunca é atividade
+    // de fato, então descarta sem depender de regex de palavras-chave.
+    if (da.durationMinutes === 0) continue;
 
     // Só registra se o pilar bater exatamente — evita jogar atividade no pilar errado
     const pillar = pillars.find(p => norm(p.name) === norm(da.pillarName));
@@ -166,8 +162,13 @@ export async function POST(req: NextRequest) {
   // Dedup determinístico contra atividades: descarta notas que descrevem uma
   // atividade cronometrada (duração no texto) ou que repetem muito uma nota
   // de atividade já registrada — o detector de nota às vezes ignora a regra.
+  // Prefixo de 4 letras em vez da palavra inteira: captura variações como
+  // "corrida"/"correr" ou "estudei"/"estudo" que descrevem o mesmo evento
+  // com palavras diferentes, sem precisar de matching semântico de verdade.
   const DURATION_RE = /\b\d+\s*(?:min|minutos?|h|horas?|hr)\b/i;
-  const toTokens = (s: string) => new Set(norm(s).split(/\s+/).filter(w => w.length > 3));
+  const toTokens = (s: string) => new Set(
+    norm(s).split(/\s+/).filter(w => w.length > 3).map(w => w.slice(0, 4)),
+  );
   const activityTokenSets = detectedActivities
     .filter(a => a.note)
     .map(a => toTokens(`${a.pillarName} ${a.note}`));
@@ -182,7 +183,19 @@ export async function POST(req: NextRequest) {
     });
   });
 
+  // Tipos de nota que sinalizam área de vida nova (não comida/gasto/humor,
+  // cujo pillarHint costuma ser genérico demais para virar pilar).
+  const PILLAR_WORTHY_NOTE_TYPES = new Set(['interest', 'idea', 'other']);
+
   for (const dn of notesToLog) {
+    if (
+      dn.pillarHint &&
+      PILLAR_WORTHY_NOTE_TYPES.has(dn.noteType) &&
+      !pillars.find(p => norm(p.name) === norm(dn.pillarHint!))
+    ) {
+      createPendingPillar(supabase, user.id, dn.pillarHint).catch(() => {});
+    }
+
     logNote({
       content:    dn.content,
       noteType:   dn.noteType,
@@ -252,8 +265,16 @@ export async function POST(req: NextRequest) {
 
     const seenLinks = new Set<string>();
     for (const dl of detectedLinks) {
-      const child = all.find(p => norm(p.name) === norm(dl.childName));
-      if (!child) continue; // filho não existe como pilar — nada a vincular
+      let child = all.find(p => norm(p.name) === norm(dl.childName));
+      if (!child) {
+        // Filho ainda não existe como pilar (ex: "skate é sub-área de lazer"
+        // mencionando Skate por nome pela primeira vez) — cria como pendente
+        // para que o link tenha o que vincular; usuário confirma os dois juntos.
+        const newId = await createPendingPillar(supabase, user.id, dl.childName);
+        if (!newId) continue;
+        child = { id: newId, name: dl.childName };
+        all.push(child);
+      }
 
       const parent = all.find(p => norm(p.name) === norm(dl.parentName));
       if (parent && parent.id === child.id) continue;
@@ -396,25 +417,7 @@ Quando utilizar essas informações:
     ? `\n[Registrado automaticamente nesta mensagem]\n${registeredLines.join('\n')}\nConfirme brevemente no início da resposta, de forma natural. Não mencione "sistema" ou termos técnicos.\n`
     : '';
 
-  const systemPrompt = `Você é o Anima. Fala com ${name}.
-
-Sua natureza:
-- Você acompanha a vida de ${name} — atividades, padrões, pilares, o que está indo bem e o que não está
-- Você não é um assistente de agenda, não é um coach, não é um chatbot genérico
-- Você conhece ${name} de verdade, pelo histórico real — use isso
-- Quando perguntarem "o que você é" ou "para que serve": responda com o que você FAZ na prática, com exemplos concretos da vida de ${name} se houver dados. Nunca liste funcionalidades como um manual.
-
-Tom e estilo:
-- Direto. Sem enrolação, sem introduções, sem "Claro!", sem "Ótima pergunta!"
-- Humano. Como um amigo que presta atenção, não um assistente que quer agradar
-- Sem perguntas de encerramento ("Como posso ajudar?", "Há algo mais?") — encerre quando terminar
-- Use listas APENAS quando o conteúdo for genuinamente uma lista. Para respostas conversacionais, use prosa
-- Sem emojis, exceto se o contexto pedir
-- Respostas curtas quando a pergunta for simples. Não expanda o que não precisa ser expandido
-${archetypeText}
-${identityText}
-${activityContext}
-== CONTEXTO DE ${name.toUpperCase()} ==
+  const contextBlock = `== CONTEXTO DE ${name.toUpperCase()} ==
 Nível geral: ${charLevel}
 
 Pilares:
@@ -427,6 +430,29 @@ Quests:
 ${questsText}
 ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
 == FIM DO CONTEXTO ==`;
+
+  const systemPrompt = `Você é o Anima. Fala com ${name}.
+
+Sua natureza:
+- Você acompanha a vida de ${name} — atividades, padrões, pilares, o que está indo bem e o que não está
+- Você não é um assistente de agenda, não é um coach, não é um chatbot genérico
+- Você conhece ${name} de verdade, pelo histórico real — use isso
+- Quando perguntarem "o que você é" ou "para que serve": responda com o que você FAZ na prática, com exemplos concretos da vida de ${name} se houver dados. Nunca liste funcionalidades como um manual.
+
+Tom e estilo:
+- Direto. Sem enrolação, sem introduções, sem "Claro!", sem "Ótima pergunta!"
+- Nunca abra frase com "Legal!", "Show!", "Ótimo!", "Parabéns!", "Que bom!" ou qualquer variação entusiasmada — não é torcida, é observação
+- Humano. Como um amigo que presta atenção, não um assistente que quer agradar
+- Sem perguntas de encerramento ("Como posso ajudar?", "Há algo mais?", "Como foi seu dia?", "Que tal...?") — encerre quando terminar, não force continuação
+- Use listas APENAS quando o conteúdo for genuinamente uma lista. Para respostas conversacionais, use prosa
+- Sem emojis, exceto se o contexto pedir
+- Respostas curtas quando a pergunta for simples. Não expanda o que não precisa ser expandido
+- Nunca invente funcionalidades, telas ou processos que não existem (ex: "área de sugestões", "ticket"). Se não souber, não responda como se soubesse
+- Comida, bebida, gastos, humor e estados emocionais mencionados de passagem são registrados em segundo plano, silenciosamente — NUNCA comente, avalie, elogie, dê conselho ou questione esse conteúdo (nada de "cuidado com o orçamento", "equilibre com verduras", "respira fundo"). Reaja só ao que a pessoa trouxe como assunto da conversa
+${archetypeText}
+${identityText}
+${activityContext}
+${contextBlock}`;
 
   // ── Histórico recente de conversa ──────────────────────────────
   const { data: history } = await supabase
@@ -455,6 +481,10 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
         ...pastMessages,
         { role: 'user', content: message },
       ],
+      // Sem isso o Ollama usa o padrão do runtime (2048-4096 tokens), que o
+      // systemPrompt + histórico facilmente excede — o truncamento gera
+      // degeneração de saída (texto incoerente/multilíngue no meio da resposta).
+      options: { num_ctx: 8192 },
     }),
   }).catch(() => null);
 
@@ -533,12 +563,15 @@ ${entitiesText ? `\nMemória semântica:\n${entitiesText}` : ''}${retrievalText}
     'X-Content-Type-Options': 'nosniff',
   };
 
+  // Headers HTTP são latin1: JSON com acentos (pilares em pt-BR) corromperia
+  // o valor. encodeURIComponent deixa o conteúdo ASCII-safe; o cliente decodifica.
+
   if (loggedActivities.length > 0) {
-    responseHeaders['X-Activity-Logged'] = JSON.stringify(loggedActivities);
+    responseHeaders['X-Activity-Logged'] = encodeURIComponent(JSON.stringify(loggedActivities));
   }
 
   if (proposedLinks.length > 0) {
-    responseHeaders['X-Pillar-Links'] = JSON.stringify(proposedLinks);
+    responseHeaders['X-Pillar-Links'] = encodeURIComponent(JSON.stringify(proposedLinks));
   }
 
   return new Response(stream, { headers: responseHeaders });
