@@ -74,7 +74,7 @@ O **Core** é a fonte única da verdade. Responsável por: memórias, notas, reg
 
 > **Reposicionamento (jul/2026, ver [Marco 001](docs/marcos/001-nascimento-da-identidade.md)):** Prisma deixa de ser uma persona conversacional paralela ao Anima e passa a ser uma **capacidade interna** — Reflexão Crítica. O usuário não escolhe "falar com o Prisma"; o Anima aciona essa capacidade quando fizer sentido refletir, questionar ou revelar uma tensão. O Anima continua sendo a única frente conversacional (ver [`anima-manifesto.md`](anima-manifesto.md)).
 
-**⚠️ Pendência de reconciliação técnica:** a implementação atual (convocação manual via `@prisma`, ver §7) ainda reflete o modelo anterior de "persona paralela". Este PRD registra a **decisão de identidade**; a decisão de **manter `@prisma` como atalho manual do usuário** ou **removê-lo em favor de acionamento automático pelo Anima** não foi tomada — fica em aberto (ver §13).
+**Estado técnico (jul/2026):** a exploração anterior de convocação manual e Persona Prisma foi retirada da árvore principal e preservada apenas em branch de resgate. O produto não expõe uma segunda identidade conversacional. O acionamento reflexivo interno ainda será desenhado como capacidade do Anima, sem `@prisma`, chat ou identidade visual paralela.
 
 **🟠 Anima** — a experiência principal: registrar, organizar, resumir, lembrar.
 - Tom: breve, objetiva, factual, pouco interpretativa.
@@ -86,7 +86,7 @@ O **Core** é a fonte única da verdade. Responsável por: memórias, notas, reg
 - Exemplo:
   > 🟣 Prisma — Observei uma possível tensão. Você demonstra entusiasmo ao falar do Anima, mas preocupação quando fala de estabilidade financeira. Essa interpretação faz sentido pra você?
 
-> Prisma é a Camada 4 (insights/reflexão, ver §1d) do PRD feita conversa — hoje implementada tecnicamente como convocação manual (`@prisma`), a ser reconciliada com o modelo de capacidade interna.
+> Prisma é a Camada 4 (insights/reflexão, ver §1d) expressa como capacidade do Anima. Seu acionamento interno ainda não está implementado como contrato próprio.
 
 ### Regra fundamental do Prisma
 O Prisma **não** toma decisões, não define objetivos, não determina caminhos, não substitui a autonomia do usuário. Seu papel é formular perguntas e mostrar perspectivas, riscos, oportunidades e padrões. **Toda conclusão é hipótese ou interpretação — nunca verdade absoluta.**
@@ -133,8 +133,8 @@ O sistema evolui junto com o usuário.
 
 **Superado (jul/2026):** não existe mais escolha entre personas paralelas — Prisma é capacidade interna acionada pelo Anima (ver reposicionamento acima e [Marco 001](docs/marcos/001-nascimento-da-identidade.md)). Este toggle nunca chegou a ser implementado tecnicamente.
 
-### Convocação explícita — decisão em aberto
-Hoje a única forma de acionar a lente Prisma é o prefixo manual `@prisma` no chat (ver estado técnico em §7). Com o reposicionamento do Prisma como capacidade interna, falta decidir se esse atalho manual **permanece como override do usuário** ou **desaparece** em favor do Anima decidir sozinho quando acionar a Reflexão Crítica. Não resolvido nesta atualização — ver §13.
+### Acionamento reflexivo interno
+Não existe convocação de uma persona Prisma. Quando essa capacidade for implementada, o Anima decidirá quando aplicar Reflexão Crítica dentro da mesma conversa e deixará claro que apresenta uma hipótese, sem transferir a interação para outra entidade.
 
 ### Filosofia central (reforço)
 - O Anima **não** é produtividade, gerenciador de tarefas ou coach.
@@ -334,7 +334,7 @@ O objetivo é criar: continuidade, confiança, sensação de memória persistent
 
 O usuário interage com uma única experiência principal: o Anima. As demais inteligências e ferramentas existem como **capacidades internas** — não como personas, não como chats separados, não como telas concorrentes.
 
-Capacidades previstas (nenhuma implementada como tal hoje, exceto Prisma parcialmente — ver §1a):
+Capacidades previstas (ainda não formalizadas como contratos de execução; Prisma já está definido como capacidade conceitual — ver §1a):
 - Programação
 - Pesquisa
 - Arquitetura
@@ -345,6 +345,14 @@ Capacidades previstas (nenhuma implementada como tal hoje, exceto Prisma parcial
 - Reflexão Crítica (Prisma — ver §1a)
 
 Dentro de uma solicitação já aprovada pelo usuário, o Anima poderá escolher quais capacidades internas consultar para executar melhor a tarefa. Fora de uma solicitação aprovada, o Anima não inicia ações por conta própria (ver regra de autonomia por impacto, `anima-manifesto.md`).
+
+## 1f.1 Orquestração de Trabalho e Modo Construção
+
+> Fundação iniciada em jul/2026 — ver [arquitetura de Orquestração de Trabalho](docs/arquitetura/orquestracao-de-trabalho.md), [Plano 001](docs/planos/001-modo-construcao-mvp.md) e [Marco 002](docs/marcos/002-anima-constroi-anima.md).
+
+O Modo Construção é o primeiro caso de uso de uma orquestração genérica de trabalho: o Anima compreende um pedido, propõe trabalho estruturado, solicita aprovação, preserva contexto, acompanha execução e registra resultado e decisões. A fundação futura usa o modelo conceitual `work_items` + `work_events`, separado de quests e sem XP automático.
+
+O bootstrap atual é **privado e manual**. Claude e Codex podem receber pacotes de contexto por operação humana, como executores de capacidades, mas o produto ainda não chama APIs, CLIs ou serviços externos. A visão orienta a arquitetura sem substituir a prioridade atual do Anima como sistema de evolução pessoal.
 
 ## 1g. Jornadas de evolução
 
@@ -914,7 +922,8 @@ O grafo de vida representa visualmente as conexões que emergem dos dados do usu
 | Banco único multi-máquina (jun/2026) | Goma é a única fonte de Postgres; qualquer notebook cliente novo (ex: Nomad) aponta `.env.local` para a Goma via Tailscale em vez de rodar Supabase local | `supabase start` cria um Postgres isolado por máquina — cada notebook com banco próprio duplicava conta e histórico do usuário; ver §15 |
 | GRANT ausente em tabelas de migration | Nova migration `20260620000000_grant_default_privileges.sql`: `GRANT ALL` + `ALTER DEFAULT PRIVILEGES` em `public` para `anon`/`authenticated`/`service_role` | Tabelas criadas por migration (role `postgres`) não recebem GRANT automático como as criadas pela role `supabase_admin` — PostgREST nega acesso antes de avaliar RLS, silenciosamente (o chat engole o erro). Só aparece num banco 100% do zero; a Goma nunca teve esse problema (corrigida manualmente em algum momento, fora de migration) |
 | Anima como experiência principal | Usuário interage com uma única frente conversacional; capacidades internas ficam por trás, nunca como telas ou chats concorrentes | Evita fragmentar a experiência entre "falar com Anima" e "falar com outra coisa"; ver `anima-manifesto.md` |
-| Prisma reposicionado (jul/2026) | Deixa de ser persona paralela convocada pelo usuário; vira capacidade interna de Reflexão Crítica, acionada pelo Anima | Consistente com "Anima como experiência principal"; implementação técnica (`@prisma`) ainda pendente de reconciliação — ver §1a e [Marco 001](docs/marcos/001-nascimento-da-identidade.md) |
+| Prisma reposicionado (jul/2026) | Deixa de ser persona paralela convocada pelo usuário; vira capacidade interna de Reflexão Crítica, acionada pelo Anima | Consistente com "Anima como experiência principal"; exploração técnica de persona foi arquivada e o acionamento interno permanece futuro — ver §1a e [Marco 001](docs/marcos/001-nascimento-da-identidade.md) |
+| Orquestração de Trabalho (jul/2026) | Fundação futura em `work_items` + `work_events`; Modo Construção é o primeiro caso de uso, em bootstrap privado e manual | Permite provar intenção, aprovação, resultado e decisão antes de integrações, sem transformar o Anima atual em gerenciador de tarefas — ver [arquitetura](docs/arquitetura/orquestracao-de-trabalho.md) e [Marco 002](docs/marcos/002-anima-constroi-anima.md) |
 | Visão A agora / Visão B como norte (jul/2026) | Anima como sistema de evolução pessoal é o único trabalho ativo; orquestrador de capacidades / Sistema Operacional Pessoal fica documentado como norte, não vira backlog imediato | Evita que a visão de longo prazo engula o produto atual ou pare o roadmap tático em andamento; ver `anima-manifesto.md` e [Marco 001](docs/marcos/001-nascimento-da-identidade.md) |
 | Autonomia por nível de impacto (jul/2026) | Observação de baixo risco roda silenciosamente (atividade, nota, entidade, hipótese); ação de impacto estrutural/financeiro/irreversível sempre exige confirmação prévia | Generaliza o padrão de confirmação já usado em pilar pendente e hipótese de identidade para qualquer futura capacidade de execução; ver `anima-manifesto.md` |
 | Jornadas de evolução (jul/2026) | Anima não gerencia só tarefas — acompanha jornadas de vida variadas (skate, música, programação, carreira, quarto inteligente, etc.); relação com pilar/entidade/quest fica em aberto | Reconhece que nem toda evolução de vida é uma "atividade cronometrada"; ver §1g — decisão de schema é arquitetura futura, não desta atualização |
@@ -1071,11 +1080,11 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 > Atualizado em jun/2026: features P0–P4 + grafo de vida concluídas. Sistema com cobertura completa em web e mobile. Próximos passos são refinamento de UX, QA e integrações externas.
 
 ### Próximo
-- **Anima Core + Personas (visão jun/2026, ver §1a)** — evolução estrutural:
+- **Anima Core + capacidades (visão jun/2026, ver §1a)** — evolução estrutural:
   - **✅ Identidade Emergente — fundação (jun/2026):** tabelas `identity_hypotheses` + `identity_evidence` (migração `20260617000001`); gerador `infer-identity.ts` (Ollama, fire-and-forget na cadência do arquétipo) propõe/atualiza hipóteses com evidências rastreáveis e reforço de confiança; tela `/identity` (agrupada por tipo, barras de confiança, "por quê?" com evidências, confirmar/rejeitar). Generaliza `profiles.archetype`
-  - **Persona Prisma (próximo)** — modo reflexivo conversacional no mesmo chat (usa a Identidade + memória + contexto, não diretivo); v1 por convocação manual `@prisma`, antes de ativação automática
-  - **Confirmação conversacional** de hipóteses pelo Prisma (além da tela) + injeção da Identidade Emergente no prompt
-  - ~~**Controle de personas** (`[✓] Anima [✓] Prisma`) e **convocação explícita** `@anima`/`@prisma` (futuro)~~ — **superado (jul/2026):** Prisma reposicionado como capacidade interna, não persona paralela; ver §1a e [Marco 001](docs/marcos/001-nascimento-da-identidade.md). A pendência real que resta é só sobre `@prisma` (manter como atalho manual ou remover) — ver §1a
+  - **Prisma como capacidade interna (futuro)** — modo reflexivo no mesmo chat, acionado pelo Anima, usando Identidade + memória + contexto e sem interface própria
+  - **Confirmação conversacional** de hipóteses pelo Anima com apoio da capacidade reflexiva, além da tela
+  - ~~**Controle de personas** e convocação explícita~~ — **superado (jul/2026):** não será recuperado na arquitetura atual; ver §1a e [Marco 001](docs/marcos/001-nascimento-da-identidade.md)
 - **✅ Tela de entidades (`/entities`)** — `semantic_entities`/`entity_pillars` agrupadas por pilar, com tipo e ocorrências
 - **✅ Filtro no grafo** — toggle de entidades + foco por pilar (isola pilar + vizinhos)
 - **Chat-First Total — limpeza mobile (próximo)** — remover `LogActivityModal.tsx` e `lib/parse-activity.ts`; migrar mic button para o input do chat; garantir que toda entrada de atividades passa pelo chat; web já alinhado (nunca teve modal como entrada primária)

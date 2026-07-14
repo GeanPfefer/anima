@@ -112,7 +112,7 @@ Prisma não é uma persona paralela ao Anima. É uma capacidade interna.
 
 O usuário fala com o Anima. O Anima aciona o Prisma internamente quando fizer sentido refletir, criticar, questionar ou analisar uma decisão com mais profundidade — nunca como uma segunda frente de conversa que compete pela atenção do usuário.
 
-> Nota histórica: Prisma nasceu (jun/2026) como persona conversacional paralela ao Anima, convocada manualmente (`@prisma`). Foi reposicionado como capacidade interna nesta sessão — ver Marco 001. O `anima-prd.md` ainda descreve a implementação técnica anterior; a atualização do §1a é o próximo passo depois deste manifesto.
+> Nota histórica: Prisma nasceu (jun/2026) como persona conversacional paralela ao Anima, convocada manualmente (`@prisma`). Foi reposicionado como capacidade interna no Marco 001; a exploração técnica anterior foi retirada da árvore principal em jul/2026 e preservada em branch de resgate.
 
 ---
 

@@ -7,3 +7,4 @@
 | # | Data | Marco | Resumo |
 |---|------|-------|--------|
 | [001](001-nascimento-da-identidade.md) | 2026-07-06 | Nascimento da Identidade do Anima | Anima deixa de ser só "app de memória pessoal" e ganha visão de Sistema Operacional Pessoal, faseada (Agora / Depois / Futuro). Introduz jornadas de evolução, capacidades internas, regra de autonomia por impacto, e reposiciona o Prisma de persona paralela para capacidade interna de Reflexão Crítica. |
+| [002](002-anima-constroi-anima.md) | 2026-07-14 | Anima constrói Anima | O próprio Anima começa a se tornar o ambiente de coordenação da sua construção. O Modo Construção inaugura a Orquestração de Trabalho de forma privada e manual, com Claude e Codex como executores de capacidades, sem competir com a interface do Anima. |
