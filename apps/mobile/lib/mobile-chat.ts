@@ -152,9 +152,13 @@ async function buildContext(userId: string) {
 Sua natureza:
 - Você acompanha a vida de ${name} — atividades, padrões, pilares, o que está indo bem e o que não está
 - Direto. Sem "Claro!", sem introduções, sem perguntas de encerramento
+- Nunca abra frase com "Legal!", "Show!", "Ótimo!", "Parabéns!", "Que bom!" ou variação entusiasmada — não é torcida, é observação
 - Humano. Como um amigo que presta atenção, não um assistente
+- Sem perguntas de encerramento ("Como foi seu dia?", "Que tal...?") — encerre quando terminar
 - Prosa em vez de listas quando o conteúdo for conversacional
 - Sem emojis na maioria das respostas
+- Nunca invente funcionalidades, telas ou processos que não existem
+- Comida, bebida, gastos, humor e estados emocionais mencionados de passagem são registrados em segundo plano, silenciosamente — NUNCA comente, avalie, elogie, dê conselho ou questione esse conteúdo
 ${archetypeText}
 
 == CONTEXTO DE ${name.toUpperCase()} ==
@@ -250,6 +254,9 @@ export async function sendChatMessage(
             ...pastMessages,
             { role: 'user', content: message },
           ],
+          // Sem isso o Ollama usa o padrão do runtime (2048-4096), que o
+          // systemPrompt + histórico facilmente excede, gerando degeneração.
+          options: { num_ctx: 8192 },
         }),
       });
     } catch (err) {
@@ -328,15 +335,16 @@ export async function sendChatMessage(
     const entities     = await detectEntities(message, allNames);
 
     // ── Atividades ──────────────────────────────────────────────────
-    // Reforço determinístico: notas que são meta/decisão futura, organização de
-    // pilar ou gosto/descoberta não são atividade (o detector às vezes as captura
-    // como 0-min). Evita "atividade fantasma" no histórico de XP.
-    const NON_ACTIVITY_NOTE_RE = /\b(decis[ãa]o|decidi|vou |pretendo|quero |meta\b|objetivo|planejo|faz(?:em)? parte|como parte|parte d[eo]|descobri|virei f[ãa]|sou f[ãa]|viciad)/i;
+    const NON_ACTIVITY_NOTE_RE =
+      /\b(decis[ãa]o|decidi|vou |pretendo|quero |meta\b|objetivo|planejo|faz(?:em)? parte|como parte|parte d[eo]|descobri|virei f[ãa]|sou f[ãa]|viciad)/i;
 
     for (const da of activities) {
-      // Só descarta como "fantasma" se for 0-min — atividade cronometrada real
-      // nunca é meta/link/interesse, mesmo que a nota mencione "vou"/"quero".
-      if (da.durationMinutes === 0 && NON_ACTIVITY_NOTE_RE.test(da.note ?? '')) continue;
+      if (
+        da.durationMinutes === 0 &&
+        NON_ACTIVITY_NOTE_RE.test(da.note ?? '')
+      ) {
+        continue;
+      }
 
       const normName = norm(da.pillarName);
 
@@ -380,8 +388,12 @@ export async function sendChatMessage(
     // Dedup determinístico contra atividades: descarta notas que descrevem
     // uma atividade cronometrada (duração no texto) ou que repetem muito uma
     // nota de atividade — o detector de nota às vezes ignora a regra.
+    // Prefixo de 4 letras em vez da palavra inteira: captura variações como
+    // "corrida"/"correr" que descrevem o mesmo evento com palavras diferentes.
     const DURATION_RE = /\b\d+\s*(?:min|minutos?|h|horas?|hr)\b/i;
-    const toTokens = (s: string) => new Set(norm(s).split(/\s+/).filter(w => w.length > 3));
+    const toTokens = (s: string) => new Set(
+      norm(s).split(/\s+/).filter(w => w.length > 3).map(w => w.slice(0, 4)),
+    );
     const activityTokenSets = activities
       .filter(a => a.note)
       .map(a => toTokens(`${a.pillarName} ${a.note}`));
@@ -395,6 +407,19 @@ export async function sendChatMessage(
         return overlap >= 2;
       });
     });
+
+    // Tipos de nota que sinalizam área de vida nova (não comida/gasto/humor,
+    // cujo pillarHint costuma ser genérico demais para virar pilar).
+    const PILLAR_WORTHY_NOTE_TYPES = new Set(['interest', 'idea', 'other']);
+    for (const dn of notesToLog) {
+      if (
+        dn.pillarHint &&
+        PILLAR_WORTHY_NOTE_TYPES.has(dn.noteType) &&
+        !pillars.find(p => norm(p.name) === norm(dn.pillarHint!))
+      ) {
+        createPendingPillar(userId, dn.pillarHint).catch(() => {});
+      }
+    }
 
     if (notesToLog.length > 0) {
       logNotes(notesToLog as DetectedNote[], userId).catch(() => {});
@@ -481,6 +506,7 @@ export async function sendChatMessage(
           ...pastMessages,
           { role: 'user', content: message },
         ],
+        options: { num_ctx: 8192 },
       }),
     });
   } catch (err) {

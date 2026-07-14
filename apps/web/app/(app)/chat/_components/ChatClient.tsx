@@ -147,7 +147,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     await readStream(res);
     if (linksHeader) {
       try {
-        const links = JSON.parse(linksHeader) as ProposedLink[];
+        const links = JSON.parse(decodeURIComponent(linksHeader)) as ProposedLink[];
         setPendingLinks(prev => {
           const seen = new Set(prev.map(l => `${l.childId}|${l.parentName.toLowerCase()}`));
           return [...prev, ...links.filter(l => !seen.has(`${l.childId}|${l.parentName.toLowerCase()}`))];
