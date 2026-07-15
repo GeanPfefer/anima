@@ -16,7 +16,7 @@ Documento arquitetural: [`../arquitetura/orquestracao-de-trabalho.md`](../arquit
 | F5 | Concluída | Execução manual, resultado, correções, revisão e encerramento preservando histórico |
 | F6 | Concluída | Contexto versionado por referências, proveniência reconstruível e conversa arquivável sem exclusão |
 | F7 | Concluída | Ciclo completo no mobile, múltiplos trabalhos sem duplicação e resolução explícita de foco ambíguo |
-| F8 | Não iniciada | Contrato de adaptadores e executor falso; integrações reais continuam fora de escopo até nova aprovação |
+| F8 | Concluída | Contrato independente de fornecedor e executor falso cobrem sucesso, falha, timeout, cancelamento e tentativas limitadas; integrações reais permanecem fora de escopo |
 
 ## F0 — Estabilização
 

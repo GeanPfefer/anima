@@ -5,3 +5,4 @@ export * from './validation';
 export * from './repository';
 export * from './service';
 export * from './interpret';
+export * from './executor';
