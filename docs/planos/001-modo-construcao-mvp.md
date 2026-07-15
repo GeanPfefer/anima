@@ -13,10 +13,10 @@ Documento arquitetural: [`../arquitetura/orquestracao-de-trabalho.md`](../arquit
 | F2 | Concluída | Persistência mínima, contratos transacionais, RLS, tipos e testes pgTAP |
 | F3 | Concluída | Domínio compartilhado, serviço e adaptador Supabase independentes de fornecedor |
 | F4 | Concluída | Proposta versionada e decisões de aprovação integradas ao chat web |
-| F5 | Concluída | Execução manual, resultado, correções, revisão e encerramento preservando histórico |
+| F5 | Implementada; aguarda comprovação funcional ao vivo | Execução manual, resultado com evidências tipadas (validações/limitações), correções atômicas, revisão versionada e encerramento preservando histórico; provada por pgTAP, testes de componente e integração |
 | F6 | Concluída | Contexto versionado por referências, proveniência reconstruível e conversa arquivável sem exclusão |
-| F7 | Concluída | Ciclo completo no mobile, múltiplos trabalhos sem duplicação e resolução explícita de foco ambíguo |
-| F8 | Concluída | Contrato independente de fornecedor e executor falso cobrem sucesso, falha, timeout, cancelamento e tentativas limitadas; integrações reais permanecem fora de escopo |
+| F7 | Implementada; aguarda comprovação funcional ao vivo | Ciclo completo no mobile, foco refletido nas duas plataformas e ambiguidade respondível na conversa; provada por testes automatizados, sem validação em dispositivo |
+| F8 | Implementada; aguarda comprovação funcional ao vivo | Executor limitado com término real, ciclo de execução persistido (início/desfecho correlacionados, resultado tardio rejeitado); contrato provado por testes de core e pgTAP, ainda não conectado à UI (Estágio 1 é manual) |
 
 ## F0 — Estabilização
 
