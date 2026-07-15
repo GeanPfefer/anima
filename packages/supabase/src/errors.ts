@@ -3,7 +3,9 @@ export interface SupabaseFailure { code?: string; message?: string; details?: st
 export const mapSupabaseFailure = <T>(error: SupabaseFailure, mutation: boolean): WorkOperationResult<T> => {
   const message = (error.message ?? '').toLowerCase();
   if (error.code === 'P0002') return failure('work_item_not_found', 'Item de trabalho não encontrado.');
-  if (error.code === '40001' || message.includes('proposal version')) return failure('version_conflict', 'O item mudou desde a última leitura.');
+  // 55000 (object_not_in_prerequisite_state): o item mudou desde a leitura do
+  // cliente. Não usar 40001 — PostgREST reexecuta serialization_failure em loop.
+  if (error.code === '55000' || message.includes('proposal version')) return failure('version_conflict', 'O item mudou desde a última leitura.');
   if (error.code === '22023') return failure(message.includes('transition') ? 'invalid_transition' : 'invalid_input', 'A operação não é válida no estado atual.');
   if (error.code === '42501') {
     if (message.includes('authentication')) return failure('authentication_required', 'Autenticação necessária.');

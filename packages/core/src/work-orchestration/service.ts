@@ -1,4 +1,4 @@
-import type { AttachWorkContextCommand, CreateWorkProposalCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, SubmitWorkResultCommand } from './commands';
+import type { AttachWorkContextCommand, CreateWorkProposalCommand, RequestProposalRevisionCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, SubmitWorkResultCommand } from './commands';
 import { failure, type WorkOperationResult } from './errors';
 import type { WorkOrchestrationRepository } from './repository';
 import type { ApprovalDecision, WorkContextSnapshot, WorkEvent, WorkItem, WorkItemId } from './types';
@@ -26,8 +26,12 @@ export class WorkOrchestrationService {
     if (!this.validVersion(command.expectedProposalVersion) || !isValidWorkResult(command.result)) return Promise.resolve(invalid('Resultado inválido.'));
     return this.repository.submitResult(command);
   }
+  requestProposalRevision(command:RequestProposalRevisionCommand):Promise<WorkOperationResult<WorkItem>>{
+    if(!this.validVersion(command.expectedProposalVersion)||!command.requestedChanges.trim()||!isValidWorkIntent(command.intent)||!isValidWorkProposal(command.proposal))return Promise.resolve(invalid('Revisão solicitada inválida.'));
+    return this.repository.requestProposalRevision(command);
+  }
   reviewResult(command: ReviewWorkResultCommand): Promise<WorkOperationResult<WorkItem>> {
-    if (!this.validVersion(command.expectedProposalVersion) || !isValidResultReviewDecision(command.decision)) return Promise.resolve(invalid('Decisão de revisão inválida.'));
+    if (!this.validVersion(command.expectedProposalVersion) || !command.reviewedResultEventId || !isValidResultReviewDecision(command.decision)) return Promise.resolve(invalid('Decisão de revisão inválida.'));
     return this.repository.reviewResult(command);
   }
   attachContext(command: AttachWorkContextCommand): Promise<WorkOperationResult<WorkContextSnapshot>> {

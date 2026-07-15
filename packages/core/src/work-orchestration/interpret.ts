@@ -35,3 +35,4 @@ export const resolveWorkFocus = (candidateIds: readonly string[], currentItemId?
   if (unique.length === 1) return { kind: 'focused', itemId: unique[0]! };
   return { kind: 'confirmation_required', itemIds: unique };
 };
+export const isWorkContinuation=(message:string):boolean=>/\b(?:continue|continuar|retome|retomar|ness[ae]|neste|nesse|tarefa|trabalho|proposta|resultado|ajuste|corrija|correção|isso|esse ponto)\b/i.test(message)&&!/\b(?:hoje|ontem|dormi|corri|treinei|estudei|me senti)\b/i.test(message);
