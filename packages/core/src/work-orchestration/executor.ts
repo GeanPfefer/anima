@@ -1,6 +1,6 @@
 import type { WorkCapability, WorkContextReference, WorkItemId } from './types';
 
-export interface ExecutionLimits { readonly maxAttempts: number; readonly timeoutMs: number; }
+export interface ExecutionLimits { readonly maxAttempts: number; readonly timeoutMs: number; readonly shutdownGraceMs?: number; }
 export interface WorkExecutionRequest {
   readonly workItemId: WorkItemId;
   readonly capability: WorkCapability;
@@ -15,31 +15,68 @@ export interface WorkExecutorAdapter {
   readonly id: string;
   execute(request: WorkExecutionRequest, signal: AbortSignal): Promise<ExecutorAttemptResult>;
 }
+// terminatedCleanly registra se o executor reconheceu o aborto e encerrou
+// dentro da janela de graça; false significa execução abandonada, informação
+// necessária antes de integrar executores reais com efeitos externos.
 export type WorkExecutionOutcome =
   | { readonly kind: 'succeeded'; readonly executorId: string; readonly attempts: number; readonly summary: string; readonly resultReferences: readonly string[] }
   | { readonly kind: 'failed'; readonly executorId: string; readonly attempts: number; readonly message: string }
-  | { readonly kind: 'timed_out'; readonly executorId: string; readonly attempts: number }
-  | { readonly kind: 'cancelled'; readonly executorId: string; readonly attempts: number };
+  | { readonly kind: 'timed_out'; readonly executorId: string; readonly attempts: number; readonly terminatedCleanly: boolean }
+  | { readonly kind: 'cancelled'; readonly executorId: string; readonly attempts: number; readonly terminatedCleanly: boolean };
 
-const validLimits = ({maxAttempts,timeoutMs}:ExecutionLimits) => Number.isInteger(maxAttempts) && maxAttempts >= 1 && maxAttempts <= 5 && Number.isInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= 300_000;
+type AttemptSettlement =
+  | { readonly status: 'result'; readonly result: ExecutorAttemptResult }
+  | { readonly status: 'rejected'; readonly message: string };
+
+const DEFAULT_SHUTDOWN_GRACE_MS = 1_000;
+const validLimits = ({maxAttempts,timeoutMs,shutdownGraceMs}:ExecutionLimits) =>
+  Number.isInteger(maxAttempts) && maxAttempts >= 1 && maxAttempts <= 5 &&
+  Number.isInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= 300_000 &&
+  (shutdownGraceMs === undefined || (Number.isInteger(shutdownGraceMs) && shutdownGraceMs >= 0 && shutdownGraceMs <= 30_000));
+
+const delay = <T>(ms:number, value:T):{promise:Promise<T>; cancel:()=>void} => {
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  const promise = new Promise<T>(resolve => { timer = setTimeout(()=>resolve(value), ms); });
+  return { promise, cancel: () => { if (timer) clearTimeout(timer); } };
+};
 
 export class BoundedWorkExecutor {
   async run(request: WorkExecutionRequest, adapter: WorkExecutorAdapter, signal?: AbortSignal): Promise<WorkExecutionOutcome> {
     if (!request.objective.trim() || !validLimits(request.limits)) throw new Error('Limites ou objetivo de execução inválidos.');
-    if (signal?.aborted) return {kind:'cancelled',executorId:adapter.id,attempts:0};
-    for (let attempt=1;attempt<=request.limits.maxAttempts;attempt++) {
-      const controller=new AbortController();
-      const cancel=()=>controller.abort(); signal?.addEventListener('abort',cancel,{once:true});
-      let timer:ReturnType<typeof setTimeout>|undefined;
-      const timeout=new Promise<'timeout'>(resolve=>{timer=setTimeout(()=>{controller.abort();resolve('timeout');},request.limits.timeoutMs)});
-      const cancelled=new Promise<'cancelled'>(resolve=>controller.signal.addEventListener('abort',()=>{if(signal?.aborted)resolve('cancelled')},{once:true}));
-      const result=await Promise.race([adapter.execute(request,controller.signal),timeout,cancelled]);
-      if(timer)clearTimeout(timer); signal?.removeEventListener('abort',cancel);
-      if(signal?.aborted) return {kind:'cancelled',executorId:adapter.id,attempts:attempt};
-      if(result==='cancelled') return {kind:'cancelled',executorId:adapter.id,attempts:attempt};
-      if(result==='timeout') return {kind:'timed_out',executorId:adapter.id,attempts:attempt};
-      if(result.kind==='success') return {kind:'succeeded',executorId:adapter.id,attempts:attempt,summary:result.summary,resultReferences:result.resultReferences};
-      if(!result.retryable||attempt===request.limits.maxAttempts) return {kind:'failed',executorId:adapter.id,attempts:attempt,message:result.message};
+    const graceMs = request.limits.shutdownGraceMs ?? DEFAULT_SHUTDOWN_GRACE_MS;
+    if (signal?.aborted) return { kind:'cancelled', executorId:adapter.id, attempts:0, terminatedCleanly:true };
+    for (let attempt=1; attempt<=request.limits.maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      signal?.addEventListener('abort', cancel, { once:true });
+      let resolveCancelled!:(value:'cancelled')=>void;
+      const cancelled = new Promise<'cancelled'>(resolve => { resolveCancelled = resolve; });
+      const notifyCancelled = () => resolveCancelled('cancelled');
+      signal?.addEventListener('abort', notifyCancelled, { once:true });
+      const timeout = delay(request.limits.timeoutMs, 'timeout' as const);
+      const settlement:Promise<AttemptSettlement> = adapter.execute(request, controller.signal).then(
+        result => ({ status:'result', result } as const),
+        cause => ({ status:'rejected', message: cause instanceof Error ? cause.message : String(cause) } as const),
+      );
+      try {
+        const first = await Promise.race([settlement, timeout.promise, ...(signal ? [cancelled] : [])]);
+        if (first === 'timeout' || first === 'cancelled') {
+          controller.abort();
+          const grace = delay(graceMs, false as const);
+          const terminatedCleanly = await Promise.race([settlement.then(()=>true as const), grace.promise]);
+          grace.cancel();
+          const kind = first === 'cancelled' ? 'cancelled' : 'timed_out';
+          return { kind, executorId:adapter.id, attempts:attempt, terminatedCleanly };
+        }
+        if (signal?.aborted) return { kind:'cancelled', executorId:adapter.id, attempts:attempt, terminatedCleanly:true };
+        if (first.status === 'rejected') return { kind:'failed', executorId:adapter.id, attempts:attempt, message:first.message };
+        if (first.result.kind === 'success') return { kind:'succeeded', executorId:adapter.id, attempts:attempt, summary:first.result.summary, resultReferences:first.result.resultReferences };
+        if (!first.result.retryable || attempt === request.limits.maxAttempts) return { kind:'failed', executorId:adapter.id, attempts:attempt, message:first.result.message };
+      } finally {
+        timeout.cancel();
+        signal?.removeEventListener('abort', cancel);
+        signal?.removeEventListener('abort', notifyCancelled);
+      }
     }
     throw new Error('Execução terminou sem condição terminal.');
   }
