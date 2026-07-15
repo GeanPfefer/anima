@@ -18,6 +18,9 @@ export async function routeWorkMessage(message:string,sourceMessageId:string):Pr
   return{kind:'none'};
 }
 export async function loadWorkItems(sourceMessageIds:readonly string[]):Promise<Record<string,WorkPresentation>>{const entries=await Promise.all(sourceMessageIds.map(async sourceMessageId=>{const result=required(await service().findItemsBySourceMessageId(sourceMessageId));const item=result.at(-1);return item?[sourceMessageId,await presentation(item)]as const:null}));return Object.fromEntries(entries.filter((entry):entry is readonly[string,WorkPresentation]=>entry!==null))}
+// Reconciliação após falha de mutação: relê o estado real para que o retry
+// parta da versão atual em vez de repetir uma versão obsoleta.
+export async function reloadWork(workItemId:string):Promise<WorkPresentation>{return presentation(required(await service().getItem(workItemId)))}
 export async function getWorkFocus():Promise<string|null>{const{data,error}=await supabase.from('work_focus').select('work_item_id').maybeSingle();if(error)throw error;return data?.work_item_id??null}
 export async function setWorkFocus(workItemId:string):Promise<void>{const{error}=await supabase.rpc('set_work_focus',{work_item_id:workItemId});if(error)throw error}
 // Resposta do usuário à pergunta de ambiguidade: fixa o foco escolhido e

@@ -1,19 +1,20 @@
 import { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
 import { describeValidationOutcome, parseWorkResultValidations, type WorkPresentation } from '@anima/core';
-import { decideWork, requestProposalCorrection, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
+import { decideWork, reloadWork, requestProposalCorrection, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
 
 export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void;focused?:boolean;onFocus?:()=>void}) {
   const {item,latestResult,availableActions}=presentation;
   const [detail,setDetail]=useState('');
+  const [references,setReferences]=useState('');
   const [validations,setValidations]=useState('');
   const [limitations,setLimitations]=useState('');
   const [mode,setMode]=useState<'none'|'proposal_changes'|'result'|'result_changes'>('none');
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const allowed=(action:WorkPresentation['availableActions'][number])=>availableActions.includes(action);
-  async function run(operation:Promise<WorkPresentation>){setBusy(true);setError('');try{onChange(await operation);setMode('none');setDetail('');setValidations('');setLimitations('');}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível atualizar o trabalho.');}setBusy(false);}
+  async function run(operation:Promise<WorkPresentation>){setBusy(true);setError('');try{onChange(await operation);setMode('none');setDetail('');setReferences('');setValidations('');setLimitations('');}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível atualizar o trabalho.');onChange(await reloadWork(item.id).catch(()=>presentation));}setBusy(false);}
   const action=(label:string,onPress:()=>void)=><TouchableOpacity disabled={busy} onPress={onPress} style={styles.action}><Text style={styles.actionText}>{label}</Text></TouchableOpacity>;
   return <View style={styles.card}>
     <View style={styles.header}><Text style={styles.label}>{focused?'Trabalho em foco':'Trabalho'} · v{item.proposalVersion}</Text><Text style={styles.state}>{item.state}</Text></View>
@@ -33,9 +34,10 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
     {mode==='none'&&allowed('submit_result')&&action('Registrar resultado',()=>setMode('result'))}
     {mode==='result'&&<View>
       <TextInput accessibilityLabel="Resumo do resultado" value={detail} onChangeText={setDetail} placeholder="Resumo do resultado" placeholderTextColor={colors.textMuted} style={styles.input} multiline/>
+      <TextInput accessibilityLabel="Referências produzidas" value={references} onChangeText={setReferences} placeholder="Referências, uma por linha" placeholderTextColor={colors.textMuted} style={styles.input} multiline/>
       <TextInput accessibilityLabel="Validações executadas" value={validations} onChangeText={setValidations} placeholder="Validações, uma por linha (ok: / falha:)" placeholderTextColor={colors.textMuted} style={styles.input} multiline/>
       <TextInput accessibilityLabel="Limitações conhecidas" value={limitations} onChangeText={setLimitations} placeholder="Limitações, uma por linha" placeholderTextColor={colors.textMuted} style={styles.input} multiline/>
-      <TouchableOpacity disabled={!detail.trim()||busy} onPress={()=>void run(submitWorkResult(presentation,detail.trim(),[],parseWorkResultValidations(validations),limitations.split('\n').map(value=>value.trim()).filter(Boolean)))} style={styles.action}><Text style={styles.actionText}>Confirmar</Text></TouchableOpacity>
+      <TouchableOpacity disabled={!detail.trim()||busy} onPress={()=>void run(submitWorkResult(presentation,detail.trim(),references.split('\n').map(value=>value.trim()).filter(Boolean),parseWorkResultValidations(validations),limitations.split('\n').map(value=>value.trim()).filter(Boolean)))} style={styles.action}><Text style={styles.actionText}>Confirmar</Text></TouchableOpacity>
     </View>}
     {mode==='none'&&allowed('accept_result')&&latestResult&&<View style={styles.actions}>{action(`Aceitar resultado v${latestResult.proposalVersion}`,()=>void run(reviewWorkResult(presentation,{type:'accept'})))}{action('Pedir correções',()=>setMode('result_changes'))}</View>}
     {mode==='result_changes'&&<Editor value={detail} onChange={setDetail} label="Correções necessárias" onConfirm={()=>void run(reviewWorkResult(presentation,{type:'request_changes',requestedChanges:detail.trim()}))} />}
