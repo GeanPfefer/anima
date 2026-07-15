@@ -1,0 +1,4 @@
+export type WorkOrchestrationErrorCode = 'authentication_required'|'orchestration_not_enabled'|'work_item_not_found'|'source_message_not_eligible'|'invalid_input'|'invalid_transition'|'version_conflict'|'permission_denied'|'ambiguous_outcome'|'persistence_failure';
+export interface WorkOrchestrationError { readonly code: WorkOrchestrationErrorCode; readonly message: string; readonly retryable: boolean; readonly cause?: unknown; }
+export type WorkOperationResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: WorkOrchestrationError };
+export const failure = (code: WorkOrchestrationErrorCode, message: string, retryable = false, cause?: unknown): WorkOperationResult<never> => ({ ok: false, error: { code, message, retryable, ...(cause === undefined ? {} : { cause }) } });
