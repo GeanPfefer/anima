@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { mapSupabaseFailure, proposalFromDatabase, proposalToDatabase, SupabaseWorkOrchestrationRepository } from '.';
 const row: Tables<'work_items'>={id:'i',user_id:'u',source_message_id:'m',state:'proposed',impact_level:'low',capability:'planning',original_request:'pedido',intent:{kind:'build'},proposal:{schema_version:1,data:{summary:'s',objective:'o',included_scope:[],excluded_scope:[],expected_effects:[],risks:[]}},proposal_version:1,created_at:'2026-07-14T00:00:00Z',updated_at:'2026-07-14T00:00:00Z'};
 const proposal={schemaVersion:1 as const,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}};
-const clientWithRpc=(rpc:jest.Mock):SupabaseClient<Database>=>({rpc} as unknown as SupabaseClient<Database>);
+const clientWithRpc=(rpc:jest.Mock):SupabaseClient<Database>=>{const query={select:()=>query,eq:()=>query,maybeSingle:async()=>({data:row,error:null})};return{rpc,from:()=>query} as unknown as SupabaseClient<Database>;};
 describe('adapter Supabase',()=>{
   test('converte envelope em ambas as direções',()=>expect(proposalFromDatabase(proposalToDatabase(proposal))).toEqual(proposal));
   test('chama create_work_proposal com argumentos exatos',async()=>{const rpc=jest.fn().mockResolvedValue({data:row,error:null});const repo=new SupabaseWorkOrchestrationRepository(clientWithRpc(rpc));const result=await repo.createProposal({sourceMessageId:'m',impactLevel:'low',capability:'planning',intent:{kind:'build'},proposal});expect(result.ok).toBe(true);expect(rpc).toHaveBeenCalledWith('create_work_proposal',expect.objectContaining({source_message_id:'m',impact_level:'low',capability:'planning'}));});
