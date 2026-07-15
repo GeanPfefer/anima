@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@anima/core": "*",
+    "@anima/supabase": "*",
     "@anima/types": "*",
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@supabase/supabase-js": "^2.48.1",

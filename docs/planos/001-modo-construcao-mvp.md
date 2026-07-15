@@ -15,7 +15,7 @@ Documento arquitetural: [`../arquitetura/orquestracao-de-trabalho.md`](../arquit
 | F4 | Concluída | Proposta versionada e decisões de aprovação integradas ao chat web |
 | F5 | Concluída | Execução manual, resultado, correções, revisão e encerramento preservando histórico |
 | F6 | Concluída | Contexto versionado por referências, proveniência reconstruível e conversa arquivável sem exclusão |
-| F7 | Não iniciada | Paridade mobile e múltiplos trabalhos/foco |
+| F7 | Concluída | Ciclo completo no mobile, múltiplos trabalhos sem duplicação e resolução explícita de foco ambíguo |
 | F8 | Não iniciada | Contrato de adaptadores e executor falso; integrações reais continuam fora de escopo até nova aprovação |
 
 ## F0 — Estabilização

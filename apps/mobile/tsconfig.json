@@ -6,6 +6,7 @@
     "paths": {
       "@anima/types": ["../../packages/types/src/index.ts"],
       "@anima/core": ["../../packages/core/src/index.ts"],
+      "@anima/supabase": ["../../packages/supabase/src/index.ts"],
       "@/*": ["./*"]
     }
   },

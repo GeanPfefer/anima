@@ -9,6 +9,7 @@ import { createPendingPillar } from './create-pending-pillar';
 import { inferAndSaveArchetype } from './infer-archetype';
 import { getOrCreatePillar } from './activity';
 import { logNotes } from './log-note';
+import { proposeWorkForMessage } from './mobile-work';
 
 const OLLAMA_URL   = process.env.EXPO_PUBLIC_OLLAMA_URL   ?? 'http://100.68.239.78:11434';
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -176,18 +177,21 @@ ${recentText}
 }
 
 export type ChatMessage = {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
 };
 
 export async function loadHistory(userId: string): Promise<ChatMessage[]> {
+  const { data: session } = await supabase.from('conversation_sessions').select('id').eq('user_id',userId).is('archived_at',null).maybeSingle();
+  if (!session) return [];
   const { data } = await supabase
     .from('ai_conversations')
-    .select('role, content')
-    .eq('user_id', userId)
+    .select('id, role, content')
+    .eq('session_id', session.id)
     .order('created_at', { ascending: false })
     .limit(20);
-  return (data ?? []).reverse().map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+  return (data ?? []).reverse().map(m => ({ id:m.id, role: m.role as 'user' | 'assistant', content: m.content }));
 }
 
 export async function getOnboardingGreeting(userId: string): Promise<string | null> {
@@ -315,7 +319,8 @@ export async function sendChatMessage(
   }
 
   // ── Chat regular ────────────────────────────────────────────────
-  await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message });
+  const { data: sourceMessage } = await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message }).select('id').single();
+  if (sourceMessage) void proposeWorkForMessage(message,sourceMessage.id);
 
   // Fire-and-forget: detecção completa (sequencial para não sobrecarregar Ollama)
   ;(async () => {
@@ -562,5 +567,7 @@ export async function sendChatMessage(
 }
 
 export async function clearHistory(userId: string): Promise<void> {
-  await supabase.from('ai_conversations').delete().eq('user_id', userId);
+  void userId;
+  const { error } = await supabase.rpc('archive_current_conversation');
+  if (error) throw error;
 }

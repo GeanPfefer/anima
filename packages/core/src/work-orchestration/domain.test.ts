@@ -1,4 +1,4 @@
-import { isActiveWorkState, isTerminalWorkState, isValidApprovalDecision, isValidProposalVersion, isValidWorkIntent, isValidWorkProposal, isValidWorkResult, isWaitingForUserWorkState, type WorkProposal } from '.';
+import { isActiveWorkState, isTerminalWorkState, isValidApprovalDecision, isValidProposalVersion, isValidWorkIntent, isValidWorkProposal, isValidWorkResult, isWaitingForUserWorkState, resolveWorkFocus, type WorkProposal } from '.';
 const proposal: WorkProposal = { schemaVersion: 1, data: { summary: 'Resumo', objective: 'Objetivo', includedScope: ['a'], excludedScope: [], expectedEffects: ['b'], risks: [] } };
 describe('domínio da orquestração', () => {
   test('aceita proposta V1 válida', () => expect(isValidWorkProposal(proposal)).toBe(true));
@@ -8,4 +8,5 @@ describe('domínio da orquestração', () => {
   test('exige contexto nas decisões', () => { expect(isValidApprovalDecision({ type: 'request_changes', requestedChanges: '' })).toBe(false); expect(isValidApprovalDecision({ type: 'defer', reason: 'depois' })).toBe(true); });
   test('exige versão inteira positiva', () => { expect(isValidProposalVersion(1)).toBe(true); expect(isValidProposalVersion(0)).toBe(false); expect(isValidProposalVersion(1.5)).toBe(false); });
   test('classifica estados', () => { expect(isTerminalWorkState('completed')).toBe(true); expect(isWaitingForUserWorkState('review')).toBe(true); expect(isActiveWorkState('in_progress')).toBe(true); });
+  test('preserva foco sem duplicar e pede confirmação na ambiguidade', () => { expect(resolveWorkFocus(['a','a'],'a')).toEqual({kind:'focused',itemId:'a'}); expect(resolveWorkFocus(['a','b'])).toEqual({kind:'confirmation_required',itemIds:['a','b']}); });
 });

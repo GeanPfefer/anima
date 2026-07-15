@@ -22,6 +22,9 @@ import {
   type ChatMessage,
 } from '@/lib/mobile-chat';
 import { colors, spacing, radius } from '@/constants/theme';
+import type { WorkItem } from '@anima/core';
+import { MobileWorkCard } from '@/components/MobileWorkCard';
+import { loadWorkItems } from '@/lib/mobile-work';
 
 export default function ChatScreen() {
   const insets  = useSafeAreaInsets();
@@ -33,6 +36,7 @@ export default function ChatScreen() {
   const [input,            setInput]            = useState('');
   const [isStreaming,      setIsStreaming]       = useState(false);
   const [loading,          setLoading]          = useState(true);
+  const [workItems,        setWorkItems]        = useState<Record<string,WorkItem>>({});
 
   const listRef = useRef<FlatList<ChatMessage | { role: 'streaming'; content: string }>>(null);
 
@@ -51,6 +55,7 @@ export default function ChatScreen() {
             }
           } else {
             setMessages(history);
+            setWorkItems(await loadWorkItems(history.flatMap(message=>message.role==='user'&&message.id?[message.id]:[])));
           }
         })
         .catch(() => {})
@@ -86,6 +91,7 @@ export default function ChatScreen() {
       // After streaming: reload history to get the saved assistant message
       const updated = await loadHistory(userId);
       setMessages(updated);
+      setWorkItems(await loadWorkItems(updated.flatMap(message=>message.role==='user'&&message.id?[message.id]:[])));
       setStreamingContent('');
     } catch (err) {
       const isTimeout = err instanceof Error && err.message === 'timeout';
@@ -105,14 +111,14 @@ export default function ChatScreen() {
 
   function handleClear() {
     if (!userId) return;
-    Alert.alert('Limpar histórico', 'Apagar todo o histórico desta conversa?', [
+    Alert.alert('Nova conversa', 'Arquivar esta conversa e iniciar uma nova? O histórico será preservado.', [
       { text: 'Cancelar', style: 'cancel' },
       {
-        text: 'Apagar',
-        style: 'destructive',
+        text: 'Arquivar',
         onPress: () => {
           clearHistory(userId).catch(() => {});
           setMessages([]);
+          setWorkItems({});
           setStreamingContent('');
         },
       },
@@ -132,7 +138,7 @@ export default function ChatScreen() {
     const isAssistant = item.role === 'assistant' || isStreamed;
 
     return (
-      <View style={[styles.messageRow, isUser ? styles.messageRowUser : styles.messageRowAssistant]}>
+      <View style={styles.messageContainer}><View style={[styles.messageRow, isUser ? styles.messageRowUser : styles.messageRowAssistant]}>
         {isAssistant && (
           <View style={styles.avatarDot} />
         )}
@@ -142,7 +148,7 @@ export default function ChatScreen() {
             {isStreamed && <Text style={styles.cursor}>▋</Text>}
           </Text>
         </View>
-      </View>
+      </View>{isUser&&'id' in item&&item.id&&workItems[item.id]&&<MobileWorkCard item={workItems[item.id]!} onChange={next=>setWorkItems(previous=>({...previous,[item.id!]:next}))}/>}</View>
     );
   }
 
@@ -156,7 +162,7 @@ export default function ChatScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Anima</Text>
         <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
-          <Text style={styles.clearBtnText}>Limpar</Text>
+          <Text style={styles.clearBtnText}>Nova conversa</Text>
         </TouchableOpacity>
       </View>
 
@@ -256,6 +262,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: spacing.xs,
   },
+  messageContainer: { gap: spacing.xs },
   messageRowUser: {
     justifyContent: 'flex-end',
   },
