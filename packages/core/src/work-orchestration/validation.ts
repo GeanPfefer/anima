@@ -4,7 +4,11 @@ const textList = (value: readonly string[]): boolean => value.every(nonEmpty);
 export const isValidProposalVersion = (value: ProposalVersion): boolean => Number.isInteger(value) && value > 0;
 export const isValidWorkIntent = (value: WorkIntent): boolean => value !== null && typeof value === 'object' && !Array.isArray(value);
 export const isValidWorkProposal = (value: WorkProposal): boolean => value.schemaVersion === 1 && nonEmpty(value.data.summary) && nonEmpty(value.data.objective) && textList(value.data.includedScope) && textList(value.data.excludedScope) && textList(value.data.expectedEffects) && textList(value.data.risks);
-export const isValidWorkResult = (value: WorkResultInput): boolean => nonEmpty(value.summary) && textList(value.resultReferences);
+const validationOutcomes = new Set(['passed', 'failed', 'declared']);
+export const isValidWorkResult = (value: WorkResultInput): boolean =>
+  nonEmpty(value.summary) && textList(value.resultReferences)
+  && (value.validations === undefined || value.validations.every(validation => nonEmpty(validation.label) && validationOutcomes.has(validation.outcome)))
+  && (value.limitations === undefined || textList(value.limitations));
 export const isValidApprovalDecision = (value: ApprovalDecision): boolean => value.type === 'approve' || value.type === 'reject' || (value.type === 'request_changes' && nonEmpty(value.requestedChanges)) || (value.type === 'defer' && nonEmpty(value.reason));
 export const isValidResultReviewDecision = (value: ResultReviewDecision): boolean => value.type === 'accept' || (value.type === 'request_changes' && nonEmpty(value.requestedChanges));
 export const isValidWorkContextReferences = (value: readonly WorkContextReference[]): boolean => value.length > 0 && value.every(reference => nonEmpty(reference.kind) && nonEmpty(reference.id));

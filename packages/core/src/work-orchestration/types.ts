@@ -24,7 +24,16 @@ export interface WorkProposalV1 {
   };
 }
 export type WorkProposal = WorkProposalV1;
-export interface WorkResultInput { readonly summary: string; readonly resultReferences: readonly string[]; }
+// 'declared' marca uma validação relatada sem classificação verificável:
+// o relato do autor nunca é promovido automaticamente a evidência factual.
+export type WorkResultValidationOutcome = 'passed' | 'failed' | 'declared';
+export interface WorkResultValidation { readonly label: string; readonly outcome: WorkResultValidationOutcome; }
+export interface WorkResultInput {
+  readonly summary: string;
+  readonly resultReferences: readonly string[];
+  readonly validations?: readonly WorkResultValidation[];
+  readonly limitations?: readonly string[];
+}
 export type ResultReviewDecision =
   | { readonly type: 'accept' }
   | { readonly type: 'request_changes'; readonly requestedChanges: string };

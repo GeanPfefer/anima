@@ -1,27 +1,41 @@
 import { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
-import type { WorkPresentation } from '@anima/core';
+import { describeValidationOutcome, parseWorkResultValidations, type WorkPresentation } from '@anima/core';
 import { decideWork, requestProposalCorrection, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
 
 export function MobileWorkCard({presentation,onChange}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void}) {
   const {item,latestResult,availableActions}=presentation;
   const [detail,setDetail]=useState('');
+  const [validations,setValidations]=useState('');
+  const [limitations,setLimitations]=useState('');
   const [mode,setMode]=useState<'none'|'proposal_changes'|'result'|'result_changes'>('none');
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const allowed=(action:WorkPresentation['availableActions'][number])=>availableActions.includes(action);
-  async function run(operation:Promise<WorkPresentation>){setBusy(true);setError('');try{onChange(await operation);setMode('none');setDetail('');}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível atualizar o trabalho.');}setBusy(false);}
+  async function run(operation:Promise<WorkPresentation>){setBusy(true);setError('');try{onChange(await operation);setMode('none');setDetail('');setValidations('');setLimitations('');}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível atualizar o trabalho.');}setBusy(false);}
   const action=(label:string,onPress:()=>void)=><TouchableOpacity disabled={busy} onPress={onPress} style={styles.action}><Text style={styles.actionText}>{label}</Text></TouchableOpacity>;
   return <View style={styles.card}>
     <View style={styles.header}><Text style={styles.label}>Trabalho · v{item.proposalVersion}</Text><Text style={styles.state}>{item.state}</Text></View>
     <Text style={styles.title}>{item.proposal.data.summary}</Text><Text style={styles.body}>{item.proposal.data.objective}</Text>
-    {item.state==='review'&&latestResult&&<View accessibilityLabel="Resultado para revisão" style={styles.result}><Text style={styles.label}>Resultado · v{latestResult.proposalVersion} · {latestResult.author}</Text><Text style={styles.body}>{latestResult.summary}</Text><Text style={styles.state}>{latestResult.references.length?latestResult.references.join(', '):'Nenhuma referência'}</Text></View>}
+    <Text style={styles.state}>Riscos: {item.proposal.data.risks.length?item.proposal.data.risks.join('; '):'nenhum risco declarado'}</Text>
+    {item.state==='review'&&latestResult&&<View accessibilityLabel="Resultado para revisão" style={styles.result}>
+      <Text style={styles.label}>Resultado · v{latestResult.proposalVersion} · {latestResult.author}</Text>
+      <Text style={styles.body}>Relato de {latestResult.author}, não verificado automaticamente: {latestResult.summary}</Text>
+      <Text style={styles.state}>Referências: {latestResult.references.length?latestResult.references.join(', '):'nenhuma referência informada'}</Text>
+      <Text style={styles.state}>Validações: {latestResult.validations&&latestResult.validations.length?latestResult.validations.map(validation=>`${validation.label} — ${describeValidationOutcome(validation.outcome)}`).join('; '):'nenhuma validação registrada'}</Text>
+      <Text style={styles.state}>Limitações: {latestResult.limitations&&latestResult.limitations.length?latestResult.limitations.join('; '):'nenhuma limitação declarada'}</Text>
+    </View>}
     {mode==='none'&&allowed('approve')&&<View style={styles.actions}>{action('Aprovar',()=>void run(decideWork(presentation,{type:'approve'})))}{action('Corrigir',()=>setMode('proposal_changes'))}{action('Adiar',()=>void run(decideWork(presentation,{type:'defer',reason:'Adiado no mobile'})))}{action('Rejeitar',()=>void run(decideWork(presentation,{type:'reject'})))}</View>}
     {mode==='proposal_changes'&&<Editor value={detail} onChange={setDetail} label="Correção da proposta" onConfirm={()=>void run(requestProposalCorrection(presentation,detail.trim()))} />}
     {mode==='none'&&allowed('start')&&action(item.state==='approved'?'Iniciar':'Retomar',()=>void run(startWork(presentation)))}
     {mode==='none'&&allowed('submit_result')&&action('Registrar resultado',()=>setMode('result'))}
-    {mode==='result'&&<Editor value={detail} onChange={setDetail} label="Resumo do resultado" onConfirm={()=>void run(submitWorkResult(presentation,detail.trim(),[]))} />}
+    {mode==='result'&&<View>
+      <TextInput accessibilityLabel="Resumo do resultado" value={detail} onChangeText={setDetail} placeholder="Resumo do resultado" placeholderTextColor={colors.textMuted} style={styles.input} multiline/>
+      <TextInput accessibilityLabel="Validações executadas" value={validations} onChangeText={setValidations} placeholder="Validações, uma por linha (ok: / falha:)" placeholderTextColor={colors.textMuted} style={styles.input} multiline/>
+      <TextInput accessibilityLabel="Limitações conhecidas" value={limitations} onChangeText={setLimitations} placeholder="Limitações, uma por linha" placeholderTextColor={colors.textMuted} style={styles.input} multiline/>
+      <TouchableOpacity disabled={!detail.trim()||busy} onPress={()=>void run(submitWorkResult(presentation,detail.trim(),[],parseWorkResultValidations(validations),limitations.split('\n').map(value=>value.trim()).filter(Boolean)))} style={styles.action}><Text style={styles.actionText}>Confirmar</Text></TouchableOpacity>
+    </View>}
     {mode==='none'&&allowed('accept_result')&&latestResult&&<View style={styles.actions}>{action(`Aceitar resultado v${latestResult.proposalVersion}`,()=>void run(reviewWorkResult(presentation,{type:'accept'})))}{action('Pedir correções',()=>setMode('result_changes'))}</View>}
     {mode==='result_changes'&&<Editor value={detail} onChange={setDetail} label="Correções necessárias" onConfirm={()=>void run(reviewWorkResult(presentation,{type:'request_changes',requestedChanges:detail.trim()}))} />}
     {error?<Text style={styles.error}>{error}</Text>:null}
