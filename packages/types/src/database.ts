@@ -729,6 +729,104 @@ export type Database = {
           },
         ]
       }
+      work_events: {
+        Row: {
+          author: Database["public"]["Enums"]["work_event_author"]
+          created_at: string
+          event_type: Database["public"]["Enums"]["work_event_type"]
+          id: string
+          payload: Json
+          proposal_version: number | null
+          work_item_id: string
+        }
+        Insert: {
+          author: Database["public"]["Enums"]["work_event_author"]
+          created_at?: string
+          event_type: Database["public"]["Enums"]["work_event_type"]
+          id?: string
+          payload: Json
+          proposal_version?: number | null
+          work_item_id: string
+        }
+        Update: {
+          author?: Database["public"]["Enums"]["work_event_author"]
+          created_at?: string
+          event_type?: Database["public"]["Enums"]["work_event_type"]
+          id?: string
+          payload?: Json
+          proposal_version?: number | null
+          work_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_events_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      work_items: {
+        Row: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at?: string
+          id?: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version?: number
+          source_message_id: string
+          state?: Database["public"]["Enums"]["work_state"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          capability?: Database["public"]["Enums"]["work_capability"]
+          created_at?: string
+          id?: string
+          impact_level?: Database["public"]["Enums"]["work_impact_level"]
+          intent?: Json
+          original_request?: string
+          proposal?: Json
+          proposal_version?: number
+          source_message_id?: string
+          state?: Database["public"]["Enums"]["work_state"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_items_source_message_id_fkey"
+            columns: ["source_message_id"]
+            isOneToOne: false
+            referencedRelation: "ai_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_items_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       xp_records: {
         Row: {
           activity_date: string
@@ -818,6 +916,35 @@ export type Database = {
       }
     }
     Functions: {
+      create_work_proposal: {
+        Args: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          proposal: Json
+          source_message_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       lifegame_get_level_from_xp: {
         Args: { p_total_xp: number }
         Returns: number
@@ -836,6 +963,112 @@ export type Database = {
           xp_record_id: string
         }[]
       }
+      resolve_approval: {
+        Args: {
+          decision: Database["public"]["Enums"]["work_approval_decision"]
+          decision_context?: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      revise_work_proposal: {
+        Args: {
+          expected_proposal_version: number
+          intent: Json
+          proposal: Json
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      start_work: {
+        Args: { expected_proposal_version: number; work_item_id: string }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      submit_work_result: {
+        Args: {
+          expected_proposal_version: number
+          result: Json
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       activity_bonus:
@@ -850,6 +1083,54 @@ export type Database = {
       event_type: "quest_milestone" | "context_event" | "state_change"
       quest_status: "open" | "in_progress" | "completed" | "abandoned"
       quest_type: "main" | "habit" | "learning" | "challenge"
+      work_approval_decision: "approve" | "reject" | "request_changes" | "defer"
+      work_capability:
+        | "programming"
+        | "research"
+        | "architecture"
+        | "planning"
+        | "learning"
+        | "organization"
+        | "home_automation"
+        | "critical_reflection"
+      work_event_author: "user" | "anima" | "executor" | "system"
+      work_event_type:
+        | "work_proposed"
+        | "proposal_revised"
+        | "proposal_changes_requested"
+        | "work_deferred"
+        | "work_approved"
+        | "work_rejected"
+        | "work_started"
+        | "context_attached"
+        | "input_requested"
+        | "input_provided"
+        | "work_blocked"
+        | "execution_started"
+        | "execution_failed"
+        | "result_submitted"
+        | "changes_requested"
+        | "result_accepted"
+        | "work_cancelled"
+      work_impact_level:
+        | "low"
+        | "significant"
+        | "structural"
+        | "strategic"
+        | "financial"
+        | "irreversible"
+        | "external"
+      work_state:
+        | "proposed"
+        | "approved"
+        | "in_progress"
+        | "blocked"
+        | "review"
+        | "changes_requested"
+        | "completed"
+        | "failed"
+        | "rejected"
+        | "cancelled"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1115,6 +1396,58 @@ export const Constants = {
       event_type: ["quest_milestone", "context_event", "state_change"],
       quest_status: ["open", "in_progress", "completed", "abandoned"],
       quest_type: ["main", "habit", "learning", "challenge"],
+      work_approval_decision: ["approve", "reject", "request_changes", "defer"],
+      work_capability: [
+        "programming",
+        "research",
+        "architecture",
+        "planning",
+        "learning",
+        "organization",
+        "home_automation",
+        "critical_reflection",
+      ],
+      work_event_author: ["user", "anima", "executor", "system"],
+      work_event_type: [
+        "work_proposed",
+        "proposal_revised",
+        "proposal_changes_requested",
+        "work_deferred",
+        "work_approved",
+        "work_rejected",
+        "work_started",
+        "context_attached",
+        "input_requested",
+        "input_provided",
+        "work_blocked",
+        "execution_started",
+        "execution_failed",
+        "result_submitted",
+        "changes_requested",
+        "result_accepted",
+        "work_cancelled",
+      ],
+      work_impact_level: [
+        "low",
+        "significant",
+        "structural",
+        "strategic",
+        "financial",
+        "irreversible",
+        "external",
+      ],
+      work_state: [
+        "proposed",
+        "approved",
+        "in_progress",
+        "blocked",
+        "review",
+        "changes_requested",
+        "completed",
+        "failed",
+        "rejected",
+        "cancelled",
+      ],
     },
   },
   storage: {
