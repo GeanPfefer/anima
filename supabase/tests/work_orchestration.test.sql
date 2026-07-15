@@ -50,7 +50,7 @@ SELECT ok(has_table_privilege('service_role','private.work_orchestration_allowli
 SELECT ok(has_function_privilege('authenticated','public.create_work_proposal(uuid,work_impact_level,work_capability,jsonb,jsonb)','EXECUTE'),'authenticated executa RPC');
 SELECT ok(NOT has_function_privilege('anon','public.create_work_proposal(uuid,work_impact_level,work_capability,jsonb,jsonb)','EXECUTE'),'anon não executa RPC');
 
-SELECT ok(has_function_privilege('authenticated','public.review_work_result(uuid,integer,work_review_decision,jsonb)','EXECUTE'),'authenticated revisa resultado');
+SELECT ok(NOT has_function_privilege('authenticated','public.review_work_result(uuid,integer,work_review_decision,jsonb)','EXECUTE'),'authenticated só revisa pela variante versionada');
 SELECT ok(NOT has_function_privilege('anon','public.review_work_result(uuid,integer,work_review_decision,jsonb)','EXECUTE'),'anon não revisa resultado');
 
 SET LOCAL ROLE authenticated;
@@ -77,7 +77,7 @@ SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
 INSERT INTO test_items SELECT 'base',id FROM public.create_work_proposal('20000000-0000-0000-0000-000000000001','structural','programming','{"goal":"x"}',pg_temp.proposal('base'));
 SELECT is((SELECT jsonb_build_array(state,user_id,original_request,proposal_version) FROM public.work_items WHERE id=(SELECT id FROM test_items WHERE label='base')),'["proposed","10000000-0000-0000-0000-000000000001","Pedido A",1]'::jsonb,'criação deriva projeção');
-SELECT is((SELECT jsonb_build_array(event_type,author,proposal_version) FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='base')),'["work_proposed","anima",1]'::jsonb,'criação deriva evento');
+SELECT is((SELECT jsonb_agg(jsonb_build_array(event_type,author,proposal_version) ORDER BY seq) FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='base')),'[["work_proposed","anima",1],["context_attached","anima",1]]'::jsonb,'criação deriva evento e contexto inicial');
 SELECT throws_ok($$SELECT public.create_work_proposal('29999999-0000-0000-0000-000000000099','low','planning','{}',pg_temp.proposal('x'))$$,'42501','source message not found or not eligible','mensagem inexistente falha');
 SELECT throws_ok($$SELECT public.create_work_proposal('20000000-0000-0000-0000-000000000002','low','planning','{}',pg_temp.proposal('x'))$$,'42501','source message not found or not eligible','mensagem alheia falha');
 SELECT throws_ok($$SELECT public.create_work_proposal('20000000-0000-0000-0000-000000000003','low','planning','{}',pg_temp.proposal('x'))$$,'42501','source message not found or not eligible','role assistant falha');
@@ -85,8 +85,8 @@ SELECT throws_ok($$SELECT public.create_work_proposal('20000000-0000-0000-0000-0
 SELECT lives_ok($$SELECT public.revise_work_proposal((SELECT id FROM test_items WHERE label='base'),1,'{"goal":"y"}',pg_temp.proposal('rev'))$$,'revisão funciona');
 SELECT is((SELECT proposal_version FROM public.work_items WHERE id=(SELECT id FROM test_items WHERE label='base')),2,'revisão incrementa versão');
 SELECT is((SELECT jsonb_build_array(event_type,author,proposal_version) FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='base') AND event_type='proposal_revised'),'["proposal_revised","anima",2]'::jsonb,'revisão deriva evento e versão');
-SELECT throws_ok($$SELECT public.revise_work_proposal((SELECT id FROM test_items WHERE label='base'),1,'{}',pg_temp.proposal('stale'))$$,'40001','work item state or proposal version changed','versão stale falha');
-SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='base')),2::bigint,'stale não cria evento');
+SELECT throws_ok($$SELECT public.revise_work_proposal((SELECT id FROM test_items WHERE label='base'),1,'{}',pg_temp.proposal('stale'))$$,'55000','work item state or proposal version changed','versão stale falha');
+SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='base')),3::bigint,'stale não cria evento');
 
 INSERT INTO test_items SELECT c.label,w.id FROM (VALUES('approve'),('reject'),('changes'),('defer')) c(label) CROSS JOIN LATERAL public.create_work_proposal('20000000-0000-0000-0000-000000000001','significant','architecture',jsonb_build_object('case',c.label),pg_temp.proposal(c.label)) w;
 SELECT lives_ok($$SELECT public.resolve_approval((SELECT id FROM test_items WHERE label='approve'),1,'approve','{}')$$,'approve funciona');
@@ -98,7 +98,7 @@ SELECT is((SELECT jsonb_build_array(i.state,e.event_type) FROM public.work_items
 SELECT lives_ok($$SELECT public.resolve_approval((SELECT id FROM test_items WHERE label='defer'),1,'defer','{"reason":"depois"}')$$,'defer funciona');
 SELECT is((SELECT jsonb_build_array(i.state,e.event_type) FROM public.work_items i JOIN public.work_events e ON e.work_item_id=i.id WHERE i.id=(SELECT id FROM test_items WHERE label='defer') AND e.event_type='work_deferred'),'["proposed","work_deferred"]'::jsonb,'defer consistente');
 SELECT throws_ok($$SELECT public.resolve_approval((SELECT id FROM test_items WHERE label='defer'),1,'invented'::public.work_approval_decision,'{}')$$,'22P02',NULL,'decisão inválida falha no enum');
-SELECT throws_ok($$SELECT public.resolve_approval((SELECT id FROM test_items WHERE label='approve'),1,'approve','{}')$$,'40001','work item state or proposal version changed','aprovação repetida falha');
+SELECT throws_ok($$SELECT public.resolve_approval((SELECT id FROM test_items WHERE label='approve'),1,'approve','{}')$$,'55000','work item state or proposal version changed','aprovação repetida falha');
 
 SELECT lives_ok($$SELECT public.start_work((SELECT id FROM test_items WHERE label='approve'),1)$$,'start em approved funciona');
 SELECT is((SELECT jsonb_build_array(i.state,e.event_type) FROM public.work_items i JOIN public.work_events e ON e.work_item_id=i.id WHERE i.id=(SELECT id FROM test_items WHERE label='approve') AND e.event_type='work_started'),'["in_progress","work_started"]'::jsonb,'start consistente');
@@ -106,13 +106,13 @@ SELECT throws_ok($$SELECT public.start_work((SELECT id FROM test_items WHERE lab
 SELECT throws_ok($$SELECT public.submit_work_result((SELECT id FROM test_items WHERE label='defer'),1,'{"summary":"x","result_references":[]}')$$,'22023','transition not allowed','submit fora de in_progress falha');
 SELECT lives_ok($$SELECT public.submit_work_result((SELECT id FROM test_items WHERE label='approve'),1,'{"summary":"feito","result_references":["commit:abc"]}')$$,'submit válido funciona');
 SELECT is((SELECT jsonb_build_array(i.state,e.event_type,e.author,e.proposal_version) FROM public.work_items i JOIN public.work_events e ON e.work_item_id=i.id WHERE i.id=(SELECT id FROM test_items WHERE label='approve') AND e.event_type='result_submitted'),'["review","result_submitted","user",1]'::jsonb,'submit consistente');
-SELECT lives_ok($$SELECT public.review_work_result((SELECT id FROM test_items WHERE label='approve'),1,'request_changes','{"requested_changes":"ajustar evidência"}')$$,'pedido de correção funciona');
+SELECT lives_ok($$SELECT public.review_work_result_versioned((SELECT id FROM test_items WHERE label='approve'),1,(SELECT id FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='approve') AND event_type='result_submitted' ORDER BY seq DESC LIMIT 1),'request_changes','{"requested_changes":"ajustar evidência"}')$$,'pedido de correção funciona');
 SELECT is((SELECT jsonb_build_array(i.state,e.event_type,e.payload->'data'->>'requested_changes') FROM public.work_items i JOIN public.work_events e ON e.work_item_id=i.id WHERE i.id=(SELECT id FROM test_items WHERE label='approve') AND e.event_type='changes_requested'),'["changes_requested","changes_requested","ajustar evidência"]'::jsonb,'correção preserva decisão');
 SELECT lives_ok($$SELECT public.start_work((SELECT id FROM test_items WHERE label='approve'),1)$$,'trabalho com correção é retomado');
 SELECT lives_ok($$SELECT public.submit_work_result((SELECT id FROM test_items WHERE label='approve'),1,'{"summary":"feito novamente","result_references":["commit:def"]}')$$,'novo resultado preserva o ciclo');
-SELECT lives_ok($$SELECT public.review_work_result((SELECT id FROM test_items WHERE label='approve'),1,'accept','{}')$$,'aceite funciona');
+SELECT lives_ok($$SELECT public.review_work_result_versioned((SELECT id FROM test_items WHERE label='approve'),1,(SELECT id FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='approve') AND event_type='result_submitted' ORDER BY seq DESC LIMIT 1),'accept','{}')$$,'aceite funciona');
 SELECT is((SELECT jsonb_build_array(i.state,e.event_type,e.payload->'data'?'accepted_result_event_id') FROM public.work_items i JOIN public.work_events e ON e.work_item_id=i.id WHERE i.id=(SELECT id FROM test_items WHERE label='approve') AND e.event_type='result_accepted'),'["completed","result_accepted",true]'::jsonb,'aceite conclui e referencia resultado');
-SELECT throws_ok($$SELECT public.review_work_result((SELECT id FROM test_items WHERE label='approve'),1,'accept','{}')$$,'40001','work item state or proposal version changed','aceite repetido falha');
+SELECT throws_ok($$SELECT public.review_work_result_versioned((SELECT id FROM test_items WHERE label='approve'),1,(SELECT id FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='approve') AND event_type='result_submitted' ORDER BY seq DESC LIMIT 1),'accept','{}')$$,'55000','work item state or proposal version changed','aceite repetido falha');
 
 -- Estados de retomada previstos na matriz são comprovados separadamente.
 INSERT INTO test_items SELECT c.label,w.id FROM (VALUES('blocked'),('changes-state')) c(label) CROSS JOIN LATERAL public.create_work_proposal('20000000-0000-0000-0000-000000000001','low','planning',jsonb_build_object('case',c.label),pg_temp.proposal(c.label)) w;
@@ -130,7 +130,7 @@ SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM te
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
 INSERT INTO test_items SELECT 'user-b',id FROM public.create_work_proposal('20000000-0000-0000-0000-000000000002','low','organization','{}',pg_temp.proposal('b'));
 SELECT is((SELECT count(*) FROM public.work_items),1::bigint,'B vê apenas seu item');
-SELECT is((SELECT count(*) FROM public.work_events),1::bigint,'B vê apenas seu evento');
+SELECT is((SELECT count(*) FROM public.work_events),2::bigint,'B vê apenas seus eventos');
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
 SELECT ok(NOT EXISTS(SELECT 1 FROM public.work_items WHERE id=(SELECT id FROM test_items WHERE label='user-b')),'A não vê item de B');
 SELECT ok(NOT EXISTS(SELECT 1 FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='user-b')),'A não vê evento de B');
@@ -149,7 +149,7 @@ SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001'
 SELECT throws_ok($$SELECT public.resolve_approval((SELECT id FROM test_items WHERE label='defer'),1,'approve','{}')$$,'P0001','controlled event failure','falha de evento aborta atualização');
 RESET ROLE; DROP TRIGGER test_fail_event ON public.work_events;
 SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM test_items WHERE label='defer')),'proposed','projeção reverte integralmente');
-SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='defer')),2::bigint,'log não recebe parcial');
+SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM test_items WHERE label='defer')),3::bigint,'log não recebe parcial');
 
 SELECT * FROM finish();
 ROLLBACK;

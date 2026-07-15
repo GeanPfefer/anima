@@ -177,7 +177,7 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE = 'P0002'; END IF;
   IF v_item.proposal_version <> expected_proposal_version
      OR v_item.state IN ('completed','failed','rejected','cancelled') THEN
-    RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE = '40001';
+    RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE = '55000';
   END IF;
 
   SELECT coalesce(max(context.version), 0) + 1 INTO v_version

@@ -55,7 +55,9 @@ BEGIN
   END IF;
 
   IF v_item.state <> 'review' OR v_item.proposal_version <> expected_proposal_version THEN
-    RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE = '40001';
+    -- 55000 e não 40001: serialization_failure dispara retry automático do
+    -- PostgREST, e um conflito de versão nunca se resolve repetindo a chamada.
+    RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE = '55000';
   END IF;
 
   SELECT event.id INTO v_result_event_id

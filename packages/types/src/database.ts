@@ -78,18 +78,21 @@ export type Database = {
       }
       conversation_sessions: {
         Row: {
+          active_turn_started_at: string | null
           archived_at: string | null
           created_at: string
           id: string
           user_id: string
         }
         Insert: {
+          active_turn_started_at?: string | null
           archived_at?: string | null
           created_at?: string
           id?: string
           user_id: string
         }
         Update: {
+          active_turn_started_at?: string | null
           archived_at?: string | null
           created_at?: string
           id?: string
@@ -808,6 +811,7 @@ export type Database = {
           id: string
           payload: Json
           proposal_version: number | null
+          seq: number
           work_item_id: string
         }
         Insert: {
@@ -817,6 +821,7 @@ export type Database = {
           id?: string
           payload: Json
           proposal_version?: number | null
+          seq?: never
           work_item_id: string
         }
         Update: {
@@ -826,11 +831,45 @@ export type Database = {
           id?: string
           payload?: Json
           proposal_version?: number | null
+          seq?: never
           work_item_id?: string
         }
         Relationships: [
           {
             foreignKeyName: "work_events_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      work_focus: {
+        Row: {
+          updated_at: string
+          user_id: string
+          work_item_id: string
+        }
+        Insert: {
+          updated_at?: string
+          user_id: string
+          work_item_id: string
+        }
+        Update: {
+          updated_at?: string
+          user_id?: string
+          work_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_focus_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_focus_work_item_id_fkey"
             columns: ["work_item_id"]
             isOneToOne: false
             referencedRelation: "work_items"
@@ -987,6 +1026,7 @@ export type Database = {
       }
     }
     Functions: {
+      abandon_current_conversation_turn: { Args: never; Returns: undefined }
       archive_current_conversation: { Args: never; Returns: string }
       attach_work_context: {
         Args: {
@@ -1055,6 +1095,35 @@ export type Database = {
           xp_record_id: string
         }[]
       }
+      request_work_proposal_revision: {
+        Args: {
+          expected_proposal_version: number
+          intent: Json
+          proposal: Json
+          requested_changes: string
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       resolve_approval: {
         Args: {
           decision: Database["public"]["Enums"]["work_approval_decision"]
@@ -1111,6 +1180,35 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      review_work_result_versioned: {
+        Args: {
+          decision: Database["public"]["Enums"]["work_review_decision"]
+          decision_context?: Json
+          expected_proposal_version: number
+          reviewed_result_event_id: string
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       revise_work_proposal: {
         Args: {
           expected_proposal_version: number
@@ -1118,6 +1216,29 @@ export type Database = {
           proposal: Json
           work_item_id: string
         }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_work_focus: {
+        Args: { work_item_id: string }
         Returns: {
           capability: Database["public"]["Enums"]["work_capability"]
           created_at: string
