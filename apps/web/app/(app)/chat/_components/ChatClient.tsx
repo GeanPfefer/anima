@@ -213,9 +213,9 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   }
 
   async function clearHistory() {
-    if (!confirm('Limpar todo o histórico de conversa?')) return;
+    if (!confirm('Arquivar esta conversa e iniciar uma nova? O histórico será preservado.')) return;
     const response = await fetch('/api/ai/history', { method: 'DELETE' });
-    if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.error ?? 'Este histórico não pode ser apagado com segurança.'); return; }
+    if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.error ?? 'Não foi possível arquivar esta conversa.'); return; }
     setMessages([]);
     setWorkItems({});
     setError('');
@@ -242,8 +242,8 @@ export function ChatClient({ isFirstTime, userName }: Props) {
           </p>
         </div>
         {messages.length > 0 && !isOnboarding && (
-          <button className={styles.clearBtn} onClick={clearHistory} title="Limpar histórico">
-            Limpar
+          <button className={styles.clearBtn} onClick={clearHistory} title="Arquivar conversa atual">
+            Nova conversa
           </button>
         )}
       </div>

@@ -1,4 +1,4 @@
-import type { WorkEvent, WorkIntent, WorkItem, WorkProposal } from '@anima/core';
+import type { WorkContextReference, WorkContextSnapshot, WorkEvent, WorkIntent, WorkItem, WorkProposal } from '@anima/core';
 import type { Json, Tables } from '@anima/types';
 type ObjectJson={ [key:string]:Json|undefined };
 const objectJson=(value:Json):ObjectJson=>{if(value===null||Array.isArray(value)||typeof value!=='object')throw new Error('Envelope JSON inválido.');return value;};
@@ -7,3 +7,4 @@ export const proposalToDatabase=(p:WorkProposal):Json=>({schema_version:p.schema
 export const proposalFromDatabase=(value:Json):WorkProposal=>{const e=objectJson(value),d=objectJson(e.data??null);return{schemaVersion:1,data:{summary:String(d.summary),objective:String(d.objective),includedScope:strings(d.included_scope),excludedScope:strings(d.excluded_scope),expectedEffects:strings(d.expected_effects),risks:strings(d.risks)}};};
 export const mapWorkItem=(r:Tables<'work_items'>):WorkItem=>({id:r.id,userId:r.user_id,sourceMessageId:r.source_message_id,state:r.state,impactLevel:r.impact_level,capability:r.capability,originalRequest:r.original_request,intent:objectJson(r.intent) as WorkIntent,proposal:proposalFromDatabase(r.proposal),proposalVersion:r.proposal_version,createdAt:new Date(r.created_at),updatedAt:new Date(r.updated_at)});
 export const mapWorkEvent=(r:Tables<'work_events'>):WorkEvent=>({id:r.id,workItemId:r.work_item_id,type:r.event_type,author:r.author,proposalVersion:r.proposal_version,payload:r.payload,occurredAt:new Date(r.created_at)});
+export const mapWorkContext=(r:Tables<'work_contexts'>):WorkContextSnapshot=>({id:r.id,workItemId:r.work_item_id,version:r.version,references:Array.isArray(r.context_references)?r.context_references.map(value=>{const reference=objectJson(value);return{kind:String(reference.kind),id:String(reference.id)} satisfies WorkContextReference;}):[],createdAt:new Date(r.created_at)});

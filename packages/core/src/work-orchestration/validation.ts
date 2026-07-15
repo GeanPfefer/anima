@@ -1,4 +1,4 @@
-import type { ApprovalDecision, ProposalVersion, ResultReviewDecision, WorkIntent, WorkProposal, WorkResultInput } from './types';
+import type { ApprovalDecision, ProposalVersion, ResultReviewDecision, WorkContextReference, WorkIntent, WorkProposal, WorkResultInput } from './types';
 const nonEmpty = (value: string): boolean => value.trim().length > 0;
 const textList = (value: readonly string[]): boolean => value.every(nonEmpty);
 export const isValidProposalVersion = (value: ProposalVersion): boolean => Number.isInteger(value) && value > 0;
@@ -7,3 +7,4 @@ export const isValidWorkProposal = (value: WorkProposal): boolean => value.schem
 export const isValidWorkResult = (value: WorkResultInput): boolean => nonEmpty(value.summary) && textList(value.resultReferences);
 export const isValidApprovalDecision = (value: ApprovalDecision): boolean => value.type === 'approve' || value.type === 'reject' || (value.type === 'request_changes' && nonEmpty(value.requestedChanges)) || (value.type === 'defer' && nonEmpty(value.reason));
 export const isValidResultReviewDecision = (value: ResultReviewDecision): boolean => value.type === 'accept' || (value.type === 'request_changes' && nonEmpty(value.requestedChanges));
+export const isValidWorkContextReferences = (value: readonly WorkContextReference[]): boolean => value.length > 0 && value.every(reference => nonEmpty(reference.kind) && nonEmpty(reference.id));

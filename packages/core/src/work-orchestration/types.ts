@@ -45,6 +45,11 @@ export interface WorkEvent {
   readonly author: WorkEventAuthor; readonly proposalVersion: ProposalVersion | null;
   readonly payload: Json; readonly occurredAt: Date;
 }
+export interface WorkContextReference { readonly kind: string; readonly id: string; }
+export interface WorkContextSnapshot {
+  readonly id: string; readonly workItemId: WorkItemId; readonly version: number;
+  readonly references: readonly WorkContextReference[]; readonly createdAt: Date;
+}
 
 const terminal = new Set<WorkState>(['completed', 'failed', 'rejected', 'cancelled']);
 const waiting = new Set<WorkState>(['proposed', 'review', 'changes_requested']);

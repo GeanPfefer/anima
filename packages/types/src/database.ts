@@ -40,6 +40,7 @@ export type Database = {
           created_at: string
           id: string
           role: string
+          session_id: string | null
           user_id: string
         }
         Insert: {
@@ -47,6 +48,7 @@ export type Database = {
           created_at?: string
           id?: string
           role: string
+          session_id?: string | null
           user_id: string
         }
         Update: {
@@ -54,11 +56,48 @@ export type Database = {
           created_at?: string
           id?: string
           role?: string
+          session_id?: string | null
           user_id?: string
         }
         Relationships: [
           {
+            foreignKeyName: "ai_conversations_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "conversation_sessions"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "ai_conversations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversation_sessions: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_sessions_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -729,6 +768,38 @@ export type Database = {
           },
         ]
       }
+      work_contexts: {
+        Row: {
+          context_references: Json
+          created_at: string
+          id: string
+          version: number
+          work_item_id: string
+        }
+        Insert: {
+          context_references: Json
+          created_at?: string
+          id?: string
+          version: number
+          work_item_id: string
+        }
+        Update: {
+          context_references?: Json
+          created_at?: string
+          id?: string
+          version?: number
+          work_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_contexts_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_events: {
         Row: {
           author: Database["public"]["Enums"]["work_event_author"]
@@ -916,6 +987,27 @@ export type Database = {
       }
     }
     Functions: {
+      archive_current_conversation: { Args: never; Returns: string }
+      attach_work_context: {
+        Args: {
+          context_references: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: {
+          context_references: Json
+          created_at: string
+          id: string
+          version: number
+          work_item_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_contexts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_work_proposal: {
         Args: {
           capability: Database["public"]["Enums"]["work_capability"]

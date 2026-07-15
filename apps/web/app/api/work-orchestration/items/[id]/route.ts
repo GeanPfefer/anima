@@ -8,5 +8,6 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
   const { id } = await context.params; const service = createWorkOrchestrationService(client);
   const item = await service.getItem(id); if (!item.ok) return operationResponse(item, serializeWorkItem);
   const events = await service.listEvents(id); if (!events.ok) return operationResponse(events, () => []);
-  return Response.json({ ok: true, value: { item: serializeWorkItem(item.value), events: events.value.map(serializeWorkEvent) } });
+  const contexts = await service.listContexts(id); if (!contexts.ok) return operationResponse(contexts, () => []);
+  return Response.json({ ok: true, value: { item: serializeWorkItem(item.value), events: events.value.map(serializeWorkEvent), contexts: contexts.value.map(value => ({ ...value, createdAt: value.createdAt.toISOString() })) } });
 }

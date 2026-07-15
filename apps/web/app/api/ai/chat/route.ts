@@ -463,10 +463,16 @@ ${activityContext}
 ${contextBlock}`;
 
   // ── Histórico recente de conversa ──────────────────────────────
+  const { data: activeSession } = await supabase
+    .from('conversation_sessions')
+    .select('id')
+    .eq('user_id', user.id)
+    .is('archived_at', null)
+    .maybeSingle();
   const { data: history } = await supabase
     .from('ai_conversations')
     .select('role, content')
-    .eq('user_id', user.id)
+    .eq('session_id', activeSession?.id ?? '00000000-0000-0000-0000-000000000000')
     .order('created_at', { ascending: false })
     .limit(10);
 
@@ -490,7 +496,11 @@ ${contextBlock}`;
     const startedAt = Date.now();
     const result = await createWorkOrchestrationService(supabase).createProposal(interpretation.command);
     console.info('[work-orchestration]', { operation: 'createProposalFromChat', sourceMessageId: sourceMessage.id, result: result.ok ? 'success' : result.error.code, durationMs: Date.now() - startedAt });
-    if (result.ok) orchestrationMetadata = { kind: 'work_proposal', sourceMessageId: sourceMessage.id, item: serializeWorkItem(result.value) };
+    if (result.ok) {
+      const contextResult = await createWorkOrchestrationService(supabase).attachContext({ workItemId: result.value.id, expectedProposalVersion: result.value.proposalVersion, references: [{ kind: 'message', id: sourceMessage.id }] });
+      if (!contextResult.ok) console.warn('[work-orchestration]', { operation: 'attachInitialContext', workItemId: result.value.id, result: contextResult.error.code });
+      orchestrationMetadata = { kind: 'work_proposal', sourceMessageId: sourceMessage.id, item: serializeWorkItem(result.value) };
+    }
     else if (result.error.code !== 'orchestration_not_enabled') orchestrationMetadata = { kind: 'work_error', sourceMessageId: sourceMessage.id, error: { code: result.error.code, message: result.error.message } };
   }
 
