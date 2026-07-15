@@ -22,7 +22,8 @@ import {
   type ChatMessage,
 } from '@/lib/mobile-chat';
 import { colors, spacing, radius } from '@/constants/theme';
-import type { WorkItem } from '@anima/core';
+import { supabase } from '@/lib/supabase';
+import type { WorkPresentation } from '@anima/core';
 import { MobileWorkCard } from '@/components/MobileWorkCard';
 import { loadWorkItems } from '@/lib/mobile-work';
 
@@ -36,7 +37,7 @@ export default function ChatScreen() {
   const [input,            setInput]            = useState('');
   const [isStreaming,      setIsStreaming]       = useState(false);
   const [loading,          setLoading]          = useState(true);
-  const [workItems,        setWorkItems]        = useState<Record<string,WorkItem>>({});
+  const [workItems,        setWorkItems]        = useState<Record<string,WorkPresentation>>({});
 
   const listRef = useRef<FlatList<ChatMessage | { role: 'streaming'; content: string }>>(null);
 
@@ -81,7 +82,7 @@ export default function ChatScreen() {
     setTimeout(scrollToBottom, 50);
 
     try {
-      await sendChatMessage(userId, text, messages, (token) => {
+      const routing = await sendChatMessage(userId, text, messages, (token) => {
         setStreamingContent(prev => {
           setTimeout(scrollToBottom, 10);
           return prev + token;
@@ -90,10 +91,14 @@ export default function ChatScreen() {
 
       // After streaming: reload history to get the saved assistant message
       const updated = await loadHistory(userId);
+      if (routing?.kind === 'focus_confirmation_required') {
+        updated.push({ role: 'assistant', content: `A qual trabalho você se refere? ${routing.candidates.map((candidate, index) => `${index + 1}. ${candidate.summary}`).join(' · ')}` });
+      }
       setMessages(updated);
       setWorkItems(await loadWorkItems(updated.flatMap(message=>message.role==='user'&&message.id?[message.id]:[])));
       setStreamingContent('');
     } catch (err) {
+      void supabase.rpc('abandon_current_conversation_turn');
       const isTimeout = err instanceof Error && err.message === 'timeout';
       const msg = isTimeout
         ? 'O Anima está demorando muito para responder. O Ollama pode estar ocupado — tente novamente em alguns instantes.'
@@ -116,10 +121,13 @@ export default function ChatScreen() {
       {
         text: 'Arquivar',
         onPress: () => {
-          clearHistory(userId).catch(() => {});
-          setMessages([]);
-          setWorkItems({});
-          setStreamingContent('');
+          clearHistory(userId)
+            .then(() => {
+              setMessages([]);
+              setWorkItems({});
+              setStreamingContent('');
+            })
+            .catch(() => Alert.alert('Arquivamento indisponível', 'Há uma resposta em andamento ou a conexão falhou. A conversa atual foi preservada.'));
         },
       },
     ]);
@@ -148,7 +156,7 @@ export default function ChatScreen() {
             {isStreamed && <Text style={styles.cursor}>▋</Text>}
           </Text>
         </View>
-      </View>{isUser&&'id' in item&&item.id&&workItems[item.id]&&<MobileWorkCard item={workItems[item.id]!} onChange={next=>setWorkItems(previous=>({...previous,[item.id!]:next}))}/>}</View>
+      </View>{isUser&&'id' in item&&item.id&&workItems[item.id]&&<MobileWorkCard presentation={workItems[item.id]!} onChange={next=>setWorkItems(previous=>({...previous,[item.id!]:next}))}/>}</View>
     );
   }
 
@@ -161,7 +169,7 @@ export default function ChatScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Anima</Text>
-        <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
+        <TouchableOpacity disabled={isStreaming} onPress={handleClear} style={styles.clearBtn}>
           <Text style={styles.clearBtnText}>Nova conversa</Text>
         </TouchableOpacity>
       </View>

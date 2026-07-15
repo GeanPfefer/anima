@@ -9,7 +9,7 @@ import { createPendingPillar } from './create-pending-pillar';
 import { inferAndSaveArchetype } from './infer-archetype';
 import { getOrCreatePillar } from './activity';
 import { logNotes } from './log-note';
-import { proposeWorkForMessage } from './mobile-work';
+import { routeWorkMessage, type MobileWorkRouting } from './mobile-work';
 
 const OLLAMA_URL   = process.env.EXPO_PUBLIC_OLLAMA_URL   ?? 'http://100.68.239.78:11434';
 const OLLAMA_MODEL = process.env.EXPO_PUBLIC_OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -216,7 +216,7 @@ export async function sendChatMessage(
   message: string,
   pastMessages: ChatMessage[],
   onToken: (token: string) => void,
-): Promise<void> {
+): Promise<MobileWorkRouting | null> {
   const today = new Date().toISOString().slice(0, 10);
   const { systemPrompt, pillars, activePillars, name, isOnboarding } = await buildContext(userId);
 
@@ -315,12 +315,14 @@ export async function sendChatMessage(
       onboarding_completed_at: new Date().toISOString(),
     }).eq('id', userId);
 
-    return;
+    return null;
   }
 
   // ── Chat regular ────────────────────────────────────────────────
   const { data: sourceMessage } = await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message }).select('id').single();
-  if (sourceMessage) void proposeWorkForMessage(message,sourceMessage.id);
+  const workRouting: MobileWorkRouting | null = sourceMessage
+    ? await routeWorkMessage(message, sourceMessage.id).catch((): MobileWorkRouting => ({ kind: 'none' }))
+    : null;
 
   // Fire-and-forget: detecção completa (sequencial para não sobrecarregar Ollama)
   ;(async () => {
@@ -564,6 +566,7 @@ export async function sendChatMessage(
   }
 
   void name;
+  return workRouting;
 }
 
 export async function clearHistory(userId: string): Promise<void> {
