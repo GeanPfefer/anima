@@ -7,3 +7,5 @@ export interface SubmitWorkResultCommand { workItemId: WorkItemId; expectedPropo
 export interface ReviewWorkResultCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; reviewedResultEventId:string; decision: ResultReviewDecision; }
 export interface AttachWorkContextCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; references: readonly WorkContextReference[]; }
 export interface RequestProposalRevisionCommand { workItemId:WorkItemId; expectedProposalVersion:ProposalVersion; requestedChanges:string; intent:WorkIntent; proposal:WorkProposal; }
+export interface StartWorkExecutionCommand { workItemId:WorkItemId; expectedProposalVersion:ProposalVersion; executionId:string; executorId:string; }
+export interface FinishWorkExecutionCommand { workItemId:WorkItemId; expectedProposalVersion:ProposalVersion; executionId:string; outcome:import('./executor').WorkExecutionOutcome; }

@@ -12,3 +12,10 @@ export const isValidWorkResult = (value: WorkResultInput): boolean =>
 export const isValidApprovalDecision = (value: ApprovalDecision): boolean => value.type === 'approve' || value.type === 'reject' || (value.type === 'request_changes' && nonEmpty(value.requestedChanges)) || (value.type === 'defer' && nonEmpty(value.reason));
 export const isValidResultReviewDecision = (value: ResultReviewDecision): boolean => value.type === 'accept' || (value.type === 'request_changes' && nonEmpty(value.requestedChanges));
 export const isValidWorkContextReferences = (value: readonly WorkContextReference[]): boolean => value.length > 0 && value.every(reference => nonEmpty(reference.kind) && nonEmpty(reference.id));
+const validAttempts = (value: number): boolean => Number.isInteger(value) && value >= 0;
+export const isValidWorkExecutionOutcome = (value: import('./executor').WorkExecutionOutcome): boolean =>
+  nonEmpty(value.executorId) && validAttempts(value.attempts) && (
+    value.kind === 'succeeded' ? nonEmpty(value.summary) && textList(value.resultReferences)
+    : value.kind === 'failed' ? nonEmpty(value.message)
+    : typeof value.terminatedCleanly === 'boolean'
+  );

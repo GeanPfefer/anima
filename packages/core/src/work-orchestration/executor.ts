@@ -82,6 +82,41 @@ export class BoundedWorkExecutor {
   }
 }
 
+// P1.6: início e desfecho da execução viram eventos persistidos correlacionados
+// ao item, versão e executor. O executor nunca certifica a própria entrega:
+// um desfecho de sucesso apenas leva o item a revisão, onde o usuário decide.
+export interface PersistedWorkExecution {
+  readonly workItemId: WorkItemId;
+  readonly expectedProposalVersion: number;
+  readonly executionId: string;
+  readonly request: WorkExecutionRequest;
+}
+export interface WorkExecutionRecorder {
+  startExecution(command: { workItemId: WorkItemId; expectedProposalVersion: number; executionId: string; executorId: string }): Promise<import('./errors').WorkOperationResult<import('./types').WorkItem>>;
+  finishExecution(command: { workItemId: WorkItemId; expectedProposalVersion: number; executionId: string; outcome: WorkExecutionOutcome }): Promise<import('./errors').WorkOperationResult<import('./types').WorkItem>>;
+}
+export async function runPersistedWorkExecution(
+  recorder: WorkExecutionRecorder,
+  adapter: WorkExecutorAdapter,
+  execution: PersistedWorkExecution,
+  signal?: AbortSignal,
+): Promise<import('./errors').WorkOperationResult<import('./types').WorkItem>> {
+  if (!execution.request.objective.trim() || !validLimits(execution.request.limits)) {
+    return { ok: false, error: { code: 'invalid_input', message: 'Limites ou objetivo de execução inválidos.', retryable: false } };
+  }
+  const started = await recorder.startExecution({ workItemId: execution.workItemId, expectedProposalVersion: execution.expectedProposalVersion, executionId: execution.executionId, executorId: adapter.id });
+  if (!started.ok) return started;
+  let outcome: WorkExecutionOutcome;
+  try {
+    outcome = await new BoundedWorkExecutor().run(execution.request, adapter, signal);
+  } catch (cause) {
+    outcome = { kind: 'failed', executorId: adapter.id, attempts: execution.request.limits.maxAttempts, message: cause instanceof Error ? cause.message : String(cause) };
+  }
+  // O retorno é persistido, nunca só mantido em memória: se a persistência do
+  // desfecho falhar, o erro tipado sobe para reconciliação explícita.
+  return recorder.finishExecution({ workItemId: execution.workItemId, expectedProposalVersion: execution.expectedProposalVersion, executionId: execution.executionId, outcome });
+}
+
 export class FakeWorkExecutor implements WorkExecutorAdapter {
   readonly id='fake';
   private cursor=0;

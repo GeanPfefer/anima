@@ -1077,6 +1077,34 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      finish_work_execution: {
+        Args: {
+          execution_id: string
+          expected_proposal_version: number
+          outcome: Json
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       lifegame_get_level_from_xp: {
         Args: { p_total_xp: number }
         Returns: number
@@ -1262,6 +1290,34 @@ export type Database = {
       }
       start_work: {
         Args: { expected_proposal_version: number; work_item_id: string }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      start_work_execution: {
+        Args: {
+          execution_id: string
+          executor_id: string
+          expected_proposal_version: number
+          work_item_id: string
+        }
         Returns: {
           capability: Database["public"]["Enums"]["work_capability"]
           created_at: string

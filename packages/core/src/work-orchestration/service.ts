@@ -1,8 +1,8 @@
-import type { AttachWorkContextCommand, CreateWorkProposalCommand, RequestProposalRevisionCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, SubmitWorkResultCommand } from './commands';
+import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, RequestProposalRevisionCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand } from './commands';
 import { failure, type WorkOperationResult } from './errors';
 import type { WorkOrchestrationRepository } from './repository';
 import type { ApprovalDecision, WorkContextSnapshot, WorkEvent, WorkItem, WorkItemId } from './types';
-import { isValidApprovalDecision, isValidProposalVersion, isValidResultReviewDecision, isValidWorkContextReferences, isValidWorkIntent, isValidWorkProposal, isValidWorkResult } from './validation';
+import { isValidApprovalDecision, isValidProposalVersion, isValidResultReviewDecision, isValidWorkContextReferences, isValidWorkExecutionOutcome, isValidWorkIntent, isValidWorkProposal, isValidWorkResult } from './validation';
 const invalid = <T>(message: string): WorkOperationResult<T> => failure('invalid_input', message);
 export class WorkOrchestrationService {
   constructor(private readonly repository: WorkOrchestrationRepository) {}
@@ -25,6 +25,14 @@ export class WorkOrchestrationService {
   submitResult(command: SubmitWorkResultCommand): Promise<WorkOperationResult<WorkItem>> {
     if (!this.validVersion(command.expectedProposalVersion) || !isValidWorkResult(command.result)) return Promise.resolve(invalid('Resultado inválido.'));
     return this.repository.submitResult(command);
+  }
+  startExecution(command: StartWorkExecutionCommand): Promise<WorkOperationResult<WorkItem>> {
+    if (!this.validVersion(command.expectedProposalVersion) || !command.executionId.trim() || !command.executorId.trim()) return Promise.resolve(invalid('Execução inválida.'));
+    return this.repository.startExecution(command);
+  }
+  finishExecution(command: FinishWorkExecutionCommand): Promise<WorkOperationResult<WorkItem>> {
+    if (!this.validVersion(command.expectedProposalVersion) || !command.executionId.trim() || !isValidWorkExecutionOutcome(command.outcome)) return Promise.resolve(invalid('Desfecho de execução inválido.'));
+    return this.repository.finishExecution(command);
   }
   requestProposalRevision(command:RequestProposalRevisionCommand):Promise<WorkOperationResult<WorkItem>>{
     if(!this.validVersion(command.expectedProposalVersion)||!command.requestedChanges.trim()||!isValidWorkIntent(command.intent)||!isValidWorkProposal(command.proposal))return Promise.resolve(invalid('Revisão solicitada inválida.'));
