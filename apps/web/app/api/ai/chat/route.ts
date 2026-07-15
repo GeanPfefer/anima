@@ -15,6 +15,9 @@ import { getOrCreatePendingPillar } from '@/lib/get-or-create-pending-pillar';
 import { createPendingPillar } from '@/lib/create-pending-pillar';
 import { inferAndSaveArchetype } from '@/lib/infer-archetype';
 import { inferAndSaveIdentity } from '@/lib/infer-identity';
+import { interpretWorkRequest } from '@/lib/work-orchestration/interpret';
+import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
+import { serializeWorkItem } from '@/lib/work-orchestration/serialize';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -472,7 +475,24 @@ ${contextBlock}`;
     content: m.content,
   }));
 
-  await supabase.from('ai_conversations').insert({ user_id: user.id, role: 'user', content: message });
+  const { data: sourceMessage, error: sourceMessageError } = await supabase
+    .from('ai_conversations')
+    .insert({ user_id: user.id, role: 'user', content: message })
+    .select('id')
+    .single();
+  if (sourceMessageError || !sourceMessage) return Response.json({ error: 'Não foi possível preservar a mensagem.' }, { status: 503 });
+
+  const interpretation = interpretWorkRequest(message, sourceMessage.id);
+  let orchestrationMetadata: unknown = interpretation.kind === 'clarification_required'
+    ? { kind: interpretation.kind, sourceMessageId: sourceMessage.id, question: interpretation.question }
+    : { kind: 'conversation', sourceMessageId: sourceMessage.id };
+  if (interpretation.kind === 'work_candidate') {
+    const startedAt = Date.now();
+    const result = await createWorkOrchestrationService(supabase).createProposal(interpretation.command);
+    console.info('[work-orchestration]', { operation: 'createProposalFromChat', sourceMessageId: sourceMessage.id, result: result.ok ? 'success' : result.error.code, durationMs: Date.now() - startedAt });
+    if (result.ok) orchestrationMetadata = { kind: 'work_proposal', sourceMessageId: sourceMessage.id, item: serializeWorkItem(result.value) };
+    else if (result.error.code !== 'orchestration_not_enabled') orchestrationMetadata = { kind: 'work_error', sourceMessageId: sourceMessage.id, error: { code: result.error.code, message: result.error.message } };
+  }
 
   // ── Chama Ollama (streaming) ───────────────────────────────────
   const ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -567,6 +587,8 @@ ${contextBlock}`;
     'Content-Type':           'text/plain; charset=utf-8',
     'X-Content-Type-Options': 'nosniff',
   };
+  responseHeaders['X-Source-Message-Id'] = sourceMessage.id;
+  responseHeaders['X-Work-Orchestration'] = encodeURIComponent(JSON.stringify(orchestrationMetadata));
 
   // Headers HTTP são latin1: JSON com acentos (pilares em pt-BR) corromperia
   // o valor. encodeURIComponent deixa o conteúdo ASCII-safe; o cliente decodifica.
