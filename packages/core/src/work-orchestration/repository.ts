@@ -9,5 +9,6 @@ export interface WorkOrchestrationRepository {
   startWork(command: StartWorkCommand): Promise<WorkOperationResult<WorkItem>>;
   submitResult(command: SubmitWorkResultCommand): Promise<WorkOperationResult<WorkItem>>;
   getItem(id: WorkItemId): Promise<WorkOperationResult<WorkItem>>;
+  findItemsBySourceMessageId(sourceMessageId: string): Promise<WorkOperationResult<readonly WorkItem[]>>;
   listEvents(id: WorkItemId): Promise<WorkOperationResult<readonly WorkEvent[]>>;
 }

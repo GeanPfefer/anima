@@ -14,7 +14,7 @@ export async function GET() {
 
   const { data } = await supabase
     .from('ai_conversations')
-    .select('role, content')
+    .select('id, role, content')
     .eq('user_id', user.id)
     .order('created_at', { ascending: true })
     .limit(100);
@@ -33,7 +33,11 @@ export async function DELETE() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Response('Não autorizado', { status: 401 });
 
-  await supabase.from('ai_conversations').delete().eq('user_id', user.id);
+  const { count } = await supabase.from('work_items').select('*', { count: 'exact', head: true });
+  if ((count ?? 0) > 0) return Response.json({ error: 'Este histórico contém propostas de trabalho e não pode ser apagado. O arquivamento será disponibilizado em uma etapa futura.' }, { status: 409 });
+
+  const { error } = await supabase.from('ai_conversations').delete().eq('user_id', user.id);
+  if (error) return Response.json({ error: 'Não foi possível limpar o histórico com segurança.' }, { status: 409 });
 
   return new Response(null, { status: 204 });
 }

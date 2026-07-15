@@ -27,6 +27,7 @@ export class WorkOrchestrationService {
     return this.repository.submitResult(command);
   }
   getItem(id: WorkItemId): Promise<WorkOperationResult<WorkItem>> { return id ? this.repository.getItem(id) : Promise.resolve(invalid('Item inválido.')); }
+  findItemsBySourceMessageId(sourceMessageId: string): Promise<WorkOperationResult<readonly WorkItem[]>> { return sourceMessageId ? this.repository.findItemsBySourceMessageId(sourceMessageId) : Promise.resolve(invalid('Mensagem inválida.')); }
   listEvents(id: WorkItemId): Promise<WorkOperationResult<readonly WorkEvent[]>> { return id ? this.repository.listEvents(id) : Promise.resolve(invalid('Item inválido.')); }
   private validVersion(value: number): boolean { return isValidProposalVersion(value); }
 }
