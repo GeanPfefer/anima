@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import styles from './chat.module.css';
 import { WorkProposalCard, type WorkPresentationView } from './WorkProposalCard';
+import { WorkFocusChoice } from './WorkFocusChoice';
 
 type Message = { id?: string; role: 'user' | 'assistant'; content: string };
 
@@ -30,6 +31,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
   const [workItems, setWorkItems] = useState<Record<string, WorkPresentationView>>({});
   const [focusedWorkItemId,setFocusedWorkItemId]=useState<string|null>(null);
+  const [focusChoice,setFocusChoice]=useState<{sourceMessageId:string;candidates:readonly{id:string;summary:string}[]}|null>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -176,7 +178,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
         if (metadata.presentation) {setWorkItems(previous => ({ ...previous, [metadata.sourceMessageId]: metadata.presentation! }));setFocusedWorkItemId(metadata.presentation.item.id);}
         if (metadata.kind === 'clarification_required' && metadata.question) setMessages(previous => [...previous, { role: 'assistant', content: metadata.question!.question }]);
         if (metadata.kind === 'work_error') setError(`Não foi possível registrar o trabalho desta mensagem: ${metadata.error?.message ?? 'erro desconhecido'}. Você pode tentar novamente.`);
-        if(metadata.kind==='focus_confirmation_required'&&metadata.candidates)setMessages(previous=>[...previous,{role:'assistant',content:`A qual trabalho você se refere? ${metadata.candidates!.map((candidate,index)=>`${index+1}. ${candidate.summary}`).join(' · ')}`}]);
+        if(metadata.kind==='focus_confirmation_required'&&metadata.candidates){setMessages(previous=>[...previous,{role:'assistant',content:'A qual trabalho você se refere? Escolha abaixo para eu associar sua mensagem ao item certo.'}]);setFocusChoice({sourceMessageId:metadata.sourceMessageId,candidates:metadata.candidates});}
       } catch { /* metadado opcional inválido não interrompe o chat */ }
     }
   }
@@ -224,6 +226,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.error ?? 'Não foi possível arquivar esta conversa.'); return; }
     setMessages([]);
     setWorkItems({});
+    setFocusChoice(null);
     setError('');
   }
 
@@ -309,6 +312,19 @@ export function ChatClient({ isFirstTime, userName }: Props) {
               </div>
             ))}
           </div>
+        )}
+
+        {focusChoice && (
+          <WorkFocusChoice
+            sourceMessageId={focusChoice.sourceMessageId}
+            candidates={focusChoice.candidates}
+            onResolved={(workItemId, summary) => {
+              setFocusedWorkItemId(workItemId);
+              setFocusChoice(null);
+              setMessages(previous => [...previous, { role: 'assistant', content: `Foco definido: ${summary}. Sua mensagem foi associada a este trabalho.` }]);
+            }}
+            onDismiss={() => setFocusChoice(null)}
+          />
         )}
 
         {error && <p className={styles.error}>{error}</p>}

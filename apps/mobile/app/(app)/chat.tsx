@@ -25,7 +25,7 @@ import { colors, spacing, radius } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import type { WorkPresentation } from '@anima/core';
 import { MobileWorkCard } from '@/components/MobileWorkCard';
-import { loadWorkItems } from '@/lib/mobile-work';
+import { confirmWorkFocus, getWorkFocus, loadWorkItems, setWorkFocus } from '@/lib/mobile-work';
 
 export default function ChatScreen() {
   const insets  = useSafeAreaInsets();
@@ -38,6 +38,8 @@ export default function ChatScreen() {
   const [isStreaming,      setIsStreaming]       = useState(false);
   const [loading,          setLoading]          = useState(true);
   const [workItems,        setWorkItems]        = useState<Record<string,WorkPresentation>>({});
+  const [focusedWorkItemId, setFocusedWorkItemId] = useState<string | null>(null);
+  const [focusChoice, setFocusChoice] = useState<{ sourceMessageId: string; candidates: readonly { id: string; summary: string }[] } | null>(null);
 
   const listRef = useRef<FlatList<ChatMessage | { role: 'streaming'; content: string }>>(null);
 
@@ -57,6 +59,7 @@ export default function ChatScreen() {
           } else {
             setMessages(history);
             setWorkItems(await loadWorkItems(history.flatMap(message=>message.role==='user'&&message.id?[message.id]:[])));
+            setFocusedWorkItemId(await getWorkFocus().catch(() => null));
           }
         })
         .catch(() => {})
@@ -92,10 +95,14 @@ export default function ChatScreen() {
       // After streaming: reload history to get the saved assistant message
       const updated = await loadHistory(userId);
       if (routing?.kind === 'focus_confirmation_required') {
-        updated.push({ role: 'assistant', content: `A qual trabalho você se refere? ${routing.candidates.map((candidate, index) => `${index + 1}. ${candidate.summary}`).join(' · ')}` });
+        updated.push({ role: 'assistant', content: 'A qual trabalho você se refere? Escolha abaixo para eu associar sua mensagem ao item certo.' });
+        setFocusChoice({ sourceMessageId: routing.sourceMessageId, candidates: routing.candidates });
       }
       if (routing?.kind === 'error') {
         updated.push({ role: 'assistant', content: `Não foi possível registrar o trabalho desta mensagem: ${routing.message} Você pode tentar novamente.` });
+      }
+      if (routing?.kind === 'proposal' || routing?.kind === 'continued') {
+        setFocusedWorkItemId(routing.kind === 'proposal' ? routing.presentation.item.id : routing.workItemId);
       }
       setMessages(updated);
       setWorkItems(await loadWorkItems(updated.flatMap(message=>message.role==='user'&&message.id?[message.id]:[])));
@@ -162,7 +169,7 @@ export default function ChatScreen() {
             {isStreamed && <Text style={styles.cursor}>▋</Text>}
           </Text>
         </View>
-      </View>{isUser&&'id' in item&&item.id&&workItems[item.id]&&<MobileWorkCard presentation={workItems[item.id]!} onChange={next=>setWorkItems(previous=>({...previous,[item.id!]:next}))}/>}</View>
+      </View>{isUser&&'id' in item&&item.id&&workItems[item.id]&&<MobileWorkCard presentation={workItems[item.id]!} focused={focusedWorkItemId===workItems[item.id]!.item.id} onFocus={()=>{const target=workItems[item.id!]!.item.id;setWorkFocus(target).then(()=>setFocusedWorkItemId(target)).catch(()=>Alert.alert('Foco indisponível','Não foi possível alterar o trabalho em foco. Tente novamente.'));}} onChange={next=>setWorkItems(previous=>({...previous,[item.id!]:next}))}/>}</View>
     );
   }
 
@@ -202,6 +209,33 @@ export default function ChatScreen() {
             </View>
           }
         />
+      )}
+
+      {/* Escolha de foco quando a referência é ambígua */}
+      {focusChoice && (
+        <View style={styles.focusChoice}>
+          <Text style={styles.focusChoiceTitle}>A qual trabalho você se refere?</Text>
+          {focusChoice.candidates.map(candidate => (
+            <TouchableOpacity
+              key={candidate.id}
+              style={styles.focusChoiceOption}
+              onPress={() => {
+                confirmWorkFocus(candidate.id, focusChoice.sourceMessageId)
+                  .then(() => {
+                    setFocusedWorkItemId(candidate.id);
+                    setFocusChoice(null);
+                    setMessages(prev => [...prev, { role: 'assistant', content: `Foco definido: ${candidate.summary}. Sua mensagem foi associada a este trabalho.` }]);
+                  })
+                  .catch(() => Alert.alert('Foco indisponível', 'Não foi possível associar sua mensagem a este trabalho. Escolha novamente ou tente mais tarde.'));
+              }}
+            >
+              <Text style={styles.focusChoiceOptionText}>{candidate.summary}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity onPress={() => setFocusChoice(null)}>
+            <Text style={styles.focusChoiceDismiss}>Nenhum destes</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* Input */}
@@ -339,6 +373,36 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 22,
+  },
+  focusChoice: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgSurface,
+    gap: spacing.xs,
+  },
+  focusChoiceTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  focusChoiceOption: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: radius.sm,
+    backgroundColor: colors.bgElevated,
+  },
+  focusChoiceOptionText: {
+    fontSize: 13,
+    color: colors.textPrimary,
+  },
+  focusChoiceDismiss: {
+    fontSize: 12,
+    color: colors.textMuted,
+    paddingVertical: 4,
   },
   inputRow: {
     flexDirection: 'row',

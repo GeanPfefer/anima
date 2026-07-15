@@ -4,7 +4,7 @@ import { describeValidationOutcome, parseWorkResultValidations, type WorkPresent
 import { decideWork, requestProposalCorrection, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
 
-export function MobileWorkCard({presentation,onChange}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void}) {
+export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void;focused?:boolean;onFocus?:()=>void}) {
   const {item,latestResult,availableActions}=presentation;
   const [detail,setDetail]=useState('');
   const [validations,setValidations]=useState('');
@@ -16,7 +16,8 @@ export function MobileWorkCard({presentation,onChange}:{presentation:WorkPresent
   async function run(operation:Promise<WorkPresentation>){setBusy(true);setError('');try{onChange(await operation);setMode('none');setDetail('');setValidations('');setLimitations('');}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível atualizar o trabalho.');}setBusy(false);}
   const action=(label:string,onPress:()=>void)=><TouchableOpacity disabled={busy} onPress={onPress} style={styles.action}><Text style={styles.actionText}>{label}</Text></TouchableOpacity>;
   return <View style={styles.card}>
-    <View style={styles.header}><Text style={styles.label}>Trabalho · v{item.proposalVersion}</Text><Text style={styles.state}>{item.state}</Text></View>
+    <View style={styles.header}><Text style={styles.label}>{focused?'Trabalho em foco':'Trabalho'} · v{item.proposalVersion}</Text><Text style={styles.state}>{item.state}</Text></View>
+    {!focused&&onFocus&&!['completed','failed','rejected','cancelled'].includes(item.state)&&action('Usar como foco',onFocus)}
     <Text style={styles.title}>{item.proposal.data.summary}</Text><Text style={styles.body}>{item.proposal.data.objective}</Text>
     <Text style={styles.state}>Riscos: {item.proposal.data.risks.length?item.proposal.data.risks.join('; '):'nenhum risco declarado'}</Text>
     {item.state==='review'&&latestResult&&<View accessibilityLabel="Resultado para revisão" style={styles.result}>
