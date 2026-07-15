@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { operationResponse } from '@/lib/work-orchestration/http';
-import { serializeWorkEvent, serializeWorkItem } from '@/lib/work-orchestration/serialize';
+import { serializeWorkEvent, serializeWorkItem, serializeWorkPresentation } from '@/lib/work-orchestration/serialize';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 export async function GET(_: Request, context: { params: Promise<{ id: string }> }) {
   const client = await createClient(); const { data: { user } } = await client.auth.getUser();
@@ -9,5 +9,5 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
   const item = await service.getItem(id); if (!item.ok) return operationResponse(item, serializeWorkItem);
   const events = await service.listEvents(id); if (!events.ok) return operationResponse(events, () => []);
   const contexts = await service.listContexts(id); if (!contexts.ok) return operationResponse(contexts, () => []);
-  return Response.json({ ok: true, value: { item: serializeWorkItem(item.value), events: events.value.map(serializeWorkEvent), contexts: contexts.value.map(value => ({ ...value, createdAt: value.createdAt.toISOString() })) } });
+  return Response.json({ ok: true, value: { presentation: serializeWorkPresentation(item.value,events.value), item: serializeWorkItem(item.value), events: events.value.map(serializeWorkEvent), contexts: contexts.value.map(value => ({ ...value, createdAt: value.createdAt.toISOString() })) } });
 }

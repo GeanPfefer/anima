@@ -16,8 +16,9 @@ import { createPendingPillar } from '@/lib/create-pending-pillar';
 import { inferAndSaveArchetype } from '@/lib/infer-archetype';
 import { inferAndSaveIdentity } from '@/lib/infer-identity';
 import { interpretWorkRequest } from '@/lib/work-orchestration/interpret';
+import { isWorkContinuation, resolveWorkFocus } from '@anima/core';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
-import { serializeWorkItem } from '@/lib/work-orchestration/serialize';
+import { serializeWorkPresentation } from '@/lib/work-orchestration/serialize';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -497,11 +498,17 @@ ${contextBlock}`;
     const result = await createWorkOrchestrationService(supabase).createProposal(interpretation.command);
     console.info('[work-orchestration]', { operation: 'createProposalFromChat', sourceMessageId: sourceMessage.id, result: result.ok ? 'success' : result.error.code, durationMs: Date.now() - startedAt });
     if (result.ok) {
-      const contextResult = await createWorkOrchestrationService(supabase).attachContext({ workItemId: result.value.id, expectedProposalVersion: result.value.proposalVersion, references: [{ kind: 'message', id: sourceMessage.id }] });
-      if (!contextResult.ok) console.warn('[work-orchestration]', { operation: 'attachInitialContext', workItemId: result.value.id, result: contextResult.error.code });
-      orchestrationMetadata = { kind: 'work_proposal', sourceMessageId: sourceMessage.id, item: serializeWorkItem(result.value) };
+      await supabase.rpc('set_work_focus',{work_item_id:result.value.id});
+      const events=await createWorkOrchestrationService(supabase).listEvents(result.value.id);
+      orchestrationMetadata = { kind: 'work_proposal', sourceMessageId: sourceMessage.id, presentation: serializeWorkPresentation(result.value,events.ok?events.value:[]) };
     }
     else if (result.error.code !== 'orchestration_not_enabled') orchestrationMetadata = { kind: 'work_error', sourceMessageId: sourceMessage.id, error: { code: result.error.code, message: result.error.message } };
+  } else if(interpretation.kind==='conversation'&&isWorkContinuation(message)){
+    const{data:focus}=await supabase.from('work_focus').select('work_item_id').eq('user_id',user.id).maybeSingle();
+    const{data:candidates}=await supabase.from('work_items').select('*').eq('user_id',user.id).in('state',['proposed','approved','in_progress','blocked','review','changes_requested']).order('updated_at',{ascending:false}).limit(5);
+    const resolution=resolveWorkFocus((candidates??[]).map(item=>item.id),focus?.work_item_id??undefined);
+    if(resolution.kind==='focused'){const focused=candidates!.find(item=>item.id===resolution.itemId)!;await supabase.rpc('set_work_focus',{work_item_id:focused.id});const attached=await createWorkOrchestrationService(supabase).attachContext({workItemId:focused.id,expectedProposalVersion:focused.proposal_version,references:[{kind:'message',id:sourceMessage.id}]});orchestrationMetadata={kind:attached.ok?'work_continuation':'work_error',sourceMessageId:sourceMessage.id,workItemId:focused.id};}
+    else if(resolution.kind==='confirmation_required')orchestrationMetadata={kind:'focus_confirmation_required',sourceMessageId:sourceMessage.id,candidates:candidates!.filter(item=>resolution.itemIds.includes(item.id)).map(item=>({id:item.id,summary:(item.proposal as {data?:{summary?:string}}).data?.summary??item.original_request}))};
   }
 
   // ── Chama Ollama (streaming) ───────────────────────────────────

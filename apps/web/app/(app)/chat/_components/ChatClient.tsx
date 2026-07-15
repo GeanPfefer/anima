@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import styles from './chat.module.css';
-import { WorkProposalCard, type WorkItemView } from './WorkProposalCard';
+import { WorkProposalCard, type WorkPresentationView } from './WorkProposalCard';
 
 type Message = { id?: string; role: 'user' | 'assistant'; content: string };
 
@@ -28,7 +28,8 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [error, setError]             = useState('');
   const [isOnboarding, setIsOnboarding] = useState(isFirstTime);
   const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
-  const [workItems, setWorkItems] = useState<Record<string, WorkItemView>>({});
+  const [workItems, setWorkItems] = useState<Record<string, WorkPresentationView>>({});
+  const [focusedWorkItemId,setFocusedWorkItemId]=useState<string|null>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -53,13 +54,14 @@ export function ChatClient({ isFirstTime, userName }: Props) {
           const userMessages = history.filter(message => message.role === 'user');
           const results = await Promise.all(userMessages.map(async message => {
             const response = await fetch(`/api/work-orchestration/items/by-source/${message.id}`);
-            if (!response.ok) return [] as WorkItemView[];
-            const body = await response.json(); return body.ok ? body.value as WorkItemView[] : [];
+            if (!response.ok) return [] as WorkPresentationView[];
+            const body = await response.json(); return body.ok ? body.value as WorkPresentationView[] : [];
           }));
-          setWorkItems(Object.fromEntries(results.flat().map(item => [item.sourceMessageId, item])));
+          setWorkItems(Object.fromEntries(results.flat().map(value => [value.item.sourceMessageId, value])));
         }
       })
       .catch(() => {});
+    fetch('/api/work-orchestration/focus').then(response=>response.ok?response.json():null).then(body=>{if(body?.ok)setFocusedWorkItemId(body.value)}).catch(()=>{});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -124,6 +126,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
         await streamChat(text);
       }
     } catch (e) {
+      void fetch('/api/ai/turns/abandon',{method:'POST'});
       setError(e instanceof Error ? e.message : 'Erro ao conectar com a IA');
       setMessages(prev => prev.slice(0, -1));
     } finally {
@@ -169,9 +172,10 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     if (activityHeader) router.refresh();
     if (orchestrationHeader) {
       try {
-        const metadata = JSON.parse(decodeURIComponent(orchestrationHeader)) as { kind: string; sourceMessageId: string; item?: WorkItemView; question?: { question: string } };
-        if (metadata.item) setWorkItems(previous => ({ ...previous, [metadata.sourceMessageId]: metadata.item! }));
+        const metadata = JSON.parse(decodeURIComponent(orchestrationHeader)) as { kind: string; sourceMessageId: string; workItemId?:string; presentation?: WorkPresentationView; candidates?:{id:string;summary:string}[]; question?: { question: string } };
+        if (metadata.presentation) {setWorkItems(previous => ({ ...previous, [metadata.sourceMessageId]: metadata.presentation! }));setFocusedWorkItemId(metadata.presentation.item.id);}
         if (metadata.kind === 'clarification_required' && metadata.question) setMessages(previous => [...previous, { role: 'assistant', content: metadata.question!.question }]);
+        if(metadata.kind==='focus_confirmation_required'&&metadata.candidates)setMessages(previous=>[...previous,{role:'assistant',content:`A qual trabalho você se refere? ${metadata.candidates!.map((candidate,index)=>`${index+1}. ${candidate.summary}`).join(' · ')}`}]);
       } catch { /* metadado opcional inválido não interrompe o chat */ }
     }
   }
@@ -213,6 +217,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   }
 
   async function clearHistory() {
+    if(loading)return;
     if (!confirm('Arquivar esta conversa e iniciar uma nova? O histórico será preservado.')) return;
     const response = await fetch('/api/ai/history', { method: 'DELETE' });
     if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.error ?? 'Não foi possível arquivar esta conversa.'); return; }
@@ -220,6 +225,8 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     setWorkItems({});
     setError('');
   }
+
+  async function focusWork(workItemId:string){const response=await fetch('/api/work-orchestration/focus',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId})});if(response.ok)setFocusedWorkItemId(workItemId);else setError('Não foi possível alterar o trabalho em foco.');}
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -242,7 +249,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
           </p>
         </div>
         {messages.length > 0 && !isOnboarding && (
-          <button className={styles.clearBtn} onClick={clearHistory} title="Arquivar conversa atual">
+          <button className={styles.clearBtn} disabled={loading} onClick={clearHistory} title="Arquivar conversa atual">
             Nova conversa
           </button>
         )}
@@ -281,7 +288,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
                   : m.content
               }
             </div>
-            {m.role === 'user' && m.id && workItems[m.id] && <WorkProposalCard item={workItems[m.id]!} onChange={item => setWorkItems(previous => ({ ...previous, [m.id!]: item }))} />}
+            {m.role === 'user' && m.id && workItems[m.id] && <WorkProposalCard presentation={workItems[m.id]!} focused={focusedWorkItemId===workItems[m.id]!.item.id} onFocus={()=>focusWork(workItems[m.id!]!.item.id)} onChange={presentation => setWorkItems(previous => ({ ...previous, [m.id!]: presentation }))} />}
           </div>
         ))}
 
