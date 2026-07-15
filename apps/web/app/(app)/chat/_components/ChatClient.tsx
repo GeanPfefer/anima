@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import styles from './chat.module.css';
+import { WorkProposalCard, type WorkItemView } from './WorkProposalCard';
 
-type Message = { role: 'user' | 'assistant'; content: string };
+type Message = { id?: string; role: 'user' | 'assistant'; content: string };
 
 type ProposedLink = {
   childId:    string;
@@ -27,6 +28,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [error, setError]             = useState('');
   const [isOnboarding, setIsOnboarding] = useState(isFirstTime);
   const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
+  const [workItems, setWorkItems] = useState<Record<string, WorkItemView>>({});
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -42,12 +44,19 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     }
     fetch('/api/ai/history')
       .then(r => r.ok ? r.json() : [])
-      .then((history: { role: string; content: string }[]) => {
+      .then(async (history: { id: string; role: string; content: string }[]) => {
         if (history.length > 0) {
           setMessages(history.map(m => ({
-            role:    m.role as 'user' | 'assistant',
+            id: m.id, role: m.role as 'user' | 'assistant',
             content: m.content,
           })));
+          const userMessages = history.filter(message => message.role === 'user');
+          const results = await Promise.all(userMessages.map(async message => {
+            const response = await fetch(`/api/work-orchestration/items/by-source/${message.id}`);
+            if (!response.ok) return [] as WorkItemView[];
+            const body = await response.json(); return body.ok ? body.value as WorkItemView[] : [];
+          }));
+          setWorkItems(Object.fromEntries(results.flat().map(item => [item.sourceMessageId, item])));
         }
       })
       .catch(() => {});
@@ -144,6 +153,9 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     }
     const activityHeader = res.headers.get('X-Activity-Logged');
     const linksHeader    = res.headers.get('X-Pillar-Links');
+    const sourceMessageId = res.headers.get('X-Source-Message-Id');
+    const orchestrationHeader = res.headers.get('X-Work-Orchestration');
+    if (sourceMessageId) setMessages(previous => previous.map((message, index) => index === previous.length - 2 && message.role === 'user' ? { ...message, id: sourceMessageId } : message));
     await readStream(res);
     if (linksHeader) {
       try {
@@ -155,6 +167,13 @@ export function ChatClient({ isFirstTime, userName }: Props) {
       } catch { /* header inválido, ignora */ }
     }
     if (activityHeader) router.refresh();
+    if (orchestrationHeader) {
+      try {
+        const metadata = JSON.parse(decodeURIComponent(orchestrationHeader)) as { kind: string; sourceMessageId: string; item?: WorkItemView; question?: { question: string } };
+        if (metadata.item) setWorkItems(previous => ({ ...previous, [metadata.sourceMessageId]: metadata.item! }));
+        if (metadata.kind === 'clarification_required' && metadata.question) setMessages(previous => [...previous, { role: 'assistant', content: metadata.question!.question }]);
+      } catch { /* metadado opcional inválido não interrompe o chat */ }
+    }
   }
 
   async function applyLink(link: ProposedLink) {
@@ -195,8 +214,10 @@ export function ChatClient({ isFirstTime, userName }: Props) {
 
   async function clearHistory() {
     if (!confirm('Limpar todo o histórico de conversa?')) return;
-    await fetch('/api/ai/history', { method: 'DELETE' });
+    const response = await fetch('/api/ai/history', { method: 'DELETE' });
+    if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.error ?? 'Este histórico não pode ser apagado com segurança.'); return; }
     setMessages([]);
+    setWorkItems({});
     setError('');
   }
 
@@ -251,7 +272,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
         )}
 
         {messages.map((m, i) => (
-          <div key={i} className={`${styles.message} ${styles[m.role]}`}>
+          <div key={m.id ?? i} className={`${styles.message} ${styles[m.role]}`}>
             <div className={styles.bubble}>
               {m.role === 'assistant' && m.content === '' && isTyping
                 ? <span className={styles.typingDots}><span /><span /><span /></span>
@@ -260,6 +281,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
                   : m.content
               }
             </div>
+            {m.role === 'user' && m.id && workItems[m.id] && <WorkProposalCard item={workItems[m.id]!} onChange={item => setWorkItems(previous => ({ ...previous, [m.id!]: item }))} />}
           </div>
         ))}
 
