@@ -1,0 +1,10 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { WorkItemView } from './WorkProposalCard';
+import { WorkProposalCard } from './WorkProposalCard';
+const item: WorkItemView = { id:'item',userId:'user',sourceMessageId:'message',state:'proposed',impactLevel:'significant',capability:'programming',originalRequest:'pedido',intent:{},proposal:{schemaVersion:1,data:{summary:'Construir tela',objective:'Criar uma tela segura',includedScope:['Tela'],excludedScope:['Execução'],expectedEffects:['Proposta'],risks:['Escopo']}},proposalVersion:2,createdAt:'2026-07-14T00:00:00Z',updatedAt:'2026-07-14T00:00:00Z' };
+describe('WorkProposalCard', () => {
+  beforeEach(() => { global.fetch = jest.fn().mockResolvedValue({ ok:true, json:async()=>({ok:true,value:{...item,state:'approved'}}) }) as jest.Mock; });
+  test('renderiza proposta e versão apresentadas', () => { render(<WorkProposalCard item={item} onChange={jest.fn()} />); expect(screen.getByText('Construir tela')).toBeInTheDocument(); expect(screen.getByText('proposed · v2')).toBeInTheDocument(); expect(screen.getByText('Nenhuma execução começou.')).toBeInTheDocument(); });
+  test('envia aprovação uma única vez enquanto carrega', async () => { let resolveResponse!: (value: unknown) => void; (global.fetch as jest.Mock).mockReturnValue(new Promise(resolve => { resolveResponse = resolve; })); render(<WorkProposalCard item={item} onChange={jest.fn()} />); const button=screen.getByRole('button',{name:'Aprovar'}); fireEvent.click(button); fireEvent.click(button); expect(global.fetch).toHaveBeenCalledTimes(1); resolveResponse({ok:true,json:async()=>({ok:true,value:{...item,state:'approved'}})}); await waitFor(()=>expect(button).toBeDisabled()); });
+  test('estados posteriores são somente leitura', () => { render(<WorkProposalCard item={{...item,state:'approved'}} onChange={jest.fn()} />); expect(screen.queryByRole('button',{name:'Aprovar'})).not.toBeInTheDocument(); });
+});
