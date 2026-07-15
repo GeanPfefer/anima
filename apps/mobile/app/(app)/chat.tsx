@@ -94,15 +94,21 @@ export default function ChatScreen() {
       if (routing?.kind === 'focus_confirmation_required') {
         updated.push({ role: 'assistant', content: `A qual trabalho você se refere? ${routing.candidates.map((candidate, index) => `${index + 1}. ${candidate.summary}`).join(' · ')}` });
       }
+      if (routing?.kind === 'error') {
+        updated.push({ role: 'assistant', content: `Não foi possível registrar o trabalho desta mensagem: ${routing.message} Você pode tentar novamente.` });
+      }
       setMessages(updated);
       setWorkItems(await loadWorkItems(updated.flatMap(message=>message.role==='user'&&message.id?[message.id]:[])));
       setStreamingContent('');
     } catch (err) {
       void supabase.rpc('abandon_current_conversation_turn');
-      const isTimeout = err instanceof Error && err.message === 'timeout';
+      const isTimeout     = err instanceof Error && err.message === 'timeout';
+      const isPersistence = err instanceof Error && err.message === 'persistence';
       const msg = isTimeout
         ? 'O Anima está demorando muito para responder. O Ollama pode estar ocupado — tente novamente em alguns instantes.'
-        : 'Não foi possível conectar ao Anima. Verifique se o Ollama está rodando em ' + (process.env.EXPO_PUBLIC_OLLAMA_URL ?? 'http://100.68.239.78:11434');
+        : isPersistence
+          ? 'Sua mensagem não pôde ser salva e nada foi enviado. Verifique a conexão com o servidor e tente novamente.'
+          : 'Não foi possível conectar ao Anima. Verifique se o Ollama está rodando em ' + (process.env.EXPO_PUBLIC_OLLAMA_URL ?? 'http://100.68.239.78:11434');
       setMessages(prev => [
         ...prev,
         { role: 'assistant', content: msg },

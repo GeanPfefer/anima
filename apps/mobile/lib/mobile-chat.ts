@@ -228,9 +228,10 @@ export async function sendChatMessage(
       // Persiste a saudação exibida localmente antes de salvar a mensagem do usuário
       const greeting = pastMessages.find(m => m.role === 'assistant');
       if (greeting) {
-        await supabase.from('ai_conversations').insert({
+        const { error: greetingError } = await supabase.from('ai_conversations').insert({
           user_id: userId, role: 'assistant', content: greeting.content,
         });
+        if (greetingError) throw new Error('persistence');
       }
       // Tenta extrair o nome da primeira resposta do usuário
       const extracted = extractName(message);
@@ -239,7 +240,12 @@ export async function sendChatMessage(
       }
     }
 
-    await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message });
+    const { data: onboardingMessage, error: onboardingMessageError } = await supabase
+      .from('ai_conversations')
+      .insert({ user_id: userId, role: 'user', content: message })
+      .select('session_id')
+      .single();
+    if (onboardingMessageError || !onboardingMessage) throw new Error('persistence');
 
     const controller  = new AbortController();
     const chatTimeout = setTimeout(() => controller.abort(), 120_000);
@@ -292,10 +298,12 @@ export async function sendChatMessage(
               onToken(token);
             }
             if (json.done && fullResponse) {
+              // session_id explícito prende a resposta ao turno da pergunta.
               await supabase.from('ai_conversations').insert({
                 user_id: userId,
                 role:    'assistant',
                 content: fullResponse,
+                session_id: onboardingMessage.session_id,
               });
             }
           } catch { /* linha não é JSON válido — ignora */ }
@@ -319,10 +327,13 @@ export async function sendChatMessage(
   }
 
   // ── Chat regular ────────────────────────────────────────────────
-  const { data: sourceMessage } = await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message }).select('id, session_id').single();
-  const workRouting: MobileWorkRouting | null = sourceMessage
-    ? await routeWorkMessage(message, sourceMessage.id).catch((): MobileWorkRouting => ({ kind: 'none' }))
-    : null;
+  // Contrato de proveniência: sem a mensagem-fonte persistida não há sessão,
+  // work item nem contexto rastreável — a interação falha de forma tipada em
+  // vez de prosseguir silenciosamente.
+  const { data: sourceMessage, error: sourceMessageError } = await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message }).select('id, session_id').single();
+  if (sourceMessageError || !sourceMessage) throw new Error('persistence');
+  const workRouting: MobileWorkRouting = await routeWorkMessage(message, sourceMessage.id)
+    .catch((cause): MobileWorkRouting => ({ kind: 'error', message: cause instanceof Error ? cause.message : 'Não foi possível registrar o trabalho.' }));
 
   // Fire-and-forget: detecção completa (sequencial para não sobrecarregar Ollama)
   ;(async () => {
@@ -551,7 +562,7 @@ export async function sendChatMessage(
               user_id: userId,
               role:    'assistant',
               content: fullResponse,
-              session_id: sourceMessage?.session_id ?? undefined,
+              session_id: sourceMessage.session_id,
             });
           }
         } catch {

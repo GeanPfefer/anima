@@ -172,9 +172,10 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     if (activityHeader) router.refresh();
     if (orchestrationHeader) {
       try {
-        const metadata = JSON.parse(decodeURIComponent(orchestrationHeader)) as { kind: string; sourceMessageId: string; workItemId?:string; presentation?: WorkPresentationView; candidates?:{id:string;summary:string}[]; question?: { question: string } };
+        const metadata = JSON.parse(decodeURIComponent(orchestrationHeader)) as { kind: string; sourceMessageId: string; workItemId?:string; presentation?: WorkPresentationView; candidates?:{id:string;summary:string}[]; question?: { question: string }; error?: { code: string; message: string } };
         if (metadata.presentation) {setWorkItems(previous => ({ ...previous, [metadata.sourceMessageId]: metadata.presentation! }));setFocusedWorkItemId(metadata.presentation.item.id);}
         if (metadata.kind === 'clarification_required' && metadata.question) setMessages(previous => [...previous, { role: 'assistant', content: metadata.question!.question }]);
+        if (metadata.kind === 'work_error') setError(`Não foi possível registrar o trabalho desta mensagem: ${metadata.error?.message ?? 'erro desconhecido'}. Você pode tentar novamente.`);
         if(metadata.kind==='focus_confirmation_required'&&metadata.candidates)setMessages(previous=>[...previous,{role:'assistant',content:`A qual trabalho você se refere? ${metadata.candidates!.map((candidate,index)=>`${index+1}. ${candidate.summary}`).join(' · ')}`}]);
       } catch { /* metadado opcional inválido não interrompe o chat */ }
     }

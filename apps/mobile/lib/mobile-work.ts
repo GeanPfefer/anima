@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 const service=()=>new WorkOrchestrationService(new SupabaseWorkOrchestrationRepository(supabase));
 const required=<T>(result:{ok:true;value:T}|{ok:false;error:{message:string}}):T=>{if(!result.ok)throw new Error(result.error.message);return result.value};
 async function presentation(item:WorkItem):Promise<WorkPresentation>{const events=required(await service().listEvents(item.id));return presentWorkItem(item,events)}
-export type MobileWorkRouting={kind:'none'}|{kind:'proposal';presentation:WorkPresentation}|{kind:'continued';workItemId:string}|{kind:'focus_confirmation_required';candidates:readonly{id:string;summary:string}[]};
+export type MobileWorkRouting={kind:'none'}|{kind:'proposal';presentation:WorkPresentation}|{kind:'continued';workItemId:string}|{kind:'focus_confirmation_required';candidates:readonly{id:string;summary:string}[]}|{kind:'error';message:string};
 
 export async function routeWorkMessage(message:string,sourceMessageId:string):Promise<MobileWorkRouting>{
   const interpretation=interpretWorkRequest(message,sourceMessageId);
