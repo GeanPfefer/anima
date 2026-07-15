@@ -10,10 +10,10 @@ Documento arquitetural: [`../arquitetura/orquestracao-de-trabalho.md`](../arquit
 |---|---|---|
 | F0 | Concluída | Árvore estabilizada; exploração de Persona Prisma preservada em resgate e correções independentes isoladas no commit `072211c` |
 | F1 | Concluída neste commit | Roteador operacional, stub de ferramenta, arquitetura, plano, marco e PRD compartilhados. Este estado só é válido após o commit que contém este documento |
-| F2 | Não iniciada | Persistência mínima e contratos transacionais |
-| F3 | Não iniciada | Regras de domínio e serviço de orquestração |
-| F4 | Não iniciada | Proposta e aprovação conversacionais na web |
-| F5 | Não iniciada | Execução manual, resultado, revisão e encerramento |
+| F2 | Concluída | Persistência mínima, contratos transacionais, RLS, tipos e testes pgTAP |
+| F3 | Concluída | Domínio compartilhado, serviço e adaptador Supabase independentes de fornecedor |
+| F4 | Concluída | Proposta versionada e decisões de aprovação integradas ao chat web |
+| F5 | Concluída | Execução manual, resultado, correções, revisão e encerramento preservando histórico |
 | F6 | Não iniciada | Contexto versionado, proveniência e arquivamento de conversa |
 | F7 | Não iniciada | Paridade mobile e múltiplos trabalhos/foco |
 | F8 | Não iniciada | Contrato de adaptadores e executor falso; integrações reais continuam fora de escopo até nova aprovação |

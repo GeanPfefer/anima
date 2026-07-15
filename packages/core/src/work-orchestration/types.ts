@@ -3,6 +3,7 @@ import type { Enums, Json } from '@anima/types';
 export type WorkState = Enums<'work_state'>;
 export type WorkEventType = Enums<'work_event_type'>;
 export type WorkApprovalDecision = Enums<'work_approval_decision'>;
+export type WorkReviewDecision = Enums<'work_review_decision'>;
 export type WorkEventAuthor = Enums<'work_event_author'>;
 export type WorkImpactLevel = Enums<'work_impact_level'>;
 export type WorkCapability = Enums<'work_capability'>;
@@ -24,6 +25,9 @@ export interface WorkProposalV1 {
 }
 export type WorkProposal = WorkProposalV1;
 export interface WorkResultInput { readonly summary: string; readonly resultReferences: readonly string[]; }
+export type ResultReviewDecision =
+  | { readonly type: 'accept' }
+  | { readonly type: 'request_changes'; readonly requestedChanges: string };
 export type ApprovalDecision =
   | { readonly type: 'approve' }
   | { readonly type: 'reject' }

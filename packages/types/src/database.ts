@@ -991,6 +991,34 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      review_work_result: {
+        Args: {
+          decision: Database["public"]["Enums"]["work_review_decision"]
+          decision_context?: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       revise_work_proposal: {
         Args: {
           expected_proposal_version: number
@@ -1120,6 +1148,7 @@ export type Database = {
         | "financial"
         | "irreversible"
         | "external"
+      work_review_decision: "accept" | "request_changes"
       work_state:
         | "proposed"
         | "approved"
@@ -1436,6 +1465,7 @@ export const Constants = {
         "irreversible",
         "external",
       ],
+      work_review_decision: ["accept", "request_changes"],
       work_state: [
         "proposed",
         "approved",

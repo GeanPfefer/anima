@@ -1,8 +1,8 @@
-import type { CreateWorkProposalCommand, ResolveWorkApprovalCommand, ReviseWorkProposalCommand, StartWorkCommand, SubmitWorkResultCommand } from './commands';
+import type { CreateWorkProposalCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, SubmitWorkResultCommand } from './commands';
 import { failure, type WorkOperationResult } from './errors';
 import type { WorkOrchestrationRepository } from './repository';
 import type { ApprovalDecision, WorkEvent, WorkItem, WorkItemId } from './types';
-import { isValidApprovalDecision, isValidProposalVersion, isValidWorkIntent, isValidWorkProposal, isValidWorkResult } from './validation';
+import { isValidApprovalDecision, isValidProposalVersion, isValidResultReviewDecision, isValidWorkIntent, isValidWorkProposal, isValidWorkResult } from './validation';
 const invalid = <T>(message: string): WorkOperationResult<T> => failure('invalid_input', message);
 export class WorkOrchestrationService {
   constructor(private readonly repository: WorkOrchestrationRepository) {}
@@ -26,9 +26,14 @@ export class WorkOrchestrationService {
     if (!this.validVersion(command.expectedProposalVersion) || !isValidWorkResult(command.result)) return Promise.resolve(invalid('Resultado inválido.'));
     return this.repository.submitResult(command);
   }
+  reviewResult(command: ReviewWorkResultCommand): Promise<WorkOperationResult<WorkItem>> {
+    if (!this.validVersion(command.expectedProposalVersion) || !isValidResultReviewDecision(command.decision)) return Promise.resolve(invalid('Decisão de revisão inválida.'));
+    return this.repository.reviewResult(command);
+  }
   getItem(id: WorkItemId): Promise<WorkOperationResult<WorkItem>> { return id ? this.repository.getItem(id) : Promise.resolve(invalid('Item inválido.')); }
   findItemsBySourceMessageId(sourceMessageId: string): Promise<WorkOperationResult<readonly WorkItem[]>> { return sourceMessageId ? this.repository.findItemsBySourceMessageId(sourceMessageId) : Promise.resolve(invalid('Mensagem inválida.')); }
   listEvents(id: WorkItemId): Promise<WorkOperationResult<readonly WorkEvent[]>> { return id ? this.repository.listEvents(id) : Promise.resolve(invalid('Item inválido.')); }
   private validVersion(value: number): boolean { return isValidProposalVersion(value); }
 }
 export const approvalDecisionContext = (decision: ApprovalDecision): Record<string, string> => decision.type === 'request_changes' ? { requested_changes: decision.requestedChanges } : decision.type === 'defer' ? { reason: decision.reason } : {};
+export const resultReviewDecisionContext = (decision: import('./types').ResultReviewDecision): Record<string, string> => decision.type === 'request_changes' ? { requested_changes: decision.requestedChanges } : {};

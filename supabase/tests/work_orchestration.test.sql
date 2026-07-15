@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(76);
+SELECT plan(86);
 
 INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at) VALUES
 ('10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','a@test.invalid','',now(),'{}','{}',now(),now()),
@@ -32,6 +32,7 @@ SELECT has_function('public','revise_work_proposal',ARRAY['uuid','integer','json
 SELECT has_function('public','resolve_approval',ARRAY['uuid','integer','work_approval_decision','jsonb'],'resolve existe');
 SELECT has_function('public','start_work',ARRAY['uuid','integer'],'start existe');
 SELECT has_function('public','submit_work_result',ARRAY['uuid','integer','jsonb'],'submit existe');
+SELECT has_function('public','review_work_result',ARRAY['uuid','integer','work_review_decision','jsonb'],'review existe');
 
 SELECT ok(has_table_privilege('authenticated','public.work_items','SELECT'),'authenticated lê itens');
 SELECT ok(NOT has_table_privilege('authenticated','public.work_items','INSERT'),'authenticated não insere itens');
@@ -48,6 +49,9 @@ SELECT ok(has_schema_privilege('service_role','private','USAGE'),'service_role u
 SELECT ok(has_table_privilege('service_role','private.work_orchestration_allowlist','INSERT'),'service_role administra allowlist');
 SELECT ok(has_function_privilege('authenticated','public.create_work_proposal(uuid,work_impact_level,work_capability,jsonb,jsonb)','EXECUTE'),'authenticated executa RPC');
 SELECT ok(NOT has_function_privilege('anon','public.create_work_proposal(uuid,work_impact_level,work_capability,jsonb,jsonb)','EXECUTE'),'anon não executa RPC');
+
+SELECT ok(has_function_privilege('authenticated','public.review_work_result(uuid,integer,work_review_decision,jsonb)','EXECUTE'),'authenticated revisa resultado');
+SELECT ok(NOT has_function_privilege('anon','public.review_work_result(uuid,integer,work_review_decision,jsonb)','EXECUTE'),'anon não revisa resultado');
 
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000003',true);
@@ -102,6 +106,13 @@ SELECT throws_ok($$SELECT public.start_work((SELECT id FROM test_items WHERE lab
 SELECT throws_ok($$SELECT public.submit_work_result((SELECT id FROM test_items WHERE label='defer'),1,'{"summary":"x","result_references":[]}')$$,'22023','transition not allowed','submit fora de in_progress falha');
 SELECT lives_ok($$SELECT public.submit_work_result((SELECT id FROM test_items WHERE label='approve'),1,'{"summary":"feito","result_references":["commit:abc"]}')$$,'submit válido funciona');
 SELECT is((SELECT jsonb_build_array(i.state,e.event_type,e.author,e.proposal_version) FROM public.work_items i JOIN public.work_events e ON e.work_item_id=i.id WHERE i.id=(SELECT id FROM test_items WHERE label='approve') AND e.event_type='result_submitted'),'["review","result_submitted","user",1]'::jsonb,'submit consistente');
+SELECT lives_ok($$SELECT public.review_work_result((SELECT id FROM test_items WHERE label='approve'),1,'request_changes','{"requested_changes":"ajustar evidência"}')$$,'pedido de correção funciona');
+SELECT is((SELECT jsonb_build_array(i.state,e.event_type,e.payload->'data'->>'requested_changes') FROM public.work_items i JOIN public.work_events e ON e.work_item_id=i.id WHERE i.id=(SELECT id FROM test_items WHERE label='approve') AND e.event_type='changes_requested'),'["changes_requested","changes_requested","ajustar evidência"]'::jsonb,'correção preserva decisão');
+SELECT lives_ok($$SELECT public.start_work((SELECT id FROM test_items WHERE label='approve'),1)$$,'trabalho com correção é retomado');
+SELECT lives_ok($$SELECT public.submit_work_result((SELECT id FROM test_items WHERE label='approve'),1,'{"summary":"feito novamente","result_references":["commit:def"]}')$$,'novo resultado preserva o ciclo');
+SELECT lives_ok($$SELECT public.review_work_result((SELECT id FROM test_items WHERE label='approve'),1,'accept','{}')$$,'aceite funciona');
+SELECT is((SELECT jsonb_build_array(i.state,e.event_type,e.payload->'data'?'accepted_result_event_id') FROM public.work_items i JOIN public.work_events e ON e.work_item_id=i.id WHERE i.id=(SELECT id FROM test_items WHERE label='approve') AND e.event_type='result_accepted'),'["completed","result_accepted",true]'::jsonb,'aceite conclui e referencia resultado');
+SELECT throws_ok($$SELECT public.review_work_result((SELECT id FROM test_items WHERE label='approve'),1,'accept','{}')$$,'40001','work item state or proposal version changed','aceite repetido falha');
 
 -- Estados de retomada previstos na matriz são comprovados separadamente.
 INSERT INTO test_items SELECT c.label,w.id FROM (VALUES('blocked'),('changes-state')) c(label) CROSS JOIN LATERAL public.create_work_proposal('20000000-0000-0000-0000-000000000001','low','planning',jsonb_build_object('case',c.label),pg_temp.proposal(c.label)) w;

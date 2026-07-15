@@ -1,10 +1,10 @@
-import type { CreateWorkProposalCommand, ResolveApprovalInput, ReviseWorkProposalCommand, StartWorkCommand, SubmitWorkResultCommand, WorkEvent, WorkItem, WorkItemId, WorkOperationResult, WorkOrchestrationRepository } from '@anima/core';
-import { approvalDecisionContext, failure } from '@anima/core';
+import type { CreateWorkProposalCommand, ResolveApprovalInput, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, SubmitWorkResultCommand, WorkEvent, WorkItem, WorkItemId, WorkOperationResult, WorkOrchestrationRepository } from '@anima/core';
+import { approvalDecisionContext, failure, resultReviewDecisionContext } from '@anima/core';
 import type { Database, Json, Tables } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { mapSupabaseFailure } from './errors';
 import { mapWorkEvent, mapWorkItem, proposalToDatabase } from './mappers';
-type MutationName='create_work_proposal'|'revise_work_proposal'|'resolve_approval'|'start_work'|'submit_work_result';
+type MutationName='create_work_proposal'|'revise_work_proposal'|'resolve_approval'|'review_work_result'|'start_work'|'submit_work_result';
 interface ObservedVersion { workItemId:string; expectedProposalVersion:number }
 export class SupabaseWorkOrchestrationRepository implements WorkOrchestrationRepository {
   constructor(private readonly client:SupabaseClient<Database>) {}
@@ -13,6 +13,7 @@ export class SupabaseWorkOrchestrationRepository implements WorkOrchestrationRep
   resolveApproval(c:ResolveApprovalInput){return this.mutate('resolve_approval',{work_item_id:c.workItemId,expected_proposal_version:c.expectedProposalVersion,decision:c.decision.type,decision_context:approvalDecisionContext(c.decision)},c);}
   startWork(c:StartWorkCommand){return this.mutate('start_work',{work_item_id:c.workItemId,expected_proposal_version:c.expectedProposalVersion},c);}
   submitResult(c:SubmitWorkResultCommand){return this.mutate('submit_work_result',{work_item_id:c.workItemId,expected_proposal_version:c.expectedProposalVersion,result:{summary:c.result.summary,result_references:[...c.result.resultReferences]}},c);}
+  reviewResult(c:ReviewWorkResultCommand){return this.mutate('review_work_result',{work_item_id:c.workItemId,expected_proposal_version:c.expectedProposalVersion,decision:c.decision.type,decision_context:resultReviewDecisionContext(c.decision)},c);}
   async getItem(id:WorkItemId):Promise<WorkOperationResult<WorkItem>>{const{data,error}=await this.client.from('work_items').select('*').eq('id',id).maybeSingle();if(error)return mapSupabaseFailure(error,false);if(!data)return failure('work_item_not_found','Item de trabalho não encontrado.');try{return{ok:true,value:mapWorkItem(data)}}catch(cause){return failure('persistence_failure','Resposta persistida inválida.',false,cause)}}
   async findItemsBySourceMessageId(sourceMessageId:string):Promise<WorkOperationResult<readonly WorkItem[]>>{const{data,error}=await this.client.from('work_items').select('*').eq('source_message_id',sourceMessageId).order('created_at',{ascending:true});if(error)return mapSupabaseFailure(error,false);try{return{ok:true,value:(data??[]).map(mapWorkItem)}}catch(cause){return failure('persistence_failure','Resposta persistida inválida.',false,cause)}}
   async listEvents(id:WorkItemId):Promise<WorkOperationResult<readonly WorkEvent[]>>{const{data,error}=await this.client.from('work_events').select('*').eq('work_item_id',id).order('created_at',{ascending:true});if(error)return mapSupabaseFailure(error,false);try{return{ok:true,value:(data??[]).map(mapWorkEvent)}}catch(cause){return failure('persistence_failure','Resposta persistida inválida.',false,cause)}}
