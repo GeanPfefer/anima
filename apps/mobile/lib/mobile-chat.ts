@@ -319,7 +319,7 @@ export async function sendChatMessage(
   }
 
   // ── Chat regular ────────────────────────────────────────────────
-  const { data: sourceMessage } = await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message }).select('id').single();
+  const { data: sourceMessage } = await supabase.from('ai_conversations').insert({ user_id: userId, role: 'user', content: message }).select('id, session_id').single();
   const workRouting: MobileWorkRouting | null = sourceMessage
     ? await routeWorkMessage(message, sourceMessage.id).catch((): MobileWorkRouting => ({ kind: 'none' }))
     : null;
@@ -545,10 +545,13 @@ export async function sendChatMessage(
             onToken(token);
           }
           if (json.done) {
+            // session_id explícito prende a resposta ao turno da pergunta e
+            // impede fragmentação caso a sessão mude nesse meio tempo.
             await supabase.from('ai_conversations').insert({
               user_id: userId,
               role:    'assistant',
               content: fullResponse,
+              session_id: sourceMessage?.session_id ?? undefined,
             });
           }
         } catch {

@@ -485,7 +485,7 @@ ${contextBlock}`;
   const { data: sourceMessage, error: sourceMessageError } = await supabase
     .from('ai_conversations')
     .insert({ user_id: user.id, role: 'user', content: message })
-    .select('id')
+    .select('id, session_id')
     .single();
   if (sourceMessageError || !sourceMessage) return Response.json({ error: 'Não foi possível preservar a mensagem.' }, { status: 503 });
 
@@ -561,10 +561,14 @@ ${contextBlock}`;
                 controller.enqueue(encoder.encode(token));
               }
               if (json.done) {
+                // session_id explícito: a resposta pertence ao turno da pergunta.
+                // Se a sessão foi arquivada nesse meio tempo, o insert falha em
+                // vez de fragmentar a interação na sessão seguinte.
                 await supabase.from('ai_conversations').insert({
                   user_id: user.id,
                   role:    'assistant',
                   content: fullResponse,
+                  session_id: sourceMessage.session_id,
                 });
                 // Arquétipo + Identidade Emergente em cadência (fire-and-forget).
                 // Conta só mensagens do USUÁRIO (passo de 1) — gatilho confiável;
