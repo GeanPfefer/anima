@@ -75,4 +75,5 @@ npm run build
 - Produto e estado técnico: `anima-prd.md`
 - Orquestração de trabalho: `docs/arquitetura/orquestracao-de-trabalho.md`
 - Plano do Modo Construção: `docs/planos/001-modo-construcao-mvp.md`
+- Plano do Modo Autônomo V0: `docs/planos/002-modo-autonomo-v0.md` (backlog em `docs/planos/002-modo-autonomo-v0-backlog.md`)
 - Histórico de visão: `docs/marcos/README.md`

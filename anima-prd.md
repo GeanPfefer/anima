@@ -354,6 +354,8 @@ O Modo Construção é o primeiro caso de uso de uma orquestração genérica de
 
 O bootstrap atual é **privado e manual**. Claude e Codex podem receber pacotes de contexto por operação humana, como executores de capacidades, mas o produto ainda não chama APIs, CLIs ou serviços externos. A visão orienta a arquitetura sem substituir a prioridade atual do Anima como sistema de evolução pessoal.
 
+O passo seguinte está formalizado no [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md) e planejado no [Plano 002 — Modo Autônomo V0](docs/planos/002-modo-autonomo-v0.md): trabalhos explicitamente aprovados poderão ser executados e retomados sem supervisão constante, com elegibilidade, claim exclusivo, tentativas persistentes, handoff obrigatório e política fechada de interrupção humana. É decisão registrada e backlog documental — **nada disso está implementado**.
+
 ## 1g. Jornadas de evolução
 
 > **Conceitual — norte arquitetural, não backlog.** Registrado em [`anima-manifesto.md`](anima-manifesto.md) e [Marco 001](docs/marcos/001-nascimento-da-identidade.md).
@@ -927,6 +929,7 @@ O grafo de vida representa visualmente as conexões que emergem dos dados do usu
 | Visão A agora / Visão B como norte (jul/2026) | Anima como sistema de evolução pessoal é o único trabalho ativo; orquestrador de capacidades / Sistema Operacional Pessoal fica documentado como norte, não vira backlog imediato | Evita que a visão de longo prazo engula o produto atual ou pare o roadmap tático em andamento; ver `anima-manifesto.md` e [Marco 001](docs/marcos/001-nascimento-da-identidade.md) |
 | Autonomia por nível de impacto (jul/2026) | Observação de baixo risco roda silenciosamente (atividade, nota, entidade, hipótese); ação de impacto estrutural/financeiro/irreversível sempre exige confirmação prévia | Generaliza o padrão de confirmação já usado em pilar pendente e hipótese de identidade para qualquer futura capacidade de execução; ver `anima-manifesto.md` |
 | Jornadas de evolução (jul/2026) | Anima não gerencia só tarefas — acompanha jornadas de vida variadas (skate, música, programação, carreira, quarto inteligente, etc.); relação com pilar/entidade/quest fica em aberto | Reconhece que nem toda evolução de vida é uma "atividade cronometrada"; ver §1g — decisão de schema é arquitetura futura, não desta atualização |
+| Trabalho Autônomo Seguro (jul/2026) | Modo Autônomo formalizado como decisão: fila de trabalhos elegíveis, claim exclusivo, tentativas persistentes, handoff obrigatório e interrupção humana só para decisões realmente humanas; V0 estreita (um trabalho por projeto, execução local, sem merge/publicação automáticos) | Permite continuidade de trabalho sem supervisão constante mantendo intenção aprovada, limites explícitos e evidências verificáveis; nada implementado ainda — ver [Marco 003](docs/marcos/003-trabalho-autonomo-seguro.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md) |
 
 ---
 
