@@ -13,7 +13,7 @@ export interface WorkResultProjection {
   readonly limitations: readonly string[] | null;
 }
 export type WorkAction = 'approve'|'reject'|'defer'|'revise_proposal'|'start'|'submit_result'|'accept_result'|'request_result_changes';
-export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; }
+export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; }
 
 const object=(value:Json|undefined):Record<string,Json|undefined>|null=>value!==null&&value!==undefined&&!Array.isArray(value)&&typeof value==='object'?value:null;
 const validationOutcomes:ReadonlySet<string>=new Set(['passed','failed','declared']);
@@ -26,6 +26,23 @@ const projectValidations=(value:Json|undefined):readonly WorkResultValidation[]|
 const projectLimitations=(value:Json|undefined):readonly string[]|null=>Array.isArray(value)&&value.every((entry):entry is string=>typeof entry==='string'&&entry.trim().length>0)?value:null;
 export function projectLatestWorkResult(events:readonly WorkEvent[]):WorkResultProjection|null{
   for(let index=events.length-1;index>=0;index--){const event=events[index]!;if(event.type!=='result_submitted'||event.proposalVersion===null)continue;const envelope=object(event.payload),data=object(envelope?.data);if(typeof data?.summary!=='string'||!Array.isArray(data.result_references)||!data.result_references.every(value=>typeof value==='string'))continue;return{eventId:event.id,proposalVersion:event.proposalVersion,author:event.author,summary:data.summary,references:data.result_references,validations:projectValidations(data.validations),limitations:projectLimitations(data.limitations)};}
+  return null;
+}
+// O resultado aceito é reconstruído a partir do result_accepted mais recente
+// e do evento exato que ele referencia (accepted_result_event_id). Qualquer
+// elo ausente ou malformado resulta em null: a UI declara a lacuna, nunca a
+// preenche com texto próprio.
+export function projectAcceptedWorkResult(events:readonly WorkEvent[]):WorkResultProjection|null{
+  for(let index=events.length-1;index>=0;index--){
+    const event=events[index]!;
+    if(event.type!=='result_accepted')continue;
+    const data=object(object(event.payload)?.data);
+    const acceptedId=data?.accepted_result_event_id;
+    if(typeof acceptedId!=='string'||!acceptedId)return null;
+    const accepted=events.find(candidate=>candidate.id===acceptedId&&candidate.type==='result_submitted');
+    if(!accepted)return null;
+    return projectLatestWorkResult([accepted]);
+  }
   return null;
 }
 // Compartilhado entre web e mobile: transforma o texto do formulário em
@@ -46,7 +63,7 @@ export function availableWorkActions(item:WorkItem,latestResult:WorkResultProjec
   if(item.state==='review'&&latestResult?.proposalVersion===item.proposalVersion)return['accept_result','request_result_changes'];
   return[];
 }
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);return{item,latestResult,latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult)}};
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult)}};
 export function buildProposalRevision(item:WorkItem,requestedChanges:string):Pick<import('./commands').RequestProposalRevisionCommand,'intent'|'proposal'|'requestedChanges'>{
   const feedback=requestedChanges.trim();
   const objective=`${item.proposal.data.objective}\n\nAjuste solicitado: ${feedback}`;

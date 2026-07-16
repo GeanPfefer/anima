@@ -8,7 +8,7 @@ export type WorkPresentationView=Omit<WorkPresentation,'item'>&{item:WorkItemVie
 type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void};
 
 export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:Props){
-  const {item,latestResult,availableActions}=presentation;
+  const {item,latestResult,acceptedResult,availableActions}=presentation;
   const [status,setStatus]=useState<'idle'|'submitting'|'reconciling'>('idle');
   const [error,setError]=useState('');
   const [mode,setMode]=useState<'none'|'defer'|'correct'|'result'|'review_changes'>('none');
@@ -26,17 +26,17 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
     <section><strong>Inclui</strong><ul>{item.proposal.data.includedScope.map(value=><li key={value}>{value}</li>)}</ul></section>
     <section><strong>Não inclui</strong><ul>{item.proposal.data.excludedScope.map(value=><li key={value}>{value}</li>)}</ul></section>
     <section><strong>Riscos</strong>{item.proposal.data.risks.length?<ul>{item.proposal.data.risks.map(value=><li key={value}>{value}</li>)}</ul>:<p>Nenhum risco declarado.</p>}</section>
-    {item.state==='review'&&latestResult&&<section aria-label="Resultado para revisão" className={styles.workNotice}>
-      <strong>Resultado · v{latestResult.proposalVersion}</strong>
-      <p><em>Relato de {latestResult.author}, não verificado automaticamente:</em> {latestResult.summary}</p>
+    {(()=>{const shown=item.state==='review'?latestResult:item.state==='completed'?acceptedResult:null;if(!shown)return null;return <section aria-label={item.state==='completed'?'Resultado aceito':'Resultado para revisão'} className={styles.workNotice}>
+      <strong>{item.state==='completed'?'Resultado aceito':'Resultado'} · v{shown.proposalVersion}</strong>
+      <p><em>Relato de {shown.author}, não verificado automaticamente:</em> {shown.summary}</p>
       <dl className={styles.workMeta}>
-        <div><dt>Autoria</dt><dd>{latestResult.author}</dd></div>
-        <div><dt>Referências</dt><dd>{latestResult.references.length?latestResult.references.join(', '):'Nenhuma referência informada'}</dd></div>
-        <div><dt>Validações</dt><dd>{latestResult.validations===null?'Nenhuma validação registrada':latestResult.validations.length===0?'Nenhuma validação registrada':latestResult.validations.map(validation=>`${validation.label} — ${describeValidationOutcome(validation.outcome)}`).join('; ')}</dd></div>
-        <div><dt>Limitações</dt><dd>{latestResult.limitations===null||latestResult.limitations.length===0?'Nenhuma limitação declarada':latestResult.limitations.join('; ')}</dd></div>
+        <div><dt>Autoria</dt><dd>{shown.author}</dd></div>
+        <div><dt>Referências</dt><dd>{shown.references.length?shown.references.join(', '):'Nenhuma referência informada'}</dd></div>
+        <div><dt>Validações</dt><dd>{shown.validations===null?'Nenhuma validação registrada':shown.validations.length===0?'Nenhuma validação registrada':shown.validations.map(validation=>`${validation.label} — ${describeValidationOutcome(validation.outcome)}`).join('; ')}</dd></div>
+        <div><dt>Limitações</dt><dd>{shown.limitations===null||shown.limitations.length===0?'Nenhuma limitação declarada':shown.limitations.join('; ')}</dd></div>
       </dl>
-    </section>}
-    <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento.':item.state==='review'?'Revise as evidências acima antes de decidir.':item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?'Resultado aceito e trabalho concluído.':`Estado atual: ${item.state}.`}</p>
+    </section>;})()}
+    <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?'Resultado aceito e trabalho concluído; evidências preservadas acima.':'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?'A execução falhou; nenhum resultado foi aceito.':`Estado atual: ${item.state}.`}</p>
     {!focused&&onFocus&&!['completed','failed','rejected','cancelled'].includes(item.state)&&<button disabled={busy} onClick={onFocus}>Usar como foco</button>}
     {mode==='none'&&allowed('approve')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>decide({type:'approve'})}>Aprovar</button><button disabled={busy} onClick={()=>setMode('correct')}>Pedir correção</button><button disabled={busy} onClick={()=>setMode('defer')}>Adiar</button><button disabled={busy} onClick={()=>decide({type:'reject'})}>Rejeitar</button></div>}
     {mode==='defer'&&<div className={styles.workDecision}><label>Motivo<select value={detail} onChange={event=>setDetail(event.target.value)}><option value="">Selecione</option><option>Quero decidir depois</option><option>Falta contexto</option><option>Não é prioridade agora</option><option value="other">Outro</option></select></label>{detail==='other'&&<input aria-label="Outro motivo" value={customDeferReason} onChange={event=>setCustomDeferReason(event.target.value)}/>}<button disabled={busy||!(detail==='other'?customDeferReason:detail).trim()} onClick={()=>decide({type:'defer',reason:detail==='other'?customDeferReason:detail})}>Confirmar adiamento</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
