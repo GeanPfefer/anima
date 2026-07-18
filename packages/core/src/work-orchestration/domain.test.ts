@@ -9,4 +9,5 @@ describe('domínio da orquestração', () => {
   test('exige versão inteira positiva', () => { expect(isValidProposalVersion(1)).toBe(true); expect(isValidProposalVersion(0)).toBe(false); expect(isValidProposalVersion(1.5)).toBe(false); });
   test('classifica estados', () => { expect(isTerminalWorkState('completed')).toBe(true); expect(isWaitingForUserWorkState('review')).toBe(true); expect(isActiveWorkState('in_progress')).toBe(true); });
   test('preserva foco sem duplicar e pede confirmação na ambiguidade', () => { expect(resolveWorkFocus(['a','a'],'a')).toEqual({kind:'focused',itemId:'a'}); expect(resolveWorkFocus(['a','b'])).toEqual({kind:'confirmation_required',itemIds:['a','b']}); });
+  test('foco obsoleto fora dos candidatos nunca direciona silenciosamente', () => { expect(resolveWorkFocus([],'obsoleto')).toEqual({kind:'none'}); expect(resolveWorkFocus(['a','b'],'obsoleto')).toEqual({kind:'confirmation_required',itemIds:['a','b']}); });
 });
