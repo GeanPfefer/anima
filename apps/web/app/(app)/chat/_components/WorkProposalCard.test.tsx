@@ -23,5 +23,23 @@ describe('WorkProposalCard', () => {
   test('cartão em foco exibe o indicador e não oferece troca', () => { render(<WorkProposalCard presentation={presentation({item:{...item,state:'in_progress'},availableActions:['submit_result']})} onChange={jest.fn()} focused onFocus={jest.fn()} />); expect(screen.getByText('Trabalho em foco')).toBeInTheDocument(); expect(screen.queryByRole('button',{name:'Usar como foco'})).not.toBeInTheDocument(); });
   test('cartão ativo fora de foco oferece troca explícita que aciona onFocus', () => { const onFocus=jest.fn(); render(<WorkProposalCard presentation={presentation({item:{...item,state:'in_progress'},availableActions:['submit_result']})} onChange={jest.fn()} onFocus={onFocus} />); fireEvent.click(screen.getByRole('button',{name:'Usar como foco'})); expect(onFocus).toHaveBeenCalledTimes(1); });
   test('cartão terminal não oferece troca de foco', () => { render(<WorkProposalCard presentation={presentation({item:{...item,state:'completed'},availableActions:[]})} onChange={jest.fn()} onFocus={jest.fn()} />); expect(screen.queryByRole('button',{name:'Usar como foco'})).not.toBeInTheDocument(); });
+  test('decisão sobre versão obsoleta é recusada com mensagem e reconcilia para a versão vigente', async () => {
+    const revised = presentation({ item: { ...item, proposalVersion: 3 }, availableActions: ['approve', 'reject', 'defer', 'revise_proposal'] });
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ ok: false, error: { code: 'version_conflict', message: 'O item mudou desde a última leitura.' } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, value: { presentation: revised } }) });
+    const onChange = jest.fn();
+    render(<WorkProposalCard presentation={presentation()} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Aprovar' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('O item mudou desde a última leitura.'));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(revised));
+    expect(global.fetch).toHaveBeenNthCalledWith(1, '/api/work-orchestration/decisions', expect.objectContaining({ body: expect.stringContaining('"expectedProposalVersion":2') }));
+    expect(global.fetch).toHaveBeenNthCalledWith(2, '/api/work-orchestration/items/item');
+  });
+  test('cartão renderiza a versão exata recebida da projeção', () => {
+    render(<WorkProposalCard presentation={presentation({ item: { ...item, proposalVersion: 3 } })} onChange={jest.fn()} />);
+    expect(screen.getByText('proposed · v3')).toBeInTheDocument();
+    expect(screen.getByLabelText('Trabalho, versão 3')).toBeInTheDocument();
+  });
   test('correção envia somente o pedido, sem reescrever a proposta no cliente', async () => { render(<WorkProposalCard presentation={presentation()} onChange={jest.fn()} />); fireEvent.click(screen.getByRole('button',{name:'Pedir correção'})); fireEvent.change(screen.getByLabelText('O que deve mudar?'),{target:{value:'Reduzir o escopo'}}); fireEvent.click(screen.getByRole('button',{name:'Criar nova versão coerente'})); await waitFor(()=>expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/proposal-corrections',expect.objectContaining({method:'POST',body:expect.stringContaining('"requestedChanges":"Reduzir o escopo"')}))); const body=JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body as string); expect(body.proposal).toBeUndefined(); expect(body.intent).toBeUndefined(); });
 });

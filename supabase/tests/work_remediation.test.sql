@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(31);
+SELECT plan(32);
 
 INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at) VALUES
 ('61000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','rem-a@test.invalid','',now(),'{}','{}',now(),now()),
@@ -49,6 +49,7 @@ SELECT is((SELECT jsonb_build_array(payload->'data'->>'requested_changes',payloa
 SELECT throws_ok($$SELECT public.request_work_proposal_revision((SELECT id FROM items WHERE label='alvo'),1,'de novo','{}',pg_temp.proposal('v3'))$$,'55000','work item state or proposal version changed','revisão stale falha');
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM items WHERE label='alvo')),4::bigint,'revisão stale não persiste parcial');
 SELECT throws_ok($$SELECT public.request_work_proposal_revision((SELECT id FROM items WHERE label='alvo'),2,'   ','{}',pg_temp.proposal('v3'))$$,'22023','invalid proposal revision input','correção vazia falha');
+SELECT throws_ok($$SELECT public.resolve_approval((SELECT id FROM items WHERE label='alvo'),1,'reject','{}')$$,'55000','work item state or proposal version changed','rejeição de versão obsoleta falha');
 SELECT set_config('request.jwt.claim.sub','61000000-0000-0000-0000-000000000002',true);
 SELECT throws_ok($$SELECT public.request_work_proposal_revision((SELECT id FROM items WHERE label='alvo'),2,'meu palpite','{}',pg_temp.proposal('vx'))$$,'P0002','work item not found','revisão alheia falha');
 SELECT set_config('request.jwt.claim.sub','61000000-0000-0000-0000-000000000001',true);
