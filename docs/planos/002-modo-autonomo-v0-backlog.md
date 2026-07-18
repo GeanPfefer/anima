@@ -67,6 +67,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### ORQ-04 — Continuidade conversacional
 
+**Estado (2026-07-18):** implementado e comprovado por core/web/pgTAP; demonstração visual autenticada pendente.
+
 - **Problema:** a ligação entre mensagem de origem, cartão, resposta do Anima e eventos existe por contrato, mas a continuidade percebida (retomar a conversa e reencontrar o trabalho com contexto) não foi comprovada.
 - **Resultado esperado:** encerrar e reabrir a conversa (inclusive arquivando) preserva proveniência: é possível reconstruir pedido → proposta → decisão → resultado a partir do item.
 - **Dependências:** ORQ-01–03; F6 do Plano 001. **Escopo:** comprovação ao vivo de arquivamento e reconstrução. **Fora do escopo:** busca; linha do tempo nova.

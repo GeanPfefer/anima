@@ -1028,6 +1028,7 @@ export type Database = {
     Functions: {
       abandon_current_conversation_turn: { Args: never; Returns: undefined }
       archive_current_conversation: { Args: never; Returns: string }
+      reopen_latest_conversation: { Args: never; Returns: string }
       attach_work_context: {
         Args: {
           context_references: Json
@@ -1753,4 +1754,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

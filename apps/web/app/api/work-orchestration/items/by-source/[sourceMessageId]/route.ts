@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import type { WorkItem } from '@anima/core';
 import { operationResponse } from '@/lib/work-orchestration/http';
-import { serializeWorkPresentation } from '@/lib/work-orchestration/serialize';
+import { serializeReconstructedWorkPresentation } from '@/lib/work-orchestration/serialize';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 export async function GET(_: Request, context: { params: Promise<{ sourceMessageId: string }> }) {
   const client = await createClient(); const { data: { user } } = await client.auth.getUser();
@@ -12,7 +12,10 @@ export async function GET(_: Request, context: { params: Promise<{ sourceMessage
   if (!items.ok) return operationResponse<readonly WorkItem[]>(items, value => value);
   const enriched = await Promise.all(items.value.map(async item => {
     const events = await service.listEvents(item.id);
-    return serializeWorkPresentation(item,events.ok?events.value:[]);
+    const contexts = await service.listContexts(item.id);
+    if(!events.ok||!contexts.ok)return null;
+    return serializeReconstructedWorkPresentation(item,events.value,contexts.value);
   }));
+  if(enriched.some(value=>value===null))return Response.json({ok:false,error:{code:'persistence_failure',message:'Não foi possível reconstruir a proveniência do trabalho.'}},{status:503});
   return Response.json({ ok: true, value: enriched });
 }

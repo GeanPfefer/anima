@@ -26,6 +26,8 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [messages, setMessages]       = useState<Message[]>([]);
   const [input, setInput]             = useState('');
   const [loading, setLoading]         = useState(false);
+  const [hydrating,setHydrating]      = useState(!isFirstTime);
+  const [continuityError,setContinuityError] = useState(false);
   const [error, setError]             = useState('');
   const [isOnboarding, setIsOnboarding] = useState(isFirstTime);
   const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
@@ -42,6 +44,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   // Carrega histórico persistido ao montar (evita reset ao trocar de aba)
   useEffect(() => {
     if (isOnboarding) {
+      setHydrating(false);
       fetchOnboardingMessage([]);
       return;
     }
@@ -62,7 +65,8 @@ export function ChatClient({ isFirstTime, userName }: Props) {
           setWorkItems(Object.fromEntries(results.flat().map(value => [value.item.sourceMessageId, value])));
         }
       })
-      .catch(() => {});
+      .catch(() => {setContinuityError(true);setError('Não foi possível reconstruir a conversa persistida. Recarregue antes de enviar uma nova mensagem.');})
+      .finally(()=>setHydrating(false));
     fetch('/api/work-orchestration/focus').then(response=>response.ok?response.json():null).then(body=>{if(body?.ok)setFocusedWorkItemId(body.value)}).catch(()=>{});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -101,7 +105,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
 
   async function send() {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || hydrating || continuityError) return;
 
     setInput('');
     setError('');
@@ -230,6 +234,16 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     setError('');
   }
 
+  async function reopenPreviousConversation(){
+    if(loading)return;
+    setLoading(true);setError('');
+    try{
+      const response=await fetch('/api/ai/history',{method:'POST'});
+      if(!response.ok){const body=await response.json().catch(()=>({}));setError(body.error??'Não foi possível retomar a conversa.');return;}
+      window.location.reload();
+    }finally{setLoading(false);}
+  }
+
   async function focusWork(workItemId:string){const response=await fetch('/api/work-orchestration/focus',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId})});if(response.ok)setFocusedWorkItemId(workItemId);else setError('Não foi possível alterar o trabalho em foco.');}
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -264,6 +278,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
           <div className={styles.empty}>
             <p className={styles.emptyIcon}>🧠</p>
             <p className={styles.emptyText}>Como posso te ajudar hoje?</p>
+            <button className={styles.suggestion} disabled={loading} onClick={reopenPreviousConversation}>Retomar conversa anterior</button>
             <div className={styles.suggestions}>
               {[
                 'Como estão meus pilares?',
@@ -342,9 +357,9 @@ export function ChatClient({ isFirstTime, userName }: Props) {
             ? 'Escreva aqui… (Enter para enviar)'
             : 'Digite uma mensagem… (Enter para enviar, Shift+Enter para nova linha)'}
           rows={2}
-          disabled={loading}
+          disabled={loading||hydrating||continuityError}
         />
-        <button className={styles.sendBtn} onClick={send} disabled={loading || !input.trim()}>
+        <button className={styles.sendBtn} onClick={send} disabled={loading || hydrating || continuityError || !input.trim()}>
           ↑
         </button>
       </div>

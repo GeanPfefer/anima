@@ -1,4 +1,4 @@
-import { availableWorkActions, buildProposalRevision, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, type WorkEvent, type WorkItem } from '.';
+import { availableWorkActions, buildProposalRevision, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, reconstructWorkPresentation, type WorkEvent, type WorkItem } from '.';
 const item={id:'i',userId:'u',sourceMessageId:'m',state:'review',impactLevel:'low',capability:'planning',originalRequest:'x',intent:{},proposal:{schemaVersion:1,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:2,createdAt:new Date(),updatedAt:new Date()} satisfies WorkItem;
 const event={id:'r',workItemId:'i',type:'result_submitted',author:'executor',proposalVersion:2,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a']}},occurredAt:new Date()} satisfies WorkEvent;
 describe('projeção de apresentação do trabalho',()=>{
@@ -9,6 +9,16 @@ describe('projeção de apresentação do trabalho',()=>{
   test('projeta validações e limitações tipadas',()=>expect(projectLatestWorkResult([{...event,payload:{schema_version:1,data:{summary:'feito',result_references:[],validations:[{label:'npm test',outcome:'passed'}],limitations:['sem teste e2e']}}}])).toMatchObject({validations:[{label:'npm test',outcome:'passed'}],limitations:['sem teste e2e']}));
   test('validações malformadas não viram evidência',()=>expect(projectLatestWorkResult([{...event,payload:{schema_version:1,data:{summary:'feito',result_references:[],validations:[{label:'x',outcome:'inventado'}],limitations:['ok',42]}}}])).toMatchObject({validations:null,limitations:null}));
   test('interpreta linhas de validação com prefixo tipado',()=>expect(parseWorkResultValidations('ok: npm test\nfalha: build web\nrevisão manual\n  \n')).toEqual([{label:'npm test',outcome:'passed'},{label:'build web',outcome:'failed'},{label:'revisão manual',outcome:'declared'}]));
+});
+describe('reconstrução fail-closed da proveniência',()=>{
+  const makeEvent=(id:string,type:WorkEvent['type'],proposalVersion:number,payload:WorkEvent['payload']={schema_version:1,data:{}}):WorkEvent=>({id,workItemId:item.id,type,author:type==='work_approved'?'user':'anima',proposalVersion,payload,occurredAt:new Date()});
+  const history=[makeEvent('p','work_proposed',1),makeEvent('c','context_attached',1),makeEvent('r2','proposal_revised',2),makeEvent('a','work_approved',2),event];
+  const source=[{kind:'message',id:item.sourceMessageId}];
+  test('reconstrói revisão, decisão e resultado da versão vigente',()=>expect(reconstructWorkPresentation(item,history,source)).toMatchObject({provenance:{status:'complete',issues:[]},latestResult:{eventId:'r'},availableActions:['accept_result','request_result_changes']}));
+  test('bloqueia ações quando a referência ao pedido original está ausente',()=>expect(reconstructWorkPresentation(item,history,[])).toMatchObject({provenance:{status:'incomplete',issues:['missing_source_message_reference']},availableActions:[]}));
+  test('bloqueia quando a decisão não aponta para a versão vigente',()=>expect(reconstructWorkPresentation(item,history.map(value=>value.id==='a'?{...value,proposalVersion:1}:value),source)).toMatchObject({provenance:{status:'incomplete',issues:expect.arrayContaining(['missing_versioned_decision'])},availableActions:[]}));
+  test('exige que resultado de executor aponte para uma execução iniciada do mesmo id',()=>{const executionResult={...event,payload:{schema_version:1,data:{summary:'feito',result_references:[],execution_id:'exec-1'}}};expect(reconstructWorkPresentation(item,[...history.slice(0,-1),executionResult],source)).toMatchObject({provenance:{status:'incomplete',issues:expect.arrayContaining(['missing_execution_exec-1'])},availableActions:[]});});
+  test('resultado aceito continua verificável depois da reconstrução',()=>{const accepted=makeEvent('accepted','result_accepted',2,{schema_version:1,data:{accepted_result_event_id:'r'}});expect(reconstructWorkPresentation({...item,state:'completed'},[...history,accepted],source)).toMatchObject({provenance:{status:'complete'},acceptedResult:{eventId:'r'},availableActions:[]});});
 });
 describe('revisão coerente de proposta',()=>{
   test('correção gera nova versão coerente preservando a proposta base',()=>{

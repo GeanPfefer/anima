@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(22);
+SELECT plan(28);
 
 INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at) VALUES
 ('41000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','f6a@test.invalid','',now(),'{}','{}',now(),now()),
@@ -13,6 +13,7 @@ RESET ROLE;
 SELECT has_table('public','conversation_sessions','sessões existem');
 SELECT has_table('public','work_contexts','contextos existem');
 SELECT has_function('public','archive_current_conversation',ARRAY[]::text[],'archive existe');
+SELECT has_function('public','reopen_latest_conversation',ARRAY[]::text[],'reabertura existe');
 SELECT has_function('public','attach_work_context',ARRAY['uuid','integer','jsonb'],'attach existe');
 SELECT ok(NOT has_table_privilege('authenticated','public.ai_conversations','DELETE'),'cliente não apaga conversa');
 
@@ -30,6 +31,10 @@ SELECT lives_ok($$SELECT public.archive_current_conversation()$$,'arquivamento f
 SELECT ok((SELECT archived_at IS NOT NULL FROM public.conversation_sessions WHERE id=(SELECT id FROM old_session)),'sessão anterior é arquivada');
 SELECT ok((SELECT id <> (SELECT id FROM old_session) FROM public.conversation_sessions WHERE archived_at IS NULL),'nova sessão é distinta');
 SELECT is((SELECT count(*) FROM public.ai_conversations),1::bigint,'mensagem antiga permanece');
+SELECT lives_ok($$SELECT public.reopen_latest_conversation()$$,'reabre a conversa arquivada mais recente');
+SELECT ok((SELECT archived_at IS NULL FROM public.conversation_sessions WHERE id=(SELECT id FROM old_session)),'sessão original volta a ser ativa');
+SELECT is((SELECT count(*) FROM public.ai_conversations message JOIN public.conversation_sessions session ON session.id=message.session_id WHERE session.archived_at IS NULL),1::bigint,'mensagem original volta com a sessão');
+SELECT lives_ok($$SELECT public.archive_current_conversation()$$,'conversa reaberta pode ser arquivada novamente');
 INSERT INTO public.ai_conversations(id,user_id,role,content) VALUES
 ('42000000-0000-0000-0000-000000000002','41000000-0000-0000-0000-000000000001','user','Novo contexto');
 SELECT ok((SELECT session_id=(SELECT id FROM public.conversation_sessions WHERE archived_at IS NULL) FROM public.ai_conversations WHERE id='42000000-0000-0000-0000-000000000002'),'nova mensagem usa sessão ativa');
@@ -49,6 +54,7 @@ SELECT throws_ok($$SELECT public.attach_work_context((SELECT id FROM item),1,'[]
 
 SELECT set_config('request.jwt.claim.sub','41000000-0000-0000-0000-000000000002',true);
 SELECT is((SELECT count(*) FROM public.work_contexts),0::bigint,'outro usuário não vê contextos');
+SELECT throws_ok($$SELECT public.reopen_latest_conversation()$$,'P0002','active conversation not found','outro usuário não reabre conversa alheia');
 
 SELECT * FROM finish();
 ROLLBACK;

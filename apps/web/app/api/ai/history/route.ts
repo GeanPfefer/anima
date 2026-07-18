@@ -46,3 +46,17 @@ export async function DELETE() {
 
   return new Response(null, { status: 204 });
 }
+
+export async function POST() {
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } },
+  );
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return new Response('Não autorizado', { status: 401 });
+  const { error } = await supabase.rpc('reopen_latest_conversation');
+  if (error) return Response.json({ error: error.code === 'P0002' ? 'Nenhuma conversa arquivada para retomar.' : 'Não foi possível retomar a conversa com segurança.' }, { status: error.code === 'P0002' ? 404 : 409 });
+  return new Response(null, { status: 204 });
+}

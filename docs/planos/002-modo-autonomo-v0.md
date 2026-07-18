@@ -14,7 +14,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 
 | Fase | Estado | Resultado |
 |---|---|---|
-| A | Não iniciada | — |
+| A | Implementada; aceitação ao vivo pendente | ORQ-01–04 implementados e cobertos por core/web/pgTAP; falta repetir o ciclo autenticado no web e em dispositivo mobile |
 | B | Não iniciada | — |
 | C | Não iniciada | — |
 | D | Não iniciada | — |
@@ -37,6 +37,14 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 **Riscos:** tratar "implementado com testes" como "comprovado"; deriva de escopo consertando UX além do necessário.
 
 **Fora do escopo:** qualquer conceito novo do Modo Autônomo; mudanças de schema além de correções do ciclo atual.
+
+### Registro de verificação da Fase A (2026-07-18)
+
+- ORQ-01–03 foram fechados nos commits `c3ec9d8`, `372ab38` e `a01855b`.
+- ORQ-04 passou a reabrir a conversa arquivada mais recente sem excluir mensagens, reconstruir cartões a partir de item + eventos + contextos persistidos e bloquear ações quando algum elo obrigatório de proveniência estiver ausente ou inconsistente.
+- A corrida entre envio e hidratação foi fechada: o chat não aceita novo turno até concluir a reconstrução; falha de hidratação permanece fail-closed e visível.
+- Evidência local: suites core/web verdes, 177 asserções pgTAP verdes, migration aplicada no Supabase local, typecheck e build verdes. O pgTAP percorre arquivar → reabrir → reidratar a sessão preservando mensagens e isolamento por usuário.
+- A verificação visual abriu o app web local, mas encontrou apenas a tela de login, sem sessão autenticada disponível. A validação em dispositivo mobile também não foi executada nesta sessão. Portanto, o critério de aceite ao vivo da Fase A ainda não foi declarado cumprido e a Fase B não está formalmente desbloqueada.
 
 ## Fase B — Contrato de execução
 

@@ -22,6 +22,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
   return <article className={styles.workCard} aria-label={`Trabalho, versão ${item.proposalVersion}`} aria-busy={busy}>
     <div className={styles.workCardHeader}><strong>{focused?'Trabalho em foco':'Proposta de trabalho'}</strong><span>{item.state} · v{item.proposalVersion}</span></div>
     <h3>{item.proposal.data.summary}</h3><p>{item.proposal.data.objective}</p>
+    {presentation.provenance?.status==='incomplete'&&<p role="alert" className={styles.error}>A proveniência persistida deste trabalho está incompleta. As ações permanecem bloqueadas para evitar uma decisão sobre contexto inconsistente.</p>}
     <dl className={styles.workMeta}><div><dt>Capacidade</dt><dd>{item.capability}</dd></div><div><dt>Impacto</dt><dd>{item.impactLevel}</dd></div></dl>
     <section><strong>Inclui</strong><ul>{item.proposal.data.includedScope.map(value=><li key={value}>{value}</li>)}</ul></section>
     <section><strong>Não inclui</strong><ul>{item.proposal.data.excludedScope.map(value=><li key={value}>{value}</li>)}</ul></section>
