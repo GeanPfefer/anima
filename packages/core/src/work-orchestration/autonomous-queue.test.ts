@@ -35,7 +35,7 @@ const ids = (candidates: readonly AutonomousQueueCandidate[], now: Date = T0): r
 describe('fila autônoma — projeção', () => {
   test('itens elegíveis entram na fila com posição e correlação', () => {
     expect(projectAutonomousQueue([candidate('i1', 10)], T0)).toEqual([
-      { workItemId: 'i1', approvedProposalVersion: 1, approvalSeq: 10, approvedAt: at(10), capability: 'programming', targetReference: 'anima', queuePosition: 1 },
+      { workItemId: 'i1', approvedProposalVersion: 1, approvalSeq: 10, approvedAt: at(10), capability: 'programming', targetReference: 'anima', queuePosition: 1, targetOccupied: false },
     ]);
   });
 

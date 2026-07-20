@@ -2,7 +2,7 @@ import { selectNextAutonomousWork, type AutonomousQueueEntry } from '.';
 
 const T0 = new Date('2026-07-21T12:00:00Z');
 
-const entry = (id: string, approvalSeq: number, queuePosition: number): AutonomousQueueEntry => ({
+const entry = (id: string, approvalSeq: number, queuePosition: number, overrides: Partial<AutonomousQueueEntry> = {}): AutonomousQueueEntry => ({
   workItemId: id,
   approvedProposalVersion: 1,
   approvalSeq,
@@ -10,6 +10,8 @@ const entry = (id: string, approvalSeq: number, queuePosition: number): Autonomo
   capability: 'programming',
   targetReference: 'anima',
   queuePosition,
+  targetOccupied: false,
+  ...overrides,
 });
 
 describe('seleção autônoma — política determinística', () => {
@@ -19,7 +21,7 @@ describe('seleção autônoma — política determinística', () => {
     expect(selectNextAutonomousWork([entry('i1', 10, 1), entry('i2', 20, 2), entry('i3', 30, 3)])).toEqual({
       outcome: 'selected',
       entry: entry('i1', 10, 1),
-      rationale: { policy: 'oldest_approval_first', queueSize: 3, selectedPosition: 1, approvalSeq: 10, runnerUpApprovalSeq: 20 },
+      rationale: { policy: 'oldest_approval_first', queueSize: 3, selectedPosition: 1, approvalSeq: 10, runnerUpApprovalSeq: 20, skippedOccupiedTargets: 0 },
     });
   });
 

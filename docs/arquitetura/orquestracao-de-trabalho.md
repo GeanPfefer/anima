@@ -331,7 +331,23 @@ Selecionar é **leitura e não emite evento**: o efeito auditável é o claim, q
 
 Seleção e posse compõem com segurança sob concorrência. Dois supervisores podem selecionar a mesma cabeça — a leitura não bloqueia — mas apenas um adquire o claim; o perdedor é recusado no lock do item e, ao reconsultar, recebe o próximo item elegível. Não há execução dupla, inanição nem deadlock.
 
-A invariante de um trabalho ativo por alvo é do SUP-03; `target_reference` já é projetado pela fila para que essa filtragem seja acrescentada sem alterar estes contratos.
+## Um trabalho ativo por alvo (SUP-03, Fase E)
+
+A exclusividade **por item** (AUTO-02) e **por alvo** (SUP-03) são invariantes distintas e permanecem separadas: dois índices únicos parciais independentes sobre `work_claims`, um em `(work_item_id)` e outro em `(user_id, target_reference)`, ambos restritos a `released_at IS NULL`.
+
+Alternativas consideradas para representar a posse do alvo: tabela própria `work_target_locks` — rejeitada por criar estado paralelo capaz de divergir dos `work_items`, exatamente o risco que o backlog manda evitar; verificação apenas na aplicação — rejeitada porque dois itens diferentes no mesmo alvo travam linhas diferentes, então nada serializaria a corrida; **extensão de `work_claims` com `target_reference` mais índice único parcial** — escolhida por ser a menor representação coerente, reaproveitar a posse existente e colocar a garantia no banco.
+
+`target_reference` é derivado no servidor a partir de `intent.execution_spec.target.reference` e **nunca informado pelo cliente**. Ausente, vazio ou não textual falha fechado. O `kind` deliberadamente **não** participa da identidade do alvo: tratar `project:X` e `workspace:X` como alvos distintos seria a "definição frouxa de mesmo projeto" que fura o invariante. Mesma referência (após `btrim`) é o mesmo alvo físico; referências são opacas (Marco 004), então não há semântica de caminho a normalizar.
+
+Um alvo está **ocupado** quando algum item está em `in_progress` **ou** possui claim ativo. O primeiro termo é indispensável e vale independentemente do claim, porque cobre dois casos reais: o claim que expira no meio de uma execução longa, e a execução comandada do INT-04, que não cria claim algum. Claim expirado ou liberado sobre item que **não** está executando não ocupa nada — o alvo nunca fica bloqueado permanentemente, e o claim vencido de outro item é liberado com razão `expired`, de forma auditável, quando o alvo é reivindicado.
+
+Itens em `review`, `changes_requested` ou `blocked` **não** ocupam o alvo. A tentativa parou e produziu handoff; conforme o INT-03, resultado produzido nunca foi aplicado ao alvo. Bloquear ali seria confundir "aguardando humano" com "executando".
+
+A corrida entre dois itens **diferentes** do mesmo alvo não é resolvida pelo lock do item — são linhas distintas. Um lock consultivo por alvo serializa os concorrentes, e o índice único parcial permanece como garantia final: se disparar, a corrida foi perdida e a recusa é traduzida em erro tipado. O lock do item é sempre adquirido antes do lock do alvo, o que impede ciclo.
+
+Na fila, alvo ocupado **não descarta nem reordena** o item: ele ganha `target_occupied = true` e continua na sua posição, esperando. A seleção escolhe o mais antigo com alvo livre e informa `skipped_occupied_targets`, de modo que trabalhos em alvos diferentes progridem sem que ninguém perca a vez. Quando todo alvo está ocupado, o resultado é "aguardando alvo", que é distinto de fila vazia — o supervisor deve esperar, não concluir que não há trabalho.
+
+**Costura conhecida:** a execução comandada do INT-04 bloqueia o alvo para o supervisor, mas o caminho inverso não é verificado — `start_commanded_work_attempt` não consulta ocupação de alvo, então um comando explícito do usuário pode iniciar execução em alvo com claim autônomo ativo. Fechar isso alteraria o contrato ratificado do INT-04 e pertence a um item próprio, com decisão humana.
 
 ## Fora de escopo desta fundação
 

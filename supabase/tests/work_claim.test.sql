@@ -94,7 +94,7 @@ SELECT is((SELECT count(*) FROM public.work_claims WHERE id='91000000-0000-0000-
 
 -- ---------- expiração e retomada ----------
 CREATE TEMP TABLE resumed AS SELECT (public.create_work_proposal('91000000-0000-0000-0000-000000000003','low','programming',
-  '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"anima"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}',
+  '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"anima-retomada"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}',
   '{"schema_version":1,"data":{"summary":"z","objective":"retomar","included_scope":["c.py"],"excluded_scope":["deploy"],"expected_effects":["ok"],"risks":[]}}')).id;
 SELECT public.resolve_approval((SELECT id FROM resumed),1,'approve','{}');
 SELECT public.acquire_work_claim((SELECT id FROM resumed),1,'91000000-0000-0000-0000-0000000000d1','supervisor-morto',60);

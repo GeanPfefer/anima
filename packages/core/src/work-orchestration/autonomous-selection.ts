@@ -24,6 +24,9 @@ export interface AutonomousSelectionRationale {
   readonly approvalSeq: number;
   // Sequência do segundo colocado: explica por que este item e não o próximo.
   readonly runnerUpApprovalSeq: number | null;
+  // SUP-03: quantos itens mais antigos foram pulados porque seu alvo está
+  // ocupado. Explica por que a escolha não foi a cabeça da fila.
+  readonly skippedOccupiedTargets: number;
 }
 
 export type AutonomousSelectionRefusal =
@@ -34,6 +37,9 @@ export type AutonomousSelectionRefusal =
 export type AutonomousWorkSelection =
   | { readonly outcome: 'selected'; readonly entry: AutonomousQueueEntry; readonly rationale: AutonomousSelectionRationale }
   | { readonly outcome: 'empty_queue' }
+  // Há trabalho esperando, mas todo alvo está ocupado. Não é fila vazia:
+  // o supervisor deve aguardar, não concluir que não há trabalho.
+  | { readonly outcome: 'waiting_for_targets'; readonly occupiedTargets: readonly string[] }
   | { readonly outcome: 'refused'; readonly reason: AutonomousSelectionRefusal; readonly explanation: string };
 
 const refuse = (reason: AutonomousSelectionRefusal, explanation: string): AutonomousWorkSelection => ({
@@ -75,8 +81,19 @@ export function selectNextAutonomousWork(queue: readonly AutonomousQueueEntry[])
     }
   }
 
-  const entry = queue[0]!;
-  const runnerUp = queue[1];
+  // SUP-03: o alvo ocupado não reordena a fila nem descarta o item — apenas o
+  // torna inelegível agora. O mais antigo com alvo livre é escolhido, de modo
+  // que trabalhos em alvos diferentes progridem e ninguém passa na frente.
+  const selectedIndex = queue.findIndex(candidate => !candidate.targetOccupied);
+  if (selectedIndex === -1) {
+    return {
+      outcome: 'waiting_for_targets',
+      occupiedTargets: [...new Set(queue.map(candidate => candidate.targetReference))].sort(),
+    };
+  }
+
+  const entry = queue[selectedIndex]!;
+  const runnerUp = queue.slice(selectedIndex + 1).find(candidate => !candidate.targetOccupied);
   return {
     outcome: 'selected',
     entry,
@@ -86,6 +103,7 @@ export function selectNextAutonomousWork(queue: readonly AutonomousQueueEntry[])
       selectedPosition: entry.queuePosition,
       approvalSeq: entry.approvalSeq,
       runnerUpApprovalSeq: runnerUp === undefined ? null : runnerUp.approvalSeq,
+      skippedOccupiedTargets: selectedIndex,
     },
   };
 }

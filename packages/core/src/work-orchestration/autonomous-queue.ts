@@ -1,8 +1,10 @@
 import { evaluateAutonomousEligibility } from './eligibility';
+import type { Json } from '@anima/types';
 import type { ProposalVersion, WorkCapability, WorkItem, WorkItemId } from './types';
 import { deriveWorkClaimStatus, type WorkClaim } from './work-claim';
 
 // SUP-01 — Fila de trabalho autônomo como projeção.
+// SUP-03 — Exclusividade por alvo projetada junto da fila.
 //
 // A fila NÃO é uma tabela paralela: é derivada da fonte de verdade (itens,
 // eventos de aprovação e claims). Por isso ela sobrevive a reinícios sem
@@ -32,10 +34,58 @@ export interface AutonomousQueueEntry {
   readonly approvalSeq: number;
   readonly approvedAt: Date;
   readonly capability: WorkCapability;
-  // Alvo declarado na especificação de execução; a invariante de um trabalho
-  // ativo por alvo (SUP-03) depende dele.
   readonly targetReference: string;
   readonly queuePosition: number;
+  // SUP-03: outro trabalho ocupa este alvo agora. O item permanece na fila —
+  // ele espera, não é descartado.
+  readonly targetOccupied: boolean;
+}
+
+const isPlainObject = (value: Json | undefined): value is Readonly<Record<string, Json>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Chave de ocupação do alvo.
+ *
+ * Deliberadamente o `kind` NÃO participa: tratar `project:X` e `workspace:X`
+ * como alvos distintos seria a "definição frouxa de mesmo projeto" que fura o
+ * invariante. Mesma referência é o mesmo alvo físico. A comparação é exata
+ * após `btrim` — referências são opacas (Marco 004), então não há semântica de
+ * caminho a normalizar.
+ */
+export const readTargetReference = (item: WorkItem): string | null => {
+  const spec = item.intent['execution_spec'];
+  if (!isPlainObject(spec)) return null;
+  const target = spec['target'];
+  if (!isPlainObject(target)) return null;
+  const reference = target['reference'];
+  if (typeof reference !== 'string') return null;
+  const trimmed = reference.trim();
+  return trimmed.length === 0 ? null : trimmed;
+};
+
+/**
+ * Alvos ocupados agora. Um alvo está ocupado quando algum item:
+ *
+ * - está em `in_progress` — uma tentativa começou e não concluiu. Vale
+ *   independentemente do claim, o que cobre dois casos reais: o claim que
+ *   expira no meio de uma execução longa, e a execução comandada do INT-04,
+ *   que não cria claim algum; ou
+ * - possui claim ativo — posse válida, ainda que a tentativa não tenha começado.
+ *
+ * Claim expirado ou liberado sobre item que NÃO está executando não ocupa
+ * nada: o alvo volta a ficar livre sem intervenção.
+ */
+export function deriveOccupiedTargets(candidates: readonly AutonomousQueueCandidate[], now: Date): ReadonlySet<string> {
+  const occupied = new Set<string>();
+  for (const { item, openClaim } of candidates) {
+    const target = readTargetReference(item);
+    if (target === null) continue;
+    const executing = item.state === 'in_progress';
+    const owned = openClaim !== null && deriveWorkClaimStatus(openClaim, now) === 'active';
+    if (executing || owned) occupied.add(target);
+  }
+  return occupied;
 }
 
 const hasCurrentApproval = (candidate: AutonomousQueueCandidate): candidate is AutonomousQueueCandidate & { approval: AutonomousQueueApproval } => {
@@ -55,11 +105,15 @@ const hasCurrentApproval = (candidate: AutonomousQueueCandidate): candidate is A
  * `seq` é identidade única do log, empate é impossível por construção; o
  * `workItemId` entra como desempate secundário apenas para que a ordem seja
  * total mesmo diante de entrada inesperada.
+ *
+ * `candidates` deve conter todos os itens não encerrados do usuário, não
+ * apenas os elegíveis: itens em execução não entram na fila, mas ocupam alvo.
  */
 export function projectAutonomousQueue(
   candidates: readonly AutonomousQueueCandidate[],
   now: Date,
 ): readonly AutonomousQueueEntry[] {
+  const occupiedTargets = deriveOccupiedTargets(candidates, now);
   const eligible: Omit<AutonomousQueueEntry, 'queuePosition'>[] = [];
 
   for (const candidate of candidates) {
@@ -72,13 +126,15 @@ export function projectAutonomousQueue(
     const evaluation = evaluateAutonomousEligibility(candidate.item);
     if (!evaluation.eligible) continue;
 
+    const targetReference = evaluation.spec.target.reference.trim();
     eligible.push({
       workItemId: candidate.item.id,
       approvedProposalVersion: candidate.item.proposalVersion,
       approvalSeq: candidate.approval.seq,
       approvedAt: candidate.approval.approvedAt,
       capability: candidate.item.capability,
-      targetReference: evaluation.spec.target.reference,
+      targetReference,
+      targetOccupied: occupiedTargets.has(targetReference),
     });
   }
 

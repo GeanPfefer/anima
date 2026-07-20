@@ -781,6 +781,7 @@ export type Database = {
           owner_instance_id: string
           release_reason: string | null
           released_at: string | null
+          target_reference: string
           user_id: string
           work_item_id: string
         }
@@ -793,6 +794,7 @@ export type Database = {
           owner_instance_id: string
           release_reason?: string | null
           released_at?: string | null
+          target_reference: string
           user_id: string
           work_item_id: string
         }
@@ -805,6 +807,7 @@ export type Database = {
           owner_instance_id?: string
           release_reason?: string | null
           released_at?: string | null
+          target_reference?: string
           user_id?: string
           work_item_id?: string
         }
@@ -1098,6 +1101,7 @@ export type Database = {
           owner_instance_id: string
           release_reason: string | null
           released_at: string | null
+          target_reference: string
           user_id: string
           work_item_id: string
         }
@@ -1137,6 +1141,7 @@ export type Database = {
           approved_proposal_version: number
           capability: Database["public"]["Enums"]["work_capability"]
           queue_position: number
+          target_occupied: boolean
           target_reference: string
           work_item_id: string
         }[]
@@ -1226,6 +1231,7 @@ export type Database = {
           queue_size: number
           runner_up_approval_seq: number
           selection_policy: string
+          skipped_occupied_targets: number
           target_reference: string
           work_item_id: string
         }[]
@@ -1269,6 +1275,7 @@ export type Database = {
           owner_instance_id: string
           release_reason: string | null
           released_at: string | null
+          target_reference: string
           user_id: string
           work_item_id: string
         }

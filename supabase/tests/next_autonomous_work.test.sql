@@ -21,11 +21,11 @@ SELECT set_config('request.jwt.claim.sub','94000000-0000-0000-0000-000000000000'
 SELECT is((SELECT count(*) FROM public.next_autonomous_work()),0::bigint,'fila vazia não seleciona nada');
 
 CREATE TEMP TABLE i1 AS SELECT (public.create_work_proposal('94000000-0000-0000-0000-000000000001','low','programming',
-  jsonb_build_object('execution_spec',:'spec'::jsonb),:'prop'::jsonb)).id;
+  jsonb_build_object('execution_spec',(:'spec'::jsonb || '{"target":{"kind":"project","reference":"alvo-1"}}'::jsonb)),:'prop'::jsonb)).id;
 CREATE TEMP TABLE i2 AS SELECT (public.create_work_proposal('94000000-0000-0000-0000-000000000002','low','programming',
-  jsonb_build_object('execution_spec',:'spec'::jsonb),:'prop'::jsonb)).id;
+  jsonb_build_object('execution_spec',(:'spec'::jsonb || '{"target":{"kind":"project","reference":"alvo-2"}}'::jsonb)),:'prop'::jsonb)).id;
 CREATE TEMP TABLE i3 AS SELECT (public.create_work_proposal('94000000-0000-0000-0000-000000000003','low','programming',
-  jsonb_build_object('execution_spec',:'spec'::jsonb),:'prop'::jsonb)).id;
+  jsonb_build_object('execution_spec',(:'spec'::jsonb || '{"target":{"kind":"project","reference":"alvo-3"}}'::jsonb)),:'prop'::jsonb)).id;
 
 -- Aprovação em ordem diferente da criação: a política segue a aprovação.
 SELECT public.resolve_approval((SELECT id FROM i2),1,'approve','{}');
