@@ -12,3 +12,4 @@ export * from './human-interruption';
 export * from './execution-attempt';
 export * from './work-executor-contract';
 export * from './execution-event-correlation';
+export * from './integration-boundary';

@@ -173,6 +173,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### INT-03 — Execução separada de integração
 
+**Estado (2026-07-20):** concluído como contrato puro antes de persistência. `IntegrationBoundary` separa resultado produzido, aceite, autorização/recusa e registro de integração; exige handoff tipado, decisão humana explícita e correlação intacta do INT-02. Repetições idênticas são idempotentes, entradas divergentes e transições ambíguas falham fechadas. `completed` continua significando resultado aceito, nunca merge/deploy/aplicação. Nenhuma migration ou integração real foi criada; por isso pgTAP não se aplica a este recorte.
+
 - **Problema:** o risco permanente é "executou, logo aplicou"; produzir alteração não pode equivaler a integrá-la.
 - **Resultado esperado:** fronteira formal entre produzir resultado (tentativa) e integrar (aplicar/mergear/publicar), com estados/eventos distintos e gate humano ou explícito entre eles.
 - **Dependências:** INT-01. **Escopo:** regras de domínio + validação de transições. **Fora do escopo:** mecânica de merge/PR; publicação.

@@ -254,6 +254,21 @@ Todo evento conceitual do ciclo autônomo carrega `ExecutionEventCorrelation`: `
 
 O banco anterior ao INT-02 não basta para materializar esse contrato completo: `work_item_id` e `proposal_version` são colunas, `execution_id` existe apenas nos payloads dos eventos de início/desfecho, `author` não substitui a origem semântica e não há persistência para todo o fluxo de sinais. Nenhuma migration foi criada nesta etapa porque fazê-lo exigiria ampliar enum, RPCs e projeções, contrariando o recorte “conceito antes de migration”. A futura integração persistente deverá aplicar este mesmo validador na fronteira de escrita e rejeitar divergência entre colunas, payload e contexto da tentativa; até lá, os RPCs legados de execução limitada permanecem intactos e não são apresentados como implementação do novo contrato.
 
+## Execução separada de integração (INT-03, Fase C)
+
+O estado `completed` do work item continua significando “resultado aceito e trabalho encerrado”; não afirma que um artefato foi aplicado, publicado, implantado ou mesclado. A integração possui uma fronteira de domínio independente, pura e fail-closed, com a sequência fechada:
+
+```text
+result_produced → result_accepted → integration_authorized → integrated
+                                      └→ integration_refused
+```
+
+`produceResultForIntegration` só abre a fronteira a partir de uma tentativa `succeeded` por `result_produced`, enquanto o item está em `review`, e exige um `IntegrationHandoff` tipado que referencia o resultado e o handoff exato da tentativa. O aceite exige o item em `completed`, origem humana e o ID exato do resultado. Autorizar ou recusar integração é uma segunda decisão humana, distinta do aceite. `recordIntegrated` apenas registra o fato depois da autorização exata, com origem de sistema; ele não executa efeito externo.
+
+Todas as etapas preservam item, tentativa e versão aprovada do INT-02. Repetir a mesma decisão ou registro devolve o mesmo estado; reutilizar o mesmo ID com entrada divergente falha fechado. Estado, versão, origem, correlação, resultado ou autorização ausentes/incompatíveis também são recusados. Assim, conclusão da tentativa, conclusão do work item e integração permanecem fatos diferentes.
+
+Não houve migration nem pgTAP no INT-03: o recorte implementa somente o contrato puro. Eventos persistentes, RPCs e mecanismo real de Git, merge, aplicação, publicação ou deploy pertencem a itens posteriores e não podem ser inferidos desta máquina de estados.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
