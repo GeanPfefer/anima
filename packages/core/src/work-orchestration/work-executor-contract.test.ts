@@ -85,7 +85,7 @@ describe('INT-01 — contrato WorkExecutorAdapter', () => {
   });
 
   test('validador recusa sequência quebrada, correlação divergente e dois terminais', () => {
-    const base = { attemptId: 'a', workItemId: 'w', approvedProposalVersion: 1 };
+    const base = { attemptId: 'a', workItemId: 'w', approvedProposalVersion: 1, origin: 'executor' as const };
     expect(validateWorkExecutorTranscript([{ ...base, sequence: 2, kind: 'progress', message: 'x' }, { ...base, sequence: 3, kind: 'error', code: 'execution_failed', message: 'x', retryable: false, handoffReference: 'r' }])).toContain('sequência');
     expect(validateWorkExecutorTranscript([{ ...base, sequence: 1, kind: 'progress', message: 'x' }, { ...base, workItemId: 'outro', sequence: 2, kind: 'error', code: 'execution_failed', message: 'x', retryable: false, handoffReference: 'r' }])).toContain('correlação');
     expect(validateWorkExecutorTranscript([{ ...base, sequence: 1, kind: 'error', code: 'execution_failed', message: 'x', retryable: false, handoffReference: 'r' }, { ...base, sequence: 2, kind: 'cancelled', acknowledged: true, handoffReference: 'r' }])).toContain('suceder');

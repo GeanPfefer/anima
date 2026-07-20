@@ -240,6 +240,20 @@ Um transcript válido possui exatamente uma condição terminal; nada pode suced
 
 A substituição do contrato anterior é explícita: a fronteira limitada de F8 permanece como `BoundedWorkExecutorAdapter`, com seu executor e persistência atuais intactos; `WorkExecutorAdapter` passa a nomear apenas o contrato autônomo. `FakeWorkExecutor` exercita todos os sinais, cancelamento e idempotência. Transporte, executor real, persistência dos sinais, fila, UI e integração com provedores ficam fora do INT-01.
 
+## Correlação dos eventos de execução (INT-02, Fase C)
+
+Todo evento conceitual do ciclo autônomo carrega `ExecutionEventCorrelation`: `workItemId`, `attemptId`, `approvedProposalVersion` e uma origem fechada (`anima`, `executor`, `user` ou `system`). Não existe origem livre nem `other`. Os sinais emitidos por `WorkExecutorAdapter` têm origem `executor`; outras origens existem para decisões e efeitos do restante do domínio, sem introduzir fornecedor no contrato.
+
+`reconstructExecutionTimelines` é a projeção pura e fail-closed desse log. Ela recebe o contexto persistido das tentativas e os eventos correlacionados, valida a correlação declarada também contra a correlação repetida no sinal e então:
+
+- associa cada evento exclusivamente pela chave explícita item + versão aprovada + tentativa;
+- recusa um `attemptId` reutilizado em outro item ou versão;
+- ordena cada tentativa somente pela sequência inteira positiva, nunca por timestamp, posição de entrada ou conteúdo;
+- recusa evento com correlação ausente ou duplicado, sequência com lacuna/empate e qualquer evento após uma condição terminal;
+- mantém tentativas concorrentes do mesmo item e versão em linhas do tempo distintas.
+
+O banco anterior ao INT-02 não basta para materializar esse contrato completo: `work_item_id` e `proposal_version` são colunas, `execution_id` existe apenas nos payloads dos eventos de início/desfecho, `author` não substitui a origem semântica e não há persistência para todo o fluxo de sinais. Nenhuma migration foi criada nesta etapa porque fazê-lo exigiria ampliar enum, RPCs e projeções, contrariando o recorte “conceito antes de migration”. A futura integração persistente deverá aplicar este mesmo validador na fronteira de escrita e rejeitar divergência entre colunas, payload e contexto da tentativa; até lá, os RPCs legados de execução limitada permanecem intactos e não são apresentados como implementação do novo contrato.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

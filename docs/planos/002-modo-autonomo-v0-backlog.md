@@ -161,6 +161,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### INT-02 — Correlação de eventos
 
+**Estado (2026-07-20):** concluído no recorte “conceito antes de migration”. O core define correlação obrigatória por item, tentativa, versão aprovada e origem fechada, estende os sinais do executor com origem e reconstrói linhas do tempo determinísticas exclusivamente pela correlação e sequência explícitas. Entradas ausentes, inválidas, divergentes, duplicadas ou tardias falham fechadas. A auditoria confirmou que o banco legado ainda não materializa o vocabulário completo; por isso não houve migration nem pgTAP nesta etapa, e a aplicação do contrato na futura fronteira persistente ficou documentada sem atribuí-la aos RPCs atuais.
+
 - **Problema:** eventos de execução precisam ser auditáveis por item, tentativa e versão aprovada; hoje a correlação cobre execução única (executionId + versão), não o vocabulário completo.
 - **Resultado esperado:** todo evento do ciclo autônomo carrega correlação obrigatória (item, tentativa, versão, origem), validada no servidor; projeção do estado continua derivada do log.
 - **Dependências:** INT-01; AUTO-03. **Escopo:** extensão do vocabulário de `work_events` (conceito antes de migration). **Fora do escopo:** telemetria externa; tracing distribuído.

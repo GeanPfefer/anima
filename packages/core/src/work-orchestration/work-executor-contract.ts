@@ -1,5 +1,6 @@
 import type { AutonomousExecutionLimits, AutonomousExecutionTarget, AutonomousValidationCriterion } from './eligibility';
 import type { ExecutionAttemptCorrelation } from './execution-attempt';
+import type { ExecutionEventCorrelation } from './execution-event-correlation';
 import type { HumanInterruptionReason } from './human-interruption';
 import type { WorkCapability, WorkContextReference, WorkResultValidation } from './types';
 
@@ -15,7 +16,7 @@ export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
   readonly contextReferences: readonly WorkContextReference[];
 }
 
-interface CorrelatedSignal extends ExecutionAttemptCorrelation { readonly sequence: number; }
+interface CorrelatedSignal extends ExecutionEventCorrelation { readonly sequence: number; }
 export type WorkExecutorSignal =
   | (CorrelatedSignal & { readonly kind: 'progress'; readonly message: string })
   | (CorrelatedSignal & { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string })
@@ -56,7 +57,7 @@ export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSig
   let index = 0;
   for (const signal of signals) {
     if (signal.sequence !== index + 1) return 'A sequência de sinais não é contínua.';
-    if (signal.attemptId !== correlation.attemptId || signal.workItemId !== correlation.workItemId || signal.approvedProposalVersion !== correlation.approvedProposalVersion) return 'Um sinal perdeu a correlação da tentativa.';
+    if (signal.attemptId !== correlation.attemptId || signal.workItemId !== correlation.workItemId || signal.approvedProposalVersion !== correlation.approvedProposalVersion || signal.origin !== 'executor') return 'Um sinal perdeu a correlação da tentativa.';
     if (terminalKinds.has(signal.kind)) terminalCount++;
     if (terminalCount > 0 && index < signals.length - 1) return 'Nenhum sinal pode suceder a condição terminal.';
     index++;
@@ -122,6 +123,6 @@ export class FakeWorkExecutor implements WorkExecutorAdapter {
   }
 
   private attach(request: WorkExecutorRequest, sequence: number, input: WorkExecutorSignalInput): WorkExecutorSignal {
-    return { attemptId: request.attemptId, workItemId: request.workItemId, approvedProposalVersion: request.approvedProposalVersion, sequence, ...input } as WorkExecutorSignal;
+    return { attemptId: request.attemptId, workItemId: request.workItemId, approvedProposalVersion: request.approvedProposalVersion, origin: 'executor', sequence, ...input } as WorkExecutorSignal;
   }
 }
