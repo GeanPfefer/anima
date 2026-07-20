@@ -183,6 +183,27 @@ Mapeamento requisito → verificação:
 
 A especificação de execução (`AutonomousExecutionSpecV1`) ainda não tem persistência própria: quando declarada, vive em `intent.execution_spec` (jsonb já existente), com parse estrito — especificação malformada gera `execution_spec_invalid` e nada é "melhorado" silenciosamente. O evento `work_blocked` (já no vocabulário proposto) ganha o payload tipado proposto `WorkBlockedNotEligiblePayloadV1` (`reason: 'not_eligible'` + códigos das lacunas); a persistência desse payload e qualquer fila/UI ficam para itens posteriores da Fase B/E.
 
+## Política de interrupção humana (AUTO-06, Fase B)
+
+Uma execução autônoma só pode solicitar decisão humana por uma das razões fechadas do [Marco 003 §Interrupções humanas](../marcos/003-trabalho-autonomo-seguro.md). A política pura `evaluateHumanInterruption`, em `packages/core`, trata qualquer razão fora da lista como defeito de domínio; não existe `other` nem texto livre capaz de criar uma nova categoria.
+
+| Razão de domínio | Situação do Marco 003 |
+|---|---|
+| `scope_change` | mudança de escopo |
+| `architectural_decision` | decisão arquitetural com alternativas reais |
+| `destructive_action` | ação destrutiva |
+| `sensitive_credential_required` | uso de segredo ou credencial sensível |
+| `requirements_conflict` | conflito de requisitos |
+| `permission_missing` | permissão ausente |
+| `final_integration_approval` | aprovação final para integrar, publicar ou mergear |
+| `persistent_inability_after_limits` | incapacidade persistente depois dos limites estabelecidos |
+
+Toda interrupção carrega um snapshot mínimo e tipado do estado que a gerou: estado do trabalho, versão exata da proposta e, quando existentes, número da tentativa e referência do checkpoint. Também exige uma explicação concreta. O payload proposto `InputRequestedPayloadV1` projeta esses dados para o evento `input_requested`, já presente no vocabulário arquitetural; sua persistência fica para itens posteriores.
+
+`persistent_inability_after_limits` tem uma proteção adicional: só é válida quando identifica qual limite declarado foi atingido (`attempts`, `duration` ou `resources`). Antes disso, pedir intervenção humana é defeito — incapacidade transitória deve ser tratada pelo sistema dentro dos limites, e incapacidade persistente após o limite deve interromper em vez de iniciar um loop.
+
+Ficam fora do AUTO-06: cartões ou outra UI, notificações, migrations, fila, executor e máquina de estados de tentativas.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
