@@ -133,7 +133,7 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### AUTO-06 — Política de interrupção humana
 
-**Estado (2026-07-20):** implementado — enum fechado com as oito razões do Marco 003, política pura fail-closed, snapshot tipado do estado causador e payload proposto `InputRequestedPayloadV1`; testes de domínio cobrem cada razão, valores externos à lista e a exigência de limite atingido para incapacidade persistente. **Checkpoint humano pendente:** aprovar a lista como política e a regra de que `attempts`, `duration` ou `resources` comprovam o limite atingido.
+**Estado (2026-07-20):** concluído. Enum fechado com as oito razões do Marco 003, política pura fail-closed, snapshot tipado do estado causador e payload proposto `InputRequestedPayloadV1`; testes de domínio cobrem cada razão, valores externos à lista e a exigência de limite atingido para incapacidade persistente. **Checkpoint humano cumprido (2026-07-20):** o Gean ratificou a lista sem categoria `other`, estado e versão obrigatórios, incapacidade persistente somente após `attempts`, `duration` ou `resources` e rejeição fail-closed de entradas inválidas sem inferência ou correção silenciosa.
 
 - **Problema:** sem uma lista fechada de razões válidas para interromper, a autonomia oscila entre incomodar demais e decidir demais.
 - **Resultado esperado:** a lista do Marco 003 (§Interrupções humanas) como enum de domínio + regra: interrupção fora da lista é defeito; incapacidade persistente após limites vira interrupção, nunca loop.
