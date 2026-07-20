@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Parcial** | AUTO-01, AUTO-02, AUTO-03 mínimo e AUTO-06 concluídos; resiliência (AUTO-04/05) permanece |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | AUTO-02 (pré-requisito de SUP-03) concluído com claim exclusivo persistido e corrida real provada; SUP-01–04 e AUTO-04/05 pendentes |
+| E | **Em andamento** | AUTO-02, SUP-01 e SUP-02 concluídos (claim exclusivo, fila como projeção e seleção determinística, com corridas reais provadas); SUP-03, SUP-04 e AUTO-04/05 pendentes |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 

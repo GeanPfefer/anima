@@ -1216,6 +1216,20 @@ export type Database = {
           xp_record_id: string
         }[]
       }
+      next_autonomous_work: {
+        Args: never
+        Returns: {
+          approval_seq: number
+          approved_at: string
+          approved_proposal_version: number
+          capability: Database["public"]["Enums"]["work_capability"]
+          queue_size: number
+          runner_up_approval_seq: number
+          selection_policy: string
+          target_reference: string
+          work_item_id: string
+        }[]
+      }
       record_commanded_work_terminal: {
         Args: {
           attempt_id: string

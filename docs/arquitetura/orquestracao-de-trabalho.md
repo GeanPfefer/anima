@@ -315,6 +315,24 @@ As razões de liberação formam lista fechada (`attempt_finished`, `released_wi
 
 O banco enforça autoridade e posse (usuário, allowlist, estado, versão, presença da especificação de execução e exclusividade); a régua completa de elegibilidade do AUTO-01 continua sendo o predicado puro do core aplicado na fronteira, como já ocorre no INT-04. Ficam fora do AUTO-02: fila persistente, seleção do próximo item, laço contínuo, escolha de executor ou modelo, paralelismo, eleição distribuída e qualquer integração ou aplicação de resultado.
 
+## Fila e seleção do trabalho autônomo (SUP-01 e SUP-02, Fase E)
+
+A fila **não tem tabela própria**. Ela é projeção de `work_items`, do evento de aprovação vigente e de `work_claims`, exposta por `public.autonomous_work_queue()`. Por ser derivada, sobrevive a reinícios sem persistência adicional e não pode divergir do estado real: um item que deixa de ser elegível sai dela sozinho, sem intervenção nem rotina de limpeza.
+
+Um item entra na fila quando é elegível pela régua completa do AUTO-01 e não pertence a ninguém. Item com claim ativo sai da fila; claim expirado ou liberado o devolve para retomada. Itens aguardando decisão humana, em execução ou encerrados nunca entram — o checkpoint humano continua soberano por construção, não por verificação adicional.
+
+A régua de elegibilidade ganhou uma implementação SQL única e reutilizável (`private.is_autonomously_eligible`), espelhando `evaluateAutonomousEligibility`. Os predicados usam `CASE` com guarda explícita de NULL e de tipo, porque o `AND` do SQL não garante curto-circuito e `jsonb_array_elements` sobre escalar levanta exceção: entrada malformada resulta em `false`, nunca em NULL nem em erro. O predicado do core permanece a especificação do domínio, e os testes provam que as duas concordam caso a caso.
+
+A ordenação é **FIFO pela sequência (`seq`) do evento `work_approved` vigente** — identidade única, monotônica e imutável do log append-only, imune a relógio, fuso e ajuste de horário. Empate é impossível por construção; o `work_item_id` entra como desempate secundário apenas para que a ordem seja total mesmo diante de entrada inesperada. Como a posição depende da aprovação da versão vigente, uma proposta revisada e reaprovada entra no fim da fila: a posição pertence à versão exata que se tornou executável.
+
+`public.next_autonomous_work()` aplica a política V0 `oldest_approval_first`, que é exatamente a cabeça dessa fila, e devolve a razão da escolha (política, tamanho da fila e sequência do segundo colocado). Nenhuma ponderação de urgência, impacto, capacidade ou dificuldade participa — na dúvida, FIFO explicável. Escolher executor, modelo ou esforço pertence à Fase F.
+
+Selecionar é **leitura e não emite evento**: o efeito auditável é o claim, que já registra `work_claimed`. Como a política é determinística sobre um log imutável, a escolha é sempre recomputável a posteriori; gravar um evento por consulta inundaria um log que não pode ser limpo. No core, `selectNextAutonomousWork` desconfia da entrada e falha fechado: fila com posições não contíguas, ordem não monotônica ou item repetido não seleciona nada, porque fila ambígua não autoriza execução.
+
+Seleção e posse compõem com segurança sob concorrência. Dois supervisores podem selecionar a mesma cabeça — a leitura não bloqueia — mas apenas um adquire o claim; o perdedor é recusado no lock do item e, ao reconsultar, recebe o próximo item elegível. Não há execução dupla, inanição nem deadlock.
+
+A invariante de um trabalho ativo por alvo é do SUP-03; `target_reference` já é projetado pela fila para que essa filtragem seja acrescentada sem alterar estes contratos.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

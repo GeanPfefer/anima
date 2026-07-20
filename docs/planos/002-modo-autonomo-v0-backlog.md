@@ -203,6 +203,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### SUP-01 — Fila persistente
 
+**Estado (2026-07-20):** concluído. A fila é projeção, não tabela: `public.autonomous_work_queue()` deriva de `work_items`, da aprovação vigente e de `work_claims`, com espelho puro `projectAutonomousQueue` em `packages/core` (28 testes) e 28 asserções pgTAP. Persistência entre reinícios é consequência de ser derivada; um teste prova que nenhuma tabela de fila existe. Item com claim ativo sai da fila e claim expirado o devolve; item que entra em execução sai sozinho. A régua completa do AUTO-01 ganhou implementação SQL única (`private.is_autonomously_eligible`) com guarda de NULL e tipo, falhando fechado em entrada malformada em vez de levantar exceção.
+
 - **Problema:** não existe representação persistente de "trabalhos aguardando execução autônoma"; sem fila, autonomia é um botão, não uma capacidade.
 - **Resultado esperado:** fila derivada da fonte de verdade (itens elegíveis + ordem), persistente entre reinícios, sem estado paralelo que possa divergir dos `work_items`.
 - **Dependências:** INT-04 comprovado; AUTO-01. **Escopo:** conceito + projeção consultável. **Fora do escopo:** prioridades configuráveis avançadas; multiusuário.
@@ -212,6 +214,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 - **Tamanho:** M · **Capacidade:** persistência + modelagem · **Raciocínio:** médio · **Checkpoint humano:** não · **Braço isolado:** sim
 
 ### SUP-02 — Seleção do próximo item
+
+**Estado (2026-07-20):** concluído. Política V0 `oldest_approval_first` — FIFO pela sequência do evento `work_approved` vigente, imune a relógio, com o `work_item_id` como desempate defensivo (empate é impossível no log). `public.next_autonomous_work()` devolve a escolha e sua razão (política, tamanho da fila, sequência do segundo colocado); `selectNextAutonomousWork` no core recusa fila ambígua (posições não contíguas, ordem não monotônica, item repetido). 16 testes de domínio e 14 asserções pgTAP, incluindo prova de que selecionar não grava evento, não cria claim e não altera estado. **Decisão registrada:** selecionar é leitura e não emite evento próprio — o efeito auditável é o claim, e a política determinística sobre log imutável torna a escolha recomputável. Corrida real entre dois supervisores: ambos selecionaram a mesma cabeça, um venceu o claim e o outro recebeu o próximo item ao reconsultar.
 
 - **Problema:** com mais de um elegível, alguém precisa escolher o próximo de forma explicável e segura.
 - **Resultado esperado:** política de seleção determinística e documentada (ex.: aprovação mais antiga primeiro, respeitando SUP-03), com a razão da escolha registrada.
