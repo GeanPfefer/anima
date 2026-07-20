@@ -287,6 +287,24 @@ O runner local admite somente os formatos estruturados declarados. Respostas inv
 
 A prova de 2026-07-20 produziu um resultado real com `qwen2.5-coder:7b`: o item `507af5ef-a72f-4451-8ddb-0747f5e4e856`, tentativa `e65d1de1-ef9c-4e13-8dd5-55d784642e87`, chegou a `review` com `python -m unittest` aprovado. O handoff `20260720T205121334287Z-result.zip` tem SHA-256 `fbe7d1acf5a6017ea0eef7344d95882380be59122c8699ebbd481e8997c00e44` e contém apenas `calculator.py`. O original permaneceu byte a byte no hash `9445c47952abb8a7fc5d4a905d55b5be05771df1d69362ec597f9a50f7ede40d`, com árvore limpa. O resultado está disponível para revisão humana; `apply.status` permaneceu `not_attempted`.
 
+## Claim exclusivo e expiração (AUTO-02, Fase B/E)
+
+Um claim é a posse temporária e exclusiva de um work item por uma instância de supervisor. **Claim não é execução.** A sequência do domínio é `eligible → claimed → attempt_started → execution_started`, e obter o claim não afirma que qualquer tentativa começou: `acquire_work_claim` nunca muda o estado do item, que permanece `approved` até a tentativa nascer.
+
+A menor representação coerente com os contratos existentes é `claim_id`, `work_item_id`, `approved_proposal_version`, `owner_instance_id`, `acquired_at`, `expires_at`, `attempt_id` e a liberação (`released_at` + razão). A versão aprovada é obrigatória porque toda correlação do INT-02 já a exige: proposta revisada invalida o claim em vez de herdá-lo. Não há coluna de versão para concorrência otimista — a exclusividade vem do banco, não de comparação na aplicação.
+
+A exclusividade é garantida por duas camadas: o `SELECT ... FOR UPDATE` do item serializa supervisores concorrentes, e o índice único parcial `work_claims (work_item_id) WHERE released_at IS NULL` mantém o invariante ainda que alguém esqueça o lock. Um segundo índice parcial sobre `attempt_id` garante que uma tentativa pertence a no máximo um claim.
+
+Expiração é **derivada** de `expires_at`, nunca um estado gravado que sobrescreva o anterior. Um claim vencido é recuperável: a aquisição seguinte o libera com razão `expired`, registra `work_claim_released` e só então concede o novo claim, deixando `superseded_claim_id` no evento `work_claimed`. A linha antiga permanece íntegra — expirar não apaga histórico.
+
+A retomada é idempotente e explícita. Reenviar o mesmo `claim_id` ativo devolve o mesmo claim sem novo efeito, inclusive depois de o item ter saído de `approved` — por isso identidade e replay são verificados **antes** de elegibilidade. Reenviar um `claim_id` já expirado é recusado: renovar silenciosamente esconderia a interrupção, então a substituição exige um claim novo e auditável. Reutilizar um `claim_id` com outro item, dono ou versão é conflito, não replay.
+
+`start_claimed_work_attempt` é o único caminho de `claimed` para `attempt_started`, vincula no máximo uma tentativa por claim e reaproveita `private.begin_work_attempt`, o mesmo corpo da execução comandada do INT-04 — cuja RPC pública e cujos payloads permanecem byte a byte inalterados quando não há claim. A razão registrada em `work_started` distingue `supervised_execution` de `commanded_execution`.
+
+As razões de liberação formam lista fechada (`attempt_finished`, `released_without_attempt`, `expired`) e são validadas contra o que de fato aconteceu: liberar como `attempt_finished` sem tentativa iniciada, ou como `released_without_attempt` com tentativa iniciada, é recusado. Liberar de novo com a mesma razão é idempotente; com razão diferente falha fechado.
+
+O banco enforça autoridade e posse (usuário, allowlist, estado, versão, presença da especificação de execução e exclusividade); a régua completa de elegibilidade do AUTO-01 continua sendo o predicado puro do core aplicado na fronteira, como já ocorre no INT-04. Ficam fora do AUTO-02: fila persistente, seleção do próximo item, laço contínuo, escolha de executor ou modelo, paralelismo, eleição distribuída e qualquer integração ou aplicação de resultado.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

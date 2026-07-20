@@ -771,6 +771,60 @@ export type Database = {
           },
         ]
       }
+      work_claims: {
+        Row: {
+          acquired_at: string
+          approved_proposal_version: number
+          attempt_id: string | null
+          expires_at: string
+          id: string
+          owner_instance_id: string
+          release_reason: string | null
+          released_at: string | null
+          user_id: string
+          work_item_id: string
+        }
+        Insert: {
+          acquired_at?: string
+          approved_proposal_version: number
+          attempt_id?: string | null
+          expires_at: string
+          id: string
+          owner_instance_id: string
+          release_reason?: string | null
+          released_at?: string | null
+          user_id: string
+          work_item_id: string
+        }
+        Update: {
+          acquired_at?: string
+          approved_proposal_version?: number
+          attempt_id?: string | null
+          expires_at?: string
+          id?: string
+          owner_instance_id?: string
+          release_reason?: string | null
+          released_at?: string | null
+          user_id?: string
+          work_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_claims_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_claims_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_contexts: {
         Row: {
           context_references: Json
@@ -1027,8 +1081,34 @@ export type Database = {
     }
     Functions: {
       abandon_current_conversation_turn: { Args: never; Returns: undefined }
+      acquire_work_claim: {
+        Args: {
+          claim_id: string
+          expected_proposal_version: number
+          lease_seconds: number
+          owner_instance_id: string
+          work_item_id: string
+        }
+        Returns: {
+          acquired_at: string
+          approved_proposal_version: number
+          attempt_id: string | null
+          expires_at: string
+          id: string
+          owner_instance_id: string
+          release_reason: string | null
+          released_at: string | null
+          user_id: string
+          work_item_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_claims"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       archive_current_conversation: { Args: never; Returns: string }
-      reopen_latest_conversation: { Args: never; Returns: string }
       attach_work_context: {
         Args: {
           context_references: Json
@@ -1106,6 +1186,24 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      lifegame_get_level_from_xp: {
+        Args: { p_total_xp: number }
+        Returns: number
+      }
+      match_entries: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          activity_date: string
+          note: string
+          pillar_name: string
+          similarity: number
+          xp_record_id: string
+        }[]
+      }
       record_commanded_work_terminal: {
         Args: {
           attempt_id: string
@@ -1127,26 +1225,35 @@ export type Database = {
           updated_at: string
           user_id: string
         }
-        SetofOptions: { from: "*"; to: "work_items"; isOneToOne: true; isSetofReturn: false }
-      }
-      lifegame_get_level_from_xp: {
-        Args: { p_total_xp: number }
-        Returns: number
-      }
-      match_entries: {
-        Args: {
-          match_count?: number
-          match_threshold?: number
-          query_embedding: string
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
         }
-        Returns: {
-          activity_date: string
-          note: string
-          pillar_name: string
-          similarity: number
-          xp_record_id: string
-        }[]
       }
+      release_work_claim: {
+        Args: { claim_id: string; reason: string }
+        Returns: {
+          acquired_at: string
+          approved_proposal_version: number
+          attempt_id: string | null
+          expires_at: string
+          id: string
+          owner_instance_id: string
+          release_reason: string | null
+          released_at: string | null
+          user_id: string
+          work_item_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_claims"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      reopen_latest_conversation: { Args: never; Returns: string }
       request_work_proposal_revision: {
         Args: {
           expected_proposal_version: number
@@ -1312,6 +1419,57 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      start_claimed_work_attempt: {
+        Args: { attempt_id: string; claim_id: string; executor_id: string }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      start_commanded_work_attempt: {
+        Args: {
+          attempt_id: string
+          executor_id: string
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       start_work: {
         Args: { expected_proposal_version: number; work_item_id: string }
         Returns: {
@@ -1362,29 +1520,6 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
-      }
-      start_commanded_work_attempt: {
-        Args: {
-          attempt_id: string
-          executor_id: string
-          expected_proposal_version: number
-          work_item_id: string
-        }
-        Returns: {
-          capability: Database["public"]["Enums"]["work_capability"]
-          created_at: string
-          id: string
-          impact_level: Database["public"]["Enums"]["work_impact_level"]
-          intent: Json
-          original_request: string
-          proposal: Json
-          proposal_version: number
-          source_message_id: string
-          state: Database["public"]["Enums"]["work_state"]
-          updated_at: string
-          user_id: string
-        }
-        SetofOptions: { from: "*"; to: "work_items"; isOneToOne: true; isSetofReturn: false }
       }
       submit_work_result: {
         Args: {
@@ -1456,6 +1591,8 @@ export type Database = {
         | "changes_requested"
         | "result_accepted"
         | "work_cancelled"
+        | "work_claimed"
+        | "work_claim_released"
       work_impact_level:
         | "low"
         | "significant"
@@ -1771,6 +1908,8 @@ export const Constants = {
         "changes_requested",
         "result_accepted",
         "work_cancelled",
+        "work_claimed",
+        "work_claim_released",
       ],
       work_impact_level: [
         "low",
@@ -1800,3 +1939,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
