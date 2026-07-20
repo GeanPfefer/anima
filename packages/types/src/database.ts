@@ -1106,6 +1106,29 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_commanded_work_terminal: {
+        Args: {
+          attempt_id: string
+          expected_proposal_version: number
+          signal: Json
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: { from: "*"; to: "work_items"; isOneToOne: true; isSetofReturn: false }
+      }
       lifegame_get_level_from_xp: {
         Args: { p_total_xp: number }
         Returns: number
@@ -1339,6 +1362,29 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      start_commanded_work_attempt: {
+        Args: {
+          attempt_id: string
+          executor_id: string
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: { from: "*"; to: "work_items"; isOneToOne: true; isSetofReturn: false }
       }
       submit_work_result: {
         Args: {
