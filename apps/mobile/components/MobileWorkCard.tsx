@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
-import { describeValidationOutcome, parseWorkResultValidations, type WorkPresentation } from '@anima/core';
+import { parseWorkResultValidations, type WorkPresentation } from '@anima/core';
 import { decideWork, reloadWork, requestProposalCorrection, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
+import { describeMissingCompletedResult, presentMobileWorkResult } from './mobile-work-result';
 
 export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void;focused?:boolean;onFocus?:()=>void}) {
   const {item,latestResult,availableActions}=presentation;
+  const shownResult=presentMobileWorkResult(presentation);
+  const missingCompletedResult=describeMissingCompletedResult(presentation);
   const [detail,setDetail]=useState('');
   const [references,setReferences]=useState('');
   const [validations,setValidations]=useState('');
@@ -21,13 +24,15 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
     {!focused&&onFocus&&!['completed','failed','rejected','cancelled'].includes(item.state)&&action('Usar como foco',onFocus)}
     <Text style={styles.title}>{item.proposal.data.summary}</Text><Text style={styles.body}>{item.proposal.data.objective}</Text>
     <Text style={styles.state}>Riscos: {item.proposal.data.risks.length?item.proposal.data.risks.join('; '):'nenhum risco declarado'}</Text>
-    {item.state==='review'&&latestResult&&<View accessibilityLabel="Resultado para revisão" style={styles.result}>
-      <Text style={styles.label}>Resultado · v{latestResult.proposalVersion} · {latestResult.author}</Text>
-      <Text style={styles.body}>Relato de {latestResult.author}, não verificado automaticamente: {latestResult.summary}</Text>
-      <Text style={styles.state}>Referências: {latestResult.references.length?latestResult.references.join(', '):'nenhuma referência informada'}</Text>
-      <Text style={styles.state}>Validações: {latestResult.validations&&latestResult.validations.length?latestResult.validations.map(validation=>`${validation.label} — ${describeValidationOutcome(validation.outcome)}`).join('; '):'nenhuma validação registrada'}</Text>
-      <Text style={styles.state}>Limitações: {latestResult.limitations&&latestResult.limitations.length?latestResult.limitations.join('; '):'nenhuma limitação declarada'}</Text>
+    {shownResult&&<View accessible accessibilityLabel={shownResult.accessibilityLabel} style={styles.result}>
+      <Text style={styles.label}>{shownResult.title}</Text>
+      <Text style={styles.body}>{shownResult.summary}</Text>
+      <Text style={styles.state}>Referências: {shownResult.references}</Text>
+      <Text style={styles.state}>Validações: {shownResult.validations}</Text>
+      <Text style={styles.state}>Limitações: {shownResult.limitations}</Text>
+      {shownResult.completionMessage&&<Text accessibilityLiveRegion="polite" style={styles.completed}>{shownResult.completionMessage}</Text>}
     </View>}
+    {missingCompletedResult&&<Text accessibilityRole="alert" style={styles.error}>{missingCompletedResult}</Text>}
     {mode==='none'&&allowed('approve')&&<View style={styles.actions}>{action('Aprovar',()=>void run(decideWork(presentation,{type:'approve'})))}{action('Corrigir',()=>setMode('proposal_changes'))}{action('Adiar',()=>void run(decideWork(presentation,{type:'defer',reason:'Adiado no mobile'})))}{action('Rejeitar',()=>void run(decideWork(presentation,{type:'reject'})))}</View>}
     {mode==='proposal_changes'&&<Editor value={detail} onChange={setDetail} label="Correção da proposta" onConfirm={()=>void run(requestProposalCorrection(presentation,detail.trim()))} />}
     {mode==='none'&&allowed('start')&&action(item.state==='approved'?'Iniciar':'Retomar',()=>void run(startWork(presentation)))}
@@ -45,4 +50,4 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
   </View>;
 }
 function Editor({value,onChange,label,onConfirm}:{value:string;onChange:(value:string)=>void;label:string;onConfirm:()=>void}){return <View><TextInput accessibilityLabel={label} value={value} onChangeText={onChange} placeholder={label} placeholderTextColor={colors.textMuted} style={styles.input} multiline/><TouchableOpacity disabled={!value.trim()} onPress={onConfirm} style={styles.action}><Text style={styles.actionText}>Confirmar</Text></TouchableOpacity></View>}
-const styles=StyleSheet.create({card:{marginTop:spacing.xs,padding:spacing.sm,borderWidth:1,borderColor:colors.border,borderRadius:radius.md,backgroundColor:colors.bgSurface,gap:spacing.xs,maxWidth:'92%'},header:{flexDirection:'row',justifyContent:'space-between'},label:{fontSize:12,fontWeight:'700',color:colors.accent},state:{fontSize:12,color:colors.textMuted},title:{fontSize:14,fontWeight:'700',color:colors.textPrimary},body:{fontSize:13,color:colors.textMuted},result:{borderWidth:1,borderColor:colors.border,borderRadius:radius.sm,padding:spacing.xs,gap:2},actions:{flexDirection:'row',flexWrap:'wrap',gap:spacing.xs},action:{paddingVertical:6,paddingHorizontal:10,borderRadius:radius.sm,backgroundColor:colors.bgElevated,alignSelf:'flex-start'},actionText:{fontSize:12,color:colors.textPrimary},input:{borderWidth:1,borderColor:colors.border,borderRadius:radius.sm,color:colors.textPrimary,padding:8,minHeight:54,marginBottom:spacing.xs},error:{fontSize:12,color:'#e5484d'}});
+const styles=StyleSheet.create({card:{marginTop:spacing.xs,padding:spacing.sm,borderWidth:1,borderColor:colors.border,borderRadius:radius.md,backgroundColor:colors.bgSurface,gap:spacing.xs,maxWidth:'92%'},header:{flexDirection:'row',justifyContent:'space-between'},label:{fontSize:12,fontWeight:'700',color:colors.accent},state:{fontSize:12,color:colors.textMuted},title:{fontSize:14,fontWeight:'700',color:colors.textPrimary},body:{fontSize:13,color:colors.textMuted},result:{borderWidth:1,borderColor:colors.border,borderRadius:radius.sm,padding:spacing.xs,gap:2},completed:{fontSize:12,fontWeight:'600',color:colors.textPrimary,marginTop:spacing.xs},actions:{flexDirection:'row',flexWrap:'wrap',gap:spacing.xs},action:{paddingVertical:6,paddingHorizontal:10,borderRadius:radius.sm,backgroundColor:colors.bgElevated,alignSelf:'flex-start'},actionText:{fontSize:12,color:colors.textPrimary},input:{borderWidth:1,borderColor:colors.border,borderRadius:radius.sm,color:colors.textPrimary,padding:8,minHeight:54,marginBottom:spacing.xs},error:{fontSize:12,color:'#e5484d'}});
