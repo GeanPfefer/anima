@@ -63,6 +63,7 @@ npm run build
 
 - Preserve trabalho local existente; inspecione `git status` e o diff antes de editar.
 - Não altere banco sem migration e regeneração dos tipos quando a tarefa autorizar schema.
+- Aplique migrations pendentes com `supabase migration up`. `supabase db reset` apaga os dados locais: é ação destrutiva e exige checkpoint humano explícito, mesmo em banco local.
 - Não introduza integração externa sem autorização explícita.
 - Faça a menor mudança coerente com o plano aprovado.
 - Execute typecheck, testes e build proporcionais ao escopo; registre scripts ausentes e falhas de infraestrutura/dependência separadamente de falhas de código.

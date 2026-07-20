@@ -297,7 +297,17 @@ A exclusividade é garantida por duas camadas: o `SELECT ... FOR UPDATE` do item
 
 Expiração é **derivada** de `expires_at`, nunca um estado gravado que sobrescreva o anterior. Um claim vencido é recuperável: a aquisição seguinte o libera com razão `expired`, registra `work_claim_released` e só então concede o novo claim, deixando `superseded_claim_id` no evento `work_claimed`. A linha antiga permanece íntegra — expirar não apaga histórico.
 
-A retomada é idempotente e explícita. Reenviar o mesmo `claim_id` ativo devolve o mesmo claim sem novo efeito, inclusive depois de o item ter saído de `approved` — por isso identidade e replay são verificados **antes** de elegibilidade. Reenviar um `claim_id` já expirado é recusado: renovar silenciosamente esconderia a interrupção, então a substituição exige um claim novo e auditável. Reutilizar um `claim_id` com outro item, dono ou versão é conflito, não replay.
+A retomada é idempotente e explícita. Três operações permanecem conceitualmente distintas e não devem ser confundidas:
+
+| Operação | Significado | Estado exigido |
+|---|---|---|
+| `replay` | devolve deterministicamente o resultado da mesma solicitação | claim ainda ativo |
+| `renew` | extensão explícita da validade pelo mesmo proprietário | claim ainda ativo |
+| `reacquire` | novo claim depois da expiração, referenciando o anterior | claim expirado |
+
+Reenviar o mesmo `claim_id` ativo é **replay**: devolve o mesmo claim sem novo efeito, inclusive depois de o item ter saído de `approved` — por isso identidade e replay são verificados **antes** de elegibilidade. Reenviar um `claim_id` já expirado é recusado: renovar silenciosamente esconderia a interrupção, então a retomada é **reacquire**, com claim novo e `superseded_claim_id` no log. Reutilizar um `claim_id` com outro item, dono ou versão é conflito, não replay.
+
+`renew` **não existe** nesta versão e não é exigido por nenhum item canônico da Fase E. Quando for necessário, deverá ser operação atômica própria, aplicável somente a claim ainda válido, sem iniciar tentativa nem alterar o estado do item.
 
 `start_claimed_work_attempt` é o único caminho de `claimed` para `attempt_started`, vincula no máximo uma tentativa por claim e reaproveita `private.begin_work_attempt`, o mesmo corpo da execução comandada do INT-04 — cuja RPC pública e cujos payloads permanecem byte a byte inalterados quando não há claim. A razão registrada em `work_started` distingue `supervised_execution` de `commanded_execution`.
 
