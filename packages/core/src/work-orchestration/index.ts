@@ -10,3 +10,4 @@ export * from './presentation';
 export * from './eligibility';
 export * from './human-interruption';
 export * from './execution-attempt';
+export * from './work-executor-contract';

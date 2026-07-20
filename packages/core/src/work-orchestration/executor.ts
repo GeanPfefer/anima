@@ -11,7 +11,9 @@ export interface WorkExecutionRequest {
 export type ExecutorAttemptResult =
   | { readonly kind: 'success'; readonly summary: string; readonly resultReferences: readonly string[] }
   | { readonly kind: 'failure'; readonly message: string; readonly retryable: boolean };
-export interface WorkExecutorAdapter {
+// Contrato limitado legado de F8. INT-01 reserva WorkExecutorAdapter para o
+// fluxo autônomo de sinais em work-executor-contract.ts.
+export interface BoundedWorkExecutorAdapter {
   readonly id: string;
   execute(request: WorkExecutionRequest, signal: AbortSignal): Promise<ExecutorAttemptResult>;
 }
@@ -41,7 +43,7 @@ const delay = <T>(ms:number, value:T):{promise:Promise<T>; cancel:()=>void} => {
 };
 
 export class BoundedWorkExecutor {
-  async run(request: WorkExecutionRequest, adapter: WorkExecutorAdapter, signal?: AbortSignal): Promise<WorkExecutionOutcome> {
+  async run(request: WorkExecutionRequest, adapter: BoundedWorkExecutorAdapter, signal?: AbortSignal): Promise<WorkExecutionOutcome> {
     if (!request.objective.trim() || !validLimits(request.limits)) throw new Error('Limites ou objetivo de execução inválidos.');
     const graceMs = request.limits.shutdownGraceMs ?? DEFAULT_SHUTDOWN_GRACE_MS;
     if (signal?.aborted) return { kind:'cancelled', executorId:adapter.id, attempts:0, terminatedCleanly:true };
@@ -97,7 +99,7 @@ export interface WorkExecutionRecorder {
 }
 export async function runPersistedWorkExecution(
   recorder: WorkExecutionRecorder,
-  adapter: WorkExecutorAdapter,
+  adapter: BoundedWorkExecutorAdapter,
   execution: PersistedWorkExecution,
   signal?: AbortSignal,
 ): Promise<import('./errors').WorkOperationResult<import('./types').WorkItem>> {
@@ -117,7 +119,7 @@ export async function runPersistedWorkExecution(
   return recorder.finishExecution({ workItemId: execution.workItemId, expectedProposalVersion: execution.expectedProposalVersion, executionId: execution.executionId, outcome });
 }
 
-export class FakeWorkExecutor implements WorkExecutorAdapter {
+export class FakeBoundedWorkExecutor implements BoundedWorkExecutorAdapter {
   readonly id='fake';
   private cursor=0;
   constructor(private readonly script:readonly ExecutorAttemptResult[]) {}

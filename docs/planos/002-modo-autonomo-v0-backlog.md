@@ -149,6 +149,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### INT-01 — Contrato WorkExecutorAdapter
 
+**Estado (2026-07-20):** implementado — `WorkExecutorAdapter` recebe entrada delimitada e correlacionada e emite fluxo de `progress`, `decision_required`, `result`, `error` ou `cancelled`; validador fail-closed exige sequência, correlação e terminal únicos; `FakeWorkExecutor` comprova todos os sinais, cancelamento e idempotência sequencial/concorrente por tentativa. O contrato limitado anterior foi preservado explicitamente como `BoundedWorkExecutorAdapter`. **Checkpoint humano pendente:** aprovar este contrato antes do INT-02.
+
 - **Problema:** o contrato atual cobre execução limitada com desfecho único; o ciclo autônomo exige progresso, decisão necessária, cancelamento cooperativo, idempotência e correlação por tentativa.
 - **Resultado esperado:** contrato evoluído (entrada delimitada; eventos de progresso; resultado; erro tipado; decisão necessária; cancelamento; idempotência por tentativa; correlação item/tentativa/versão), compatível com o `WorkExecutorAdapter` atual ou substituindo-o por decisão explícita.
 - **Dependências:** AUTO-03, AUTO-06. **Escopo:** contrato em `packages/core` + executor falso completo. **Fora do escopo:** transporte; runner real.

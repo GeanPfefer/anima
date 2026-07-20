@@ -222,6 +222,24 @@ Término tardio ou duplicado é defeito e não substitui o primeiro desfecho. Su
 
 O AUTO-03 mínimo não modela provedor/modelo, esforço, ambiente, ações, arquivos, validações detalhadas ou consumo. Esses campos permanecem no AUTO-03 completo, depois da primeira integração estreita, evitando antecipar telemetria sem uso real.
 
+## Contrato WorkExecutorAdapter (INT-01, Fase C)
+
+`WorkExecutorAdapter` é a fronteira substituível entre o domínio e qualquer executor de uma tentativa. A entrada `WorkExecutorRequest` é delimitada e correlacionada por `attemptId`, `workItemId` e versão aprovada; carrega objetivo, escopo incluído/excluído, capacidade, alvo, permissões, critérios de validação, limites e referências de contexto. Nenhum tipo menciona fornecedor, transporte, processo ou runner concreto.
+
+O adaptador devolve um fluxo assíncrono de sinais, todos com a mesma correlação e sequência contínua:
+
+| Sinal | Papel | Terminal |
+|---|---|---|
+| `progress` | progresso conhecido, sem log bruto | não |
+| `decision_required` | interrupção admitida pelo AUTO-06, com razão tipada | sim |
+| `result` | resultado, evidências e handoff para revisão | sim |
+| `error` | falha tipada, retryable explícito e handoff | sim |
+| `cancelled` | reconhecimento cooperativo do cancelamento e handoff | sim |
+
+Um transcript válido possui exatamente uma condição terminal; nada pode sucedê-la. Sequência quebrada, correlação divergente, entrada vaga ou término ausente falham fechados. Reentregar o mesmo `attemptId` com a mesma entrada deve devolver o mesmo transcript sem repetir efeitos, inclusive sob concorrência; reentrega com entrada diferente produz `attempt_payload_conflict` terminal e não retryable.
+
+A substituição do contrato anterior é explícita: a fronteira limitada de F8 permanece como `BoundedWorkExecutorAdapter`, com seu executor e persistência atuais intactos; `WorkExecutorAdapter` passa a nomear apenas o contrato autônomo. `FakeWorkExecutor` exercita todos os sinais, cancelamento e idempotência. Transporte, executor real, persistência dos sinais, fila, UI e integração com provedores ficam fora do INT-01.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
