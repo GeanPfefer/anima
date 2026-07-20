@@ -67,7 +67,7 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### ORQ-04 — Continuidade conversacional
 
-**Estado (2026-07-20):** implementado e comprovado ao vivo em sessão web autenticada (arquivar → retomar → cartões reconstruídos → decisão pós-retomada única); validação em dispositivo mobile pendente (ver registro de 2026-07-20 no Plano 002).
+**Estado (2026-07-20):** aceito. Comprovado ao vivo em sessão web autenticada (arquivar → retomar → cartões reconstruídos → decisão pós-retomada única) e em dispositivo físico (iPhone 14 Pro via Expo Go: retomada entre plataformas, conflito com reconcile e mensagem preservada, ciclo completo e persistência após reabrir o app). Fase A formalmente aceita — ver §Aceite formal no Plano 002.
 
 - **Problema:** a ligação entre mensagem de origem, cartão, resposta do Anima e eventos existe por contrato, mas a continuidade percebida (retomar a conversa e reencontrar o trabalho com contexto) não foi comprovada.
 - **Resultado esperado:** encerrar e reabrir a conversa (inclusive arquivando) preserva proveniência: é possível reconstruir pedido → proposta → decisão → resultado a partir do item.

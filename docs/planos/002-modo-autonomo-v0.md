@@ -14,7 +14,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 
 | Fase | Estado | Resultado |
 |---|---|---|
-| A | Comprovada ao vivo no web autenticado; falta apenas dispositivo mobile | ORQ-01–04 comprovados em sessão web autenticada (2026-07-20); mobile validado por typecheck/contrato compartilhado, pendente somente execução em dispositivo |
+| A | **Aceita (2026-07-20)** | ORQ-01–04 comprovados ao vivo em web autenticado e em dispositivo físico (iPhone 14 Pro); Fase B desbloqueada |
 | B | Não iniciada | — |
 | C | Não iniciada | — |
 | D | Não iniciada | — |
@@ -70,6 +70,24 @@ Pré-requisito: Expo Go em dispositivo na mesma rede, Supabase local acessível,
 6. Evidências a registrar: capturas de cada passo e `SELECT event_type, proposal_version FROM work_events WHERE work_item_id = '<item>' ORDER BY seq;` sem duplicatas.
 
 Com o roteiro cumprido em dispositivo, a Fase A pode ser declarada aceita e a Fase B desbloqueada.
+
+### Aceite formal da Fase A (2026-07-20) — validação em dispositivo físico
+
+O roteiro manual acima foi executado integralmente em um **iPhone 14 Pro** (Expo Go, conectado via Tailscale à stack local), com a conta descartável `fase-a-demo-1784563575@teste.local`, guiado passo a passo com capturas de tela e verificação do banco a cada etapa. Item descartável: `e570b888`.
+
+- **Login e retomada:** autenticação por senha funcionou; a conversa da sessão web foi reidratada no dispositivo com os quatro cartões anteriores em estado/versão/foco corretos (`completed · v3` com ajustes, `approved · v1` em foco com botão Iniciar, `proposed · v1`, `rejected · v1`).
+- **Criação resiliente:** o envio de "Planeje uma melhoria no app" falhou na resposta do Ollama (firewall da máquina bloqueia entrada no 11434/11435 — problema de ambiente, não de produto), mas a proposta e a mensagem de origem foram persistidas; ao reabrir o app, o cartão v1 apareceu em foco, comprovando o backend como fonte de verdade.
+- **Correção no dispositivo:** cartão v1 → v2 com par atômico `proposal_changes_requested`+`proposal_revised` (seq 692/693).
+- **Conflito:** correção concorrente do cliente web levou o servidor a v3; aprovar o cartão obsoleto em v2 no dispositivo foi recusado com "O item mudou desde a última leitura.", o cartão reconciliou para v3 exibindo o ajuste vindo da web e **a mensagem permaneceu visível**; nenhum evento de decisão foi gravado.
+- **Ciclo completo:** aprovar v3 → iniciar → resultado com validações `passou`/`falhou`, referência e limitação → aceite. Log final do item: 10 eventos, um por intenção, decisões ancoradas exclusivamente na v3, estado `completed · v3`.
+- **Persistência:** fechar e reabrir o app reconstruiu o cartão `completed · v3` idêntico.
+
+**A Fase A está formalmente aceita.** Critério do plano cumprido: ciclo completo comprovado ao vivo em web e mobile, com eventos consistentes e foco estável entre plataformas. A Fase B (AUTO-01–06) está desbloqueada.
+
+Limitações registradas (não bloqueantes, fora do critério de aceite):
+- Respostas de chat no mobile dependem de liberar `ollama.exe` no firewall do Windows (regras de bloqueio de entrada existentes); as ações de orquestração não passam pelo Ollama e funcionaram integralmente.
+- O cartão mobile exibe as evidências na revisão, mas não re-exibe o "Resultado aceito" no estado `completed` como o web — lacuna de paridade anotada para correção separada.
+- UX mobile: tocar no campo de texto do cartão pode desviar o foco para o input do chat — anotado para correção separada.
 
 ## Fase B — Contrato de execução
 
