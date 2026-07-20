@@ -17,7 +17,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | A | **Aceita (2026-07-20)** | ORQ-01–04 comprovados ao vivo em web autenticado e em dispositivo físico (iPhone 14 Pro); Fase B desbloqueada |
 | B | **Parcial** | AUTO-01, AUTO-03 mínimo e AUTO-06 concluídos; resiliência (AUTO-02/04/05) permanece |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
-| D | **Resultado em revisão (2026-07-20)** | INT-04 produziu resultado real isolado e persistido; handoff aguarda decisão humana, sem aplicação |
+| D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | Não iniciada | — |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
@@ -136,6 +136,21 @@ Limitações registradas (não bloqueantes, fora do critério de aceite):
 **Riscos:** depender de detalhes do runner; segredos ou caminhos locais vazando para eventos; “só mais um atalho” virando fila informal.
 
 **Fora do escopo:** fila, supervisor, seleção automática de executor, paralelismo, aplicação automática.
+
+### Aceite formal da Fase D (2026-07-20) — ratificação da revisão humana do INT-04
+
+O resultado do INT-04 foi **tecnicamente aceito na revisão humana**. A ratificação apoia-se em quatro evidências independentes e append-only, sem reescrever nenhum registro anterior:
+
+- **Robustez do runner** (repositório separado `anima-local-agent-poc`, commit `db704e4`): tolerância estritamente controlada a respostas estruturadas inválidas por regeneração limitada do modelo (no máximo duas tentativas compartilhadas), com revalidação idêntica, auditoria da resposta bruta + SHA-256, e sem qualquer reinterpretação semântica. Fail-closed, escopo, allowlists, isolamento e separação produção/aplicação permaneceram intactos.
+- **Teste adicional de regressão** (mesmo repositório, commit `5bd917d`): fixa que `write_file` com `\n` literais no `content` é preservado byte a byte, jamais desescapado — travando o contrato contra reinterpretação semântica do conteúdo produzido pelo modelo.
+- **Prova anterior pelo endpoint** (registrada em `af4d8b4`): item `507af5ef-a72f-4451-8ddb-0747f5e4e856`, tentativa `e65d1de1-ef9c-4e13-8dd5-55d784642e87`, handoff `20260720T205121334287Z-result.zip` (SHA-256 `fbe7d1acf5a6017ea0eef7344d95882380be59122c8699ebbd481e8997c00e44`), item em `review`.
+- **Nova prova independente (2026-07-20)**: o runner foi comandado exatamente como o adaptador o invoca (`--produce-only --model qwen2.5-coder:7b`, gate `python -m unittest`) contra uma **cópia isolada** do piloto. O sucesso produziu o bundle `20260720T221717004114Z-result.zip`, SHA-256 `8706d0ef9504893e7c2b1179b3af08bf15f727e2098653f63cdfd09204faad7e`, contendo apenas `calculator.py` corrigido (`return a + b`, quebras de linha reais); `python -m unittest` verde (1 teste); escada de gates completa até `result_produced`. É uma amostra distinta da anterior (bundle diferente, ambos válidos).
+
+**Limitações observadas do `qwen2.5-coder:7b` (não bloqueantes):** o modelo é estocástico e fraco — foram necessárias quatro tentativas para uma amostra verde. Modos de falha observados e preservados como evidência: `content` com `\n` literais duplo-escapados (gerou `SyntaxError`, corretamente barrado pelo gate de testes) e `iteration_limit`. Em todas as tentativas a robustez agiu corretamente: nenhuma resposta estruturada válida foi indevidamente recusada e as falhas foram do gate factual, nunca do gate estrutural.
+
+**Confirmações de segurança:** nenhuma aplicação automática ocorreu em nenhuma tentativa (`apply.status=not_attempted`); nenhum merge, push ou deploy. O piloto original permaneceu **byte a byte intacto** (SHA-256 de `calculator.py` = `9445c47952abb8a7fc5d4a905d55b5be05771df1d69362ec597f9a50f7ede40d`, árvore limpa, HEAD `9101ec5`).
+
+**A Fase D está formalmente aceita.** Critério do INT-04 cumprido: ciclo real comandado pelo Anima com resultado tipado e evidências persistidas, revisão humana concluída, integração sem corromper o item nem apagar histórico, e nenhuma aplicação sem revisão. A comprovação ao vivo (pré-requisito da Fase E) foi atendida pela prova registrada em `af4d8b4`.
 
 ## Fase E — Supervisor V0
 
