@@ -1,6 +1,6 @@
 # Backlog — Modo Autônomo V0
 
-> Backlog documental do [Plano 002](002-modo-autonomo-v0.md), derivado do [Marco 003](../marcos/003-trabalho-autonomo-seguro.md). Nenhum item está implementado. Itens descrevem a **capacidade necessária** do braço executor, nunca um fornecedor fixo (Claude, Codex e outros são executores substituíveis).
+> Backlog documental do [Plano 002](002-modo-autonomo-v0.md), derivado do [Marco 003](../marcos/003-trabalho-autonomo-seguro.md). O estado factual de cada item é registrado junto ao item. Itens descrevem a **capacidade necessária** do braço executor, nunca um fornecedor fixo (Claude, Codex e outros são executores substituíveis).
 
 Legenda dos campos compactos: **Tamanho** P/M/G · **Raciocínio** leve/médio/alto · **Checkpoint humano** = exige decisão do usuário dentro do item · **Braço isolado** = executável de ponta a ponta por um único braço com este documento como contexto.
 
@@ -184,6 +184,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 - **Tamanho:** P · **Capacidade:** modelagem de domínio · **Raciocínio:** médio · **Checkpoint humano:** não · **Braço isolado:** sim
 
 ### INT-04 — Primeira execução sob comando
+
+**Estado (2026-07-20): resultado produzido; checkpoint de revisão humana pendente.** O endpoint autenticado comandou o `work_item` `507af5ef-a72f-4451-8ddb-0747f5e4e856`, tentativa `e65d1de1-ef9c-4e13-8dd5-55d784642e87`, por um adaptador local com alvo resolvido apenas no nó. O runner `qwen2.5-coder:7b` produziu em isolamento o handoff `20260720T205121334287Z-result.zip`, SHA-256 `fbe7d1acf5a6017ea0eef7344d95882380be59122c8699ebbd481e8997c00e44`, contendo somente `calculator.py`; `python -m unittest` passou (1 teste) e o item entrou em `review`. A reentrega da mesma tentativa foi idempotente. O arquivo original permaneceu com SHA-256 `9445c47952abb8a7fc5d4a905d55b5be05771df1d69362ec597f9a50f7ede40d` e a árvore do piloto permaneceu limpa. `apply.status=not_attempted`; nenhuma aplicação, merge, push ou deploy ocorreu. A conclusão formal aguarda a decisão humana sobre o resultado.
 
 - **Problema:** as duas metades comprovadas (orquestração no Anima; execução isolada no runner) nunca se tocaram; sem uma integração estreita, tudo acima é teoria.
 - **Resultado esperado:** um `work_item` aprovado; usuário comanda "executar"; um adaptador concreto (fora do core) entrega o pacote a um executor real em workspace isolada; uma tentativa; evidências e resultado retornam tipados; revisão humana decide; nenhuma aplicação automática.

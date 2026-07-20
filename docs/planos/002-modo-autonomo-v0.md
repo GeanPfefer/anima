@@ -15,9 +15,9 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | Fase | Estado | Resultado |
 |---|---|---|
 | A | **Aceita (2026-07-20)** | ORQ-01–04 comprovados ao vivo em web autenticado e em dispositivo físico (iPhone 14 Pro); Fase B desbloqueada |
-| B | Não iniciada | — |
-| C | Não iniciada | — |
-| D | Não iniciada | — |
+| B | **Parcial** | AUTO-01, AUTO-03 mínimo e AUTO-06 concluídos; resiliência (AUTO-02/04/05) permanece |
+| C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
+| D | **Resultado em revisão (2026-07-20)** | INT-04 produziu resultado real isolado e persistido; handoff aguarda decisão humana, sem aplicação |
 | E | Não iniciada | — |
 | F | Não iniciada | — |
 | G | Não iniciada | — |

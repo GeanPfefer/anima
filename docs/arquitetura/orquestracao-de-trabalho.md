@@ -277,6 +277,16 @@ Um nó local é executor de capacidades, não fonte de intenção nem interface 
 
 Permissões para leitura, indexação, escrita, execução, transferência e administração são independentes e fail-closed. Nenhuma existe por padrão. Ações destrutivas, privilegiadas, estruturais ou com efeito externo continuam atrás de decisão humana conforme a política de interrupção. O INT-04 é a primeira prova estreita dessa direção, sem incluir sincronização, catálogo de dispositivos, administração geral ou acesso amplo ao filesystem.
 
+## Primeira execução comandada em nó local (INT-04, Fase D)
+
+O transporte concreto permanece fora do core. A rota autenticada `execute-commanded` recebe item, versão aprovada e tentativa explícita; reconcilia reentregas pelo histórico persistido; verifica elegibilidade; inicia a tentativa atomicamente; chama o adaptador local; valida o transcript e persiste exatamente um terminal correlacionado. Os RPCs de início e terminal bloqueiam o item, conferem usuário, allowlist, estado, versão, item e tentativa e recusam divergências. Uma tentativa terminal idêntica é idempotente; conflito falha fechado.
+
+O adaptador resolve uma referência opaca por configuração exclusiva do nó e exige `workspace_read` e `workspace_write_isolated`. Caminhos absolutos não entram no contrato persistido. O runner é invocado sem shell e somente em `produce-only`; o envelope exige versão, estado, referências opacas, caminhos relativos dentro do escopo aprovado e SHA-256 do bundle. Saída inválida, arquivo fora do escopo, processo cancelado ou falha do runner viram terminais tipados e nunca autorizam aplicação.
+
+O runner local admite somente os formatos estruturados declarados. Respostas inválidas não são interpretadas heuristicamente: a resposta bruta, seu hash, fase, tentativa, normalização e rejeição são auditados; no máximo duas regenerações integrais são solicitadas; persistindo a invalidade, a execução falha. A única normalização legada aceita é o resumo de conclusão em um único campo textual de `arguments`, que não influencia gates. Testes, allowlist de arquivos, manifesto, isolamento, revisão e separação entre produção e aplicação continuam obrigatórios.
+
+A prova de 2026-07-20 produziu um resultado real com `qwen2.5-coder:7b`: o item `507af5ef-a72f-4451-8ddb-0747f5e4e856`, tentativa `e65d1de1-ef9c-4e13-8dd5-55d784642e87`, chegou a `review` com `python -m unittest` aprovado. O handoff `20260720T205121334287Z-result.zip` tem SHA-256 `fbe7d1acf5a6017ea0eef7344d95882380be59122c8699ebbd481e8997c00e44` e contém apenas `calculator.py`. O original permaneceu byte a byte no hash `9445c47952abb8a7fc5d4a905d55b5be05771df1d69362ec597f9a50f7ede40d`, com árvore limpa. O resultado está disponível para revisão humana; `apply.status` permaneceu `not_attempted`.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
