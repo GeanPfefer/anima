@@ -269,6 +269,14 @@ Todas as etapas preservam item, tentativa e versão aprovada do INT-02. Repetir 
 
 Não houve migration nem pgTAP no INT-03: o recorte implementa somente o contrato puro. Eventos persistentes, RPCs e mecanismo real de Git, merge, aplicação, publicação ou deploy pertencem a itens posteriores e não podem ser inferidos desta máquina de estados.
 
+## Portabilidade e nós locais (Marco 004)
+
+O Anima deve distinguir contexto pessoal portátil de recursos locais. Memória, decisões, trabalhos e checkpoints podem acompanhar o usuário entre dispositivos; arquivos, pastas, ferramentas e recursos de uma máquina permanecem sob um nó local e suas permissões explícitas. Portabilidade não implica copiar todo conteúdo para um banco ou expô-lo na rede.
+
+Um nó local é executor de capacidades, não fonte de intenção nem interface concorrente. Contratos portáteis descrevem capacidade, alvo e referências opacas; não dependem de nome de máquina, caminho absoluto, sistema operacional, fornecedor ou transporte. A resolução de uma referência local acontece somente no nó autorizado, e dados sensíveis não podem vazar para eventos ou checkpoints portáteis.
+
+Permissões para leitura, indexação, escrita, execução, transferência e administração são independentes e fail-closed. Nenhuma existe por padrão. Ações destrutivas, privilegiadas, estruturais ou com efeito externo continuam atrás de decisão humana conforme a política de interrupção. O INT-04 é a primeira prova estreita dessa direção, sem incluir sincronização, catálogo de dispositivos, administração geral ou acesso amplo ao filesystem.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
