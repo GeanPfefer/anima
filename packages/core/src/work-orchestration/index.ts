@@ -7,3 +7,4 @@ export * from './service';
 export * from './interpret';
 export * from './executor';
 export * from './presentation';
+export * from './eligibility';

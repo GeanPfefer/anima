@@ -163,6 +163,26 @@ A memória bruta é parte da fonte de verdade. A ação visual equivalente a “
 7. A RPC validará que `source_message_id` pertence ao usuário autenticado.
 8. Nenhuma estrutura de banco é implementada nesta fase de documentação.
 
+## Elegibilidade para execução autônoma (AUTO-01, Fase B)
+
+Definição executável de "trabalho pronto para execução autônoma", derivada requisito a requisito do [Marco 003 §Elegibilidade](../marcos/003-trabalho-autonomo-seguro.md). Vive como predicado **puro e fail-closed** em `packages/core` (`evaluateAutonomousEligibility`): na dúvida, o item não é elegível, e cada lacuna (`AutonomousEligibilityGap`) nomeia o requisito violado e explica exatamente o que falta — não existe lacuna "outro".
+
+Mapeamento requisito → verificação:
+
+| Requisito do Marco 003 | Verificação | Lacunas possíveis |
+|---|---|---|
+| versão aprovada da proposta | `state === 'approved'` (estados encerrados nunca são elegíveis) | `proposal_not_approved`, `work_already_closed` |
+| nenhuma decisão humana pendente | estado fora de `proposed`/`review`/`changes_requested`; execução não ativa; item não bloqueado | `human_decision_pending`, `execution_already_active`, `work_blocked_unresolved` |
+| escopo concreto | `includedScope` e `excludedScope` não vazios, sem entradas em branco | `scope_not_concrete` |
+| resultado esperado descrito | `objective` e `expectedEffects` concretos | `expected_result_missing` |
+| capacidade executora identificada | `capability` pertence ao enum `work_capability` | `capability_unknown` |
+| alvo conhecido | `execution_spec.target` com `kind` (`project`/`workspace`/`resource`) e `reference` | `target_missing` |
+| permissões explícitas | `execution_spec.permissions` é lista explícita (vazia = "nenhuma adicional", declarada) | `permissions_not_declared` |
+| critérios de validação verificáveis | `execution_spec.validation_criteria` com ≥1 entrada rotulada | `validation_criteria_missing` |
+| limites de tentativa, tempo ou recurso | `execution_spec.limits` com ≥1 inteiro positivo | `limits_missing` |
+
+A especificação de execução (`AutonomousExecutionSpecV1`) ainda não tem persistência própria: quando declarada, vive em `intent.execution_spec` (jsonb já existente), com parse estrito — especificação malformada gera `execution_spec_invalid` e nada é "melhorado" silenciosamente. O evento `work_blocked` (já no vocabulário proposto) ganha o payload tipado proposto `WorkBlockedNotEligiblePayloadV1` (`reason: 'not_eligible'` + códigos das lacunas); a persistência desse payload e qualquer fila/UI ficam para itens posteriores da Fase B/E.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

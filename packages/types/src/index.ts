@@ -154,6 +154,7 @@ export interface CharacterStats {
 // ─── Database (Supabase) ──────────────────────────────────────
 
 export type { Database, Json, Tables, Enums } from './database';
+export { Constants } from './database';
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 

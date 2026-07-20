@@ -81,6 +81,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### AUTO-01 — Critérios de elegibilidade
 
+**Estado (2026-07-20):** implementado — predicado puro fail-closed `evaluateAutonomousEligibility` em `packages/core` (com `AutonomousExecutionSpecV1` lida de `intent.execution_spec`, sem migration), payload tipado proposto para `work_blocked` e seção correspondente na arquitetura; 34 testes de domínio cobrem cada requisito do Marco 003 e combinações. **Checkpoint humano pendente:** ratificar a régua (tabela requisito → verificação na arquitetura) — qualquer ajuste é mudança de código pequena e isolada.
+
 - **Problema:** não existe definição executável de "trabalho pronto para execução autônoma"; sem ela, qualquer fila herdaria propostas vagas.
 - **Resultado esperado:** predicado de domínio puro que responde se um `work_item` é elegível, com a lista de lacunas quando não é (escopo vago, sem critérios de validação, sem limites, decisão pendente etc.).
 - **Dependências:** Fase A aceita. **Escopo:** conceito documentado + tipos e função em `packages/core` + eventos propostos (`work_blocked` com razão tipada). **Fora do escopo:** persistência nova; UI; fila.
