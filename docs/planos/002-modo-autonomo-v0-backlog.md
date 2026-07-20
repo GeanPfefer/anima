@@ -103,6 +103,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### AUTO-03 — Tentativas persistentes
 
+**Estado do mínimo (2026-07-20):** concluído como contrato de domínio, antes de schema. `ExecutionAttempt` correlaciona tentativa, item e versão aprovada; registra executor, início/fim, resultado, razão de parada e handoff; transições puras recusam término tardio/duplicado e dados sensíveis; payloads V1 de início e término ficam propostos para INT-01/INT-02. Ambiente, consumo e demais campos completos permanecem pendentes no AUTO-03 completo.
+
 - **Problema:** o ciclo atual registra início/desfecho de execução, mas não o conceito completo de tentativa (executor, modelo, esforço, ambiente, ações, validações, consumo, razão de parada, handoff).
 - **Resultado esperado:** tentativa como entidade do domínio com todos os campos do Marco 003 (§Tentativas persistentes), correlacionada a item + versão aprovada; mínimo viável primeiro (executor, início/fim, resultado, razão, referência de handoff), campos de consumo/ambiente na versão completa.
 - **Dependências:** AUTO-01; contrato existente de `start/finish_execution` como base. **Escopo:** conceito + tipos + evolução dos eventos persistidos. **Fora do escopo:** telemetria contínua; métricas agregadas.

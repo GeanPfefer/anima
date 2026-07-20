@@ -204,6 +204,24 @@ Toda interrupção carrega um snapshot mínimo e tipado do estado que a gerou: e
 
 Ficam fora do AUTO-06: cartões ou outra UI, notificações, migrations, fila, executor e máquina de estados de tentativas.
 
+## Tentativa de execução mínima (AUTO-03 mínimo, Fase B)
+
+Uma execução comandada corresponde a uma entidade `ExecutionAttempt`, identificada por `attemptId` e correlacionada obrigatoriamente ao `workItemId` e à versão aprovada da proposta. O `executionId` do contrato existente é o precursor desse identificador; a convergência dos nomes ocorrerá junto da evolução do adaptador e dos eventos em INT-01/INT-02, sem manter duas identidades paralelas.
+
+A tentativa nasce uma única vez em `running`, com executor genérico e horário de início. Pode terminar uma única vez em `succeeded`, `failed`, `timed_out`, `cancelled`, `paused` ou `blocked`, sempre com:
+
+- horário de término;
+- resumo do resultado conhecido, inclusive diagnóstico em falha;
+- razão de parada tipada;
+- referência opaca de handoff;
+- a correlação original intacta.
+
+Término tardio ou duplicado é defeito e não substitui o primeiro desfecho. Sucesso exige `result_produced`; a mesma razão não pode certificar outro estado. Identificadores, resumos e referências são validados fail-closed contra credenciais evidentes e caminhos absolutos locais antes de formar payload persistível.
+
+`ExecutionAttemptStartedPayloadV1` e `ExecutionAttemptFinishedPayloadV1` são os payloads propostos para tornar a tentativa reconstruível pelos eventos. Nesta etapa de conceito antes de schema, eles não alteram migrations nem RPCs. A persistência definitiva, idempotência de transporte e correlação no servidor pertencem a INT-01/INT-02.
+
+O AUTO-03 mínimo não modela provedor/modelo, esforço, ambiente, ações, arquivos, validações detalhadas ou consumo. Esses campos permanecem no AUTO-03 completo, depois da primeira integração estreita, evitando antecipar telemetria sem uso real.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
