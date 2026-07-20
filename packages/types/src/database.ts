@@ -1129,6 +1129,18 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      autonomous_work_queue: {
+        Args: never
+        Returns: {
+          approval_seq: number
+          approved_at: string
+          approved_proposal_version: number
+          capability: Database["public"]["Enums"]["work_capability"]
+          queue_position: number
+          target_reference: string
+          work_item_id: string
+        }[]
+      }
       create_work_proposal: {
         Args: {
           capability: Database["public"]["Enums"]["work_capability"]

@@ -14,3 +14,4 @@ export * from './work-executor-contract';
 export * from './execution-event-correlation';
 export * from './integration-boundary';
 export * from './work-claim';
+export * from './autonomous-queue';
