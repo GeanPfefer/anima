@@ -14,7 +14,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 
 | Fase | Estado | Resultado |
 |---|---|---|
-| A | Implementada; aceitação ao vivo pendente | ORQ-01–04 implementados e cobertos por core/web/pgTAP; falta repetir o ciclo autenticado no web e em dispositivo mobile |
+| A | Comprovada ao vivo no web autenticado; falta apenas dispositivo mobile | ORQ-01–04 comprovados em sessão web autenticada (2026-07-20); mobile validado por typecheck/contrato compartilhado, pendente somente execução em dispositivo |
 | B | Não iniciada | — |
 | C | Não iniciada | — |
 | D | Não iniciada | — |
@@ -45,6 +45,31 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 - A corrida entre envio e hidratação foi fechada: o chat não aceita novo turno até concluir a reconstrução; falha de hidratação permanece fail-closed e visível.
 - Evidência local: suites core/web verdes, 177 asserções pgTAP verdes, migration aplicada no Supabase local, typecheck e build verdes. O pgTAP percorre arquivar → reabrir → reidratar a sessão preservando mensagens e isolamento por usuário.
 - A verificação visual abriu o app web local, mas encontrou apenas a tela de login, sem sessão autenticada disponível. A validação em dispositivo mobile também não foi executada nesta sessão. Portanto, o critério de aceite ao vivo da Fase A ainda não foi declarado cumprido e a Fase B não está formalmente desbloqueada.
+
+### Registro de verificação da Fase A (2026-07-20) — demonstração web autenticada
+
+Sessão real na stack local (Supabase + Next.js dev + Ollama), autenticada com conta descartável criada pela Admin API (`fase-a-demo-1784563575@teste.local`, usuário `4d848bc9`, habilitado na allowlist de orquestração). Todos os comportamentos exigidos por ORQ-01–04 foram exercitados pelo fluxo real do chat:
+
+- **ORQ-01** — item `564f5738` criado por mensagem no chat (`work_proposed` v1 + `context_attached` atômicos); aprovado, iniciado, resultado registrado com evidências tipadas (referência, validações `passou`/`falhou`, limitação) e aceito. Cartão final `completed · v3` com "Resultado aceito · v3" e evidências preservadas; `result_accepted` aponta exatamente a versão 3.
+- **ORQ-03** — correção pelo cartão gerou v2 (par atômico `proposal_changes_requested` v1 + `proposal_revised` v2, mesmo commit de transação); correção concorrente por segundo cliente gerou v3; aprovação sobre o cartão obsoleto em v2 foi recusada com HTTP 409 (`version_conflict`/55000), **sem nenhum evento de decisão**, o cartão reconciliou para v3 e a explicação "O item mudou desde a última leitura." permaneceu visível após o reconcile; a aprovação válida foi registrada uma única vez sobre a v3.
+- **ORQ-02** — quatro itens no ciclo, dois ativos simultâneos; foco seguiu o item mais novo, troca explícita por "Usar como foco" persistida em `work_focus`; rejeitar o item em foco limpou o foco; mensagem de continuação ambígua produziu o cartão "A qual trabalho você se refere?" com os dois candidatos, e a escolha definiu o foco e anexou a mensagem como contexto (`context_attached` v2) sem duplicar trabalho.
+- **ORQ-04** — reload completo da página reidratou mensagens, cartões, estados e foco; arquivar preservou a sessão e as 12 mensagens (`conversation_sessions.archived_at` preenchido, mensagens intactas); "Retomar conversa anterior" reabriu a conversa com todos os cartões reconstruídos de item + eventos + contextos (completed/proposed/rejected e foco corretos); aprovar o item em foco após a retomada registrou exatamente um `work_approved` v1.
+- Log de eventos do item `564f5738` íntegro e sem duplicatas: `work_proposed` → `context_attached` → (`proposal_changes_requested`+`proposal_revised`)×2 → `work_approved` → `work_started` → `result_submitted` → `result_accepted`, todos os eventos de decisão ancorados na v3.
+- Suítes no mesmo HEAD (`0c1569a`): typecheck 4 workspaces + mobile, core 61, supabase 7, web 31, pgTAP 177, build web — todos verdes.
+- **Mobile (sem dispositivo):** typecheck verde; `MobileWorkCard`/`mobile-work.ts` consomem o mesmo domínio `@anima/core` (coberto pelas suítes) e implementam reconcile pós-erro com mensagem preservada (`run()` recarrega via `reloadWork` mantendo o erro exibido). Não há tooling Android/iOS nesta máquina; a execução em dispositivo físico/emulador **não ocorreu** e é o único aceite restante da Fase A.
+
+#### Roteiro manual mobile (único aceite pendente)
+
+Pré-requisito: Expo Go em dispositivo na mesma rede, Supabase local acessível, usuário allowlisted. Passos determinísticos:
+
+1. `npm run dev:mobile`, abrir no dispositivo, logar e enviar "Planeje uma melhoria no app" → **esperado:** cartão de proposta v1 em foco.
+2. Pedir correção pelo cartão → **esperado:** cartão passa a v2 com o ajuste no escopo.
+3. Em um navegador web logado na mesma conta, pedir outra correção (v3); no dispositivo, sem recarregar, aprovar o cartão v2 → **esperado:** recusa com mensagem compreensível, cartão reconcilia para v3 e a mensagem permanece visível.
+4. Aprovar v3, iniciar, registrar resultado com uma validação `ok:` e uma `falha:`, aceitar → **esperado:** cartão `completed · v3` com evidências.
+5. Fechar e reabrir o app → **esperado:** conversa e cartão reconstruídos com o mesmo estado.
+6. Evidências a registrar: capturas de cada passo e `SELECT event_type, proposal_version FROM work_events WHERE work_item_id = '<item>' ORDER BY seq;` sem duplicatas.
+
+Com o roteiro cumprido em dispositivo, a Fase A pode ser declarada aceita e a Fase B desbloqueada.
 
 ## Fase B — Contrato de execução
 
