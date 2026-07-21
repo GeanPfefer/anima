@@ -117,6 +117,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### AUTO-04 — Checkpoint e handoff obrigatório
 
+**Estado (2026-07-20):** concluído como contrato de domínio, antes de schema. `WorkHandoffV1` estrutura o conteúdo que acompanha o `handoffReference` já existente do INT-04 — **não** é um segundo conceito concorrente: a referência opaca continua canônica e a projeção para a fronteira do INT-03 casa por ela, comprovado em teste. Campos classificados em correlação (item, tentativa, versão, claim), canônicos (estado, razão, feito, restante, decisões, riscos, próximo passo), evidência (recursos, validações, falhas, referências) e **deriváveis, que não são repetidos** — objetivo e escopo vivem na versão aprovada, e é assim que o contrato torna impossível ampliar escopo por handoff. Sucesso exige ao menos uma validação `passed` (relato `declared` não é evidência); validação reprovada é incompatível com sucesso e exige falha registrada; sanitização reutiliza a régua única do AUTO-03. Replay idêntico é idempotente e divergente falha fechado. 48 testes de domínio. Sem migration: o recorte é conceito antes de schema, como INT-01–03.
+
 - **Problema:** trabalho relevante hoje pode existir só na memória de uma sessão de executor; interrupção significa perda e retrabalho.
 - **Resultado esperado:** definição tipada de checkpoint/handoff (commit, branch, patch, artefato, checkpoint estruturado, relatório, evidência) e a regra: nenhuma tentativa termina — por qualquer razão — sem produzir um estado transferível referenciável.
 - **Dependências:** AUTO-03. **Escopo:** conceito + tipos + validação de que toda razão de parada exige handoff correspondente. **Fora do escopo:** armazenamento binário de artefatos; sincronização entre máquinas.
@@ -246,6 +248,20 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 - **Evidências:** testes por cenário; demonstração real documentada.
 - **Riscos:** reconciliação agressiva matando claims válidos; duplo processamento.
 - **Tamanho:** G · **Capacidade:** orquestração + programação · **Raciocínio:** alto · **Checkpoint humano:** não · **Braço isolado:** parcialmente (demonstração ao vivo exige ambiente)
+
+### SUP-05 — Exclusividade de alvo simétrica
+
+**Origem (2026-07-20):** costura identificada e deliberadamente deixada aberta no SUP-03, com ratificação humana. O SUP-03 impede que o supervisor reivindique alvo ocupado — inclusive por execução comandada —, mas `start_commanded_work_attempt` não consulta ocupação de alvo. Um comando explícito do usuário ainda pode iniciar execução sobre alvo com claim autônomo ativo. Fechar isso altera o contrato ratificado do INT-04 e por isso não foi feito dentro do SUP-03.
+
+- **Problema:** a exclusividade por alvo é assimétrica: vale para o caminho autônomo e não para o comandado. Enquanto o Supervisor não inicia execuções reais o risco é teórico; a partir daí, dois braços podem atuar no mesmo alvo.
+- **Resultado esperado:** nenhuma execução — comandada ou autônoma — inicia sobre alvo ocupado por claim ativo ou item `in_progress`. A verificação é atômica e garantida pelo banco; o bloqueio produz erro tipado e evidência auditável; nenhum claim é silenciosamente roubado ou liberado por uma execução comandada. A retomada da **mesma** execução é caso separado e continua permitida (é replay, não nova ocupação).
+- **Dependências:** SUP-03. **Escopo:** estender a verificação de alvo ao caminho comandado, preservando idempotência do replay. **Fora do escopo:** mudar a sequência estreita do INT-04; paralelismo entre alvos distintos.
+- **Aceite:** execução comandada sobre alvo com claim autônomo ativo é recusada com erro tipado; replay da mesma tentativa continua idempotente; nenhum claim é liberado ou roubado pelo caminho comandado.
+- **Evidências:** pgTAP das duas direções; corrida real entre um comando explícito e um claim autônomo.
+- **Riscos:** recusar uma retomada legítima por confundi-la com nova execução; alterar o INT-04 além do necessário.
+- **Tamanho:** P · **Capacidade:** persistência + modelagem · **Raciocínio:** médio · **Checkpoint humano:** sim (altera contrato ratificado do INT-04) · **Braço isolado:** sim
+
+> **Bloqueante:** deve ser fechado **antes** de o Supervisor passar a iniciar execuções reais.
 
 ## INTEL — Uso sustentável de inteligência
 

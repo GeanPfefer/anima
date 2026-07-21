@@ -349,6 +349,31 @@ Na fila, alvo ocupado **não descarta nem reordena** o item: ele ganha `target_o
 
 **Costura conhecida:** a execução comandada do INT-04 bloqueia o alvo para o supervisor, mas o caminho inverso não é verificado — `start_commanded_work_attempt` não consulta ocupação de alvo, então um comando explícito do usuário pode iniciar execução em alvo com claim autônomo ativo. Fechar isso alteraria o contrato ratificado do INT-04 e pertence a um item próprio, com decisão humana.
 
+## Handoff obrigatório (AUTO-04, Fase B/E)
+
+Nenhuma tentativa termina — por qualquer razão, inclusive sucesso — sem deixar estado transferível suficiente para que outra execução, instância ou capacidade continue com segurança.
+
+O AUTO-04 **não cria um segundo conceito de handoff**. Ele estrutura o que acompanha o `handoffReference` já existente: a referência opaca do INT-04 permanece o ponteiro canônico para o artefato, e `IntegrationHandoff` (INT-03) continua casando por ela. `WorkHandoffV1` é o conteúdo que torna a retomada possível.
+
+Os campos são classificados de propósito:
+
+| Natureza | Campos |
+|---|---|
+| Correlação | item, tentativa, versão aprovada, claim (nulo na execução comandada) |
+| Canônico | estado, razão de parada, o que foi feito, o que resta, decisões, riscos, próximo passo |
+| Evidência | recursos tocados, validações tipadas, falhas, referências de evidência |
+| Derivável | objetivo, escopo, tentativas anteriores, estado do item |
+
+O que é derivável **não é repetido**. Objetivo e escopo vivem na versão aprovada da proposta e o handoff apenas aponta para ela — é assim que o contrato torna estruturalmente impossível ampliar escopo por handoff, em vez de depender de vigilância. Tentativas anteriores vivem no log append-only e não podem ser reescritas daqui.
+
+Sucesso exige evidência: ao menos uma validação `passed`. Um relato `declared` é o que alguém afirmou, nunca fato verificado, e não sustenta sucesso — coerente com a semântica já estabelecida em F5. Validação reprovada é incompatível com sucesso e exige falha correspondente registrada; tentativa `failed` sem falha declarada é ocultação e falha fechado. Toda seção é lista estruturada sem entradas vazias: não existe handoff de texto livre. A sanitização contra credenciais e caminhos absolutos reutiliza a régua única do AUTO-03, exportada em vez de duplicada.
+
+Reentregar o handoff da mesma tentativa com conteúdo idêntico é idempotente; com conteúdo divergente falha fechado, porque reescrever um handoff já registrado apagaria o estado a partir do qual alguém pode ter retomado.
+
+Produzir handoff **não autoriza nada**. Ele não muda estado de item, de claim ou de integração, não substitui evento canônico algum e é incapaz de expressar autorização: integrar continua exigindo resultado aceito mais uma segunda decisão humana explícita (INT-03).
+
+O AUTO-04 é conceito antes de schema, como INT-01–03: não há migration. A persistência do handoff estruturado acompanha a evolução dos eventos de término da tentativa.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

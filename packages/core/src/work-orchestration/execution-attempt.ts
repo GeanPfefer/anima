@@ -90,7 +90,9 @@ const positiveVersion = (value: unknown): value is number => typeof value === 'n
 
 // Payloads de domínio não podem persistir credenciais nem caminhos absolutos.
 // Referências devem ser opacas (hash/id/URI segura), não localização da máquina.
-const containsSensitiveData = (value: string): boolean =>
+// Exportado para que o handoff estruturado (AUTO-04) use exatamente a mesma
+// régua de sanitização, em vez de manter uma segunda cópia divergente.
+export const containsSensitiveData = (value: string): boolean =>
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(value)
   || /\b(password|passwd|secret|api[_-]?key|access[_-]?token)\s*[:=]/i.test(value)
   || /:\/\/[^\s/@:]+:[^\s/@]+@/.test(value)
