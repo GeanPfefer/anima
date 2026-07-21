@@ -1236,6 +1236,18 @@ export type Database = {
           work_item_id: string
         }[]
       }
+      reconcile_supervised_work: {
+        Args: never
+        Returns: {
+          action: string
+          attempt_id: string
+          claim_id: string
+          detail: Json
+          finding: string
+          item_state: Database["public"]["Enums"]["work_state"]
+          work_item_id: string
+        }[]
+      }
       record_commanded_work_terminal: {
         Args: {
           attempt_id: string
@@ -1626,6 +1638,7 @@ export type Database = {
         | "work_cancelled"
         | "work_claimed"
         | "work_claim_released"
+        | "attempt_abandoned"
       work_impact_level:
         | "low"
         | "significant"
@@ -1943,6 +1956,7 @@ export const Constants = {
         "work_cancelled",
         "work_claimed",
         "work_claim_released",
+        "attempt_abandoned",
       ],
       work_impact_level: [
         "low",

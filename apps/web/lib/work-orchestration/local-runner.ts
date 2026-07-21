@@ -32,10 +32,14 @@ interface RunnerEnvelope {
 const opaque = (value: string): boolean => value.length > 0 && !value.includes('/') && !value.includes('\\') && !value.includes('..');
 const record = (value: unknown): Record<string, unknown> | null => typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
-export type PersistedAttemptStatus = 'absent' | 'in_progress' | 'terminal';
+export type PersistedAttemptStatus = 'absent' | 'in_progress' | 'terminal' | 'abandoned';
 export const classifyPersistedAttempt = (events: readonly WorkEvent[], attemptId: string): PersistedAttemptStatus => {
   const matching = events.filter(event => record(record(event.payload)?.['data'])?.['attempt_id'] === attemptId);
   if (matching.some(event => ['result_submitted', 'execution_failed', 'work_cancelled'].includes(event.type))) return 'terminal';
+  // SUP-04: a reconciliação encerrou esta tentativa. Ela não é replay (nada foi
+  // entregue) nem reiniciável (o banco recusa o terminal tardio) — recomeçar
+  // aqui gastaria uma execução inteira para ser rejeitada no fim.
+  if (matching.some(event => event.type === 'attempt_abandoned')) return 'abandoned';
   return matching.some(event => event.type === 'execution_started') ? 'in_progress' : 'absent';
 };
 

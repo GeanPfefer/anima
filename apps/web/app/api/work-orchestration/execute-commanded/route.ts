@@ -52,6 +52,9 @@ export async function POST(request: Request) {
   if (persistedAttempt === 'in_progress') {
     return Response.json({ ok: false, error: { code: 'attempt_in_progress', message: 'A tentativa já está em andamento.' } }, { status: 409 });
   }
+  if (persistedAttempt === 'abandoned') {
+    return Response.json({ ok: false, error: { code: 'attempt_abandoned', message: 'A reconciliação encerrou esta tentativa; comande uma tentativa nova.' } }, { status: 409 });
+  }
   const eligibility = evaluateAutonomousEligibility(current.value);
   if (!eligibility.eligible) return Response.json({ ok: false, error: { code: 'work_not_eligible', gaps: eligibility.gaps } }, { status: 422 });
   const contexts = await service.listContexts(workItemId);
