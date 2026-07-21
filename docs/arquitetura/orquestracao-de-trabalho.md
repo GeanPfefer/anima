@@ -347,7 +347,31 @@ A corrida entre dois itens **diferentes** do mesmo alvo não é resolvida pelo l
 
 Na fila, alvo ocupado **não descarta nem reordena** o item: ele ganha `target_occupied = true` e continua na sua posição, esperando. A seleção escolhe o mais antigo com alvo livre e informa `skipped_occupied_targets`, de modo que trabalhos em alvos diferentes progridem sem que ninguém perca a vez. Quando todo alvo está ocupado, o resultado é "aguardando alvo", que é distinto de fila vazia — o supervisor deve esperar, não concluir que não há trabalho.
 
-**Costura conhecida:** a execução comandada do INT-04 bloqueia o alvo para o supervisor, mas o caminho inverso não é verificado — `start_commanded_work_attempt` não consulta ocupação de alvo, então um comando explícito do usuário pode iniciar execução em alvo com claim autônomo ativo. Fechar isso alteraria o contrato ratificado do INT-04 e pertence a um item próprio, com decisão humana.
+**Costura conhecida (fechada pelo SUP-05):** a execução comandada do INT-04 bloqueia o alvo para o supervisor, mas o caminho inverso não era verificado — `start_commanded_work_attempt` não consultava ocupação de alvo, então um comando explícito do usuário podia iniciar execução em alvo com claim autônomo ativo. Fechar isso alterava o contrato ratificado do INT-04 e por isso pertenceu a um item próprio, com decisão humana. O registro permanece aqui porque a decisão de adiar foi deliberada; a resolução está na seção do SUP-05.
+
+## Exclusividade de alvo simétrica (SUP-05, Fase E)
+
+A brecha deixada aberta pelo SUP-03 não era, como o enunciado supunha, uma assimetria entre o caminho comandado e o autônomo. Era uma assimetria entre **aquisição** e **início**: `acquire_work_claim` verificava ocupação do alvo, `private.begin_work_attempt` não. O caminho comandado apenas exibia o defeito primeiro, por chegar ao início sem passar por aquisição alguma.
+
+Por isso a correção não foi acrescentar uma verificação ao caminho comandado. A fronteira atômica escolhida é `private.begin_work_attempt` — o corpo único que os dois caminhos já compartilhavam desde o AUTO-02. Uma implementação só torna a simetria **consequência estrutural**, não uma coincidência que duas cópias precisariam manter. Verificar em `start_commanded_work_attempt` foi considerado e rejeitado justamente por duplicar a regra, que é como assimetrias nascem.
+
+A verificação **não pode** morar na aplicação, e a razão é a mesma do SUP-03 levada ao início da tentativa: dois itens diferentes no mesmo alvo travam **linhas diferentes**, então o `SELECT ... FOR UPDATE` do item não serializa nada e resta uma janela entre consultar e gravar. Isso foi medido, não deduzido: com um claim adquirido e ainda não commitado, a consulta otimista que a aplicação faria leu `alvo_ocupado = false` e retornou em menos de um milissegundo, enquanto a mesma corrida contra o RPC real bloqueou 3,97 s no lock consultivo e terminou em recusa tipada. A janela existe e é observável.
+
+O dispositivo é o mesmo já estabelecido pelo SUP-03: `pg_advisory_xact_lock` sobre `'work_target:'||user||':'||target`, adquirido **depois** do lock do item — a mesma ordem de `acquire_work_claim`, o que impede ciclo entre as duas funções.
+
+Três exclusões são indispensáveis e cada uma corresponde a um modo de falha real:
+
+| Exclusão | Sem ela | Contrato preservado |
+|---|---|---|
+| o próprio item não se auto-ocupa | nenhuma tentativa iniciaria | — |
+| o claim desta tentativa (`p_claim_id`) não bloqueia a si mesmo | o caminho supervisionado recusaria a si próprio, pois chega segurando a posse do alvo | AUTO-02 |
+| replay retorna **antes** da verificação | a reentrega da mesma tentativa seria confundida com nova ocupação e recusada | INT-04, AUTO-05 |
+
+Claim expirado ou liberado **não** ocupa e **não** é recolhido por este caminho. Recolher posse alheia durante um início comandado seria exatamente o roubo silencioso que o aceite do SUP-05 proíbe; quem libera claim vencido de forma auditável, com razão `expired` e evento, continua sendo `acquire_work_claim`. O caminho comandado é inerte sobre posse de terceiros: recusa e não escreve nada.
+
+Os erros reaproveitam as mensagens tipadas que a aquisição já usava — `work target is held by an active claim` e `work target is busy with a running attempt`, ambos `55000`. Mensagem idêntica para invariante idêntica: a simetria do contrato aparece também no que o cliente observa.
+
+**Impacto assumido sobre o INT-04:** um item cujo `execution_spec` não permita derivar `target.reference` deixa de iniciar execução comandada e passa a falhar fechado com `execution target missing` (`22023`), como já ocorria na aquisição. Sem alvo derivável não há exclusividade a garantir, e iniciar assim seria executar precisamente onde a garantia não alcança. Nenhum fluxo existente depende disso — a rota `execute-commanded` já exige `evaluateAutonomousEligibility`, que reprova alvo ausente antes do RPC. Fora esse endurecimento, o contrato do INT-04 permanece: a RPC pública, sua assinatura e os payloads de `work_started` e `execution_started` continuam byte a byte idênticos quando não há claim, e o replay segue idempotente.
 
 ## Handoff obrigatório (AUTO-04, Fase B/E)
 
