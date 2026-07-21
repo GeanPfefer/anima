@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | AUTO-02, AUTO-04, AUTO-05, SUP-01, SUP-02 e SUP-03 concluídos; SUP-05 **ratificado (2026-07-21)**; SUP-04 (reconciliação) **implementado e pronto para revisão humana, ainda não ratificado** — ver "SUP-04 pronto para revisão" |
+| E | **Em andamento** | AUTO-02, AUTO-04, AUTO-05, SUP-01, SUP-02 e SUP-03 concluídos; SUP-05 **ratificado (2026-07-21)**; SUP-04 **ratificado e encerrado (2026-07-21)** — ver "Ratificação do SUP-04". SUP-01 a SUP-05 completos; resta o laço que escolhe e executa e a comprovação do AUTO-05 em retomada real, não iniciados |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -272,6 +272,44 @@ Evidência exigida pelo aceite do SUP-04 ("cada cenário de interrupção do Mar
 **Estado dos dados locais:** as fixtures das provas de corrida (SUP-03, SUP-05 e SUP-04) e da demonstração ao vivo foram **preservadas** como evidência auditável, seguindo o padrão já adotado. Verificado ao final: **zero claims ativos** e **zero itens em `in_progress`** em todo o banco local — nenhum alvo permanece ocupado. Todas as contas de prova usam o domínio `@test.invalid`.
 
 **Confirmações de segurança:** nenhuma execução foi disparada pela reconciliação; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum outro item da Fase E foi iniciado; `private.begin_work_attempt` não foi tocado e o SUP-05 permanece idêntico; nenhum merge, push, deploy ou `db reset`.
+
+### Ratificação do SUP-04 (2026-07-21) — reconciliação após interrupção
+
+A revisão humana final **aprovou, ratificou e encerrou** o SUP-04. Registro append-only: nenhuma evidência ou seção anterior foi reescrita, e as duas seções acima permanecem como o percurso que levou até aqui.
+
+**A pendência que bloqueava a ratificação está satisfeita.** O aceite do SUP-04 exigia que ao menos um cenário de interrupção do Marco 003 fosse demonstrado ao vivo com executor real. A demonstração registrada no commit `40b8815` cumpriu o requisito e foi ratificada integralmente, com seus quinze pontos: início pela rota real `POST /api/work-orchestration/execute-commanded`, autenticação real por sessão, `LocalRunnerAdapter` e executor local reais, `work_started` e `execution_started` persistidos, interrupção da aplicação sem terminal, item órfão em `in_progress`, reconciliação recusada antes do vencimento do limite, abandono somente após `max_duration_minutes = 1` ser excedido, exatamente um `attempt_abandoned`, retorno a `approved`, reconciliações posteriores idempotentes e sem novos eventos, recusa de terminal tardio pela fronteira real, ausência de aceite, autorização, integração ou aplicação, ausência final de claims ativos e alvos ocupados, e workspace isolada sem alteração.
+
+**O núcleo da ratificação:** a revisão destacou nominalmente a recusa da reconciliação aos **57 segundos** após a morte do executor como parte central do aceite. A ausência do processo não foi tratada como prova de nada; a decisão só ocorreu depois que o limite persistido venceu. É esse comportamento — e não o abandono em si — que o checkpoint ratificou.
+
+**Decisões arquiteturais ratificadas nominalmente:**
+
+- `attempt_abandoned` como afirmação **mais fraca** que sucesso ou falha;
+- a transição `in_progress → approved`, única linha nova da matriz normativa;
+- a **rejeição de `failed`** como conclusão inferida da ausência do executor;
+- a **rejeição de `blocked`** enquanto não existir caminho executável de retomada a partir desse estado;
+- `work_claims.expires_at` como limite persistido do caminho supervisionado;
+- `execution_spec.limits.max_duration_minutes` como limite persistido do caminho comandado;
+- a exigência de que **todos** os limites aplicáveis estejam excedidos;
+- ausência de limite declarado resultando em `requires_human`, **sem mutação**;
+- a guarda contra terminal tardio de tentativa abandonada;
+- o **replay idempotente preservado antes** dessa guarda;
+- a reconciliação restaurar consistência e elegibilidade **sem iniciar execução**;
+- eventos append-only e operações idempotentes;
+- o lock consultivo por usuário combinado com o lock por item;
+- nenhuma interação da reconciliação com aceite, autorização ou integração.
+
+**Observações aceitas pela revisão, sem alterar o resultado:**
+
+- a primeira tentativa da prova falhou porque a workspace não era repositório git limpo — falha de preparação de ambiente, não defeito do SUP-04; o adaptador produziu corretamente `execution_failed`;
+- os processos do runner não sobreviveram à queda da aplicação neste ambiente, o que **reduz a exposição observada** ao executor zumbi mas **não elimina o risco conceitualmente**; ele permanece no registro de riscos;
+- a guarda contra terminal tardio foi comprovada pela chamada real da fronteira terminal com os identificadores da tentativa abandonada, e não por um zumbi genuíno;
+- as fixtures permanecem no banco local como evidência auditável, e a configuração local do runner em `apps/web/.env.local` permanece como está.
+
+**Riscos que sobrevivem à ratificação** (registrados, não resolvidos): o executor zumbi conceitual, que o banco não pode matar; a tentativa comandada **sem** `max_duration_minutes` declarado, que permanece em `in_progress` até decisão humana por não haver fato que sustente transição; e o bundle de uma tentativa abandonada, que não é aceito nem descartado automaticamente.
+
+**O SUP-04 está ratificado e encerrado.** Suas decisões não devem ser reabertas sem evidência concreta de regressão ou incompatibilidade. Com isso, **SUP-01 a SUP-05 estão todos concluídos**; o que resta para fechar a Fase E é o laço que escolhe e executa (SUP-02 + AUTO-02 operando juntos) e a comprovação do AUTO-05 em retomada real — nenhum deles iniciado.
+
+**Confirmações de segurança desta ratificação:** nenhum código funcional foi alterado; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum próximo item da Fase E foi iniciado; nenhuma fixture foi removida; o SUP-05 permanece intocado; nenhum merge, push, deploy ou `db reset`.
 
 ## Fase F — Uso sustentável de inteligência
 
