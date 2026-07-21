@@ -225,8 +225,51 @@ A revisão humana **aprovou e ratificou** o SUP-05. Registro append-only, sem re
 - **Executor zumbi.** O banco não mata processos. Um executor que ignore seu próprio limite declarado pode continuar mexendo no alvo depois do abandono. Mitigações reais: o abandono só ocorre depois do limite que o próprio contrato declarou; a exclusividade do SUP-05 continua valendo no início da tentativa seguinte; e o sinal tardio é recusado. Fechar isso por completo exigiria cancelamento cooperativo do runner — fora do escopo do SUP-04.
 - **Tentativa comandada sem `max_duration_minutes` permanece travada** em `in_progress` até decisão humana. É deliberado: sem limite declarado não há fato. Um caminho humano explícito de abandono seria o próximo passo natural, e não foi criado aqui para não ampliar escopo.
 - **Bundle da tentativa abandonada não é aceito nem descartado.** Ele permanece no nó local, referenciado pelo evento de abandono; nenhuma via automática o promove a resultado.
-- **A demonstração ao vivo** de um cenário do Marco 003 com executor real, exigida pelo aceite do SUP-04, **ainda não foi feita**.
+- ~~**A demonstração ao vivo** de um cenário do Marco 003 com executor real, exigida pelo aceite do SUP-04, **ainda não foi feita**.~~ — **satisfeito em 2026-07-21**, ver "Demonstração ao vivo do SUP-04" abaixo.
 - A garantia é limitada por `user_id`, coerente com a V0 monousuário.
+
+### Demonstração ao vivo do SUP-04 (2026-07-21) — `application_shutdown` com executor real
+
+Evidência exigida pelo aceite do SUP-04 ("cada cenário de interrupção do Marco 003 tem teste e pelo menos um foi demonstrado ao vivo"). Registro append-only; **o SUP-04 continua não ratificado**.
+
+**Cenário:** `application_shutdown` — o processo da aplicação morre no meio da execução comandada, sem gravar sucesso nem falha.
+
+**Fluxo real atravessado:** rota `POST /api/work-orchestration/execute-commanded` com sessão autenticada real (cookie `@supabase/ssr` de `sup04-live@test.invalid`), `LocalRunnerAdapter` (`local-runner-v1`) invocando o runner de `G:/anima-local-agent-poc` (`python -m local_agent --produce-only --model qwen2.5-coder:7b`) sobre **cópia isolada** do piloto, com Ollama local. RPCs reais: `create_work_proposal`, `resolve_approval`, `start_commanded_work_attempt`, `reconcile_supervised_work`, `record_commanded_work_terminal`. Nenhuma linha foi inserida diretamente no banco para simular o executor; o SQL serviu apenas para observar.
+
+**Item da prova:** `41fe2069-eacf-404d-956e-dd9499e1dd64`, tentativa `41fe2069-0000-4000-8000-00000000b002`, `max_duration_minutes = 1` — o **menor limite que o contrato permite**, para tornar a prova prática sem alterar nenhum timestamp depois do início.
+
+**Cronologia observada (UTC):**
+
+| Horário | Fato persistido |
+|---|---|
+| 15:29:19 | `work_proposed`, `context_attached`, `work_approved` (seq 3478–3480) |
+| 15:29:34.44 | `work_started` + `execution_started` (seq 3481–3482); item em `in_progress`; runner real vivo (PIDs 24344 e 11424) |
+| ~15:29:54.8 | **servidor da aplicação derrubado**; a conexão HTTP da rota caiu sem resposta; nenhum terminal foi gravado |
+| 15:30:01 | item confirmado órfão: `in_progress`, **0** eventos terminais, **0** claims (caminho comandado não cria lease) |
+| **15:30:31** | **reconciliação executada 57 s depois da morte do executor: recusou concluir qualquer coisa** — `attempt_within_declared_bounds` / `none`, item permaneceu `in_progress` (faltavam 3 s do limite declarado) |
+| 15:30:49 | limite excedido; reconciliação produziu `attempt_abandoned` (seq 3483, autor `system`), item → `approved` |
+
+**A linha de 15:30:31 é a evidência central da prova.** O processo executor estava morto havia quase um minuto e a reconciliação ainda assim não afirmou nada, porque o limite declarado não tinha vencido. É a demonstração direta de que a decisão é governada pelo **limite persistido**, não pela ausência do executor.
+
+**Payload do abandono:** `reason: duration_limit_exceeded`, `origin: commanded`, `claim_id: null`, `lease_expires_at: null`, `max_duration_minutes: 1`, `attempt_started_at: 15:29:34.440604Z`, `observed_at: 15:30:49.369586Z`.
+
+**Idempotência:** segunda e terceira reconciliações, cada uma em transação própria, retornaram **0 linhas**. O item terminou com **6 eventos** no total e **exatamente um** `attempt_abandoned`. Nenhum claim foi criado ou liberado — não havia nenhum.
+
+**Terminal tardio:** a chamada real de `record_commanded_work_terminal` com os identificadores da tentativa abandonada e um sinal `result` bem-formado foi **recusada** com `attempt was abandoned by reconciliation` (`55000`). Depois da recusa: item ainda `approved`, ainda 6 eventos, **zero** eventos terminais indevidos. **Limitação declarada:** não foi reproduzido um executor zumbi real — os processos do runner morreram junto com a aplicação nesta configuração (observação registrada abaixo) —, então a guarda foi exercitada pela fronteira real com os identificadores da tentativa abandonada, como o checkpoint autorizou.
+
+**Nenhum efeito de resultado ou integração:** zero `result_accepted` e zero itens `completed` em todo o banco local; a workspace isolada terminou **byte a byte intacta** (`git status` vazio, `sum()` ainda retornando `a - b`) — nada foi aplicado, aceito, autorizado ou integrado.
+
+**Diferenças entre o esperado e o observado:**
+
+1. **Primeira tentativa falhou por setup, não por defeito do SUP-04.** O runner exige workspace em repositório git limpo; a cópia isolada não era repositório, o runner caiu com `EOFError` no prompt interativo de workspace suja e saiu com código 1. O adaptador converteu isso corretamente em `execution_failed`, e o item `1766ad82-29e4-4d0d-b1ee-d2859630acce` foi para `failed` — comportamento correto do INT-04, não órfão. A prova foi refeita com a workspace inicializada como repositório git (HEAD `6f32937`).
+2. **Os processos do runner não sobreviveram à queda da aplicação** nesta configuração: derrubado o servidor, os PIDs filhos desapareceram junto. Isso **reduz** a exposição prática ao risco de executor zumbi, mas **não o elimina** — é uma observação sobre este ambiente (encerramento em árvore no Windows), não uma garantia do contrato. O risco permanece registrado.
+3. Fora esses dois pontos, o comportamento observado coincidiu exatamente com o projetado.
+
+**Configuração local da prova** (não versionada, `apps/web/.env.local` é ignorado pelo git): `ANIMA_LOCAL_RUNNER_ROOT`, `ANIMA_LOCAL_RUNNER_MODEL=qwen2.5-coder:7b` e `ANIMA_LOCAL_TARGETS_JSON` apontando `sup04-live` para a cópia isolada no diretório temporário da sessão. As linhas ficaram marcadas com comentário; removê-las desabilita o executor local.
+
+**Validações após a prova:** 381 asserções pgTAP em 12 suítes (incluindo as 65 do SUP-04), 23 testes de domínio do espelho puro e `typecheck` limpo nos cinco workspaces. Nenhum arquivo de código foi alterado pela demonstração; a árvore permaneceu limpa em `f06f19d`.
+
+**Estado dos dados locais:** as fixtures das provas de corrida (SUP-03, SUP-05 e SUP-04) e da demonstração ao vivo foram **preservadas** como evidência auditável, seguindo o padrão já adotado. Verificado ao final: **zero claims ativos** e **zero itens em `in_progress`** em todo o banco local — nenhum alvo permanece ocupado. Todas as contas de prova usam o domínio `@test.invalid`.
 
 **Confirmações de segurança:** nenhuma execução foi disparada pela reconciliação; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum outro item da Fase E foi iniciado; `private.begin_work_attempt` não foi tocado e o SUP-05 permanece idêntico; nenhum merge, push, deploy ou `db reset`.
 
