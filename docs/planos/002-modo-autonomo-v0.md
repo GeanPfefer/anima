@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | AUTO-02, AUTO-04, AUTO-05, SUP-01, SUP-02 e SUP-03 concluídos; SUP-05 concluído em 2026-07-21 e aguardando revisão humana (altera contrato ratificado do INT-04); resta SUP-04 (reconciliação) |
+| E | **Em andamento** | AUTO-02, AUTO-04, AUTO-05, SUP-01, SUP-02 e SUP-03 concluídos; SUP-05 **ratificado (2026-07-21)** — ver "Ratificação do SUP-05" —, encerrando o bloqueio para execuções reais do Supervisor; resta SUP-04 (reconciliação), não iniciado |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -167,6 +167,32 @@ O resultado do INT-04 foi **tecnicamente aceito na revisão humana**. A ratifica
 **Riscos:** duplo processamento por claim mal desenhado; supervisor virando scheduler genérico antes da hora.
 
 **Fora do escopo:** paralelismo geral; múltiplos projetos simultâneos; priorização sofisticada.
+
+### Ratificação do SUP-05 (2026-07-21) — exclusividade de alvo simétrica
+
+A revisão humana **aprovou e ratificou** o SUP-05. Registro append-only, sem reescrever nenhuma evidência anterior. Foram aprovados nominalmente:
+
+- a correção em `private.begin_work_attempt` como **fronteira única** compartilhada pelos inícios comandado e autônomo — e não uma verificação acrescentada ao caminho comandado, que duplicaria a regra;
+- o uso de `pg_advisory_xact_lock` por `user_id + target_reference`;
+- a manutenção da mesma ordem de locks de `acquire_work_claim` (item antes do alvo), que impede ciclo;
+- o retorno de **replay antes** da verificação de exclusividade, preservando a idempotência do INT-04 e do AUTO-05;
+- as exclusões do próprio item e do claim pertencente à própria tentativa;
+- claims expirados **não bloquearem** e **não serem apropriados silenciosamente** pelo caminho comandado;
+- o **endurecimento para falha fechada** (`execution target missing`, `22023`) quando o alvo não puder ser derivado — única alteração assumida sobre o contrato ratificado do INT-04;
+- a garantia limitada por `user_id`, coerente com a V0 monousuário;
+- o lock permanecer apenas durante a **transação curta de início**, e não pela duração da execução;
+- as evidências pgTAP, a regressão completa e a corrida real entre duas sessões.
+
+**Evidências ratificadas:**
+
+- **Suíte específica** (`supabase/tests/commanded_target_exclusivity.test.sql`, commit `8310808`): 25 asserções cobrindo alvo livre, bloqueio por item `in_progress`, bloqueio por claim autônomo ativo, não-ocupação por estados encerrados ou em revisão, idempotência do replay sobre alvo ocupado por ele mesmo, e a inércia da recusa (claim alheio com `released_at`, `owner_instance_id` e `attempt_id` intactos; item comandado sem evento de execução).
+- **Regressão completa:** 316 asserções pgTAP em 11 suítes, zero falhas; `typecheck` limpo nos cinco workspaces; 365 testes Jest em `packages/core` e 7 em `packages/supabase`; build do `apps/web` concluído.
+- **Corrida real entre duas sessões**, com dois itens **diferentes** no **mesmo** alvo — a configuração em que locks de linha não serializam: a sessão concorrente permaneceu bloqueada por aproximadamente 3,97 segundos, até a conclusão da transação concorrente, e então foi recusada com `work target is held by an active claim` (`55000`).
+- **Contrafactual medido:** durante a mesma janela, a consulta otimista que uma verificação na aplicação faria leu `alvo_ocupado = false` e retornou em menos de 1 milissegundo. É a prova de que a janela de corrida é observável e de que o lock é necessário, não decorativo.
+
+**Correção documental desta ratificação:** o resumo em chat da prova concorrente trouxe a forma ambígua "3.968 ms"; a medição real é ~3,97 segundos (`Time: 3967.680 ms (00:03.968)`). A forma ambígua **nunca entrou no repositório** — a documentação e o commit `5aac4e4` já registravam "3,97 s" —, mas a redação foi uniformizada para a unidade inequívoca em todas as ocorrências.
+
+**Confirmações de segurança:** nenhum resultado produzido foi integrado ou aplicado; nenhum merge, push, deploy ou `db reset`. O SUP-04 (reconciliação após interrupção) **não foi iniciado**. Com o SUP-05 encerrado, cai o bloqueio que impedia o Supervisor de iniciar execuções reais.
 
 ## Fase F — Uso sustentável de inteligência
 
