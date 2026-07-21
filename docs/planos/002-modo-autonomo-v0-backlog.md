@@ -269,6 +269,18 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 > **Bloqueante — satisfeito em 2026-07-21:** devia ser fechado **antes** de o Supervisor passar a iniciar execuções reais. Com a ratificação do SUP-05 esse bloqueio cai. O registro permanece porque a condição era real e orientou a ordem da Fase E.
 
+### Laço operacional — costura sem item próprio
+
+**Estado (2026-07-21): implementado e comprovado ao vivo; pronto para revisão, não ratificado.**
+
+Não é um item novo do backlog e **não deve virar SUP-06**: é o objetivo da Fase E, nomeado no plano e no próprio SUP-04 como "o laço que escolhe e executa continua sendo SUP-02 + AUTO-02". O diagnóstico foi confirmado no código — nenhuma das RPCs da fase tinha chamador em código de aplicação, e o único caminho vivo era a execução comandada do INT-04.
+
+Ponto de entrada `POST /api/work-orchestration/supervisor-turn`, **uma volta por invocação**, sem daemon nem polling. Compõe as fronteiras ratificadas sem reimplementar nenhuma: reconciliar → selecionar → posse → início sob claim → executor real → terminal → liberação. Serialização inteiramente do banco, sem mutex em memória. Incerteza (executor que lança, transcrição inválida, terminal recusado) deixa a tentativa aberta para o SUP-04, sem inventar desfecho nem liberar posse.
+
+15 testes novos em `apps/web`; 381 asserções pgTAP inalteradas. Prova ao vivo com dois itens em FIFO (`approval_seq` 4316 e 4319), um por volta, sem sobreposição, ambos terminando em `review`; terceira volta em `no_eligible_work`. Prova concorrente real com as duas recusas tipadas observadas (215 ms e 321 ms), sempre exatamente um claim e uma tentativa por item.
+
+Detalhamento, limitações e confirmações de segurança em "Laço operacional do Supervisor V0" no [Plano 002](002-modo-autonomo-v0.md). **`WorkHandoffV1` continua sem persistência e o AUTO-05 não foi iniciado.**
+
 ## INTEL — Uso sustentável de inteligência
 
 ### INTEL-01 — Classificação de trabalho

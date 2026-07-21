@@ -482,6 +482,28 @@ Abandonar cria um estado que antes não existia: a tentativa deixou de ser a ocu
 
 `private.begin_work_attempt` **não foi tocado**: o contrato ratificado do SUP-05 permanece idêntico.
 
+## O laço operacional do Supervisor V0 (Fase E)
+
+Até aqui a Fase E entregou capacidades sem chamador: fila, seleção, posse, início supervisionado e reconciliação só eram alcançáveis por pgTAP. O único caminho operacional vivo era a execução comandada do INT-04. O laço é a costura que torna essas capacidades reais em código de aplicação — e **nada além disso**: ele não é um item novo do backlog, e sim o objetivo da própria fase.
+
+O ponto de entrada é `POST /api/work-orchestration/supervisor-turn`, e executa **uma volta por invocação**. Não há daemon, agendador nem polling: a periodicidade, se um dia existir, pertence a quem chama, e `requiresAnotherTurn` informa se vale insistir. A escolha por rota autenticada não é estética — toda RPC do ciclo resolve `auth.uid()` e consulta a allowlist, então um processo residente exigiria uma credencial de serviço nova, ampliando a superfície exatamente onde a V0 quer estreitá-la.
+
+A sequência é fixa: reconciliar, selecionar, ler o item, adquirir posse, iniciar sob claim, delegar ao executor, registrar o terminal, liberar a posse.
+
+A reconciliação vem **antes** da seleção porque religar sem reconciliar escolheria sobre um estado que a interrupção deixou mentindo. Ela não é reimplementada: o laço chama `reconcile_supervised_work()` e apenas relata o que ela produziu.
+
+A aplicação **não julga** elegibilidade, ordem, ocupação de alvo ou posse. Todas essas regras vivem no banco e já foram ratificadas; aqui existe composição e tradução de recusa. O predicado `evaluateAutonomousEligibility` é chamado uma única vez e apenas como **parser** do `execution_spec`, para montar a entrada delimitada do executor. Se ele recusar um item que a fila ofereceu, isso é divergência entre o espelho puro e o espelho SQL — defeito, não licença para executar às cegas: a volta sai fail-closed, sem tomar posse.
+
+Não há consulta prévia de disponibilidade antes do claim. Prever posse na aplicação é precisamente a janela de corrida que o SUP-05 mediu em menos de um milissegundo; a RPC é a fonte de verdade e a recusa dela é o resultado. A serialização é inteiramente do banco — lock do item, lock consultivo de alvo e índice único parcial — e **não existe mutex em memória**, que seria uma segunda fonte de verdade capaz de discordar da primeira.
+
+O lease do claim é derivado de `max_duration_minutes` mais folga. Um lease mais curto que a duração declarada faria a reconciliação recolher a posse de uma execução legitimamente viva.
+
+O terminal reusa `record_commanded_work_terminal`. A RPC valida por correlação do `execution_started` — que `private.begin_work_attempt` emite nos dois caminhos — e não por origem, então serve ao supervisionado sem alteração alguma. Criar uma RPC nova duplicaria a guarda do SUP-04 contra sinal tardio, e duplicar regra é como assimetrias nascem. O nome nasceu estreito; o contrato nunca foi.
+
+**Incerteza não vira conclusão.** Se o executor lança, ou se a transcrição viola o contrato do INT-01, ou se o banco recusa o terminal, o laço **não** inventa desfecho e **não** libera a posse: a tentativa fica aberta, exatamente como a órfã que o SUP-04 sabe reconciliar por limite persistido. Liberar ali afirmaria um encerramento que não existe no log.
+
+O desfecho máximo de uma volta é um item em `review`. Nenhum caminho do laço aceita, autoriza, integra ou aplica resultado — a fronteira do INT-03 permanece intacta.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

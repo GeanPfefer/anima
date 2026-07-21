@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | AUTO-02, AUTO-04, AUTO-05, SUP-01, SUP-02 e SUP-03 concluídos; SUP-05 **ratificado (2026-07-21)**; SUP-04 **ratificado e encerrado (2026-07-21)** — ver "Ratificação do SUP-04". SUP-01 a SUP-05 completos; resta o laço que escolhe e executa e a comprovação do AUTO-05 em retomada real, não iniciados |
+| E | **Em andamento** | SUP-01 a SUP-05 completos e ratificados. O **laço operacional** (SUP-02 + AUTO-02 compostos) está implementado e comprovado ao vivo em 2026-07-21, mas **não ratificado** — ver "Laço operacional do Supervisor V0". Resta a comprovação do AUTO-05 em retomada real, **não iniciada**, bloqueada pela persistência de `WorkHandoffV1`, que é tarefa separada com checkpoint humano |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -310,6 +310,73 @@ A revisão humana final **aprovou, ratificou e encerrou** o SUP-04. Registro app
 **O SUP-04 está ratificado e encerrado.** Suas decisões não devem ser reabertas sem evidência concreta de regressão ou incompatibilidade. Com isso, **SUP-01 a SUP-05 estão todos concluídos**; o que resta para fechar a Fase E é o laço que escolhe e executa (SUP-02 + AUTO-02 operando juntos) e a comprovação do AUTO-05 em retomada real — nenhum deles iniciado.
 
 **Confirmações de segurança desta ratificação:** nenhum código funcional foi alterado; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum próximo item da Fase E foi iniciado; nenhuma fixture foi removida; o SUP-05 permanece intocado; nenhum merge, push, deploy ou `db reset`.
+
+### Laço operacional do Supervisor V0 (2026-07-21) — pronto para revisão
+
+**Não ratificado.** Registro append-only do estado alcançado, para o checkpoint humano. Nenhuma seção anterior foi reescrita.
+
+**Diagnóstico confirmado no código.** As capacidades da Fase E existiam sem chamador: `autonomous_work_queue`, `next_autonomous_work`, `acquire_work_claim`, `start_claimed_work_attempt`, `release_work_claim` e `reconcile_supervised_work` não tinham **uma única chamada** em código de aplicação — apenas migrations, pgTAP e espelhos puros em `packages/core`. O único caminho operacional vivo era `POST /api/work-orchestration/execute-commanded` (INT-04), que usa o início comandado e não passa por posse. Não existia rota, worker, script ou processo capaz de executar o primeiro laço autônomo.
+
+**Ponto de entrada criado:** `POST /api/work-orchestration/supervisor-turn` — **uma volta por invocação**, sem daemon, agendador ou polling. Rota autenticada porque todas as RPCs do ciclo resolvem `auth.uid()` e consultam a allowlist; um processo residente exigiria credencial de serviço nova.
+
+**Sequência implementada:** `reconcile_supervised_work()` → `next_autonomous_work()` → leitura do item → parser do `execution_spec` → contextos → `acquire_work_claim` → `start_claimed_work_attempt` → `LocalRunnerAdapter` → `record_commanded_work_terminal` → `release_work_claim('attempt_finished')`.
+
+**Fronteiras reutilizadas, nenhuma reimplementada.** Elegibilidade, ordem FIFO, ocupação de alvo e exclusividade continuam no banco. `evaluateAutonomousEligibility` é chamado só como parser do spec; divergência entre ele e o espelho SQL sai fail-closed **sem tomar posse**. O terminal reusa a RPC ratificada do INT-04, que valida por correlação de `execution_started` — emitido pelos dois caminhos — e não por origem; uma RPC nova duplicaria a guarda do SUP-04 contra sinal tardio.
+
+**Serialização.** Exclusivamente do banco: lock do item, lock consultivo de alvo e índice único parcial. **Nenhum mutex em memória.** Não há consulta prévia de disponibilidade antes do claim — prever posse na aplicação é a janela que o SUP-05 mediu.
+
+**Incerteza não vira conclusão.** Executor que lança, transcrição fora do contrato do INT-01 ou terminal recusado deixam a tentativa **aberta**, sem desfecho inventado e **sem liberar a posse** — é a órfã que o SUP-04 reconcilia por limite persistido.
+
+**Testes (15 casos, `apps/web/lib/work-orchestration/supervisor.test.ts`):** o fake modela as invariantes ratificadas (posse única por item, alvo ocupado por claim ativo ou item em execução, replay idempotente, liberação idempotente por razão), de modo que os testes provam obediência às recusas e não coreografia de chamadas. Cobrem fila vazia sem efeito, reconciliação antes da seleção, cabeça FIFO, claim antes do início, uso de `start_claimed_work_attempt` e nunca do comandado, executor acionado exatamente uma vez, terminal registrado, posse liberada após o terminal, falha do executor virando terminal de falha, duas invocações concorrentes sem execução dupla, corrida perdida com recusa tipada, posse alheia intocada, exclusividade de alvo, item inelegível barrado antes da posse, replay sem duplicar efeito e ausência de aceite, autorização ou integração.
+
+**Validações no HEAD da entrega:** 381 asserções pgTAP em 12 suítes, zero falhas (inalteradas — SUP-04 e SUP-05 intocados); Jest 388 em `packages/core`, 51 em `apps/web` (36 anteriores + 15 novos), 12 em mobile, 7 em `packages/supabase`; `typecheck` limpo nos quatro workspaces; build do `apps/web` concluído com a rota registrada. **Não existe script de lint neste repositório** (registrado no `AGENTS.md`), então essa validação não foi executada.
+
+#### Prova ao vivo (2026-07-21) — dois itens, FIFO, executor real
+
+Rota real com sessão autenticada (`suploop-fifo@test.invalid`), `LocalRunnerAdapter` invocando o runner de `G:/anima-local-agent-poc` sobre **cópias isoladas** do piloto, cada item em seu alvo. Nenhuma linha foi inserida diretamente no banco para simular o executor; o SQL serviu apenas para observar.
+
+| Invocação | Selecionado | `approval_seq` | Desfecho | Terminal | Posse |
+|---|---|---|---|---|---|
+| 1ª | `7493f05f` (suploop-a) | 4316 | `execution_completed` | `result` | liberada |
+| 2ª | `49104e5b` (suploop-b) | 4319 | `execution_completed` | `result` | liberada |
+| 3ª | — | — | `no_eligible_work` | — | — |
+
+Log dos dois itens, **sem sobreposição**: `work_claimed` 4320 → `work_started` 4321 (`supervised_execution`) → `execution_started` 4322 → `result_submitted` 4323 → `work_claim_released` 4324 (`attempt_finished`); só então `work_claimed` 4325 do segundo item, e a mesma escada até 4329. A posse do segundo item é adquirida **estritamente depois** da liberação do primeiro: um por vez, na ordem definida.
+
+Handoffs persistidos: `local-runner:suploop-a:20260721T164718743084Z-result.zip:sha256:12445eee…` e `local-runner:suploop-b:20260721T164913520389Z-result.zip:sha256:f4e4eb2b…`. Ambos os itens terminaram em **`review`** — decisão humana pendente, nunca `completed`.
+
+#### Prova concorrente real
+
+Duas invocações disparadas **no mesmo tick**, cada uma uma requisição HTTP independente:
+
+- **Itens diferentes disponíveis:** cada volta selecionou um item distinto (`approval_seq` 4276 e 4279), com claims e tentativas distintos. Progresso paralelo em alvos distintos, sem colisão.
+- **Um único item disponível (duas repetições):** ambas as voltas selecionaram **o mesmo item** — a leitura da seleção não bloqueia, exatamente como o SUP-02 documenta — e a perdedora foi recusada **no claim**, com `claimId` e `attemptId` nulos, sem jamais acionar o executor. As duas recusas tipadas do contrato foram observadas ao vivo: `work item is held by an active claim` (**215 ms**, perdedora chegou depois da aquisição e antes do `in_progress`) e `work item is not eligible for an autonomous claim` (**321 ms** e **1,2 s**, perdedora chegou depois do início). Estado final: exatamente **um** claim, **um** `execution_started` e **um** terminal por item.
+
+#### Cancelamento cooperativo observado sem ser planejado
+
+Numa das voltas o cliente navegou durante a execução; o `AbortSignal` da requisição propagou ao adaptador, que emitiu `cancelled`, e o laço registrou `work_cancelled` e liberou a posse com `attempt_finished`. Comportamento correto do contrato, observado por acidente e registrado por honestidade.
+
+#### Achado sobre o executor, fora do escopo desta entrega
+
+As primeiras **onze** voltas terminaram em `execution_failed`. A investigação isolou a causa e ela **não está no laço**: `taskFor()` do `LocalRunnerAdapter` (INT-04) costura `Fora do escopo: <lista>` no prompt do modelo, e citar ali um **arquivo real** faz o modelo planejar editá-lo. Reproduzido fora da rota: com o texto exato que o adaptador monta, o runner falhou pela CLI (`model_execution_iteration_limit`, plano incluindo "Atualizar test_calculator.py"); com o objetivo isolado, a mesma CLI produziu `result_produced` de primeira. Removendo nomes de arquivo reais do escopo excluído do **item** — dado, não código — a primeira volta seguinte foi verde.
+
+Isso é uma propriedade do adaptador ratificado no INT-04, não uma regressão; **não foi alterado aqui**, porque mexer nele muda contrato ratificado sem evidência de regressão. Fica registrado como candidato a item próprio.
+
+Modelo do runner trocado de `qwen2.5-coder:7b` para `qwen2.5-coder:14b` em `apps/web/.env.local` após quatro falhas seguidas em `invalid_structured_response`. Mesmo runner, mesmos gates, apenas modelo mais estável. É configuração local não versionada; a linha do SUP-04 foi preservada e os alvos anteriores continuam declarados.
+
+#### Confirmações de segurança
+
+Zero `result_accepted` e zero itens `completed` em todo o banco local. Todos os **15 claims** criados pelo laço, em 8 contas de prova, foram liberados: **zero claims ativos** do laço e **zero itens `in_progress`**. Os três claims ativos remanescentes no banco são fixtures de 2026-07-20 das provas do SUP-03 e do AUTO-02, preservadas como evidência auditável e **não tocadas**. As quatro workspaces isoladas terminaram **byte a byte intactas** (`git status` vazio, `sum()` ainda retornando `a - b`): nada foi aplicado, aceito, autorizado ou integrado. Nenhum merge, push, deploy ou `db reset`. `private.begin_work_attempt` não foi tocado; SUP-04 e SUP-05 permanecem idênticos.
+
+#### Limitações declaradas
+
+- **A persistência de `WorkHandoffV1` não foi implementada.** O banco continua guardando apenas `handoff_reference`, uma string opaca. É tarefa separada e exige checkpoint humano por alterar contrato persistido e vocabulário de eventos.
+- **O AUTO-05 não foi iniciado nem comprovado.** Sem checkpoint estruturado persistido não há de onde `planWorkResumption` eleger retomada; o abandono do SUP-04 não produz handoff algum.
+- **Não há execução contínua.** Uma volta por invocação; quem chama decide a periodicidade.
+- **A `maxDuration` da rota é 1800 s** e uma volta longa ocupa a conexão HTTP inteira. Cliente que desiste no meio produz cancelamento cooperativo, como observado.
+- O laço herda a estabilidade do executor local: enquanto o modelo falhar seu próprio gate factual, a volta termina corretamente em `execution_failed`, que é comportamento, não defeito.
+
+**A Fase E não está encerrada.** O critério "com N itens elegíveis, o supervisor executa um por vez na ordem definida" está comprovado; a retomada real do AUTO-05 continua pendente.
 
 ## Fase F — Uso sustentável de inteligência
 
