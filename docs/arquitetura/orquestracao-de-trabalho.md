@@ -374,6 +374,30 @@ Produzir handoff **não autoriza nada**. Ele não muda estado de item, de claim 
 
 O AUTO-04 é conceito antes de schema, como INT-01–03: não há migration. A persistência do handoff estruturado acompanha a evolução dos eventos de término da tentativa.
 
+## Pausa e retomada (AUTO-05, Fase B/E)
+
+Retomar é eleger o último checkpoint válido somado às evidências persistidas e continuar dali com **novo claim e nova tentativa**. Nunca é confiar no contexto conversacional anterior de um executor: tudo o que atravessa a interrupção precisa ter sido escrito antes dela, no handoff do AUTO-04.
+
+Os sete cenários do Marco 003 formam lista fechada — `provider_limit_reached`, `application_shutdown`, `machine_restart`, `container_runtime_unavailable`, `network_failure`, `model_failure`, `executor_change`. Não existe "outro", como na política do AUTO-06. Todos compartilham o **mesmo mecanismo**: a distinção entre eles é de diagnóstico e auditoria, não de caminho. Não há cenário privilegiado que dispense checkpoint ou reaproveite posse.
+
+`planWorkResumption` é puro e fail-closed. Ele recusa quando:
+
+- não há checkpoint persistido — retomar seria reconstruir por suposição, então o caso exige reparação ou decisão humana;
+- o checkpoint pertence a outro item, ou a uma versão de proposta que não é a vigente — retomar ali mudaria o escopo aprovado;
+- o checkpoint aponta tentativa ausente do histórico;
+- o `attemptId` ou o `claimId` propostos repetem os anteriores — a retomada exige identidades novas, coerente com a regra do AUTO-02 de que claim expirado não é renovado e sim substituído;
+- ainda existe claim ativo, o que duplicaria execução;
+- o item está em `in_progress`, que precisa de reconciliação (SUP-04) antes de qualquer retomada;
+- o item deixou de ser elegível.
+
+Checkpoints humanos permanecem soberanos: `review`, `changes_requested` e `blocked` **não** são retomados automaticamente. `blocked` em especial aguarda informação, autoridade ou dependência externa pela régua ratificada do AUTO-01; resolver o bloqueio devolve o item a `approved`, e só então a retomada segue.
+
+Limite de tentativas esgotado não vira loop: a decisão sai como `requires_human` com a razão tipada `persistent_inability_after_limits` e o limite atingido (`attempts`), reaproveitando exatamente o vocabulário do AUTO-06.
+
+O contexto carregado para a nova tentativa é extraído **estritamente** do handoff: o que resta, o próximo passo, os riscos, os recursos tocados e as falhas anteriores. Falhas atravessam a interrupção — a retomada não recomeça limpa fingindo que nada deu errado. Planejar retomada é puro: não adquire posse, não inicia tentativa, não altera o checkpoint e não carrega autorização de aplicação ou integração.
+
+A retomada automática, sem alguém pedindo, pertence ao SUP-04.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

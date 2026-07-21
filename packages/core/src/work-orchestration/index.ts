@@ -17,3 +17,4 @@ export * from './work-claim';
 export * from './autonomous-queue';
 export * from './autonomous-selection';
 export * from './work-handoff';
+export * from './work-resumption';

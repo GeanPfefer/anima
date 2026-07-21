@@ -129,6 +129,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### AUTO-05 — Pausa e retomada
 
+**Estado (2026-07-20):** concluído como regras puras de domínio. Os sete cenários do Marco 003 formam lista fechada e compartilham o mesmo mecanismo — a distinção é de diagnóstico, não de caminho; nenhum dispensa checkpoint ou reaproveita posse. `planWorkResumption` retoma do handoff do AUTO-04 com **novo claim e nova tentativa**, carregando estritamente o que foi persistido (restante, próximo passo, riscos, recursos, falhas anteriores) — nunca contexto conversacional. Recusa fail-closed sem checkpoint, com correlação ou versão divergente, com identificador reaproveitado, com claim ainda ativo, com item `in_progress` (exige reconciliação do SUP-04) ou inelegível. Checkpoints humanos continuam soberanos: `review`, `changes_requested` e `blocked` não retomam sozinhos. Limite de tentativas esgotado sai como `requires_human` com `persistent_inability_after_limits` e limite `attempts`, reusando o vocabulário do AUTO-06 em vez de criar outro. 47 testes de domínio, com cobertura por cenário. A demonstração ao vivo de um cenário pertence à Fase E via SUP-04.
+
 - **Problema:** o sistema não sobrevive a limite de provedor, reinício de máquina, Docker/Ollama fora ou troca de executor sem intervenção manual de reconstrução.
 - **Resultado esperado:** retomar = eleger o último checkpoint válido + evidências persistidas e continuar dali, com novo claim e nova tentativa; nunca depender do contexto conversacional anterior do executor.
 - **Dependências:** AUTO-02, AUTO-03, AUTO-04. **Escopo:** regras de retomada + cenários de interrupção nomeados no Marco 003. **Fora do escopo:** retomada automática sem supervisor (vira SUP-04).
