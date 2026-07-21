@@ -422,6 +422,66 @@ O contexto carregado para a nova tentativa é extraído **estritamente** do hand
 
 A retomada automática, sem alguém pedindo, pertence ao SUP-04.
 
+## Reconciliação após interrupção (SUP-04, Fase E)
+
+### Diagnóstico confirmado no código
+
+Nenhum caminho tirava um item de `in_progress` sem um sinal do executor. `private.begin_work_attempt` vira o item; o desfecho chega por `record_commanded_work_terminal` ou `finish_work_execution`. A rota `execute-commanded` fica até 1800 segundos entre os dois, executando o runner. Se o processo morrer nessa janela — máquina reiniciada, Docker fora, limite de provedor, rede caída —, o item permanece em `in_progress` **para sempre**: ocupa o alvo permanentemente pelo SUP-05, sai da fila do SUP-01 (que exige `approved`) e `planWorkResumption` recusa com `work_not_resumable` apontando explicitamente para cá. O AUTO-05 era, até aqui, estruturalmente inalcançável — o SUP-04 é o elo que faltava.
+
+O que sobrevive a uma queda é exatamente `work_items.state`, o log append-only `work_events` e as linhas de `work_claims`. O executor, seu progresso e sua vitalidade são memória de processo e não sobrevivem a nada. **Não existe heartbeat**: o lease é o único contrato de posse persistido.
+
+### O que a reconciliação sabe perguntar
+
+Ausência de processo, executor ou heartbeat **não prova sucesso nem fracasso**. A pergunta que a reconciliação consegue responder não é "a execução terminou?" — essa ela não pode responder — e sim **"esta tentativa excedeu um limite que alguém declarou e o banco guardou?"**. Duas fontes de limite existem no contrato atual, e nenhuma é relógio solto:
+
+| Caminho | Limite persistido | Origem |
+|---|---|---|
+| tentativa sob claim | `work_claims.expires_at` | AUTO-02 — o contrato de posse que `acquire_work_claim` já recolhe com razão `expired` |
+| tentativa comandada | `execution_spec.limits.max_duration_minutes` | AUTO-01 — declarado na proposta **aprovada**, já validado por `private.is_valid_execution_limits`, medido a partir do `execution_started` persistido |
+
+Sem nenhum limite declarado não há fato: a reconciliação relata `attempt_without_declared_bound` como `requires_human` e **não muda nada**. Com limites declarados, exige-se que **todos** os aplicáveis estejam excedidos — lease vencido com a duração ainda dentro do declarado não abandona, porque a execução pode legitimamente seguir viva. A posse vencida ainda assim é recolhida: recolher é seguro, abandonar não.
+
+`attempt_abandoned` afirma estritamente que a tentativa excedeu seu limite declarado e deixou de ser a ocupante do item. É afirmação **mais fraca** que `result_submitted` ou `execution_failed`, e é essa fraqueza que a torna segura de emitir sem evidência do executor.
+
+### Decisões possíveis
+
+| Fato persistido | Ação | Vocabulário |
+|---|---|---|
+| desfecho já gravado, item ainda `in_progress` | aplica a transição da matriz normativa, **sem** emitir evento novo | `terminal_not_materialized` → `state_materialized` |
+| posse aberta cuja tentativa já tem desfecho | libera com `attempt_finished` | `claim_open_after_terminal` → `claim_released` |
+| posse aberta com lease vencido | libera com `expired`, linha preservada | `claim_expired` → `claim_released` |
+| posse ainda válida | nada | `claim_active` → `none` |
+| tentativa com algum limite ainda dentro | nada | `attempt_within_declared_bounds` → `none` |
+| tentativa com todos os limites excedidos | evento `attempt_abandoned`, item → `approved` | `attempt_abandoned` |
+| tentativa sem limite algum declarado | nada | `attempt_without_declared_bound` → `requires_human` |
+| item `in_progress` sem tentativa correlacionada | nada | `attempt_missing` → `requires_human` |
+
+Materializar estado derivado **não emite evento**: ele já existe, e duplicá-lo inventaria um segundo fato.
+
+### Ações explicitamente proibidas
+
+A reconciliação nunca conclui sucesso ou fracasso a partir do desaparecimento do executor; nunca toma, renova ou libera claim ainda ativo; nunca apaga linha, evento ou evidência; nunca aceita resultado, autoriza integração ou aplica coisa alguma; e **nunca inicia execução**. Devolver o item a `approved` restaura *elegibilidade* — escolher e iniciar continuam sendo SUP-02 e AUTO-02, e o `planWorkResumption` do AUTO-05 continua fail-closed sem checkpoint. São duas decisões distintas e ambas precisam passar.
+
+### Alternativas rejeitadas
+
+- **marcar a órfã como `failed`** — afirma um desfecho que ninguém observou;
+- **mandar a órfã para `blocked`** — beco sem saída real: nenhuma RPC emite `work_blocked` e `begin_work_attempt` exige `approved`, de modo que a linha `blocked → work_started` da matriz é inexecutável. Trocaria um item travado por outro;
+- **deixar em `in_progress` e apenas relatar** — o alvo fica ocupado para sempre e nada é restaurado, que é o defeito de origem;
+- **dar lease ao caminho comandado** — alteraria o contrato ratificado do INT-04 sem regressão demonstrada; o limite da proposta aprovada já é contrato persistido suficiente;
+- **reconciliar e já iniciar a próxima tentativa** — o backlog separa reconciliar de executar.
+
+### Fronteira transacional e concorrência
+
+Uma transação por chamada de `public.reconcile_supervised_work()`. Um `pg_advisory_xact_lock` por **usuário** no início serializa duas reconciliações inteiras; depois dele, `FOR UPDATE` por item, na ordem do id. A reconciliação **nunca** adquire lock de alvo — `acquire_work_claim` e `begin_work_attempt` pegam item→alvo, ela pega usuário→item e nunca pede o alvo, então não existe ciclo possível entre elas.
+
+**Corrida real medida entre três sessões**, com um item cujo lease vencera: a sessão A reconciliou (posse recolhida + tentativa abandonada, item → `approved`) e segurou a transação; a sessão B, iniciada 1 segundo depois, **permaneceu bloqueada por 4,02 segundos** e, ao destravar, retornou **zero linhas** — nada restava a reconciliar. O estado final commitado tem exatamente **um** `attempt_abandoned` e **um** `work_claim_released`. **Contrafactual medido:** durante a mesma janela, a sessão C executou a consulta otimista que uma verificação na aplicação faria e leu `in_progress` com `lease_vencido = true` em 0,5 milissegundo — ou seja, decidiria abandonar uma segunda vez. A janela de corrida é observável, não hipotética, e o lock é necessário.
+
+### Consequência assumida sobre o INT-04
+
+Abandonar cria um estado que antes não existia: a tentativa deixou de ser a ocupante, mas seu executor pode continuar vivo e entregar depois. `record_commanded_work_terminal` ganhou uma guarda que recusa sinal de tentativa abandonada com `attempt was abandoned by reconciliation` (`55000`). A guarda entra **depois** da verificação de replay idempotente, para que a reentrega de um terminal legitimamente registrado continue idempotente. Fora ela, o corpo permanece byte a byte o da migration do INT-04. `classifyPersistedAttempt` ganhou o status `abandoned` e a rota `execute-commanded` recusa com `409` antes de gastar uma execução inteira que seria rejeitada no fim.
+
+`private.begin_work_attempt` **não foi tocado**: o contrato ratificado do SUP-05 permanece idêntico.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

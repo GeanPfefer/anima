@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | AUTO-02, AUTO-04, AUTO-05, SUP-01, SUP-02 e SUP-03 concluídos; SUP-05 **ratificado (2026-07-21)** — ver "Ratificação do SUP-05" —, encerrando o bloqueio para execuções reais do Supervisor; resta SUP-04 (reconciliação), não iniciado |
+| E | **Em andamento** | AUTO-02, AUTO-04, AUTO-05, SUP-01, SUP-02 e SUP-03 concluídos; SUP-05 **ratificado (2026-07-21)**; SUP-04 (reconciliação) **implementado e pronto para revisão humana, ainda não ratificado** — ver "SUP-04 pronto para revisão" |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -193,6 +193,42 @@ A revisão humana **aprovou e ratificou** o SUP-05. Registro append-only, sem re
 **Correção documental desta ratificação:** o resumo em chat da prova concorrente trouxe a forma ambígua "3.968 ms"; a medição real é ~3,97 segundos (`Time: 3967.680 ms (00:03.968)`). A forma ambígua **nunca entrou no repositório** — a documentação e o commit `5aac4e4` já registravam "3,97 s" —, mas a redação foi uniformizada para a unidade inequívoca em todas as ocorrências.
 
 **Confirmações de segurança:** nenhum resultado produzido foi integrado ou aplicado; nenhum merge, push, deploy ou `db reset`. O SUP-04 (reconciliação após interrupção) **não foi iniciado**. Com o SUP-05 encerrado, cai o bloqueio que impedia o Supervisor de iniciar execuções reais.
+
+### SUP-04 pronto para revisão (2026-07-21) — reconciliação após interrupção
+
+**Ainda não ratificado.** Registro append-only do estado alcançado, para o checkpoint humano.
+
+**Diagnóstico confirmado:** nenhum caminho tirava um item de `in_progress` sem sinal do executor. A rota `execute-commanded` fica até 1800 s entre `start_commanded_work_attempt` e `record_commanded_work_terminal`; morto o processo nessa janela, o item ficava travado **para sempre**, ocupando o alvo pelo SUP-05 e saindo da fila do SUP-01. O AUTO-05 era estruturalmente inalcançável: `planWorkResumption` já recusava `in_progress` apontando para o SUP-04.
+
+**Decisão central submetida à revisão:** a reconciliação não pergunta se a execução terminou — não pode saber. Pergunta se a tentativa **excedeu um limite declarado e persistido**: o lease de `work_claims` (AUTO-02) para a tentativa sob claim, e `execution_spec.limits.max_duration_minutes` da proposta **aprovada** (AUTO-01) para a comandada. Exige **todos** os limites aplicáveis excedidos. Sem limite algum declarado, sai como `requires_human` e não muda nada. `attempt_abandoned` afirma estritamente que a tentativa excedeu seu limite e deixou de ser a ocupante — mais fraco que concluir ou falhar.
+
+**Decisões que pedem aprovação nominal:**
+
+- a escolha de `approved` como destino do abandono, e a rejeição explícita de `failed` (afirma o não observado) e de `blocked` (beco sem saída: nenhuma RPC emite `work_blocked` e `begin_work_attempt` exige `approved`);
+- o uso de `max_duration_minutes` da proposta aprovada como contrato persistido do caminho comandado, em vez de criar lease novo — que alteraria o INT-04;
+- a exigência conjunta de todos os limites, em vez de qualquer um;
+- materializar desfecho já persistido **sem** emitir evento novo;
+- o recolhimento do lease vencido mesmo quando a tentativa continua protegida pelo limite de duração;
+- o `pg_advisory_xact_lock` por usuário e a decisão de **não** adquirir lock de alvo, o que impede ciclo com `acquire_work_claim`;
+- a guarda nova em `record_commanded_work_terminal` contra sinal tardio de tentativa abandonada, posicionada depois do replay idempotente;
+- o status `abandoned` em `classifyPersistedAttempt` e a recusa `409` na rota.
+
+**Evidências:**
+
+- **Suíte específica** (`supabase/tests/supervisor_reconciliation.test.sql`): 65 asserções cobrindo reconciliação vazia inerte, posse válida intocada, lease vencido recolhido com razão declarada e linha preservada, órfã supervisionada e órfã comandada, o caso em que um único limite excedido **não** basta, ausência total de limite saindo como `requires_human`, desfecho já persistido materializado sem duplicar evento, posse liberada por fato com lease ainda ativo, idempotência em segunda e terceira passadas, recusa do sinal tardio, replay do INT-04 intacto e exclusividade do SUP-05 preservada.
+- **Regressão completa:** 381 asserções pgTAP em 12 suítes, zero falhas; `typecheck` limpo nos cinco workspaces; 388 testes Jest em `packages/core` e 7 em `packages/supabase`; build do `apps/web` concluído.
+- **Corrida real entre três sessões:** A reconciliou e segurou a transação; B, iniciada 1 s depois, **bloqueou 4,02 s** e retornou **zero linhas**; o estado final commitado tem exatamente um `attempt_abandoned` e um `work_claim_released`.
+- **Contrafactual medido:** na mesma janela, a consulta otimista que uma verificação na aplicação faria leu `in_progress` com `lease_vencido = true` — "abandonaria = true" — em 0,5 ms. A janela de corrida é observável, não hipotética.
+
+**Riscos e limitações declarados:**
+
+- **Executor zumbi.** O banco não mata processos. Um executor que ignore seu próprio limite declarado pode continuar mexendo no alvo depois do abandono. Mitigações reais: o abandono só ocorre depois do limite que o próprio contrato declarou; a exclusividade do SUP-05 continua valendo no início da tentativa seguinte; e o sinal tardio é recusado. Fechar isso por completo exigiria cancelamento cooperativo do runner — fora do escopo do SUP-04.
+- **Tentativa comandada sem `max_duration_minutes` permanece travada** em `in_progress` até decisão humana. É deliberado: sem limite declarado não há fato. Um caminho humano explícito de abandono seria o próximo passo natural, e não foi criado aqui para não ampliar escopo.
+- **Bundle da tentativa abandonada não é aceito nem descartado.** Ele permanece no nó local, referenciado pelo evento de abandono; nenhuma via automática o promove a resultado.
+- **A demonstração ao vivo** de um cenário do Marco 003 com executor real, exigida pelo aceite do SUP-04, **ainda não foi feita**.
+- A garantia é limitada por `user_id`, coerente com a V0 monousuário.
+
+**Confirmações de segurança:** nenhuma execução foi disparada pela reconciliação; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum outro item da Fase E foi iniciado; `private.begin_work_attempt` não foi tocado e o SUP-05 permanece idêntico; nenhum merge, push, deploy ou `db reset`.
 
 ## Fase F — Uso sustentável de inteligência
 
