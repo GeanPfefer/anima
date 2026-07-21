@@ -1,28 +1,14 @@
-import { isAbsolute } from 'node:path';
-import { evaluateAutonomousEligibility, validateWorkExecutorTranscript, type WorkExecutorSignal } from '@anima/core';
-import type { Json } from '@anima/types';
+import { evaluateAutonomousEligibility } from '@anima/core';
 import { createClient } from '@/lib/supabase/server';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
-import { classifyPersistedAttempt, LocalRunnerAdapter } from '@/lib/work-orchestration/local-runner';
+import { classifyPersistedAttempt } from '@/lib/work-orchestration/local-runner';
+import { buildExecutorRequest, localRunnerFromEnvironment, recordExecutionTerminal, runExecutorOnce } from '@/lib/work-orchestration/execution';
 
 export const runtime = 'nodejs';
 export const maxDuration = 1800;
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const object = (value: unknown): Record<string, unknown> | null => typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
-
-const targetsFromEnvironment = (): Readonly<Record<string, string>> | null => {
-  try {
-    const parsed = object(JSON.parse(process.env.ANIMA_LOCAL_TARGETS_JSON ?? 'null') as unknown);
-    if (!parsed) return null;
-    const targets: Record<string, string> = {};
-    for (const [reference, path] of Object.entries(parsed)) {
-      if (!reference.trim() || typeof path !== 'string' || !isAbsolute(path)) return null;
-      targets[reference] = path;
-    }
-    return targets;
-  } catch { return null; }
-};
 
 export async function POST(request: Request) {
   const client = await createClient();
@@ -36,9 +22,8 @@ export async function POST(request: Request) {
       || !Number.isInteger(expectedProposalVersion) || (expectedProposalVersion as number) < 1) {
     return Response.json({ ok: false, error: { code: 'invalid_input', message: 'Comando de execução inválido.' } }, { status: 400 });
   }
-  const runnerRoot = process.env.ANIMA_LOCAL_RUNNER_ROOT;
-  const targets = targetsFromEnvironment();
-  if (!runnerRoot || !isAbsolute(runnerRoot) || !targets) {
+  const adapter = localRunnerFromEnvironment();
+  if (!adapter) {
     return Response.json({ ok: false, error: { code: 'local_runner_not_configured', message: 'Executor local não configurado.' } }, { status: 503 });
   }
   const service = createWorkOrchestrationService(client);
@@ -60,28 +45,18 @@ export async function POST(request: Request) {
   const contexts = await service.listContexts(workItemId);
   if (!contexts.ok) return Response.json(contexts, { status: 500 });
   const latestContext = contexts.value.at(-1);
-  const adapter = new LocalRunnerAdapter({
-    runnerRoot, model: process.env.ANIMA_LOCAL_RUNNER_MODEL,
-    targets: { resolve: reference => targets[reference] ?? null },
-  });
   const { error: startError } = await client.rpc('start_commanded_work_attempt', {
     work_item_id: workItemId, expected_proposal_version: expectedProposalVersion as number, attempt_id: attemptId, executor_id: adapter.id,
   });
   if (startError) return Response.json({ ok: false, error: { code: 'attempt_start_failed', message: startError.message } }, { status: 409 });
-  const requestPayload = {
-    attemptId, workItemId, approvedProposalVersion: expectedProposalVersion as number, capability: current.value.capability,
-    objective: current.value.proposal.data.objective, includedScope: current.value.proposal.data.includedScope,
-    excludedScope: current.value.proposal.data.excludedScope, target: eligibility.spec.target,
-    permissions: eligibility.spec.permissions, validationCriteria: eligibility.spec.validationCriteria, limits: eligibility.spec.limits,
-    contextReferences: latestContext?.references ?? [],
-  };
-  const signals: WorkExecutorSignal[] = [];
-  for await (const signal of adapter.execute(requestPayload, request.signal)) signals.push(signal);
-  const transcriptDefect = validateWorkExecutorTranscript(signals);
-  if (transcriptDefect) return Response.json({ ok: false, error: { code: 'executor_contract_violation', message: transcriptDefect } }, { status: 502 });
-  const terminal = signals.at(-1)!;
-  const { error: terminalError } = await client.rpc('record_commanded_work_terminal', {
-    work_item_id: workItemId, expected_proposal_version: expectedProposalVersion as number, attempt_id: attemptId, signal: terminal as unknown as Json,
+  const requestPayload = buildExecutorRequest({
+    item: current.value, spec: eligibility.spec, attemptId, contextReferences: latestContext?.references ?? [],
+  });
+  const run = await runExecutorOnce(adapter, requestPayload, request.signal);
+  if (!run.ok) return Response.json({ ok: false, error: { code: 'executor_contract_violation', message: run.defect } }, { status: 502 });
+  const terminal = run.terminal;
+  const { error: terminalError } = await recordExecutionTerminal(client, {
+    workItemId, expectedProposalVersion: expectedProposalVersion as number, attemptId, terminal,
   });
   if (terminalError) return Response.json({ ok: false, error: { code: 'attempt_terminal_failed', message: terminalError.message } }, { status: 500 });
   const updated = await service.getItem(workItemId);
