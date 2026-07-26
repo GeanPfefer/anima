@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | SUP-01 a SUP-05 completos e ratificados. O **laço operacional** (SUP-02 + AUTO-02 compostos) está implementado e comprovado ao vivo em 2026-07-21, mas **não ratificado** — ver "Laço operacional do Supervisor V0". Resta a comprovação do AUTO-05 em retomada real, **não iniciada**, bloqueada pela persistência de `WorkHandoffV1`, que é tarefa separada com checkpoint humano |
+| E | **Em andamento** | SUP-01 a SUP-05 completos e ratificados. O **laço operacional** (SUP-02 + AUTO-02 compostos) foi implementado, comprovado ao vivo e **ratificado (2026-07-26)** — ver "Ratificação do laço operacional". Resta a comprovação do AUTO-05 em retomada real, **não iniciada**, bloqueada pela persistência de `WorkHandoffV1`, que é tarefa separada com checkpoint humano |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -377,6 +377,28 @@ Zero `result_accepted` e zero itens `completed` em todo o banco local. Todos os 
 - O laço herda a estabilidade do executor local: enquanto o modelo falhar seu próprio gate factual, a volta termina corretamente em `execution_failed`, que é comportamento, não defeito.
 
 **A Fase E não está encerrada.** O critério "com N itens elegíveis, o supervisor executa um por vez na ordem definida" está comprovado; a retomada real do AUTO-05 continua pendente.
+
+### Ratificação do laço operacional (2026-07-26) — mecanismo de execução da V0
+
+A revisão humana **aprovou, ratificou e encerrou** o laço operacional. Registro append-only: nenhuma seção anterior foi reescrita; a seção acima permanece como o percurso que levou até aqui.
+
+**Provas frescas na ratificação (2026-07-26, HEAD `a36d7cf`):** o espelho puro do SUP-04 (`packages/core`, `work-reconciliation`) passou 23/23; o laço (`apps/web/lib/work-orchestration/supervisor.test.ts`) passou 15/15; `typecheck` limpo nos cinco workspaces (mobile, web, core, supabase, types). A suíte pgTAP (381 asserções, 12 suítes) **não foi reexecutada**: o laço não tocou migration alguma e SUP-04/SUP-05 permanecem byte a byte, de modo que reexecutar suíte ratificada não altera o veredito.
+
+**Decisões arquiteturais ratificadas nominalmente:**
+
+- **uma volta por invocação** via rota autenticada, sem daemon, agendador ou polling — a periodicidade pertence a quem chama, e `requiresAnotherTurn` diz se vale insistir;
+- **reconciliar (SUP-04) antes de selecionar**, para nunca decidir sobre um estado que a interrupção deixou mentindo;
+- **serialização inteiramente do banco** (lock do item, lock consultivo de alvo, índice único parcial), **sem mutex em memória** e **sem consulta prévia de disponibilidade** antes do claim — prever posse na aplicação é a janela que o SUP-05 mediu;
+- **`evaluateAutonomousEligibility` apenas como parser** do `execution_spec`, com divergência em relação ao espelho SQL saindo **fail-closed sem tomar posse**;
+- **terminal reusando `record_commanded_work_terminal`**, validado por correlação de `execution_started` (emitido pelos dois caminhos) e não por origem, evitando duplicar a guarda do SUP-04 contra sinal tardio;
+- **incerteza não vira conclusão** — executor que lança, transcrição fora do contrato do INT-01 ou terminal recusado deixam a tentativa **aberta e a posse retida** para o SUP-04, sem inventar desfecho;
+- **desfecho máximo de uma volta em `review`** — nenhum caminho aceita, autoriza, integra ou aplica resultado (fronteira do INT-03 intacta).
+
+**Riscos e limitações que sobrevivem à ratificação** (registrados, não resolvidos): `WorkHandoffV1` permanece **sem persistência** e o **AUTO-05 em retomada real continua não iniciado**, bloqueado por isso; não há execução contínua, e a `maxDuration = 1800 s` ocupa a conexão HTTP inteira, com cancelamento cooperativo quando o cliente desiste no meio; o achado do `taskFor()` do `LocalRunnerAdapter` — que costura arquivos reais do escopo excluído no prompt e induz o modelo a editá-los — é propriedade do INT-04, **candidato a item próprio**, e não foi alterado aqui; o modelo local em `apps/web/.env.local` foi trocado para `qwen2.5-coder:14b`, configuração local não versionada.
+
+**Confirmações de segurança desta ratificação:** nenhum código funcional foi alterado; nenhuma migration foi tocada; `private.begin_work_attempt`, SUP-04 e SUP-05 permanecem idênticos; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum merge, push, deploy ou `db reset`.
+
+**Consequência para a Fase E:** o laço está ratificado como o **mecanismo de execução da V0**. Ele é seguro contra órfãs por composição com o SUP-04, mas **não retoma** trabalho pausado enquanto o handoff estruturado não for persistido. A Fase E **permanece aberta** por uma única pendência nomeada — a retomada real do AUTO-05, bloqueada pela persistência de `WorkHandoffV1` (tarefa separada, com checkpoint humano).
 
 ## Fase F — Uso sustentável de inteligência
 

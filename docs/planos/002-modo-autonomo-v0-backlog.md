@@ -271,7 +271,7 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### Laço operacional — costura sem item próprio
 
-**Estado (2026-07-21): implementado e comprovado ao vivo; pronto para revisão, não ratificado.**
+**Estado (2026-07-26): implementado, comprovado ao vivo e ratificado.** A revisão humana aprovou nominalmente as sete decisões arquiteturais em 2026-07-26; ver "Ratificação do laço operacional" no [Plano 002](002-modo-autonomo-v0.md). Provas frescas na ratificação: espelho do SUP-04 23/23, laço 15/15, `typecheck` limpo nos cinco workspaces. Riscos que sobrevivem: `WorkHandoffV1` sem persistência e AUTO-05 em retomada real não iniciado.
 
 Não é um item novo do backlog e **não deve virar SUP-06**: é o objetivo da Fase E, nomeado no plano e no próprio SUP-04 como "o laço que escolhe e executa continua sendo SUP-02 + AUTO-02". O diagnóstico foi confirmado no código — nenhuma das RPCs da fase tinha chamador em código de aplicação, e o único caminho vivo era a execução comandada do INT-04.
 
