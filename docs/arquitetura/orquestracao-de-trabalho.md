@@ -231,12 +231,15 @@ O adaptador devolve um fluxo assíncrono de sinais, todos com a mesma correlaç�
 | Sinal | Papel | Terminal |
 |---|---|---|
 | `progress` | progresso conhecido, sem log bruto | não |
+| `checkpoint` | snapshot estruturado retomável (`WorkCheckpointV1`) emitido mid-flight | não |
 | `decision_required` | interrupção admitida pelo AUTO-06, com razão tipada | sim |
 | `result` | resultado, evidências e handoff para revisão | sim |
 | `error` | falha tipada, retryable explícito e handoff | sim |
 | `cancelled` | reconhecimento cooperativo do cancelamento e handoff | sim |
 
 Um transcript válido possui exatamente uma condição terminal; nada pode sucedê-la. Sequência quebrada, correlação divergente, entrada vaga ou término ausente falham fechados. Reentregar o mesmo `attemptId` com a mesma entrada deve devolver o mesmo transcript sem repetir efeitos, inclusive sob concorrência; reentrega com entrada diferente produz `attempt_payload_conflict` terminal e não retryable.
+
+O sinal `checkpoint` (Etapa 1 da Opção B, aprovada em checkpoint humano) é o único não-terminal além de `progress` e o único que carrega continuação estruturada retomável **antes** do terminal: um `WorkCheckpointV1` enxuto com feito/restante, próximo passo, decisões, riscos, recursos tocados, validações, falhas, evidências e `handoffReference` — **sem** `status`/`stopReason`, que são fatos terminais. É opcional e emissível de 0 a N vezes; executores que não o suportam permanecem válidos emitindo zero, e por isso `terminalKinds` e `validateWorkExecutorTranscript` não mudam. `validateWorkCheckpoint` aplica a mesma régua estrutural e a mesma sanitização única do handoff (AUTO-04). A `sequence` é a da transcrição inteira, e sua monotonicidade é a chave anti-regressão. Ficam **fora** desta etapa e não estão implementados: a persistência (evento `checkpoint_recorded`, Opção B), a retomada real (AUTO-05) e a regra de idempotência por sequência, que pertence à futura RPC persistente.
 
 A substituição do contrato anterior é explícita: a fronteira limitada de F8 permanece como `BoundedWorkExecutorAdapter`, com seu executor e persistência atuais intactos; `WorkExecutorAdapter` passa a nomear apenas o contrato autônomo. `FakeWorkExecutor` exercita todos os sinais, cancelamento e idempotência. Transporte, executor real, persistência dos sinais, fila, UI e integração com provedores ficam fora do INT-01.
 
