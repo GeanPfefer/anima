@@ -507,6 +507,16 @@ O terminal reusa `record_commanded_work_terminal`. A RPC valida por correlação
 
 O desfecho máximo de uma volta é um item em `review`. Nenhum caminho do laço aceita, autoriza, integra ou aplica resultado — a fronteira do INT-03 permanece intacta.
 
+## Persistência de checkpoint mid-flight (Etapa 2A, Opção B)
+
+O sinal `checkpoint` do INT-01 ganha persistência **append-only, sem tabela nova**. `public.record_work_checkpoint` grava um `WorkCheckpointV1` como evento `checkpoint_recorded` — não-terminal, fora da matriz de estados, que **não muda o estado do item, não conclui, não aceita, não autoriza e não integra**. A RPC decide só por fato persistido e é fail-closed: exige item do usuário em `in_progress`, tentativa iniciada (por `execution_started`), sem terminal e não abandonada pelo SUP-04, versão aprovada correta, payload estruturalmente válido (`private.is_valid_work_checkpoint`, espelho SQL de `validateWorkCheckpoint` que reusa os primitivos existentes) e origem `executor`. Se há claim ativo no item, ele tem de ser o desta tentativa — o `claim_id` é **derivado no servidor**, nunca vem do sinal.
+
+A `sequence` é a da transcrição inteira (1-indexada); a RPC não vê os `progress` não persistidos, então checkpoints são **monotônicos mas não consecutivos**. Para a maior sequência já persistida da tentativa: sequência menor recusa por regressão; mesma sequência com conteúdo idêntico é replay idempotente sem novo evento; mesma sequência com conteúdo diferente é conflito fail-closed; sequência maior registra. A comparação de replay é o mesmo dispositivo determinístico (jsonb `=` sobre o sinal bruto) que o terminal comandado já usa. A concorrência é serializada pelo `FOR UPDATE` do item, com o índice único parcial `(attempt_id, signal_sequence)` como garantia final; não há mutex em memória.
+
+`public.latest_work_checkpoint` reconstrói o checkpoint de maior sequência apenas por fato persistido, preservando o histórico, com **ausência tipada** (NULL) quando não há nenhum. O espelho puro em `packages/core` (`reconcileCheckpointDelivery`, `selectLatestCheckpoint`, `projectCheckpointContinuation`) reproduz a mesma lógica e projeta a continuação **sem derivar `status`/`stopReason` terminais**.
+
+Fora desta etapa (2B e adiante), e **não implementados**: o laço operacional, o `LocalRunnerAdapter` e o runner ainda não emitem checkpoints; `resumed_from_attempt_id`, `reason = 'resumed_execution'`, a criação de nova tentativa e a retomada real do AUTO-05 (que continua puro e fail-closed via `planWorkResumption`, jamais chamado aqui).
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
