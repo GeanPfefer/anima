@@ -26,7 +26,9 @@ const event = (
         ? { ...correlation, kind, summary: 'Concluído.', resultReferences: ['commit:abc'], validations: [], limitations: [], handoffReference: 'commit:abc' }
         : kind === 'error'
           ? { ...correlation, kind, code: 'execution_failed' as const, message: 'Falhou.', retryable: false, handoffReference: 'report:error' }
-          : { ...correlation, kind, acknowledged: true as const, handoffReference: 'checkpoint:cancelled' };
+          : kind === 'checkpoint'
+            ? { ...correlation, kind, checkpoint: { schemaVersion: 1 as const, handoffReference: 'runner-bundle:cp', completedSteps: ['feito'], remainingSteps: ['resta'], nextStep: 'seguir', decisions: [], risks: [], touchedResources: [], validations: [], failures: [], evidenceReferences: [] } }
+            : { ...correlation, kind, acknowledged: true as const, handoffReference: 'checkpoint:cancelled' };
   return { ...correlation, eventId: `${attemptContext.attemptId}-${sequence}`, signal };
 };
 
