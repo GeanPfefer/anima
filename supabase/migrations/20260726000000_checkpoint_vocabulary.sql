@@ -1,0 +1,13 @@
+-- Etapa 2A: vocabulário do checkpoint mid-flight.
+--
+-- Isolado em migration própria pela mesma razão do AUTO-02 e do SUP-04: um valor
+-- novo de enum só pode ser usado depois de commitado, então a RPC, os índices e
+-- os predicados que o consomem vivem na migration seguinte.
+--
+-- `checkpoint_recorded` é NÃO-terminal e NÃO muda o estado do work_item. Como
+-- `context_attached`, `input_requested` e `input_provided`, ele não entra na
+-- matriz `private.work_state_transitions`: registrá-lo jamais avança, conclui ou
+-- reabre um item. Ele afirma estritamente que um snapshot estruturado retomável
+-- (`WorkCheckpointV1`) foi registrado durante uma tentativa ainda em andamento —
+-- nunca aceita, autoriza, integra nem aplica resultado algum.
+ALTER TYPE public.work_event_type ADD VALUE IF NOT EXISTS 'checkpoint_recorded';
