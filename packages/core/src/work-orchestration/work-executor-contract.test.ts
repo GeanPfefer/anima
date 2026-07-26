@@ -1,4 +1,4 @@
-import { FakeWorkExecutor, validateWorkExecutorTranscript, type WorkExecutorRequest, type WorkExecutorSignal } from '.';
+import { FakeWorkExecutor, validateWorkCheckpoint, validateWorkExecutorTranscript, type WorkCheckpointV1, type WorkExecutorRequest, type WorkExecutorSignal } from '.';
 
 const request: WorkExecutorRequest = {
   attemptId: 'attempt-1', workItemId: 'work-1', approvedProposalVersion: 3, capability: 'programming', objective: 'Implementar contrato',
@@ -89,5 +89,145 @@ describe('INT-01 — contrato WorkExecutorAdapter', () => {
     expect(validateWorkExecutorTranscript([{ ...base, sequence: 2, kind: 'progress', message: 'x' }, { ...base, sequence: 3, kind: 'error', code: 'execution_failed', message: 'x', retryable: false, handoffReference: 'r' }])).toContain('sequência');
     expect(validateWorkExecutorTranscript([{ ...base, sequence: 1, kind: 'progress', message: 'x' }, { ...base, workItemId: 'outro', sequence: 2, kind: 'error', code: 'execution_failed', message: 'x', retryable: false, handoffReference: 'r' }])).toContain('correlação');
     expect(validateWorkExecutorTranscript([{ ...base, sequence: 1, kind: 'error', code: 'execution_failed', message: 'x', retryable: false, handoffReference: 'r' }, { ...base, sequence: 2, kind: 'cancelled', acknowledged: true, handoffReference: 'r' }])).toContain('suceder');
+  });
+});
+
+const checkpoint: WorkCheckpointV1 = {
+  schemaVersion: 1,
+  handoffReference: 'runner-bundle:partial-1',
+  completedSteps: ['Escrever o parser'],
+  remainingSteps: ['Cobrir o caso de erro'],
+  nextStep: 'Adicionar o teste do caso de erro',
+  decisions: [],
+  risks: ['O caso de erro pode exigir nova validação'],
+  touchedResources: ['packages/core/src/x.ts'],
+  validations: [{ label: 'parser', outcome: 'passed' }],
+  failures: [],
+  evidenceReferences: ['runner-evidence:e1'],
+};
+const corr = { attemptId: 'a', workItemId: 'w', approvedProposalVersion: 1, origin: 'executor' as const };
+const resultAt = (sequence: number): WorkExecutorSignal =>
+  ({ ...corr, sequence, kind: 'result', summary: 'ok', resultReferences: [], validations: [], limitations: [], handoffReference: 'commit:z' });
+
+describe('INT-01 — checkpoint mid-flight na transcrição', () => {
+  test('transcrição só com terminal continua válida (compatibilidade)', async () => {
+    const signals = await collect(new FakeWorkExecutor([{ kind: 'result', summary: 'Feito.', resultReferences: [], validations: [], limitations: [], handoffReference: 'commit:abc' }]));
+    expect(signals.map(value => value.kind)).toEqual(['result']);
+    expect(validateWorkExecutorTranscript(signals)).toBeNull();
+  });
+
+  test('um checkpoint seguido de terminal é válido', async () => {
+    const signals = await collect(new FakeWorkExecutor([
+      { kind: 'checkpoint', checkpoint },
+      { kind: 'result', summary: 'Feito.', resultReferences: [], validations: [{ label: 'core', outcome: 'passed' }], limitations: [], handoffReference: 'commit:abc' },
+    ]));
+    expect(signals.map(value => value.kind)).toEqual(['checkpoint', 'result']);
+    expect(validateWorkExecutorTranscript(signals)).toBeNull();
+  });
+
+  test('múltiplos checkpoints intercalados com progress são válidos e a sequência é da transcrição inteira', async () => {
+    const signals = await collect(new FakeWorkExecutor([
+      { kind: 'progress', message: 'Começando.' },
+      { kind: 'checkpoint', checkpoint },
+      { kind: 'progress', message: 'Continuando.' },
+      { kind: 'checkpoint', checkpoint: { ...checkpoint, nextStep: 'Segundo passo concreto' } },
+      { kind: 'result', summary: 'Feito.', resultReferences: [], validations: [{ label: 'core', outcome: 'passed' }], limitations: [], handoffReference: 'commit:abc' },
+    ]));
+    expect(signals.map(value => value.kind)).toEqual(['progress', 'checkpoint', 'progress', 'checkpoint', 'result']);
+    expect(signals.map(value => value.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(validateWorkExecutorTranscript(signals)).toBeNull();
+  });
+
+  test('checkpoint é não-terminal: script só com checkpoint recebe erro de violação do contrato', async () => {
+    const signals = await collect(new FakeWorkExecutor([{ kind: 'checkpoint', checkpoint }]));
+    expect(signals.map(value => value.kind)).toEqual(['checkpoint', 'error']);
+    expect(signals[1]).toMatchObject({ kind: 'error', code: 'contract_violation' });
+    expect(validateWorkExecutorTranscript(signals)).toBeNull();
+  });
+
+  test('transcrição só com checkpoint, sem terminal, é recusada pelo validador', () => {
+    expect(validateWorkExecutorTranscript([{ ...corr, sequence: 1, kind: 'checkpoint', checkpoint }]))
+      .toContain('exatamente uma condição terminal');
+  });
+
+  test('checkpoint depois do terminal é recusado', () => {
+    expect(validateWorkExecutorTranscript([resultAt(1), { ...corr, sequence: 2, kind: 'checkpoint', checkpoint }]))
+      .toContain('suceder');
+  });
+
+  test('sequência não contígua envolvendo checkpoint é recusada', () => {
+    expect(validateWorkExecutorTranscript([
+      { ...corr, sequence: 1, kind: 'progress', message: 'x' },
+      { ...corr, sequence: 3, kind: 'checkpoint', checkpoint },
+      resultAt(4),
+    ])).toContain('sequência');
+  });
+
+  test('correlação divergente em checkpoint é recusada', () => {
+    expect(validateWorkExecutorTranscript([
+      { ...corr, sequence: 1, kind: 'progress', message: 'x' },
+      { ...corr, workItemId: 'outro', sequence: 2, kind: 'checkpoint', checkpoint },
+      resultAt(3),
+    ])).toContain('correlação');
+  });
+
+  test('origem diferente de executor em checkpoint é recusada', () => {
+    expect(validateWorkExecutorTranscript([
+      { ...corr, origin: 'user', sequence: 1, kind: 'checkpoint', checkpoint },
+      resultAt(2),
+    ])).toContain('correlação');
+  });
+
+  test('FakeWorkExecutor emite e preserva o checkpoint com correlação completa', async () => {
+    const signals = await collect(new FakeWorkExecutor([
+      { kind: 'checkpoint', checkpoint },
+      { kind: 'result', summary: 'Feito.', resultReferences: [], validations: [{ label: 'core', outcome: 'passed' }], limitations: [], handoffReference: 'commit:abc' },
+    ]));
+    expect(signals[0]).toMatchObject({ kind: 'checkpoint', checkpoint, attemptId: 'attempt-1', workItemId: 'work-1', approvedProposalVersion: 3, origin: 'executor', sequence: 1 });
+  });
+
+  test('executores sem checkpoint continuam compatíveis', async () => {
+    const fake = new FakeWorkExecutor([
+      { kind: 'progress', message: 'Sem checkpoint.' },
+      { kind: 'result', summary: 'Feito.', resultReferences: [], validations: [{ label: 'core', outcome: 'passed' }], limitations: [], handoffReference: 'commit:abc' },
+    ]);
+    const signals = await collect(fake);
+    expect(signals.map(value => value.kind)).toEqual(['progress', 'result']);
+    expect(validateWorkExecutorTranscript(signals)).toBeNull();
+    expect(fake.executionCount).toBe(1);
+  });
+});
+
+describe('INT-01 — validateWorkCheckpoint (régua estrutural do payload)', () => {
+  test('checkpoint completo é aceito', () => {
+    expect(validateWorkCheckpoint(checkpoint)).toBeNull();
+  });
+
+  test('nextStep vazio é recusado', () => {
+    expect(validateWorkCheckpoint({ ...checkpoint, nextStep: '   ' })).toContain('próximo passo');
+  });
+
+  test('handoffReference vazio é recusado', () => {
+    expect(validateWorkCheckpoint({ ...checkpoint, handoffReference: '' })).toContain('handoff');
+  });
+
+  test('completedSteps e remainingSteps ambos vazios são recusados', () => {
+    expect(validateWorkCheckpoint({ ...checkpoint, completedSteps: [], remainingSteps: [] })).toContain('retomada');
+  });
+
+  test('entrada textual vazia numa lista é recusada', () => {
+    expect(validateWorkCheckpoint({ ...checkpoint, risks: ['   '] })).toContain('lista estruturada');
+  });
+
+  test('validação com outcome inválido é recusada (payload malformado)', () => {
+    expect(validateWorkCheckpoint({ ...checkpoint, validations: [{ label: 'x', outcome: 'aprovado' as never }] })).toContain('lista estruturada');
+  });
+
+  test('dado sensível no checkpoint é recusado, reusando a régua única de sanitização', () => {
+    expect(validateWorkCheckpoint({ ...checkpoint, touchedResources: ['C:\\Users\\gean\\secret.txt'] })).toContain('credenciais');
+  });
+
+  test('schemaVersion não suportada é recusada', () => {
+    expect(validateWorkCheckpoint({ ...checkpoint, schemaVersion: 2 as never })).toContain('Versão');
   });
 });
