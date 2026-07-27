@@ -1207,6 +1207,31 @@ export type Database = {
         Args: { p_attempt_id: string; p_work_item_id: string }
         Returns: Json
       }
+      abandoned_work_resumption_source: {
+        Args: { p_work_item_id: string }
+        Returns: Json
+      }
+      begin_resumed_work_attempt: {
+        Args: {
+          abandonment_event_seq: number
+          attempt_id: string
+          checkpoint_event_seq: number
+          claim_id: string
+          executor_id: string
+          expected_proposal_version: number
+          lease_seconds: number
+          owner_instance_id: string
+          source_attempt_id: string
+          work_item_id: string
+        }
+        Returns: Database["public"]["Tables"]["work_items"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       lifegame_get_level_from_xp: {
         Args: { p_total_xp: number }
         Returns: number
@@ -2001,4 +2026,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
