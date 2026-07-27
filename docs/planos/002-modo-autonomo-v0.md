@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | SUP-01 a SUP-05 completos e ratificados. O **laço operacional** foi implementado, comprovado ao vivo e **ratificado (2026-07-26)** — ver "Ratificação do laço operacional". A **persistência de checkpoint (Etapa 2A)** foi implementada, provada em base real e **ratificada (2026-07-26)** — ver "Ratificação da Etapa 2A". Resta a **retomada real do AUTO-05 (Etapa 2B)**, **não iniciada**, que costura o laço à reconstrução do checkpoint e cria a nova tentativa |
+| E | **Em andamento** | SUP-01 a SUP-05 completos e ratificados. O **laço operacional** e a **persistência de checkpoint (Etapa 2A)** foram implementados, provados em base real e **ratificados (2026-07-26)**. A **persistência de checkpoint em stream no laço (Etapa 2B.1)** foi implementada, provada ao vivo contra o Supabase local e **ratificada (2026-07-26)** — ver "Ratificação da Etapa 2B.1". Resta a **retomada real do AUTO-05 (Etapa 2B.2)**, **não iniciada**: ler `latest_work_checkpoint`, projetar para `WorkHandoffV1`, chamar `planWorkResumption` e criar a nova tentativa/claim de retomada |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -424,6 +424,30 @@ A revisão humana **aprovou, ratificou e encerrou** a Etapa 2A da persistência 
 **Consequência confirmada para a Etapa 2B:** `record_commanded_work_terminal` ainda exige `sequence == 1`; quando o terminal passar a vir **depois** de checkpoints (sequência > 1), essa guarda o recusará e precisará ser revisitada em 2B — sem tocá-la agora.
 
 **Confirmações de segurança desta ratificação:** nenhum código funcional novo foi escrito; o laço operacional, o `LocalRunnerAdapter`, o runner, o AUTO-05 e o `planWorkResumption` permanecem intocados; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum merge, push ou deploy. As migrations e provas da Etapa 2A estão nos commits `ec060d5`, `b820af1`, `855ceeb`, `e0d591c`, `72a86ef`, `02af23f` e `4dff367`.
+
+### Ratificação da Etapa 2B.1 — persistência de checkpoint em stream (2026-07-26)
+
+A revisão humana **aprovou, ratificou e encerrou** a Etapa 2B.1. Registro append-only: nenhuma seção anterior foi reescrita. A consequência sobre o INT-04 antecipada na ratificação da Etapa 2A — a guarda `sequence == 1` do terminal comandado — foi resolvida aqui.
+
+**Decisões e garantias ratificadas nominalmente:**
+
+- `runExecutorStreamed` consome o stream do executor **incrementalmente**;
+- cada `checkpoint` é persistido **imediatamente** ao ser recebido, e a confirmação da persistência ocorre **antes** de consumir o próximo sinal;
+- `progress` continua **não persistido** e nunca é tratado como checkpoint;
+- o terminal só é processado depois dos sinais anteriores; nada após o terminal é aceito;
+- falha ao persistir um checkpoint interrompe o processamento **fail-closed**, sem processar terminal, sem liberar posse e sem inventar desfecho;
+- checkpoints já confirmados **sobrevivem** a exceção do executor, ausência de terminal ou cancelamento da conexão;
+- a tentativa permanece **aberta para reconciliação pelo SUP-04** quando não há terminal válido;
+- `record_commanded_work_terminal` aceita terminal com `sequence` positivo e **posterior ao maior checkpoint persistido**; o banco **não** reconstrói `progress` não persistidos, e a continuidade completa da transcrição permanece do `validateWorkExecutorTranscript`;
+- executores que emitem **zero checkpoints** continuam compatíveis;
+- `LocalRunnerAdapter`, `BoundedWorkExecutorAdapter`, `terminalKinds`, a matriz de estados, INT-03, SUP-04, SUP-05 e `planWorkResumption` permanecem preservados; o desfecho máximo do laço continua sendo `review`;
+- a persistência entra por uma **porta genérica** (`CheckpointSink`), sem acoplar o consumidor ao Supabase; o caminho comandado (INT-04) segue single-shot e rejeita checkpoint fail-closed.
+
+**Evidências ratificadas:** `typecheck` limpo nos cinco workspaces; core **424/424**; web **62/62**; pgTAP específico `terminal_after_checkpoint` **9/9**; **pgTAP total com 415 asserções verdes**. **Prova real contra o Supabase local** com o laço `runSupervisorTurn` e um `FakeWorkExecutor` emitindo `progress 1 / checkpoint 2 / progress 3 / checkpoint 4 / result 5`: os eventos persistiram na ordem `execution_started → checkpoint_recorded → checkpoint_recorded → result_submitted → work_claim_released`, checkpoints com sequências **[2, 4]** e estado final **`review`**.
+
+**Riscos aceitos que sobrevivem à ratificação:** o `LocalRunnerAdapter` ainda **não** produz checkpoints; a qualidade do checkpoint depende do executor; pode haver perda do sinal emitido antes da confirmação persistente; o caminho comandado continua single-shot enquanto o supervisionado tem a porta persistente; e a retomada real do AUTO-05 permanece **não implementada**.
+
+**Confirmações de segurança desta ratificação:** nenhum código funcional novo foi escrito; o `LocalRunnerAdapter`, o runner, o AUTO-05 e o `planWorkResumption` permanecem intocados; `latest_work_checkpoint` **não** é lido pelo laço; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum merge, push ou deploy. As migrations, provas e mudanças da Etapa 2B.1 estão nos commits `fc76b76`, `e00e4aa`, `bce3eb2`, `e213754` e `643c8d8`.
 
 ## Fase F — Uso sustentável de inteligência
 
