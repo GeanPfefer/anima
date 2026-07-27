@@ -1,7 +1,10 @@
 import {
   evaluateAutonomousEligibility,
+  planWorkResumption,
+  type AbandonedCheckpointV1,
   type AutonomousEligibilityGap,
   type WorkExecutorAdapter,
+  type WorkExecutorRequest,
 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -30,6 +33,7 @@ export type SupervisorTurnOutcome =
   | 'claim_refused'
   // Posse obtida, início recusado (exclusividade de alvo, versão mudou…).
   | 'attempt_start_refused'
+  | 'resumption_requires_human'
   | 'execution_completed'
   | 'execution_failed'
   | 'execution_cancelled'
@@ -95,6 +99,9 @@ const refusalOf = (error: { code?: string; message: string }): { code: string; m
 const outcomeForTerminal = (kind: string): SupervisorTurnOutcome =>
   kind === 'result' ? 'execution_completed' : kind === 'cancelled' ? 'execution_cancelled' : 'execution_failed';
 
+const object = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
 /**
  * Executa exatamente uma volta do Supervisor.
  *
@@ -157,30 +164,71 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     return { ...started, outcome: 'selection_not_executable', refusal: { code: 'context_unavailable', message: contexts.error.message } };
   }
 
-  // ---------- (4) Posse exclusiva (AUTO-02) ----------
-  //
-  // Sem consulta prévia de disponibilidade: prever posse na aplicação é
-  // precisamente a janela de corrida que o SUP-05 mediu. A RPC é a fonte de
-  // verdade e a recusa dela é o resultado.
-  //
-  // O lease cobre a duração declarada mais folga: encurtá-lo faria a
-  // reconciliação recolher a posse de uma execução legitimamente viva.
+  const sourceRead = await client.rpc('abandoned_work_resumption_source', { p_work_item_id: selection.workItemId });
+  if (sourceRead.error) return { ...started, outcome: 'selection_not_executable', refusal: refusalOf(sourceRead.error) };
+  const persistedSource = object(sourceRead.data);
+  const isResumption = persistedSource?.kind === 'abandoned_checkpoint';
+
   const claimId = newId();
   const leaseSeconds = (eligibility.spec.limits.maxDurationMinutes ?? 30) * 60 + 300;
-  const claim = await client.rpc('acquire_work_claim', {
-    work_item_id: selection.workItemId,
-    expected_proposal_version: selection.approvedProposalVersion,
-    claim_id: claimId,
-    owner_instance_id: ownerInstanceId,
-    lease_seconds: leaseSeconds,
-  });
-  if (claim.error) return { ...started, outcome: 'claim_refused', refusal: refusalOf(claim.error) };
-
-  // ---------- (5) Início supervisionado ----------
   const attemptId = newId();
-  const attempt = await client.rpc('start_claimed_work_attempt', {
-    claim_id: claimId, attempt_id: attemptId, executor_id: adapter.id,
-  });
+  let carriedContext: WorkExecutorRequest['carriedContext'];
+  let attempt;
+  if (isResumption && persistedSource) {
+    const rawCheckpoint = object(persistedSource.checkpoint);
+    const data = object(rawCheckpoint?.data);
+    const sourceAttemptId = String(persistedSource.source_attempt_id ?? '');
+    const sourceClaimId = typeof persistedSource.source_claim_id === 'string' ? persistedSource.source_claim_id : null;
+    const abandonmentEventSeq = Number(persistedSource.abandonment_event_seq);
+    const abandonmentReason = String(persistedSource.abandonment_reason ?? '');
+    const abandonedAt = String(persistedSource.abandoned_at ?? '');
+    const checkpoint = data ? {
+      schemaVersion: 1, workItemId: selection.workItemId, sourceAttemptId, sourceClaimId,
+      approvedProposalVersion: Number(persistedSource.approved_proposal_version),
+      checkpointEventSeq: Number(rawCheckpoint?.checkpoint_event_seq),
+      checkpointSignalSequence: Number(rawCheckpoint?.checkpoint_signal_sequence),
+      abandonmentEventSeq, abandonmentReason, abandonedAt,
+      handoffReference: data.handoffReference, completedSteps: data.completedSteps,
+      remainingSteps: data.remainingSteps, nextStep: data.nextStep, decisions: data.decisions,
+      risks: data.risks, touchedResources: data.touchedResources, validations: data.validations,
+      failures: data.failures, evidenceReferences: data.evidenceReferences,
+    } as AbandonedCheckpointV1 : null;
+    const decision = planWorkResumption({
+      item: item.value,
+      source: {
+        kind: 'abandoned_checkpoint', checkpoint, sourceAttemptId, sourceClaimId,
+        approvedProposalVersion: Number(persistedSource.approved_proposal_version),
+        abandonmentEventSeq, abandonmentReason, abandonedAt,
+      },
+      openClaim: null,
+      previousAttemptIds: Array.isArray(persistedSource.previous_attempt_ids)
+        ? persistedSource.previous_attempt_ids.filter((id): id is string => typeof id === 'string') : [],
+      nextAttemptId: attemptId, nextClaimId: claimId, now: new Date(),
+    });
+    if (decision.outcome !== 'resume') {
+      return {
+        ...started, outcome: decision.outcome === 'requires_human' ? 'resumption_requires_human' : 'attempt_start_refused',
+        refusal: { code: decision.reason, message: decision.explanation },
+      };
+    }
+    carriedContext = { isNewAttempt: true, continueFromCheckpoint: true, ...decision.plan.carriedContext };
+    attempt = await client.rpc('begin_resumed_work_attempt', {
+      work_item_id: selection.workItemId, expected_proposal_version: selection.approvedProposalVersion,
+      source_attempt_id: decision.plan.resumeFromAttemptId,
+      checkpoint_event_seq: decision.plan.resumeFromCheckpointEventSeq!,
+      abandonment_event_seq: abandonmentEventSeq, claim_id: claimId, attempt_id: attemptId,
+      owner_instance_id: ownerInstanceId, lease_seconds: leaseSeconds, executor_id: adapter.id,
+    });
+  } else {
+    const claim = await client.rpc('acquire_work_claim', {
+      work_item_id: selection.workItemId, expected_proposal_version: selection.approvedProposalVersion,
+      claim_id: claimId, owner_instance_id: ownerInstanceId, lease_seconds: leaseSeconds,
+    });
+    if (claim.error) return { ...started, outcome: 'claim_refused', refusal: refusalOf(claim.error) };
+    attempt = await client.rpc('start_claimed_work_attempt', {
+      claim_id: claimId, attempt_id: attemptId, executor_id: adapter.id,
+    });
+  }
   if (attempt.error) {
     // Nenhuma tentativa começou; a posse é devolvida com a razão que o próprio
     // contrato exige para esse caso, e o alvo volta a ficar livre.
@@ -196,6 +244,7 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   const request = buildExecutorRequest({
     item: item.value, spec: eligibility.spec, attemptId,
     contextReferences: contexts.value.at(-1)?.references ?? [],
+    carriedContext,
   });
   // Porta de persistência: cada checkpoint é gravado IMEDIATAMENTE, antes do
   // próximo sinal. Replay idempotente (`record_work_checkpoint`) não devolve

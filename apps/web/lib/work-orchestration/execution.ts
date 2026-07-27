@@ -49,13 +49,14 @@ export interface ExecutorRequestInput {
   readonly spec: AutonomousExecutionSpecV1;
   readonly attemptId: string;
   readonly contextReferences: readonly WorkContextReference[];
+  readonly carriedContext?: WorkExecutorRequest['carriedContext'];
 }
 
 /**
  * Entrada delimitada do executor (INT-01). O escopo vem da proposta aprovada e
  * os limites do `execution_spec` já validado — nunca de sessão ou memória.
  */
-export const buildExecutorRequest = ({ item, spec, attemptId, contextReferences }: ExecutorRequestInput): WorkExecutorRequest => ({
+export const buildExecutorRequest = ({ item, spec, attemptId, contextReferences, carriedContext }: ExecutorRequestInput): WorkExecutorRequest => ({
   attemptId,
   workItemId: item.id,
   approvedProposalVersion: item.proposalVersion,
@@ -68,6 +69,7 @@ export const buildExecutorRequest = ({ item, spec, attemptId, contextReferences 
   validationCriteria: spec.validationCriteria,
   limits: spec.limits,
   contextReferences,
+  ...(carriedContext ? { carriedContext } : {}),
 });
 
 export type ExecutorRun =

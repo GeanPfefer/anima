@@ -32,6 +32,7 @@ interface FakeOptions {
   readonly failCheckpointAtSequence?: number;
   /** Faz todo record_work_checkpoint devolver `replayed` (idempotente, sem novo evento). */
   readonly replayCheckpoints?: boolean;
+  readonly resumptionSource?: Record<string, unknown>;
 }
 
 class FakeDatabase {
@@ -89,6 +90,21 @@ class FakeDatabase {
           selection_policy: 'oldest_approval_first', queue_size: queue.length,
           runner_up_approval_seq: queue[1]?.approvalSeq ?? null, skipped_occupied_targets: 0,
         }]);
+      }
+
+      case 'abandoned_work_resumption_source':
+        return ok(this.options.resumptionSource ?? { kind: 'new_execution' });
+
+      case 'begin_resumed_work_attempt': {
+        const item = this.items.get(args['work_item_id'] as string)!;
+        const claim: FakeClaim = {
+          id: args['claim_id'] as string, itemId: item.id, target: item.target,
+          attemptId: args['attempt_id'] as string, released: false, reason: null,
+        };
+        this.claims.set(claim.id, claim);
+        item.state = 'in_progress';
+        this.events.push({ itemId: item.id, type: 'execution_started', attemptId: claim.attemptId, reason: 'resumed_execution' });
+        return ok(item);
       }
 
       case 'acquire_work_claim': {
@@ -358,7 +374,7 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
 
   // Ordem canônica das fronteiras, e nunca o início comandado.
   expect(database.calls).toEqual([
-    'reconcile_supervised_work', 'next_autonomous_work', 'acquire_work_claim',
+    'reconcile_supervised_work', 'next_autonomous_work', 'abandoned_work_resumption_source', 'acquire_work_claim',
     'start_claimed_work_attempt', 'record_commanded_work_terminal', 'release_work_claim',
   ]);
   expect(database.calls).not.toContain('start_commanded_work_attempt');
@@ -561,6 +577,40 @@ test('a volta nunca aceita, autoriza, integra ou aplica resultado algum', async 
   for (const forbidden of ['review_work_result', 'complete_work_review', 'resolve_approval']) {
     expect(database.calls).not.toContain(forbidden);
   }
+});
+
+test('tentativa abandonada retoma com IDs novos e carriedContext sem cenário inventado', async () => {
+  const source = {
+    kind: 'abandoned_checkpoint', item_state: 'approved', source_attempt_id: 'attempt-antiga',
+    source_claim_id: 'claim-antigo', approved_proposal_version: 1,
+    abandonment_event_seq: 41, abandonment_reason: 'lease_expired',
+    abandoned_at: '2026-07-27T12:00:00.000Z', previous_attempt_ids: ['attempt-antiga'],
+    checkpoint: {
+      checkpoint_event_seq: 40, checkpoint_signal_sequence: 4,
+      data: {
+        schemaVersion: 1, handoffReference: 'runner-bundle:cp', completedSteps: ['feito'],
+        remainingSteps: ['resta'], nextStep: 'continuar', decisions: [], risks: ['risco'],
+        touchedResources: ['calculator.py'], validations: [], failures: ['falha anterior'], evidenceReferences: [],
+      },
+    },
+  };
+  const item = workItem('item-1', { limits: { max_attempts: 3, max_duration_minutes: 5 } });
+  const database = new FakeDatabase({
+    items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-item-1', approvalSeq: 1 }],
+    resumptionSource: source,
+  });
+  const { adapter, calls } = executor();
+  const result = await turn(database, adapter, [item], ['claim-novo', 'attempt-nova']);
+
+  expect(result.outcome).toBe('execution_completed');
+  expect(database.calls).toContain('begin_resumed_work_attempt');
+  expect(database.calls).not.toContain('acquire_work_claim');
+  expect(calls[0]?.attemptId).toBe('attempt-nova');
+  expect(calls[0]?.carriedContext).toEqual(expect.objectContaining({
+    isNewAttempt: true, continueFromCheckpoint: true, remainingSteps: ['resta'],
+    nextStep: 'continuar', previousFailures: ['falha anterior'],
+  }));
+  expect(calls[0]?.carriedContext).not.toHaveProperty('scenario');
 });
 
 describe('Etapa 2B.1 — persistência de checkpoint em stream', () => {
