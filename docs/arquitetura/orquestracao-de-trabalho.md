@@ -517,6 +517,14 @@ A `sequence` é a da transcrição inteira (1-indexada); a RPC não vê os `prog
 
 Fora desta etapa (2B e adiante), e **não implementados**: o laço operacional, o `LocalRunnerAdapter` e o runner ainda não emitem checkpoints; `resumed_from_attempt_id`, `reason = 'resumed_execution'`, a criação de nova tentativa e a retomada real do AUTO-05 (que continua puro e fail-closed via `planWorkResumption`, jamais chamado aqui).
 
+## Persistência de checkpoint em stream no laço (Etapa 2B.1)
+
+O laço operacional passa a **consumir a transcrição do executor incrementalmente** e a persistir cada `checkpoint` assim que chega, **antes** do próximo sinal — para que uma tentativa cujo processo morra antes do terminal preserve todos os checkpoints já confirmados. `runExecutorStreamed` substitui o consumo que só devolvia o terminal: `progress` é observado e **não** persistido; `checkpoint` é gravado imediatamente por uma **porta genérica** (`CheckpointSink`, injetada pelo laço com uma chamada a `record_work_checkpoint`), sem acoplar o consumidor ao Supabase; o terminal único é processado depois de zero ou mais não-terminais. Replay idempotente segue normalmente; **falha ao persistir um checkpoint interrompe o consumo fechado**, sem processar o terminal, sem liberar a posse e sem inventar desfecho — a tentativa fica aberta para o SUP-04, com os checkpoints confirmados preservados. O mesmo vale quando o executor lança ou termina sem terminal. O caminho comandado do INT-04 permanece single-shot (`runExecutorOnce`, que rejeita checkpoints fail-closed); o `LocalRunnerAdapter`, o `BoundedWorkExecutorAdapter` e o runner **não** são tocados.
+
+A guarda de sequência do terminal foi corrigida: `record_commanded_work_terminal` não exige mais `sequence == 1`. A `sequence` pertence à transcrição inteira, então o terminal pode vir depois de `progress` e `checkpoint`. O menor contrato persistente passa a exigir `sequence` inteiro positivo e, quando há checkpoint persistido em N, `sequence > N` (`sequence <= N` recusa fail-closed). `progress` não é persistido, logo **lacunas** entre o maior checkpoint e o terminal são legítimas — não se exige `terminal == checkpoint + 1`. A continuidade completa da transcrição continua sendo do `validateWorkExecutorTranscript`, no processo que consome o stream, não do banco. A guarda entra **depois** do replay idempotente e da recusa de tentativa abandonada (SUP-04), que permanecem; o `signal_sequence` gravado passa a ser o real do terminal.
+
+Ainda **fora** desta etapa (2B.2 e adiante): ler `latest_work_checkpoint` para retomar, projetar para `WorkHandoffV1`, `planWorkResumption`, `resumed_from_attempt_id`, `reason = 'resumed_execution'`, a criação de nova tentativa/claim de retomada e qualquer produtor real de checkpoints (o `LocalRunnerAdapter` segue emitindo zero).
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
