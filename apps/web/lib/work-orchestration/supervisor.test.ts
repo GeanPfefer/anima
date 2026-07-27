@@ -1,4 +1,4 @@
-import type { WorkContextSnapshot, WorkExecutorAdapter, WorkExecutorRequest, WorkExecutorSignal, WorkItem } from '@anima/core';
+import type { WorkCheckpointV1, WorkContextSnapshot, WorkExecutorAdapter, WorkExecutorRequest, WorkExecutorSignal, WorkItem } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runSupervisorTurn, type SupervisorReader } from './supervisor';
@@ -28,6 +28,10 @@ interface FakeOptions {
   readonly failReconcile?: boolean;
   /** Corrida de alvo perdida entre a aquisição da posse e o início da tentativa. */
   readonly startRefusal?: { readonly code: string; readonly message: string };
+  /** Simula falha de persistência de um checkpoint na sequência indicada. */
+  readonly failCheckpointAtSequence?: number;
+  /** Faz todo record_work_checkpoint devolver `replayed` (idempotente, sem novo evento). */
+  readonly replayCheckpoints?: boolean;
 }
 
 class FakeDatabase {
@@ -36,6 +40,9 @@ class FakeDatabase {
   readonly claims = new Map<string, FakeClaim>();
   readonly items = new Map<string, FakeItem>();
   private readonly terminals = new Map<string, string>();
+  // Maior sequência de checkpoint e sinal bruto por tentativa (para replay/conflito).
+  private readonly checkpointSeq = new Map<string, number>();
+  private readonly checkpointSignals = new Map<string, string>();
 
   constructor(private readonly options: FakeOptions) {
     for (const item of options.items) this.items.set(item.id, { ...item });
@@ -114,21 +121,54 @@ class FakeDatabase {
       case 'record_commanded_work_terminal': {
         const attemptId = args['attempt_id'] as string;
         const item = this.items.get(args['work_item_id'] as string)!;
-        const serialized = JSON.stringify(args['signal']);
+        const signal = args['signal'] as { kind: string; sequence: number };
+        const serialized = JSON.stringify(signal);
         const previous = this.terminals.get(attemptId);
         if (previous !== undefined) {
           if (previous === serialized) return ok(item); // replay idempotente
           return fail('55000', 'attempt already finished with different signal');
         }
+        // Só result/error/cancelled são terminais persistíveis; decision_required é recusado.
+        if (!['result', 'error', 'cancelled'].includes(signal.kind)) return fail('22023', 'terminal signal correlation mismatch');
+        // Etapa 2B.1: o terminal vem depois do maior checkpoint persistido.
+        const maxCp = this.checkpointSeq.get(attemptId);
+        if (maxCp !== undefined && signal.sequence <= maxCp) return fail('55000', 'terminal sequence must follow the latest checkpoint');
         if (item.state !== 'in_progress') return fail('55000', 'work item state or proposal version changed');
-        const kind = (args['signal'] as { kind: string }).kind;
         this.terminals.set(attemptId, serialized);
-        item.state = kind === 'result' ? 'review' : kind === 'cancelled' ? 'cancelled' : 'failed';
+        item.state = signal.kind === 'result' ? 'review' : signal.kind === 'cancelled' ? 'cancelled' : 'failed';
         this.events.push({
           itemId: item.id, attemptId,
-          type: kind === 'result' ? 'result_submitted' : kind === 'cancelled' ? 'work_cancelled' : 'execution_failed',
+          type: signal.kind === 'result' ? 'result_submitted' : signal.kind === 'cancelled' ? 'work_cancelled' : 'execution_failed',
         });
         return ok(item);
+      }
+
+      case 'record_work_checkpoint': {
+        const attemptId = args['attempt_id'] as string;
+        const item = this.items.get(args['work_item_id'] as string)!;
+        const signal = args['signal'] as { kind: string; sequence: number; workItemId: string; attemptId: string };
+        if (this.options.failCheckpointAtSequence === signal.sequence) return fail('58000', 'persistência de checkpoint indisponível');
+        if (signal.attemptId !== attemptId || signal.workItemId !== item.id) return fail('22023', 'checkpoint signal correlation mismatch');
+        // Fato persistido: tentativa iniciada, sem terminal, item em execução.
+        if (!this.events.some(event => event.type === 'execution_started' && event.attemptId === attemptId)) return fail('P0002', 'attempt not found');
+        if (this.terminals.has(attemptId)) return fail('55000', 'attempt already finished');
+        if (item.state !== 'in_progress') return fail('55000', 'work item state or proposal version changed');
+        if (this.options.replayCheckpoints) return ok({ action: 'replayed', checkpoint_sequence: signal.sequence });
+        const serialized = JSON.stringify(signal);
+        const last = this.checkpointSeq.get(attemptId);
+        const key = `${attemptId}:${signal.sequence}`;
+        if (last !== undefined) {
+          if (signal.sequence < last) return fail('55000', 'checkpoint sequence regressed');
+          if (signal.sequence === last) {
+            return this.checkpointSignals.get(key) === serialized
+              ? ok({ action: 'replayed', checkpoint_sequence: signal.sequence })
+              : fail('55000', 'checkpoint conflict at the same sequence');
+          }
+        }
+        this.checkpointSeq.set(attemptId, signal.sequence);
+        this.checkpointSignals.set(key, serialized);
+        this.events.push({ itemId: item.id, type: 'checkpoint_recorded', attemptId });
+        return ok({ action: 'recorded', checkpoint_sequence: signal.sequence });
       }
 
       case 'release_work_claim': {
@@ -213,6 +253,42 @@ const throwingExecutor = (): WorkExecutorAdapter => ({
   // eslint-disable-next-line require-yield
   async *execute() { throw new Error('processo do runner morreu'); },
 });
+
+// ---------- executor roteirizado para a Etapa 2B.1 (progress/checkpoint/terminal) ----------
+
+const sampleCheckpoint = (nextStep: string): WorkCheckpointV1 => ({
+  schemaVersion: 1, handoffReference: 'runner-bundle:cp', completedSteps: ['feito'], remainingSteps: ['resta'],
+  nextStep, decisions: [], risks: [], touchedResources: [], validations: [{ label: 'testes', outcome: 'passed' }],
+  failures: [], evidenceReferences: [],
+});
+
+type SignalSpec = { readonly kind: 'progress' | 'checkpoint' | 'result' | 'error' | 'cancelled' };
+
+const attachSpec = (request: WorkExecutorRequest, sequence: number, spec: SignalSpec): WorkExecutorSignal => {
+  const base = { attemptId: request.attemptId, workItemId: request.workItemId, approvedProposalVersion: request.approvedProposalVersion, origin: 'executor' as const, sequence };
+  switch (spec.kind) {
+    case 'progress': return { ...base, kind: 'progress', message: `progresso ${sequence}` } as WorkExecutorSignal;
+    case 'checkpoint': return { ...base, kind: 'checkpoint', checkpoint: sampleCheckpoint(`passo ${sequence}`) } as WorkExecutorSignal;
+    case 'result': return { ...base, kind: 'result', summary: 'ok', resultReferences: [], validations: [{ label: 'testes', outcome: 'passed' }], limitations: [], handoffReference: 'runner-bundle:r' } as WorkExecutorSignal;
+    case 'cancelled': return { ...base, kind: 'cancelled', acknowledged: true, handoffReference: 'checkpoint:cancelled' } as WorkExecutorSignal;
+    default: return { ...base, kind: 'error', code: 'execution_failed', message: 'falhou', retryable: false, handoffReference: 'checkpoint:err' } as WorkExecutorSignal;
+  }
+};
+
+const scriptedExecutor = (specs: readonly SignalSpec[], opts: { readonly throwAtIndex?: number } = {}) => {
+  const calls: WorkExecutorRequest[] = [];
+  const adapter: WorkExecutorAdapter = {
+    id: 'local-runner-v1',
+    async *execute(request: WorkExecutorRequest) {
+      calls.push(request);
+      for (let index = 0; index < specs.length; index += 1) {
+        if (opts.throwAtIndex === index) throw new Error('processo do runner morreu');
+        yield attachSpec(request, index + 1, specs[index]!);
+      }
+    },
+  };
+  return { adapter, calls };
+};
 
 const ids = (values: readonly string[]) => { let index = 0; return () => values[index++]!; };
 
@@ -485,4 +561,127 @@ test('a volta nunca aceita, autoriza, integra ou aplica resultado algum', async 
   for (const forbidden of ['review_work_result', 'complete_work_review', 'resolve_approval']) {
     expect(database.calls).not.toContain(forbidden);
   }
+});
+
+describe('Etapa 2B.1 — persistência de checkpoint em stream', () => {
+  const readerItems = () => [workItem('item-1', { target: 'alvo-1' })];
+  const db = (extra: Partial<FakeOptions> = {}) =>
+    new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }], ...extra });
+
+  test('executor sem checkpoint não chama record_work_checkpoint e chega a review', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'progress' }, { kind: 'result' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_completed');
+    expect(database.calls).not.toContain('record_work_checkpoint');
+    expect(database.items.get('item-1')!.state).toBe('review');
+  });
+
+  test('checkpoint único é persistido ANTES do terminal', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'result' }]);
+    await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    const cpCall = database.calls.indexOf('record_work_checkpoint');
+    const termCall = database.calls.indexOf('record_commanded_work_terminal');
+    expect(cpCall).toBeGreaterThanOrEqual(0);
+    expect(cpCall).toBeLessThan(termCall);
+    const types = database.events.map(event => event.type);
+    expect(types.indexOf('checkpoint_recorded')).toBeLessThan(types.indexOf('result_submitted'));
+  });
+
+  test('múltiplos checkpoints persistidos na ordem; progress não vira checkpoint', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'progress' }, { kind: 'checkpoint' }, { kind: 'progress' }, { kind: 'checkpoint' }, { kind: 'result' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_completed');
+    expect(database.calls.filter(name => name === 'record_work_checkpoint')).toHaveLength(2);
+    expect(database.events.filter(event => event.type === 'checkpoint_recorded')).toHaveLength(2);
+    const termIndex = database.events.findIndex(event => event.type === 'result_submitted');
+    const cpIndexes = database.events.flatMap((event, index) => event.type === 'checkpoint_recorded' ? [index] : []);
+    expect(cpIndexes.every(index => index < termIndex)).toBe(true);
+  });
+
+  test('replay idempotente permite continuar até o terminal', async () => {
+    const database = db({ replayCheckpoints: true });
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'result' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_completed');
+    expect(database.items.get('item-1')!.state).toBe('review');
+    expect(database.events.filter(event => event.type === 'checkpoint_recorded')).toHaveLength(0);
+  });
+
+  test('falha de persistência de checkpoint interrompe: sem terminal, posse retida', async () => {
+    const database = db({ failCheckpointAtSequence: 2 });
+    const { adapter } = scriptedExecutor([{ kind: 'progress' }, { kind: 'checkpoint' }, { kind: 'result' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_interrupted');
+    expect(result.refusal?.code).toBe('checkpoint_persist_failed');
+    expect(result.requiresAnotherTurn).toBe(true);
+    expect(database.calls).not.toContain('record_commanded_work_terminal');
+    expect(database.calls).not.toContain('release_work_claim');
+    expect(database.claims.get('claim-1')!.released).toBe(false);
+    expect(database.items.get('item-1')!.state).toBe('in_progress');
+  });
+
+  test('executor lança após um checkpoint: o checkpoint permanece registrado, tentativa aberta', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'result' }], { throwAtIndex: 1 });
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_interrupted');
+    expect(result.refusal?.code).toBe('executor_threw');
+    expect(database.events.filter(event => event.type === 'checkpoint_recorded')).toHaveLength(1);
+    expect(database.calls).not.toContain('record_commanded_work_terminal');
+    expect(database.claims.get('claim-1')!.released).toBe(false);
+    expect(database.items.get('item-1')!.state).toBe('in_progress');
+  });
+
+  test('stream termina sem terminal: checkpoint permanece, tentativa aberta', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_interrupted');
+    expect(result.refusal?.code).toBe('executor_contract_violation');
+    expect(database.events.filter(event => event.type === 'checkpoint_recorded')).toHaveLength(1);
+    expect(database.calls).not.toContain('record_commanded_work_terminal');
+    expect(database.items.get('item-1')!.state).toBe('in_progress');
+  });
+
+  test('checkpoint depois do terminal é recusado pelo validador e não é persistido', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'result' }, { kind: 'checkpoint' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_interrupted');
+    expect(result.refusal?.code).toBe('executor_contract_violation');
+    expect(database.calls).not.toContain('record_work_checkpoint');
+    expect(database.calls).not.toContain('record_commanded_work_terminal');
+  });
+
+  test('terminal error após checkpoint chega a failed', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'error' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_failed');
+    expect(database.events.filter(event => event.type === 'checkpoint_recorded')).toHaveLength(1);
+    expect(database.items.get('item-1')!.state).toBe('failed');
+  });
+
+  test('terminal cancelled após checkpoint chega a cancelled, checkpoint preservado', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'cancelled' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_cancelled');
+    expect(database.events.filter(event => event.type === 'checkpoint_recorded')).toHaveLength(1);
+    expect(database.items.get('item-1')!.state).toBe('cancelled');
+  });
+
+  test('volta com checkpoint mantém requiresAnotherTurn e não aceita/integra resultado', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'result' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result.outcome).toBe('execution_completed');
+    expect(result.requiresAnotherTurn).toBe(true);
+    expect(result.claimReleased).toBe(true);
+    expect(database.items.get('item-1')!.state).toBe('review');
+    expect(database.events.map(event => event.type)).not.toContain('result_accepted');
+  });
 });
