@@ -8,7 +8,7 @@
 -- Prefixo de UUID livre: 84000000 (89/88 são do SUP-04, 92/95/97/99 do SUP-03/05).
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(24);
+SELECT plan(25);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('84000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','cp2a@test.invalid','',now(),'{}','{}',now(),now());
@@ -75,8 +75,10 @@ SELECT public.resolve_approval((SELECT id FROM i4),1,'approve','{}');
 SELECT public.acquire_work_claim((SELECT id FROM i4),1,'84000000-0000-0000-0000-0000000000c4','sup-4',3600);
 SELECT public.start_claimed_work_attempt('84000000-0000-0000-0000-0000000000c4','84000000-0000-0000-0000-0000000000a4','local-runner-v1');
 -- Vence o lease e reconcilia: o SUP-04 abandona a tentativa (item volta a approved).
+-- Recua acquired_at junto para preservar o CHECK (expires_at > acquired_at); o
+-- lease fica no passado (vencido) sem violar a restrição da tabela.
 SET LOCAL ROLE service_role;
-UPDATE public.work_claims SET expires_at = now() - interval '1 minute' WHERE id='84000000-0000-0000-0000-0000000000c4';
+UPDATE public.work_claims SET acquired_at = now() - interval '2 hours', expires_at = now() - interval '1 hour' WHERE id='84000000-0000-0000-0000-0000000000c4';
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','84000000-0000-0000-0000-000000000000',true);
 SELECT public.reconcile_supervised_work();
@@ -196,6 +198,13 @@ SELECT is((SELECT count(DISTINCT (payload->'data'->>'signal_sequence')) FROM pub
 SELECT ok(EXISTS(SELECT 1 FROM public.work_events WHERE work_item_id=(SELECT id FROM i1)
   AND event_type='checkpoint_recorded' AND (payload->'data'->>'signal_sequence')='2'),
   'o checkpoint mais antigo (seq 2) não foi apagado pelo mais novo');
+
+-- (7) latest_work_checkpoint exige allowlist, como as demais RPCs de orquestração.
+SELECT set_config('request.jwt.claim.sub','84000000-0000-0000-0000-0000000000ff',true);
+SELECT throws_ok(
+  $$ SELECT public.latest_work_checkpoint((SELECT id FROM i1),'84000000-0000-0000-0000-0000000000a1') $$,
+  '42501',NULL,'latest_work_checkpoint recusa usuário fora da allowlist');
+SELECT set_config('request.jwt.claim.sub','84000000-0000-0000-0000-000000000000',true);
 
 SELECT * FROM finish();
 ROLLBACK;
