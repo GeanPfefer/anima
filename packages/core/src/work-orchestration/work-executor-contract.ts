@@ -14,6 +14,16 @@ export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
   readonly validationCriteria: readonly AutonomousValidationCriterion[];
   readonly limits: AutonomousExecutionLimits;
   readonly contextReferences: readonly WorkContextReference[];
+  /** Contexto informativo de uma tentativa anterior; nunca amplia permissões. */
+  readonly carriedContext?: {
+    readonly isNewAttempt: true;
+    readonly continueFromCheckpoint: true;
+    readonly remainingSteps: readonly string[];
+    readonly nextStep: string;
+    readonly risks: readonly string[];
+    readonly touchedResources: readonly string[];
+    readonly previousFailures: readonly string[];
+  };
 }
 
 // WorkCheckpointV1 — AUTO-04/AUTO-05: snapshot estruturado de uma tentativa

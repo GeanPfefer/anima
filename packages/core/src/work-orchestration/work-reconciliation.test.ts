@@ -265,7 +265,7 @@ describe('SUP-04 destrava o AUTO-05 sem atropelá-lo', () => {
 
   it('o AUTO-05 recusa retomar item em execução, apontando para a reconciliação', () => {
     const decision = planWorkResumption({
-      item, scenario: 'machine_restart', lastHandoff: null, openClaim: vencido,
+      item, source: { kind: 'terminal_handoff', scenario: 'machine_restart', handoff: null }, openClaim: vencido,
       previousAttemptIds: ['attempt-1'], nextAttemptId: 'attempt-2', nextClaimId: 'claim-2', now: at(60),
     });
     expect(decision.outcome).toBe('refused');
@@ -279,7 +279,7 @@ describe('SUP-04 destrava o AUTO-05 sem atropelá-lo', () => {
     // autoriza retomar; são duas decisões distintas e ambas precisam passar.
     const resumption = planWorkResumption({
       item: makeItem({ state: reconciled.resultingState }),
-      scenario: 'machine_restart', lastHandoff: null, openClaim: null,
+      source: { kind: 'terminal_handoff', scenario: 'machine_restart', handoff: null }, openClaim: null,
       previousAttemptIds: ['attempt-1'], nextAttemptId: 'attempt-2', nextClaimId: 'claim-2', now: at(60),
     });
     expect(resumption.outcome).toBe('refused');

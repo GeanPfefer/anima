@@ -1,4 +1,5 @@
 import {
+  type AbandonedCheckpointV1,
   INTERRUPTION_SCENARIOS,
   buildWorkHandoff,
   describesRecoverableInterruption,
@@ -61,10 +62,26 @@ const claim = (overrides: Partial<WorkClaim> = {}): WorkClaim => ({
   acquiredAt: T0, expiresAt: at(300), attemptId: 'attempt-1', release: null, ...overrides,
 });
 
+const abandonedCheckpoint = (overrides: Partial<AbandonedCheckpointV1> = {}): AbandonedCheckpointV1 => ({
+  schemaVersion: 1, workItemId: 'item-1', sourceAttemptId: 'attempt-1', sourceClaimId: 'claim-1',
+  approvedProposalVersion: 2, checkpointEventSeq: 40, checkpointSignalSequence: 4, abandonmentEventSeq: 41,
+  handoffReference: HANDOFF_REF, completedSteps: ['isolou a workspace'],
+  remainingSteps: ['corrigir o operador de soma'], nextStep: 'corrigir e testar',
+  decisions: ['manter assinatura'], risks: ['cobertura parcial'], touchedResources: ['calculator.py'],
+  validations: [{ label: 'python -m unittest', outcome: 'failed' }],
+  failures: ['AssertionError'], evidenceReferences: ['runner-evidence:1'],
+  abandonmentReason: 'lease_expired', abandonedAt: at(400).toISOString(), ...overrides,
+});
+
+const abandonedSource = (checkpoint: AbandonedCheckpointV1 | null = abandonedCheckpoint()) => ({
+  kind: 'abandoned_checkpoint' as const, checkpoint, sourceAttemptId: 'attempt-1', sourceClaimId: 'claim-1',
+  approvedProposalVersion: 2, abandonmentEventSeq: 41, abandonmentReason: 'lease_expired' as const,
+  abandonedAt: at(400).toISOString(),
+});
+
 const makeInput = (overrides: Partial<WorkResumptionInput> = {}): WorkResumptionInput => ({
   item: makeItem(),
-  scenario: 'machine_restart',
-  lastHandoff: makeHandoff(),
+  source: { kind: 'terminal_handoff', scenario: 'machine_restart', handoff: makeHandoff() },
   openClaim: null,
   previousAttemptIds: ['attempt-1'],
   nextAttemptId: 'attempt-2',
@@ -81,7 +98,7 @@ describe('retomada — todo cenário do Marco 003 tem caminho', () => {
     ]));
 
   test.each<InterruptionScenario>([...INTERRUPTION_SCENARIOS])('%s retoma pelo checkpoint persistido', scenario => {
-    const decision = planWorkResumption(makeInput({ scenario }));
+    const decision = planWorkResumption(makeInput({ source: { kind: 'terminal_handoff', scenario, handoff: makeHandoff() } }));
     expect(decision).toMatchObject({
       outcome: 'resume',
       plan: { scenario, resumeFromAttemptId: 'attempt-1', resumeFromHandoffReference: HANDOFF_REF, attemptNumber: 2 },
@@ -92,13 +109,13 @@ describe('retomada — todo cenário do Marco 003 tem caminho', () => {
     expect(describesRecoverableInterruption(scenario)).toBe(true));
 
   test('cenário fora da lista é defeito', () =>
-    expect(planWorkResumption(makeInput({ scenario: 'gato_no_teclado' as InterruptionScenario })))
+    expect(planWorkResumption(makeInput({ source: { kind: 'terminal_handoff', scenario: 'gato_no_teclado' as InterruptionScenario, handoff: makeHandoff() } })))
       .toMatchObject({ outcome: 'refused', reason: 'scenario_not_allowed' }));
 });
 
 describe('retomada — parte do checkpoint, nunca da memória', () => {
   test('sem checkpoint não se retoma: exige reparação ou decisão humana', () =>
-    expect(planWorkResumption(makeInput({ lastHandoff: null })))
+    expect(planWorkResumption(makeInput({ source: { kind: 'terminal_handoff', scenario: 'machine_restart', handoff: null } })))
       .toMatchObject({ outcome: 'refused', reason: 'checkpoint_missing' }));
 
   test('o contexto carregado vem exclusivamente do handoff persistido', () => {
@@ -124,13 +141,47 @@ describe('retomada — parte do checkpoint, nunca da memória', () => {
 
   test('checkpoint de outro item é recusado', () => {
     const alheio = { ...makeHandoff(), workItemId: 'item-9' };
-    expect(planWorkResumption(makeInput({ lastHandoff: alheio })))
+    expect(planWorkResumption(makeInput({ source: { kind: 'terminal_handoff', scenario: 'machine_restart', handoff: alheio } })))
       .toMatchObject({ outcome: 'refused', reason: 'checkpoint_correlation_mismatch' });
   });
 
   test('checkpoint de tentativa ausente do histórico é recusado', () =>
     expect(planWorkResumption(makeInput({ previousAttemptIds: ['attempt-outra'] })))
       .toMatchObject({ outcome: 'refused', reason: 'checkpoint_correlation_mismatch' }));
+});
+
+describe('retomada — fonte de checkpoint abandonado', () => {
+  test('checkpoint abandonado válido autoriza sem cenário externo', () =>
+    expect(planWorkResumption(makeInput({ source: abandonedSource() }))).toMatchObject({
+      outcome: 'resume',
+      plan: {
+        sourceKind: 'abandoned_checkpoint', abandonmentReason: 'lease_expired',
+        resumeFromAttemptId: 'attempt-1', resumeFromCheckpointEventSeq: 40,
+        resumeFromCheckpointSignalSequence: 4,
+      },
+    }));
+
+  test('abandono sem checkpoint exige humano e não executa do zero', () =>
+    expect(planWorkResumption(makeInput({ source: abandonedSource(null) })))
+      .toMatchObject({ outcome: 'requires_human' }));
+
+  test('razão de abandono fora do vocabulário é recusada', () =>
+    expect(planWorkResumption(makeInput({
+      source: { ...abandonedSource(), abandonmentReason: 'machine_restart' },
+    }))).toMatchObject({ outcome: 'refused', reason: 'invalid_resumption_request' }));
+
+  test('checkpoint isolado sem prova de abandono correlacionada é recusado', () =>
+    expect(planWorkResumption(makeInput({
+      source: { ...abandonedSource(), abandonmentEventSeq: 99 },
+    }))).toMatchObject({ outcome: 'refused', reason: 'checkpoint_correlation_mismatch' }));
+
+  test('não fabrica status, stopReason ou cenário externo', () => {
+    const decision = planWorkResumption(makeInput({ source: abandonedSource() }));
+    if (decision.outcome !== 'resume') throw new Error('esperava retomada');
+    expect(decision.plan).not.toHaveProperty('status');
+    expect(decision.plan).not.toHaveProperty('stopReason');
+    expect(decision.plan).not.toHaveProperty('scenario');
+  });
 });
 
 describe('retomada — escopo aprovado não muda', () => {
@@ -234,7 +285,7 @@ describe('retomada — planejar não produz efeito', () => {
   test('planejar não altera o checkpoint de origem', () => {
     const handoff = makeHandoff();
     const snapshot = JSON.stringify(handoff);
-    planWorkResumption(makeInput({ lastHandoff: handoff }));
+    planWorkResumption(makeInput({ source: { kind: 'terminal_handoff', scenario: 'machine_restart', handoff } }));
     expect(JSON.stringify(handoff)).toBe(snapshot);
   });
 

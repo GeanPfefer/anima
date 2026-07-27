@@ -1,6 +1,6 @@
 import { evaluateAutonomousEligibility } from './eligibility';
 import type { AutonomousLimitKind, HumanInterruptionReason } from './human-interruption';
-import type { ProposalVersion, WorkItem, WorkItemId } from './types';
+import type { ProposalVersion, WorkItem, WorkItemId, WorkResultValidation } from './types';
 import { deriveWorkClaimStatus, type WorkClaim, type WorkClaimId } from './work-claim';
 import type { WorkHandoffV1 } from './work-handoff';
 
@@ -28,6 +28,45 @@ export const INTERRUPTION_SCENARIOS = [
 
 export type InterruptionScenario = (typeof INTERRUPTION_SCENARIOS)[number];
 
+export const ABANDONMENT_REASONS = ['lease_expired', 'duration_limit_exceeded', 'declared_bounds_exceeded'] as const;
+export type WorkAbandonmentReason = (typeof ABANDONMENT_REASONS)[number];
+
+export interface AbandonedCheckpointV1 {
+  readonly schemaVersion: 1;
+  readonly workItemId: WorkItemId;
+  readonly sourceAttemptId: string;
+  readonly sourceClaimId: WorkClaimId | null;
+  readonly approvedProposalVersion: ProposalVersion;
+  readonly checkpointEventSeq: number;
+  readonly checkpointSignalSequence: number;
+  readonly abandonmentEventSeq: number;
+  readonly handoffReference: string;
+  readonly completedSteps: readonly string[];
+  readonly remainingSteps: readonly string[];
+  readonly nextStep: string;
+  readonly decisions: readonly string[];
+  readonly risks: readonly string[];
+  readonly touchedResources: readonly string[];
+  readonly validations: readonly WorkResultValidation[];
+  readonly failures: readonly string[];
+  readonly evidenceReferences: readonly string[];
+  readonly abandonmentReason: WorkAbandonmentReason;
+  readonly abandonedAt: string;
+}
+
+export type WorkResumptionSourceV1 =
+  | { readonly kind: 'terminal_handoff'; readonly handoff: WorkHandoffV1 | null; readonly scenario: InterruptionScenario }
+  | {
+      readonly kind: 'abandoned_checkpoint';
+      readonly checkpoint: AbandonedCheckpointV1 | null;
+      readonly sourceAttemptId: string;
+      readonly sourceClaimId: WorkClaimId | null;
+      readonly approvedProposalVersion: ProposalVersion;
+      readonly abandonmentEventSeq: number;
+      readonly abandonmentReason: WorkAbandonmentReason | string;
+      readonly abandonedAt: string;
+    };
+
 export type WorkResumptionRefusal =
   | 'scenario_not_allowed'
   | 'checkpoint_missing'
@@ -40,9 +79,8 @@ export type WorkResumptionRefusal =
 
 export interface WorkResumptionInput {
   readonly item: WorkItem;
-  readonly scenario: InterruptionScenario;
+  readonly source: WorkResumptionSourceV1;
   // Último handoff produzido — o checkpoint a partir do qual se retoma.
-  readonly lastHandoff: WorkHandoffV1 | null;
   // Claim ainda não liberado do item, se houver.
   readonly openClaim: WorkClaim | null;
   // Tentativas já registradas para este item, na ordem em que ocorreram.
@@ -55,7 +93,11 @@ export interface WorkResumptionInput {
 export interface WorkResumptionPlan {
   readonly workItemId: WorkItemId;
   readonly approvedProposalVersion: ProposalVersion;
-  readonly scenario: InterruptionScenario;
+  readonly sourceKind: WorkResumptionSourceV1['kind'];
+  readonly scenario?: InterruptionScenario;
+  readonly abandonmentReason?: WorkAbandonmentReason;
+  readonly resumeFromCheckpointEventSeq?: number;
+  readonly resumeFromCheckpointSignalSequence?: number;
   // De onde se retoma: sempre uma referência persistida, nunca memória.
   readonly resumeFromAttemptId: string;
   readonly resumeFromHandoffReference: string;
@@ -111,10 +153,10 @@ const resumableStates: ReadonlySet<string> = new Set(['approved']);
  * - insiste depois do limite de tentativas — aí a saída é interrupção humana.
  */
 export function planWorkResumption(input: WorkResumptionInput): WorkResumptionDecision {
-  const { item, scenario, lastHandoff, openClaim, previousAttemptIds, nextAttemptId, nextClaimId, now } = input;
-
-  if (!scenarios.has(scenario)) {
-    return refuse('scenario_not_allowed', `"${String(scenario)}" não é um cenário de interrupção reconhecido pelo Marco 003.`);
+  const { item, source, openClaim, previousAttemptIds, nextAttemptId, nextClaimId, now } = input;
+  const terminal = source.kind === 'terminal_handoff';
+  if (terminal && !scenarios.has(source.scenario)) {
+    return refuse('scenario_not_allowed', `"${String(source.scenario)}" não é um cenário de interrupção reconhecido pelo Marco 003.`);
   }
   if (!nonBlank(nextAttemptId) || !nonBlank(nextClaimId) || !Array.isArray(previousAttemptIds)) {
     return refuse('invalid_resumption_request', 'A retomada exige identificadores novos e histórico de tentativas.');
@@ -123,26 +165,49 @@ export function planWorkResumption(input: WorkResumptionInput): WorkResumptionDe
     return refuse('identifier_reused', 'A retomada exige uma tentativa nova; reaproveitar o identificador duplicaria efeitos.');
   }
 
-  if (lastHandoff === null) {
-    return refuse(
-      'checkpoint_missing',
-      'Não há checkpoint persistido: retomar seria reconstruir por suposição. O caso exige reparação ou decisão humana.',
-    );
+  if (!terminal && !ABANDONMENT_REASONS.includes(source.abandonmentReason as WorkAbandonmentReason)) {
+    return refuse('invalid_resumption_request', 'A razão persistida do abandono não pertence ao vocabulário fechado.');
   }
-  if (lastHandoff.workItemId !== item.id) {
+  const checkpoint: WorkHandoffV1 | AbandonedCheckpointV1 | null =
+    source.kind === 'terminal_handoff' ? source.handoff : source.checkpoint;
+  if (checkpoint === null) {
+    return terminal
+      ? refuse('checkpoint_missing', 'Não há checkpoint persistido: retomar seria reconstruir por suposição.')
+      : {
+          outcome: 'requires_human', reason: 'persistent_inability_after_limits', reachedLimit: 'duration',
+          explanation: 'A tentativa foi abandonada sem checkpoint persistido; continuar do zero exige decisão humana.',
+        };
+  }
+  const abandonedCheckpoint = source.kind === 'abandoned_checkpoint' ? source.checkpoint : null;
+  const checkpointAttemptId = source.kind === 'terminal_handoff' ? source.handoff!.attemptId : source.checkpoint!.sourceAttemptId;
+  const checkpointClaimId = source.kind === 'terminal_handoff' ? source.handoff!.claimId : source.checkpoint!.sourceClaimId;
+  if (checkpoint.workItemId !== item.id) {
     return refuse('checkpoint_correlation_mismatch', 'O checkpoint pertence a outro work item.');
   }
-  if (lastHandoff.approvedProposalVersion !== item.proposalVersion) {
+  if (checkpoint.approvedProposalVersion !== item.proposalVersion) {
     return refuse(
       'checkpoint_correlation_mismatch',
-      `O checkpoint foi produzido sobre a versão ${lastHandoff.approvedProposalVersion} e a proposta vigente é a ${item.proposalVersion}; retomar ali mudaria o escopo aprovado.`,
+      `O checkpoint foi produzido sobre a versão ${checkpoint.approvedProposalVersion} e a proposta vigente é a ${item.proposalVersion}; retomar ali mudaria o escopo aprovado.`,
     );
   }
-  if (lastHandoff.claimId !== null && nextClaimId === lastHandoff.claimId) {
+  if (checkpointClaimId !== null && nextClaimId === checkpointClaimId) {
     return refuse('identifier_reused', 'A retomada exige claim novo; o claim anterior não é renovado nem reaproveitado.');
   }
-  if (!previousAttemptIds.includes(lastHandoff.attemptId)) {
+  if (!previousAttemptIds.includes(checkpointAttemptId)) {
     return refuse('checkpoint_correlation_mismatch', 'O checkpoint aponta uma tentativa ausente do histórico do item.');
+  }
+  if (source.kind === 'abandoned_checkpoint' && abandonedCheckpoint !== null && (
+    source.sourceAttemptId !== abandonedCheckpoint.sourceAttemptId
+    || source.sourceClaimId !== abandonedCheckpoint.sourceClaimId
+    || source.approvedProposalVersion !== abandonedCheckpoint.approvedProposalVersion
+    || source.abandonmentEventSeq !== abandonedCheckpoint.abandonmentEventSeq
+    || source.abandonmentReason !== abandonedCheckpoint.abandonmentReason
+    || source.abandonedAt !== abandonedCheckpoint.abandonedAt
+    || !Number.isInteger(abandonedCheckpoint.checkpointEventSeq) || abandonedCheckpoint.checkpointEventSeq < 1
+    || !Number.isInteger(abandonedCheckpoint.checkpointSignalSequence) || abandonedCheckpoint.checkpointSignalSequence < 1
+    || !Number.isInteger(abandonedCheckpoint.abandonmentEventSeq) || abandonedCheckpoint.abandonmentEventSeq < 1
+  )) {
+    return refuse('checkpoint_correlation_mismatch', 'A prova de abandono e o checkpoint não possuem a mesma correlação persistida.');
   }
 
   if (openClaim !== null && deriveWorkClaimStatus(openClaim, now) === 'active') {
@@ -181,19 +246,24 @@ export function planWorkResumption(input: WorkResumptionInput): WorkResumptionDe
     plan: {
       workItemId: item.id,
       approvedProposalVersion: item.proposalVersion,
-      scenario,
-      resumeFromAttemptId: lastHandoff.attemptId,
-      resumeFromHandoffReference: lastHandoff.handoffReference,
+      sourceKind: source.kind,
+      ...(source.kind === 'terminal_handoff' ? { scenario: source.scenario } : {
+        abandonmentReason: source.checkpoint!.abandonmentReason,
+        resumeFromCheckpointEventSeq: source.checkpoint!.checkpointEventSeq,
+        resumeFromCheckpointSignalSequence: source.checkpoint!.checkpointSignalSequence,
+      }),
+      resumeFromAttemptId: checkpointAttemptId,
+      resumeFromHandoffReference: checkpoint.handoffReference,
       nextAttemptId,
       nextClaimId,
       attemptNumber,
       // Estritamente o que foi persistido no handoff. Nada de contexto de sessão.
       carriedContext: {
-        remainingSteps: lastHandoff.remainingSteps,
-        nextStep: lastHandoff.nextStep,
-        risks: lastHandoff.risks,
-        touchedResources: lastHandoff.touchedResources,
-        previousFailures: lastHandoff.failures,
+        remainingSteps: checkpoint.remainingSteps,
+        nextStep: checkpoint.nextStep,
+        risks: checkpoint.risks,
+        touchedResources: checkpoint.touchedResources,
+        previousFailures: checkpoint.failures,
       },
     },
   };
