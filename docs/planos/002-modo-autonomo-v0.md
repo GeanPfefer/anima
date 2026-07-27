@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | SUP-01 a SUP-05 completos e ratificados. O **laço operacional** e a **persistência de checkpoint (Etapa 2A)** foram implementados, provados em base real e **ratificados (2026-07-26)**. A **persistência de checkpoint em stream no laço (Etapa 2B.1)** foi implementada, provada ao vivo contra o Supabase local e **ratificada (2026-07-26)** — ver "Ratificação da Etapa 2B.1". Resta a **retomada real do AUTO-05 (Etapa 2B.2)**, **não iniciada**: ler `latest_work_checkpoint`, projetar para `WorkHandoffV1`, chamar `planWorkResumption` e criar a nova tentativa/claim de retomada |
+| E | **Em andamento** | SUP-01 a SUP-05, laço operacional, Etapa 2A e Etapa 2B.1 completos e ratificados. A **retomada real do AUTO-05 (Etapa 2B.2)** está implementada em código e aguarda ratificação após as provas completas. Ela usa `WorkResumptionSourceV1.abandoned_checkpoint`, sem projetar abandono como `WorkHandoffV1` terminal nem inventar causa externa. |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 

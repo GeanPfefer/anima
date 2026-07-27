@@ -523,7 +523,19 @@ O laço operacional passa a **consumir a transcrição do executor incrementalme
 
 A guarda de sequência do terminal foi corrigida: `record_commanded_work_terminal` não exige mais `sequence == 1`. A `sequence` pertence à transcrição inteira, então o terminal pode vir depois de `progress` e `checkpoint`. O menor contrato persistente passa a exigir `sequence` inteiro positivo e, quando há checkpoint persistido em N, `sequence > N` (`sequence <= N` recusa fail-closed). `progress` não é persistido, logo **lacunas** entre o maior checkpoint e o terminal são legítimas — não se exige `terminal == checkpoint + 1`. A continuidade completa da transcrição continua sendo do `validateWorkExecutorTranscript`, no processo que consome o stream, não do banco. A guarda entra **depois** do replay idempotente e da recusa de tentativa abandonada (SUP-04), que permanecem; o `signal_sequence` gravado passa a ser o real do terminal.
 
-Ainda **fora** desta etapa (2B.2 e adiante): ler `latest_work_checkpoint` para retomar, projetar para `WorkHandoffV1`, `planWorkResumption`, `resumed_from_attempt_id`, `reason = 'resumed_execution'`, a criação de nova tentativa/claim de retomada e qualquer produtor real de checkpoints (o `LocalRunnerAdapter` segue emitindo zero).
+Naquele marco ainda ficavam fora a retomada real (entregue na Etapa 2B.2 abaixo) e qualquer produtor real de checkpoints; o `LocalRunnerAdapter` segue emitindo zero.
+
+## Retomada real após abandono (Etapa 2B.2)
+
+`WorkHandoffV1` permanece exclusivamente o handoff de um `TerminalExecutionAttempt`. A retomada após SUP-04 não fabrica `status`, `stopReason` nem causa externa: `planWorkResumption` recebeu a fonte discriminada `WorkResumptionSourceV1`, com os ramos `terminal_handoff` (comportamento anterior preservado) e `abandoned_checkpoint`.
+
+`AbandonedCheckpointV1` é uma projeção apenas de fatos append-only: tentativa e claim de origem, versão aprovada, `seq` dos eventos de checkpoint e abandono, `signal_sequence`, conteúdo do checkpoint, razão técnica fechada do abandono e instante persistido. `lease_expired`, `duration_limit_exceeded` e `declared_bounds_exceeded` são fatos operacionais; não são convertidos em `machine_restart`, `network_failure` ou outro `InterruptionScenario`.
+
+`abandoned_work_resumption_source` distingue item nunca executado de tentativa abandonada, seleciona o maior checkpoint válido anterior ao abandono e preserva ausência como `checkpoint: null`. O laço chama `planWorkResumption`; ausência na fonte abandonada exige humano e nunca cai no início normal.
+
+`begin_resumed_work_attempt` é a fronteira atômica final. Sob lock do item e lock consultivo do alvo, ela revalida estado `approved`, versão, evento `attempt_abandoned`, checkpoint escolhido e sua maximalidade, IDs novos e ausência de ocupação; então cria claim e tentativa novos. `work_started` e `execution_started` registram `reason = resumed_execution`, tentativa de origem, sequência e `seq` do checkpoint e `seq` do abandono. A tentativa e o checkpoint anteriores permanecem intactos.
+
+O executor recebe `carriedContext` informativo com restante, próximo passo, riscos, recursos tocados e falhas anteriores, marcando explicitamente nova tentativa e continuação do checkpoint. Esse contexto não amplia permissões. O máximo da volta continua sendo `review`; aceite e integração não são derivados.
 
 ## Fora de escopo desta fundação
 
