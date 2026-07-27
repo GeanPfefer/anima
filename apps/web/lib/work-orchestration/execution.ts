@@ -72,22 +72,74 @@ export const buildExecutorRequest = ({ item, spec, attemptId, contextReferences 
 
 export type ExecutorRun =
   | { readonly ok: true; readonly terminal: WorkExecutorSignal }
-  // Transcrição inválida: o executor falou, mas fora do contrato. Não existe
-  // terminal confiável para gravar — inventar um seria afirmar o não observado.
-  | { readonly ok: false; readonly defect: string };
+  // Falha antes de um terminal confiável. `cause` distingue transcrição inválida
+  // (fora do contrato do INT-01) de falha ao persistir um checkpoint mid-flight.
+  // Em ambos não existe terminal confiável — inventar um seria afirmar o não
+  // observado —, então a tentativa fica aberta para o SUP-04.
+  | { readonly ok: false; readonly defect: string; readonly cause: 'transcript' | 'checkpoint' };
 
-/** Consome a transcrição inteira do executor e valida o contrato fechado do INT-01. */
-export const runExecutorOnce = async (
+/**
+ * Porta de persistência de checkpoints mid-flight. O laço injeta a implementação
+ * real (uma RPC); o consumidor genérico não conhece o transporte nem o Supabase.
+ */
+export interface CheckpointSink {
+  /** Persiste um checkpoint recebido, ANTES de consumir o próximo sinal. */
+  persistCheckpoint(signal: WorkExecutorSignal): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
+  /** progress não é persistido nesta etapa; só observabilidade opcional. */
+  observeProgress?(signal: WorkExecutorSignal): void;
+}
+
+/**
+ * Consome a transcrição do executor INCREMENTALMENTE e persiste cada checkpoint
+ * assim que chega, antes do próximo sinal — para que uma tentativa cujo processo
+ * morra antes do terminal preserve todos os checkpoints já confirmados.
+ *
+ * - `progress`: não-terminal, não persistido (só observado);
+ * - `checkpoint`: persistido imediatamente; falha na persistência interrompe o
+ *   consumo e devolve `cause: 'checkpoint'`, sem processar terminal e sem
+ *   inventar desfecho;
+ * - terminal único: nada é aceito depois dele; a transcrição inteira é validada
+ *   pelo contrato fechado do INT-01 (sequência, correlação, terminal único).
+ */
+export const runExecutorStreamed = async (
   adapter: WorkExecutorAdapter,
   request: WorkExecutorRequest,
   signal: AbortSignal,
+  sink: CheckpointSink,
 ): Promise<ExecutorRun> => {
   const signals: WorkExecutorSignal[] = [];
-  for await (const value of adapter.execute(request, signal)) signals.push(value);
+  let terminalSeen = false;
+  for await (const value of adapter.execute(request, signal)) {
+    signals.push(value);
+    // Depois de um terminal, apenas acumula: o validador rejeita qualquer sinal
+    // que o suceda, e nenhum checkpoint tardio é persistido.
+    if (terminalSeen) continue;
+    if (value.kind === 'checkpoint') {
+      const persisted = await sink.persistCheckpoint(value);
+      if (!persisted.ok) return { ok: false, defect: persisted.message, cause: 'checkpoint' };
+      continue;
+    }
+    if (value.kind === 'progress') { sink.observeProgress?.(value); continue; }
+    terminalSeen = true;
+  }
   const defect = validateWorkExecutorTranscript(signals);
-  if (defect) return { ok: false, defect };
+  if (defect) return { ok: false, defect, cause: 'transcript' };
   return { ok: true, terminal: signals.at(-1)! };
 };
+
+// Caminho comandado (INT-04): single-shot, sem persistir checkpoints mid-flight.
+// Rejeita fail-closed qualquer checkpoint que apareça — o LocalRunnerAdapter
+// emite zero, então na prática o consumo é idêntico ao anterior.
+const rejectCheckpoints: CheckpointSink = {
+  persistCheckpoint: async () => ({ ok: false, message: 'Checkpoints mid-flight não são persistidos no caminho comandado.' }),
+};
+
+/** Consome a transcrição inteira do executor e valida o contrato fechado do INT-01. */
+export const runExecutorOnce = (
+  adapter: WorkExecutorAdapter,
+  request: WorkExecutorRequest,
+  signal: AbortSignal,
+): Promise<ExecutorRun> => runExecutorStreamed(adapter, request, signal, rejectCheckpoints);
 
 /**
  * Fronteira ratificada de término da tentativa.

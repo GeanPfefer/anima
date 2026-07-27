@@ -1203,6 +1203,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      latest_work_checkpoint: {
+        Args: { p_attempt_id: string; p_work_item_id: string }
+        Returns: Json
+      }
       lifegame_get_level_from_xp: {
         Args: { p_total_xp: number }
         Returns: number
@@ -1275,6 +1279,15 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      record_work_checkpoint: {
+        Args: {
+          attempt_id: string
+          expected_proposal_version: number
+          signal: Json
+          work_item_id: string
+        }
+        Returns: Json
       }
       release_work_claim: {
         Args: { claim_id: string; reason: string }
@@ -1639,6 +1652,7 @@ export type Database = {
         | "work_claimed"
         | "work_claim_released"
         | "attempt_abandoned"
+        | "checkpoint_recorded"
       work_impact_level:
         | "low"
         | "significant"
@@ -1957,6 +1971,7 @@ export const Constants = {
         "work_claimed",
         "work_claim_released",
         "attempt_abandoned",
+        "checkpoint_recorded",
       ],
       work_impact_level: [
         "low",

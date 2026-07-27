@@ -3,9 +3,9 @@ import {
   type AutonomousEligibilityGap,
   type WorkExecutorAdapter,
 } from '@anima/core';
-import type { Database } from '@anima/types';
+import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { buildExecutorRequest, recordExecutionTerminal, runExecutorOnce } from './execution';
+import { buildExecutorRequest, recordExecutionTerminal, runExecutorStreamed, type CheckpointSink } from './execution';
 import { createWorkOrchestrationService } from './server';
 
 // ============================================================
@@ -192,25 +192,44 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   }
   const running = { ...started, claimId, attemptId };
 
-  // ---------- (6) Execução real ----------
+  // ---------- (6) Execução real, com persistência de checkpoint em stream ----------
   const request = buildExecutorRequest({
     item: item.value, spec: eligibility.spec, attemptId,
     contextReferences: contexts.value.at(-1)?.references ?? [],
   });
+  // Porta de persistência: cada checkpoint é gravado IMEDIATAMENTE, antes do
+  // próximo sinal. Replay idempotente (`record_work_checkpoint`) não devolve
+  // erro, então o consumo segue normalmente; falha de persistência interrompe
+  // fechado, sem processar terminal.
+  const checkpointSink: CheckpointSink = {
+    persistCheckpoint: async (checkpoint) => {
+      const persisted = await client.rpc('record_work_checkpoint', {
+        work_item_id: selection.workItemId,
+        expected_proposal_version: selection.approvedProposalVersion,
+        attempt_id: attemptId,
+        signal: checkpoint as unknown as Json,
+      });
+      return persisted.error ? { ok: false, message: persisted.error.message } : { ok: true };
+    },
+  };
   let run;
   try {
-    run = await runExecutorOnce(adapter, request, signal);
+    run = await runExecutorStreamed(adapter, request, signal, checkpointSink);
   } catch (cause) {
-    // Tentativa aberta sem desfecho observado. A posse NÃO é liberada e nenhum
-    // terminal é inventado: esta é a órfã que o SUP-04 sabe reconciliar por
-    // limite persistido. Liberar aqui contradiria o estado gravado.
+    // Tentativa aberta sem desfecho observado; os checkpoints já confirmados
+    // permanecem persistidos. A posse NÃO é liberada e nenhum terminal é
+    // inventado: é a órfã que o SUP-04 reconcilia por limite persistido.
     return {
       ...running, outcome: 'execution_interrupted',
       refusal: { code: 'executor_threw', message: cause instanceof Error ? cause.message : 'Falha não tipada do executor.' },
     };
   }
   if (!run.ok) {
-    return { ...running, outcome: 'execution_interrupted', refusal: { code: 'executor_contract_violation', message: run.defect } };
+    // `checkpoint`: a persistência falhou no meio do stream; `transcript`: fora
+    // do contrato do INT-01. Nos dois, a tentativa fica aberta para o SUP-04,
+    // com a posse retida e sem terminal — os checkpoints confirmados permanecem.
+    const code = run.cause === 'checkpoint' ? 'checkpoint_persist_failed' : 'executor_contract_violation';
+    return { ...running, outcome: 'execution_interrupted', refusal: { code, message: run.defect } };
   }
 
   // ---------- (7) Terminal pela fronteira ratificada ----------
