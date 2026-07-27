@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | SUP-01 a SUP-05 completos e ratificados. O **laço operacional** (SUP-02 + AUTO-02 compostos) foi implementado, comprovado ao vivo e **ratificado (2026-07-26)** — ver "Ratificação do laço operacional". Resta a comprovação do AUTO-05 em retomada real, **não iniciada**, bloqueada pela persistência de `WorkHandoffV1`, que é tarefa separada com checkpoint humano |
+| E | **Em andamento** | SUP-01 a SUP-05 completos e ratificados. O **laço operacional** foi implementado, comprovado ao vivo e **ratificado (2026-07-26)** — ver "Ratificação do laço operacional". A **persistência de checkpoint (Etapa 2A)** foi implementada, provada em base real e **ratificada (2026-07-26)** — ver "Ratificação da Etapa 2A". Resta a **retomada real do AUTO-05 (Etapa 2B)**, **não iniciada**, que costura o laço à reconstrução do checkpoint e cria a nova tentativa |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -399,6 +399,31 @@ A revisão humana **aprovou, ratificou e encerrou** o laço operacional. Registr
 **Confirmações de segurança desta ratificação:** nenhum código funcional foi alterado; nenhuma migration foi tocada; `private.begin_work_attempt`, SUP-04 e SUP-05 permanecem idênticos; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum merge, push, deploy ou `db reset`.
 
 **Consequência para a Fase E:** o laço está ratificado como o **mecanismo de execução da V0**. Ele é seguro contra órfãs por composição com o SUP-04, mas **não retoma** trabalho pausado enquanto o handoff estruturado não for persistido. A Fase E **permanece aberta** por uma única pendência nomeada — a retomada real do AUTO-05, bloqueada pela persistência de `WorkHandoffV1` (tarefa separada, com checkpoint humano).
+
+### Ratificação da Etapa 2A — persistência de checkpoint (2026-07-26)
+
+A revisão humana **aprovou, ratificou e encerrou** a Etapa 2A da persistência de handoff/checkpoint. Registro append-only: nenhuma seção anterior foi reescrita.
+
+**Provas ambientais frescas (2026-07-26, base local limpa via `supabase db reset`):** todas as migrations aplicaram sem erro, incluindo as da Etapa 2A; pgTAP específico `work_checkpoint` **25/25**; **pgTAP total (`supabase test db`): 13 arquivos, 406 asserções, PASS**; core **424**, web **51** e `typecheck` limpos nos cinco workspaces. Verificado no banco real: o enum tem `checkpoint_recorded`; as RPCs, o índice e o validador existem; o cliente autenticado não consegue `INSERT` direto em `work_events` (`permission denied`); o `jsonb =` ignora a ordem das chaves; e `data.checkpoint = data.executor_signal.checkpoint` em todos os eventos.
+
+**Corridas concorrentes reais medidas** (duas sessões psql; o detentor segura o lock do item enquanto o outro bloqueia): mesmo conteúdo e mesma sequência → o segundo bloqueou **3,029 s**, resultou em `replayed`, exatamente **um** evento, nenhuma exceção de índice não tipada; conteúdo diferente e mesma sequência → o segundo bloqueou **3,022 s**, recebeu a recusa tipada `checkpoint conflict at the same sequence` (`55000`), exatamente **um** evento e o payload vencedor íntegro.
+
+**Decisões arquiteturais ratificadas nominalmente:**
+
+- o evento **append-only `checkpoint_recorded`**, não-terminal e fora da matriz de estados — não muda estado, não conclui, não aceita, não autoriza e não integra;
+- a RPC **`record_work_checkpoint`**, fail-closed e decidindo só por fato persistido;
+- a reconstrução **`latest_work_checkpoint`** pelo maior `signal_sequence`, com ausência tipada;
+- o **espelho puro no core** (`reconcileCheckpointDelivery`, `selectLatestCheckpoint`, `projectCheckpointContinuation`), sem derivar `status`/`stopReason` terminais;
+- a **semântica de sequência** 1-indexada, monotônica não consecutiva: regressão e conflito falham fechados, replay idêntico não cria evento;
+- a **estratégia de concorrência** por `FOR UPDATE` do item e índice único parcial `(attempt_id, signal_sequence)`, sem mutex em memória;
+- a **proteção de autenticação, posse e allowlist**, agora simétrica com as demais RPCs de orquestração;
+- as **correções de revisão dirigida** dos commits `02af23f` (guarda de allowlist em `latest_work_checkpoint`) e `4dff367` (correção do fixture de abandono e asserção de allowlist no pgTAP).
+
+**Riscos aceitos que sobrevivem à ratificação** (registrados, não resolvidos): o `LocalRunnerAdapter` ainda emite **zero** checkpoints, então a persistência existe sem produtor; a qualidade do checkpoint depende da honestidade do executor; há uma pequena janela entre emitir e persistir um checkpoint; e a integração com o laço mais a retomada real do AUTO-05 permanecem **fora** da Etapa 2A.
+
+**Consequência confirmada para a Etapa 2B:** `record_commanded_work_terminal` ainda exige `sequence == 1`; quando o terminal passar a vir **depois** de checkpoints (sequência > 1), essa guarda o recusará e precisará ser revisitada em 2B — sem tocá-la agora.
+
+**Confirmações de segurança desta ratificação:** nenhum código funcional novo foi escrito; o laço operacional, o `LocalRunnerAdapter`, o runner, o AUTO-05 e o `planWorkResumption` permanecem intocados; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum merge, push ou deploy. As migrations e provas da Etapa 2A estão nos commits `ec060d5`, `b820af1`, `855ceeb`, `e0d591c`, `72a86ef`, `02af23f` e `4dff367`.
 
 ## Fase F — Uso sustentável de inteligência
 
