@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | SUP-01 a SUP-05, laço operacional, Etapa 2A, Etapa 2B.1 e **Etapa 2B.2 (retomada real do AUTO-05)** completos e ratificados (2B.2 em 2026-07-28). A **produção e o consumo reais de checkpoints** (runner local emite checkpoint após o planejamento; `LocalRunnerAdapter` transmite em stream; retomada entrega `carriedContext`) estão **implementados e aguardando ratificação** — provados de forma determinística e ao vivo com modelo local (ver "Produção e consumo reais de checkpoints"). A Fase E permanece **aberta** até a decisão humana de ratificação. |
+| E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -533,6 +533,38 @@ Estado final **`review`**; **zero** `result_accepted`; a interrupção deixou a 
 **Fora desta etapa (não resolvidos):** encerramento de executor zumbi; aceite/integração/merge automáticos; daemon/execução contínua; armazenamento de cadeia de pensamento; redesenho do runner; troca de modelo. As provas descartáveis não foram commitadas; a configuração local do usuário (`.env.local`, alvos) não foi alterada permanentemente.
 
 **Confirmações de segurança:** nenhum contrato ratificado foi enfraquecido; nenhum fato novo persistido além dos existentes; caminho comandado (INT-04) intocado byte a byte; nenhum resultado foi aceito, integrado ou aplicado; nenhum merge, push ou deploy; `supabase db reset` não foi executado. Mudanças no runner nos commits `b7d17f9` e `5361101` (repositório `anima-local-agent-poc`); no monorepo, `cae9d92` (adaptador + costura + testes).
+
+### Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E (2026-07-28)
+
+O usuário **ratificou a implementação da produção e do consumo reais de checkpoints nos limites exatos demonstrados pelas provas**. A capacidade ratificada, em sua formulação vinculante, é:
+
+> **“Checkpoint real pós-planejamento e retomada informada por contexto.”**
+
+Este registro é append-only: preserva integralmente a seção anterior, que documentou o estado pronto para revisão, e acrescenta a decisão humana que faltava.
+
+**O que foi implementado e ratificado.** O runner Python produz um `WorkCheckpointV1` real, válido e não terminal depois do planejamento validado e antes da edição. A emissão é opt-in e exclusiva do caminho supervisionado. O `LocalRunnerAdapter` transmite o checkpoint como sinal canônico, sem convertê-lo em progresso ou terminal; o laço o persiste por `record_work_checkpoint`, correlacionando item, tentativa, claim, versão e sequência. Depois de um `attempt_abandoned` registrado pelo SUP-04, o Supervisor inicia uma tentativa nova por `begin_resumed_work_attempt`; ela recebe `carriedContext` e realiza uma retomada informada por contexto. O resultado permanece limitado a `review`.
+
+O caminho comandado ratificado do INT-04 continua sem checkpoints e fail-closed diante deles. Não existe aceite, integração, aplicação ou merge automáticos, e a workspace original continua protegida pelas garantias do INT-04.
+
+**O que foi comprovado deterministicamente.**
+
+- runner Python: **99 testes verdes**, `mypy` limpo em **17 arquivos** e `compileall` verde;
+- `LocalRunnerAdapter`: **10/10**;
+- Supervisor: **27/27**;
+- `apps/web`: **68/68**;
+- `packages/core`: **432/432**;
+- `typecheck` limpo nos **cinco workspaces**;
+- pgTAP: **16 arquivos, 447 asserções, PASS**.
+
+**O que foi demonstrado na prova local real.** Com `qwen2.5-coder:14b`, o item `b6d38d8b-0fd7-4b13-bf95-1817386fcf19` percorreu a tentativa inicial `e1ca7da3…` e a tentativa retomada `c32dc0a2…`. Foram observados `execution_started`; `checkpoint_recorded` da primeira tentativa; `work_claim_released`; `attempt_abandoned` com `declared_bounds_exceeded`; `work_started` da retomada; `execution_started` com `reason=resumed_execution` e `resumed_from` correlacionado à tentativa anterior; `checkpoint_recorded` da retomada; `result_submitted`; e `work_claim_released` com `attempt_finished`.
+
+As sequências relevantes foram 2551 (`execution_started`), 2552 (`checkpoint_recorded`), 2553 (`work_claim_released`), 2554 (`attempt_abandoned`), 2556–2557 (início da retomada), 2558 (`checkpoint_recorded` da retomada), 2559 (`result_submitted`) e 2560 (`work_claim_released`). O resultado referenciado preserva o hash iniciado em `caa0f45a` e terminado em `307cc8`. O estado final foi `review`, houve **zero** `result_accepted`, e a workspace original terminou com `git status` vazio e conteúdo original preservado.
+
+**Limites preservados.** Esta ratificação não afirma restauração dos arquivos produzidos pela tentativa anterior nem de workspace parcialmente editada; continuação exata do estado interno do modelo; preservação ou armazenamento de cadeia de pensamento; que o planejamento sempre seja pulado numa retomada; checkpoints depois de cada unidade editada e testada; encerramento forçado de executor zumbi; comportamento determinístico do modelo local; aceite, integração, aplicação ou merge automáticos; execução contínua ou existência de daemon.
+
+Permanecem separados como possíveis trabalhos futuros, sem integrar o aceite desta fase: checkpoints mais ricos após unidades editadas e testadas; transporte de `carriedContext` por stdin ou arquivo temporário restrito em vez de argumento de processo; tratamento de executor zumbi; retomada com estado material de workspace; execução contínua ou daemon; aceite, integração, aplicação ou merge automáticos.
+
+**Conclusão formal.** A revisão do Plano 002 e do backlog confirma que a ratificação acima era a **última pendência canônica aberta da Fase E**. Os entregáveis, critérios e evidências obrigatórias da fase já estavam satisfeitos pelas ratificações anteriores e pelas provas determinísticas e real registradas; faltava apenas esta decisão humana. Por isso, a **Fase E está formalmente concluída em 2026-07-28, por ratificação do usuário**. Riscos residuais e melhorias futuras permanecem registrados, mas não reabrem a fase nem ampliam retroativamente seu aceite. A próxima fase elegível segundo este plano é a **Fase F — Uso sustentável de inteligência**, que não é iniciada por este registro.
 
 ## Fase F — Uso sustentável de inteligência
 
