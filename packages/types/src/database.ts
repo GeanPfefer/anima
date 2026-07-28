@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -1084,6 +1084,10 @@ export type Database = {
     }
     Functions: {
       abandon_current_conversation_turn: { Args: never; Returns: undefined }
+      abandoned_work_resumption_source: {
+        Args: { p_work_item_id: string }
+        Returns: Json
+      }
       acquire_work_claim: {
         Args: {
           claim_id: string
@@ -1146,6 +1150,40 @@ export type Database = {
           work_item_id: string
         }[]
       }
+      begin_resumed_work_attempt: {
+        Args: {
+          abandonment_event_seq: number
+          attempt_id: string
+          checkpoint_event_seq: number
+          claim_id: string
+          executor_id: string
+          expected_proposal_version: number
+          lease_seconds: number
+          owner_instance_id: string
+          source_attempt_id: string
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_work_proposal: {
         Args: {
           capability: Database["public"]["Enums"]["work_capability"]
@@ -1174,6 +1212,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      current_work_intelligence_classification: {
+        Args: { p_work_item_id: string }
+        Returns: Json
       }
       finish_work_execution: {
         Args: {
@@ -1206,31 +1248,6 @@ export type Database = {
       latest_work_checkpoint: {
         Args: { p_attempt_id: string; p_work_item_id: string }
         Returns: Json
-      }
-      abandoned_work_resumption_source: {
-        Args: { p_work_item_id: string }
-        Returns: Json
-      }
-      begin_resumed_work_attempt: {
-        Args: {
-          abandonment_event_seq: number
-          attempt_id: string
-          checkpoint_event_seq: number
-          claim_id: string
-          executor_id: string
-          expected_proposal_version: number
-          lease_seconds: number
-          owner_instance_id: string
-          source_attempt_id: string
-          work_item_id: string
-        }
-        Returns: Database["public"]["Tables"]["work_items"]["Row"]
-        SetofOptions: {
-          from: "*"
-          to: "work_items"
-          isOneToOne: true
-          isSetofReturn: false
-        }
       }
       lifegame_get_level_from_xp: {
         Args: { p_total_xp: number }
@@ -1311,6 +1328,15 @@ export type Database = {
           expected_proposal_version: number
           signal: Json
           work_item_id: string
+        }
+        Returns: Json
+      }
+      record_work_intelligence_classification: {
+        Args: {
+          p_classification: Json
+          p_expected_classification_revision: number
+          p_expected_proposal_version: number
+          p_work_item_id: string
         }
         Returns: Json
       }
@@ -1678,6 +1704,7 @@ export type Database = {
         | "work_claim_released"
         | "attempt_abandoned"
         | "checkpoint_recorded"
+        | "work_intelligence_classified"
       work_impact_level:
         | "low"
         | "significant"
@@ -1997,6 +2024,7 @@ export const Constants = {
         "work_claim_released",
         "attempt_abandoned",
         "checkpoint_recorded",
+        "work_intelligence_classified",
       ],
       work_impact_level: [
         "low",
