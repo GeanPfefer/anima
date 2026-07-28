@@ -2,6 +2,7 @@ import {
   projectAutonomousQueue,
   type AutonomousQueueCandidate,
   type WorkClaim,
+  type WorkIntelligenceClassificationV1,
   type WorkItem,
 } from '.';
 import type { Json } from '@anima/types';
@@ -15,10 +16,16 @@ const makeItem = (id: string, overrides: Partial<WorkItem> = {}): WorkItem => ({
 });
 
 const T0 = new Date('2026-07-21T12:00:00Z');
+const classification: WorkIntelligenceClassificationV1 = {
+  schemaVersion: 1, complexity: 'bounded', risk: 'low', reversibility: 'reversible',
+  planClarity: 'clear', urgency: 'normal',
+  provenance: { kind: 'human_confirmed', classifiedAt: '2026-07-28T12:00:00Z', classifierId: 'user:opaque' },
+};
 const at = (seconds: number): Date => new Date(T0.getTime() + seconds * 1000);
 
 const candidate = (id: string, seq: number, overrides: Partial<AutonomousQueueCandidate> = {}): AutonomousQueueCandidate => ({
   item: makeItem(id),
+  currentClassification: classification,
   approval: { seq, approvedAt: at(seq), proposalVersion: 1 },
   openClaim: null,
   ...overrides,
@@ -81,6 +88,14 @@ describe('fila autônoma — posse retira o item da fila', () => {
 });
 
 describe('fila autônoma — checkpoints humanos e inelegibilidade (fail-closed)', () => {
+  test('item sem classificação vigente não entra na fila', () =>
+    expect(ids([candidate('i1', 10, { currentClassification: null })])).toEqual([]));
+
+  test('item com classificação incompleta não entra na fila', () =>
+    expect(ids([candidate('i1', 10, {
+      currentClassification: { ...classification, risk: 'unknown' },
+    })])).toEqual([]));
+
   test.each<WorkItem['state']>(['proposed', 'review', 'changes_requested', 'blocked'])('item em %s aguarda humano e não entra na fila', state =>
     expect(ids([candidate('i1', 10, { item: makeItem('i1', { state }) })])).toEqual([]));
 

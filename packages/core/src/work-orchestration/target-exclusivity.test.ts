@@ -4,6 +4,7 @@ import {
   type AutonomousQueueCandidate,
   type AutonomousQueueEntry,
   type WorkClaim,
+  type WorkIntelligenceClassificationV1,
   type WorkItem,
 } from '.';
 import type { Json } from '@anima/types';
@@ -15,6 +16,11 @@ const specFor = (target: Json): Json => ({ ...baseSpec, target } as Json);
 const projectSpec = (reference: string): Json => specFor({ kind: 'project', reference });
 
 const T0 = new Date('2026-07-21T12:00:00Z');
+const classification: WorkIntelligenceClassificationV1 = {
+  schemaVersion: 1, complexity: 'bounded', risk: 'low', reversibility: 'reversible',
+  planClarity: 'clear', urgency: 'normal',
+  provenance: { kind: 'human_confirmed', classifiedAt: '2026-07-28T12:00:00Z', classifierId: 'user:opaque' },
+};
 const at = (seconds: number): Date => new Date(T0.getTime() + seconds * 1000);
 
 const makeItem = (id: string, spec: Json, overrides: Partial<WorkItem> = {}): WorkItem => ({
@@ -32,6 +38,7 @@ const claimOn = (workItemId: string, overrides: Partial<WorkClaim> = {}): WorkCl
 // Item elegível aguardando execução no alvo indicado.
 const waiting = (id: string, seq: number, reference: string, overrides: Partial<AutonomousQueueCandidate> = {}): AutonomousQueueCandidate => ({
   item: makeItem(id, projectSpec(reference)),
+  currentClassification: classification,
   approval: { seq, approvedAt: at(seq), proposalVersion: 1 },
   openClaim: null,
   ...overrides,
@@ -40,6 +47,7 @@ const waiting = (id: string, seq: number, reference: string, overrides: Partial<
 // Item que não está na fila mas pode ocupar o alvo.
 const occupant = (id: string, spec: Json, state: WorkItem['state'], openClaim: WorkClaim | null = null): AutonomousQueueCandidate => ({
   item: makeItem(id, spec, { state }),
+  currentClassification: null,
   approval: null,
   openClaim,
 });
@@ -170,13 +178,13 @@ describe('SUP-03 — alvo ausente ou malformado falha fechado', () => {
     ['referência não textual', specFor({ kind: 'project', reference: 42 })],
     ['alvo escalar', specFor('anima')],
   ])('item com %s não entra na fila', (_label, malformed) => {
-    const queue = queueOf([{ item: makeItem('i1', malformed), approval: { seq: 10, approvedAt: T0, proposalVersion: 1 }, openClaim: null }]);
+    const queue = queueOf([{ item: makeItem('i1', malformed), currentClassification: classification, approval: { seq: 10, approvedAt: T0, proposalVersion: 1 }, openClaim: null }]);
     expect(queue).toEqual([]);
   });
 
   test('item em execução com alvo ilegível não ocupa alvo nenhum', () => {
     const queue = queueOf([
-      { item: makeItem('i1', 'sem spec' as Json, { state: 'in_progress' }), approval: null, openClaim: null },
+      { item: makeItem('i1', 'sem spec' as Json, { state: 'in_progress' }), currentClassification: null, approval: null, openClaim: null },
       waiting('i2', 20, 'anima'),
     ]);
     expect(queue[0]).toMatchObject({ workItemId: 'i2', targetOccupied: false });

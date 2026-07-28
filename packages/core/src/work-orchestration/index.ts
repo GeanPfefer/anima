@@ -22,3 +22,4 @@ export * from './work-reconciliation';
 export * from './work-checkpoint';
 export * from './work-intelligence-classification';
 export * from './work-intelligence-classification-events';
+export * from './autonomous-intelligence-eligibility';

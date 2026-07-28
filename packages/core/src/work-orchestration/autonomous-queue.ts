@@ -1,4 +1,9 @@
 import { evaluateAutonomousEligibility } from './eligibility';
+import { evaluateAutonomousIntelligenceEligibility } from './autonomous-intelligence-eligibility';
+import {
+  evaluateClassificationReadiness,
+  type WorkIntelligenceClassificationV1,
+} from './work-intelligence-classification';
 import type { Json } from '@anima/types';
 import type { ProposalVersion, WorkCapability, WorkItem, WorkItemId } from './types';
 import { deriveWorkClaimStatus, type WorkClaim } from './work-claim';
@@ -21,6 +26,8 @@ export interface AutonomousQueueApproval {
 
 export interface AutonomousQueueCandidate {
   readonly item: WorkItem;
+  /** Classificação vigente da versão atual; ausência é bloqueio fail-closed. */
+  readonly currentClassification: WorkIntelligenceClassificationV1 | null;
   // Aprovação vigente: o `work_approved` mais recente do item. Ausente quando
   // o item nunca foi aprovado.
   readonly approval: AutonomousQueueApproval | null;
@@ -123,7 +130,14 @@ export function projectAutonomousQueue(
     // Claim expirado ou liberado é recuperável e permanece.
     if (candidate.openClaim !== null && deriveWorkClaimStatus(candidate.openClaim, now) === 'active') continue;
 
-    const evaluation = evaluateAutonomousEligibility(candidate.item);
+    const auto01 = evaluateAutonomousEligibility(candidate.item);
+    const evaluation = evaluateAutonomousIntelligenceEligibility({
+      auto01,
+      currentClassification: candidate.currentClassification,
+      readiness: candidate.currentClassification === null
+        ? null
+        : evaluateClassificationReadiness(candidate.currentClassification),
+    });
     if (!evaluation.eligible) continue;
 
     const targetReference = evaluation.spec.target.reference.trim();
