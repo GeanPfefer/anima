@@ -11,6 +11,7 @@ INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('87000000-0000-
 RESET ROLE;
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','87000000-0000-0000-0000-000000000000',true);
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 
 CREATE TEMP TABLE item AS SELECT (public.create_work_proposal(
   '87000000-0000-0000-0000-000000000001','low','programming',
@@ -18,6 +19,7 @@ CREATE TEMP TABLE item AS SELECT (public.create_work_proposal(
   '{"schema_version":1,"data":{"summary":"s","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["verde"],"risks":[]}}'
 )).id;
 SELECT public.resolve_approval((SELECT id FROM item),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM item),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM item),1,'87000000-0000-0000-0000-0000000000c1','sup-a',60);
 SELECT public.start_claimed_work_attempt('87000000-0000-0000-0000-0000000000c1','87000000-0000-0000-0000-0000000000a1','fake');
 SELECT public.record_work_checkpoint((SELECT id FROM item),1,'87000000-0000-0000-0000-0000000000a1',

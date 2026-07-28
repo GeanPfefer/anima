@@ -13,6 +13,7 @@ INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('96000000-0000-
 RESET ROLE;
 
 \set prop '{"schema_version":1,"data":{"summary":"s","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["testes verdes"],"risks":[]}}'
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 \set anima '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"anima"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
 \set outro '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"outro"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
 \set workspace_anima '{"execution_spec":{"schema_version":1,"target":{"kind":"workspace","reference":"anima"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
@@ -27,6 +28,9 @@ CREATE TEMP TABLE b1 AS SELECT (public.create_work_proposal('96000000-0000-0000-
 SELECT public.resolve_approval((SELECT id FROM a1),1,'approve','{}');
 SELECT public.resolve_approval((SELECT id FROM a2),1,'approve','{}');
 SELECT public.resolve_approval((SELECT id FROM b1),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM a1),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM a2),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM b1),1,0,:'intel'::jsonb);
 
 -- ---------- (1) dois itens elegíveis no mesmo alvo ----------
 SELECT is((SELECT count(*) FROM public.autonomous_work_queue()),3::bigint,'três itens elegíveis aguardam');

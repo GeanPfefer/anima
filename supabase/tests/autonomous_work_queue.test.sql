@@ -15,6 +15,7 @@ RESET ROLE;
 -- ---------- régua de elegibilidade em SQL espelhando o core ----------
 \set spec '{"schema_version":1,"target":{"kind":"project","reference":"anima"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}'
 \set prop '{"schema_version":1,"data":{"summary":"s","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["testes verdes"],"risks":[]}}'
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 SET LOCAL ROLE service_role;
 SELECT ok(private.is_autonomously_eligible('approved',:'prop'::jsonb,jsonb_build_object('execution_spec',:'spec'::jsonb)),
   'item aprovado e completo é elegível');
@@ -60,6 +61,9 @@ CREATE TEMP TABLE i3 AS SELECT (public.create_work_proposal('93000000-0000-0000-
 SELECT public.resolve_approval((SELECT id FROM i3),1,'approve','{}');
 SELECT public.resolve_approval((SELECT id FROM i1),1,'approve','{}');
 SELECT public.resolve_approval((SELECT id FROM i2),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i1),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM i2),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM i3),1,0,:'intel'::jsonb);
 
 SELECT is((SELECT count(*) FROM public.autonomous_work_queue()),3::bigint,'os três itens aprovados entram na fila');
 SELECT is((SELECT array_agg(work_item_id ORDER BY queue_position) FROM public.autonomous_work_queue()),
@@ -104,6 +108,7 @@ SELECT public.revise_work_proposal((SELECT id FROM i4),1,jsonb_build_object('exe
 SELECT is((SELECT count(*) FROM public.autonomous_work_queue() WHERE work_item_id=(SELECT id FROM i4)),0::bigint,
   'proposta revisada sem aprovação continua fora da fila');
 SELECT public.resolve_approval((SELECT id FROM i4),2,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i4),2,0,:'intel'::jsonb);
 SELECT is((SELECT approved_proposal_version FROM public.autonomous_work_queue() WHERE work_item_id=(SELECT id FROM i4)),2,
   'a fila referencia a versão aprovada vigente');
 SELECT is((SELECT work_item_id FROM public.autonomous_work_queue() ORDER BY queue_position DESC LIMIT 1),(SELECT id FROM i4),

@@ -19,6 +19,7 @@ INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('86000000-0000-
 RESET ROLE;
 
 \set prop '{"schema_version":1,"data":{"summary":"s","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["testes verdes"],"risks":[]}}'
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 \set g1 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"term-t1"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
 \set g2 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"term-t2"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
 \set g3 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"term-t3"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
@@ -47,26 +48,31 @@ $$;
 -- Fixtures: cada item aprovado, com claim e tentativa iniciada.
 CREATE TEMP TABLE i1 AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000001','low','programming',:'g1'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i1),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i1),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i1),1,'86000000-0000-0000-0000-0000000000c1','sup',3600);
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c1','86000000-0000-0000-0000-0000000000a1','local-runner-v1');
 
 CREATE TEMP TABLE i2 AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000002','low','programming',:'g2'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i2),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i2),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i2),1,'86000000-0000-0000-0000-0000000000c2','sup',3600);
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c2','86000000-0000-0000-0000-0000000000a2','local-runner-v1');
 
 CREATE TEMP TABLE i3 AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000003','low','programming',:'g3'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i3),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i3),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i3),1,'86000000-0000-0000-0000-0000000000c3','sup',3600);
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c3','86000000-0000-0000-0000-0000000000a3','local-runner-v1');
 
 CREATE TEMP TABLE i4 AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000004','low','programming',:'g4'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i4),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i4),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i4),1,'86000000-0000-0000-0000-0000000000c4','sup',3600);
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c4','86000000-0000-0000-0000-0000000000a4','local-runner-v1');
 
 CREATE TEMP TABLE i6 AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000006','low','programming',:'g6'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i6),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i6),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i6),1,'86000000-0000-0000-0000-0000000000c6','sup',3600);
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c6','86000000-0000-0000-0000-0000000000a6','local-runner-v1');
 SET LOCAL ROLE service_role;

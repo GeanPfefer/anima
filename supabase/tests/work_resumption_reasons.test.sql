@@ -24,6 +24,7 @@ INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('86000000-0000-
 RESET ROLE;
 
 \set prop '{"schema_version":1,"data":{"summary":"s","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["verde"],"risks":[]}}'
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 -- Alvos distintos por razão: o SUP-05 recusaria dois inícios no mesmo alvo.
 -- lease: só max_attempts (sem duração) → lease_expired.
 \set lease_spec '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"rr-lease"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":3}}}'
@@ -41,6 +42,7 @@ SELECT set_config('request.jwt.claim.sub','86000000-0000-0000-0000-000000000000'
 
 CREATE TEMP TABLE lease_item AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000001','low','programming',:'lease_spec'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM lease_item),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM lease_item),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM lease_item),1,'86000000-0000-4000-8000-0000000000c1','sup-lease',3600);
 SELECT public.start_claimed_work_attempt('86000000-0000-4000-8000-0000000000c1','86000000-0000-4000-8000-0000000000a1','fake');
 SELECT public.record_work_checkpoint((SELECT id FROM lease_item),1,'86000000-0000-4000-8000-0000000000a1',
@@ -81,6 +83,7 @@ SELECT is((SELECT payload->'data'->>'reason' FROM public.work_events WHERE work_
 
 CREATE TEMP TABLE dur_item AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000002','low','programming',:'dur_spec'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM dur_item),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM dur_item),1,0,:'intel'::jsonb);
 SELECT public.start_commanded_work_attempt((SELECT id FROM dur_item),1,'86000000-0000-4000-8000-0000000000a2','fake');
 SELECT public.record_work_checkpoint((SELECT id FROM dur_item),1,'86000000-0000-4000-8000-0000000000a2',
   jsonb_build_object('kind','checkpoint','workItemId',(SELECT id FROM dur_item),'attemptId','86000000-0000-4000-8000-0000000000a2',
@@ -124,6 +127,7 @@ SELECT is((SELECT payload->'data'->>'reason' FROM public.work_events WHERE work_
 
 CREATE TEMP TABLE both_item AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000003','low','programming',:'both_spec'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM both_item),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM both_item),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM both_item),1,'86000000-0000-4000-8000-0000000000c3','sup-both',3600);
 SELECT public.start_claimed_work_attempt('86000000-0000-4000-8000-0000000000c3','86000000-0000-4000-8000-0000000000a3','fake');
 SELECT public.record_work_checkpoint((SELECT id FROM both_item),1,'86000000-0000-4000-8000-0000000000a3',

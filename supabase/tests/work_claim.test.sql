@@ -14,11 +14,13 @@ INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('91000000-0000-
 RESET ROLE;
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','91000000-0000-0000-0000-000000000000',true);
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 
 CREATE TEMP TABLE item AS SELECT (public.create_work_proposal('91000000-0000-0000-0000-000000000001','low','programming',
   '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"anima"},"permissions":["workspace_read"],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}',
   '{"schema_version":1,"data":{"summary":"x","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["testes verdes"],"risks":[]}}')).id;
 SELECT public.resolve_approval((SELECT id FROM item),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM item),1,0,:'intel'::jsonb);
 
 -- Item ainda não aprovado, usado para provar que inelegível não é reivindicável.
 CREATE TEMP TABLE pending AS SELECT (public.create_work_proposal('91000000-0000-0000-0000-000000000002','low','programming',
@@ -97,6 +99,7 @@ CREATE TEMP TABLE resumed AS SELECT (public.create_work_proposal('91000000-0000-
   '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"anima-retomada"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}',
   '{"schema_version":1,"data":{"summary":"z","objective":"retomar","included_scope":["c.py"],"excluded_scope":["deploy"],"expected_effects":["ok"],"risks":[]}}')).id;
 SELECT public.resolve_approval((SELECT id FROM resumed),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM resumed),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM resumed),1,'91000000-0000-0000-0000-0000000000d1','supervisor-morto',60);
 -- Simula o abandono: a instância morreu e o lease venceu.
 SET LOCAL ROLE service_role;

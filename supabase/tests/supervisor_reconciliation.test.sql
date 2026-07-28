@@ -18,6 +18,7 @@ INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('89000000-0000-
 RESET ROLE;
 
 \set prop '{"schema_version":1,"data":{"summary":"s","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["testes verdes"],"risks":[]}}'
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 
 -- Alvos distintos por cenário: o SUP-05 recusaria dois inícios no mesmo alvo, e
 -- aqui vários itens precisam ficar simultaneamente em execução.
@@ -42,6 +43,7 @@ SELECT set_config('request.jwt.claim.sub','89000000-0000-0000-0000-000000000000'
 
 CREATE TEMP TABLE i1 AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000001','low','programming',:'t1'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i1),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i1),1,0,:'intel'::jsonb);
 CREATE TEMP TABLE eventos_antes AS SELECT count(*) AS total FROM public.work_events;
 
 SELECT is((SELECT count(*) FROM public.reconcile_supervised_work()),0::bigint,
@@ -57,6 +59,7 @@ SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM i1
 
 CREATE TEMP TABLE i2 AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000002','low','programming',:'t2'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i2),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i2),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i2),1,'89000000-0000-0000-0000-0000000000c2','supervisor-2',3600);
 
 SELECT is((SELECT finding FROM public.reconcile_supervised_work() WHERE work_item_id=(SELECT id FROM i2)),
@@ -74,6 +77,7 @@ SELECT is((SELECT owner_instance_id FROM public.work_claims WHERE id='89000000-0
 
 CREATE TEMP TABLE i3 AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000003','low','programming',:'t3'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i3),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i3),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i3),1,'89000000-0000-0000-0000-0000000000c3','supervisor-3',3600);
 SELECT public.start_claimed_work_attempt('89000000-0000-0000-0000-0000000000c3','89000000-0000-0000-0000-0000000000e3','local-runner-v1');
 
@@ -92,6 +96,7 @@ SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id
 
 CREATE TEMP TABLE i4 AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000004','low','programming',:'t4'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i4),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i4),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i4),1,'89000000-0000-0000-0000-0000000000c4','supervisor-4',3600);
 SET LOCAL ROLE service_role;
 UPDATE public.work_claims SET acquired_at=now()-interval '2 hours', expires_at=now()-interval '1 hour'
@@ -116,6 +121,7 @@ SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM i4
 
 CREATE TEMP TABLE i5 AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000005','low','programming',:'t5'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i5),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i5),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i5),1,'89000000-0000-0000-0000-0000000000c5','supervisor-5',3600);
 SELECT public.start_claimed_work_attempt('89000000-0000-0000-0000-0000000000c5','89000000-0000-0000-0000-0000000000e5','local-runner-v1');
 SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM i5)),'in_progress',
@@ -153,6 +159,7 @@ SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id
 
 CREATE TEMP TABLE i6 AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000006','low','programming',:'t6'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i6),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i6),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i6),1,'89000000-0000-0000-0000-0000000000c6','supervisor-6',3600);
 SELECT public.start_claimed_work_attempt('89000000-0000-0000-0000-0000000000c6','89000000-0000-0000-0000-0000000000e6','local-runner-v1');
 SET LOCAL ROLE service_role;
@@ -180,6 +187,7 @@ SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id
 
 CREATE TEMP TABLE i7 AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000007','low','programming',:'t7'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i7),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i7),1,0,:'intel'::jsonb);
 SELECT public.start_commanded_work_attempt((SELECT id FROM i7),1,'89000000-0000-0000-0000-0000000000e7','local-runner-v1');
 -- O processo morreu aqui: nenhum claim existe, e o único limite persistido é o
 -- max_duration_minutes de 5 declarado na proposta aprovada.
@@ -213,6 +221,7 @@ SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM i7
 
 CREATE TEMP TABLE i8 AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000008','low','programming',:'t8'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i8),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i8),1,0,:'intel'::jsonb);
 SELECT public.start_commanded_work_attempt((SELECT id FROM i8),1,'89000000-0000-0000-0000-0000000000e8','local-runner-v1');
 SET LOCAL ROLE service_role;
 UPDATE public.work_events SET created_at=now()-interval '30 days'
@@ -237,6 +246,7 @@ SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id
 
 CREATE TEMP TABLE i9 AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000009','low','programming',:'t9'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i9),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i9),1,0,:'intel'::jsonb);
 SELECT public.start_commanded_work_attempt((SELECT id FROM i9),1,'89000000-0000-0000-0000-0000000000e9','local-runner-v1');
 SELECT public.record_commanded_work_terminal((SELECT id FROM i9),1,'89000000-0000-0000-0000-0000000000e9',
   jsonb_build_object('kind','result','workItemId',(SELECT id FROM i9),'attemptId','89000000-0000-0000-0000-0000000000e9',
@@ -269,6 +279,7 @@ SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id
 
 CREATE TEMP TABLE ia AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000010','low','programming',:'ta'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM ia),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM ia),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM ia),1,'89000000-0000-0000-0000-0000000000ca','supervisor-a',3600);
 SELECT public.start_claimed_work_attempt('89000000-0000-0000-0000-0000000000ca','89000000-0000-0000-0000-0000000000ea','local-runner-v1');
 SELECT public.record_commanded_work_terminal((SELECT id FROM ia),1,'89000000-0000-0000-0000-0000000000ea',
@@ -375,6 +386,7 @@ SELECT is((SELECT target_occupied FROM public.autonomous_work_queue() WHERE work
 -- Item novo no alvo de i3, que segue em execução sob posse válida.
 CREATE TEMP TABLE ib AS SELECT (public.create_work_proposal('89000000-0000-0000-0000-000000000011','low','programming',:'t3'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM ib),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM ib),1,0,:'intel'::jsonb);
 SELECT is((SELECT target_occupied FROM public.autonomous_work_queue() WHERE work_item_id=(SELECT id FROM ib)),true,
   'a reconciliação não torna elegível um item cujo alvo continua ocupado');
 SELECT isnt((SELECT work_item_id FROM public.next_autonomous_work()),(SELECT id FROM ib),

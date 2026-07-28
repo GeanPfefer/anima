@@ -14,6 +14,7 @@ RESET ROLE;
 
 \set spec '{"schema_version":1,"target":{"kind":"project","reference":"anima"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}'
 \set prop '{"schema_version":1,"data":{"summary":"s","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["testes verdes"],"risks":[]}}'
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','94000000-0000-0000-0000-000000000000',true);
@@ -31,6 +32,9 @@ CREATE TEMP TABLE i3 AS SELECT (public.create_work_proposal('94000000-0000-0000-
 SELECT public.resolve_approval((SELECT id FROM i2),1,'approve','{}');
 SELECT public.resolve_approval((SELECT id FROM i3),1,'approve','{}');
 SELECT public.resolve_approval((SELECT id FROM i1),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i1),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM i2),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM i3),1,0,:'intel'::jsonb);
 
 SELECT is((SELECT work_item_id FROM public.next_autonomous_work()),(SELECT id FROM i2),
   'seleciona a aprovação mais antiga, não a criação mais antiga');

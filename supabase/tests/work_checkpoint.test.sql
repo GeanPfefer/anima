@@ -20,6 +20,7 @@ INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('84000000-0000-
 RESET ROLE;
 
 \set prop '{"schema_version":1,"data":{"summary":"s","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["testes verdes"],"risks":[]}}'
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 -- Alvos distintos: o SUP-05 recusaria dois inícios no mesmo alvo.
 \set t1 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"cp-t1"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
 \set t2 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"cp-t2"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
@@ -52,16 +53,19 @@ $$;
 
 CREATE TEMP TABLE i1 AS SELECT (public.create_work_proposal('84000000-0000-0000-0000-000000000001','low','programming',:'t1'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i1),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i1),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i1),1,'84000000-0000-0000-0000-0000000000c1','sup-1',3600);
 SELECT public.start_claimed_work_attempt('84000000-0000-0000-0000-0000000000c1','84000000-0000-0000-0000-0000000000a1','local-runner-v1');
 
 CREATE TEMP TABLE i2 AS SELECT (public.create_work_proposal('84000000-0000-0000-0000-000000000002','low','programming',:'t2'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i2),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i2),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i2),1,'84000000-0000-0000-0000-0000000000c2','sup-2',3600);
 SELECT public.start_claimed_work_attempt('84000000-0000-0000-0000-0000000000c2','84000000-0000-0000-0000-0000000000a2','local-runner-v1');
 
 CREATE TEMP TABLE i3 AS SELECT (public.create_work_proposal('84000000-0000-0000-0000-000000000003','low','programming',:'t3'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i3),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i3),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i3),1,'84000000-0000-0000-0000-0000000000c3','sup-3',3600);
 SELECT public.start_claimed_work_attempt('84000000-0000-0000-0000-0000000000c3','84000000-0000-0000-0000-0000000000a3','local-runner-v1');
 SELECT public.record_commanded_work_terminal((SELECT id FROM i3),1,'84000000-0000-0000-0000-0000000000a3',
@@ -72,6 +76,7 @@ SELECT public.record_commanded_work_terminal((SELECT id FROM i3),1,'84000000-000
 
 CREATE TEMP TABLE i4 AS SELECT (public.create_work_proposal('84000000-0000-0000-0000-000000000004','low','programming',:'t4'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i4),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i4),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i4),1,'84000000-0000-0000-0000-0000000000c4','sup-4',3600);
 SELECT public.start_claimed_work_attempt('84000000-0000-0000-0000-0000000000c4','84000000-0000-0000-0000-0000000000a4','local-runner-v1');
 -- Vence o lease e reconcilia: o SUP-04 abandona a tentativa (item volta a approved).

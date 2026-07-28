@@ -14,6 +14,7 @@ INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('98000000-0000-
 RESET ROLE;
 
 \set prop '{"schema_version":1,"data":{"summary":"s","objective":"corrigir","included_scope":["a.py"],"excluded_scope":["deploy"],"expected_effects":["testes verdes"],"risks":[]}}'
+\set intel '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"test"}}'
 \set anima '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"anima"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
 \set outro '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"outro"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
 
@@ -28,6 +29,10 @@ SELECT public.resolve_approval((SELECT id FROM a1),1,'approve','{}');
 SELECT public.resolve_approval((SELECT id FROM a2),1,'approve','{}');
 SELECT public.resolve_approval((SELECT id FROM a3),1,'approve','{}');
 SELECT public.resolve_approval((SELECT id FROM b1),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM a1),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM a2),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM a3),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM b1),1,0,:'intel'::jsonb);
 
 -- ---------- (1) alvo livre: o caminho comandado segue intacto ----------
 SELECT is((public.start_commanded_work_attempt((SELECT id FROM a1),1,'98000000-0000-0000-0000-0000000000e1','local-runner-v1')).state,
@@ -88,6 +93,7 @@ SELECT throws_ok($$SELECT public.start_commanded_work_attempt((SELECT id FROM a1
 -- Um item novo e aprovado no alvo sob claim autônomo é o caso canônico.
 CREATE TEMP TABLE a4 AS SELECT (public.create_work_proposal('98000000-0000-0000-0000-000000000005','low','programming',:'anima'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM a4),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM a4),1,0,:'intel'::jsonb);
 SELECT throws_ok($$SELECT public.start_commanded_work_attempt((SELECT id FROM a4),1,'98000000-0000-0000-0000-0000000000e6','local-runner-v1')$$,
   '55000','work target is held by an active claim',
   'execução comandada sobre alvo com claim autônomo ativo é recusada com erro tipado');
