@@ -1,6 +1,8 @@
 import {
+  ABANDONMENT_REASONS,
   type AbandonedCheckpointV1,
   INTERRUPTION_SCENARIOS,
+  type WorkAbandonmentReason,
   buildWorkHandoff,
   describesRecoverableInterruption,
   finishExecutionAttempt,
@@ -182,6 +184,23 @@ describe('retomada — fonte de checkpoint abandonado', () => {
     expect(decision.plan).not.toHaveProperty('stopReason');
     expect(decision.plan).not.toHaveProperty('scenario');
   });
+
+  test.each<WorkAbandonmentReason>([...ABANDONMENT_REASONS])(
+    '%s é aceito e preservado sem virar cenário, status ou stopReason',
+    reason => {
+      const decision = planWorkResumption(makeInput({
+        source: { ...abandonedSource(abandonedCheckpoint({ abandonmentReason: reason })), abandonmentReason: reason },
+      }));
+      if (decision.outcome !== 'resume') throw new Error(`esperava retomada para ${reason}`);
+      // A razão técnica atravessa intacta, no vocabulário próprio do abandono.
+      expect(decision.plan.abandonmentReason).toBe(reason);
+      expect(decision.plan.sourceKind).toBe('abandoned_checkpoint');
+      // Nunca convertida para um InterruptionScenario nem para terminal do executor.
+      expect(decision.plan).not.toHaveProperty('scenario');
+      expect(decision.plan).not.toHaveProperty('status');
+      expect(decision.plan).not.toHaveProperty('stopReason');
+    },
+  );
 });
 
 describe('retomada — escopo aprovado não muda', () => {
