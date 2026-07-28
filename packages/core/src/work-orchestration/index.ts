@@ -20,3 +20,4 @@ export * from './work-handoff';
 export * from './work-resumption';
 export * from './work-reconciliation';
 export * from './work-checkpoint';
+export * from './work-intelligence-classification';
