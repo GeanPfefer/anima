@@ -574,6 +574,17 @@ Permanecem separados como possíveis trabalhos futuros, sem integrar o aceite de
 
 **Entregáveis:** INTEL-01 a INTEL-04.
 
+**Progresso do INTEL-01 (2026-07-28; não ratificado).** Dois incrementos
+contratuais estão implementados: (1) taxonomia e validação puras da
+classificação V1; (2) persistência append-only, reclassificação auditável e
+reconstrução da classificação vigente para a versão de proposta atual e
+aprovada. O segundo incremento usa revisão esperada para concorrência, preserva
+proveniência e histórico e não conecta a classificação ao Supervisor, executor
+ou roteamento. O INTEL-01 permanece aberto porque ainda não há garantia de que
+todo item elegível carregue classificação nem integração ao fluxo de
+proposta/revisão. Esta atualização não ratifica o INTEL-01 e não inicia o
+INTEL-02.
+
 **Critérios de aceite:** toda seleção de executor/modelo/esforço é registrada com os fatores considerados; escalonamento acontece por regra explícita após falhas; existe reserva de capacidade que impede o modo autônomo de esgotar o provedor do usuário.
 
 **Evidências obrigatórias:** decisões de roteamento consultáveis por tentativa; cenários de escalonamento e redução testados.

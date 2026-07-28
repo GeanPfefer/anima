@@ -295,6 +295,23 @@ Detalhamento, limitações e confirmações de segurança em "Laço operacional 
 
 ### INTEL-01 — Classificação de trabalho
 
+**Estado (2026-07-28): segundo incremento implementado; INTEL-01 ainda não
+concluído nem ratificado.** O primeiro incremento definiu em
+`packages/core` o contrato puro V1 com cinco eixos obrigatórios, `unknown`
+explícito, proveniência humana ou sistêmica e readiness separada da validade.
+O segundo acrescentou o evento append-only
+`work_intelligence_classified`, as RPCs
+`record_work_intelligence_classification` e
+`current_work_intelligence_classification`, concorrência otimista por revisão
+esperada e um espelho puro que reconstrói e valida a cadeia de supersessão. A
+reclassificação cria novo evento; a versão anterior nunca é sobrescrita. A
+vigência é estrita à versão de proposta atual e aprovada, portanto uma nova
+versão retorna ausência até receber classificação própria. Este recorte não
+seleciona executor, provedor, modelo ou esforço, não inicia o INTEL-02 e não
+altera elegibilidade ou execução. Permanecem pendentes o requisito de aceite
+“todo item elegível carrega classificação”, sua integração mínima no fluxo que
+produz/revisa propostas e a posterior ratificação humana.
+
 - **Problema:** sem classificar complexidade, risco e reversibilidade, toda decisão de roteamento é chute.
 - **Resultado esperado:** classificação tipada por item/tentativa (complexidade, risco, reversibilidade, clareza do plano, urgência), atribuída na proposta e revisável, persistida com proveniência.
 - **Dependências:** Fase E operando. **Escopo:** conceito + tipos + registro. **Fora do escopo:** inferência automática sofisticada (começa com classificação assistida/manual).
