@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | SUP-01 a SUP-05, laço operacional, Etapa 2A e Etapa 2B.1 completos e ratificados. A **retomada real do AUTO-05 (Etapa 2B.2)** está implementada em código e aguarda ratificação após as provas completas. Ela usa `WorkResumptionSourceV1.abandoned_checkpoint`, sem projetar abandono como `WorkHandoffV1` terminal nem inventar causa externa. |
+| E | **Em andamento** | SUP-01 a SUP-05, laço operacional, Etapa 2A, Etapa 2B.1 e **Etapa 2B.2 (retomada real do AUTO-05)** completos e ratificados — a 2B.2 em 2026-07-28 após as provas de banco completas (ver "Ratificação da Etapa 2B.2"). A retomada usa `WorkResumptionSourceV1.abandoned_checkpoint`, sem projetar abandono como `WorkHandoffV1` terminal nem inventar causa externa. **Resta** para a retomada *prática*: um produtor real de checkpoints no `LocalRunnerAdapter`, que ainda emite zero. |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -448,6 +448,51 @@ A revisão humana **aprovou, ratificou e encerrou** a Etapa 2B.1. Registro appen
 **Riscos aceitos que sobrevivem à ratificação:** o `LocalRunnerAdapter` ainda **não** produz checkpoints; a qualidade do checkpoint depende do executor; pode haver perda do sinal emitido antes da confirmação persistente; o caminho comandado continua single-shot enquanto o supervisionado tem a porta persistente; e a retomada real do AUTO-05 permanece **não implementada**.
 
 **Confirmações de segurança desta ratificação:** nenhum código funcional novo foi escrito; o `LocalRunnerAdapter`, o runner, o AUTO-05 e o `planWorkResumption` permanecem intocados; `latest_work_checkpoint` **não** é lido pelo laço; nenhum resultado foi aceito, autorizado, integrado ou aplicado; nenhum merge, push ou deploy. As migrations, provas e mudanças da Etapa 2B.1 estão nos commits `fc76b76`, `e00e4aa`, `bce3eb2`, `e213754` e `643c8d8`.
+
+### Ratificação da Etapa 2B.2 — retomada real após abandono (2026-07-28)
+
+A revisão humana **aprovou, ratificou e encerrou** a Etapa 2B.2 — a retomada real do AUTO-05 a partir de uma tentativa abandonada pelo SUP-04. A implementação já estava no repositório quando a ratificação foi conduzida; a decisão humana foi **manter a implementação completa** (sem reduzir ao escopo mínimo da tarefa anterior, que estava desatualizada) e ratificá-la **condicionada à execução verde das provas de banco**, agora cumprida. Registro append-only: nenhuma seção anterior foi reescrita.
+
+**O que a Etapa 2B.2 entrega.** `planWorkResumption` passou a receber a fonte discriminada `WorkResumptionSourceV1`, com dois ramos **semanticamente distintos**:
+
+- `terminal_handoff` — o caminho anterior, preservado byte a byte: carrega um `WorkHandoffV1` **terminal** e um `InterruptionScenario` do Marco 003;
+- `abandoned_checkpoint` — o caminho novo: uma projeção **apenas de fatos append-only** (`AbandonedCheckpointV1`), correlacionada a um evento `attempt_abandoned` real, que **preserva a razão técnica do abandono no vocabulário próprio** e **nunca** a converte em `InterruptionScenario`, `status` ou `stopReason`.
+
+A costura da retomada no **Supervisor** (`apps/web/lib/work-orchestration/supervisor.ts`) lê a fonte por `abandoned_work_resumption_source`, chama `planWorkResumption` e, quando o plano autoriza, inicia a nova tentativa por `begin_resumed_work_attempt` — claim e início criados **atomicamente**, com identidades novas e `reason = 'resumed_execution'`. Ausência de checkpoint na fonte abandonada exige humano e **não** cai no início normal. O executor recebe `carriedContext` informativo (restante, próximo passo, riscos, recursos, falhas anteriores) que **não amplia permissão**.
+
+**Decisões arquiteturais ratificadas nominalmente:**
+
+- `WorkHandoffV1` permanece **exclusivamente terminal**; a Etapa 2B.2 não amplia nem enfraquece esse significado;
+- `attempt_abandoned` permanece uma afirmação **mais fraca** que um terminal do executor, e a retomada a partir dele **não** fabrica cenário, `status` (`paused`/`timed_out`) nem `stopReason` (`time_limit_reached`);
+- os três motivos técnicos persistidos — `lease_expired`, `duration_limit_exceeded`, `declared_bounds_exceeded` — permanecem **distinguíveis** e atravessam a retomada **literais**;
+- a fonte abandonada carrega só fatos comprováveis (tentativa/claim de origem, versão aprovada, `seq` de checkpoint e abandono, `signal_sequence`, conteúdo do checkpoint, razão e instante);
+- `begin_resumed_work_attempt` é a **fronteira atômica** que revalida estado `approved`, versão, evento de abandono, checkpoint e sua maximalidade, identidades novas e a exclusividade de alvo do SUP-05 antes de criar claim e tentativa;
+- fail-closed diante de qualquer correlação ou fato obrigatório ausente; o plano é **determinístico**; os dois tipos de fonte **não** podem ser misturados.
+
+**Provas de banco (2026-07-28, base local reutilizada — `supabase start`, sem `db reset`).** Docker Desktop iniciado; o volume local existente foi reaproveitado; a migration `20260727000000_begin_resumed_work_attempt.sql` já constava aplicada (maior versão aplicada = arquivo mais novo do repositório) e as duas RPCs — `abandoned_work_resumption_source` e `begin_resumed_work_attempt` — existem no banco. `supabase test db`: **16 arquivos, 447 asserções, Result: PASS**, incluindo `work_resumption.test.sql` (retomada a partir de `lease_expired`, com checkpoint obrigatório e correlacionado, IDs novos, terminal tardio recusado e ausência de aceite/integração), `supervisor_reconciliation.test.sql` (SUP-04, intocado), `commanded_target_exclusivity.test.sql`/`target_exclusivity.test.sql` (SUP-05, intocado) e o novo `work_resumption_reasons.test.sql`.
+
+**Prova individual dos três motivos (novo `work_resumption_reasons.test.sql`, 18 asserções).** Cada motivo nasce da **reconciliação real** (SUP-04), não de um evento fabricado, e é provado ponta a ponta:
+
+| Motivo | Como é produzido | O que a prova confirma |
+|---|---|---|
+| `lease_expired` | supervisionada, só o lease do claim vencido (sem `max_duration_minutes`) | fonte devolve `abandoned_checkpoint` com a razão **literal**; `begin_resumed_work_attempt` aceita; item em `in_progress`; `reason = resumed_execution` |
+| `duration_limit_exceeded` | comandada **sem posse**, só `max_duration_minutes` vencido | idem, razão literal preservada |
+| `declared_bounds_exceeded` | supervisionada com lease **e** duração vencidos juntos | idem, razão literal preservada |
+
+Para os três, a fonte **não** carrega chave `scenario`, e seu texto não contém `time_limit_reached`, `timed_out` nem `paused` — a preservação é literal e sem conversão semântica.
+
+**Provas de código no mesmo estado:** `packages/core` **432/432** em 19 suítes (inclui os três motivos no espelho puro `work-resumption.test.ts`); supervisor em `apps/web` **27/27** (inclui "tentativa abandonada retoma com IDs novos e carriedContext sem cenário inventado"); `typecheck` limpo nos cinco workspaces.
+
+**Diferenciação explícita do que está e do que não está pronto:**
+
+- **Retomada real implementada no Supervisor** — sim. O laço reconstrói a fonte abandonada, planeja e inicia a tentativa de retomada atomicamente, provado por pgTAP e pelos testes do supervisor.
+- **Produtor real de checkpoints ausente no `LocalRunnerAdapter`** — o adaptador ainda emite **zero** checkpoints. Sem um executor que faça streaming de checkpoints reais, a retomada por `abandoned_checkpoint` só tem valor sobre checkpoints sintéticos/de fixture; a **retomada prática** de ponta a ponta com executor real permanece pendente.
+
+**Riscos e limitações que sobrevivem à ratificação** (registrados, não resolvidos): o `LocalRunnerAdapter` não produz checkpoints; a qualidade do checkpoint depende da honestidade do executor; persiste a pequena janela entre emitir e persistir um checkpoint; o executor zumbi que o banco não mata continua um risco conceitual herdado do SUP-04; e a demonstração ao vivo de uma retomada real conduzida pelo executor local ainda **não** foi feita.
+
+**Confirmações de segurança desta ratificação:** nenhuma alteração no `LocalRunnerAdapter` nem no runner; nenhuma migration nova (a migration da 2B.2 já estava no repositório e no banco); nenhuma execução foi disparada; nenhum resultado foi aceito, autorizado, integrado ou aplicado; `supabase db reset` **não** foi executado; nenhum merge, push ou deploy. As mudanças da Etapa 2B.2 estão nos commits `7bf9179` (contrato puro), `f72bfa5` (migration + pgTAP + tipos), `020db80` (costura no laço), `85178a4` (documentação), `4643115` (prova dos três motivos no espelho puro) e `fd787be` (prova dos três motivos no banco).
+
+**Consequência para a Fase E:** a Etapa 2B.2 está ratificada como o **contrato e o planejamento verdadeiros da retomada**, costurados ao Supervisor. A Fase E **permanece aberta** por uma única pendência nomeada — um **produtor real de checkpoints** no `LocalRunnerAdapter` — sem a qual a retomada prática de ponta a ponta com executor real não pode ser demonstrada.
 
 ## Fase F — Uso sustentável de inteligência
 
