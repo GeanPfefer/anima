@@ -17,7 +17,16 @@ type Rpc = { data: unknown; error: { code: string; message: string } | null };
 const ok = (data: unknown): Rpc => ({ data, error: null });
 const fail = (code: string, message: string): Rpc => ({ data: null, error: { code, message } });
 
-interface FakeItem { readonly id: string; version: number; state: string; readonly target: string; readonly approvalSeq: number; }
+type FakeClassification = 'missing' | 'incomplete' | 'complete';
+interface FakeItem {
+  readonly id: string;
+  version: number;
+  state: string;
+  readonly target: string;
+  readonly approvalSeq: number;
+  /** Ausência do campo modela banco/fake sem suporte e falha fechado. */
+  readonly classification?: FakeClassification;
+}
 interface FakeClaim { readonly id: string; readonly itemId: string; readonly target: string; attemptId: string | null; released: boolean; reason: string | null; }
 
 interface FakeOptions {
@@ -76,9 +85,10 @@ class FakeDatabase {
         // devolve a mesma cabeça que outro supervisor já está disputando,
         // porque selecionar não trava nada.
         const visible = this.options.staleSelection
-          ? [...this.items.values()]
+          ? [...this.items.values()].filter(item => item.classification === 'complete')
           : [...this.items.values()]
               .filter(item => item.state === 'approved')
+              .filter(item => item.classification === 'complete')
               .filter(item => !this.activeClaimOfItem(item.id) && !this.activeClaimOfTarget(item.target, item.id))
               .filter(item => !this.runningOnTarget(item.target, item.id));
         const queue = visible.sort((left, right) => left.approvalSeq - right.approvalSeq);
@@ -97,6 +107,11 @@ class FakeDatabase {
 
       case 'begin_resumed_work_attempt': {
         const item = this.items.get(args['work_item_id'] as string)!;
+        if (item.classification !== 'complete') {
+          return fail('55000', item.classification === 'incomplete'
+            ? 'work_intelligence_classification_incomplete'
+            : 'work_intelligence_classification_missing');
+        }
         const claim: FakeClaim = {
           id: args['claim_id'] as string, itemId: item.id, target: item.target,
           attemptId: args['attempt_id'] as string, released: false, reason: null,
@@ -109,6 +124,11 @@ class FakeDatabase {
 
       case 'acquire_work_claim': {
         const item = this.items.get(args['work_item_id'] as string)!;
+        if (item.classification !== 'complete') {
+          return fail('55000', item.classification === 'incomplete'
+            ? 'work_intelligence_classification_incomplete'
+            : 'work_intelligence_classification_missing');
+        }
         if (item.state !== 'approved') return fail('55000', 'work item is not eligible for an autonomous claim');
         if (this.activeClaimOfItem(item.id)) return fail('55000', 'work item is held by an active claim');
         if (this.runningOnTarget(item.target, item.id)) return fail('55000', 'work target is busy with a running attempt');
@@ -124,6 +144,11 @@ class FakeDatabase {
         const claim = this.claims.get(args['claim_id'] as string);
         if (!claim) return fail('P0002', 'claim not found');
         const item = this.items.get(claim.itemId)!;
+        if (item.classification !== 'complete') {
+          return fail('55000', item.classification === 'incomplete'
+            ? 'work_intelligence_classification_incomplete'
+            : 'work_intelligence_classification_missing');
+        }
         // SUP-05: a exclusividade de alvo vive no início, não na aquisição.
         if (this.runningOnTarget(item.target, item.id)) return fail('55000', 'work target is busy with a running attempt');
         if (claim.attemptId && claim.attemptId !== args['attempt_id']) return fail('55000', 'claim already started another attempt');
@@ -331,6 +356,38 @@ test('fila vazia encerra a volta sem posse, tentativa ou executor', async () => 
   expect(database.events).toHaveLength(0);
 });
 
+test.each<FakeClassification>(['missing', 'incomplete'])(
+  'classificação %s impede seleção, claim, tentativa e executor',
+  async (classification) => {
+    const fakeItem: FakeItem = {
+      id: 'item-1', version: 1, state: 'approved', target: 'alvo-1',
+      approvalSeq: 10, classification,
+    };
+    const database = new FakeDatabase({ items: [fakeItem] });
+    const runner = executor();
+    const result = await turn(database, runner.adapter, [workItem('item-1')], ['claim-1', 'attempt-1']);
+
+    expect(result.outcome).toBe('no_eligible_work');
+    expect(runner.calls).toHaveLength(0);
+    expect(database.claims.size).toBe(0);
+    expect(database.events).toHaveLength(0);
+    expect(database.calls).toEqual(['reconcile_supervised_work', 'next_autonomous_work']);
+  },
+);
+
+test('FakeDatabase sem suporte explícito à classificação falha fechado', async () => {
+  const database = new FakeDatabase({
+    items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }],
+  });
+  const runner = executor();
+  const result = await turn(database, runner.adapter, [workItem('item-1')], ['claim-1', 'attempt-1']);
+
+  expect(result.outcome).toBe('no_eligible_work');
+  expect(runner.calls).toHaveLength(0);
+  expect(database.claims.size).toBe(0);
+  expect(database.events).toHaveLength(0);
+});
+
 test('reconcilia antes de selecionar e relata o que a reconciliação produziu', async () => {
   const database = new FakeDatabase({
     items: [],
@@ -346,7 +403,7 @@ test('reconcilia antes de selecionar e relata o que a reconciliação produziu',
 });
 
 test('reconciliação recusada interrompe a volta antes de qualquer seleção', async () => {
-  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }], failReconcile: true });
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }], failReconcile: true });
   const { adapter, calls } = executor();
   const result = await turn(database, adapter, [workItem('item-1')], ['claim-1', 'attempt-1']);
 
@@ -358,8 +415,8 @@ test('reconciliação recusada interrompe a volta antes de qualquer seleção', 
 test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal e liberação', async () => {
   const database = new FakeDatabase({
     items: [
-      { id: 'item-novo', version: 1, state: 'approved', target: 'alvo-b', approvalSeq: 90 },
-      { id: 'item-antigo', version: 1, state: 'approved', target: 'alvo-a', approvalSeq: 10 },
+      { id: 'item-novo', version: 1, state: 'approved', target: 'alvo-b', approvalSeq: 90, classification: 'complete' },
+      { id: 'item-antigo', version: 1, state: 'approved', target: 'alvo-a', approvalSeq: 10, classification: 'complete' },
     ],
   });
   const { adapter, calls } = executor('result');
@@ -392,8 +449,8 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
 test('segunda volta seleciona o item seguinte, sem sobrepor o primeiro', async () => {
   const database = new FakeDatabase({
     items: [
-      { id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 },
-      { id: 'item-2', version: 1, state: 'approved', target: 'alvo-2', approvalSeq: 20 },
+      { id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' },
+      { id: 'item-2', version: 1, state: 'approved', target: 'alvo-2', approvalSeq: 20, classification: 'complete' },
     ],
   });
   const items = [workItem('item-1', { target: 'alvo-1' }), workItem('item-2', { target: 'alvo-2' })];
@@ -409,7 +466,7 @@ test('segunda volta seleciona o item seguinte, sem sobrepor o primeiro', async (
 });
 
 test('falha do executor produz terminal de falha e libera a posse', async () => {
-  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }] });
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }] });
   const result = await turn(database, executor('error').adapter, [workItem('item-1', { target: 'alvo-1' })], ['claim-1', 'attempt-1']);
 
   expect(result.outcome).toBe('execution_failed');
@@ -420,7 +477,7 @@ test('falha do executor produz terminal de falha e libera a posse', async () => 
 });
 
 test('executor que lança deixa a órfã para a reconciliação, sem inventar terminal nem soltar posse', async () => {
-  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }] });
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }] });
   const result = await turn(database, throwingExecutor(), [workItem('item-1', { target: 'alvo-1' })], ['claim-1', 'attempt-1']);
 
   expect(result.outcome).toBe('execution_interrupted');
@@ -434,7 +491,7 @@ test('executor que lança deixa a órfã para a reconciliação, sem inventar te
 });
 
 test('duas invocações concorrentes não executam o mesmo item duas vezes', async () => {
-  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }] });
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }] });
   const items = [workItem('item-1', { target: 'alvo-1' })];
   let release = (): void => {};
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -462,7 +519,7 @@ test('duas invocações concorrentes não executam o mesmo item duas vezes', asy
 test('seleção obsoleta sobre tentativa em curso perde a corrida com recusa tipada', async () => {
   // Cenário documentado no SUP-02: dois supervisores leem a mesma cabeça porque
   // a seleção não bloqueia. O perdedor chega depois do início da tentativa.
-  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }], staleSelection: true });
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }], staleSelection: true });
   const items = [workItem('item-1', { target: 'alvo-1' })];
   let release = (): void => {};
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -485,7 +542,7 @@ test('seleção obsoleta sobre tentativa em curso perde a corrida com recusa tip
 test('posse alheia ainda não iniciada recusa a segunda aquisição do mesmo item', async () => {
   // A janela mais estreita: outro supervisor já tem a posse mas ainda não
   // iniciou a tentativa, então o item continua `approved`.
-  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }], staleSelection: true });
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }], staleSelection: true });
   await database.client.rpc('acquire_work_claim', { work_item_id: 'item-1', expected_proposal_version: 1, claim_id: 'claim-alheio', owner_instance_id: 'outro', lease_seconds: 600 });
 
   const { adapter, calls } = executor();
@@ -501,8 +558,8 @@ test('posse alheia ainda não iniciada recusa a segunda aquisição do mesmo ite
 test('dois itens no mesmo alvo respeitam a exclusividade no início da tentativa', async () => {
   const database = new FakeDatabase({
     items: [
-      { id: 'item-2', version: 1, state: 'approved', target: 'alvo-comum', approvalSeq: 20 },
-      { id: 'item-1', version: 1, state: 'in_progress', target: 'alvo-comum', approvalSeq: 30 },
+      { id: 'item-2', version: 1, state: 'approved', target: 'alvo-comum', approvalSeq: 20, classification: 'complete' },
+      { id: 'item-1', version: 1, state: 'in_progress', target: 'alvo-comum', approvalSeq: 30, classification: 'complete' },
     ],
     staleSelection: true,
   });
@@ -517,7 +574,7 @@ test('dois itens no mesmo alvo respeitam a exclusividade no início da tentativa
 test('início recusado devolve a posse sem tentativa e não aciona o executor', async () => {
   // A posse é adquirida; a corrida do alvo é perdida entre a aquisição e o início.
   const database = new FakeDatabase({
-    items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }],
+    items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }],
     startRefusal: { code: '55000', message: 'work target is held by an active claim' },
   });
   const { adapter, calls } = executor();
@@ -530,7 +587,7 @@ test('início recusado devolve a posse sem tentativa e não aciona o executor', 
 });
 
 test('item que a fila ofereceu mas o domínio recusa não chega ao executor nem toma posse', async () => {
-  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }] });
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }] });
   const { adapter, calls } = executor();
   // Sem limites declarados: o predicado do AUTO-01 reprova.
   const invalid = workItem('item-1', { spec: { schema_version: 1, target: { kind: 'project', reference: 'alvo-1' }, permissions: [], validation_criteria: [{ label: 'testes' }], limits: {} } });
@@ -545,7 +602,7 @@ test('item que a fila ofereceu mas o domínio recusa não chega ao executor nem 
 });
 
 test('replay do mesmo terminal não duplica efeito persistido', async () => {
-  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }] });
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }] });
   const items = [workItem('item-1', { target: 'alvo-1' })];
   await turn(database, executor().adapter, items, ['claim-1', 'attempt-1']);
 
@@ -567,7 +624,7 @@ test('replay do mesmo terminal não duplica efeito persistido', async () => {
 });
 
 test('a volta nunca aceita, autoriza, integra ou aplica resultado algum', async () => {
-  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }] });
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }] });
   const result = await turn(database, executor().adapter, [workItem('item-1', { target: 'alvo-1' })], ['claim-1', 'attempt-1']);
 
   expect(result.outcome).toBe('execution_completed');
@@ -596,7 +653,7 @@ test('tentativa abandonada retoma com IDs novos e carriedContext sem cenário in
   };
   const item = workItem('item-1', { limits: { max_attempts: 3, max_duration_minutes: 5 } });
   const database = new FakeDatabase({
-    items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-item-1', approvalSeq: 1 }],
+    items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-item-1', approvalSeq: 1, classification: 'complete' }],
     resumptionSource: source,
   });
   const { adapter, calls } = executor();
@@ -616,7 +673,7 @@ test('tentativa abandonada retoma com IDs novos e carriedContext sem cenário in
 describe('Etapa 2B.1 — persistência de checkpoint em stream', () => {
   const readerItems = () => [workItem('item-1', { target: 'alvo-1' })];
   const db = (extra: Partial<FakeOptions> = {}) =>
-    new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10 }], ...extra });
+    new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }], ...extra });
 
   test('executor sem checkpoint não chama record_work_checkpoint e chega a review', async () => {
     const database = db();
