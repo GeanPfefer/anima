@@ -33,14 +33,21 @@ export const targetsFromEnvironment = (): Readonly<Record<string, string>> | nul
   } catch { return null; }
 };
 
-/** Adaptador local a partir do ambiente, ou `null` quando o nó não está configurado. */
-export const localRunnerFromEnvironment = (): LocalRunnerAdapter | null => {
+/**
+ * Adaptador local a partir do ambiente, ou `null` quando o nó não está configurado.
+ *
+ * `emitCheckpoints` é opt-in do chamador: só o laço supervisionado o liga, para
+ * persistir checkpoints mid-flight. O caminho comandado (INT-04) não passa a
+ * flag e segue single-shot, preservando a fronteira ratificada em 2B.1.
+ */
+export const localRunnerFromEnvironment = (options: { readonly emitCheckpoints?: boolean } = {}): LocalRunnerAdapter | null => {
   const runnerRoot = process.env.ANIMA_LOCAL_RUNNER_ROOT;
   const targets = targetsFromEnvironment();
   if (!runnerRoot || !isAbsolute(runnerRoot) || !targets) return null;
   return new LocalRunnerAdapter({
     runnerRoot, model: process.env.ANIMA_LOCAL_RUNNER_MODEL,
     targets: { resolve: reference => targets[reference] ?? null },
+    emitCheckpoints: options.emitCheckpoints ?? false,
   });
 };
 

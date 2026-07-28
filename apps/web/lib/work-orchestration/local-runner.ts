@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
-import type { WorkEvent, WorkExecutorAdapter, WorkExecutorRequest, WorkExecutorSignal, WorkExecutorSignalInput } from '@anima/core';
+import { validateWorkCheckpoint } from '@anima/core';
+import type { WorkCheckpointV1, WorkEvent, WorkExecutorAdapter, WorkExecutorRequest, WorkExecutorSignal, WorkExecutorSignalInput } from '@anima/core';
 
 const RESULT_PREFIX = 'ANIMA_RESULT_JSON=';
+const CHECKPOINT_PREFIX = 'ANIMA_CHECKPOINT_JSON=';
 const REQUIRED_PERMISSIONS = new Set(['workspace_read', 'workspace_write_isolated']);
 
 export interface LocalRunnerProcessInput {
@@ -14,6 +16,12 @@ export interface LocalRunnerProcessInput {
   readonly testCommand?: string;
   readonly timeoutMs: number;
   readonly signal: AbortSignal;
+  /** Liga a emissão de checkpoints mid-flight do runner. */
+  readonly emitCheckpoints?: boolean;
+  /** JSON do carriedContext da retomada (AUTO-05), repassado ao runner. */
+  readonly carriedContext?: string;
+  /** Recebe cada linha de stdout assim que completa, para consumo em stream. */
+  readonly onLine?: (line: string) => void;
 }
 
 export interface LocalRunnerProcessResult { readonly exitCode: number; readonly stdout: string; readonly stderr: string; }
@@ -61,6 +69,57 @@ const parseEnvelope = (stdout: string): RunnerEnvelope | null => {
   } catch { return null; }
 };
 
+// Projeta um envelope `ANIMA_CHECKPOINT_JSON=` do runner num `WorkCheckpointV1`.
+// A régua estrutural e de sanitização é a MESMA do core (`validateWorkCheckpoint`),
+// não uma segunda cópia; `touchedResources` declarados ficam dentro do escopo
+// aprovado; ausência de correlação ou campo obrigatório devolve `null`.
+const parseCheckpoint = (line: string, targetReference: string, includedScope: readonly string[]): WorkCheckpointV1 | null => {
+  try {
+    const root = record(JSON.parse(line.slice(CHECKPOINT_PREFIX.length)) as unknown);
+    const handoff = record(root?.['handoff']);
+    const checkpoint = record(root?.['checkpoint']);
+    if (root?.['schema_version'] !== 1 || root['status'] !== 'checkpoint' || handoff?.['kind'] !== 'checkpoint_bundle' || !checkpoint) return null;
+    const reference = handoff['reference'];
+    const sha256 = handoff['sha256'];
+    if (typeof reference !== 'string' || typeof sha256 !== 'string' || !opaque(reference) || !/^[a-f0-9]{64}$/.test(sha256)) return null;
+    const candidate = {
+      schemaVersion: 1,
+      handoffReference: `local-runner:${targetReference}:${reference}:sha256:${sha256}`,
+      completedSteps: checkpoint['completedSteps'], remainingSteps: checkpoint['remainingSteps'], nextStep: checkpoint['nextStep'],
+      decisions: checkpoint['decisions'], risks: checkpoint['risks'], touchedResources: checkpoint['touchedResources'],
+      validations: checkpoint['validations'], failures: checkpoint['failures'], evidenceReferences: checkpoint['evidenceReferences'],
+    } as unknown as WorkCheckpointV1;
+    if (validateWorkCheckpoint(candidate) !== null) return null;
+    const approved = new Set(includedScope.map(path => path.replace(/\\/g, '/')));
+    if (candidate.touchedResources.some(path => !approved.has(path.replace(/\\/g, '/')))) return null;
+    return candidate;
+  } catch { return null; }
+};
+
+// Terminal único a partir do resultado do processo — compartilhado pelos dois
+// caminhos (single-shot comandado e stream supervisionado), sem código duplicado.
+const terminalInputFrom = (request: WorkExecutorRequest, result: LocalRunnerProcessResult): WorkExecutorSignalInput => {
+  if (result.exitCode !== 0) {
+    return { kind: 'error', code: 'execution_failed', message: `Runner terminou com código ${result.exitCode}.`, retryable: false, handoffReference: 'checkpoint:runner-failed' };
+  }
+  const envelope = parseEnvelope(result.stdout);
+  if (!envelope) {
+    return { kind: 'error', code: 'contract_violation', message: 'Runner retornou envelope inválido.', retryable: false, handoffReference: 'checkpoint:invalid-runner-envelope' };
+  }
+  const approvedPaths = new Set(request.includedScope.map(path => path.replace(/\\/g, '/')));
+  if (envelope.producedPaths.some(path => !approvedPaths.has(path.replace(/\\/g, '/')))) {
+    return { kind: 'error', code: 'contract_violation', message: 'Runner produziu arquivo fora do escopo aprovado.', retryable: false, handoffReference: 'checkpoint:runner-scope-violation' };
+  }
+  const handoffReference = `local-runner:${request.target.reference}:${envelope.handoffReference}:sha256:${envelope.handoffSha256}`;
+  return {
+    kind: 'result', summary: 'O runner local produziu e validou um resultado para revisão.',
+    resultReferences: [`runner-evidence:${envelope.evidenceReference}`, `runner-bundle:${envelope.handoffReference}`],
+    validations: request.validationCriteria.map(item => ({ label: item.label, outcome: 'passed' as const })),
+    limitations: ['Resultado produzido em workspace isolada; nenhuma alteração foi aplicada ao alvo original.'],
+    handoffReference,
+  };
+};
+
 const taskFor = (request: WorkExecutorRequest): string => [
   request.objective,
   `Escopo incluído: ${request.includedScope.join('; ')}.`,
@@ -73,6 +132,8 @@ export class SpawnLocalRunnerProcess implements LocalRunnerProcess {
     return new Promise((resolveResult, reject) => {
       const args = ['-m', 'local_agent', '--workspace', input.workspace, '--task', input.task, '--produce-only'];
       if (input.model) args.push('--model', input.model);
+      if (input.emitCheckpoints) args.push('--emit-checkpoints');
+      if (input.carriedContext) args.push('--carried-context', input.carriedContext);
       const child = spawn(input.pythonExecutable, args, {
         cwd: input.runnerRoot,
         shell: false,
@@ -80,14 +141,25 @@ export class SpawnLocalRunnerProcess implements LocalRunnerProcess {
         env: { ...process.env, PYTHONIOENCODING: 'utf-8', ...(input.testCommand ? { LOCAL_AGENT_TEST_COMMAND: input.testCommand } : {}) },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-      let stdout = '', stderr = '', settled = false;
+      let stdout = '', stderr = '', settled = false, lineBuffer = '';
       const finish = (result: LocalRunnerProcessResult): void => { if (!settled) { settled = true; clearTimeout(timer); resolveResult(result); } };
       const fail = (cause: Error): void => { if (!settled) { settled = true; clearTimeout(timer); reject(cause); } };
       const stop = (): void => { child.kill(); fail(new Error('runner_cancelled')); };
       const timer = setTimeout(() => { child.kill(); fail(new Error('runner_timeout')); }, input.timeoutMs);
       input.signal.addEventListener('abort', stop, { once: true });
       child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
-      child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk;
+        // Entrega cada linha completa assim que chega: um checkpoint impresso
+        // antes do terminal precisa ser observável ANTES do processo terminar.
+        if (!input.onLine) return;
+        lineBuffer += chunk;
+        for (let nl = lineBuffer.indexOf('\n'); nl >= 0; nl = lineBuffer.indexOf('\n')) {
+          const line = lineBuffer.slice(0, nl).replace(/\r$/, '');
+          lineBuffer = lineBuffer.slice(nl + 1);
+          input.onLine(line);
+        }
+      });
       child.stderr.on('data', (chunk: string) => { stderr += chunk; });
       child.on('error', fail);
       child.on('close', code => { input.signal.removeEventListener('abort', stop); finish({ exitCode: code ?? -1, stdout, stderr }); });
@@ -102,7 +174,13 @@ export interface LocalRunnerAdapterOptions {
   readonly model?: string;
   readonly targets: LocalTargetResolver;
   readonly process?: LocalRunnerProcess;
+  // Liga a emissão de checkpoints mid-flight. Só o caminho supervisionado a
+  // ativa; o caminho comandado (INT-04) permanece single-shot e byte a byte,
+  // preservando a fronteira ratificada em 2B.1 (comandado rejeita checkpoint).
+  readonly emitCheckpoints?: boolean;
 }
+
+type Attach = (sequence: number, value: WorkExecutorSignalInput) => WorkExecutorSignal;
 
 export class LocalRunnerAdapter implements WorkExecutorAdapter {
   readonly id = 'local-runner-v1';
@@ -110,7 +188,7 @@ export class LocalRunnerAdapter implements WorkExecutorAdapter {
   constructor(private readonly options: LocalRunnerAdapterOptions) { this.process = options.process ?? new SpawnLocalRunnerProcess(); }
 
   async *execute(request: WorkExecutorRequest, signal: AbortSignal): AsyncIterable<WorkExecutorSignal> {
-    const attach = (sequence: number, value: WorkExecutorSignalInput): WorkExecutorSignal => ({
+    const attach: Attach = (sequence, value) => ({
       attemptId: request.attemptId, workItemId: request.workItemId, approvedProposalVersion: request.approvedProposalVersion,
       origin: 'executor', sequence, ...value,
     }) as unknown as WorkExecutorSignal;
@@ -121,40 +199,69 @@ export class LocalRunnerAdapter implements WorkExecutorAdapter {
       yield attach(1, { kind: 'error', code: 'invalid_request', message: !workspace ? 'Alvo local não autorizado.' : missing.length ? 'Permissões locais insuficientes.' : 'Mais de um comando de validação não é suportado.', retryable: false, handoffReference: 'checkpoint:invalid-local-request' });
       return;
     }
-    const timeoutMs = (request.limits.maxDurationMinutes ?? 30) * 60_000;
-    try {
-      const result = await this.process.run({
-        runnerRoot: this.options.runnerRoot,
-        pythonExecutable: this.options.pythonExecutable ?? resolve(this.options.runnerRoot, '.venv', 'Scripts', 'python.exe'),
-        workspace, task: taskFor(request), model: this.options.model, testCommand: commands[0], timeoutMs, signal,
-      });
-      if (result.exitCode !== 0) {
-        yield attach(1, { kind: 'error', code: 'execution_failed', message: `Runner terminou com código ${result.exitCode}.`, retryable: false, handoffReference: 'checkpoint:runner-failed' });
-        return;
+    const processInput: LocalRunnerProcessInput = {
+      runnerRoot: this.options.runnerRoot,
+      pythonExecutable: this.options.pythonExecutable ?? resolve(this.options.runnerRoot, '.venv', 'Scripts', 'python.exe'),
+      workspace, task: taskFor(request), model: this.options.model, testCommand: commands[0],
+      timeoutMs: (request.limits.maxDurationMinutes ?? 30) * 60_000, signal,
+      emitCheckpoints: this.options.emitCheckpoints,
+      // O carriedContext do AUTO-05 é repassado como contexto de continuação,
+      // nunca como instrução de domínio; ausência preserva o começo do zero.
+      carriedContext: request.carriedContext ? JSON.stringify(request.carriedContext) : undefined,
+    };
+    if (!this.options.emitCheckpoints) {
+      // Caminho single-shot preservado byte a byte (INT-04 comandado).
+      try {
+        yield attach(1, terminalInputFrom(request, await this.process.run(processInput)));
+      } catch {
+        yield signal.aborted
+          ? attach(1, { kind: 'cancelled', acknowledged: true, handoffReference: 'checkpoint:runner-cancelled' })
+          : attach(1, { kind: 'error', code: 'execution_failed', message: 'Falha no processo do runner local.', retryable: false, handoffReference: 'checkpoint:runner-process-failed' });
       }
-      const envelope = parseEnvelope(result.stdout);
-      if (!envelope) {
-        yield attach(1, { kind: 'error', code: 'contract_violation', message: 'Runner retornou envelope inválido.', retryable: false, handoffReference: 'checkpoint:invalid-runner-envelope' });
-        return;
-      }
-      const approvedPaths = new Set(request.includedScope.map(path => path.replace(/\\/g, '/')));
-      if (envelope.producedPaths.some(path => !approvedPaths.has(path.replace(/\\/g, '/')))) {
-        yield attach(1, { kind: 'error', code: 'contract_violation', message: 'Runner produziu arquivo fora do escopo aprovado.', retryable: false, handoffReference: 'checkpoint:runner-scope-violation' });
-        return;
-      }
-      const handoffReference = `local-runner:${request.target.reference}:${envelope.handoffReference}:sha256:${envelope.handoffSha256}`;
-      yield attach(1, {
-        kind: 'result', summary: 'O runner local produziu e validou um resultado para revisão.',
-        resultReferences: [`runner-evidence:${envelope.evidenceReference}`, `runner-bundle:${envelope.handoffReference}`],
-        validations: request.validationCriteria.map(item => ({ label: item.label, outcome: 'passed' as const })),
-        limitations: ['Resultado produzido em workspace isolada; nenhuma alteração foi aplicada ao alvo original.'],
-        handoffReference,
-      });
-    } catch {
-      const cancelled = signal.aborted;
-      yield cancelled
-        ? attach(1, { kind: 'cancelled', acknowledged: true, handoffReference: 'checkpoint:runner-cancelled' })
-        : attach(1, { kind: 'error', code: 'execution_failed', message: 'Falha no processo do runner local.', retryable: false, handoffReference: 'checkpoint:runner-process-failed' });
+      return;
     }
+    yield* this.runStreamed(request, signal, attach, processInput);
+  }
+
+  /**
+   * Consome o stream do runner: cada `checkpoint` impresso vira um sinal
+   * `checkpoint` (jamais convertido em `progress` ou terminal) emitido ANTES do
+   * terminal, para que o laço o persista antes de uma eventual interrupção. Um
+   * checkpoint mal-formado falha fechado como violação de contrato.
+   */
+  private async *runStreamed(request: WorkExecutorRequest, signal: AbortSignal, attach: Attach, processInput: LocalRunnerProcessInput): AsyncIterable<WorkExecutorSignal> {
+    const queue: WorkExecutorSignal[] = [];
+    let seq = 0, malformed = false, done = false, wake: (() => void) | null = null;
+    const signalWake = (): void => { const w = wake; wake = null; w?.(); };
+    const onLine = (line: string): void => {
+      if (!line.startsWith(CHECKPOINT_PREFIX)) return;
+      const checkpoint = parseCheckpoint(line, request.target.reference, request.includedScope);
+      if (checkpoint) queue.push(attach(++seq, { kind: 'checkpoint', checkpoint }));
+      else malformed = true;
+      signalWake();
+    };
+    let result: LocalRunnerProcessResult | undefined, threw = false;
+    const runPromise = this.process.run({ ...processInput, onLine })
+      .then(value => { result = value; }, () => { threw = true; })
+      .finally(() => { done = true; signalWake(); });
+    // Drena checkpoints à medida que chegam; só depois de `done` decide o terminal.
+    for (;;) {
+      while (queue.length) yield queue.shift()!;
+      if (done) break;
+      await new Promise<void>(resolve => { wake = resolve; if (done || queue.length) { wake = null; resolve(); } });
+    }
+    await runPromise;
+    while (queue.length) yield queue.shift()!;
+    if (malformed) {
+      yield attach(++seq, { kind: 'error', code: 'contract_violation', message: 'Runner emitiu um checkpoint inválido.', retryable: false, handoffReference: 'checkpoint:invalid-runner-checkpoint' });
+      return;
+    }
+    if (threw) {
+      yield signal.aborted
+        ? attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference: 'checkpoint:runner-cancelled' })
+        : attach(++seq, { kind: 'error', code: 'execution_failed', message: 'Falha no processo do runner local.', retryable: false, handoffReference: 'checkpoint:runner-process-failed' });
+      return;
+    }
+    yield attach(++seq, terminalInputFrom(request, result!));
   }
 }

@@ -41,6 +41,62 @@ test('recusa resultado que produziu arquivo fora do escopo aprovado', async () =
   await expect(collect(new LocalRunnerAdapter({ runnerRoot: 'runner', targets, process }))).resolves.toEqual([expect.objectContaining({ kind: 'error', code: 'contract_violation', message: expect.stringContaining('fora do escopo') })]);
 });
 
+const SHA_A = 'a'.repeat(64);
+const SHA_B = 'b'.repeat(64);
+const RESULT_LINE = `ANIMA_RESULT_JSON={"schema_version":1,"status":"result_produced","evidence_reference":"run.json","produced_paths":["a.py"],"handoff":{"kind":"result_bundle","reference":"result.zip","sha256":"${SHA_A}"}}`;
+const checkpointLine = (overrides: Record<string, unknown> = {}): string => 'ANIMA_CHECKPOINT_JSON=' + JSON.stringify({
+  schema_version: 1, status: 'checkpoint',
+  handoff: { kind: 'checkpoint_bundle', reference: 'cp.json', sha256: SHA_B },
+  checkpoint: {
+    schemaVersion: 1, completedSteps: ['Planejamento validado e vinculado à tarefa.'],
+    remainingSteps: ['Atualizar a.py.'], nextStep: 'Atualizar a.py.', decisions: [], risks: ['cobertura parcial'],
+    touchedResources: [], validations: [{ label: 'planejamento validado', outcome: 'declared' }],
+    failures: [], evidenceReferences: ['checkpoint-plan:cp.json'], ...overrides,
+  },
+});
+// Fake em stream: entrega cada linha por onLine (como o runner real) e devolve o stdout inteiro.
+const streamingProcess = (stdout: string, exitCode = 0): LocalRunnerProcess => ({
+  run: async (input) => { for (const line of stdout.split('\n')) input.onLine?.(line); return { exitCode, stderr: '', stdout }; },
+});
+
+test('em stream, o checkpoint vira sinal checkpoint ANTES do terminal, sem virar progresso', async () => {
+  const stdout = checkpointLine() + '\n' + RESULT_LINE + '\n';
+  const signals = await collect(new LocalRunnerAdapter({ runnerRoot: 'G:\\runner', targets, process: streamingProcess(stdout), emitCheckpoints: true }));
+  expect(signals).toEqual([
+    expect.objectContaining({ kind: 'checkpoint', sequence: 1, origin: 'executor', checkpoint: expect.objectContaining({
+      schemaVersion: 1, handoffReference: `local-runner:anima:cp.json:sha256:${SHA_B}`, nextStep: 'Atualizar a.py.', remainingSteps: ['Atualizar a.py.'],
+    }) }),
+    expect.objectContaining({ kind: 'result', sequence: 2, handoffReference: `local-runner:anima:result.zip:sha256:${SHA_A}` }),
+  ]);
+  expect(JSON.stringify(signals)).not.toContain('G:\\');
+});
+
+test('sem emitCheckpoints (caminho comandado), o checkpoint é ignorado: só o resultado em seq 1', async () => {
+  const stdout = checkpointLine() + '\n' + RESULT_LINE + '\n';
+  const signals = await collect(new LocalRunnerAdapter({ runnerRoot: 'G:\\runner', targets, process: streamingProcess(stdout) }));
+  expect(signals).toEqual([expect.objectContaining({ kind: 'result', sequence: 1 })]);
+});
+
+test('checkpoint mal-formado falha fechado como violação de contrato', async () => {
+  const stdout = 'ANIMA_CHECKPOINT_JSON={não é json}\n' + RESULT_LINE + '\n';
+  const signals = await collect(new LocalRunnerAdapter({ runnerRoot: 'G:\\runner', targets, process: streamingProcess(stdout), emitCheckpoints: true }));
+  expect(signals).toEqual([expect.objectContaining({ kind: 'error', code: 'contract_violation' })]);
+});
+
+test('checkpoint com recurso fora do escopo aprovado é recusado', async () => {
+  const stdout = checkpointLine({ touchedResources: ['fora.py'] }) + '\n' + RESULT_LINE + '\n';
+  const signals = await collect(new LocalRunnerAdapter({ runnerRoot: 'G:\\runner', targets, process: streamingProcess(stdout), emitCheckpoints: true }));
+  expect(signals).toEqual([expect.objectContaining({ kind: 'error', code: 'contract_violation' })]);
+});
+
+test('carriedContext da retomada é repassado ao runner como contexto de continuação', async () => {
+  const carriedContext = { isNewAttempt: true as const, continueFromCheckpoint: true as const, remainingSteps: ['Atualizar a.py.'], nextStep: 'Inspecionar.', risks: [], touchedResources: ['a.py'], previousFailures: ['AssertionError'] };
+  const run = jest.fn().mockResolvedValue({ exitCode: 0, stderr: '', stdout: RESULT_LINE });
+  const signals = await collect(new LocalRunnerAdapter({ runnerRoot: 'G:\\runner', targets, process: { run }, emitCheckpoints: true }), { ...request, carriedContext });
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({ emitCheckpoints: true, carriedContext: JSON.stringify(carriedContext) }));
+  expect(signals).toEqual([expect.objectContaining({ kind: 'result', sequence: 1 })]);
+});
+
 test('reconcilia reentrega pela tentativa persistida sem heurística', () => {
   const event = (type: 'execution_started' | 'result_submitted', attemptId: string) => ({ id: type, workItemId: 'work-1', type, author: 'executor' as const, proposalVersion: 1, payload: { schema_version: 1, data: { attempt_id: attemptId } }, occurredAt: new Date() });
   expect(classifyPersistedAttempt([], 'attempt-1')).toBe('absent');

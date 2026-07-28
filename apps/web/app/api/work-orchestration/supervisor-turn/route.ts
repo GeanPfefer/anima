@@ -15,7 +15,9 @@ export async function POST(request: Request) {
   const { data: { user } } = await client.auth.getUser();
   if (!user) return Response.json({ ok: false, error: { code: 'authentication_required' } }, { status: 401 });
 
-  const adapter = localRunnerFromEnvironment();
+  // O laço supervisionado liga os checkpoints mid-flight (AUTO-05); o caminho
+  // comandado (INT-04) não, mantendo-se single-shot.
+  const adapter = localRunnerFromEnvironment({ emitCheckpoints: true });
   if (!adapter) {
     return Response.json({ ok: false, error: { code: 'local_runner_not_configured', message: 'Executor local não configurado.' } }, { status: 503 });
   }
