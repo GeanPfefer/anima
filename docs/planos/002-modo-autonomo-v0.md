@@ -18,7 +18,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | B | **Concluída (2026-07-20)** | AUTO-01 a AUTO-06 concluídos como contrato de domínio; AUTO-03 completo (ambiente e consumo) permanece adiado por decisão do próprio item |
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
-| E | **Em andamento** | SUP-01 a SUP-05, laço operacional, Etapa 2A, Etapa 2B.1 e **Etapa 2B.2 (retomada real do AUTO-05)** completos e ratificados — a 2B.2 em 2026-07-28 após as provas de banco completas (ver "Ratificação da Etapa 2B.2"). A retomada usa `WorkResumptionSourceV1.abandoned_checkpoint`, sem projetar abandono como `WorkHandoffV1` terminal nem inventar causa externa. **Resta** para a retomada *prática*: um produtor real de checkpoints no `LocalRunnerAdapter`, que ainda emite zero. |
+| E | **Em andamento** | SUP-01 a SUP-05, laço operacional, Etapa 2A, Etapa 2B.1 e **Etapa 2B.2 (retomada real do AUTO-05)** completos e ratificados (2B.2 em 2026-07-28). A **produção e o consumo reais de checkpoints** (runner local emite checkpoint após o planejamento; `LocalRunnerAdapter` transmite em stream; retomada entrega `carriedContext`) estão **implementados e aguardando ratificação** — provados de forma determinística e ao vivo com modelo local (ver "Produção e consumo reais de checkpoints"). A Fase E permanece **aberta** até a decisão humana de ratificação. |
 | F | Não iniciada | — |
 | G | Não iniciada | — |
 
@@ -493,6 +493,46 @@ Para os três, a fonte **não** carrega chave `scenario`, e seu texto não cont�
 **Confirmações de segurança desta ratificação:** nenhuma alteração no `LocalRunnerAdapter` nem no runner; nenhuma migration nova (a migration da 2B.2 já estava no repositório e no banco); nenhuma execução foi disparada; nenhum resultado foi aceito, autorizado, integrado ou aplicado; `supabase db reset` **não** foi executado; nenhum merge, push ou deploy. As mudanças da Etapa 2B.2 estão nos commits `7bf9179` (contrato puro), `f72bfa5` (migration + pgTAP + tipos), `020db80` (costura no laço), `85178a4` (documentação), `4643115` (prova dos três motivos no espelho puro) e `fd787be` (prova dos três motivos no banco).
 
 **Consequência para a Fase E:** a Etapa 2B.2 está ratificada como o **contrato e o planejamento verdadeiros da retomada**, costurados ao Supervisor. A Fase E **permanece aberta** por uma única pendência nomeada — um **produtor real de checkpoints** no `LocalRunnerAdapter` — sem a qual a retomada prática de ponta a ponta com executor real não pode ser demonstrada.
+
+### Produção e consumo reais de checkpoints (2026-07-28) — pronto para revisão
+
+**Não ratificado.** Registro append-only do estado alcançado, para o checkpoint humano. Fecha a pendência operacional nomeada da Fase E — o produtor real de checkpoints —, mas **não** registra ratificação: a Fase E segue aberta até a decisão humana.
+
+**O que foi implementado.** O sinal `checkpoint` do INT-01 e a persistência da 2A/2B.1 já existiam; faltava um **produtor real** e a **transmissão** pelo adaptador.
+
+- **Runner local** (repositório separado `anima-local-agent-poc`): emite um checkpoint mid-flight **após o planejamento e antes da edição**, no protocolo `ANIMA_CHECKPOINT_JSON=`. O `Plan` validado é projetado num subconjunto do `WorkCheckpointV1` (passos concluídos/restantes por templates fixos, próximo passo, validação `declared`, handoff opaco + sha256 de um artefato do plano) — **só fatos do plano**, sem prosa do modelo, cadeia de pensamento, `status`/`stopReason` terminais nem segredos. A linha é ancorada com `\n` para sobreviver ao prompt de aprovação. Na retomada, `--carried-context` injeta o contexto de continuação (restante, próximo passo, riscos, falhas anteriores) no planejador e no executor como preâmbulo `[RETOMADA]` — **apenas contexto, nunca instrução de domínio**; o motivo do abandono não chega por contrato. Ausência preserva o começo do zero.
+- **`LocalRunnerAdapter`**: ganhou um caminho em **stream, opt-in por chamador**. Quando ligado, consome o stdout linha a linha, projeta cada `ANIMA_CHECKPOINT_JSON=` num sinal `checkpoint` (revalidado pela régua única `validateWorkCheckpoint` do core e restrito ao escopo aprovado) e o emite **antes do terminal** — nunca convertido em `progress` ou terminal —, para o laço persistir por `record_work_checkpoint`. Checkpoint mal-formado falha fechado como violação de contrato.
+- **Preservação do INT-04:** a emissão é **opt-in** (`localRunnerFromEnvironment({ emitCheckpoints })`), ligada só na rota `supervisor-turn`. O caminho comandado (INT-04) não liga a flag e permanece **single-shot byte a byte**, honrando a fronteira ratificada em 2B.1 (comandado rejeita checkpoint). Nenhum contrato ratificado foi ampliado ou enfraquecido; nenhum fato novo é persistido além dos já existentes.
+
+**Provas determinísticas (sem depender do modelo estocástico):**
+
+- Runner (`anima-local-agent-poc`): suíte **99/99**, `mypy` limpo (17 arquivos), `compileall` ok. Cobrem a projeção do plano em checkpoint, a emissão antes do terminal no fluxo real com fake, a ausência sem a flag, a âncora de linha (o mock de `input` passou a ecoar o prompt), e a entrega/consumo do `carriedContext` no planejador e no executor sem fabricar cenário/status.
+- `apps/web`: `local-runner` **10/10** (as 4 do single-shot comandado intactas + 5 novas de stream: checkpoint antes do terminal, ignorado sem a flag, mal-formado fail-closed, fora de escopo recusado, `carriedContext` repassado); supervisor **27/27**; web **68/68**.
+- `packages/core` **432/432**; `typecheck` limpo nos 5 workspaces; pgTAP `supabase test db` **16 arquivos/447** PASS (inalterado — nenhuma migration tocada).
+
+**Prova real com modelo local (`qwen2.5-coder:14b`, Ollama + Docker + Supabase local):**
+
+- **Produção + transmissão** (adaptador real contra o runner real): o runner emitiu um `checkpoint` válido (`WorkCheckpointV1`, `validateWorkCheckpoint` = ok, sem vocabulário terminal) em `sequence=1`, **antes** do `result` em `sequence=2`.
+- **Ciclo completo de ponta a ponta** contra o Supabase local, item `b6d38d8b-0fd7-4b13-bf95-1817386fcf19` (alvo isolado `cp-live`, tarefa de duas unidades verificáveis: `add` e `subtract`):
+
+| seq | evento | fato |
+|---|---|---|
+| 2551 | `execution_started` | tentativa 1 `e1ca7da3…` |
+| 2552 | `checkpoint_recorded` | checkpoint real persistido (`signal_sequence=1`) |
+| 2553 | `work_claim_released` | `expired` |
+| 2554 | `attempt_abandoned` | **SUP-04**, `declared_bounds_exceeded` |
+| 2556–2557 | `work_started`/`execution_started` | tentativa 2 `c32dc0a2…`, `reason=resumed_execution`, `resumed_from=e1ca7da3…` |
+| 2558 | `checkpoint_recorded` | checkpoint real da tentativa retomada |
+| 2559 | `result_submitted` | `local-runner:cp-live:20260728T212802644731Z-result.zip:sha256:caa0f45a…307cc8` |
+| 2560 | `work_claim_released` | `attempt_finished` |
+
+Estado final **`review`**; **zero** `result_accepted`; a interrupção deixou a tentativa **aberta** (0 terminais) até o SUP-04. A workspace `cp-live` terminou **byte a byte intacta** (`git status` vazio; `calculator.py` ainda com os stubs `return 0`), preservando a garantia do INT-04.
+
+**Diferenciação determinístico × real:** as garantias contratuais (produção, transmissão sem conversão, escopo, fail-closed, entrega/consumo do `carriedContext`, persistência, correlação da retomada) são provadas por **fixtures determinísticas**; a prova com modelo local demonstra o **fluxo real de ponta a ponta**, cujo desfecho de edição é estocástico e não é a base das garantias.
+
+**Fora desta etapa (não resolvidos):** encerramento de executor zumbi; aceite/integração/merge automáticos; daemon/execução contínua; armazenamento de cadeia de pensamento; redesenho do runner; troca de modelo. As provas descartáveis não foram commitadas; a configuração local do usuário (`.env.local`, alvos) não foi alterada permanentemente.
+
+**Confirmações de segurança:** nenhum contrato ratificado foi enfraquecido; nenhum fato novo persistido além dos existentes; caminho comandado (INT-04) intocado byte a byte; nenhum resultado foi aceito, integrado ou aplicado; nenhum merge, push ou deploy; `supabase db reset` não foi executado. Mudanças no runner nos commits `b7d17f9` e `5361101` (repositório `anima-local-agent-poc`); no monorepo, `cae9d92` (adaptador + costura + testes).
 
 ## Fase F — Uso sustentável de inteligência
 
