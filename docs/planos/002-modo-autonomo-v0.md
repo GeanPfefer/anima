@@ -19,7 +19,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
-| F | Não iniciada | — |
+| F | **Em andamento (2026-07-28)** | INTEL-01 implementado e ratificado; INTEL-02 a INTEL-04 não iniciados |
 | G | Não iniciada | — |
 
 ## Fase A — Fechar a orquestração atual
@@ -585,6 +585,36 @@ desconhecidos em ordem determinística. Uma nova versão aprovada exige
 classificação própria. Proposta e aprovação não exigem classificação, e o
 INT-04 comandado permanece fora do gate. Este registro não ratifica o INTEL-01,
 não escolhe executor/provedor/modelo/esforço e não inicia o INTEL-02.
+
+### Ratificação do INTEL-01 (2026-07-28) — classificação de trabalho
+
+O usuário aprovou e ratificou o contrato apresentado do INTEL-01 ao declarar
+confiança na recomendação técnica, depois de receber nominalmente as decisões
+abaixo. Esta ratificação encerra o INTEL-01 sem ampliar seu escopo:
+
+- os cinco eixos obrigatórios são complexidade, risco, reversibilidade, clareza
+  do plano e urgência;
+- `unknown` é um valor válido durante a classificação, mas impede readiness para
+  execução autônoma;
+- toda classificação registra proveniência humana ou sistêmica;
+- reclassificação cria evento append-only e não sobrescreve versões anteriores;
+- a classificação só vigora para a versão atual e aprovada da proposta;
+- proposta e aprovação continuam possíveis sem classificação;
+- seleção, claim e início autônomos exigem classificação vigente e completa;
+- o INT-04 comandado pelo usuário permanece fora desse gate;
+- nenhuma escolha de executor, provedor, modelo ou esforço pertence ao INTEL-01.
+
+As evidências técnicas ratificadas são os três incrementos registrados acima:
+contrato puro V1, persistência auditável e gate autoritativo composto com
+AUTO-01 no core e no banco. A validação fresca anterior à decisão passou em
+todos os cinco workspaces no `typecheck`, em 597 testes Jest, com 2 testes de
+integração ignorados, e no build de produção do `apps/web`. A suíte pgTAP não
+foi reexecutada neste checkpoint; permanecem como evidência as provas SQL
+registradas na entrega.
+
+**Conclusão formal:** o INTEL-01 está encerrado por ratificação humana. A Fase F
+passa a estar em andamento. O INTEL-02 continua não iniciado e exigirá
+checkpoint humano próprio para aprovar a política inicial de roteamento.
 
 **Critérios de aceite:** toda seleção de executor/modelo/esforço é registrada com os fatores considerados; escalonamento acontece por regra explícita após falhas; existe reserva de capacidade que impede o modo autônomo de esgotar o provedor do usuário.
 

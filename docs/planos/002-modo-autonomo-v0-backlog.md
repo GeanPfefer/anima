@@ -295,8 +295,7 @@ Detalhamento, limitações e confirmações de segurança em "Laço operacional 
 
 ### INTEL-01 — Classificação de trabalho
 
-**Estado (2026-07-28): três incrementos implementados; INTEL-01 aguarda
-ratificação humana.** O primeiro incremento definiu em
+**Estado (2026-07-28): implementado, ratificado e encerrado.** O primeiro incremento definiu em
 `packages/core` o contrato puro V1 com cinco eixos obrigatórios, `unknown`
 explícito, proveniência humana ou sistêmica e readiness separada da validade.
 O segundo acrescentou o evento append-only
@@ -314,7 +313,11 @@ sob claim exigem classificação vigente e completa; ausência produz
 Propostas e aprovações continuam permitidas sem classificação, e o INT-04
 comandado permanece fora do gate. Nenhum executor, provedor, modelo ou esforço
 é selecionado, e o INTEL-02 não foi iniciado. Os critérios implementáveis do
-INTEL-01 estão satisfeitos; falta somente a ratificação humana deste contrato.
+INTEL-01 estão satisfeitos. O usuário ratificou os cinco eixos, o comportamento
+de `unknown`, a proveniência, a reclassificação append-only, a vigência por
+versão aprovada, o gate exclusivo do caminho autônomo e a separação do
+INTEL-02. A decisão e suas evidências estão registradas em "Ratificação do
+INTEL-01" no [Plano 002](002-modo-autonomo-v0.md).
 
 - **Problema:** sem classificar complexidade, risco e reversibilidade, toda decisão de roteamento é chute.
 - **Resultado esperado:** classificação tipada por item/tentativa (complexidade, risco, reversibilidade, clareza do plano, urgência), atribuída na proposta e revisável, persistida com proveniência.

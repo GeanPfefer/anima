@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-07-06 (sessão: Fundação — Anima ganha visão de Sistema Operacional Pessoal; ver §0 e [Marco 001](docs/marcos/001-nascimento-da-identidade.md))
+> Documento vivo de design. Última atualização: 2026-07-28 (sessão: sincronização do estado após conclusão da Fase E e ratificação do INTEL-01; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -24,7 +24,7 @@
 
 **Nome provisório:** Anima  
 **Plataformas:** Desktop, Web, Mobile (todas)  
-**Estágio atual:** Em desenvolvimento ativo — auth, onboarding, registro de atividades, histórico e quests implementados em web e mobile  
+**Estágio atual:** Em desenvolvimento ativo — produto pessoal funcional em web e mobile; Modo Construção comprovado; Modo Autônomo V0 concluído até a Fase E; Fase F em andamento com INTEL-01 ratificado
 **Repositório:** https://github.com/GeanPfefer/anima  
 **Público inicial:** O próprio criador (uso pessoal para validar o sistema)  
 **Público futuro:** Aberto ao público após o sistema estar bem estruturado e funcional
@@ -352,9 +352,23 @@ Dentro de uma solicitação já aprovada pelo usuário, o Anima poderá escolher
 
 O Modo Construção é o primeiro caso de uso de uma orquestração genérica de trabalho: o Anima compreende um pedido, propõe trabalho estruturado, solicita aprovação, preserva contexto, acompanha execução e registra resultado e decisões. A fundação futura usa o modelo conceitual `work_items` + `work_events`, separado de quests e sem XP automático.
 
-O bootstrap atual é **privado e manual**. Claude e Codex podem receber pacotes de contexto por operação humana, como executores de capacidades, mas o produto ainda não chama APIs, CLIs ou serviços externos. A visão orienta a arquitetura sem substituir a prioridade atual do Anima como sistema de evolução pessoal.
+O bootstrap continua **privado**, mas não é mais apenas manual. O Anima já
+possui uma primeira integração local estreita e ratificada: trabalhos
+explicitamente aprovados podem ser executados pelo `LocalRunnerAdapter` em
+workspace isolada, com limites, evidências, checkpoints, retomada e revisão
+humana. Claude, Codex, modelos e ferramentas continuam executores
+substituíveis de capacidades, nunca personagens do produto. Não há merge,
+publicação, ampliação de escopo ou uso autônomo de segredos.
 
-O passo seguinte está formalizado no [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md) e planejado no [Plano 002 — Modo Autônomo V0](docs/planos/002-modo-autonomo-v0.md): trabalhos explicitamente aprovados poderão ser executados e retomados sem supervisão constante, com elegibilidade, claim exclusivo, tentativas persistentes, handoff obrigatório e política fechada de interrupção humana. É decisão registrada e backlog documental — **nada disso está implementado**.
+O [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md)
+já possui implementação incremental registrada no
+[Plano 002 — Modo Autônomo V0](docs/planos/002-modo-autonomo-v0.md). As fases
+A–E estão concluídas: elegibilidade, fila, seleção, claims exclusivos,
+tentativas persistentes, execução local, reconciliação, checkpoints reais,
+retomada e Supervisor V0 foram implementados e ratificados. A Fase F está em
+andamento: o INTEL-01 classifica o trabalho e impede execução autônoma sem
+classificação vigente e completa; seleção automática de executor, provedor,
+modelo e esforço pertence ao INTEL-02 e ainda não foi iniciada.
 
 ## 1g. Jornadas de evolução
 
@@ -929,7 +943,7 @@ O grafo de vida representa visualmente as conexões que emergem dos dados do usu
 | Visão A agora / Visão B como norte (jul/2026) | Anima como sistema de evolução pessoal é o único trabalho ativo; orquestrador de capacidades / Sistema Operacional Pessoal fica documentado como norte, não vira backlog imediato | Evita que a visão de longo prazo engula o produto atual ou pare o roadmap tático em andamento; ver `anima-manifesto.md` e [Marco 001](docs/marcos/001-nascimento-da-identidade.md) |
 | Autonomia por nível de impacto (jul/2026) | Observação de baixo risco roda silenciosamente (atividade, nota, entidade, hipótese); ação de impacto estrutural/financeiro/irreversível sempre exige confirmação prévia | Generaliza o padrão de confirmação já usado em pilar pendente e hipótese de identidade para qualquer futura capacidade de execução; ver `anima-manifesto.md` |
 | Jornadas de evolução (jul/2026) | Anima não gerencia só tarefas — acompanha jornadas de vida variadas (skate, música, programação, carreira, quarto inteligente, etc.); relação com pilar/entidade/quest fica em aberto | Reconhece que nem toda evolução de vida é uma "atividade cronometrada"; ver §1g — decisão de schema é arquitetura futura, não desta atualização |
-| Trabalho Autônomo Seguro (jul/2026) | Modo Autônomo formalizado como decisão: fila de trabalhos elegíveis, claim exclusivo, tentativas persistentes, handoff obrigatório e interrupção humana só para decisões realmente humanas; V0 estreita (um trabalho por projeto, execução local, sem merge/publicação automáticos) | Permite continuidade de trabalho sem supervisão constante mantendo intenção aprovada, limites explícitos e evidências verificáveis; nada implementado ainda — ver [Marco 003](docs/marcos/003-trabalho-autonomo-seguro.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md) |
+| Trabalho Autônomo Seguro (jul/2026) | Modo Autônomo formalizado e implementado até a Fase E: fila elegível, claim exclusivo, tentativas persistentes, checkpoints, retomada, Supervisor V0 e interrupção humana tipada; V0 estreita (um trabalho por projeto, execução local, sem merge/publicação automáticos) | Permite continuidade de trabalho sem supervisão constante mantendo intenção aprovada, limites explícitos e evidências verificáveis; a Fase F está em andamento com INTEL-01 ratificado — ver [Marco 003](docs/marcos/003-trabalho-autonomo-seguro.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md) |
 | Anima Portátil e Nós Locais (jul/2026) | Contexto pessoal pode acompanhar o usuário entre dispositivos; arquivos, ferramentas e recursos permanecem locais e acessíveis somente por permissões explícitas de cada máquina | Permite continuidade no Nomad e em futuras máquinas sem exigir exposição ou cópia indiscriminada dos arquivos; orienta o INT-04 sem ampliar seu escopo — ver [Marco 004](docs/marcos/004-anima-portatil-e-nos-locais.md) |
 
 ---
