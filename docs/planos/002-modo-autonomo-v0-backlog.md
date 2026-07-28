@@ -295,8 +295,8 @@ Detalhamento, limitações e confirmações de segurança em "Laço operacional 
 
 ### INTEL-01 — Classificação de trabalho
 
-**Estado (2026-07-28): segundo incremento implementado; INTEL-01 ainda não
-concluído nem ratificado.** O primeiro incremento definiu em
+**Estado (2026-07-28): três incrementos implementados; INTEL-01 aguarda
+ratificação humana.** O primeiro incremento definiu em
 `packages/core` o contrato puro V1 com cinco eixos obrigatórios, `unknown`
 explícito, proveniência humana ou sistêmica e readiness separada da validade.
 O segundo acrescentou o evento append-only
@@ -306,11 +306,15 @@ O segundo acrescentou o evento append-only
 esperada e um espelho puro que reconstrói e valida a cadeia de supersessão. A
 reclassificação cria novo evento; a versão anterior nunca é sobrescrita. A
 vigência é estrita à versão de proposta atual e aprovada, portanto uma nova
-versão retorna ausência até receber classificação própria. Este recorte não
-seleciona executor, provedor, modelo ou esforço, não inicia o INTEL-02 e não
-altera elegibilidade ou execução. Permanecem pendentes o requisito de aceite
-“todo item elegível carrega classificação”, sua integração mínima no fluxo que
-produz/revisa propostas e a posterior ratificação humana.
+versão retorna ausência até receber classificação própria. O terceiro compôs
+AUTO-01 e INTEL-01 no core e no banco: a fila, a criação do claim e o início
+sob claim exigem classificação vigente e completa; ausência produz
+`work_intelligence_classification_missing`, e qualquer `unknown` produz
+`work_intelligence_classification_incomplete` com eixos em ordem canônica.
+Propostas e aprovações continuam permitidas sem classificação, e o INT-04
+comandado permanece fora do gate. Nenhum executor, provedor, modelo ou esforço
+é selecionado, e o INTEL-02 não foi iniciado. Os critérios implementáveis do
+INTEL-01 estão satisfeitos; falta somente a ratificação humana deste contrato.
 
 - **Problema:** sem classificar complexidade, risco e reversibilidade, toda decisão de roteamento é chute.
 - **Resultado esperado:** classificação tipada por item/tentativa (complexidade, risco, reversibilidade, clareza do plano, urgência), atribuída na proposta e revisável, persistida com proveniência.
