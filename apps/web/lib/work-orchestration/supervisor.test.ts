@@ -109,6 +109,24 @@ class FakeDatabase {
         }]);
       }
 
+      case 'select_autonomous_work': {
+        const requested = this.items.get(args['p_work_item_id'] as string);
+        const eligible = requested?.state === 'approved'
+          && requested.classification === 'complete'
+          && requested.version === args['p_expected_proposal_version']
+          && !this.activeClaimOfItem(requested.id)
+          && !this.activeClaimOfTarget(requested.target, requested.id)
+          && !this.runningOnTarget(requested.target, requested.id);
+        if (!requested || !eligible) return ok([]);
+        return ok([{
+          work_item_id: requested.id, approved_proposal_version: requested.version,
+          approval_seq: requested.approvalSeq, approved_at: new Date().toISOString(),
+          capability: 'programming', target_reference: requested.target,
+          selection_policy: 'explicit_card_selection', queue_size: 1,
+          runner_up_approval_seq: null, skipped_occupied_targets: 0,
+        }]);
+      }
+
       case 'autonomous_work_budget_status':
         return ok({
           schemaVersion: 1,
@@ -477,7 +495,7 @@ const scriptedExecutor = (specs: readonly SignalSpec[], opts: { readonly throwAt
 
 const ids = (values: readonly string[]) => { let index = 0; return () => values[index++]!; };
 
-const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: readonly WorkItem[], identifiers: readonly string[], contexts?: readonly WorkContextSnapshot[]) =>
+const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: readonly WorkItem[], identifiers: readonly string[], contexts?: readonly WorkContextSnapshot[], requestedWork?: { readonly workItemId: string; readonly expectedProposalVersion: number }) =>
   runSupervisorTurn({
     client: database.asClient(),
     routes: [{
@@ -490,6 +508,7 @@ const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: reado
     }],
     ownerInstanceId: 'supervisor-test',
     newId: ids(identifiers), signal: new AbortController().signal, reader: reader(items, contexts),
+    requestedWork,
   });
 
 // ============================================================
@@ -507,6 +526,39 @@ test('fila vazia encerra a volta sem posse, tentativa ou executor', async () => 
   expect(calls).toHaveLength(0);
   expect(database.claims.size).toBe(0);
   expect(database.events).toHaveLength(0);
+});
+
+test('seleção explícita nunca substitui o cartão solicitado pela cabeça da fila', async () => {
+  const first = { id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' as const };
+  const requested = { id: 'item-2', version: 1, state: 'approved', target: 'alvo-2', approvalSeq: 20, classification: 'complete' as const };
+  const database = new FakeDatabase({ items: [first, requested] });
+  const runner = executor();
+  const result = await turn(
+    database, runner.adapter, [workItem('item-1'), workItem('item-2')],
+    ['claim-2', 'attempt-2'], undefined,
+    { workItemId: 'item-2', expectedProposalVersion: 1 },
+  );
+
+  expect(database.calls[1]).toBe('select_autonomous_work');
+  expect(result.selection?.workItemId).toBe('item-2');
+  expect(runner.calls[0]?.workItemId).toBe('item-2');
+});
+
+test('seleção explícita obsoleta falha fechada sem cair para outro trabalho', async () => {
+  const database = new FakeDatabase({ items: [
+    { id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' },
+    { id: 'item-2', version: 2, state: 'approved', target: 'alvo-2', approvalSeq: 20, classification: 'complete' },
+  ] });
+  const runner = executor();
+  const result = await turn(
+    database, runner.adapter, [workItem('item-1'), workItem('item-2')],
+    ['claim-x', 'attempt-x'], undefined,
+    { workItemId: 'item-2', expectedProposalVersion: 1 },
+  );
+
+  expect(result.outcome).toBe('no_eligible_work');
+  expect(database.calls).toEqual(['reconcile_supervised_work', 'select_autonomous_work']);
+  expect(runner.calls).toHaveLength(0);
 });
 
 test.each<FakeClassification>(['missing', 'incomplete'])(

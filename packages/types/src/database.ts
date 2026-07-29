@@ -1303,6 +1303,24 @@ export type Database = {
           work_item_id: string
         }[]
       }
+      select_autonomous_work: {
+        Args: {
+          p_expected_proposal_version: number
+          p_work_item_id: string
+        }
+        Returns: {
+          approval_seq: number
+          approved_at: string
+          approved_proposal_version: number
+          capability: Database["public"]["Enums"]["work_capability"]
+          queue_size: number
+          runner_up_approval_seq: number | null
+          selection_policy: string
+          skipped_occupied_targets: number
+          target_reference: string
+          work_item_id: string
+        }[]
+      }
       reconcile_supervised_work: {
         Args: never
         Returns: {

@@ -105,6 +105,10 @@ export interface SupervisorTurnDependencies {
   readonly newId: () => string;
   readonly signal: AbortSignal;
   readonly reader?: SupervisorReader;
+  readonly requestedWork?: {
+    readonly workItemId: string;
+    readonly expectedProposalVersion: number;
+  };
 }
 
 const base = (reconciliation: readonly ReconciliationFinding[]): SupervisorTurnResult => ({
@@ -171,7 +175,12 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   }));
 
   // ---------- (2) Seleção pela fronteira canônica do SUP-02 ----------
-  const selected = await client.rpc('next_autonomous_work');
+  const selected = dependencies.requestedWork
+    ? await client.rpc('select_autonomous_work', {
+        p_work_item_id: dependencies.requestedWork.workItemId,
+        p_expected_proposal_version: dependencies.requestedWork.expectedProposalVersion,
+      })
+    : await client.rpc('next_autonomous_work');
   if (selected.error) {
     return { ...base(reconciliation), outcome: 'selection_not_executable', refusal: refusalOf(selected.error), requiresAnotherTurn: true };
   }

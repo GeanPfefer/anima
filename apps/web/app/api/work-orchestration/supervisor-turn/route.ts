@@ -15,6 +15,21 @@ export async function POST(request: Request) {
   const { data: { user } } = await client.auth.getUser();
   if (!user) return Response.json({ ok: false, error: { code: 'authentication_required' } }, { status: 401 });
 
+  const body = await request.json().catch(() => null) as {
+    workItemId?: unknown;
+    expectedProposalVersion?: unknown;
+  } | null;
+  const explicit = body !== null
+    && (body.workItemId !== undefined || body.expectedProposalVersion !== undefined);
+  if (explicit && (typeof body?.workItemId !== 'string'
+    || !Number.isInteger(body.expectedProposalVersion)
+    || Number(body.expectedProposalVersion) < 1)) {
+    return Response.json({
+      ok: false,
+      error: { code: 'invalid_autonomous_selection', message: 'O trabalho e a versão precisam ser informados.' },
+    }, { status: 400 });
+  }
+
   // O laço supervisionado liga os checkpoints mid-flight (AUTO-05); o caminho
   // comandado (INT-04) não, mantendo-se single-shot.
   const route = localRunnerRouteFromEnvironment({ emitCheckpoints: true });
@@ -27,6 +42,10 @@ export async function POST(request: Request) {
     ownerInstanceId: process.env.ANIMA_SUPERVISOR_INSTANCE_ID ?? 'supervisor-v0',
     newId: () => crypto.randomUUID(),
     signal: request.signal,
+    requestedWork: explicit ? {
+      workItemId: body!.workItemId as string,
+      expectedProposalVersion: body!.expectedProposalVersion as number,
+    } : undefined,
   });
 
   // Toda volta que o laço conduziu até um desfecho conhecido responde 200 com o

@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { describeValidationOutcome, parseWorkResultValidations, type ApprovalDecision, type ResultReviewDecision, type WorkItem, type WorkPresentation } from '@anima/core';
+import { describeValidationOutcome, evaluateAutonomousEligibility, parseWorkResultValidations, type ApprovalDecision, type ResultReviewDecision, type WorkItem, type WorkPresentation } from '@anima/core';
 import styles from './chat.module.css';
 import { WorkExecutionCard } from './WorkExecutionCard';
 
@@ -15,8 +15,31 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
   const [mode,setMode]=useState<'none'|'defer'|'correct'|'result'|'review_changes'>('none');
   const [detail,setDetail]=useState('');const[customDeferReason,setCustomDeferReason]=useState('');const[references,setReferences]=useState('');const[validations,setValidations]=useState('');const[limitations,setLimitations]=useState('');
   const allowed=(action:WorkPresentation['availableActions'][number])=>availableActions.includes(action);
+  const autonomousEligible=evaluateAutonomousEligibility(item as unknown as WorkItem).eligible;
   async function reload(){setStatus('reconciling');const response=await fetch(`/api/work-orchestration/items/${item.id}`);const body=await response.json();if(response.ok&&body.ok){onChange(body.value.presentation as WorkPresentationView);setError('');}else setError(body.error?.message??'Não foi possível reler o trabalho.');setStatus('idle');}
   async function mutate(endpoint:string,payload:Record<string,unknown>){if(status!=='idle')return;setStatus('submitting');setError('');const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion,...payload})});const body=await response.json().catch(()=>({}));if(response.ok&&body.ok){setMode('none');setDetail('');setReferences('');setValidations('');setLimitations('');setCustomDeferReason('');await reload();return;}const message=body.error?.message??'Não foi possível atualizar o trabalho.';setError(message);setStatus('idle');if(body.error?.code==='version_conflict'||body.error?.code==='ambiguous_outcome'){await reload();setError(message);}}
+  async function startAutonomous(){
+    if(status!=='idle')return;
+    setStatus('submitting');setError('');
+    let finished=false;
+    const executionRequest=fetch('/api/work-orchestration/supervisor-turn',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion}),
+    }).finally(()=>{finished=true;});
+    while(!finished){
+      await new Promise(resolve=>setTimeout(resolve,500));
+      if(finished)break;
+      const snapshot=await fetch(`/api/work-orchestration/items/${item.id}`).catch(()=>null);
+      if(snapshot?.ok){
+        const body=await snapshot.json().catch(()=>null);
+        if(body?.ok)onChange(body.value.presentation as WorkPresentationView);
+      }
+    }
+    const response=await executionRequest;
+    const body=await response.json().catch(()=>({}));
+    if(!response.ok||!body.ok)setError(body.error?.message??body.value?.refusal?.message??'Não foi possível executar este trabalho autonomamente.');
+    await reload();
+  }
   const decide=(decision:ApprovalDecision)=>mutate('/api/work-orchestration/decisions',{decision});
   const review=(decision:ResultReviewDecision)=>mutate('/api/work-orchestration/reviews',{decision,reviewedResultEventId:latestResult?.eventId});
   const busy=status!=='idle';
@@ -44,7 +67,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
     {mode==='none'&&allowed('approve')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>decide({type:'approve'})}>Aprovar</button><button disabled={busy} onClick={()=>setMode('correct')}>Pedir correção</button><button disabled={busy} onClick={()=>setMode('defer')}>Adiar</button><button disabled={busy} onClick={()=>decide({type:'reject'})}>Rejeitar</button></div>}
     {mode==='defer'&&<div className={styles.workDecision}><label>Motivo<select value={detail} onChange={event=>setDetail(event.target.value)}><option value="">Selecione</option><option>Quero decidir depois</option><option>Falta contexto</option><option>Não é prioridade agora</option><option value="other">Outro</option></select></label>{detail==='other'&&<input aria-label="Outro motivo" value={customDeferReason} onChange={event=>setCustomDeferReason(event.target.value)}/>}<button disabled={busy||!(detail==='other'?customDeferReason:detail).trim()} onClick={()=>decide({type:'defer',reason:detail==='other'?customDeferReason:detail})}>Confirmar adiamento</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
     {mode==='correct'&&<div className={styles.workDecision}><label>O que deve mudar?<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>mutate('/api/work-orchestration/proposal-corrections',{requestedChanges:detail.trim()})}>Criar nova versão coerente</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
-    {mode==='none'&&allowed('start')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>mutate('/api/work-orchestration/start',{})}>{item.state==='approved'?'Iniciar execução manual':'Retomar trabalho'}</button></div>}
+    {mode==='none'&&allowed('start')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>mutate('/api/work-orchestration/start',{})}>{item.state==='approved'?'Iniciar execução manual':'Retomar trabalho'}</button>{item.state==='approved'&&autonomousEligible&&<button disabled={busy} onClick={startAutonomous}>Executar autonomamente</button>}</div>}
     {mode==='none'&&allowed('submit_result')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>setMode('result')}>Registrar resultado</button></div>}
     {mode==='result'&&<div className={styles.workDecision}><label>Resumo do resultado<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><label>Referências, uma por linha<textarea value={references} onChange={event=>setReferences(event.target.value)}/></label><label>Validações executadas, uma por linha (prefixe com ok: ou falha:)<textarea value={validations} onChange={event=>setValidations(event.target.value)}/></label><label>Limitações conhecidas, uma por linha<textarea value={limitations} onChange={event=>setLimitations(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>mutate('/api/work-orchestration/results',{result:{summary:detail.trim(),resultReferences:references.split('\n').map(value=>value.trim()).filter(Boolean),validations:parseWorkResultValidations(validations),limitations:limitations.split('\n').map(value=>value.trim()).filter(Boolean)}})}>Enviar para revisão</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
     {mode==='none'&&allowed('accept_result')&&latestResult&&<div className={styles.workActions}><button disabled={busy} onClick={()=>review({type:'accept'})}>Aceitar resultado v{latestResult.proposalVersion}</button><button disabled={busy} onClick={()=>setMode('review_changes')}>Pedir correções no resultado</button></div>}
