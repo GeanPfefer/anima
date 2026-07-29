@@ -20,7 +20,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
 | F | **Concluída (2026-07-28)** | INTEL-01 a INTEL-04 concluídos; política de orçamento ratificada e aplicada |
-| G | Em andamento | UX-01 (cartão de execução) pronto para revisão, **não ratificado** |
+| G | Em andamento | UX-01 (cartão de execução) ratificado; UX-02 é o próximo incremento |
 
 ## Fase A — Fechar a orquestração atual
 
@@ -805,7 +805,17 @@ pausa/cancelamento.
 
 **Evidências (verdes):** `packages/core` 551 testes (inclui 13 do cartão); `apps/web` 87 (inclui `WorkExecutionCard` e 3 novos do laço); mobile 12; `supabase` 7 (2 integrações ignoradas); **pgTAP `work_control` 20/20 e regressão de 22 arquivos sem falha, contra o Supabase local com as RPCs reais**; `typecheck` limpo nos cinco workspaces; build de produção do `apps/web` com a rota `/api/work-orchestration/control` registrada.
 
-**Pendente para ratificação (infra/interativo, separado do código):** a **demonstração ao vivo de ponta a ponta pelo chat** com o modelo local (Ollama + runner emitindo checkpoint) — pedir pausa pelo cartão durante uma execução real e observar a aplicação cooperativa no checkpoint. As garantias contratuais estão provadas deterministicamente e no banco real; falta o passo interativo com modelo.
+**Ratificação ao vivo (2026-07-29):** demonstração de ponta a ponta concluída
+na conta local descartável, pelo cartão real do chat. O trabalho explicitamente
+selecionado entrou em `in_progress`, exibiu executor, modelo, limites e os
+controles. O pedido de pausa foi persistido enquanto o Ollama executava; no
+checkpoint #1, o Supervisor aplicou a pausa, moveu o item para `blocked`,
+registrou `work_paused` e preservou quatro passos restantes. Após recarregar a
+página, o cartão reconstruiu “Pausada por você” e o mesmo checkpoint somente a
+partir do estado persistido. O alvo original permaneceu intacto porque o runner
+operou em workspace isolada. A preparação também revelou e corrigiu no ambiente
+de prova um alvo descartável com metadados Git incompletos; a primeira tentativa
+falhou fechada antes de qualquer checkpoint.
 
 **Nota de ambiente:** os três rascunhos já tinham sido aplicados ao banco local pela sessão anterior. Como as versões finalizadas diferem e `db reset` é proibido sem checkpoint, o banco local foi sincronizado manualmente às funções finalizadas (só código de função/uma linha de transição; nenhum dado tocado). Um ambiente novo aplica os arquivos 17/18/19 do zero corretamente.
 
