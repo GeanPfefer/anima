@@ -391,6 +391,26 @@ Fase F está concluída.
 
 ## UX — Experiência no chat
 
+### UX-00 — Intenção natural para proposta persistida
+
+**Estado (2026-07-29): pronto para revisão, não ratificado.** Pedidos naturais
+de análise, síntese, documentação e organização de trabalho passam a criar
+proposta versionada real em vez de cair em conversa livre. A proposta inicial é
+deliberadamente planning-first e não inventa nó, alvo, caminhos, permissões ou
+limites. `orchestration_not_enabled` deixa de ser silencioso. Para propostas e
+capacidade ausente, a resposta é determinada pelo servidor; o modelo não pode
+simular cartão nem alegar leitura/execução anterior à aprovação. Evidências:
+551 testes core, 104 web, typecheck dos cinco workspaces, build e prova real
+autenticada com persistência e reconstrução após refresh. Limite: transformar a
+proposta aprovada em especificação autônoma completa permanece dependente de
+nós locais e de refinamento posterior.
+
+- **Problema:** intenção operacional curta podia produzir apenas prosa do modelo, inclusive cartão simulado e alegação falsa de acesso.
+- **Resultado esperado:** intenção reconhecida → `work_item` e eventos persistidos → cartão real → decisão versionada, sem execução anterior.
+- **Dependências:** ORQ-01–04. **Escopo:** interpretação conservadora, persistência existente, resposta honesta e cartão existente. **Fora do escopo:** resolver nó/alvo, fabricar permissões ou tornar a proposta automaticamente elegível ao Supervisor.
+- **Aceite:** mensagem real cria cartão; conversa comum não cria trabalho; capacidade ausente é explícita; cartão e resposta sobrevivem ao refresh.
+- **Riscos:** falsos positivos do classificador; confundir proposta de planejamento com autorização de execução.
+
 ### UX-01 — Cartão de execução
 
 **Estado (2026-07-29): pronto para revisão, não ratificado (web).** Cartão conversacional que é **exclusivamente projeção do estado persistido** (`projectAutonomousExecution` em `packages/core`, integrado ao `WorkPresentation`): estado da tentativa, executor/provedor/modelo/esforço, início, limites, checkpoint mais recente, pedido de controle pendente, resultado aplicado e bloqueio por orçamento. Pausa/cancelamento são **cooperativos**: `request_work_control` persiste a intenção sem mudar estado; o laço aplica via `apply_work_control_at_checkpoint` num checkpoint seguro (espelhando o `interrupt_work_on_budget` do INTEL-04), movendo o item para `blocked`/`cancelled`, gravando `work_paused`/`work_cancelled` e liberando o claim com `attempt_finished`; o orçamento para de contar em `work_paused`. Terminal tardio já é recusado pela guarda de estado do RPC ratificado; execução comandada (INT-04) fica fora do controle. Os três rascunhos de migration foram auditados e finalizados (removido `current_work_control_request`; guardas de allowlist/versão; ordem de aplicação). **Evidências verdes:** core 551, web 87, mobile 12, supabase 7 (2 integrações ignoradas), pgTAP `work_control` 20/20 + regressão 22 arquivos sem falha no Supabase local, typecheck 5 workspaces, build web com a rota `/api/work-orchestration/control`. **Pendente para ratificação:** demonstração ao vivo pelo chat com o modelo local (Ollama + runner). Detalhes em "UX-01 pronto para revisão" no [Plano 002](002-modo-autonomo-v0.md).

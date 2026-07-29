@@ -750,6 +750,41 @@ aceite estão satisfeitos. Como INTEL-01 a INTEL-04 estão concluídos, a
 
 **Fora do escopo:** telas dedicadas de gerenciamento; dashboards; notificações push.
 
+### UX-00 pronto para revisão (2026-07-29) — intenção natural para proposta persistida
+
+O teste real do UX-01 revelou uma lacuna anterior ao cartão de execução: pedidos
+como “analise os Planos 003 a 006 e me apresente a proposta antes de começar”
+caíam em conversa livre. O modelo então afirmava ter lido os arquivos e imitava
+propostas e cartões em texto, sem `work_item`, versão ou autorização persistidos.
+
+O diagnóstico encontrou duas causas concretas: o classificador determinístico
+não reconhecia verbos de análise/síntese nem objetos documentais, e
+`orchestration_not_enabled` era descartado silenciosamente pela rota do chat. O
+incremento UX-00 amplia de forma conservadora o vocabulário de intenção,
+preserva conversas pessoais e perguntas comuns, cria uma proposta
+**planning-first** sem inventar nó, alvo, arquivo, permissão ou limite, e expõe
+capacidade ausente como sinal tipado.
+
+A primeira prova real criou e reconstruiu o cartão persistido, mas mostrou que o
+modelo local ignorava instruções e ainda alegava falsamente ter produzido o
+resultado. A correção final não depende de prompt: quando uma proposta real é
+criada — ou quando a capacidade está ausente — a resposta curta é determinada
+pelo servidor e o Ollama não é chamado para narrar um resultado inexistente.
+Conversa comum continua usando o modelo normalmente.
+
+**Evidências:** 551 testes do core; 104 testes web; typecheck limpo nos cinco
+workspaces; build web; prova autenticada com o modelo e Supabase locais. O item
+`56a74a19-c524-46c4-b18e-363113df7da7` permaneceu `proposed`, versão 1, somente
+com `work_proposed` e `context_attached`; o cartão e a resposta “Ainda não li
+nem executei o trabalho” sobreviveram ao refresh.
+
+**Limite preservado:** UX-00 termina numa proposta segura de planejamento. Ele
+não resolve sozinho um nó local, não fabrica `execution_spec` e não torna o
+item elegível ao Supervisor. A estruturação automática de alvo, permissões,
+validações e limites depende dos contratos de nós locais e permanece trabalho
+posterior. O UX-01 continua aguardando uma demonstração autônoma real de
+pausa/cancelamento.
+
 ### UX-01 pronto para revisão (2026-07-29) — cartão de execução
 
 **Não ratificado.** Registro append-only do estado alcançado, para o checkpoint humano. Nenhuma seção anterior foi reescrita.
