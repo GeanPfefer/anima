@@ -40,6 +40,7 @@ export type SupervisorTurnOutcome =
   | 'selection_not_executable'
   | 'routing_unavailable'
   | 'routing_refused'
+  | 'budget_interrupted'
   // Posse recusada pelo banco — tipicamente a corrida perdida.
   | 'claim_refused'
   // Posse obtida, início recusado (exclusividade de alvo, versão mudou…).
@@ -197,6 +198,38 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     return {
       ...started, outcome: 'selection_not_executable', gaps: eligibility.gaps,
       refusal: { code: 'eligibility_divergence', message: 'A fila ofereceu um item que o predicado do domínio recusa.' },
+    };
+  }
+
+  const budgetRead = await client.rpc('autonomous_work_budget_status', {
+    p_work_item_id: selection.workItemId,
+  });
+  if (budgetRead.error) {
+    return { ...started, outcome: 'selection_not_executable', refusal: refusalOf(budgetRead.error) };
+  }
+  const budget = object(budgetRead.data);
+  if (!budget || typeof budget.admitted !== 'boolean') {
+    return {
+      ...started,
+      outcome: 'selection_not_executable',
+      refusal: { code: 'work_budget_invalid', message: 'O orçamento autônomo não pôde ser reconstruído.' },
+    };
+  }
+  if (!budget.admitted) {
+    const blocked = await client.rpc('block_work_on_budget', {
+      p_work_item_id: selection.workItemId,
+    });
+    if (blocked.error) {
+      return { ...started, outcome: 'selection_not_executable', refusal: refusalOf(blocked.error) };
+    }
+    return {
+      ...started,
+      outcome: 'budget_interrupted',
+      requiresAnotherTurn: false,
+      refusal: {
+        code: typeof budget.reason === 'string' ? budget.reason : 'work_budget_exhausted',
+        message: 'A execução autônoma aguarda o usuário porque o orçamento disponível foi atingido.',
+      },
     };
   }
 
@@ -371,7 +404,24 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
         attempt_id: attemptId,
         signal: checkpoint as unknown as Json,
       });
-      return persisted.error ? { ok: false, message: persisted.error.message } : { ok: true };
+      if (persisted.error) return { ok: false, message: persisted.error.message };
+      const checked = await client.rpc('interrupt_work_on_budget', {
+        p_work_item_id: selection.workItemId,
+        p_expected_proposal_version: selection.approvedProposalVersion,
+        p_attempt_id: attemptId,
+      });
+      if (checked.error) return { ok: false, message: checked.error.message };
+      const decision = object(checked.data);
+      if (decision?.interrupted === true) {
+        return {
+          ok: false,
+          cause: 'budget',
+          reason: typeof decision.reason === 'string' ? decision.reason : 'work_budget_exhausted',
+          message: 'A execução autônoma foi interrompida após salvar o checkpoint para preservar o orçamento.',
+          claimReleased: decision.claimReleased === true,
+        };
+      }
+      return { ok: true };
     },
   };
   let run;
@@ -390,6 +440,15 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     // `checkpoint`: a persistência falhou no meio do stream; `transcript`: fora
     // do contrato do INT-01. Nos dois, a tentativa fica aberta para o SUP-04,
     // com a posse retida e sem terminal — os checkpoints confirmados permanecem.
+    if (run.cause === 'budget') {
+      return {
+        ...running,
+        outcome: 'budget_interrupted',
+        claimReleased: run.claimReleased === true,
+        requiresAnotherTurn: false,
+        refusal: { code: run.reason ?? 'work_budget_exhausted', message: run.defect },
+      };
+    }
     const code = run.cause === 'checkpoint' ? 'checkpoint_persist_failed' : 'executor_contract_violation';
     return { ...running, outcome: 'execution_interrupted', refusal: { code, message: run.defect } };
   }

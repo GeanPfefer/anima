@@ -43,6 +43,8 @@ interface FakeOptions {
   readonly replayCheckpoints?: boolean;
   readonly resumptionSource?: Record<string, unknown>;
   readonly routingAdjustmentContext?: WorkRoutingAdjustmentContextV1;
+  readonly budgetReason?: string;
+  readonly interruptBudgetAfterCheckpoint?: string;
 }
 
 class FakeDatabase {
@@ -103,6 +105,26 @@ class FakeDatabase {
           selection_policy: 'oldest_approval_first', queue_size: queue.length,
           runner_up_approval_seq: queue[1]?.approvalSeq ?? null, skipped_occupied_targets: 0,
         }]);
+      }
+
+      case 'autonomous_work_budget_status':
+        return ok({
+          schemaVersion: 1,
+          policyVersion: 'autonomous-work-budget-v1',
+          admitted: this.options.budgetReason === undefined,
+          reason: this.options.budgetReason ?? null,
+        });
+
+      case 'block_work_on_budget': {
+        const item = this.items.get(args['p_work_item_id'] as string)!;
+        item.state = 'blocked';
+        this.events.push({
+          itemId: item.id,
+          type: 'work_blocked',
+          attemptId: null,
+          reason: this.options.budgetReason,
+        });
+        return ok({ blocked: true, reason: this.options.budgetReason });
       }
 
       case 'abandoned_work_resumption_source':
@@ -278,6 +300,32 @@ class FakeDatabase {
         this.checkpointSignals.set(key, serialized);
         this.events.push({ itemId: item.id, type: 'checkpoint_recorded', attemptId });
         return ok({ action: 'recorded', checkpoint_sequence: signal.sequence });
+      }
+
+      case 'interrupt_work_on_budget': {
+        if (!this.options.interruptBudgetAfterCheckpoint) {
+          return ok({ interrupted: false });
+        }
+        const attemptId = args['p_attempt_id'] as string;
+        const item = this.items.get(args['p_work_item_id'] as string)!;
+        const claim = this.activeClaimOfItem(item.id);
+        item.state = 'blocked';
+        if (claim) {
+          claim.released = true;
+          claim.reason = 'attempt_finished';
+          this.events.push({
+            itemId: item.id,
+            type: 'work_claim_released',
+            attemptId,
+            reason: 'attempt_finished',
+          });
+        }
+        this.events.push({ itemId: item.id, type: 'work_blocked', attemptId, reason: this.options.interruptBudgetAfterCheckpoint });
+        return ok({
+          interrupted: true,
+          reason: this.options.interruptBudgetAfterCheckpoint,
+          claimReleased: claim !== undefined,
+        });
       }
 
       case 'release_work_claim': {
@@ -508,7 +556,7 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
 
   // Ordem canônica das fronteiras, e nunca o início comandado.
   expect(database.calls).toEqual([
-    'reconcile_supervised_work', 'next_autonomous_work', 'abandoned_work_resumption_source',
+    'reconcile_supervised_work', 'next_autonomous_work', 'autonomous_work_budget_status', 'abandoned_work_resumption_source',
     'current_work_intelligence_classification', 'work_routing_adjustment_context',
     'record_work_routing_adjustment', 'record_work_routing_decision', 'acquire_work_claim',
     'start_claimed_work_attempt', 'record_commanded_work_terminal', 'release_work_claim',
@@ -899,5 +947,48 @@ describe('Etapa 2B.1 — persistência de checkpoint em stream', () => {
     expect(result.claimReleased).toBe(true);
     expect(database.items.get('item-1')!.state).toBe('review');
     expect(database.events.map(event => event.type)).not.toContain('result_accepted');
+  });
+});
+
+describe('INTEL-04 — orçamento no laço do Supervisor', () => {
+  test('orçamento indisponível interrompe antes de roteamento, claim e executor', async () => {
+    const database = new FakeDatabase({
+      items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 1, classification: 'complete' }],
+      budgetReason: 'user_attempt_budget_exhausted',
+    });
+    const { adapter, calls } = executor('result');
+    const result = await turn(database, adapter, [workItem('item-1')], ['claim-1', 'attempt-1']);
+
+    expect(result).toMatchObject({
+      outcome: 'budget_interrupted',
+      requiresAnotherTurn: false,
+      refusal: { code: 'user_attempt_budget_exhausted' },
+    });
+    expect(calls).toHaveLength(0);
+    expect(database.items.get('item-1')?.state).toBe('blocked');
+    expect(database.calls).toContain('block_work_on_budget');
+    expect(database.calls).not.toContain('record_work_routing_decision');
+    expect(database.calls).not.toContain('acquire_work_claim');
+  });
+
+  test('limite de tempo após checkpoint bloqueia o item e não consome o terminal', async () => {
+    const database = new FakeDatabase({
+      items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 1, classification: 'complete' }],
+      interruptBudgetAfterCheckpoint: 'interactive_reserve_protected',
+    });
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'result' }]);
+    const result = await turn(database, adapter, [workItem('item-1')], ['claim-1', 'attempt-1']);
+
+    expect(result).toMatchObject({
+      outcome: 'budget_interrupted',
+      requiresAnotherTurn: false,
+      claimReleased: true,
+      refusal: { code: 'interactive_reserve_protected' },
+    });
+    expect(database.items.get('item-1')?.state).toBe('blocked');
+    expect(database.events.map(event => event.type)).toContain('checkpoint_recorded');
+    expect(database.events.map(event => event.type)).toContain('work_blocked');
+    expect(database.events.map(event => event.type)).not.toContain('result_submitted');
+    expect(database.calls).not.toContain('record_commanded_work_terminal');
   });
 });

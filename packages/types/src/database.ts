@@ -1137,6 +1137,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      autonomous_work_budget_status: {
+        Args: { p_work_item_id: string }
+        Returns: Json
+      }
       autonomous_work_queue: {
         Args: never
         Returns: {
@@ -1184,6 +1188,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      block_work_on_budget: { Args: { p_work_item_id: string }; Returns: Json }
       create_work_proposal: {
         Args: {
           capability: Database["public"]["Enums"]["work_capability"]
@@ -1244,6 +1249,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      interrupt_work_on_budget: {
+        Args: {
+          p_attempt_id: string
+          p_expected_proposal_version: number
+          p_work_item_id: string
+        }
+        Returns: Json
       }
       latest_work_checkpoint: {
         Args: { p_attempt_id: string; p_work_item_id: string }

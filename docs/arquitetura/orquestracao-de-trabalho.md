@@ -592,6 +592,38 @@ esse esforço efetivo, e `execution_started` autônomo exige ambos os fatos com
 o mesmo item, versão e tentativa. Falta de capacidade no novo piso interrompe;
 nenhuma regra faz downgrade.
 
+## Orçamento autônomo e reserva interativa (INTEL-04)
+
+O orçamento V0 mede unidades observáveis já persistidas: tentativas e tempo.
+Cada item admite até 3 tentativas autônomas em 24 horas, ou menos quando a
+proposta aprovada declara um teto inferior. Por usuário, a janela móvel de 24
+horas admite até 6 tentativas e 120 minutos. Em cada janela móvel de 60 minutos,
+somente 45 podem ser consumidos pelo modo autônomo; os 15 restantes formam a
+reserva interativa.
+
+`private.autonomous_work_budget_usage` reconstrói o consumo a partir de
+`execution_started` com `claim_id` e do primeiro desfecho correlacionado. Uma
+tentativa aberta conta até o instante observado. O caminho comandado não possui
+`claim_id` e, portanto, não entra nessa contabilidade. A decisão é consultável
+por `autonomous_work_budget_status`.
+
+A guarda `enforce_autonomous_work_budget_before_start` serializa por usuário e
+revalida a decisão no `INSERT` de `execution_started`; duas admissões
+concorrentes não podem ultrapassar o orçamento. O Supervisor faz uma leitura
+antecipada antes do roteamento para evitar trabalho inútil. Quando ela nega a
+admissão, `block_work_on_budget` materializa `input_requested` +
+`work_blocked`, retirando o item da fila e preservando o checkpoint anterior
+quando existe. Essa leitura não substitui a guarda autoritativa.
+
+Depois que `record_work_checkpoint` confirma um checkpoint, o Supervisor chama
+`interrupt_work_on_budget`. Se tempo global ou reserva se esgotaram, a RPC
+registra `input_requested` e `work_blocked`, ambos correlacionados à tentativa e
+ao último checkpoint, move o item para `blocked` e libera o claim. Nenhum
+resultado é inferido e o terminal posterior do executor não é consumido. Os
+limites de tentativas são gates entre tentativas; não encerram uma tentativa já
+admitida. Tokens, dinheiro e janelas específicas de fornecedores permanecem
+fora do V0.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

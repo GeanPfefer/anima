@@ -9,6 +9,10 @@ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 \ir helpers/routing.inc
 SELECT plan(65);
 
+-- Esta suíte desloca tentativas sintéticas no relógio para provar reconciliação.
+-- O orçamento tem suíte própria; suspendê-lo aqui preserva o isolamento.
+ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_work_budget_before_start;
+
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('89000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','sup04@test.invalid','',now(),'{}','{}',now(),now());
 INSERT INTO public.ai_conversations(id,user_id,role,content)
@@ -427,4 +431,5 @@ SELECT set_config('request.jwt.claim.sub','89000000-0000-0000-0000-000000000000'
 
 SELECT * FROM finish();
 RESET ROLE;
+ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_work_budget_before_start;
 ROLLBACK;

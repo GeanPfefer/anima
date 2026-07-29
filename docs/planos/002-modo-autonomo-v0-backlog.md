@@ -370,6 +370,17 @@ do Supervisor, prova SQL de duas falhas seguida de escalonamento, regressão de
 
 ### INTEL-04 — Orçamento e reserva de capacidade
 
+**Estado (2026-07-28): concluído e ratificado.** O orçamento V0 limita cada
+item a 3 tentativas autônomas em 24 horas (ou ao menor limite declarado), cada
+usuário a 6 tentativas e 120 minutos em 24 horas e o modo autônomo a 45 minutos
+por janela móvel de 60 minutos, preservando 15 minutos interativos. O consumo
+vem do log append-only e a admissão é serializada no banco. O Supervisor para
+antes da posse quando não há orçamento e, após checkpoint, bloqueia com razão
+tipada e libera o claim quando o tempo ou a reserva se esgotam. O caminho
+comandado permanece fora da contabilidade. Evidências: 15 provas pgTAP
+específicas, regressão de 547 SQL e 631 Jest, `typecheck` e build. Com isso, a
+Fase F está concluída.
+
 - **Problema:** o modo autônomo não pode esgotar os limites de provedor do usuário nem monopolizar a máquina; "maximizar progresso confiável por unidade de recurso" exige orçamento.
 - **Resultado esperado:** noção de orçamento por item/período (tentativas, tempo, janelas de provedor) e reserva de capacidade para uso interativo do usuário; execução autônoma para com razão tipada ao atingir orçamento.
 - **Dependências:** INTEL-02; AUTO-03 (consumo registrado). **Escopo:** conceito + enforcement nos limites existentes. **Fora do escopo:** billing real; medição fina de custo por token.

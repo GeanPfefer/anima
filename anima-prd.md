@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-07-28 (sessão: sincronização do estado após conclusão da Fase E e ratificação do INTEL-01; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-07-28 (sessão: conclusão do INTEL-04 e da Fase F; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -24,7 +24,7 @@
 
 **Nome provisório:** Anima  
 **Plataformas:** Desktop, Web, Mobile (todas)  
-**Estágio atual:** Em desenvolvimento ativo — produto pessoal funcional em web e mobile; Modo Construção comprovado; Modo Autônomo V0 concluído até a Fase E; Fase F em andamento com INTEL-01 ratificado
+**Estágio atual:** Em desenvolvimento ativo — produto pessoal funcional em web e mobile; Modo Construção comprovado; Modo Autônomo V0 concluído até a Fase F
 **Repositório:** https://github.com/GeanPfefer/anima  
 **Público inicial:** O próprio criador (uso pessoal para validar o sistema)  
 **Público futuro:** Aberto ao público após o sistema estar bem estruturado e funcional
@@ -365,13 +365,14 @@ já possui implementação incremental registrada no
 [Plano 002 — Modo Autônomo V0](docs/planos/002-modo-autonomo-v0.md). As fases
 A–E estão concluídas: elegibilidade, fila, seleção, claims exclusivos,
 tentativas persistentes, execução local, reconciliação, checkpoints reais,
-retomada e Supervisor V0 foram implementados e ratificados. A Fase F está em
-andamento: o INTEL-01 classifica o trabalho e impede execução autônoma sem
+retomada e Supervisor V0 foram implementados e ratificados. A Fase F também
+está concluída: o INTEL-01 classifica o trabalho e impede execução autônoma sem
 classificação vigente e completa; o INTEL-02 seleciona e registra
 automaticamente executor, provedor, modelo e esforço por política explícita;
 o INTEL-03 ajusta o esforço entre tentativas por histórico persistido, com
-escalonamento e redução auditáveis. Orçamento e reserva de capacidade
-(INTEL-04) permanecem não iniciados e dependem da definição humana dos padrões.
+escalonamento e redução auditáveis; o INTEL-04 aplica orçamento por tentativas
+e tempo em janelas móveis, preserva capacidade interativa e interrompe com
+checkpoint e razão tipada. Tokens e custo financeiro permanecem fora do V0.
 
 ## 1g. Jornadas de evolução
 
@@ -946,7 +947,7 @@ O grafo de vida representa visualmente as conexões que emergem dos dados do usu
 | Visão A agora / Visão B como norte (jul/2026) | Anima como sistema de evolução pessoal é o único trabalho ativo; orquestrador de capacidades / Sistema Operacional Pessoal fica documentado como norte, não vira backlog imediato | Evita que a visão de longo prazo engula o produto atual ou pare o roadmap tático em andamento; ver `anima-manifesto.md` e [Marco 001](docs/marcos/001-nascimento-da-identidade.md) |
 | Autonomia por nível de impacto (jul/2026) | Observação de baixo risco roda silenciosamente (atividade, nota, entidade, hipótese); ação de impacto estrutural/financeiro/irreversível sempre exige confirmação prévia | Generaliza o padrão de confirmação já usado em pilar pendente e hipótese de identidade para qualquer futura capacidade de execução; ver `anima-manifesto.md` |
 | Jornadas de evolução (jul/2026) | Anima não gerencia só tarefas — acompanha jornadas de vida variadas (skate, música, programação, carreira, quarto inteligente, etc.); relação com pilar/entidade/quest fica em aberto | Reconhece que nem toda evolução de vida é uma "atividade cronometrada"; ver §1g — decisão de schema é arquitetura futura, não desta atualização |
-| Trabalho Autônomo Seguro (jul/2026) | Modo Autônomo formalizado e implementado até a Fase E: fila elegível, claim exclusivo, tentativas persistentes, checkpoints, retomada, Supervisor V0 e interrupção humana tipada; V0 estreita (um trabalho por projeto, execução local, sem merge/publicação automáticos) | Permite continuidade de trabalho sem supervisão constante mantendo intenção aprovada, limites explícitos e evidências verificáveis; a Fase F está em andamento com INTEL-01 ratificado — ver [Marco 003](docs/marcos/003-trabalho-autonomo-seguro.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md) |
+| Trabalho Autônomo Seguro (jul/2026) | Modo Autônomo formalizado e implementado até a Fase F: fila elegível, claim exclusivo, tentativas persistentes, checkpoints, retomada, Supervisor V0, interrupção humana tipada, classificação, roteamento, ajuste de esforço e orçamento com reserva interativa; V0 estreita (um trabalho por projeto, execução local, sem merge/publicação automáticos) | Permite continuidade de trabalho sem supervisão constante mantendo intenção aprovada, limites explícitos, uso sustentável de inteligência e evidências verificáveis — ver [Marco 003](docs/marcos/003-trabalho-autonomo-seguro.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md) |
 | Anima Portátil e Nós Locais (jul/2026) | Contexto pessoal pode acompanhar o usuário entre dispositivos; arquivos, ferramentas e recursos permanecem locais e acessíveis somente por permissões explícitas de cada máquina | Permite continuidade no Nomad e em futuras máquinas sem exigir exposição ou cópia indiscriminada dos arquivos; orienta o INT-04 sem ampliar seu escopo — ver [Marco 004](docs/marcos/004-anima-portatil-e-nos-locais.md) |
 
 ---

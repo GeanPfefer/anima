@@ -121,7 +121,13 @@ export type ExecutorRun =
   // (fora do contrato do INT-01) de falha ao persistir um checkpoint mid-flight.
   // Em ambos não existe terminal confiável — inventar um seria afirmar o não
   // observado —, então a tentativa fica aberta para o SUP-04.
-  | { readonly ok: false; readonly defect: string; readonly cause: 'transcript' | 'checkpoint' };
+  | {
+      readonly ok: false;
+      readonly defect: string;
+      readonly cause: 'transcript' | 'checkpoint' | 'budget';
+      readonly reason?: string;
+      readonly claimReleased?: boolean;
+    };
 
 /**
  * Porta de persistência de checkpoints mid-flight. O laço injeta a implementação
@@ -129,7 +135,16 @@ export type ExecutorRun =
  */
 export interface CheckpointSink {
   /** Persiste um checkpoint recebido, ANTES de consumir o próximo sinal. */
-  persistCheckpoint(signal: WorkExecutorSignal): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
+  persistCheckpoint(signal: WorkExecutorSignal): Promise<
+    | { readonly ok: true }
+    | {
+        readonly ok: false;
+        readonly message: string;
+        readonly cause?: 'checkpoint' | 'budget';
+        readonly reason?: string;
+        readonly claimReleased?: boolean;
+      }
+  >;
   /** progress não é persistido nesta etapa; só observabilidade opcional. */
   observeProgress?(signal: WorkExecutorSignal): void;
 }
@@ -161,7 +176,13 @@ export const runExecutorStreamed = async (
     if (terminalSeen) continue;
     if (value.kind === 'checkpoint') {
       const persisted = await sink.persistCheckpoint(value);
-      if (!persisted.ok) return { ok: false, defect: persisted.message, cause: 'checkpoint' };
+      if (!persisted.ok) return {
+        ok: false,
+        defect: persisted.message,
+        cause: persisted.cause ?? 'checkpoint',
+        ...(persisted.reason ? { reason: persisted.reason } : {}),
+        ...(persisted.claimReleased === undefined ? {} : { claimReleased: persisted.claimReleased }),
+      };
       continue;
     }
     if (value.kind === 'progress') { sink.observeProgress?.(value); continue; }

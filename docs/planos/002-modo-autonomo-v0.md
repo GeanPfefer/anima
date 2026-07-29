@@ -19,7 +19,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
-| F | **Em andamento (2026-07-28)** | INTEL-01 e INTEL-02 ratificados; INTEL-03 concluído; INTEL-04 aguarda definição humana dos padrões |
+| F | **Concluída (2026-07-28)** | INTEL-01 a INTEL-04 concluídos; política de orçamento ratificada e aplicada |
 | G | Não iniciada | — |
 
 ## Fase A — Fechar a orquestração atual
@@ -689,6 +689,42 @@ integrações ignoradas), `typecheck` dos cinco workspaces e build de produção
 **Conclusão formal:** os critérios do INTEL-03 estão satisfeitos sem checkpoint
 humano adicional. O próximo item é o INTEL-04, cujo orçamento padrão exige
 decisão humana antes da implementação.
+
+### Conclusão do INTEL-04 e da Fase F (2026-07-28) — orçamento e reserva
+
+O usuário aprovou os padrões recomendados e autorizou a implementação: no
+máximo 3 tentativas autônomas por item em 24 horas, respeitando qualquer limite
+declarado menor; 6 tentativas e 120 minutos autônomos por usuário em 24 horas;
+e no máximo 45 minutos autônomos em cada janela móvel de 60 minutos, preservando
+15 minutos para uso interativo. O V0 mede tentativas e tempo; tokens e dinheiro
+continuam fora do escopo.
+
+A política pura devolve quatro razões fechadas:
+`item_attempt_budget_exhausted`, `user_attempt_budget_exhausted`,
+`user_runtime_budget_exhausted` e `interactive_reserve_protected`. O banco
+reconstrói consumo a partir do log append-only, incluindo o tempo de tentativas
+abertas, e serializa admissões por usuário. Uma guarda em
+`execution_started` impede que concorrência ultrapasse os tetos. Somente
+tentativas com `claim_id` entram na contabilidade; o caminho comandado continua
+fora do orçamento autônomo.
+
+O Supervisor consulta o orçamento antes do roteamento e não toma posse quando
+não há capacidade; materializa o bloqueio humano para retirar o item esgotado
+da cabeça da fila. Depois de cada checkpoint persistido, verifica os limites de
+tempo. Ao atingi-los, registra `input_requested` e `work_blocked` com razão,
+limite e referência exata do checkpoint, move o item para `blocked`, libera o
+claim e não consome nem inventa terminal. Assim a retomada automática para e o
+trabalho aguarda decisão humana.
+
+**Evidência técnica:** 8 cenários puros, 2 cenários do Supervisor e 15 provas
+pgTAP específicas. A regressão completa passou em 21 arquivos/547 testes SQL,
+631 testes Jest (2 integrações ignoradas), `typecheck` dos cinco workspaces e
+build de produção do web.
+
+**Conclusão formal:** o checkpoint humano do INTEL-04 e seus critérios de
+aceite estão satisfeitos. Como INTEL-01 a INTEL-04 estão concluídos, a
+**Fase F — Uso sustentável de inteligência está formalmente concluída em
+2026-07-28**. A próxima fase canônica é a Fase G — Experiência no chat.
 
 **Critérios de aceite:** toda seleção de executor/modelo/esforço é registrada com os fatores considerados; escalonamento acontece por regra explícita após falhas; existe reserva de capacidade que impede o modo autônomo de esgotar o provedor do usuário.
 

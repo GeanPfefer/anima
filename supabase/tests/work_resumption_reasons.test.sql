@@ -15,6 +15,10 @@ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 \ir helpers/routing.inc
 SELECT plan(18);
 
+-- As durações artificiais desta suíte existem para produzir razões de abandono,
+-- não para exercitar orçamento (coberto em work_budget.test.sql).
+ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_work_budget_before_start;
+
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('86000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','resume-reasons@test.invalid','',now(),'{}','{}',now(),now());
 INSERT INTO public.ai_conversations(id,user_id,role,content)
@@ -173,4 +177,6 @@ SELECT is((SELECT payload->'data'->>'reason' FROM public.work_events WHERE work_
   AND event_type='execution_started' ORDER BY seq DESC LIMIT 1),'resumed_execution','both: início marcado como retomada, não como cenário');
 
 SELECT * FROM finish();
+RESET ROLE;
+ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_work_budget_before_start;
 ROLLBACK;
