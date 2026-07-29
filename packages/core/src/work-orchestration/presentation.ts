@@ -14,7 +14,34 @@ export interface WorkResultProjection {
 }
 export type WorkAction = 'approve'|'reject'|'defer'|'revise_proposal'|'start'|'submit_result'|'accept_result'|'request_result_changes';
 export interface WorkProvenanceProjection { readonly status:'complete'|'incomplete'; readonly issues:readonly string[]; }
-export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; }
+
+// UX-01 — projeção do cartão de execução autônoma. É PURA e derivada apenas do
+// item e dos eventos persistidos: o cliente nunca inventa estado. Ausente
+// (null) quando não há tentativa autônoma (execution_started com claim_id).
+export type ExecutionControlAction = 'pause'|'cancel';
+export type AutonomousExecutionStatus = 'running'|'paused'|'cancelled'|'abandoned'|'submitted_for_review'|'failed'|'blocked';
+export interface ExecutionCheckpointProjection { readonly signalSequence:number; readonly completedSteps:number; readonly remainingSteps:number; readonly nextStep:string; }
+export interface ExecutionControlRequestProjection { readonly action:ExecutionControlAction; readonly requestedAt:string; }
+export interface ExecutionControlAppliedProjection { readonly action:ExecutionControlAction; readonly reason:string; readonly appliedAt:string; }
+export interface ExecutionBudgetBlockProjection { readonly reason:string; readonly reachedLimit:string|null; }
+export interface AutonomousExecutionProjection {
+  readonly attemptId:string;
+  readonly status:AutonomousExecutionStatus;
+  readonly startedAt:string;
+  readonly executorId:string|null;
+  readonly providerRef:string|null;
+  readonly modelRef:string|null;
+  readonly effort:string|null;
+  readonly limits:{readonly maxAttempts:number|null; readonly maxDurationMinutes:number|null};
+  readonly latestCheckpoint:ExecutionCheckpointProjection|null;
+  readonly pendingControl:ExecutionControlRequestProjection|null;
+  readonly appliedControl:ExecutionControlAppliedProjection|null;
+  readonly budgetBlock:ExecutionBudgetBlockProjection|null;
+  // Derivado, não inventado: só cabe pedir controle quando a tentativa corre e
+  // não há pedido pendente. O cartão nunca decide isso por conta própria.
+  readonly canRequestControl:boolean;
+}
+export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; }
 
 const object=(value:Json|undefined):Record<string,Json|undefined>|null=>value!==null&&value!==undefined&&!Array.isArray(value)&&typeof value==='object'?value:null;
 const validationOutcomes:ReadonlySet<string>=new Set(['passed','failed','declared']);
@@ -64,7 +91,66 @@ export function availableWorkActions(item:WorkItem,latestResult:WorkResultProjec
   if(item.state==='review'&&latestResult?.proposalVersion===item.proposalVersion)return['accept_result','request_result_changes'];
   return[];
 }
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult)}};
+// Reconstrói o cartão de execução autônoma a partir dos eventos persistidos.
+// Cada campo tem origem num evento; nada é derivado do relógio ou de suposição.
+const asString=(value:Json|undefined):string|null=>typeof value==='string'&&value.trim().length>0?value:null;
+const asNumber=(value:Json|undefined):number|null=>typeof value==='number'&&Number.isFinite(value)?value:null;
+const arrayLength=(value:Json|undefined):number=>Array.isArray(value)?value.length:0;
+const eventData=(event:WorkEvent):Record<string,Json|undefined>|null=>object(object(event.payload)?.data);
+const eventAttempt=(event:WorkEvent):string|null=>asString(eventData(event)?.attempt_id);
+export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEvent[]):AutonomousExecutionProjection|null{
+  // Tentativa autônoma corrente = último execution_started com claim_id. A
+  // execução comandada (INT-04) não tem claim e não é pausável/cancelável aqui.
+  let started:WorkEvent|undefined;
+  for(let index=events.length-1;index>=0;index--){const event=events[index]!;if(event.type!=='execution_started')continue;if(asString(eventData(event)?.claim_id)===null)continue;started=event;break;}
+  if(!started)return null;
+  const attemptId=asString(eventData(started)?.attempt_id);
+  if(attemptId===null)return null;
+  const forAttempt=events.filter(event=>eventAttempt(event)===attemptId);
+
+  // Executor/provedor/modelo/esforço: do work_routing_decided da tentativa; ao
+  // menos o executor vem do próprio execution_started quando não há decisão.
+  let executorId=asString(eventData(started)?.executor_id),providerRef:string|null=null,modelRef:string|null=null,effort:string|null=null;
+  const routing=forAttempt.find(event=>event.type==='work_routing_decided');
+  if(routing){const selected=object(object(eventData(routing)?.decision)?.selected);if(selected){executorId=asString(selected.executorId)??executorId;providerRef=asString(selected.providerRef);modelRef=asString(selected.modelRef);effort=asString(selected.effort);}}
+
+  // Checkpoint persistido mais recente (maior signal_sequence).
+  let latestCheckpoint:ExecutionCheckpointProjection|null=null;
+  for(const event of forAttempt){if(event.type!=='checkpoint_recorded')continue;const data=eventData(event);const sequence=asNumber(data?.signal_sequence);if(sequence===null)continue;if(latestCheckpoint&&sequence<=latestCheckpoint.signalSequence)continue;const checkpoint=object(data?.checkpoint);latestCheckpoint={signalSequence:sequence,completedSteps:arrayLength(checkpoint?.completedSteps),remainingSteps:arrayLength(checkpoint?.remainingSteps),nextStep:asString(checkpoint?.nextStep)??''};}
+
+  // Resultado aplicado da pausa/cancelamento: work_paused, ou work_cancelled que
+  // referencia um pedido de controle (distinto do cancelamento do executor).
+  let appliedControl:ExecutionControlAppliedProjection|null=null,appliedIndex=-1;
+  for(let index=0;index<events.length;index++){const event=events[index]!;if(eventAttempt(event)!==attemptId)continue;const data=eventData(event);if(event.type==='work_paused'){appliedControl={action:'pause',reason:asString(data?.reason)??'paused_by_user',appliedAt:asString(data?.applied_at)??event.occurredAt.toISOString()};appliedIndex=index;}else if(event.type==='work_cancelled'&&data?.control_request_event_seq!==undefined&&data.control_request_event_seq!==null){appliedControl={action:'cancel',reason:asString(data?.reason)??'cancelled_by_user',appliedAt:asString(data?.applied_at)??event.occurredAt.toISOString()};appliedIndex=index;}}
+
+  // Pedido pendente = último work_control_requested sem aplicação posterior.
+  let lastRequest:{index:number;action:ExecutionControlAction;requestedAt:string}|null=null;
+  for(let index=0;index<events.length;index++){const event=events[index]!;if(event.type!=='work_control_requested'||eventAttempt(event)!==attemptId)continue;const action=asString(eventData(event)?.action);if(action==='pause'||action==='cancel')lastRequest={index,action,requestedAt:asString(eventData(event)?.requested_at)??event.occurredAt.toISOString()};}
+  const pendingControl:ExecutionControlRequestProjection|null=lastRequest&&lastRequest.index>appliedIndex?{action:lastRequest.action,requestedAt:lastRequest.requestedAt}:null;
+
+  // Orçamento relevante: um work_blocked da tentativa registra a razão tipada.
+  let budgetBlock:ExecutionBudgetBlockProjection|null=null;
+  for(const event of forAttempt){if(event.type!=='work_blocked')continue;const data=eventData(event);budgetBlock={reason:asString(data?.reason)??'work_blocked',reachedLimit:asString(data?.reached_limit)};}
+
+  const has=(type:WorkEvent['type']):boolean=>forAttempt.some(event=>event.type===type);
+  let status:AutonomousExecutionStatus='running';
+  if(appliedControl?.action==='cancel')status='cancelled';
+  else if(appliedControl?.action==='pause')status='paused';
+  else if(has('result_submitted'))status='submitted_for_review';
+  else if(has('execution_failed'))status='failed';
+  else if(has('attempt_abandoned'))status='abandoned';
+  else if(has('work_cancelled'))status='cancelled';
+  else if(has('work_blocked'))status='blocked';
+
+  const specLimits=object(object((item.intent as Record<string,Json|undefined>).execution_spec)?.limits);
+  return{
+    attemptId,status,startedAt:started.occurredAt.toISOString(),executorId,providerRef,modelRef,effort,
+    limits:{maxAttempts:asNumber(specLimits?.max_attempts),maxDurationMinutes:asNumber(specLimits?.max_duration_minutes)},
+    latestCheckpoint,pendingControl,appliedControl,budgetBlock,
+    canRequestControl:status==='running'&&pendingControl===null,
+  };
+}
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events)}};
 
 // Reconstrói a projeção somente quando os elos persistidos mínimos existem.
 // O estado atual nunca basta para inventar o histórico que deveria explicá-lo.
