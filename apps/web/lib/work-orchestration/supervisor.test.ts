@@ -1,4 +1,4 @@
-import type { WorkCheckpointV1, WorkContextSnapshot, WorkExecutorAdapter, WorkExecutorRequest, WorkExecutorSignal, WorkItem } from '@anima/core';
+import type { WorkCheckpointV1, WorkContextSnapshot, WorkExecutorAdapter, WorkExecutorRequest, WorkExecutorSignal, WorkItem, WorkRoutingAdjustmentContextV1 } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runSupervisorTurn, type SupervisorReader } from './supervisor';
@@ -42,6 +42,7 @@ interface FakeOptions {
   /** Faz todo record_work_checkpoint devolver `replayed` (idempotente, sem novo evento). */
   readonly replayCheckpoints?: boolean;
   readonly resumptionSource?: Record<string, unknown>;
+  readonly routingAdjustmentContext?: WorkRoutingAdjustmentContextV1;
 }
 
 class FakeDatabase {
@@ -51,6 +52,7 @@ class FakeDatabase {
   readonly items = new Map<string, FakeItem>();
   private readonly terminals = new Map<string, string>();
   private readonly routing = new Map<string, { executorId: string; serialized: string }>();
+  private readonly routingAdjustments = new Map<string, string>();
   // Maior sequência de checkpoint e sinal bruto por tentativa (para replay/conflito).
   private readonly checkpointSeq = new Map<string, number>();
   private readonly checkpointSignals = new Map<string, string>();
@@ -129,6 +131,26 @@ class FakeDatabase {
         });
       }
 
+      case 'work_routing_adjustment_context':
+        return ok(this.options.routingAdjustmentContext ?? {
+          schemaVersion: 1, attempts: [], latestCheckpoint: null,
+        });
+
+      case 'record_work_routing_adjustment': {
+        const attemptId = args['p_attempt_id'] as string;
+        const serialized = JSON.stringify(args['p_adjustment']);
+        const previous = this.routingAdjustments.get(attemptId);
+        if (previous) return previous === serialized
+          ? ok({ action: 'replayed', attempt_id: attemptId })
+          : fail('55000', 'work routing adjustment conflict');
+        this.routingAdjustments.set(attemptId, serialized);
+        this.events.push({
+          itemId: args['p_work_item_id'] as string,
+          type: 'work_routing_adjusted', attemptId,
+        });
+        return ok({ action: 'recorded', attempt_id: attemptId });
+      }
+
       case 'record_work_routing_decision': {
         const attemptId = args['p_attempt_id'] as string;
         const decision = args['p_decision'] as { selected: { executorId: string } };
@@ -155,6 +177,7 @@ class FakeDatabase {
           attemptId: args['attempt_id'] as string, released: false, reason: null,
         };
         const routing = this.routing.get(args['attempt_id'] as string);
+        if (!this.routingAdjustments.has(args['attempt_id'] as string)) return fail('55000', 'work routing adjustment missing');
         if (!routing) return fail('55000', 'work routing decision missing');
         if (routing.executorId !== args['executor_id']) return fail('55000', 'work routing executor mismatch');
         this.claims.set(claim.id, claim);
@@ -186,6 +209,7 @@ class FakeDatabase {
         if (!claim) return fail('P0002', 'claim not found');
         const item = this.items.get(claim.itemId)!;
         const routing = this.routing.get(args['attempt_id'] as string);
+        if (!this.routingAdjustments.has(args['attempt_id'] as string)) return fail('55000', 'work routing adjustment missing');
         if (!routing) return fail('55000', 'work routing decision missing');
         if (routing.executorId !== args['executor_id']) return fail('55000', 'work routing executor mismatch');
         if (item.classification !== 'complete') {
@@ -485,7 +509,8 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
   // Ordem canônica das fronteiras, e nunca o início comandado.
   expect(database.calls).toEqual([
     'reconcile_supervised_work', 'next_autonomous_work', 'abandoned_work_resumption_source',
-    'current_work_intelligence_classification', 'record_work_routing_decision', 'acquire_work_claim',
+    'current_work_intelligence_classification', 'work_routing_adjustment_context',
+    'record_work_routing_adjustment', 'record_work_routing_decision', 'acquire_work_claim',
     'start_claimed_work_attempt', 'record_commanded_work_terminal', 'release_work_claim',
   ]);
   expect(database.calls).not.toContain('start_commanded_work_attempt');
@@ -496,10 +521,38 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
 
   // Liberação depois do terminal, com a razão que o contrato exige.
   expect(database.events.map(event => event.type)).toEqual([
-    'work_routing_decided', 'work_claimed', 'execution_started', 'result_submitted', 'work_claim_released',
+    'work_routing_adjusted', 'work_routing_decided', 'work_claimed',
+    'execution_started', 'result_submitted', 'work_claim_released',
   ]);
   expect(database.events.at(-1)).toMatchObject({ reason: 'attempt_finished' });
   expect(database.items.get('item-antigo')!.state).toBe('review');
+});
+
+test('aplica escalonamento persistido ao esforço mínimo antes de tomar posse', async () => {
+  const database = new FakeDatabase({
+    items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }],
+    routingAdjustmentContext: {
+      schemaVersion: 1,
+      attempts: [
+        { attemptId: 'old-1', outcome: 'attempt_abandoned', selectedEffort: 'light', adjustment: 'none' },
+        { attemptId: 'old-2', outcome: 'execution_failed', selectedEffort: 'light', adjustment: 'none' },
+      ],
+      latestCheckpoint: null,
+    },
+  });
+  const runner = executor('result');
+  const result = await turn(database, runner.adapter, [workItem('item-1')], ['claim-3', 'attempt-3']);
+
+  expect(result.outcome).toBe('execution_completed');
+  expect(result.routingAdjustment).toMatchObject({
+    kind: 'escalated', baselineEffort: 'light', effectiveEffort: 'standard',
+    consecutiveFailures: 2,
+  });
+  expect(result.routingDecision).toMatchObject({
+    requiredEffort: 'standard', selected: { effort: 'standard' },
+  });
+  expect(database.calls.indexOf('record_work_routing_adjustment'))
+    .toBeLessThan(database.calls.indexOf('acquire_work_claim'));
 });
 
 test('segunda volta seleciona o item seguinte, sem sobrepor o primeiro', async () => {

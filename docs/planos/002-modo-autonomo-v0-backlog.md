@@ -349,6 +349,17 @@ testes pgTAP, além de 609 testes Jest, `typecheck` e build de produção.
 
 ### INTEL-03 — Escalonamento e redução
 
+**Estado (2026-07-28): concluído.** Duas falhas consecutivas elevam exatamente
+um nível, sem ultrapassar `strong`; resultado ou cancelamento quebra a
+sequência. Uma tentativa antes escalada só volta ao baseline quando deixou
+checkpoint estruturado com próximo passo e restante, sem falhas, e nunca reduz
+abaixo do mínimo do INTEL-01. O histórico é reconstruído no banco apenas para
+tentativas autônomas da versão aprovada. `work_routing_adjusted` registra
+decisão e evidências antes da rota; banco e Supervisor falham fechados diante
+de divergência ou rota insuficiente. Evidências: 10 cenários puros, integração
+do Supervisor, prova SQL de duas falhas seguida de escalonamento, regressão de
+532 testes pgTAP e 621 Jest, `typecheck` e build.
+
 - **Problema:** falhas repetidas com executor leve desperdiçam tentativas; manter executor forte após o plano consolidar desperdiça capacidade.
 - **Resultado esperado:** regras explícitas de escalonamento (após N falhas ou bloqueio persistente → executor/esforço mais forte) e de redução (plano consolidado/etapa mecânica → mais leve), sempre registradas como eventos.
 - **Dependências:** INTEL-02; AUTO-05. **Escopo:** regras + integração com limites de tentativa existentes. **Fora do escopo:** ajuste dinâmico intra-tentativa.

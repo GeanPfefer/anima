@@ -19,7 +19,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
-| F | **Em andamento (2026-07-28)** | INTEL-01 e INTEL-02 implementados e ratificados; INTEL-03 e INTEL-04 não iniciados |
+| F | **Em andamento (2026-07-28)** | INTEL-01 e INTEL-02 ratificados; INTEL-03 concluído; INTEL-04 aguarda definição humana dos padrões |
 | G | Não iniciada | — |
 
 ## Fase A — Fechar a orquestração atual
@@ -654,6 +654,41 @@ workspaces e build de produção do web.
 **Conclusão formal:** o checkpoint humano da política inicial e os critérios de
 aceite do INTEL-02 estão satisfeitos. O INTEL-02 está encerrado; a próxima
 dependência da Fase F é o INTEL-03.
+
+### Conclusão do INTEL-03 (2026-07-28) — ajuste entre tentativas
+
+A política `work-routing-adjustment-v1` usa exclusivamente fatos persistidos da
+mesma versão aprovada. Duas falhas consecutivas (`execution_failed` ou
+`attempt_abandoned`) elevam exatamente um nível: `light → standard` ou
+`standard → strong`; `strong` nunca é ultrapassado. Resultado submetido ou
+cancelamento quebra a sequência. Depois de uma tentativa escalada, um
+checkpoint correlacionado com próximo passo e trabalho restante, sem falhas,
+permite voltar ao baseline da classificação — nunca abaixo dele.
+
+Cada tentativa recebe antes da decisão de rota o evento append-only
+`work_routing_adjusted`, inclusive quando o resultado é `none`. O fato registra
+baseline, esforço efetivo, quantidade de falhas, IDs das tentativas usadas como
+evidência e razão fechada. O banco reconstrói o histórico, exclui o caminho
+comandado do INT-04, recalcula a decisão e recusa divergência. Dois gates
+impedem tanto gravar uma rota com esforço diferente do ajuste quanto iniciar
+sem ajuste/rota correspondentes. Retomadas aceitam esses dois fatos prévios,
+sem liberar qualquer outro reaproveitamento de `attempt_id`.
+
+A redução não infere que uma etapa é “mecânica” a partir de prosa livre: exige
+o checkpoint estruturado. Ausência de rota no esforço escalado interrompe de
+forma tipada; não há downgrade silencioso. O limite de tentativas do AUTO-05
+continua soberano e impede o início; orçamento permanece exclusivamente no
+INTEL-04.
+
+**Evidência técnica:** 10 cenários puros cobrem escalonamento, teto, quebra de
+sequência e redução; o Supervisor prova o ajuste antes do claim; a prova SQL
+executa duas falhas e verifica a terceira tentativa escalada com razões e IDs
+persistidos. Passaram 20 arquivos/532 testes pgTAP, 621 testes Jest (2
+integrações ignoradas), `typecheck` dos cinco workspaces e build de produção.
+
+**Conclusão formal:** os critérios do INTEL-03 estão satisfeitos sem checkpoint
+humano adicional. O próximo item é o INTEL-04, cujo orçamento padrão exige
+decisão humana antes da implementação.
 
 **Critérios de aceite:** toda seleção de executor/modelo/esforço é registrada com os fatores considerados; escalonamento acontece por regra explícita após falhas; existe reserva de capacidade que impede o modo autônomo de esgotar o provedor do usuário.
 

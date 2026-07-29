@@ -125,6 +125,27 @@ describe('política V0 de roteamento de inteligência', () => {
     });
   });
 
+  test('respeita piso elevado pelo INTEL-03 e jamais aceita redução abaixo do baseline', () => {
+    expect(selectWorkRoute({
+      capability: 'programming',
+      classification: classification(),
+      minimumEffort: 'standard',
+      candidates: [route('light', 'light'), route('standard', 'standard')],
+    })).toMatchObject({
+      outcome: 'selected',
+      decision: { requiredEffort: 'standard', selected: { routeId: 'standard' } },
+    });
+    expect(selectWorkRoute({
+      capability: 'programming',
+      classification: classification({ risk: 'high' }),
+      minimumEffort: 'light',
+      candidates: [route('light', 'light'), route('strong', 'strong')],
+    })).toMatchObject({
+      outcome: 'selected',
+      decision: { requiredEffort: 'strong', selected: { routeId: 'strong' } },
+    });
+  });
+
   test('falha fechado com classificação incompleta ou catálogo inválido', () => {
     expect(selectWorkRoute({
       capability: 'programming',

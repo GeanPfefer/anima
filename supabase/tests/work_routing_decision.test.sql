@@ -43,6 +43,16 @@ RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$
       'urgencyTieBreakApplied',false),
     'rejectedCandidates','[]'::jsonb);
 $$;
+CREATE FUNCTION pg_temp.adjust(p_item uuid,p_attempt uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE v_version integer; v_classification jsonb; v_adjustment jsonb;
+BEGIN
+  SELECT proposal_version INTO v_version FROM public.work_items WHERE id=p_item;
+  v_classification:=(public.current_work_intelligence_classification(p_item))->'classification';
+  v_adjustment:=private.expected_work_routing_adjustment(
+    p_item,v_version,private.required_work_effort(v_classification));
+  RETURN public.record_work_routing_adjustment(p_item,v_version,p_attempt,v_adjustment);
+END $$;
 
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','83000000-0000-0000-0000-000000000001',true);
@@ -69,6 +79,7 @@ SELECT public.record_work_intelligence_classification(id,1,0,pg_temp.classificat
 SELECT public.record_work_intelligence_classification(id,1,0,pg_temp.classification()) FROM missing;
 SELECT public.record_work_intelligence_classification(id,1,0,pg_temp.classification()) FROM obsolete;
 
+SELECT pg_temp.adjust((SELECT id FROM routed),'83000000-0000-0000-0000-0000000000a1');
 CREATE TEMP TABLE first_route AS SELECT public.record_work_routing_decision(
   (SELECT id FROM routed),1,'83000000-0000-0000-0000-0000000000a1',pg_temp.decision()) result;
 SELECT is(result->>'action','recorded','decisão é registrada') FROM first_route;
@@ -83,12 +94,13 @@ SELECT ok((public.work_routing_decision('83000000-0000-0000-0000-0000000000a1')
 SELECT is((public.record_work_routing_decision((SELECT id FROM routed),1,
   '83000000-0000-0000-0000-0000000000a1',pg_temp.decision()))->>'action',
   'replayed','reentrega idêntica é replay');
+SELECT pg_temp.adjust((SELECT id FROM routed),'83000000-0000-0000-0000-0000000000af');
 SELECT throws_ok($$SELECT public.record_work_routing_decision((SELECT id FROM routed),1,
   '83000000-0000-0000-0000-0000000000a1',pg_temp.decision('light','local-runner-v1','model:other'))$$,
   '55000','work routing decision conflict','mesma tentativa com rota divergente é recusada');
 SELECT throws_ok($$SELECT public.record_work_routing_decision((SELECT id FROM routed),1,
   '83000000-0000-0000-0000-0000000000af',pg_temp.decision('standard'))$$,
-  '22023','invalid work routing decision','esforço exigido divergente é recusado');
+  '55000','work routing effort mismatch','esforço exigido divergente é recusado');
 
 SELECT public.acquire_work_claim((SELECT id FROM missing),1,
   '83000000-0000-0000-0000-0000000000c2','sup',300);
@@ -112,6 +124,7 @@ SELECT lives_ok($$SELECT public.start_claimed_work_attempt(
 SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM routed)),
   'in_progress','início roteado move o item para execução');
 
+SELECT pg_temp.adjust((SELECT id FROM obsolete),'83000000-0000-0000-0000-0000000000a3');
 SELECT public.record_work_routing_decision((SELECT id FROM obsolete),1,
   '83000000-0000-0000-0000-0000000000a3',pg_temp.decision());
 SELECT public.record_work_intelligence_classification((SELECT id FROM obsolete),1,1,pg_temp.classification('high'));
@@ -124,6 +137,7 @@ SELECT throws_ok($$SELECT public.start_claimed_work_attempt(
 SELECT throws_ok($$SELECT public.record_work_routing_decision((SELECT id FROM obsolete),1,
   '83000000-0000-0000-0000-0000000000a4',pg_temp.decision())$$,
   '22023','invalid work routing decision','classificação forte recusa decisão light');
+SELECT pg_temp.adjust((SELECT id FROM obsolete),'83000000-0000-0000-0000-0000000000a4');
 SELECT is((public.record_work_routing_decision((SELECT id FROM obsolete),1,
   '83000000-0000-0000-0000-0000000000a4',pg_temp.decision('strong')))->>'action',
   'recorded','classificação forte aceita decisão strong');

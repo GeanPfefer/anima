@@ -344,8 +344,8 @@ SELECT is((SELECT count(*) FROM public.work_items WHERE user_id='89000000-0000-0
   'nenhum item é concluído pela reconciliação');
 SELECT is((SELECT count(*) FROM public.work_events e JOIN public.work_items i ON i.id=e.work_item_id
   WHERE i.user_id='89000000-0000-0000-0000-000000000000' AND e.author='system'
-    AND e.event_type NOT IN ('work_routing_decided','work_claimed','work_claim_released','attempt_abandoned')),0::bigint,
-  'o vocabulário que a reconciliação escreve é fechado: roteamento, posse e abandono, nada mais');
+    AND e.event_type NOT IN ('work_routing_adjusted','work_routing_decided','work_claimed','work_claim_released','attempt_abandoned')),0::bigint,
+  'o vocabulário que a reconciliação escreve é fechado: ajuste, roteamento, posse e abandono, nada mais');
 
 -- ============================================================
 -- (13) Sinal tardio de tentativa abandonada é recusado

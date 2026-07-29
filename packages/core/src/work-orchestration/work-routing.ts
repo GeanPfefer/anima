@@ -127,6 +127,8 @@ export function selectWorkRoute(input: {
   readonly capability: WorkCapability;
   readonly classification: WorkIntelligenceClassificationV1;
   readonly candidates: readonly WorkRoutingCandidateV1[];
+  /** Piso já ajustado pelo INTEL-03; nunca pode reduzir o baseline da classificação. */
+  readonly minimumEffort?: WorkEffortLevel;
 }): WorkRoutingPolicyResult {
   const invalidClassification = validateWorkIntelligenceClassification(input.classification);
   if (invalidClassification) {
@@ -149,7 +151,12 @@ export function selectWorkRoute(input: {
     };
   }
 
-  const requiredEffort = requiredEffortFor(input.classification);
+  const baselineEffort = requiredEffortFor(input.classification);
+  const requiredEffort = input.minimumEffort === undefined
+    ? baselineEffort
+    : effortRank[input.minimumEffort] >= effortRank[baselineEffort]
+      ? input.minimumEffort
+      : baselineEffort;
   const rejected = new Map<string, WorkRoutingRejectionReason[]>();
   const capable = input.candidates.filter(candidate => {
     const reasons = reasonsFor(candidate, input.capability, requiredEffort);

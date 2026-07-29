@@ -564,9 +564,33 @@ uma tentativa retomada; todos os demais usos prévios do identificador
 continuam recusados.
 
 O catálogo inicial contém somente a rota local realmente configurada. A
-política não codifica fornecedor específico. Histórico de falhas,
-escalonamento/redução e orçamento pertencem respectivamente ao INTEL-03 e ao
-INTEL-04.
+política não codifica fornecedor específico. Neste checkpoint do INTEL-02,
+histórico de falhas, escalonamento/redução e orçamento ainda pertenciam
+respectivamente ao INTEL-03 e ao INTEL-04.
+
+## Ajuste de esforço entre tentativas (INTEL-03)
+
+O ajuste é uma decisão separada da seleção de rota. O banco projeta somente
+tentativas autônomas encerradas da versão aprovada, correlacionadas por
+`attempt_id` a `work_routing_decided`; execuções comandadas não contaminam o
+histórico. A política pura conta a sequência final de `execution_failed` e
+`attempt_abandoned`. Com duas falhas consecutivas, sobe um nível; sucesso ou
+cancelamento encerra a sequência; `strong` é teto.
+
+Redução significa remover um escalonamento anterior, nunca reduzir o baseline
+do INTEL-01. Ela exige que a tentativa escalada mais recente tenha um
+`checkpoint_recorded` correlacionado, com `nextStep` não vazio,
+`remainingSteps` não vazio e `failures` vazio. Isso usa estrutura persistida,
+não interpretação de texto.
+
+`record_work_routing_adjustment` compara byte a byte a decisão da aplicação
+com `private.expected_work_routing_adjustment`, calculada sob lock do item.
+Aceita apenas a versão aprovada atual e grava `work_routing_adjusted`
+append-only. O evento contém `kind`, baseline, esforço efetivo, sequência de
+falhas, IDs de evidência e razão. A decisão de rota subsequente deve declarar
+esse esforço efetivo, e `execution_started` autônomo exige ambos os fatos com
+o mesmo item, versão e tentativa. Falta de capacidade no novo piso interrompe;
+nenhuma regra faz downgrade.
 
 ## Fora de escopo desta fundação
 

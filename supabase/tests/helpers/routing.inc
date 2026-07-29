@@ -16,11 +16,18 @@ DECLARE
   v_effort text;
   v_capability text;
   v_decision jsonb;
+  v_adjustment jsonb;
+  v_version integer;
 BEGIN
   v_current := public.current_work_intelligence_classification(p_item);
   v_classification := v_current -> 'classification';
-  v_effort := private.required_work_effort(v_classification);
-  SELECT capability::text INTO v_capability FROM public.work_items WHERE id=p_item;
+  SELECT capability::text,proposal_version INTO v_capability,v_version
+    FROM public.work_items WHERE id=p_item;
+  v_adjustment:=private.expected_work_routing_adjustment(
+    p_item,v_version,private.required_work_effort(v_classification)
+  );
+  PERFORM public.record_work_routing_adjustment(p_item,v_version,p_attempt,v_adjustment);
+  v_effort := v_adjustment ->> 'effectiveEffort';
   v_decision := jsonb_build_object(
     'schemaVersion',1,
     'policyVersion','work-routing-v1',
@@ -45,7 +52,7 @@ BEGIN
   );
   RETURN public.record_work_routing_decision(
     p_item,
-    (SELECT proposal_version FROM public.work_items WHERE id=p_item),
+    v_version,
     p_attempt,
     v_decision
   );

@@ -1,6 +1,8 @@
 import {
   evaluateAutonomousEligibility,
   planWorkResumption,
+  planWorkRoutingAdjustment,
+  requiredEffortFor,
   selectWorkRoute,
   validateWorkIntelligenceClassification,
   type AbandonedCheckpointV1,
@@ -9,6 +11,8 @@ import {
   type WorkExecutorAdapter,
   type WorkExecutorRequest,
   type WorkRoutingCandidateV1,
+  type WorkRoutingAdjustmentContextV1,
+  type WorkRoutingAdjustmentV1,
   type WorkRoutingDecisionV1,
 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
@@ -77,6 +81,7 @@ export interface SupervisorTurnResult {
   readonly attemptId: string | null;
   readonly terminalKind: 'result' | 'error' | 'cancelled' | null;
   readonly routingDecision: WorkRoutingDecisionV1 | null;
+  readonly routingAdjustment: WorkRoutingAdjustmentV1 | null;
   readonly claimReleased: boolean;
   /** Efeito persistido que esta volta não conseguiu fechar sozinha. */
   readonly requiresAnotherTurn: boolean;
@@ -101,7 +106,8 @@ export interface SupervisorTurnDependencies {
 
 const base = (reconciliation: readonly ReconciliationFinding[]): SupervisorTurnResult => ({
   outcome: 'no_eligible_work', reconciliation, selection: null, claimId: null, attemptId: null,
-  terminalKind: null, routingDecision: null, claimReleased: false, requiresAnotherTurn: false, refusal: null, gaps: [],
+  terminalKind: null, routingDecision: null, routingAdjustment: null,
+  claimReleased: false, requiresAnotherTurn: false, refusal: null, gaps: [],
 });
 
 const refusalOf = (error: { code?: string; message: string }): { code: string; message: string } =>
@@ -112,6 +118,30 @@ const outcomeForTerminal = (kind: string): SupervisorTurnOutcome =>
 
 const object = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+const routingAdjustmentContext = (value: unknown): WorkRoutingAdjustmentContextV1 | null => {
+  const root = object(value);
+  if (root?.schemaVersion !== 1 || !Array.isArray(root.attempts)) return null;
+  const attempts: WorkRoutingAdjustmentContextV1['attempts'][number][] = [];
+  for (const raw of root.attempts) {
+    const attempt = object(raw);
+    if (!attempt || typeof attempt.attemptId !== 'string'
+      || !['result_submitted', 'execution_failed', 'work_cancelled', 'attempt_abandoned'].includes(String(attempt.outcome))
+      || !['light', 'standard', 'strong'].includes(String(attempt.selectedEffort))
+      || !['none', 'escalated', 'reduced'].includes(String(attempt.adjustment))) return null;
+    attempts.push(attempt as unknown as WorkRoutingAdjustmentContextV1['attempts'][number]);
+  }
+  const rawCheckpoint = root.latestCheckpoint;
+  if (rawCheckpoint === null) return { schemaVersion: 1, attempts, latestCheckpoint: null };
+  const checkpoint = object(rawCheckpoint);
+  if (!checkpoint || typeof checkpoint.attemptId !== 'string' || typeof checkpoint.nextStep !== 'string'
+    || !Array.isArray(checkpoint.remainingSteps) || !checkpoint.remainingSteps.every(step => typeof step === 'string')
+    || !Array.isArray(checkpoint.failures) || !checkpoint.failures.every(failure => typeof failure === 'string')) return null;
+  return {
+    schemaVersion: 1, attempts,
+    latestCheckpoint: checkpoint as unknown as NonNullable<WorkRoutingAdjustmentContextV1['latestCheckpoint']>,
+  };
+};
 
 /**
  * Executa exatamente uma volta do Supervisor.
@@ -197,9 +227,27 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
       refusal: { code: 'routing_classification_invalid', message: 'A classificação corrente não pôde ser reconstruída.' },
     };
   }
+  const adjustmentContextRead = await client.rpc('work_routing_adjustment_context', {
+    p_work_item_id: selection.workItemId,
+  });
+  if (adjustmentContextRead.error) {
+    return { ...started, outcome: 'routing_refused', refusal: refusalOf(adjustmentContextRead.error) };
+  }
+  const adjustmentContext = routingAdjustmentContext(adjustmentContextRead.data);
+  if (!adjustmentContext) {
+    return {
+      ...started, outcome: 'routing_unavailable',
+      refusal: { code: 'routing_history_invalid', message: 'O histórico de roteamento não pôde ser reconstruído.' },
+    };
+  }
+  const adjustment = planWorkRoutingAdjustment({
+    baselineEffort: requiredEffortFor(classification as unknown as WorkIntelligenceClassificationV1),
+    context: adjustmentContext,
+  });
   const routing = selectWorkRoute({
     capability: item.value.capability,
     classification: classification as unknown as WorkIntelligenceClassificationV1,
+    minimumEffort: adjustment.effectiveEffort,
     candidates: routes.map(route => route.candidate),
   });
   if (routing.outcome !== 'selected') {
@@ -218,6 +266,15 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     };
   }
   const adapter = configuredRoute.adapter;
+  const adjustmentRecorded = await client.rpc('record_work_routing_adjustment', {
+    p_work_item_id: selection.workItemId,
+    p_expected_proposal_version: selection.approvedProposalVersion,
+    p_attempt_id: attemptId,
+    p_adjustment: adjustment as unknown as Json,
+  });
+  if (adjustmentRecorded.error) {
+    return { ...started, outcome: 'routing_refused', refusal: refusalOf(adjustmentRecorded.error) };
+  }
   const routingRecorded = await client.rpc('record_work_routing_decision', {
     p_work_item_id: selection.workItemId,
     p_expected_proposal_version: selection.approvedProposalVersion,
@@ -227,7 +284,7 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   if (routingRecorded.error) {
     return { ...started, outcome: 'routing_refused', refusal: refusalOf(routingRecorded.error) };
   }
-  const routed = { ...started, routingDecision: routing.decision };
+  const routed = { ...started, routingDecision: routing.decision, routingAdjustment: adjustment };
   let carriedContext: WorkExecutorRequest['carriedContext'];
   let attempt;
   if (isResumption && persistedSource) {
