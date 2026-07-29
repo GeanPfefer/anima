@@ -24,3 +24,4 @@ export * from './work-intelligence-classification';
 export * from './work-intelligence-classification-events';
 export * from './autonomous-intelligence-eligibility';
 export * from './work-routing';
+export * from './work-routing-adjustment';
