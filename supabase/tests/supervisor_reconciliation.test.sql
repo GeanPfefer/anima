@@ -6,6 +6,7 @@
 -- recusa a fazer.
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+\ir helpers/routing.inc
 SELECT plan(65);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
@@ -79,6 +80,7 @@ CREATE TEMP TABLE i3 AS SELECT (public.create_work_proposal('89000000-0000-0000-
 SELECT public.resolve_approval((SELECT id FROM i3),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM i3),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i3),1,'89000000-0000-0000-0000-0000000000c3','supervisor-3',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM i3),'89000000-0000-0000-0000-0000000000e3','local-runner-v1');
 SELECT public.start_claimed_work_attempt('89000000-0000-0000-0000-0000000000c3','89000000-0000-0000-0000-0000000000e3','local-runner-v1');
 
 SELECT is((SELECT count(*) FROM public.reconcile_supervised_work()
@@ -123,6 +125,7 @@ CREATE TEMP TABLE i5 AS SELECT (public.create_work_proposal('89000000-0000-0000-
 SELECT public.resolve_approval((SELECT id FROM i5),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM i5),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i5),1,'89000000-0000-0000-0000-0000000000c5','supervisor-5',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM i5),'89000000-0000-0000-0000-0000000000e5','local-runner-v1');
 SELECT public.start_claimed_work_attempt('89000000-0000-0000-0000-0000000000c5','89000000-0000-0000-0000-0000000000e5','local-runner-v1');
 SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM i5)),'in_progress',
   'a tentativa supervisionada começou e travou o item');
@@ -161,6 +164,7 @@ CREATE TEMP TABLE i6 AS SELECT (public.create_work_proposal('89000000-0000-0000-
 SELECT public.resolve_approval((SELECT id FROM i6),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM i6),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i6),1,'89000000-0000-0000-0000-0000000000c6','supervisor-6',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM i6),'89000000-0000-0000-0000-0000000000e6','local-runner-v1');
 SELECT public.start_claimed_work_attempt('89000000-0000-0000-0000-0000000000c6','89000000-0000-0000-0000-0000000000e6','local-runner-v1');
 SET LOCAL ROLE service_role;
 UPDATE public.work_claims SET acquired_at=now()-interval '2 hours', expires_at=now()-interval '1 hour'
@@ -281,6 +285,7 @@ CREATE TEMP TABLE ia AS SELECT (public.create_work_proposal('89000000-0000-0000-
 SELECT public.resolve_approval((SELECT id FROM ia),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM ia),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM ia),1,'89000000-0000-0000-0000-0000000000ca','supervisor-a',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM ia),'89000000-0000-0000-0000-0000000000ea','local-runner-v1');
 SELECT public.start_claimed_work_attempt('89000000-0000-0000-0000-0000000000ca','89000000-0000-0000-0000-0000000000ea','local-runner-v1');
 SELECT public.record_commanded_work_terminal((SELECT id FROM ia),1,'89000000-0000-0000-0000-0000000000ea',
   jsonb_build_object('kind','result','workItemId',(SELECT id FROM ia),'attemptId','89000000-0000-0000-0000-0000000000ea',
@@ -339,8 +344,8 @@ SELECT is((SELECT count(*) FROM public.work_items WHERE user_id='89000000-0000-0
   'nenhum item é concluído pela reconciliação');
 SELECT is((SELECT count(*) FROM public.work_events e JOIN public.work_items i ON i.id=e.work_item_id
   WHERE i.user_id='89000000-0000-0000-0000-000000000000' AND e.author='system'
-    AND e.event_type NOT IN ('work_claimed','work_claim_released','attempt_abandoned')),0::bigint,
-  'o vocabulário que a reconciliação escreve é fechado: posse e abandono, nada mais');
+    AND e.event_type NOT IN ('work_routing_decided','work_claimed','work_claim_released','attempt_abandoned')),0::bigint,
+  'o vocabulário que a reconciliação escreve é fechado: roteamento, posse e abandono, nada mais');
 
 -- ============================================================
 -- (13) Sinal tardio de tentativa abandonada é recusado
@@ -402,6 +407,7 @@ SELECT throws_ok($$SELECT public.start_commanded_work_attempt((SELECT id FROM ib
 -- sozinha — foi preciso alguém pedir.
 SELECT is((public.acquire_work_claim((SELECT id FROM i5),1,'89000000-0000-0000-0000-0000000000d5','supervisor-5b',3600)).target_reference,
   't5','o alvo do item reconciliado está livre para uma posse nova');
+SELECT pg_temp.record_test_route((SELECT id FROM i5),'89000000-0000-0000-0000-0000000000f5','local-runner-v1');
 SELECT is((public.start_claimed_work_attempt('89000000-0000-0000-0000-0000000000d5','89000000-0000-0000-0000-0000000000f5','local-runner-v1')).state,
   'in_progress','a retomada acontece com claim novo e tentativa nova, nunca reaproveitando as anteriores');
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i5)

@@ -329,6 +329,16 @@ INTEL-01" no [Plano 002](002-modo-autonomo-v0.md).
 
 ### INTEL-02 — Seleção de provedor e esforço
 
+**Estado (2026-07-28): concluído e ratificado.** A política V1 aprovada mapeia
+os cinco eixos do INTEL-01 para `light`, `standard` ou `strong`, escolhe a
+menor rota disponível que satisfaça capacidade e esforço mínimo e usa urgência
+somente para desempatar equivalentes. A decisão append-only é consultável por
+tentativa e o banco recusa início sem rota ou com executor divergente. O
+catálogo permanece genérico; a configuração inicial declara somente o runner
+local real. INTEL-03 e INTEL-04 não foram antecipados. Evidências: 12 cenários
+puros, integração do Supervisor, 20 provas específicas e regressão de 522
+testes pgTAP, além de 609 testes Jest, `typecheck` e build de produção.
+
 - **Problema:** hoje a escolha de executor/modelo/esforço é humana e implícita; a visão exige que seja automática, explicável e alinhada ao princípio "leve para operar, médio para construir, forte para decidir, destravar e revisar".
 - **Resultado esperado:** política que mapeia classificação (INTEL-01) → executor/provedor/modelo/nível de esforço, registrando os fatores considerados (incl. recursos da máquina e limites conhecidos dos provedores).
 - **Dependências:** INTEL-01; histórico de AUTO-03. **Escopo:** política V0 por regras explícitas. **Fora do escopo:** otimização por custo de token como objetivo primário; aprendizado de política.

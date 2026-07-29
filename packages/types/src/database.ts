@@ -1340,6 +1340,15 @@ export type Database = {
         }
         Returns: Json
       }
+      record_work_routing_decision: {
+        Args: {
+          p_attempt_id: string
+          p_decision: Json
+          p_expected_proposal_version: number
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
       release_work_claim: {
         Args: { claim_id: string; reason: string }
         Returns: {
@@ -1657,6 +1666,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      work_routing_decision: { Args: { p_attempt_id: string }; Returns: Json }
     }
     Enums: {
       activity_bonus:
@@ -1705,6 +1715,7 @@ export type Database = {
         | "attempt_abandoned"
         | "checkpoint_recorded"
         | "work_intelligence_classified"
+        | "work_routing_decided"
       work_impact_level:
         | "low"
         | "significant"
@@ -2025,6 +2036,7 @@ export const Constants = {
         "attempt_abandoned",
         "checkpoint_recorded",
         "work_intelligence_classified",
+        "work_routing_decided",
       ],
       work_impact_level: [
         "low",

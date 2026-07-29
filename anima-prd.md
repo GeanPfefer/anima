@@ -367,8 +367,10 @@ A–E estão concluídas: elegibilidade, fila, seleção, claims exclusivos,
 tentativas persistentes, execução local, reconciliação, checkpoints reais,
 retomada e Supervisor V0 foram implementados e ratificados. A Fase F está em
 andamento: o INTEL-01 classifica o trabalho e impede execução autônoma sem
-classificação vigente e completa; seleção automática de executor, provedor,
-modelo e esforço pertence ao INTEL-02 e ainda não foi iniciada.
+classificação vigente e completa; o INTEL-02 seleciona e registra
+automaticamente executor, provedor, modelo e esforço por política explícita.
+Escalonamento/redução entre tentativas (INTEL-03) e orçamento/reserva de
+capacidade (INTEL-04) permanecem não iniciados.
 
 ## 1g. Jornadas de evolução
 

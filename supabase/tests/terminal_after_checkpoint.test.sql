@@ -7,6 +7,7 @@
 -- permanecem. Prefixo de UUID livre: 86000000.
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+\ir helpers/routing.inc
 SELECT plan(9);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
@@ -50,30 +51,35 @@ CREATE TEMP TABLE i1 AS SELECT (public.create_work_proposal('86000000-0000-0000-
 SELECT public.resolve_approval((SELECT id FROM i1),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM i1),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i1),1,'86000000-0000-0000-0000-0000000000c1','sup',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM i1),'86000000-0000-0000-0000-0000000000a1','local-runner-v1');
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c1','86000000-0000-0000-0000-0000000000a1','local-runner-v1');
 
 CREATE TEMP TABLE i2 AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000002','low','programming',:'g2'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i2),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM i2),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i2),1,'86000000-0000-0000-0000-0000000000c2','sup',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM i2),'86000000-0000-0000-0000-0000000000a2','local-runner-v1');
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c2','86000000-0000-0000-0000-0000000000a2','local-runner-v1');
 
 CREATE TEMP TABLE i3 AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000003','low','programming',:'g3'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i3),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM i3),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i3),1,'86000000-0000-0000-0000-0000000000c3','sup',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM i3),'86000000-0000-0000-0000-0000000000a3','local-runner-v1');
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c3','86000000-0000-0000-0000-0000000000a3','local-runner-v1');
 
 CREATE TEMP TABLE i4 AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000004','low','programming',:'g4'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i4),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM i4),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i4),1,'86000000-0000-0000-0000-0000000000c4','sup',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM i4),'86000000-0000-0000-0000-0000000000a4','local-runner-v1');
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c4','86000000-0000-0000-0000-0000000000a4','local-runner-v1');
 
 CREATE TEMP TABLE i6 AS SELECT (public.create_work_proposal('86000000-0000-0000-0000-000000000006','low','programming',:'g6'::jsonb,:'prop'::jsonb)).id;
 SELECT public.resolve_approval((SELECT id FROM i6),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM i6),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM i6),1,'86000000-0000-0000-0000-0000000000c6','sup',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM i6),'86000000-0000-0000-0000-0000000000a6','local-runner-v1');
 SELECT public.start_claimed_work_attempt('86000000-0000-0000-0000-0000000000c6','86000000-0000-0000-0000-0000000000a6','local-runner-v1');
 SET LOCAL ROLE service_role;
 UPDATE public.work_claims SET acquired_at=now()-interval '2 hours', expires_at=now()-interval '1 hour' WHERE id='86000000-0000-0000-0000-0000000000c6';

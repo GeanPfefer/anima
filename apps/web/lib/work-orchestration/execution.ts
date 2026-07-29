@@ -6,6 +6,7 @@ import {
   type WorkExecutorAdapter,
   type WorkExecutorRequest,
   type WorkExecutorSignal,
+  type WorkRoutingCandidateV1,
   type WorkItem,
 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
@@ -49,6 +50,41 @@ export const localRunnerFromEnvironment = (options: { readonly emitCheckpoints?:
     targets: { resolve: reference => targets[reference] ?? null },
     emitCheckpoints: options.emitCheckpoints ?? false,
   });
+};
+
+export interface ConfiguredWorkRoute {
+  readonly candidate: WorkRoutingCandidateV1;
+  readonly adapter: WorkExecutorAdapter;
+}
+
+/**
+ * Catálogo real inicial do INTEL-02. A política pura não conhece estes nomes:
+ * o nó local declara uma rota e suas capacidades, ou não oferece candidato.
+ */
+export const localRunnerRouteFromEnvironment = (
+  options: { readonly emitCheckpoints?: boolean } = {},
+): ConfiguredWorkRoute | null => {
+  const adapter = localRunnerFromEnvironment(options);
+  if (!adapter) return null;
+  const configuredEffort = process.env.ANIMA_LOCAL_RUNNER_EFFORT;
+  const effort = configuredEffort === 'light' || configuredEffort === 'strong'
+    ? configuredEffort
+    : 'standard';
+  return {
+    adapter,
+    candidate: {
+      schemaVersion: 1,
+      routeId: 'local-runner-v1:configured',
+      executorId: adapter.id,
+      providerRef: 'local-node',
+      modelRef: process.env.ANIMA_LOCAL_RUNNER_MODEL ?? 'runner-default',
+      effort,
+      capabilities: ['programming'],
+      availability: 'available',
+      latency: 'normal',
+      priority: 100,
+    },
+  };
 };
 
 export interface ExecutorRequestInput {

@@ -50,6 +50,7 @@ class FakeDatabase {
   readonly claims = new Map<string, FakeClaim>();
   readonly items = new Map<string, FakeItem>();
   private readonly terminals = new Map<string, string>();
+  private readonly routing = new Map<string, { executorId: string; serialized: string }>();
   // Maior sequência de checkpoint e sinal bruto por tentativa (para replay/conflito).
   private readonly checkpointSeq = new Map<string, number>();
   private readonly checkpointSignals = new Map<string, string>();
@@ -105,6 +106,43 @@ class FakeDatabase {
       case 'abandoned_work_resumption_source':
         return ok(this.options.resumptionSource ?? { kind: 'new_execution' });
 
+      case 'current_work_intelligence_classification': {
+        const item = this.items.get(args['p_work_item_id'] as string);
+        if (!item || item.classification !== 'complete') return ok(null);
+        return ok({
+          work_item_id: item.id,
+          approved_proposal_version: item.version,
+          classification_revision: 1,
+          classification: {
+            schemaVersion: 1,
+            complexity: 'routine',
+            risk: 'low',
+            reversibility: 'reversible',
+            planClarity: 'clear',
+            urgency: 'normal',
+            provenance: {
+              kind: 'human_confirmed',
+              classifiedAt: '2026-07-28T18:00:00-03:00',
+              classifierId: 'user:test',
+            },
+          },
+        });
+      }
+
+      case 'record_work_routing_decision': {
+        const attemptId = args['p_attempt_id'] as string;
+        const decision = args['p_decision'] as { selected: { executorId: string } };
+        const serialized = JSON.stringify(decision);
+        const previous = this.routing.get(attemptId);
+        if (previous) return previous.serialized === serialized
+          ? ok({ action: 'replayed', attempt_id: attemptId })
+          : fail('55000', 'work routing decision conflict');
+        this.routing.set(attemptId, { executorId: decision.selected.executorId, serialized });
+        const itemId = args['p_work_item_id'] as string;
+        this.events.push({ itemId, type: 'work_routing_decided', attemptId });
+        return ok({ action: 'recorded', attempt_id: attemptId });
+      }
+
       case 'begin_resumed_work_attempt': {
         const item = this.items.get(args['work_item_id'] as string)!;
         if (item.classification !== 'complete') {
@@ -116,6 +154,9 @@ class FakeDatabase {
           id: args['claim_id'] as string, itemId: item.id, target: item.target,
           attemptId: args['attempt_id'] as string, released: false, reason: null,
         };
+        const routing = this.routing.get(args['attempt_id'] as string);
+        if (!routing) return fail('55000', 'work routing decision missing');
+        if (routing.executorId !== args['executor_id']) return fail('55000', 'work routing executor mismatch');
         this.claims.set(claim.id, claim);
         item.state = 'in_progress';
         this.events.push({ itemId: item.id, type: 'execution_started', attemptId: claim.attemptId, reason: 'resumed_execution' });
@@ -144,6 +185,9 @@ class FakeDatabase {
         const claim = this.claims.get(args['claim_id'] as string);
         if (!claim) return fail('P0002', 'claim not found');
         const item = this.items.get(claim.itemId)!;
+        const routing = this.routing.get(args['attempt_id'] as string);
+        if (!routing) return fail('55000', 'work routing decision missing');
+        if (routing.executorId !== args['executor_id']) return fail('55000', 'work routing executor mismatch');
         if (item.classification !== 'complete') {
           return fail('55000', item.classification === 'incomplete'
             ? 'work_intelligence_classification_incomplete'
@@ -335,7 +379,16 @@ const ids = (values: readonly string[]) => { let index = 0; return () => values[
 
 const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: readonly WorkItem[], identifiers: readonly string[], contexts?: readonly WorkContextSnapshot[]) =>
   runSupervisorTurn({
-    client: database.asClient(), adapter, ownerInstanceId: 'supervisor-test',
+    client: database.asClient(),
+    routes: [{
+      adapter,
+      candidate: {
+        schemaVersion: 1, routeId: 'test-route', executorId: adapter.id,
+        providerRef: 'test-provider', modelRef: 'test-model', effort: 'standard',
+        capabilities: ['programming'], availability: 'available', latency: 'normal', priority: 1,
+      },
+    }],
+    ownerInstanceId: 'supervisor-test',
     newId: ids(identifiers), signal: new AbortController().signal, reader: reader(items, contexts),
   });
 
@@ -431,7 +484,8 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
 
   // Ordem canônica das fronteiras, e nunca o início comandado.
   expect(database.calls).toEqual([
-    'reconcile_supervised_work', 'next_autonomous_work', 'abandoned_work_resumption_source', 'acquire_work_claim',
+    'reconcile_supervised_work', 'next_autonomous_work', 'abandoned_work_resumption_source',
+    'current_work_intelligence_classification', 'record_work_routing_decision', 'acquire_work_claim',
     'start_claimed_work_attempt', 'record_commanded_work_terminal', 'release_work_claim',
   ]);
   expect(database.calls).not.toContain('start_commanded_work_attempt');
@@ -441,7 +495,9 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
   expect(calls[0]).toMatchObject({ workItemId: 'item-antigo', attemptId: 'attempt-1', includedScope: ['calculator.py'], target: { reference: 'alvo-a' } });
 
   // Liberação depois do terminal, com a razão que o contrato exige.
-  expect(database.events.map(event => event.type)).toEqual(['work_claimed', 'execution_started', 'result_submitted', 'work_claim_released']);
+  expect(database.events.map(event => event.type)).toEqual([
+    'work_routing_decided', 'work_claimed', 'execution_started', 'result_submitted', 'work_claim_released',
+  ]);
   expect(database.events.at(-1)).toMatchObject({ reason: 'attempt_finished' });
   expect(database.items.get('item-antigo')!.state).toBe('review');
 });

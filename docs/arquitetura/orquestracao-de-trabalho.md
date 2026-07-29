@@ -537,6 +537,37 @@ Naquele marco ainda ficavam fora a retomada real (entregue na Etapa 2B.2 abaixo)
 
 O executor recebe `carriedContext` informativo com restante, próximo passo, riscos, recursos tocados e falhas anteriores, marcando explicitamente nova tentativa e continuação do checkpoint. Esse contexto não amplia permissões. O máximo da volta continua sendo `review`; aceite e integração não são derivados.
 
+## Roteamento de inteligência por tentativa (INTEL-02)
+
+O Supervisor não recebe mais um executor implícito. Ele recebe um catálogo de
+rotas que separa o adaptador executável de sua descrição genérica:
+`route_id`, `executor_id`, referências opacas de provedor e modelo, esforço,
+capacidades, disponibilidade, latência e prioridade. A política pura
+`work-routing-v1` consome a classificação vigente do INTEL-01 e escolhe a rota
+disponível de menor esforço suficiente.
+
+Os níveis são ordenados `light < standard < strong`. `light` exige,
+simultaneamente, complexidade rotineira, risco baixo, reversibilidade e plano
+claro. Qualquer complexidade alta, risco alto/crítico, irreversibilidade ou
+plano incerto exige `strong`; o restante exige `standard`. Urgência pode
+desempatar candidatos já equivalentes por latência, mas nunca reduz o esforço
+mínimo. Ausência de rota compatível é uma parada tipada, sem fallback para uma
+rota insuficiente.
+
+Antes de adquirir posse, `record_work_routing_decision` grava
+`work_routing_decided` no log append-only, correlacionando classificação
+vigente, versão aprovada e `attempt_id`. O payload registra fatores, rota
+selecionada e rejeições. `work_routing_decision` oferece a projeção consultável
+e uma guarda `BEFORE INSERT` recusa `execution_started` autônomo sem esse fato
+ou com `executor_id` divergente. A decisão pode ser o único evento anterior de
+uma tentativa retomada; todos os demais usos prévios do identificador
+continuam recusados.
+
+O catálogo inicial contém somente a rota local realmente configurada. A
+política não codifica fornecedor específico. Histórico de falhas,
+escalonamento/redução e orçamento pertencem respectivamente ao INTEL-03 e ao
+INTEL-04.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

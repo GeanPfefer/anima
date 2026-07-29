@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { localRunnerFromEnvironment } from '@/lib/work-orchestration/execution';
+import { localRunnerRouteFromEnvironment } from '@/lib/work-orchestration/execution';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
 
 export const runtime = 'nodejs';
@@ -17,13 +17,13 @@ export async function POST(request: Request) {
 
   // O laço supervisionado liga os checkpoints mid-flight (AUTO-05); o caminho
   // comandado (INT-04) não, mantendo-se single-shot.
-  const adapter = localRunnerFromEnvironment({ emitCheckpoints: true });
-  if (!adapter) {
+  const route = localRunnerRouteFromEnvironment({ emitCheckpoints: true });
+  if (!route) {
     return Response.json({ ok: false, error: { code: 'local_runner_not_configured', message: 'Executor local não configurado.' } }, { status: 503 });
   }
 
   const result = await runSupervisorTurn({
-    client, adapter,
+    client, routes: [route],
     ownerInstanceId: process.env.ANIMA_SUPERVISOR_INSTANCE_ID ?? 'supervisor-v0',
     newId: () => crypto.randomUUID(),
     signal: request.signal,

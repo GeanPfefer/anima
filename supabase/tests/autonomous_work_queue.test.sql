@@ -1,6 +1,7 @@
 -- SUP-01 — a fila é projeção da fonte de verdade, não estado paralelo.
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+\ir helpers/routing.inc
 SELECT plan(28);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
@@ -95,6 +96,7 @@ SELECT is((SELECT count(*) FROM public.autonomous_work_queue() WHERE work_item_i
 
 -- ---------- o item sai da fila sozinho ao deixar de ser elegível ----------
 SELECT public.acquire_work_claim((SELECT id FROM i1),1,'93000000-0000-0000-0000-0000000000a2','supervisor-1',300);
+SELECT pg_temp.record_test_route((SELECT id FROM i1),'93000000-0000-0000-0000-0000000000c1','local-runner-v1');
 SELECT public.start_claimed_work_attempt('93000000-0000-0000-0000-0000000000a2','93000000-0000-0000-0000-0000000000c1','local-runner-v1');
 SELECT is((SELECT count(*) FROM public.autonomous_work_queue() WHERE work_item_id=(SELECT id FROM i1)),0::bigint,
   'item em execução sai da fila sem intervenção');

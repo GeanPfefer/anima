@@ -19,7 +19,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | C | **Concluída (2026-07-20)** | INT-01–03 implementados e ratificados conforme seus checkpoints |
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
-| F | **Em andamento (2026-07-28)** | INTEL-01 implementado e ratificado; INTEL-02 a INTEL-04 não iniciados |
+| F | **Em andamento (2026-07-28)** | INTEL-01 e INTEL-02 implementados e ratificados; INTEL-03 e INTEL-04 não iniciados |
 | G | Não iniciada | — |
 
 ## Fase A — Fechar a orquestração atual
@@ -612,9 +612,48 @@ integração ignorados, e no build de produção do `apps/web`. A suíte pgTAP n
 foi reexecutada neste checkpoint; permanecem como evidência as provas SQL
 registradas na entrega.
 
-**Conclusão formal:** o INTEL-01 está encerrado por ratificação humana. A Fase F
-passa a estar em andamento. O INTEL-02 continua não iniciado e exigirá
-checkpoint humano próprio para aprovar a política inicial de roteamento.
+**Conclusão formal naquele checkpoint:** o INTEL-01 foi encerrado por
+ratificação humana e a Fase F passou a estar em andamento. O INTEL-02 ainda
+não havia sido iniciado e exigiria checkpoint humano próprio para aprovar a
+política inicial de roteamento.
+
+### Ratificação do INTEL-02 (2026-07-28) — roteamento por política explícita
+
+O usuário aprovou a política inicial depois de receber suas regras e limites,
+respondendo “marcha”. A política V1 usa os níveis abstratos `light`,
+`standard` e `strong`: somente trabalho rotineiro, de baixo risco, reversível
+e com plano claro pode usar `light`; complexidade alta, risco alto/crítico,
+irreversibilidade ou plano incerto exigem `strong`; os demais casos usam
+`standard`. Urgência só desempata rotas equivalentes e nunca reduz a margem de
+segurança. A política escolhe a rota disponível de menor esforço que satisfaça
+a capacidade e o mínimo exigido; ausência de rota suficiente interrompe de
+forma tipada, sem redução silenciosa.
+
+O catálogo é genérico por capacidades e identificadores opacos, sem nomes de
+fornecedores fixados na regra. A primeira configuração contém apenas o runner
+local real; integrações externas fictícias não foram criadas. INTEL-03
+(escalonamento/redução após histórico de tentativas) e INTEL-04
+(orçamento/reserva) permanecem fora deste incremento.
+
+Cada decisão é gravada antes do início como evento append-only
+`work_routing_decided`, ligado ao item, à versão aprovada, à classificação
+vigente e ao `attempt_id`. O fato contém política, esforço exigido, rota
+selecionada, fatores e candidatos rejeitados; a RPC
+`work_routing_decision` o torna consultável por tentativa. Uma guarda no banco
+impede o início autônomo sem decisão correspondente ou com executor diferente
+do selecionado. A retomada permite esse único fato anterior ao início, sem
+afrouxar a recusa de reutilização de identificadores.
+
+**Evidência técnica:** 12 cenários puros reproduzem a política; a integração do
+Supervisor comprova seleção, persistência anterior à posse e uso do adaptador
+escolhido; 20 provas pgTAP cobrem validação, consulta, idempotência,
+concorrência e enforcement. A regressão completa passou em 19 arquivos e 522
+testes SQL, 609 testes Jest (com 2 integrações ignoradas), `typecheck` dos cinco
+workspaces e build de produção do web.
+
+**Conclusão formal:** o checkpoint humano da política inicial e os critérios de
+aceite do INTEL-02 estão satisfeitos. O INTEL-02 está encerrado; a próxima
+dependência da Fase F é o INTEL-03.
 
 **Critérios de aceite:** toda seleção de executor/modelo/esforço é registrada com os fatores considerados; escalonamento acontece por regra explícita após falhas; existe reserva de capacidade que impede o modo autônomo de esgotar o provedor do usuário.
 

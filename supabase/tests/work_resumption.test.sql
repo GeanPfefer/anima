@@ -1,5 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+\ir helpers/routing.inc
 SELECT plan(14);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
@@ -21,6 +22,7 @@ CREATE TEMP TABLE item AS SELECT (public.create_work_proposal(
 SELECT public.resolve_approval((SELECT id FROM item),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM item),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM item),1,'87000000-0000-0000-0000-0000000000c1','sup-a',60);
+SELECT pg_temp.record_test_route((SELECT id FROM item),'87000000-0000-0000-0000-0000000000a1','fake');
 SELECT public.start_claimed_work_attempt('87000000-0000-0000-0000-0000000000c1','87000000-0000-0000-0000-0000000000a1','fake');
 SELECT public.record_work_checkpoint((SELECT id FROM item),1,'87000000-0000-0000-0000-0000000000a1',
  jsonb_build_object('kind','checkpoint','workItemId',(SELECT id FROM item),'attemptId','87000000-0000-0000-0000-0000000000a1',
@@ -40,6 +42,7 @@ SELECT is(value->>'kind','abandoned_checkpoint','reconstrói fonte abandonada') 
 SELECT is((value#>>'{checkpoint,checkpoint_signal_sequence}')::int,2,'seleciona maior sequência') FROM src;
 SELECT is(value->>'source_attempt_id','87000000-0000-0000-0000-0000000000a1','correlaciona tentativa origem') FROM src;
 
+SELECT pg_temp.record_test_route((SELECT id FROM item),'87000000-0000-0000-0000-0000000000a2','fake');
 SELECT lives_ok(format($q$SELECT public.begin_resumed_work_attempt(%L,1,
  '87000000-0000-0000-0000-0000000000a1',%s,%s,
  '87000000-0000-0000-0000-0000000000c2','87000000-0000-0000-0000-0000000000a2','sup-b',300,'fake')$q$,

@@ -1,6 +1,7 @@
 -- AUTO-02 — claim exclusivo e expiração provados na fonte de verdade.
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+\ir helpers/routing.inc
 SELECT plan(31);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
@@ -67,6 +68,7 @@ SELECT throws_ok($$SELECT public.acquire_work_claim((SELECT id FROM item),1,'910
   '22023','invalid claim request','validade não positiva falha fechado');
 
 -- ---------- uma tentativa por claim ----------
+SELECT pg_temp.record_test_route((SELECT id FROM item),'91000000-0000-0000-0000-0000000000c1','local-runner-v1');
 SELECT is((public.start_claimed_work_attempt('91000000-0000-0000-0000-0000000000a1','91000000-0000-0000-0000-0000000000c1','local-runner-v1')).state,
   'in_progress','a tentativa só começa em passo separado do claim');
 SELECT is((SELECT attempt_id FROM public.work_claims WHERE id='91000000-0000-0000-0000-0000000000a1'),

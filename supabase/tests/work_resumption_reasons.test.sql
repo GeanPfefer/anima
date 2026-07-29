@@ -12,6 +12,7 @@
 -- `declared_bounds_exceeded` (posse e duração vencidas juntas).
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+\ir helpers/routing.inc
 SELECT plan(18);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
@@ -44,6 +45,7 @@ CREATE TEMP TABLE lease_item AS SELECT (public.create_work_proposal('86000000-00
 SELECT public.resolve_approval((SELECT id FROM lease_item),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM lease_item),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM lease_item),1,'86000000-0000-4000-8000-0000000000c1','sup-lease',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM lease_item),'86000000-0000-4000-8000-0000000000a1','fake');
 SELECT public.start_claimed_work_attempt('86000000-0000-4000-8000-0000000000c1','86000000-0000-4000-8000-0000000000a1','fake');
 SELECT public.record_work_checkpoint((SELECT id FROM lease_item),1,'86000000-0000-4000-8000-0000000000a1',
   jsonb_build_object('kind','checkpoint','workItemId',(SELECT id FROM lease_item),'attemptId','86000000-0000-4000-8000-0000000000a1',
@@ -68,6 +70,7 @@ SELECT ok((SELECT (value->>'abandonment_reason')='lease_expired'
   AND NOT (value ? 'scenario')
   AND value::text NOT LIKE '%time_limit_reached%' AND value::text NOT LIKE '%timed_out%' AND value::text NOT LIKE '%"paused"%'
   FROM lease_src),'lease_expired preservado literal: sem InterruptionScenario, status ou stopReason inventados');
+SELECT pg_temp.record_test_route((SELECT id FROM lease_item),'86000000-0000-4000-8000-0000000000b1','fake');
 SELECT lives_ok(format($q$SELECT public.begin_resumed_work_attempt(%L,1,
   '86000000-0000-4000-8000-0000000000a1',%s,%s,
   '86000000-0000-4000-8000-0000000000d1','86000000-0000-4000-8000-0000000000b1','sup-lease-b',300,'fake')$q$,
@@ -112,6 +115,7 @@ SELECT ok((SELECT (value->>'abandonment_reason')='duration_limit_exceeded'
   AND NOT (value ? 'scenario')
   AND value::text NOT LIKE '%time_limit_reached%' AND value::text NOT LIKE '%timed_out%' AND value::text NOT LIKE '%"paused"%'
   FROM dur_src),'duration_limit_exceeded preservado literal: sem InterruptionScenario, status ou stopReason inventados');
+SELECT pg_temp.record_test_route((SELECT id FROM dur_item),'86000000-0000-4000-8000-0000000000b2','fake');
 SELECT lives_ok(format($q$SELECT public.begin_resumed_work_attempt(%L,1,
   '86000000-0000-4000-8000-0000000000a2',%s,%s,
   '86000000-0000-4000-8000-0000000000d2','86000000-0000-4000-8000-0000000000b2','sup-dur-b',300,'fake')$q$,
@@ -129,6 +133,7 @@ CREATE TEMP TABLE both_item AS SELECT (public.create_work_proposal('86000000-000
 SELECT public.resolve_approval((SELECT id FROM both_item),1,'approve','{}');
 SELECT public.record_work_intelligence_classification((SELECT id FROM both_item),1,0,:'intel'::jsonb);
 SELECT public.acquire_work_claim((SELECT id FROM both_item),1,'86000000-0000-4000-8000-0000000000c3','sup-both',3600);
+SELECT pg_temp.record_test_route((SELECT id FROM both_item),'86000000-0000-4000-8000-0000000000a3','fake');
 SELECT public.start_claimed_work_attempt('86000000-0000-4000-8000-0000000000c3','86000000-0000-4000-8000-0000000000a3','fake');
 SELECT public.record_work_checkpoint((SELECT id FROM both_item),1,'86000000-0000-4000-8000-0000000000a3',
   jsonb_build_object('kind','checkpoint','workItemId',(SELECT id FROM both_item),'attemptId','86000000-0000-4000-8000-0000000000a3',
@@ -157,6 +162,7 @@ SELECT ok((SELECT (value->>'abandonment_reason')='declared_bounds_exceeded'
   AND NOT (value ? 'scenario')
   AND value::text NOT LIKE '%time_limit_reached%' AND value::text NOT LIKE '%timed_out%' AND value::text NOT LIKE '%"paused"%'
   FROM both_src),'declared_bounds_exceeded preservado literal: sem InterruptionScenario, status ou stopReason inventados');
+SELECT pg_temp.record_test_route((SELECT id FROM both_item),'86000000-0000-4000-8000-0000000000b3','fake');
 SELECT lives_ok(format($q$SELECT public.begin_resumed_work_attempt(%L,1,
   '86000000-0000-4000-8000-0000000000a3',%s,%s,
   '86000000-0000-4000-8000-0000000000d3','86000000-0000-4000-8000-0000000000b3','sup-both-b',300,'fake')$q$,

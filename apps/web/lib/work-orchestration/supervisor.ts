@@ -1,10 +1,15 @@
 import {
   evaluateAutonomousEligibility,
   planWorkResumption,
+  selectWorkRoute,
+  validateWorkIntelligenceClassification,
   type AbandonedCheckpointV1,
   type AutonomousEligibilityGap,
+  type WorkIntelligenceClassificationV1,
   type WorkExecutorAdapter,
   type WorkExecutorRequest,
+  type WorkRoutingCandidateV1,
+  type WorkRoutingDecisionV1,
 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -29,6 +34,8 @@ export type SupervisorTurnOutcome =
   | 'no_eligible_work'
   // A cabeça da fila existe mas não pôde virar entrada de executor.
   | 'selection_not_executable'
+  | 'routing_unavailable'
+  | 'routing_refused'
   // Posse recusada pelo banco — tipicamente a corrida perdida.
   | 'claim_refused'
   // Posse obtida, início recusado (exclusividade de alvo, versão mudou…).
@@ -69,6 +76,7 @@ export interface SupervisorTurnResult {
   readonly claimId: string | null;
   readonly attemptId: string | null;
   readonly terminalKind: 'result' | 'error' | 'cancelled' | null;
+  readonly routingDecision: WorkRoutingDecisionV1 | null;
   readonly claimReleased: boolean;
   /** Efeito persistido que esta volta não conseguiu fechar sozinha. */
   readonly requiresAnotherTurn: boolean;
@@ -81,7 +89,10 @@ export type SupervisorReader = Pick<ReturnType<typeof createWorkOrchestrationSer
 
 export interface SupervisorTurnDependencies {
   readonly client: SupabaseClient<Database>;
-  readonly adapter: WorkExecutorAdapter;
+  readonly routes: readonly {
+    readonly candidate: WorkRoutingCandidateV1;
+    readonly adapter: WorkExecutorAdapter;
+  }[];
   readonly ownerInstanceId: string;
   readonly newId: () => string;
   readonly signal: AbortSignal;
@@ -90,7 +101,7 @@ export interface SupervisorTurnDependencies {
 
 const base = (reconciliation: readonly ReconciliationFinding[]): SupervisorTurnResult => ({
   outcome: 'no_eligible_work', reconciliation, selection: null, claimId: null, attemptId: null,
-  terminalKind: null, claimReleased: false, requiresAnotherTurn: false, refusal: null, gaps: [],
+  terminalKind: null, routingDecision: null, claimReleased: false, requiresAnotherTurn: false, refusal: null, gaps: [],
 });
 
 const refusalOf = (error: { code?: string; message: string }): { code: string; message: string } =>
@@ -109,7 +120,7 @@ const object = (value: unknown): Record<string, unknown> | null =>
  * desta função é um item em `review` aguardando decisão humana (INT-03).
  */
 export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies): Promise<SupervisorTurnResult> {
-  const { client, adapter, ownerInstanceId, newId, signal } = dependencies;
+  const { client, routes, ownerInstanceId, newId, signal } = dependencies;
   const service = dependencies.reader ?? createWorkOrchestrationService(client);
 
   // ---------- (1) Reconciliação, sempre antes da seleção ----------
@@ -172,6 +183,51 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   const claimId = newId();
   const leaseSeconds = (eligibility.spec.limits.maxDurationMinutes ?? 30) * 60 + 300;
   const attemptId = newId();
+  const classificationRead = await client.rpc('current_work_intelligence_classification', {
+    p_work_item_id: selection.workItemId,
+  });
+  if (classificationRead.error) {
+    return { ...started, outcome: 'routing_refused', refusal: refusalOf(classificationRead.error) };
+  }
+  const classificationData = object(classificationRead.data);
+  const classification = classificationData?.classification;
+  if (validateWorkIntelligenceClassification(classification) !== null) {
+    return {
+      ...started, outcome: 'routing_unavailable',
+      refusal: { code: 'routing_classification_invalid', message: 'A classificação corrente não pôde ser reconstruída.' },
+    };
+  }
+  const routing = selectWorkRoute({
+    capability: item.value.capability,
+    classification: classification as unknown as WorkIntelligenceClassificationV1,
+    candidates: routes.map(route => route.candidate),
+  });
+  if (routing.outcome !== 'selected') {
+    return {
+      ...started, outcome: 'routing_unavailable',
+      refusal: { code: routing.reason, message: routing.explanation },
+    };
+  }
+  const configuredRoute = routes.find(route =>
+    route.candidate.routeId === routing.decision.selected.routeId
+    && route.adapter.id === routing.decision.selected.executorId);
+  if (!configuredRoute) {
+    return {
+      ...started, outcome: 'routing_unavailable',
+      refusal: { code: 'routing_adapter_missing', message: 'A rota selecionada não possui adaptador correspondente.' },
+    };
+  }
+  const adapter = configuredRoute.adapter;
+  const routingRecorded = await client.rpc('record_work_routing_decision', {
+    p_work_item_id: selection.workItemId,
+    p_expected_proposal_version: selection.approvedProposalVersion,
+    p_attempt_id: attemptId,
+    p_decision: routing.decision as unknown as Json,
+  });
+  if (routingRecorded.error) {
+    return { ...started, outcome: 'routing_refused', refusal: refusalOf(routingRecorded.error) };
+  }
+  const routed = { ...started, routingDecision: routing.decision };
   let carriedContext: WorkExecutorRequest['carriedContext'];
   let attempt;
   if (isResumption && persistedSource) {
@@ -207,7 +263,7 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     });
     if (decision.outcome !== 'resume') {
       return {
-        ...started, outcome: decision.outcome === 'requires_human' ? 'resumption_requires_human' : 'attempt_start_refused',
+        ...routed, outcome: decision.outcome === 'requires_human' ? 'resumption_requires_human' : 'attempt_start_refused',
         refusal: { code: decision.reason, message: decision.explanation },
       };
     }
@@ -224,7 +280,7 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
       work_item_id: selection.workItemId, expected_proposal_version: selection.approvedProposalVersion,
       claim_id: claimId, owner_instance_id: ownerInstanceId, lease_seconds: leaseSeconds,
     });
-    if (claim.error) return { ...started, outcome: 'claim_refused', refusal: refusalOf(claim.error) };
+    if (claim.error) return { ...routed, outcome: 'claim_refused', refusal: refusalOf(claim.error) };
     attempt = await client.rpc('start_claimed_work_attempt', {
       claim_id: claimId, attempt_id: attemptId, executor_id: adapter.id,
     });
@@ -234,11 +290,11 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     // contrato exige para esse caso, e o alvo volta a ficar livre.
     const released = await client.rpc('release_work_claim', { claim_id: claimId, reason: 'released_without_attempt' });
     return {
-      ...started, outcome: 'attempt_start_refused', claimId, claimReleased: !released.error,
+      ...routed, outcome: 'attempt_start_refused', claimId, claimReleased: !released.error,
       refusal: refusalOf(attempt.error),
     };
   }
-  const running = { ...started, claimId, attemptId };
+  const running = { ...routed, claimId, attemptId };
 
   // ---------- (6) Execução real, com persistência de checkpoint em stream ----------
   const request = buildExecutorRequest({

@@ -2,6 +2,7 @@
 -- autônoma, inicia sobre alvo ocupado. As duas direções são provadas aqui.
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
+\ir helpers/routing.inc
 SELECT plan(25);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
@@ -114,6 +115,7 @@ SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM a4
   'o item comandado recusado permanece aprovado, disponível para quando o alvo vagar');
 
 -- ---------- (6) simetria: o dono do claim inicia sem bloquear a si mesmo ----------
+SELECT pg_temp.record_test_route((SELECT id FROM a3),'98000000-0000-0000-0000-0000000000e7','local-runner-v1');
 SELECT is((public.start_claimed_work_attempt('98000000-0000-0000-0000-0000000000c1','98000000-0000-0000-0000-0000000000e7','local-runner-v1')).state,
   'in_progress','o próprio dono do claim inicia: a posse não bloqueia a si mesma');
 SELECT is((SELECT payload->'data'->>'claim_id' FROM public.work_events
