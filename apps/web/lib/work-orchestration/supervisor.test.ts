@@ -45,6 +45,8 @@ interface FakeOptions {
   readonly routingAdjustmentContext?: WorkRoutingAdjustmentContextV1;
   readonly budgetReason?: string;
   readonly interruptBudgetAfterCheckpoint?: string;
+  /** UX-01: modela um pedido de pausa/cancelamento pendente aplicável no checkpoint. */
+  readonly controlAfterCheckpoint?: 'pause' | 'cancel';
 }
 
 class FakeDatabase {
@@ -300,6 +302,32 @@ class FakeDatabase {
         this.checkpointSignals.set(key, serialized);
         this.events.push({ itemId: item.id, type: 'checkpoint_recorded', attemptId });
         return ok({ action: 'recorded', checkpoint_sequence: signal.sequence });
+      }
+
+      case 'apply_work_control_at_checkpoint': {
+        // Sem pedido pendente: no-op idempotente, o laço segue consumindo.
+        if (!this.options.controlAfterCheckpoint) return ok({ applied: false });
+        const attemptId = args['p_attempt_id'] as string;
+        const item = this.items.get(args['p_work_item_id'] as string)!;
+        // Fato exigido pela RPC real: um checkpoint da tentativa já persistido.
+        if (!this.events.some(event => event.type === 'checkpoint_recorded' && event.attemptId === attemptId)) {
+          return ok({ applied: false });
+        }
+        const action = this.options.controlAfterCheckpoint;
+        const claim = this.activeClaimOfItem(item.id);
+        item.state = action === 'pause' ? 'blocked' : 'cancelled';
+        if (claim) {
+          claim.released = true;
+          claim.reason = 'attempt_finished';
+          this.events.push({ itemId: item.id, type: 'work_claim_released', attemptId, reason: 'attempt_finished' });
+        }
+        this.events.push({
+          itemId: item.id,
+          type: action === 'pause' ? 'work_paused' : 'work_cancelled',
+          attemptId,
+          reason: action === 'pause' ? 'paused_by_user' : 'cancelled_by_user',
+        });
+        return ok({ applied: true, action, claimReleased: claim !== undefined });
       }
 
       case 'interrupt_work_on_budget': {
@@ -990,5 +1018,59 @@ describe('INTEL-04 — orçamento no laço do Supervisor', () => {
     expect(database.events.map(event => event.type)).toContain('work_blocked');
     expect(database.events.map(event => event.type)).not.toContain('result_submitted');
     expect(database.calls).not.toContain('record_commanded_work_terminal');
+  });
+});
+
+describe('UX-01 — controle cooperativo no laço', () => {
+  const items = () => [workItem('item-1', { target: 'alvo-1' })];
+  const db = (extra: Partial<FakeOptions> = {}) =>
+    new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }], ...extra });
+
+  test('pausa pendente é aplicada no checkpoint: item blocked, posse liberada, terminal não consumido', async () => {
+    const database = db({ controlAfterCheckpoint: 'pause' });
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'result' }]);
+    const result = await turn(database, adapter, items(), ['claim-1', 'attempt-1']);
+
+    expect(result.outcome).toBe('control_applied');
+    expect(result.requiresAnotherTurn).toBe(false);
+    expect(result.claimReleased).toBe(true);
+    expect(result.refusal?.code).toBe('pause');
+    // Aplicado DEPOIS do checkpoint e ANTES do gate de orçamento; sem terminal.
+    const cp = database.calls.indexOf('record_work_checkpoint');
+    const apply = database.calls.indexOf('apply_work_control_at_checkpoint');
+    expect(cp).toBeGreaterThanOrEqual(0);
+    expect(apply).toBeGreaterThan(cp);
+    expect(database.calls.indexOf('interrupt_work_on_budget')).toBe(-1);
+    expect(database.calls).not.toContain('record_commanded_work_terminal');
+    expect(database.items.get('item-1')!.state).toBe('blocked');
+    expect(database.events.map(event => event.type)).toContain('checkpoint_recorded');
+    expect(database.events.map(event => event.type)).toContain('work_paused');
+    expect(database.events.map(event => event.type)).toContain('work_claim_released');
+    expect(database.events.map(event => event.type)).not.toContain('result_submitted');
+  });
+
+  test('cancelamento pendente é aplicado no checkpoint: item cancelled, sem resultado', async () => {
+    const database = db({ controlAfterCheckpoint: 'cancel' });
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'result' }]);
+    const result = await turn(database, adapter, items(), ['claim-1', 'attempt-1']);
+
+    expect(result.outcome).toBe('control_applied');
+    expect(result.refusal?.code).toBe('cancel');
+    expect(database.items.get('item-1')!.state).toBe('cancelled');
+    expect(database.events.map(event => event.type)).toContain('work_cancelled');
+    expect(database.events.map(event => event.type)).not.toContain('result_submitted');
+    expect(database.calls).not.toContain('record_commanded_work_terminal');
+  });
+
+  test('sem pedido pendente, o checkpoint não interrompe: a volta chega a review', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'result' }]);
+    const result = await turn(database, adapter, items(), ['claim-1', 'attempt-1']);
+
+    expect(result.outcome).toBe('execution_completed');
+    // A RPC de controle é consultada, mas devolve applied:false e o laço segue.
+    expect(database.calls).toContain('apply_work_control_at_checkpoint');
+    expect(database.items.get('item-1')!.state).toBe('review');
+    expect(database.events.map(event => event.type)).toContain('result_submitted');
   });
 });

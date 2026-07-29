@@ -124,7 +124,8 @@ export type ExecutorRun =
   | {
       readonly ok: false;
       readonly defect: string;
-      readonly cause: 'transcript' | 'checkpoint' | 'budget';
+      // 'control' = pausa/cancelamento cooperativo aplicado num checkpoint (UX-01).
+      readonly cause: 'transcript' | 'checkpoint' | 'budget' | 'control';
       readonly reason?: string;
       readonly claimReleased?: boolean;
     };
@@ -140,7 +141,7 @@ export interface CheckpointSink {
     | {
         readonly ok: false;
         readonly message: string;
-        readonly cause?: 'checkpoint' | 'budget';
+        readonly cause?: 'checkpoint' | 'budget' | 'control';
         readonly reason?: string;
         readonly claimReleased?: boolean;
       }

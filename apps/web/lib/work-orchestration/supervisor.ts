@@ -41,6 +41,8 @@ export type SupervisorTurnOutcome =
   | 'routing_unavailable'
   | 'routing_refused'
   | 'budget_interrupted'
+  // Pausa/cancelamento cooperativo do usuário aplicado num checkpoint (UX-01).
+  | 'control_applied'
   // Posse recusada pelo banco — tipicamente a corrida perdida.
   | 'claim_refused'
   // Posse obtida, início recusado (exclusividade de alvo, versão mudou…).
@@ -405,6 +407,27 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
         signal: checkpoint as unknown as Json,
       });
       if (persisted.error) return { ok: false, message: persisted.error.message };
+      // UX-01: com um checkpoint seguro persistido, aplica cooperativamente um
+      // pedido de pausa/cancelamento pendente. A decisão explícita do usuário é
+      // primária, por isso vem ANTES do gate de orçamento. Aplicada, a RPC já
+      // liberou a posse e o terminal do executor NÃO será consumido — nada é
+      // morto no meio de uma edição.
+      const controlled = await client.rpc('apply_work_control_at_checkpoint', {
+        p_work_item_id: selection.workItemId,
+        p_expected_proposal_version: selection.approvedProposalVersion,
+        p_attempt_id: attemptId,
+      });
+      if (controlled.error) return { ok: false, message: controlled.error.message };
+      const control = object(controlled.data);
+      if (control?.applied === true) {
+        return {
+          ok: false,
+          cause: 'control',
+          reason: typeof control.action === 'string' ? control.action : 'control_applied',
+          message: 'A execução autônoma foi pausada ou cancelada pelo usuário no checkpoint seguro.',
+          claimReleased: control.claimReleased === true,
+        };
+      }
       const checked = await client.rpc('interrupt_work_on_budget', {
         p_work_item_id: selection.workItemId,
         p_expected_proposal_version: selection.approvedProposalVersion,
@@ -447,6 +470,17 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
         claimReleased: run.claimReleased === true,
         requiresAnotherTurn: false,
         refusal: { code: run.reason ?? 'work_budget_exhausted', message: run.defect },
+      };
+    }
+    if (run.cause === 'control') {
+      // Pausa/cancelamento aplicado no checkpoint: a posse já foi liberada pela
+      // RPC e o item já está em `blocked`/`cancelled`. Nenhum terminal é gravado.
+      return {
+        ...running,
+        outcome: 'control_applied',
+        claimReleased: run.claimReleased === true,
+        requiresAnotherTurn: false,
+        refusal: { code: run.reason ?? 'control_applied', message: run.defect },
       };
     }
     const code = run.cause === 'checkpoint' ? 'checkpoint_persist_failed' : 'executor_contract_violation';
