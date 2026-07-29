@@ -8,6 +8,7 @@ import {
   type WorkExecutorSignal,
   type WorkRoutingCandidateV1,
   type WorkItem,
+  type CreateWorkProposalCommand,
 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -20,6 +21,35 @@ import { LocalRunnerAdapter } from './local-runner';
 
 const object = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+export const UX02_DETERMINISTIC_PROOF_PHRASE =
+  'Anima, prepare a prova determinística do UX-02 para eu revisar antes de executar.';
+
+/**
+ * Ponte local de ratificação. A especificação só é acrescentada quando as duas
+ * condições explícitas coincidem: flag de prova e frase exata. Qualquer variação
+ * preserva o comando normal do chat, sem alvo ou permissão inventados.
+ */
+export const configureUx02DeterministicProof = (
+  message: string,
+  command: CreateWorkProposalCommand,
+): CreateWorkProposalCommand => process.env.ANIMA_UX02_DETERMINISTIC_PROOF === '1'
+  && message.trim() === UX02_DETERMINISTIC_PROOF_PHRASE
+  ? {
+      ...command,
+      capability: 'programming',
+      intent: {
+        ...command.intent,
+        execution_spec: {
+          schema_version: 1,
+          target: { kind: 'project', reference: 'ux02-deterministic-decision' },
+          permissions: ['workspace_read', 'workspace_write_isolated'],
+          validation_criteria: [{ label: 'Retomar somente do checkpoint persistido' }],
+          limits: { max_attempts: 3, max_duration_minutes: 5 },
+        },
+      },
+    }
+  : command;
 
 export const targetsFromEnvironment = (): Readonly<Record<string, string>> | null => {
   try {

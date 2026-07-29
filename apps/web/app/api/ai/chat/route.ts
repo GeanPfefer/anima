@@ -16,6 +16,7 @@ import { createPendingPillar } from '@/lib/create-pending-pillar';
 import { inferAndSaveArchetype } from '@/lib/infer-archetype';
 import { inferAndSaveIdentity } from '@/lib/infer-identity';
 import { interpretWorkRequest } from '@/lib/work-orchestration/interpret';
+import { configureUx02DeterministicProof } from '@/lib/work-orchestration/execution';
 import {
   buildWorkOrchestrationReply,
   type WorkOrchestrationChatKind,
@@ -493,7 +494,10 @@ ${contextBlock}`;
     .single();
   if (sourceMessageError || !sourceMessage) return Response.json({ error: 'Não foi possível preservar a mensagem.' }, { status: 503 });
 
-  const interpretation = interpretWorkRequest(message, sourceMessage.id);
+  const rawInterpretation = interpretWorkRequest(message, sourceMessage.id);
+  const interpretation = rawInterpretation.kind === 'work_candidate'
+    ? { ...rawInterpretation, command: configureUx02DeterministicProof(message, rawInterpretation.command) }
+    : rawInterpretation;
   let orchestrationMetadata: unknown = interpretation.kind === 'clarification_required'
     ? { kind: interpretation.kind, sourceMessageId: sourceMessage.id, question: interpretation.question }
     : { kind: 'conversation', sourceMessageId: sourceMessage.id };
