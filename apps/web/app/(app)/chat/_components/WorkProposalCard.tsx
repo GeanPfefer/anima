@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { describeValidationOutcome, parseWorkResultValidations, type ApprovalDecision, type ResultReviewDecision, type WorkItem, type WorkPresentation } from '@anima/core';
 import styles from './chat.module.css';
+import { WorkExecutionCard } from './WorkExecutionCard';
 
 type WorkItemView=Omit<WorkItem,'createdAt'|'updatedAt'>&{createdAt:string;updatedAt:string};
 export type WorkPresentationView=Omit<WorkPresentation,'item'>&{item:WorkItemView};
@@ -38,6 +39,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
       </dl>
     </section>;})()}
     <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?'Resultado aceito e trabalho concluído; evidências preservadas acima.':'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?'A execução falhou; nenhum resultado foi aceito.':`Estado atual: ${item.state}.`}</p>
+    {presentation.execution&&<WorkExecutionCard execution={presentation.execution} workItemId={item.id} proposalVersion={item.proposalVersion} onReload={reload} />}
     {!focused&&onFocus&&!['completed','failed','rejected','cancelled'].includes(item.state)&&<button disabled={busy} onClick={onFocus}>Usar como foco</button>}
     {mode==='none'&&allowed('approve')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>decide({type:'approve'})}>Aprovar</button><button disabled={busy} onClick={()=>setMode('correct')}>Pedir correção</button><button disabled={busy} onClick={()=>setMode('defer')}>Adiar</button><button disabled={busy} onClick={()=>decide({type:'reject'})}>Rejeitar</button></div>}
     {mode==='defer'&&<div className={styles.workDecision}><label>Motivo<select value={detail} onChange={event=>setDetail(event.target.value)}><option value="">Selecione</option><option>Quero decidir depois</option><option>Falta contexto</option><option>Não é prioridade agora</option><option value="other">Outro</option></select></label>{detail==='other'&&<input aria-label="Outro motivo" value={customDeferReason} onChange={event=>setCustomDeferReason(event.target.value)}/>}<button disabled={busy||!(detail==='other'?customDeferReason:detail).trim()} onClick={()=>decide({type:'defer',reason:detail==='other'?customDeferReason:detail})}>Confirmar adiamento</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
