@@ -20,7 +20,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
 | F | **Concluída (2026-07-28)** | INTEL-01 a INTEL-04 concluídos; política de orçamento ratificada e aplicada |
-| G | Não iniciada | — |
+| G | Em andamento | UX-01 (cartão de execução) pronto para revisão, **não ratificado** |
 
 ## Fase A — Fechar a orquestração atual
 
@@ -749,6 +749,32 @@ aceite estão satisfeitos. Como INTEL-01 a INTEL-04 estão concluídos, a
 **Riscos:** cartão virar formulário; UI inventar estado; excesso de notificação quebrando o princípio de interrupção mínima.
 
 **Fora do escopo:** telas dedicadas de gerenciamento; dashboards; notificações push.
+
+### UX-01 pronto para revisão (2026-07-29) — cartão de execução
+
+**Não ratificado.** Registro append-only do estado alcançado, para o checkpoint humano. Nenhuma seção anterior foi reescrita.
+
+**O que foi implementado (web).** Um cartão conversacional de execução autônoma que é **exclusivamente projeção do estado persistido** e permite acompanhar a tentativa e pedir pausa/cancelamento reais.
+
+- **Projeção pura (`packages/core`, `projectAutonomousExecution`)** reconstrói do log: estado da tentativa, executor/provedor/modelo/esforço (de `work_routing_decided`, com fallback ao `execution_started`), início, limites declarados, checkpoint persistido mais recente, pedido de controle pendente, resultado aplicado da pausa/cancelamento e bloqueio por orçamento. Ausência de tentativa autônoma (ou execução comandada sem claim) resulta em cartão ausente. É integrada ao `WorkPresentation` e flui pela reconstrução fail-closed existente.
+- **Controle cooperativo, aplicado só em checkpoint seguro.** `request_work_control` persiste a intenção do usuário (`work_control_requested`) sem mudar estado nem matar execução. O laço do Supervisor, após persistir cada checkpoint e **antes** do gate de orçamento, chama `apply_work_control_at_checkpoint`, que — espelhando o `interrupt_work_on_budget` do INTEL-04 — move o item para `blocked` (pausa) ou `cancelled` (cancelamento), grava `work_paused`/`work_cancelled` e libera o claim com `attempt_finished`. Nenhum terminal do executor é consumido depois disso.
+- **Orçamento para de contar** após a pausa: `autonomous_work_budget_usage` passou a encerrar a janela da tentativa também em `work_paused`.
+- **Cartão web** (`WorkExecutionCard`) renderiza a projeção e oferece Pausar/Cancelar (com confirmação de cancelamento); as ações vêm de `canRequestControl`, derivado do estado persistido — o cliente não inventa nada. Versão obsoleta/erro forçam reprojeção a partir do estado vigente.
+- **Contratos ratificados preservados:** o terminal comandado (INT-04) já recusa sinal tardio pela guarda de estado (item deixa de estar `in_progress`), então nenhuma RPC ratificada foi alterada. A execução comandada permanece fora do controle cooperativo (sem claim).
+
+**Decisões que pedem atenção na revisão:**
+
+- extensão de `autonomous_work_budget_usage` (INTEL-04, ratificado) para encerrar a contagem em `work_paused` — aditiva, sem alterar o comportamento de fluxos existentes (regressão `work_budget` 15/15 verde);
+- os três rascunhos de migration foram **auditados e finalizados**: `current_work_control_request` foi removido (a projeção já cobre o pedido pendente por eventos), guardas de allowlist e de versão nula foram adicionadas, e a ordem de `apply` passou a checar o pedido pendente antes de exigir checkpoint;
+- a matriz normativa ganhou uma única linha nova (`in_progress → work_paused → blocked`); o cancelamento reaproveita `in_progress → work_cancelled → cancelled`, já existente.
+
+**Evidências (verdes):** `packages/core` 551 testes (inclui 13 do cartão); `apps/web` 87 (inclui `WorkExecutionCard` e 3 novos do laço); mobile 12; `supabase` 7 (2 integrações ignoradas); **pgTAP `work_control` 20/20 e regressão de 22 arquivos sem falha, contra o Supabase local com as RPCs reais**; `typecheck` limpo nos cinco workspaces; build de produção do `apps/web` com a rota `/api/work-orchestration/control` registrada.
+
+**Pendente para ratificação (infra/interativo, separado do código):** a **demonstração ao vivo de ponta a ponta pelo chat** com o modelo local (Ollama + runner emitindo checkpoint) — pedir pausa pelo cartão durante uma execução real e observar a aplicação cooperativa no checkpoint. As garantias contratuais estão provadas deterministicamente e no banco real; falta o passo interativo com modelo.
+
+**Nota de ambiente:** os três rascunhos já tinham sido aplicados ao banco local pela sessão anterior. Como as versões finalizadas diferem e `db reset` é proibido sem checkpoint, o banco local foi sincronizado manualmente às funções finalizadas (só código de função/uma linha de transição; nenhum dado tocado). Um ambiente novo aplica os arquivos 17/18/19 do zero corretamente.
+
+**Fora desta entrega (não iniciados):** UX-02 (cartão de decisão necessária), UX-03 (cartão de resultado autônomo), UX-04 (histórico/retomada pelo chat) e a paridade mobile do cartão.
 
 ## Dependências entre fases
 
