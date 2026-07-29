@@ -1101,6 +1101,22 @@ py -m uvicorn whisper_server:app --host 0.0.0.0 --port 9000 --app-dir C:\Users\G
 
 > Atualizado em jun/2026: features P0–P4 + grafo de vida concluídas. Sistema com cobertura completa em web e mobile. Próximos passos são refinamento de UX, QA e integrações externas.
 
+### Horizonte aprovado após a Fase F (jul/2026)
+
+O desenvolvimento passa a seguir o índice em
+[`docs/planos/README.md`](docs/planos/README.md):
+
+1. [Plano 003 — Experiência Operacional](docs/planos/003-experiencia-operacional.md);
+2. [Plano 004 — Nós Locais e Portabilidade](docs/planos/004-nos-locais-e-portabilidade.md);
+3. [Plano 005 — Anima Conversacional e Semântico](docs/planos/005-anima-conversacional-e-semantico.md);
+4. [Plano 006 — Consolidação Multiplataforma Chat-First](docs/planos/006-consolidacao-multiplataforma-chat-first.md).
+
+Depois do Plano 006 haverá um checkpoint estratégico antes de definir qualquer
+Plano 008. Prisma permanece como referência histórica e reflexão crítica pode
+existir como comportamento do próprio Anima, mas uma capacidade independente
+dedicada a ele não é foco deste horizonte. A prioridade cognitiva é aprofundar
+memória semântica, continuidade e qualidade da conversa.
+
 ### Próximo
 - **Anima Core + capacidades (visão jun/2026, ver §1a)** — evolução estrutural:
   - **✅ Identidade Emergente — fundação (jun/2026):** tabelas `identity_hypotheses` + `identity_evidence` (migração `20260617000001`); gerador `infer-identity.ts` (Ollama, fire-and-forget na cadência do arquétipo) propõe/atualiza hipóteses com evidências rastreáveis e reforço de confiança; tela `/identity` (agrupada por tipo, barras de confiança, "por quê?" com evidências, confirmar/rejeitar). Generaliza `profiles.archetype`
