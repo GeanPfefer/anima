@@ -16,6 +16,10 @@ import { createPendingPillar } from '@/lib/create-pending-pillar';
 import { inferAndSaveArchetype } from '@/lib/infer-archetype';
 import { inferAndSaveIdentity } from '@/lib/infer-identity';
 import { interpretWorkRequest } from '@/lib/work-orchestration/interpret';
+import {
+  buildWorkOrchestrationReply,
+  type WorkOrchestrationChatKind,
+} from '@/lib/work-orchestration/chat-guidance';
 import { isWorkContinuation, resolveWorkFocus } from '@anima/core';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { serializeWorkPresentation } from '@/lib/work-orchestration/serialize';
@@ -502,7 +506,11 @@ ${contextBlock}`;
       const events=await createWorkOrchestrationService(supabase).listEvents(result.value.id);
       orchestrationMetadata = { kind: 'work_proposal', sourceMessageId: sourceMessage.id, presentation: serializeWorkPresentation(result.value,events.ok?events.value:[]) };
     }
-    else if (result.error.code !== 'orchestration_not_enabled') orchestrationMetadata = { kind: 'work_error', sourceMessageId: sourceMessage.id, error: { code: result.error.code, message: result.error.message } };
+    // Capacidade ausente é mostrada honestamente (UX-00 §9), não em silêncio: a
+    // Orquestração não habilitada para a conta vira um sinal tipado, não um
+    // fallback mudo que deixaria o modelo inventar uma proposta.
+    else if (result.error.code === 'orchestration_not_enabled') orchestrationMetadata = { kind: 'work_unavailable', sourceMessageId: sourceMessage.id, reason: 'orchestration_not_enabled' };
+    else orchestrationMetadata = { kind: 'work_error', sourceMessageId: sourceMessage.id, error: { code: result.error.code, message: result.error.message } };
   } else if(interpretation.kind==='conversation'&&isWorkContinuation(message)){
     const{data:focus}=await supabase.from('work_focus').select('work_item_id').eq('user_id',user.id).maybeSingle();
     const{data:candidates}=await supabase.from('work_items').select('*').eq('user_id',user.id).in('state',['proposed','approved','in_progress','blocked','review','changes_requested']).order('updated_at',{ascending:false}).limit(5);
@@ -511,8 +519,22 @@ ${contextBlock}`;
     else if(resolution.kind==='confirmation_required')orchestrationMetadata={kind:'focus_confirmation_required',sourceMessageId:sourceMessage.id,candidates:candidates!.filter(item=>resolution.itemIds.includes(item.id)).map(item=>({id:item.id,summary:(item.proposal as {data?:{summary?:string}}).data?.summary??item.original_request}))};
   }
 
+  // O cartão real é a fonte da verdade e já foi persistido pelo servidor.
+  // Prompting reduz alegações falsas, mas a garantia continua sendo determinística.
+  const metaKind = (orchestrationMetadata as { kind?: string })?.kind;
+  const chatKind: WorkOrchestrationChatKind =
+    metaKind === 'work_proposal' || metaKind === 'work_unavailable'
+      ? metaKind
+      : 'none';
+  const deterministicWorkReply = buildWorkOrchestrationReply(chatKind);
+
   // ── Chama Ollama (streaming) ───────────────────────────────────
-  const ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
+  const ollamaRes = deterministicWorkReply
+    ? new Response(`${JSON.stringify({
+        message: { content: deterministicWorkReply },
+        done: true,
+      })}\n`)
+    : await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -528,7 +550,7 @@ ${contextBlock}`;
       // degeneração de saída (texto incoerente/multilíngue no meio da resposta).
       options: { num_ctx: 8192 },
     }),
-  }).catch(() => null);
+    }).catch(() => null);
 
   if (!ollamaRes?.ok) {
     return new Response(
