@@ -21,7 +21,7 @@ const event = (
   const signal = kind === 'progress'
     ? { ...correlation, kind, message: `progresso-${sequence}` }
     : kind === 'decision_required'
-      ? { ...correlation, kind, reason: 'architectural_decision' as const, explanation: 'Escolha necessária.' }
+      ? { ...correlation, kind, reason: 'architectural_decision' as const, explanation: 'Escolha necessária.', options: [{ id: 'continuar', label: 'Continuar', effect: 'resume' as const }, { id: 'cancelar', label: 'Cancelar', effect: 'cancel' as const }] }
       : kind === 'result'
         ? { ...correlation, kind, summary: 'Concluído.', resultReferences: ['commit:abc'], validations: [], limitations: [], handoffReference: 'commit:abc' }
         : kind === 'error'

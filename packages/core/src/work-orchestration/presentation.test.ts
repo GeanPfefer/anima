@@ -1,4 +1,4 @@
-import { availableWorkActions, buildProposalRevision, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, reconstructWorkPresentation, type WorkEvent, type WorkItem } from '.';
+import { availableWorkActions, buildProposalRevision, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingWorkDecision, reconstructWorkPresentation, type WorkEvent, type WorkItem } from '.';
 const item={id:'i',userId:'u',sourceMessageId:'m',state:'review',impactLevel:'low',capability:'planning',originalRequest:'x',intent:{},proposal:{schemaVersion:1,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:2,createdAt:new Date(),updatedAt:new Date()} satisfies WorkItem;
 const event={id:'r',workItemId:'i',type:'result_submitted',author:'executor',proposalVersion:2,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a']}},occurredAt:new Date()} satisfies WorkEvent;
 describe('projeção de apresentação do trabalho',()=>{
@@ -46,4 +46,10 @@ describe('projeção do resultado aceito',()=>{
   test('referência para evento de outro tipo não vira evidência',()=>expect(projectAcceptedWorkResult([event,{...accepted,payload:{schema_version:1,data:{accepted_result_event_id:'a'}}}])).toBeNull());
   test('resultado referenciado com payload malformado não vira evidência',()=>expect(projectAcceptedWorkResult([{...event,payload:{schema_version:1,data:{summary:42}}},accepted])).toBeNull());
   test('sem evento de aceite não há resultado aceito',()=>expect(projectAcceptedWorkResult([event])).toBeNull());
+});
+describe('projeção da decisão humana',()=>{
+  const request=(reason:(typeof HUMAN_INTERRUPTION_REASONS)[number]):WorkEvent=>({id:`q-${reason}`,workItemId:'i',type:'input_requested',author:'anima',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{attempt_id:'attempt-1',reason,explanation:'Escolha necessária.',checkpoint_reference:'checkpoint-1',options:[{id:'seguir',label:'Seguir',effect:'resume'},{id:'parar',label:'Parar',effect:'cancel'}]}}});
+  test.each(HUMAN_INTERRUPTION_REASONS)('projeta a razão fechada %s',reason=>expect(projectPendingWorkDecision({...item,state:'blocked'},[request(reason)])).toMatchObject({reason,requestEventId:`q-${reason}`,options:[{id:'seguir',effect:'resume'},{id:'parar',effect:'cancel'}]}));
+  test('a resposta ao evento exato remove a decisão pendente',()=>{const pending=request('scope_change');const answered:WorkEvent={id:'answer',workItemId:'i',type:'input_provided',author:'user',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{input_requested_event_id:pending.id,option_id:'seguir'}}};expect(projectPendingWorkDecision({...item,state:'approved'},[pending,answered])).toBeNull();});
+  test('alternativas malformadas não são inventadas pela apresentação',()=>expect(projectPendingWorkDecision({...item,state:'blocked'},[{...request('scope_change'),payload:{schema_version:1,data:{attempt_id:'attempt-1',reason:'scope_change',explanation:'x',checkpoint_reference:'cp',options:[{id:'única',label:'Única',effect:'resume'}]}}}])).toBeNull());
 });

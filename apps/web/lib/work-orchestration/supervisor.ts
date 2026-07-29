@@ -17,7 +17,7 @@ import {
 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { buildExecutorRequest, recordExecutionTerminal, runExecutorStreamed, type CheckpointSink } from './execution';
+import { buildExecutorRequest, recordExecutionTerminal, recordWorkDecisionRequired, runExecutorStreamed, type CheckpointSink } from './execution';
 import { createWorkOrchestrationService } from './server';
 
 // ============================================================
@@ -43,6 +43,7 @@ export type SupervisorTurnOutcome =
   | 'budget_interrupted'
   // Pausa/cancelamento cooperativo do usuário aplicado num checkpoint (UX-01).
   | 'control_applied'
+  | 'decision_required'
   // Posse recusada pelo banco — tipicamente a corrida perdida.
   | 'claim_refused'
   // Posse obtida, início recusado (exclusividade de alvo, versão mudou…).
@@ -497,6 +498,24 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   }
 
   // ---------- (7) Terminal pela fronteira ratificada ----------
+  if (run.terminal.kind === 'decision_required') {
+    const recorded = await recordWorkDecisionRequired(client, {
+      workItemId: selection.workItemId,
+      expectedProposalVersion: selection.approvedProposalVersion,
+      attemptId,
+      signal: run.terminal,
+    });
+    if (recorded.error) {
+      return { ...running, outcome: 'terminal_refused', refusal: refusalOf(recorded.error) };
+    }
+    const decision = object(recorded.data);
+    return {
+      ...running,
+      outcome: 'decision_required',
+      claimReleased: decision?.claimReleased === true,
+      requiresAnotherTurn: false,
+    };
+  }
   const terminalKind = (run.terminal as { kind: 'result' | 'error' | 'cancelled' }).kind;
   const terminal = await recordExecutionTerminal(client, {
     workItemId: selection.workItemId, expectedProposalVersion: selection.approvedProposalVersion,

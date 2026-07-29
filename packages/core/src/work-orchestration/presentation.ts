@@ -1,5 +1,6 @@
 import type { Json } from '@anima/types';
 import type { WorkEvent, WorkItem, WorkResultValidation, WorkResultValidationOutcome } from './types';
+import { HUMAN_INTERRUPTION_REASONS, type HumanInterruptionReason } from './human-interruption';
 
 // null distingue "não informado" de lista vazia: a UI deve declarar a ausência
 // explicitamente, nunca preencher o vazio com o texto livre do autor.
@@ -41,7 +42,17 @@ export interface AutonomousExecutionProjection {
   // não há pedido pendente. O cartão nunca decide isso por conta própria.
   readonly canRequestControl:boolean;
 }
-export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; }
+export interface WorkDecisionOptionProjection { readonly id:string; readonly label:string; readonly effect:'resume'|'cancel'; }
+export interface WorkDecisionProjection {
+  readonly requestEventId:string;
+  readonly attemptId:string;
+  readonly proposalVersion:number;
+  readonly reason:HumanInterruptionReason;
+  readonly explanation:string;
+  readonly options:readonly WorkDecisionOptionProjection[];
+  readonly checkpointReference:string;
+}
+export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; }
 
 const object=(value:Json|undefined):Record<string,Json|undefined>|null=>value!==null&&value!==undefined&&!Array.isArray(value)&&typeof value==='object'?value:null;
 const validationOutcomes:ReadonlySet<string>=new Set(['passed','failed','declared']);
@@ -98,6 +109,23 @@ const asNumber=(value:Json|undefined):number|null=>typeof value==='number'&&Numb
 const arrayLength=(value:Json|undefined):number=>Array.isArray(value)?value.length:0;
 const eventData=(event:WorkEvent):Record<string,Json|undefined>|null=>object(object(event.payload)?.data);
 const eventAttempt=(event:WorkEvent):string|null=>asString(eventData(event)?.attempt_id);
+const interruptionReasons:ReadonlySet<string>=new Set(HUMAN_INTERRUPTION_REASONS);
+export function projectPendingWorkDecision(item:WorkItem,events:readonly WorkEvent[]):WorkDecisionProjection|null{
+  for(let index=events.length-1;index>=0;index--){
+    const request=events[index]!;
+    if(request.type!=='input_requested'||request.proposalVersion!==item.proposalVersion)continue;
+    const data=eventData(request),reason=asString(data?.reason),attemptId=asString(data?.attempt_id);
+    const explanation=asString(data?.explanation),checkpointReference=asString(data?.checkpoint_reference);
+    if(reason===null||!interruptionReasons.has(reason)||attemptId===null||explanation===null||checkpointReference===null)continue;
+    if(events.some(event=>event.type==='input_provided'&&asString(eventData(event)?.input_requested_event_id)===request.id))return null;
+    if(!Array.isArray(data?.options))continue;
+    const options:WorkDecisionOptionProjection[]=[];
+    for(const value of data.options){const option=object(value),id=asString(option?.id),label=asString(option?.label),effect=asString(option?.effect);if(id===null||label===null||(effect!=='resume'&&effect!=='cancel')){options.length=0;break;}options.push({id,label,effect});}
+    if(options.length<2||new Set(options.map(option=>option.id)).size!==options.length)continue;
+    return{requestEventId:request.id,attemptId,proposalVersion:item.proposalVersion,reason:reason as HumanInterruptionReason,explanation,options,checkpointReference};
+  }
+  return null;
+}
 export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEvent[]):AutonomousExecutionProjection|null{
   // Tentativa autônoma corrente = último execution_started com claim_id. A
   // execução comandada (INT-04) não tem claim e não é pausável/cancelável aqui.
@@ -150,7 +178,7 @@ export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEve
     canRequestControl:status==='running'&&pendingControl===null,
   };
 }
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events)}};
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events),pendingDecision:projectPendingWorkDecision(item,events)}};
 
 // Reconstrói a projeção somente quando os elos persistidos mínimos existem.
 // O estado atual nunca basta para inventar o histórico que deveria explicá-lo.

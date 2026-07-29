@@ -821,6 +821,20 @@ falhou fechada antes de qualquer checkpoint.
 
 **Fora desta entrega (não iniciados):** UX-02 (cartão de decisão necessária), UX-03 (cartão de resultado autônomo), UX-04 (histórico/retomada pelo chat) e a paridade mobile do cartão.
 
+### UX-02 pronto para revisão (2026-07-29) — decisão necessária
+
+**Não ratificado.** O fluxo foi implementado e validado automaticamente; ainda falta uma interrupção real no chat para o checkpoint humano.
+
+- O contrato `decision_required` exige razão fechada, explicação e ao menos duas alternativas distintas, cada uma com efeito `resume` ou `cancel`.
+- A interrupção só é persistida depois de um checkpoint seguro. O banco bloqueia o trabalho, grava `input_requested` e `work_blocked`, preserva o sinal integral e libera o claim.
+- A projeção compartilhada reconstrói exclusivamente o pedido ainda não respondido. Web e mobile exibem as alternativas persistidas e não oferecem a retomada genérica enquanto a decisão estiver pendente.
+- A resposta referencia o evento e a versão exatos. Uma alternativa não apresentada ou uma versão obsoleta é recusada. `resume` devolve o item à fila `approved`, de onde uma nova tentativa pode usar o checkpoint; `cancel` encerra em `cancelled`.
+- O Supervisor trata `decision_required` numa fronteira própria e não o envia ao registrador de resultado/erro/cancelamento.
+
+**Evidências verdes:** core 561 testes; web 118 testes; mobile 12; pgTAP UX-02 10/10; typecheck dos cinco workspaces; build de produção web. As oito razões da política AUTO-06 possuem cobertura de projeção e apresentação.
+
+**Falta para ratificar:** provocar uma interrupção real do executor, confirmar que o cartão sobrevive ao refresh e testar uma escolha de retomada ou encerramento no chat.
+
 ## Dependências entre fases
 
 ```text

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
 import { parseWorkResultValidations, type WorkPresentation } from '@anima/core';
-import { decideWork, reloadWork, requestProposalCorrection, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
+import { answerWorkDecision, decideWork, reloadWork, requestProposalCorrection, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
 import { describeMissingCompletedResult, presentMobileWorkResult } from './mobile-work-result';
 
@@ -33,9 +33,15 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
       {shownResult.completionMessage&&<Text accessibilityLiveRegion="polite" style={styles.completed}>{shownResult.completionMessage}</Text>}
     </View>}
     {missingCompletedResult&&<Text accessibilityRole="alert" style={styles.error}>{missingCompletedResult}</Text>}
+    {presentation.pendingDecision&&<View accessible accessibilityLabel="Decisão necessária" style={styles.result}>
+      <Text style={styles.label}>Preciso da sua decisão</Text>
+      <Text style={styles.body}>{presentation.pendingDecision.explanation}</Text>
+      <Text style={styles.state}>O trabalho está pausado em um checkpoint seguro.</Text>
+      <View style={styles.actions}>{presentation.pendingDecision.options.map(option=><TouchableOpacity key={option.id} disabled={busy} onPress={()=>void run(answerWorkDecision(presentation,option.id))} style={styles.action}><Text style={styles.actionText}>{option.label}</Text></TouchableOpacity>)}</View>
+    </View>}
     {mode==='none'&&allowed('approve')&&<View style={styles.actions}>{action('Aprovar',()=>void run(decideWork(presentation,{type:'approve'})))}{action('Corrigir',()=>setMode('proposal_changes'))}{action('Adiar',()=>void run(decideWork(presentation,{type:'defer',reason:'Adiado no mobile'})))}{action('Rejeitar',()=>void run(decideWork(presentation,{type:'reject'})))}</View>}
     {mode==='proposal_changes'&&<Editor value={detail} onChange={setDetail} label="Correção da proposta" onConfirm={()=>void run(requestProposalCorrection(presentation,detail.trim()))} />}
-    {mode==='none'&&allowed('start')&&action(item.state==='approved'?'Iniciar':'Retomar',()=>void run(startWork(presentation)))}
+    {mode==='none'&&!presentation.pendingDecision&&allowed('start')&&action(item.state==='approved'?'Iniciar':'Retomar',()=>void run(startWork(presentation)))}
     {mode==='none'&&allowed('submit_result')&&action('Registrar resultado',()=>setMode('result'))}
     {mode==='result'&&<View>
       <TextInput accessibilityLabel="Resumo do resultado" value={detail} onChangeText={setDetail} placeholder="Resumo do resultado" placeholderTextColor={colors.textMuted} style={styles.input} multiline/>

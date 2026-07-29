@@ -1486,6 +1486,43 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_work_decision_required: {
+        Args: {
+          p_attempt_id: string
+          p_expected_proposal_version: number
+          p_signal: Json
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
+      respond_to_work_decision: {
+        Args: {
+          p_expected_proposal_version: number
+          p_input_requested_event_id: string
+          p_option_id: string
+          p_work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       review_work_result: {
         Args: {
           decision: Database["public"]["Enums"]["work_review_decision"]

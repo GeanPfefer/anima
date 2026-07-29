@@ -293,6 +293,18 @@ class FakeDatabase {
         });
         return ok(item);
       }
+      case 'record_work_decision_required': {
+        const attemptId = args['p_attempt_id'] as string;
+        const item = this.items.get(args['p_work_item_id'] as string)!;
+        const signal = args['p_signal'] as { kind: string; sequence: number };
+        const maxCp = this.checkpointSeq.get(attemptId);
+        if (signal.kind !== 'decision_required' || maxCp === undefined || signal.sequence <= maxCp) return fail('55000', 'decision must follow a persisted checkpoint');
+        item.state = 'blocked';
+        const claim = [...this.claims.values()].find(value => value.attemptId === attemptId);
+        if (claim) claim.released = true;
+        this.events.push({ itemId: item.id, attemptId, type: 'input_requested' }, { itemId: item.id, attemptId, type: 'work_blocked' });
+        return ok({ requestEventId: 'decision-1', claimReleased: claim !== undefined });
+      }
 
       case 'record_work_checkpoint': {
         const attemptId = args['attempt_id'] as string;
@@ -465,13 +477,14 @@ const sampleCheckpoint = (nextStep: string): WorkCheckpointV1 => ({
   failures: [], evidenceReferences: [],
 });
 
-type SignalSpec = { readonly kind: 'progress' | 'checkpoint' | 'result' | 'error' | 'cancelled' };
+type SignalSpec = { readonly kind: 'progress' | 'checkpoint' | 'decision_required' | 'result' | 'error' | 'cancelled' };
 
 const attachSpec = (request: WorkExecutorRequest, sequence: number, spec: SignalSpec): WorkExecutorSignal => {
   const base = { attemptId: request.attemptId, workItemId: request.workItemId, approvedProposalVersion: request.approvedProposalVersion, origin: 'executor' as const, sequence };
   switch (spec.kind) {
     case 'progress': return { ...base, kind: 'progress', message: `progresso ${sequence}` } as WorkExecutorSignal;
     case 'checkpoint': return { ...base, kind: 'checkpoint', checkpoint: sampleCheckpoint(`passo ${sequence}`) } as WorkExecutorSignal;
+    case 'decision_required': return { ...base, kind: 'decision_required', reason: 'architectural_decision', explanation: 'Escolha a fronteira.', options: [{ id: 'seguir', label: 'Seguir', effect: 'resume' }, { id: 'parar', label: 'Parar', effect: 'cancel' }] } as WorkExecutorSignal;
     case 'result': return { ...base, kind: 'result', summary: 'ok', resultReferences: [], validations: [{ label: 'testes', outcome: 'passed' }], limitations: [], handoffReference: 'runner-bundle:r' } as WorkExecutorSignal;
     case 'cancelled': return { ...base, kind: 'cancelled', acknowledged: true, handoffReference: 'checkpoint:cancelled' } as WorkExecutorSignal;
     default: return { ...base, kind: 'error', code: 'execution_failed', message: 'falhou', retryable: false, handoffReference: 'checkpoint:err' } as WorkExecutorSignal;
@@ -931,6 +944,16 @@ describe('Etapa 2B.1 — persistência de checkpoint em stream', () => {
     expect(cpCall).toBeLessThan(termCall);
     const types = database.events.map(event => event.type);
     expect(types.indexOf('checkpoint_recorded')).toBeLessThan(types.indexOf('result_submitted'));
+  });
+
+  test('decisão necessária após checkpoint bloqueia, libera posse e não grava terminal comum', async () => {
+    const database = db();
+    const { adapter } = scriptedExecutor([{ kind: 'checkpoint' }, { kind: 'decision_required' }]);
+    const result = await turn(database, adapter, readerItems(), ['claim-1', 'attempt-1']);
+    expect(result).toMatchObject({ outcome: 'decision_required', claimReleased: true, requiresAnotherTurn: false });
+    expect(database.items.get('item-1')!.state).toBe('blocked');
+    expect(database.calls).toContain('record_work_decision_required');
+    expect(database.calls).not.toContain('record_commanded_work_terminal');
   });
 
   test('múltiplos checkpoints persistidos na ordem; progress não vira checkpoint', async () => {

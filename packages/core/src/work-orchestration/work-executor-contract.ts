@@ -71,12 +71,17 @@ export interface WorkCheckpointV1 {
 }
 
 interface CorrelatedSignal extends ExecutionEventCorrelation { readonly sequence: number; }
+export interface WorkDecisionOption {
+  readonly id: string;
+  readonly label: string;
+  readonly effect: 'resume' | 'cancel';
+}
 // `progress` e `checkpoint` são os dois sinais NÃO-terminais. `checkpoint` é o
 // único que carrega continuação estruturada retomável antes do terminal único.
 export type WorkExecutorSignal =
   | (CorrelatedSignal & { readonly kind: 'progress'; readonly message: string })
   | (CorrelatedSignal & { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 })
-  | (CorrelatedSignal & { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string })
+  | (CorrelatedSignal & { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] })
   | (CorrelatedSignal & { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string })
   | (CorrelatedSignal & { readonly kind: 'error'; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string })
   | (CorrelatedSignal & { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string });
@@ -85,7 +90,7 @@ export type WorkExecutorErrorCode = 'invalid_request' | 'execution_failed' | 'at
 export type WorkExecutorSignalInput =
   | { readonly kind: 'progress'; readonly message: string }
   | { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 }
-  | { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string }
+  | { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] }
   | { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string }
   | { readonly kind: 'error'; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string }
   | { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string };
@@ -166,6 +171,14 @@ export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSig
   for (const signal of signals) {
     if (signal.sequence !== index + 1) return 'A sequência de sinais não é contínua.';
     if (signal.attemptId !== correlation.attemptId || signal.workItemId !== correlation.workItemId || signal.approvedProposalVersion !== correlation.approvedProposalVersion || signal.origin !== 'executor') return 'Um sinal perdeu a correlação da tentativa.';
+    if (signal.kind === 'decision_required') {
+      const ids = new Set(signal.options.map(option => option.id));
+      if (!nonBlank(signal.explanation) || signal.options.length < 2 || ids.size !== signal.options.length
+        || signal.options.some(option => !nonBlank(option.id) || !nonBlank(option.label)
+          || !['resume', 'cancel'].includes(option.effect))) {
+        return 'Uma decisão precisa de explicação e ao menos duas alternativas válidas e distintas.';
+      }
+    }
     if (terminalKinds.has(signal.kind)) terminalCount++;
     if (terminalCount > 0 && index < signals.length - 1) return 'Nenhum sinal pode suceder a condição terminal.';
     index++;

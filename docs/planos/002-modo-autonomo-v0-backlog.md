@@ -425,6 +425,8 @@ nós locais e de refinamento posterior.
 
 ### UX-02 — Cartão de decisão necessária
 
+**Estado (2026-07-29): pronto para revisão; falta ratificação interativa.** O sinal terminal `decision_required` agora carrega alternativas tipadas fornecidas pelo executor. Depois de um checkpoint persistido, `record_work_decision_required` bloqueia o item, grava o pedido exato e libera o claim. Web e mobile projetam esse evento e enviam somente o identificador da alternativa apresentada. `respond_to_work_decision` referencia evento + versão exatos, recusa respostas obsoletas e move o item para `approved` (retomar em nova tentativa a partir do checkpoint) ou `cancelled`. Evidências verdes: core 561, web 118, mobile 12, pgTAP UX-02 10/10, typecheck dos cinco workspaces e build web.
+
 - **Problema:** interrupções humanas (AUTO-06) precisam chegar como decisão estruturada, não como texto solto perdido na conversa.
 - **Resultado esperado:** cartão com razão tipada, contexto mínimo, alternativas reais e ações explícitas; a decisão persiste apontando a versão exata apresentada; o trabalho permanece pausado com checkpoint até a resposta.
 - **Dependências:** AUTO-06; UX-01. **Escopo:** web + mobile. **Fora do escopo:** notificações externas; decisão por outra pessoa.

@@ -226,3 +226,13 @@ export const recordExecutionTerminal = (
   attempt_id: input.attemptId,
   signal: input.terminal as unknown as Json,
 });
+
+export const recordWorkDecisionRequired = (
+  client: SupabaseClient<Database>,
+  input: { readonly workItemId: string; readonly expectedProposalVersion: number; readonly attemptId: string; readonly signal: WorkExecutorSignal },
+) => client.rpc('record_work_decision_required', {
+  p_work_item_id: input.workItemId,
+  p_expected_proposal_version: input.expectedProposalVersion,
+  p_attempt_id: input.attemptId,
+  p_signal: input.signal as unknown as Json,
+});

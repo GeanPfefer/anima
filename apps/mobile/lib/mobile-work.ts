@@ -35,3 +35,14 @@ export async function requestProposalCorrection(value:WorkPresentation,requested
 export async function startWork(value:WorkPresentation):Promise<WorkPresentation>{return presentation(required(await service().startWork({workItemId:value.item.id,expectedProposalVersion:value.item.proposalVersion})))}
 export async function submitWorkResult(value:WorkPresentation,summary:string,references:readonly string[],validations:readonly WorkResultValidation[]=[],limitations:readonly string[]=[]):Promise<WorkPresentation>{return presentation(required(await service().submitResult({workItemId:value.item.id,expectedProposalVersion:value.item.proposalVersion,result:{summary,resultReferences:references,validations,limitations}})))}
 export async function reviewWorkResult(value:WorkPresentation,decision:ResultReviewDecision):Promise<WorkPresentation>{if(!value.latestResult)throw new Error('Resultado indisponível para revisão.');return presentation(required(await service().reviewResult({workItemId:value.item.id,expectedProposalVersion:value.item.proposalVersion,reviewedResultEventId:value.latestResult.eventId,decision})))}
+export async function answerWorkDecision(value:WorkPresentation,optionId:string):Promise<WorkPresentation>{
+  if(!value.pendingDecision)throw new Error('Decisão pendente indisponível.');
+  const{error}=await supabase.rpc('respond_to_work_decision',{
+    p_work_item_id:value.item.id,
+    p_expected_proposal_version:value.pendingDecision.proposalVersion,
+    p_input_requested_event_id:value.pendingDecision.requestEventId,
+    p_option_id:optionId,
+  });
+  if(error)throw error;
+  return reloadWork(value.item.id);
+}

@@ -23,7 +23,7 @@ describe('INT-01 — contrato WorkExecutorAdapter', () => {
   });
 
   test('executor falso exercita decisão necessária tipada', async () => {
-    const signals = await collect(new FakeWorkExecutor([{ kind: 'decision_required', reason: 'architectural_decision', explanation: 'Há duas fronteiras válidas.' }]));
+    const signals = await collect(new FakeWorkExecutor([{ kind: 'decision_required', reason: 'architectural_decision', explanation: 'Há duas fronteiras válidas.', options: [{ id: 'continuar', label: 'Continuar', effect: 'resume' }, { id: 'cancelar', label: 'Encerrar', effect: 'cancel' }] }]));
     expect(signals).toEqual([expect.objectContaining({ kind: 'decision_required', reason: 'architectural_decision' })]);
     expect(validateWorkExecutorTranscript(signals)).toBeNull();
   });
