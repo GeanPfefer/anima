@@ -1188,6 +1188,14 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      apply_work_control_at_checkpoint: {
+        Args: {
+          p_attempt_id: string
+          p_expected_proposal_version: number
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
       block_work_on_budget: { Args: { p_work_item_id: string }; Returns: Json }
       create_work_proposal: {
         Args: {
@@ -1394,6 +1402,15 @@ export type Database = {
         }
       }
       reopen_latest_conversation: { Args: never; Returns: string }
+      request_work_control: {
+        Args: {
+          p_action: string
+          p_attempt_id: string
+          p_expected_proposal_version: number
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
       request_work_proposal_revision: {
         Args: {
           expected_proposal_version: number
@@ -1743,6 +1760,8 @@ export type Database = {
         | "work_intelligence_classified"
         | "work_routing_decided"
         | "work_routing_adjusted"
+        | "work_control_requested"
+        | "work_paused"
       work_impact_level:
         | "low"
         | "significant"
@@ -2065,6 +2084,8 @@ export const Constants = {
         "work_intelligence_classified",
         "work_routing_decided",
         "work_routing_adjusted",
+        "work_control_requested",
+        "work_paused",
       ],
       work_impact_level: [
         "low",
