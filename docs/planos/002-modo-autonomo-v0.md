@@ -835,6 +835,20 @@ falhou fechada antes de qualquer checkpoint.
 
 **Falta para ratificar:** provocar uma interrupção real do executor, confirmar que o cartão sobrevive ao refresh e testar uma escolha de retomada ou encerramento no chat.
 
+### UX-02 ponta a ponta (2026-07-29) — correção da implementação parcial
+
+O checkpoint anterior desta seção comprovava a emissão e a resposta ao cartão, mas não o ciclo completo. A auditoria posterior encontrou duas lacunas: o evento `input_requested` não preservava um `InputRequestedPayloadV1` com `source_state` e `WorkHandoffV1` completos; além disso, `resume` somente retornava o item a `approved`, sem uma fonte persistida que permitisse ao Supervisor abrir a tentativa seguinte pelo checkpoint.
+
+- O mesmo vocabulário `decision_required`/`InputRequestedPayloadV1` foi mantido e refinado com alternativas e handoff; não foi criado um protocolo paralelo.
+- O alvo determinístico `ux02-deterministic-decision`, habilitado apenas por configuração explícita de prova, emite progresso, checkpoint conhecido e decisão estruturada e suspende o executor sem chamar modelo.
+- O pedido, o checkpoint e o handoff pausado são persistidos juntos. A projeção do cartão e a fonte de retomada consultam somente eventos do banco, portanto sobrevivem a refresh e reinício do processo web.
+- “Continuar” persiste `input_provided`, abre uma nova claim/tentativa ligada ao evento de pergunta e resposta e entrega ao executor o checkpoint no `carriedContext`; o cenário determinístico só produz resultado depois de receber esse contexto.
+- “Encerrar” persiste `work_cancelled` e deixa o item em `cancelled`. Repetições iguais não duplicam eventos; respostas divergentes, tardias ou dirigidas a trabalho terminal são recusadas.
+
+**Evidências verdes:** pgTAP 26/26 cobrindo os ramos de retomada e cancelamento contra o Supabase local real; core 563; web 123; mobile 12; typecheck dos cinco workspaces; build web. A prova automatizada também confirma reconstrução do cartão a partir do `input_requested`, nova tentativa com referência exata ao pedido/resposta e resultado terminal somente depois do checkpoint retomado.
+
+**Falta para ratificar:** executar o cenário determinístico no chat real, recarregar a página enquanto o cartão estiver pendente e escolher um dos dois ramos. A frase de teste só deve ser fornecida depois de o ambiente de prova estar preparado.
+
 ## Dependências entre fases
 
 ```text

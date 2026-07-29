@@ -42,6 +42,7 @@ interface FakeOptions {
   /** Faz todo record_work_checkpoint devolver `replayed` (idempotente, sem novo evento). */
   readonly replayCheckpoints?: boolean;
   readonly resumptionSource?: Record<string, unknown>;
+  readonly decisionResumptionSource?: Record<string, unknown>;
   readonly routingAdjustmentContext?: WorkRoutingAdjustmentContextV1;
   readonly budgetReason?: string;
   readonly interruptBudgetAfterCheckpoint?: string;
@@ -149,6 +150,8 @@ class FakeDatabase {
 
       case 'abandoned_work_resumption_source':
         return ok(this.options.resumptionSource ?? { kind: 'new_execution' });
+      case 'human_decision_resumption_source':
+        return ok(this.options.decisionResumptionSource ?? null);
 
       case 'current_work_intelligence_classification': {
         const item = this.items.get(args['p_work_item_id'] as string);
@@ -291,6 +294,16 @@ class FakeDatabase {
           itemId: item.id, attemptId,
           type: signal.kind === 'result' ? 'result_submitted' : signal.kind === 'cancelled' ? 'work_cancelled' : 'execution_failed',
         });
+        return ok(item);
+      }
+      case 'begin_human_decision_resumed_attempt': {
+        const item = this.items.get(args['work_item_id'] as string)!;
+        const claim:FakeClaim={id:args['claim_id'] as string,itemId:item.id,target:item.target,
+          attemptId:args['attempt_id'] as string,released:false,reason:null};
+        if(!this.routingAdjustments.has(claim.attemptId!))return fail('55000','work routing adjustment missing');
+        if(!this.routing.has(claim.attemptId!))return fail('55000','work routing decision missing');
+        this.claims.set(claim.id,claim);item.state='in_progress';
+        this.events.push({itemId:item.id,type:'execution_started',attemptId:claim.attemptId,reason:'human_decision_resumed'});
         return ok(item);
       }
       case 'record_work_decision_required': {
@@ -649,7 +662,7 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
 
   // Ordem canônica das fronteiras, e nunca o início comandado.
   expect(database.calls).toEqual([
-    'reconcile_supervised_work', 'next_autonomous_work', 'autonomous_work_budget_status', 'abandoned_work_resumption_source',
+    'reconcile_supervised_work', 'next_autonomous_work', 'autonomous_work_budget_status', 'human_decision_resumption_source','abandoned_work_resumption_source',
     'current_work_intelligence_classification', 'work_routing_adjustment_context',
     'record_work_routing_adjustment', 'record_work_routing_decision', 'acquire_work_claim',
     'start_claimed_work_attempt', 'record_commanded_work_terminal', 'release_work_claim',
@@ -918,6 +931,24 @@ test('tentativa abandonada retoma com IDs novos e carriedContext sem cenário in
     nextStep: 'continuar', previousFailures: ['falha anterior'],
   }));
   expect(calls[0]?.carriedContext).not.toHaveProperty('scenario');
+});
+
+test('decisão humana consumida retoma do handoff persistido com novo claim e nova tentativa',async()=>{
+  const source={kind:'human_decision_checkpoint',input_requested_event_id:'request-1',input_provided_event_id:'answer-1',
+    previous_attempt_ids:['attempt-antiga'],handoff:{schemaVersion:1,workItemId:'item-1',attemptId:'attempt-antiga',
+      approvedProposalVersion:1,claimId:'claim-antigo',status:'paused',stopReason:'human_input_required',
+      handoffReference:'ux02-proof:checkpoint-1',completedSteps:['iniciado'],remainingSteps:['concluir'],
+      decisions:[],risks:['decisão necessária'],nextStep:'continuar',touchedResources:['calculator.py'],
+      validations:[{label:'checkpoint',outcome:'passed'}],failures:[],evidenceReferences:['ux02-proof:checkpoint-1']}};
+  const database=new FakeDatabase({items:[{id:'item-1',version:1,state:'approved',target:'alvo-1',approvalSeq:1,classification:'complete'}],
+    decisionResumptionSource:source});
+  const{adapter,calls}=executor();
+  const result=await turn(database,adapter,[workItem('item-1',{target:'alvo-1',limits:{max_attempts:3,max_duration_minutes:5}})],['claim-novo','attempt-nova']);
+  expect(result.outcome).toBe('execution_completed');
+  expect(database.calls).toContain('begin_human_decision_resumed_attempt');
+  expect(database.calls).not.toContain('acquire_work_claim');
+  expect(calls[0]).toMatchObject({attemptId:'attempt-nova',carriedContext:{isNewAttempt:true,continueFromCheckpoint:true,
+    remainingSteps:['concluir'],nextStep:'continuar',risks:['decisão necessária'],touchedResources:['calculator.py'],previousFailures:[]}});
 });
 
 describe('Etapa 2B.1 — persistência de checkpoint em stream', () => {

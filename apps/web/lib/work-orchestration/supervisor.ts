@@ -14,6 +14,7 @@ import {
   type WorkRoutingAdjustmentContextV1,
   type WorkRoutingAdjustmentV1,
   type WorkRoutingDecisionV1,
+  type WorkHandoffV1,
 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -250,10 +251,15 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     return { ...started, outcome: 'selection_not_executable', refusal: { code: 'context_unavailable', message: contexts.error.message } };
   }
 
-  const sourceRead = await client.rpc('abandoned_work_resumption_source', { p_work_item_id: selection.workItemId });
-  if (sourceRead.error) return { ...started, outcome: 'selection_not_executable', refusal: refusalOf(sourceRead.error) };
-  const persistedSource = object(sourceRead.data);
-  const isResumption = persistedSource?.kind === 'abandoned_checkpoint';
+  const decisionSourceRead = await client.rpc('human_decision_resumption_source', { p_work_item_id: selection.workItemId });
+  if (decisionSourceRead.error) return { ...started, outcome: 'selection_not_executable', refusal: refusalOf(decisionSourceRead.error) };
+  let persistedSource = object(decisionSourceRead.data);
+  if (!persistedSource) {
+    const abandonedSourceRead = await client.rpc('abandoned_work_resumption_source', { p_work_item_id: selection.workItemId });
+    if (abandonedSourceRead.error) return { ...started, outcome: 'selection_not_executable', refusal: refusalOf(abandonedSourceRead.error) };
+    persistedSource = object(abandonedSourceRead.data);
+  }
+  const isResumption = persistedSource?.kind === 'abandoned_checkpoint' || persistedSource?.kind === 'human_decision_checkpoint';
 
   const claimId = newId();
   const leaseSeconds = (eligibility.spec.limits.maxDurationMinutes ?? 30) * 60 + 300;
@@ -332,7 +338,30 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   const routed = { ...started, routingDecision: routing.decision, routingAdjustment: adjustment };
   let carriedContext: WorkExecutorRequest['carriedContext'];
   let attempt;
-  if (isResumption && persistedSource) {
+  if (persistedSource?.kind === 'human_decision_checkpoint') {
+    const handoff = object(persistedSource.handoff) as unknown as WorkHandoffV1 | null;
+    const inputRequestedEventId = String(persistedSource.input_requested_event_id ?? '');
+    const inputProvidedEventId = String(persistedSource.input_provided_event_id ?? '');
+    const decision = planWorkResumption({
+      item:item.value,
+      source:{kind:'human_decision_checkpoint',handoff,inputRequestedEventId,inputProvidedEventId},
+      openClaim:null,
+      previousAttemptIds:Array.isArray(persistedSource.previous_attempt_ids)
+        ? persistedSource.previous_attempt_ids.filter((id):id is string=>typeof id==='string'):[],
+      nextAttemptId:attemptId,nextClaimId:claimId,now:new Date(),
+    });
+    if(decision.outcome!=='resume'){
+      return{...routed,outcome:decision.outcome==='requires_human'?'resumption_requires_human':'attempt_start_refused',
+        refusal:{code:decision.reason,message:decision.explanation}};
+    }
+    carriedContext={isNewAttempt:true,continueFromCheckpoint:true,...decision.plan.carriedContext};
+    attempt=await client.rpc('begin_human_decision_resumed_attempt',{
+      work_item_id:selection.workItemId,expected_proposal_version:selection.approvedProposalVersion,
+      input_requested_event_id:inputRequestedEventId,input_provided_event_id:inputProvidedEventId,
+      claim_id:claimId,attempt_id:attemptId,owner_instance_id:ownerInstanceId,
+      lease_seconds:leaseSeconds,executor_id:adapter.id,
+    });
+  } else if (isResumption && persistedSource) {
     const rawCheckpoint = object(persistedSource.checkpoint);
     const data = object(rawCheckpoint?.data);
     const sourceAttemptId = String(persistedSource.source_attempt_id ?? '');

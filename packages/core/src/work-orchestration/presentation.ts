@@ -114,9 +114,12 @@ export function projectPendingWorkDecision(item:WorkItem,events:readonly WorkEve
   for(let index=events.length-1;index>=0;index--){
     const request=events[index]!;
     if(request.type!=='input_requested'||request.proposalVersion!==item.proposalVersion)continue;
-    const data=eventData(request),reason=asString(data?.reason),attemptId=asString(data?.attempt_id);
-    const explanation=asString(data?.explanation),checkpointReference=asString(data?.checkpoint_reference);
+    const data=eventData(request),inputRequest=object(data?.input_request),sourceState=object(inputRequest?.source_state);
+    const reason=asString(inputRequest?.reason)??asString(data?.reason),attemptId=asString(data?.attempt_id);
+    const explanation=asString(inputRequest?.explanation)??asString(data?.explanation);
+    const checkpointReference=asString(sourceState?.checkpoint_reference)??asString(data?.checkpoint_reference);
     if(reason===null||!interruptionReasons.has(reason)||attemptId===null||explanation===null||checkpointReference===null)continue;
+    if(inputRequest&&inputRequest.schema_version!==1)continue;
     if(events.some(event=>event.type==='input_provided'&&asString(eventData(event)?.input_requested_event_id)===request.id))return null;
     if(!Array.isArray(data?.options))continue;
     const options:WorkDecisionOptionProjection[]=[];

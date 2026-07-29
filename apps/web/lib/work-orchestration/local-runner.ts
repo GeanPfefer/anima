@@ -178,6 +178,8 @@ export interface LocalRunnerAdapterOptions {
   // ativa; o caminho comandado (INT-04) permanece single-shot e byte a byte,
   // preservando a fronteira ratificada em 2B.1 (comandado rejeita checkpoint).
   readonly emitCheckpoints?: boolean;
+  /** Cenário local fechado para provar UX-02; nunca é inferido pelo modelo. */
+  readonly deterministicDecisionProof?: boolean;
 }
 
 type Attach = (sequence: number, value: WorkExecutorSignalInput) => WorkExecutorSignal;
@@ -197,6 +199,10 @@ export class LocalRunnerAdapter implements WorkExecutorAdapter {
     const commands = request.validationCriteria.flatMap(item => item.command ? [item.command] : []);
     if (!opaque(request.target.reference) || !workspace || missing.length > 0 || commands.length > 1) {
       yield attach(1, { kind: 'error', code: 'invalid_request', message: !workspace ? 'Alvo local não autorizado.' : missing.length ? 'Permissões locais insuficientes.' : 'Mais de um comando de validação não é suportado.', retryable: false, handoffReference: 'checkpoint:invalid-local-request' });
+      return;
+    }
+    if (this.options.deterministicDecisionProof && request.target.reference === 'ux02-deterministic-decision') {
+      yield* this.runDeterministicDecisionProof(request, attach);
       return;
     }
     const processInput: LocalRunnerProcessInput = {
@@ -221,6 +227,35 @@ export class LocalRunnerAdapter implements WorkExecutorAdapter {
       return;
     }
     yield* this.runStreamed(request, signal, attach, processInput);
+  }
+
+  private async *runDeterministicDecisionProof(request: WorkExecutorRequest, attach: Attach): AsyncIterable<WorkExecutorSignal> {
+    if (request.carriedContext?.continueFromCheckpoint === true) {
+      yield attach(1,{kind:'progress',message:'Retomando do checkpoint persistido após a decisão humana.'});
+      yield attach(2,{
+        kind:'result',
+        summary:'O cenário determinístico retomou do checkpoint persistido e concluiu a etapa autorizada.',
+        resultReferences:['ux02-proof:resumed-from-checkpoint'],
+        validations:[{label:'Retomada consumiu o checkpoint persistido',outcome:'passed'}],
+        limitations:['Cenário determinístico local; nenhuma decisão foi produzida livremente por modelo.'],
+        handoffReference:'ux02-proof:completed',
+      });
+      return;
+    }
+    const touched=request.includedScope[0]!;
+    yield attach(1,{kind:'progress',message:'Preparando o checkpoint determinístico do UX-02.'});
+    yield attach(2,{kind:'checkpoint',checkpoint:{
+      schemaVersion:1,handoffReference:'ux02-proof:checkpoint-1',
+      completedSteps:['Cenário determinístico iniciado'],remainingSteps:['Concluir a etapa após autorização humana'],
+      nextStep:'Retomar a execução usando a alternativa persistida',decisions:[],risks:['A continuação exige decisão humana explícita'],
+      touchedResources:[touched],validations:[{label:'Checkpoint determinístico criado',outcome:'passed'}],
+      failures:[],evidenceReferences:['ux02-proof:checkpoint-1'],
+    }});
+    yield attach(3,{
+      kind:'decision_required',reason:'architectural_decision',
+      explanation:'O cenário determinístico chegou ao checkpoint conhecido. Deseja continuar dali ou encerrar o trabalho?',
+      options:[{id:'continuar',label:'Continuar do checkpoint',effect:'resume'},{id:'encerrar',label:'Encerrar o trabalho',effect:'cancel'}],
+    });
   }
 
   /**

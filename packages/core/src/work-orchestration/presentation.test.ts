@@ -50,6 +50,13 @@ describe('projeção do resultado aceito',()=>{
 describe('projeção da decisão humana',()=>{
   const request=(reason:(typeof HUMAN_INTERRUPTION_REASONS)[number]):WorkEvent=>({id:`q-${reason}`,workItemId:'i',type:'input_requested',author:'anima',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{attempt_id:'attempt-1',reason,explanation:'Escolha necessária.',checkpoint_reference:'checkpoint-1',options:[{id:'seguir',label:'Seguir',effect:'resume'},{id:'parar',label:'Parar',effect:'cancel'}]}}});
   test.each(HUMAN_INTERRUPTION_REASONS)('projeta a razão fechada %s',reason=>expect(projectPendingWorkDecision({...item,state:'blocked'},[request(reason)])).toMatchObject({reason,requestEventId:`q-${reason}`,options:[{id:'seguir',effect:'resume'},{id:'parar',effect:'cancel'}]}));
+  test('reconstrói após refresh a partir do InputRequestedPayloadV1 persistido',()=>{
+    const persisted={...request('architectural_decision'),payload:{schema_version:1,data:{attempt_id:'attempt-1',
+      input_request:{schema_version:1,reason:'architectural_decision',source_state:{work_state:'in_progress',proposal_version:2,checkpoint_reference:'checkpoint-1'},explanation:'Escolha persistida.'},
+      options:[{id:'seguir',label:'Seguir',effect:'resume'},{id:'parar',label:'Parar',effect:'cancel'}],
+      handoff:{schemaVersion:1,workItemId:'i',attemptId:'attempt-1',approvedProposalVersion:2,claimId:'claim-1',status:'paused',stopReason:'human_input_required'}}}};
+    expect(presentWorkItem({...item,state:'blocked'},[persisted])).toMatchObject({pendingDecision:{reason:'architectural_decision',explanation:'Escolha persistida.',checkpointReference:'checkpoint-1'}});
+  });
   test('a resposta ao evento exato remove a decisão pendente',()=>{const pending=request('scope_change');const answered:WorkEvent={id:'answer',workItemId:'i',type:'input_provided',author:'user',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{input_requested_event_id:pending.id,option_id:'seguir'}}};expect(projectPendingWorkDecision({...item,state:'approved'},[pending,answered])).toBeNull();});
   test('alternativas malformadas não são inventadas pela apresentação',()=>expect(projectPendingWorkDecision({...item,state:'blocked'},[{...request('scope_change'),payload:{schema_version:1,data:{attempt_id:'attempt-1',reason:'scope_change',explanation:'x',checkpoint_reference:'cp',options:[{id:'única',label:'Única',effect:'resume'}]}}}])).toBeNull());
 });

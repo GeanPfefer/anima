@@ -97,6 +97,33 @@ test('carriedContext da retomada é repassado ao runner como contexto de continu
   expect(signals).toEqual([expect.objectContaining({ kind: 'result', sequence: 1 })]);
 });
 
+test('cenário UX-02 determinístico emite progresso, checkpoint e decisão sem chamar modelo',async()=>{
+  const process={run:jest.fn()} satisfies LocalRunnerProcess;
+  const proof={...request,target:{kind:'project' as const,reference:'ux02-deterministic-decision'}};
+  const adapter=new LocalRunnerAdapter({runnerRoot:'runner',targets:{resolve:()=> 'G:\\proof'},process,emitCheckpoints:true,deterministicDecisionProof:true});
+  const signals=await collect(adapter,proof);
+  expect(signals).toEqual([
+    expect.objectContaining({kind:'progress',sequence:1}),
+    expect.objectContaining({kind:'checkpoint',sequence:2,checkpoint:expect.objectContaining({handoffReference:'ux02-proof:checkpoint-1'})}),
+    expect.objectContaining({kind:'decision_required',sequence:3,reason:'architectural_decision',options:[
+      {id:'continuar',label:'Continuar do checkpoint',effect:'resume'},{id:'encerrar',label:'Encerrar o trabalho',effect:'cancel'}]}),
+  ]);
+  expect(process.run).not.toHaveBeenCalled();
+});
+
+test('cenário UX-02 determinístico só conclui quando recebe carriedContext persistido',async()=>{
+  const process={run:jest.fn()} satisfies LocalRunnerProcess;
+  const proof={...request,target:{kind:'project' as const,reference:'ux02-deterministic-decision'},
+    carriedContext:{isNewAttempt:true as const,continueFromCheckpoint:true as const,remainingSteps:['Concluir'],nextStep:'Continuar',
+      risks:[],touchedResources:['a.py'],previousFailures:[]}};
+  const adapter=new LocalRunnerAdapter({runnerRoot:'runner',targets:{resolve:()=> 'G:\\proof'},process,emitCheckpoints:true,deterministicDecisionProof:true});
+  await expect(collect(adapter,proof)).resolves.toEqual([
+    expect.objectContaining({kind:'progress',sequence:1}),
+    expect.objectContaining({kind:'result',sequence:2,summary:expect.stringContaining('retomou do checkpoint')}),
+  ]);
+  expect(process.run).not.toHaveBeenCalled();
+});
+
 test('reconcilia reentrega pela tentativa persistida sem heurística', () => {
   const event = (type: 'execution_started' | 'result_submitted', attemptId: string) => ({ id: type, workItemId: 'work-1', type, author: 'executor' as const, proposalVersion: 1, payload: { schema_version: 1, data: { attempt_id: attemptId } }, occurredAt: new Date() });
   expect(classifyPersistedAttempt([], 'attempt-1')).toBe('absent');

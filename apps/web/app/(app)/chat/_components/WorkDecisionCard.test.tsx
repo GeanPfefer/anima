@@ -25,4 +25,24 @@ describe('WorkDecisionCard',()=>{
     expect(body).toEqual({workItemId:'item-1',expectedProposalVersion:2,inputRequestedEventId:'request-1',optionId:'seguir'});
     await waitFor(()=>expect(onReload).toHaveBeenCalled());
   });
+  test('retoma pelo supervisor quando a decisão Continuar deixa o trabalho aprovado',async()=>{
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ok:true,json:async()=>({ok:true,value:{state:'approved'}})})
+      .mockResolvedValueOnce({ok:true,json:async()=>({ok:true,value:{outcome:'completed'}})});
+    const onReload=jest.fn();
+    render(<WorkDecisionCard decision={decision()} workItemId="item-1" onReload={onReload}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Seguir com a alternativa A'}));
+    await waitFor(()=>expect(global.fetch).toHaveBeenCalledTimes(2));
+    expect(global.fetch).toHaveBeenNthCalledWith(2,'/api/work-orchestration/supervisor-turn',expect.objectContaining({
+      method:'POST',
+      body:JSON.stringify({workItemId:'item-1',expectedProposalVersion:2}),
+    }));
+    await waitFor(()=>expect(onReload).toHaveBeenCalled());
+  });
+  test('não inicia nova execução ao encerrar',async()=>{
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ok:true,json:async()=>({ok:true,value:{state:'cancelled'}})});
+    render(<WorkDecisionCard decision={decision()} workItemId="item-1" onReload={jest.fn()}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Encerrar este trabalho'}));
+    await waitFor(()=>expect(global.fetch).toHaveBeenCalledTimes(1));
+  });
 });

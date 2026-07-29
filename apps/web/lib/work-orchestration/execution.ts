@@ -49,6 +49,7 @@ export const localRunnerFromEnvironment = (options: { readonly emitCheckpoints?:
     runnerRoot, model: process.env.ANIMA_LOCAL_RUNNER_MODEL,
     targets: { resolve: reference => targets[reference] ?? null },
     emitCheckpoints: options.emitCheckpoints ?? false,
+    deterministicDecisionProof: process.env.ANIMA_UX02_DETERMINISTIC_PROOF === '1',
   });
 };
 

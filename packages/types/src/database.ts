@@ -1495,6 +1495,43 @@ export type Database = {
         }
         Returns: Json
       }
+      human_decision_resumption_source: {
+        Args: { p_work_item_id: string }
+        Returns: Json
+      }
+      begin_human_decision_resumed_attempt: {
+        Args: {
+          attempt_id: string
+          claim_id: string
+          executor_id: string
+          expected_proposal_version: number
+          input_provided_event_id: string
+          input_requested_event_id: string
+          lease_seconds: number
+          owner_instance_id: string
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       respond_to_work_decision: {
         Args: {
           p_expected_proposal_version: number

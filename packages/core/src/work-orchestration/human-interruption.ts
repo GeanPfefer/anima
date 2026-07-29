@@ -1,4 +1,5 @@
 import type { WorkState } from './types';
+import type { WorkHandoffV1 } from './work-handoff';
 
 // AUTO-06 — Política fechada de interrupção humana (Marco 003).
 // O domínio não oferece razão genérica: qualquer valor fora desta lista é defeito.
@@ -41,6 +42,19 @@ export interface InputRequestedPayloadV1 {
   };
   readonly explanation: string;
   readonly reached_limit?: AutonomousLimitKind;
+}
+export interface HumanDecisionOption {
+  readonly id:string;
+  readonly label:string;
+  readonly effect:'resume'|'cancel';
+}
+// Refinamento do MESMO InputRequestedPayloadV1 para o UX-02. O pedido não
+// ganha outro vocabulário: mantém razão/source_state/explicação e acrescenta
+// apenas correlação, alternativas apresentadas e o handoff AUTO-05 persistido.
+export interface DecisionInputRequestedPayloadV1 extends InputRequestedPayloadV1 {
+  readonly attempt_id:string;
+  readonly options:readonly HumanDecisionOption[];
+  readonly handoff:WorkHandoffV1;
 }
 
 export type HumanInterruptionPolicyResult =

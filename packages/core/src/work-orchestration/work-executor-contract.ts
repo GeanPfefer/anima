@@ -1,7 +1,7 @@
 import type { AutonomousExecutionLimits, AutonomousExecutionTarget, AutonomousValidationCriterion } from './eligibility';
 import { containsSensitiveData, type ExecutionAttemptCorrelation } from './execution-attempt';
 import type { ExecutionEventCorrelation } from './execution-event-correlation';
-import type { HumanInterruptionReason } from './human-interruption';
+import type { HumanDecisionOption, HumanInterruptionReason } from './human-interruption';
 import type { WorkCapability, WorkContextReference, WorkResultValidation } from './types';
 
 export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
@@ -71,11 +71,7 @@ export interface WorkCheckpointV1 {
 }
 
 interface CorrelatedSignal extends ExecutionEventCorrelation { readonly sequence: number; }
-export interface WorkDecisionOption {
-  readonly id: string;
-  readonly label: string;
-  readonly effect: 'resume' | 'cancel';
-}
+export type WorkDecisionOption = HumanDecisionOption;
 // `progress` e `checkpoint` são os dois sinais NÃO-terminais. `checkpoint` é o
 // único que carrega continuação estruturada retomável antes do terminal único.
 export type WorkExecutorSignal =

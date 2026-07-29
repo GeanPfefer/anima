@@ -57,6 +57,12 @@ export interface AbandonedCheckpointV1 {
 export type WorkResumptionSourceV1 =
   | { readonly kind: 'terminal_handoff'; readonly handoff: WorkHandoffV1 | null; readonly scenario: InterruptionScenario }
   | {
+      readonly kind: 'human_decision_checkpoint';
+      readonly handoff: WorkHandoffV1 | null;
+      readonly inputRequestedEventId: string;
+      readonly inputProvidedEventId: string;
+    }
+  | {
       readonly kind: 'abandoned_checkpoint';
       readonly checkpoint: AbandonedCheckpointV1 | null;
       readonly sourceAttemptId: string;
@@ -161,17 +167,22 @@ export function planWorkResumption(input: WorkResumptionInput): WorkResumptionDe
   if (!nonBlank(nextAttemptId) || !nonBlank(nextClaimId) || !Array.isArray(previousAttemptIds)) {
     return refuse('invalid_resumption_request', 'A retomada exige identificadores novos e histórico de tentativas.');
   }
+  if (source.kind==='human_decision_checkpoint'
+    && (!nonBlank(source.inputRequestedEventId)||!nonBlank(source.inputProvidedEventId)
+      || (source.handoff!==null&&(source.handoff.status!=='paused'||source.handoff.stopReason!=='human_input_required')))) {
+    return refuse('checkpoint_correlation_mismatch','A retomada por decisão humana exige pedido, resposta e handoff pausado correlacionados.');
+  }
   if (previousAttemptIds.includes(nextAttemptId)) {
     return refuse('identifier_reused', 'A retomada exige uma tentativa nova; reaproveitar o identificador duplicaria efeitos.');
   }
 
-  if (!terminal && !ABANDONMENT_REASONS.includes(source.abandonmentReason as WorkAbandonmentReason)) {
+  if (source.kind === 'abandoned_checkpoint' && !ABANDONMENT_REASONS.includes(source.abandonmentReason as WorkAbandonmentReason)) {
     return refuse('invalid_resumption_request', 'A razão persistida do abandono não pertence ao vocabulário fechado.');
   }
   const checkpoint: WorkHandoffV1 | AbandonedCheckpointV1 | null =
-    source.kind === 'terminal_handoff' ? source.handoff : source.checkpoint;
+    source.kind === 'abandoned_checkpoint' ? source.checkpoint : source.handoff;
   if (checkpoint === null) {
-    return terminal
+    return source.kind !== 'abandoned_checkpoint'
       ? refuse('checkpoint_missing', 'Não há checkpoint persistido: retomar seria reconstruir por suposição.')
       : {
           outcome: 'requires_human', reason: 'persistent_inability_after_limits', reachedLimit: 'duration',
@@ -179,8 +190,8 @@ export function planWorkResumption(input: WorkResumptionInput): WorkResumptionDe
         };
   }
   const abandonedCheckpoint = source.kind === 'abandoned_checkpoint' ? source.checkpoint : null;
-  const checkpointAttemptId = source.kind === 'terminal_handoff' ? source.handoff!.attemptId : source.checkpoint!.sourceAttemptId;
-  const checkpointClaimId = source.kind === 'terminal_handoff' ? source.handoff!.claimId : source.checkpoint!.sourceClaimId;
+  const checkpointAttemptId = source.kind === 'abandoned_checkpoint' ? source.checkpoint!.sourceAttemptId : source.handoff!.attemptId;
+  const checkpointClaimId = source.kind === 'abandoned_checkpoint' ? source.checkpoint!.sourceClaimId : source.handoff!.claimId;
   if (checkpoint.workItemId !== item.id) {
     return refuse('checkpoint_correlation_mismatch', 'O checkpoint pertence a outro work item.');
   }
@@ -247,11 +258,11 @@ export function planWorkResumption(input: WorkResumptionInput): WorkResumptionDe
       workItemId: item.id,
       approvedProposalVersion: item.proposalVersion,
       sourceKind: source.kind,
-      ...(source.kind === 'terminal_handoff' ? { scenario: source.scenario } : {
+      ...(source.kind === 'terminal_handoff' ? { scenario: source.scenario } : source.kind === 'abandoned_checkpoint' ? {
         abandonmentReason: source.checkpoint!.abandonmentReason,
         resumeFromCheckpointEventSeq: source.checkpoint!.checkpointEventSeq,
         resumeFromCheckpointSignalSequence: source.checkpoint!.checkpointSignalSequence,
-      }),
+      } : {}),
       resumeFromAttemptId: checkpointAttemptId,
       resumeFromHandoffReference: checkpoint.handoffReference,
       nextAttemptId,

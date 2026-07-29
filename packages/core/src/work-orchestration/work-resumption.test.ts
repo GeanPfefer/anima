@@ -115,6 +115,14 @@ describe('retomada — todo cenário do Marco 003 tem caminho', () => {
       .toMatchObject({ outcome: 'refused', reason: 'scenario_not_allowed' }));
 });
 
+test('decisão humana respondida retoma do WorkHandoffV1 persistido com novas identidades',()=>{
+  const result=planWorkResumption(makeInput({source:{kind:'human_decision_checkpoint',handoff:makeHandoff(),
+    inputRequestedEventId:'input-request-1',inputProvidedEventId:'input-answer-1'}}));
+  expect(result).toMatchObject({outcome:'resume',plan:{sourceKind:'human_decision_checkpoint',
+    resumeFromAttemptId:'attempt-1',resumeFromHandoffReference:HANDOFF_REF,nextAttemptId:'attempt-2',nextClaimId:'claim-2',
+    carriedContext:{remainingSteps:['corrigir o operador de soma'],nextStep:'aplicar a correção mínima e reexecutar os testes'}}});
+});
+
 describe('retomada — parte do checkpoint, nunca da memória', () => {
   test('sem checkpoint não se retoma: exige reparação ou decisão humana', () =>
     expect(planWorkResumption(makeInput({ source: { kind: 'terminal_handoff', scenario: 'machine_restart', handoff: null } })))
