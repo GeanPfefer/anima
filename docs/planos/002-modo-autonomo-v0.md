@@ -20,7 +20,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
 | F | **Concluída (2026-07-28)** | INTEL-01 a INTEL-04 concluídos; política de orçamento ratificada e aplicada |
-| G | Em andamento | UX-01 (cartão de execução) ratificado; UX-02 é o próximo incremento |
+| G | Em andamento | UX-01 (cartão de execução) e UX-02 (cartão de decisão necessária) ratificados; UX-03/UX-04 e paridade mobile seguem |
 
 ## Fase A — Fechar a orquestração atual
 
@@ -859,10 +859,33 @@ As duas camadas de prova são **formalmente distintas** e têm status diferentes
 - **`supabase/tests/ux02_deterministic_proof.test.sql`** (pgTAP, padrão canônico BEGIN/ROLLBACK): cria uma conta descartável `@test.invalid` própria, allowlista, e percorre o caminho **real de RPCs** — `create_work_proposal`, `resolve_approval`, `record_work_intelligence_classification`, claim, roteamento, tentativa e checkpoint — até `record_work_decision_required` e a resposta humana (ramo A retoma até `review`; ramo B encerra em `cancelled`). Prova explicitamente que, **antes** da classificação, `select_autonomous_work` não oferece o item, e que **depois** dela passa a oferecer — cobrindo a lacuna original. Nenhuma conta pessoal é usada e nada persiste (ROLLBACK). **Ressalva:** a prova insere a intenção/proposta *equivalente* à da frase; ela **não** invoca `configureUx02DeterministicProof`.
 - **`apps/web/lib/work-orchestration/execution-environment.test.ts`**: prova o **gatilho da frase** pela função real (`configureUx02DeterministicProof` só configura com a flag e a frase exata) e a **ponte de elegibilidade** — a frase produz um `execution_spec` que o predicado do AUTO-01 aceita. É a fonte da verdade da forma que o pgTAP reproduz em JSON.
 
-**Camada 2 — prova integrada do chat e da interface (NÃO EXECUTADA / pendente de ratificação).**
-Enviar a frase no chat Next.js real, ver o cartão de decisão, **recarregar a página** com o cartão pendente e clicar em continuar/encerrar. Depende do dev server + Ollama + navegador e **não foi exercida**. As garantias determinísticas (Camada 1) não dependem dela, mas a experiência visual em si **permanece não comprovada** e não é declarada concluída.
+**Camada 2 — prova integrada do chat e da interface** (à época pendente; **ratificada em 2026-07-30**, ver subseção seguinte).
+Enviar a frase no chat Next.js real, ver o cartão de decisão, **recarregar a página** com o cartão pendente e clicar em continuar/encerrar. Depende do dev server + Ollama + navegador. As garantias determinísticas (Camada 1) não dependem dela.
 
 **Evidências verdes da Camada 1 (executadas 2026-07-29):** pgTAP `ux02_deterministic_proof` 36/36 contra o Supabase local real; suíte pgTAP completa 25 arquivos / 629 testes PASS; web 127/127; typecheck `apps/web`. A frase determinística exata e o cenário fechado `ux02-deterministic-decision` foram preservados intactos.
+
+### UX-02 ratificado — funcional completo (2026-07-30)
+
+Registro **factual** de ratificação do UX-02 funcional com base nas Camadas 1 e 2. Nenhum código de produção, contrato ou teste foi alterado para esta prova; **o commit funcional ratificado é `8d3ba73`, sem novas mudanças de código**.
+
+**Significado preciso da ratificação:**
+
+1. **O UX-02 funcional está ratificado dentro do desenho atual** — Camada 1 (domínio/banco) ratificada e automatizada; Camada 2 (chat/interface) ratificada por prova integrada.
+2. A **Camada 2 foi uma prova integrada assistida**, executada no navegador real dirigido passo a passo — **não** um harness E2E totalmente automático de comando único.
+3. A **classificação foi provisionada pela RPC real** (`record_work_intelligence_classification`) porque **não existe atualmente um caminho no chat ou na interface que produza a classificação INTEL-01**.
+4. Essa ausência **não é um defeito do UX-02**; fica documentada como **limitação externa do fluxo** (a classificação INTEL-01 ainda não tem gatilho conversacional).
+5. **Fora desta ratificação:** `review → completed` (aceite do resultado), concorrência multi-sessão e execução estocástica (modelo real).
+
+**Fatos da prova:**
+
+- **Data da ratificação:** 2026-07-30.
+- **Branch/commit testados:** `codex/ux-00-natural-proposal` (= `codex/ux-02-prova-autoprovavel`), commit **`8d3ba73`**.
+- **Usuários descartáveis (`@test.invalid`, criados na sessão):** A `ux02-proof-a-20260730150741@test.invalid`; B `ux02-proof-b-20260730151519@test.invalid`.
+- **Itens e estados finais:** A `13358f9d-afc7-4051-bf87-0ea69e4c4937` → **`review`** (fluxo "continuar", com retomada correlacionada e resultado terminal, sem integração automática); B `0e6453a0-e9bb-46d9-b0d4-bd9fff40e1cc` → **`cancelled`** (fluxo "encerrar", sem retomada, resultado ou integração).
+- **Frase → função real:** os dois itens nasceram `capability=programming` + `execution_spec.target=ux02-deterministic-decision` pela rota `/api/ai/chat`, forma que só `configureUx02DeterministicProof` produz sob a flag.
+- **Reload confirmado:** em ambos os cenários, o cartão de decisão foi reconstruído a partir dos eventos persistidos e reexibido idêntico após recarga completa da página.
+- **Sem conta pessoal:** ambos os itens pertencem a contas `@test.invalid`; `tecopfefer@gmail.com` não foi utilizado.
+- **Sem mudança de código para a prova passar:** `git status` só mostrava `.worktrees/`; `HEAD` permaneceu `8d3ba73`; a configuração determinística veio de um overlay de ambiente temporário e gitignored, removido ao final.
 
 ## Dependências entre fases
 
