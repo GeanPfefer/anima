@@ -849,6 +849,21 @@ O checkpoint anterior desta seção comprovava a emissão e a resposta ao cartã
 
 **Falta para ratificar:** executar o cenário determinístico no chat real, recarregar a página enquanto o cartão estiver pendente e escolher um dos dois ramos. A frase de teste só deve ser fornecida depois de o ambiente de prova estar preparado.
 
+### UX-02 prova autoprovável (2026-07-29) — provisionamento próprio, sem conta pessoal
+
+A prova determinística passou a provisionar todo o estado sozinha, fechando duas lacunas do roteiro manual anterior: o item era criado sob a conta pessoal e ficava **sem a classificação necessária**, então nunca era selecionável pela fila autônoma.
+
+As duas camadas de prova são **formalmente distintas** e têm status diferentes:
+
+**Camada 1 — prova determinística de domínio/banco (EXECUTADA).**
+- **`supabase/tests/ux02_deterministic_proof.test.sql`** (pgTAP, padrão canônico BEGIN/ROLLBACK): cria uma conta descartável `@test.invalid` própria, allowlista, e percorre o caminho **real de RPCs** — `create_work_proposal`, `resolve_approval`, `record_work_intelligence_classification`, claim, roteamento, tentativa e checkpoint — até `record_work_decision_required` e a resposta humana (ramo A retoma até `review`; ramo B encerra em `cancelled`). Prova explicitamente que, **antes** da classificação, `select_autonomous_work` não oferece o item, e que **depois** dela passa a oferecer — cobrindo a lacuna original. Nenhuma conta pessoal é usada e nada persiste (ROLLBACK). **Ressalva:** a prova insere a intenção/proposta *equivalente* à da frase; ela **não** invoca `configureUx02DeterministicProof`.
+- **`apps/web/lib/work-orchestration/execution-environment.test.ts`**: prova o **gatilho da frase** pela função real (`configureUx02DeterministicProof` só configura com a flag e a frase exata) e a **ponte de elegibilidade** — a frase produz um `execution_spec` que o predicado do AUTO-01 aceita. É a fonte da verdade da forma que o pgTAP reproduz em JSON.
+
+**Camada 2 — prova integrada do chat e da interface (NÃO EXECUTADA / pendente de ratificação).**
+Enviar a frase no chat Next.js real, ver o cartão de decisão, **recarregar a página** com o cartão pendente e clicar em continuar/encerrar. Depende do dev server + Ollama + navegador e **não foi exercida**. As garantias determinísticas (Camada 1) não dependem dela, mas a experiência visual em si **permanece não comprovada** e não é declarada concluída.
+
+**Evidências verdes da Camada 1 (executadas 2026-07-29):** pgTAP `ux02_deterministic_proof` 36/36 contra o Supabase local real; suíte pgTAP completa 25 arquivos / 629 testes PASS; web 127/127; typecheck `apps/web`. A frase determinística exata e o cenário fechado `ux02-deterministic-decision` foram preservados intactos.
+
 ## Dependências entre fases
 
 ```text
