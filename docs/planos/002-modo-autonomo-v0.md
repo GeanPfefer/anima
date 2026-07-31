@@ -20,7 +20,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
 | F | **Concluída (2026-07-28)** | INTEL-01 a INTEL-04 concluídos; política de orçamento ratificada e aplicada |
-| G | Em andamento | UX-01 (cartão de execução) e UX-02 (cartão de decisão necessária) ratificados; UX-03/UX-04 e paridade mobile seguem |
+| G | Em andamento | UX-01 (cartão de execução) e UX-02 (cartão de decisão necessária) ratificados; UX-03 (cartão de resultado autônomo) **implementado e pronto para revisão** (não ratificado); UX-04 e paridade mobile seguem |
 
 ## Fase A — Fechar a orquestração atual
 
@@ -886,6 +886,27 @@ Registro **factual** de ratificação do UX-02 funcional com base nas Camadas 1 
 - **Reload confirmado:** em ambos os cenários, o cartão de decisão foi reconstruído a partir dos eventos persistidos e reexibido idêntico após recarga completa da página.
 - **Sem conta pessoal:** ambos os itens pertencem a contas `@test.invalid`; `tecopfefer@gmail.com` não foi utilizado.
 - **Sem mudança de código para a prova passar:** `git status` só mostrava `.worktrees/`; `HEAD` permaneceu `8d3ba73`; a configuração determinística veio de um overlay de ambiente temporário e gitignored, removido ao final.
+
+### UX-03 pronto para revisão (2026-07-31) — cartão de resultado autônomo
+
+**Não ratificado.** Registro append-only do estado alcançado, para o checkpoint humano. Nenhuma seção anterior foi reescrita. Branch dedicada `claude/ux-03-autonomous-result-card` a partir de `ce57eab`; sem push, PR, merge ou alteração de `main`.
+
+**Definição canônica (backlog UX-03):** cartão de resultado com resumo, evidências tipadas, **referência de handoff** e ações de **aprovar** e **pedir alterações**; **reutilizar o fluxo de revisão existente, estendido para a tentativa autônoma**; integração continua etapa separada (INT-03); risco explícito de duplicar o fluxo em vez de estendê-lo.
+
+**Achado central (diagnóstico):** o fluxo de revisão de resultado **já existia genérico** desde o ciclo manual F5 — projeção pura (`projectLatestWorkResult`/`availableWorkActions`), RPC `review_work_result_versioned` (aceite/pedir alterações referenciando o **evento de resultado exato** + versão; `55000` em conflito), rota `/api/work-orchestration/reviews` e a UI embutida no `WorkProposalCard`. Por ser **origin-agnóstico**, já cobria mecanicamente resultados autônomos. O UX-03 foi entregue **estendendo** esse fluxo, sem duplicá-lo nem criar cartão paralelo.
+
+**O que foi implementado (mínimo, aditivo):**
+- **Core:** `WorkResultProjection` ganhou `handoffReference`; `projectLatestWorkResult` passa a ler `data.handoff_reference` (null quando ausente/malformado). O terminal do executor já persistia a referência, mas ela **nunca era projetada** — exigência explícita do cartão do UX-03. `projectAcceptedWorkResult` herda o campo.
+- **Web:** o cartão de resultado exibe a **referência de handoff** (ou declara a ausência). Nada é inventado no cliente; o resto do fluxo (aceite/pedir alterações) já existia.
+- **Escopo preservado:** `completed` = resultado aceito, **nunca** integração; nenhum botão de merge/publicação; `changes_requested` mantém o item aberto (`changes_requested → work_started → in_progress`) sem perder histórico; as duas decisões seguem o enum ratificado `work_review_decision = {accept, request_changes}`.
+
+**Divergência registrada:** a redação do backlog menciona três ações ("aprovar, pedir alterações **ou rejeitar**"), mas o contrato implementado e ratificado do resultado tem **duas** (`accept`, `request_changes`); "rejeitar" um resultado não existe no enum. Segui o contrato do código (fonte da verdade), sem inventar botão.
+
+**Evidências verdes (2026-07-31):**
+- **Camada 1 — domínio/banco (automatizada):** `supabase/tests/ux03_autonomous_result_review.test.sql`, pgTAP determinístico autoprovável **41/41** contra o Supabase local real. Leva o item a `review` pelo **terminal real do executor** (`record_commanded_work_terminal`, `origin=executor`) e exercita `review_work_result_versioned` nos dois ramos — aceitar (`review → completed`, aceite aponta o evento de resultado exato, `completed ≠ integrated`) e pedir alterações (`review → changes_requested`, texto obrigatório, histórico preservado) — com guardas de isolamento por usuário, idempotência/versão. Contas descartáveis `@test.invalid`, `BEGIN/ROLLBACK` (nada persiste). Suíte pgTAP completa **26 arquivos / 670 testes** sem falha. Testes de componente e projeção: web **130**, core **567**, mobile **12**; `typecheck` limpo nos cinco workspaces.
+- **Camada 2 — integrada, navegador real (2026-07-31):** conta descartável `ux03-web-a@test.invalid` provisionada e allowlistada; pela interface real, a frase determinística criou a proposta (`target=ux02-deterministic-decision`), a execução autônoma parou em `decision_required`, "Continuar do checkpoint" retomou e o **terminal autônomo produziu o resultado** → item em `review`. O **cartão de resultado** foi exibido com resumo, autoria `executor`, referências, validações tipadas e a **referência de handoff `ux02-proof:completed`**. **Aceitar resultado** levou o item a `completed` referenciando o evento de resultado autônomo exato (sem integração automática); em item irmão, **Pedir correções** (texto obrigatório) levou a `changes_requested` preservando o resultado no histórico. Ambas as decisões refletiram no chat sem refresh manual e sobreviveram à recarga. A classificação INTEL-01 foi provisionada pela RPC (mesma **limitação externa** já documentada no UX-02: não há gatilho conversacional). Os dados descartáveis foram **verificados e removidos** por identificação exata (cascade do usuário `7482baae…`), com o banco retornando à baseline (6 usuários / 10 itens / 75 eventos / 34 conversas) e `tecopfefer@gmail.com` intacto.
+
+**Fora desta entrega (não iniciados):** UX-04 (histórico/retomada pelo chat) e a paridade mobile do cartão de resultado (o `presentMobileWorkResult` já projeta o resultado, mas sem ações de revisão). Ratificação final é do humano.
 
 ## Dependências entre fases
 
