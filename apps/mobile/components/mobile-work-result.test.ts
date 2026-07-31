@@ -6,6 +6,7 @@ const result: WorkResultProjection = {
   references: ['commit:abc123', 'artifact:qa'],
   validations: [{ label: 'typecheck mobile', outcome: 'passed' }, { label: 'teste físico', outcome: 'failed' }],
   limitations: ['sem teste offline'],
+  handoffReference: 'runner-bundle:mobile',
 };
 
 function presentation(state: WorkState, overrides: Partial<WorkPresentation> = {}): WorkPresentation {

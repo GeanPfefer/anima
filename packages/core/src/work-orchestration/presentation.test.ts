@@ -8,6 +8,9 @@ describe('projeção de apresentação do trabalho',()=>{
   test('marca validações e limitações ausentes como não informadas',()=>expect(projectLatestWorkResult([event])).toMatchObject({validations:null,limitations:null}));
   test('projeta validações e limitações tipadas',()=>expect(projectLatestWorkResult([{...event,payload:{schema_version:1,data:{summary:'feito',result_references:[],validations:[{label:'npm test',outcome:'passed'}],limitations:['sem teste e2e']}}}])).toMatchObject({validations:[{label:'npm test',outcome:'passed'}],limitations:['sem teste e2e']}));
   test('validações malformadas não viram evidência',()=>expect(projectLatestWorkResult([{...event,payload:{schema_version:1,data:{summary:'feito',result_references:[],validations:[{label:'x',outcome:'inventado'}],limitations:['ok',42]}}}])).toMatchObject({validations:null,limitations:null}));
+  test('projeta a referência de handoff persistida pelo terminal do executor (UX-03)',()=>expect(projectLatestWorkResult([{...event,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a'],handoff_reference:'runner-bundle:ux03'}}}])).toMatchObject({handoffReference:'runner-bundle:ux03'}));
+  test('resultado sem referência de handoff declara a ausência com null',()=>expect(projectLatestWorkResult([event])).toMatchObject({handoffReference:null}));
+  test('referência de handoff vazia ou malformada não vira evidência',()=>expect(projectLatestWorkResult([{...event,payload:{schema_version:1,data:{summary:'feito',result_references:[],handoff_reference:'   '}}}])).toMatchObject({handoffReference:null}));
   test('interpreta linhas de validação com prefixo tipado',()=>expect(parseWorkResultValidations('ok: npm test\nfalha: build web\nrevisão manual\n  \n')).toEqual([{label:'npm test',outcome:'passed'},{label:'build web',outcome:'failed'},{label:'revisão manual',outcome:'declared'}]));
 });
 describe('reconstrução fail-closed da proveniência',()=>{
@@ -36,6 +39,7 @@ describe('revisão coerente de proposta',()=>{
 describe('projeção do resultado aceito',()=>{
   const accepted={id:'a',workItemId:'i',type:'result_accepted',author:'user',proposalVersion:2,payload:{schema_version:1,data:{accepted_result_event_id:'r'}},occurredAt:new Date()} satisfies WorkEvent;
   test('reconstrói o resultado exato referenciado pelo aceite',()=>expect(projectAcceptedWorkResult([event,accepted])).toMatchObject({eventId:'r',summary:'feito',references:['commit:a']}));
+  test('resultado aceito preserva a referência de handoff do resultado original (UX-03)',()=>expect(projectAcceptedWorkResult([{...event,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a'],handoff_reference:'runner-bundle:ux03'}}},accepted])).toMatchObject({handoffReference:'runner-bundle:ux03'}));
   test('presentWorkItem expõe o resultado aceito ao lado do último resultado',()=>expect(presentWorkItem({...item,state:'completed'},[event,accepted])).toMatchObject({acceptedResult:{eventId:'r'},availableActions:[]}));
   test('correlaciona ao evento referenciado mesmo com resultado mais novo',()=>{
     const newer={...event,id:'r2',payload:{schema_version:1,data:{summary:'outro',result_references:[]}}} satisfies WorkEvent;

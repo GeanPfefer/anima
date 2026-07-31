@@ -12,6 +12,10 @@ export interface WorkResultProjection {
   readonly references: readonly string[];
   readonly validations: readonly WorkResultValidation[] | null;
   readonly limitations: readonly string[] | null;
+  // Referência de handoff do resultado (UX-03). Persistida pelo terminal do
+  // executor (autônomo/comandado) como data.handoff_reference; null quando o
+  // resultado não a informa. A UI declara a ausência, nunca a inventa.
+  readonly handoffReference: string | null;
 }
 export type WorkAction = 'approve'|'reject'|'defer'|'revise_proposal'|'start'|'submit_result'|'accept_result'|'request_result_changes';
 export interface WorkProvenanceProjection { readonly status:'complete'|'incomplete'; readonly issues:readonly string[]; }
@@ -64,7 +68,7 @@ const projectValidations=(value:Json|undefined):readonly WorkResultValidation[]|
 };
 const projectLimitations=(value:Json|undefined):readonly string[]|null=>Array.isArray(value)&&value.every((entry):entry is string=>typeof entry==='string'&&entry.trim().length>0)?value:null;
 export function projectLatestWorkResult(events:readonly WorkEvent[]):WorkResultProjection|null{
-  for(let index=events.length-1;index>=0;index--){const event=events[index]!;if(event.type!=='result_submitted'||event.proposalVersion===null)continue;const envelope=object(event.payload),data=object(envelope?.data);if(typeof data?.summary!=='string'||!Array.isArray(data.result_references)||!data.result_references.every(value=>typeof value==='string'))continue;return{eventId:event.id,proposalVersion:event.proposalVersion,author:event.author,summary:data.summary,references:data.result_references,validations:projectValidations(data.validations),limitations:projectLimitations(data.limitations)};}
+  for(let index=events.length-1;index>=0;index--){const event=events[index]!;if(event.type!=='result_submitted'||event.proposalVersion===null)continue;const envelope=object(event.payload),data=object(envelope?.data);if(typeof data?.summary!=='string'||!Array.isArray(data.result_references)||!data.result_references.every(value=>typeof value==='string'))continue;return{eventId:event.id,proposalVersion:event.proposalVersion,author:event.author,summary:data.summary,references:data.result_references,validations:projectValidations(data.validations),limitations:projectLimitations(data.limitations),handoffReference:typeof data.handoff_reference==='string'&&data.handoff_reference.trim().length>0?data.handoff_reference:null};}
   return null;
 }
 // O resultado aceito é reconstruído a partir do result_accepted mais recente
