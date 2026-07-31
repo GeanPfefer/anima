@@ -53,3 +53,17 @@ export const resolveWorkFocus = (candidateIds: readonly string[], currentItemId?
   return { kind: 'confirmation_required', itemIds: unique };
 };
 export const isWorkContinuation=(message:string):boolean=>/\b(?:continue|continuar|retome|retomar|ness[ae]|neste|nesse|tarefa|trabalho|proposta|resultado|ajuste|corrija|correção|isso|esse ponto)\b/i.test(message)&&!/\b(?:hoje|ontem|dormi|corri|treinei|estudei|me senti)\b/i.test(message);
+
+// UX-04 — estados NÃO terminais (trabalho ainda em aberto, reencontrável e
+// retomável pela conversa). Fonte única; os terminais são completed/failed/
+// rejected/cancelled. A ordem aqui não implica prioridade.
+export const RESUMABLE_WORK_STATES = ['proposed','approved','in_progress','blocked','review','changes_requested'] as const;
+
+// UX-04 — intenção CONVERSACIONAL de reencontrar/listar o próprio trabalho aberto
+// ("quais trabalhos tenho em aberto?", "meus trabalhos", "o que ficou pendente?",
+// "onde paramos?", "retomar um trabalho"). É determinística e fail-closed: só
+// padrões específicos de consulta ao trabalho existente disparam a lista; registro
+// de vida cotidiana ("trabalhei hoje") é excluído. Distinta de isWorkContinuation
+// (que retoma um referente específico já em foco): a rota consulta o histórico
+// ANTES da continuação, então um pedido genérico de listar prevalece sobre focar.
+export const isWorkHistoryQuery=(message:string):boolean=>/\b(?:meus\s+trabalhos|trabalhos?\s+(?:em\s+aberto|abertos?|pendentes?|pausados?|ativos?|parados?|aguardando)|(?:quais|que|liste|listar|mostr\w+|ver)\s+(?:os\s+)?(?:meus\s+)?trabalhos|o\s+que\s+(?:ficou|est[aá]|t[aá])\s+(?:pendente|em\s+aberto|parado|pausado|aguardando)|onde\s+(?:paramos|parei|est[aá]vamos)|tenho\s+(?:algo|algum\s+trabalho|trabalhos)\s+(?:em\s+aberto|pendente|pausad|parad|aguardando|em\s+andamento)|(?:retomar|continuar)\s+(?:um|meu|meus|o|algum)\s+trabalho|decis(?:ão|ões|oes)\s+pendentes?|trabalhos?\s+aguardando\s+decis)/i.test(message)&&!/\b(?:hoje|ontem|dormi|corri|treinei|estudei|me senti)\b/i.test(message);

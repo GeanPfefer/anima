@@ -15,6 +15,9 @@ export interface WorkOrchestrationRepository {
   attachContext(command: AttachWorkContextCommand): Promise<WorkOperationResult<WorkContextSnapshot>>;
   getItem(id: WorkItemId): Promise<WorkOperationResult<WorkItem>>;
   findItemsBySourceMessageId(sourceMessageId: string): Promise<WorkOperationResult<readonly WorkItem[]>>;
+  // UX-04 — itens NÃO terminais do usuário autenticado (isolados por RLS), em
+  // ordem determinística (mais recentes primeiro). Base da consulta de histórico.
+  findResumableWorkItems(): Promise<WorkOperationResult<readonly WorkItem[]>>;
   listEvents(id: WorkItemId): Promise<WorkOperationResult<readonly WorkEvent[]>>;
   listContexts(id: WorkItemId): Promise<WorkOperationResult<readonly WorkContextSnapshot[]>>;
 }

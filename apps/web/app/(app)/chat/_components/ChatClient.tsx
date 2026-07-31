@@ -32,6 +32,10 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [isOnboarding, setIsOnboarding] = useState(isFirstTime);
   const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
   const [workItems, setWorkItems] = useState<Record<string, WorkPresentationView>>({});
+  // UX-04 — cartões reencontrados por uma consulta de histórico, indexados pela
+  // mensagem-gatilho. É uma projeção viva da consulta (reperguntar re-lista),
+  // distinta do cartão criado por uma mensagem (workItems).
+  const [historyCards, setHistoryCards] = useState<Record<string, WorkPresentationView[]>>({});
   const [focusedWorkItemId,setFocusedWorkItemId]=useState<string|null>(null);
   const [focusChoice,setFocusChoice]=useState<{sourceMessageId:string;candidates:readonly{id:string;summary:string}[]}|null>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
@@ -178,8 +182,11 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     if (activityHeader) router.refresh();
     if (orchestrationHeader) {
       try {
-        const metadata = JSON.parse(decodeURIComponent(orchestrationHeader)) as { kind: string; sourceMessageId: string; workItemId?:string; presentation?: WorkPresentationView; candidates?:{id:string;summary:string}[]; question?: { question: string }; error?: { code: string; message: string }; reason?: string };
+        const metadata = JSON.parse(decodeURIComponent(orchestrationHeader)) as { kind: string; sourceMessageId: string; workItemId?:string; presentation?: WorkPresentationView; presentations?: WorkPresentationView[]; candidates?:{id:string;summary:string}[]; question?: { question: string }; error?: { code: string; message: string }; reason?: string };
         if (metadata.presentation) {setWorkItems(previous => ({ ...previous, [metadata.sourceMessageId]: metadata.presentation! }));setFocusedWorkItemId(metadata.presentation.item.id);}
+        // UX-04 — a consulta de histórico devolve a lista reconstruída; renderiza
+        // os cartões abaixo da mensagem-gatilho, cada um com as ações reais.
+        if (metadata.kind === 'work_history' && metadata.presentations) setHistoryCards(previous => ({ ...previous, [metadata.sourceMessageId]: metadata.presentations! }));
         if (metadata.kind === 'clarification_required' && metadata.question) setMessages(previous => [...previous, { role: 'assistant', content: metadata.question!.question }]);
         if (metadata.kind === 'work_error') setError(`Não foi possível registrar o trabalho desta mensagem: ${metadata.error?.message ?? 'erro desconhecido'}. Você pode tentar novamente.`);
         // Capacidade ausente, dita pelo servidor (não pelo texto do modelo): sem
@@ -232,6 +239,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.error ?? 'Não foi possível arquivar esta conversa.'); return; }
     setMessages([]);
     setWorkItems({});
+    setHistoryCards({});
     setFocusChoice(null);
     setError('');
   }
@@ -310,6 +318,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
               }
             </div>
             {m.role === 'user' && m.id && workItems[m.id] && <WorkProposalCard presentation={workItems[m.id]!} focused={focusedWorkItemId===workItems[m.id]!.item.id} onFocus={()=>focusWork(workItems[m.id!]!.item.id)} onChange={presentation => setWorkItems(previous => ({ ...previous, [m.id!]: presentation }))} />}
+            {m.role === 'user' && m.id && historyCards[m.id]?.length ? historyCards[m.id]!.map((view, index) => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={updated => setHistoryCards(previous => ({ ...previous, [m.id!]: previous[m.id!]!.map((existing, position) => position === index ? updated : existing) }))} />) : null}
           </div>
         ))}
 

@@ -21,9 +21,9 @@ import {
   buildWorkOrchestrationReply,
   type WorkOrchestrationChatKind,
 } from '@/lib/work-orchestration/chat-guidance';
-import { isWorkContinuation, resolveWorkFocus } from '@anima/core';
+import { isWorkContinuation, isWorkHistoryQuery, resolveWorkFocus } from '@anima/core';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
-import { serializeWorkPresentation } from '@/lib/work-orchestration/serialize';
+import { serializeReconstructedWorkPresentation, serializeWorkPresentation } from '@/lib/work-orchestration/serialize';
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
@@ -515,6 +515,16 @@ ${contextBlock}`;
     // fallback mudo que deixaria o modelo inventar uma proposta.
     else if (result.error.code === 'orchestration_not_enabled') orchestrationMetadata = { kind: 'work_unavailable', sourceMessageId: sourceMessage.id, reason: 'orchestration_not_enabled' };
     else orchestrationMetadata = { kind: 'work_error', sourceMessageId: sourceMessage.id, error: { code: result.error.code, message: result.error.message } };
+  } else if(interpretation.kind==='conversation'&&isWorkHistoryQuery(message)){
+    // UX-04 — reencontrar o próprio trabalho aberto pela conversa. A lista é a
+    // MESMA reconstrução autoritativa dos cartões (fonte persistida), isolada por
+    // RLS. Precede a continuação: um pedido genérico de listar/retomar mostra tudo
+    // em aberto em vez de focar um referente específico.
+    const workService=createWorkOrchestrationService(supabase);
+    const resumable=await workService.findResumableWorkItems();
+    const presentations:ReturnType<typeof serializeReconstructedWorkPresentation>[]=[];
+    if(resumable.ok){for(const item of resumable.value){const events=await workService.listEvents(item.id);const contexts=await workService.listContexts(item.id);if(events.ok&&contexts.ok)presentations.push(serializeReconstructedWorkPresentation(item,events.value,contexts.value));}}
+    orchestrationMetadata={kind:'work_history',sourceMessageId:sourceMessage.id,presentations};
   } else if(interpretation.kind==='conversation'&&isWorkContinuation(message)){
     const{data:focus}=await supabase.from('work_focus').select('work_item_id').eq('user_id',user.id).maybeSingle();
     const{data:candidates}=await supabase.from('work_items').select('*').eq('user_id',user.id).in('state',['proposed','approved','in_progress','blocked','review','changes_requested']).order('updated_at',{ascending:false}).limit(5);
@@ -525,11 +535,13 @@ ${contextBlock}`;
 
   // O cartão real é a fonte da verdade e já foi persistido pelo servidor.
   // Prompting reduz alegações falsas, mas a garantia continua sendo determinística.
-  const metaKind = (orchestrationMetadata as { kind?: string })?.kind;
+  const metaKind = (orchestrationMetadata as { kind?: string; presentations?: unknown[] })?.kind;
   const chatKind: WorkOrchestrationChatKind =
     metaKind === 'work_proposal' || metaKind === 'work_unavailable'
       ? metaKind
-      : 'none';
+      : metaKind === 'work_history'
+        ? (((orchestrationMetadata as { presentations?: unknown[] }).presentations?.length ?? 0) > 0 ? 'work_history' : 'work_history_empty')
+        : 'none';
   const deterministicWorkReply = buildWorkOrchestrationReply(chatKind);
 
   // ── Chama Ollama (streaming) ───────────────────────────────────
