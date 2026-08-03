@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
 import { parseWorkResultValidations, type WorkPresentation } from '@anima/core';
-import { answerWorkDecision, decideWork, reloadWork, requestProposalCorrection, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
+import { decideWork, reloadWork, requestHostSupervisorTurn, requestProposalCorrection, respondWorkDecision, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
 import { describeMissingCompletedResult, presentMobileWorkResult } from './mobile-work-result';
 
@@ -16,8 +16,18 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
   const [mode,setMode]=useState<'none'|'proposal_changes'|'result'|'result_changes'>('none');
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
+  // Retomada executora pendente: a decisão foi salva no banco, mas a volta do
+  // Supervisor no host falhou. Oferece um retry que aciona SOMENTE o host (a
+  // decisão não é reenviada — sem 2º input_provided).
+  const [resumeRetry,setResumeRetry]=useState(false);
   const allowed=(action:WorkPresentation['availableActions'][number])=>availableActions.includes(action);
   async function run(operation:Promise<WorkPresentation>){setBusy(true);setError('');try{onChange(await operation);setMode('none');setDetail('');setReferences('');setValidations('');setLimitations('');}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível atualizar o trabalho.');onChange(await reloadWork(item.id).catch(()=>presentation));}setBusy(false);}
+  // Responde à decisão e, só quando o efeito é `resume` e o estado persistido é
+  // `approved`, pede ao host UMA volta do Supervisor (retomada canônica pelo
+  // checkpoint). O mobile não executa nada; relê a projeção persistida.
+  async function onDecision(optionId:string){if(busy)return;setBusy(true);setError('');setResumeRetry(false);try{const{presentation:next,resumeRequested}=await respondWorkDecision(presentation,optionId);onChange(next);if(resumeRequested)await resumeOnHost(next);}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível registrar sua decisão.');onChange(await reloadWork(item.id).catch(()=>presentation));}setBusy(false);}
+  async function resumeOnHost(current:WorkPresentation){try{onChange(await requestHostSupervisorTurn(current));setResumeRetry(false);}catch(cause){setResumeRetry(true);setError(cause instanceof Error?cause.message:'Sua decisão foi salva, mas não foi possível retomar o trabalho agora.');}}
+  async function retryResume(){if(busy)return;setBusy(true);setError('');await resumeOnHost(presentation);setBusy(false);}
   const action=(label:string,onPress:()=>void)=><TouchableOpacity disabled={busy} onPress={onPress} style={styles.action}><Text style={styles.actionText}>{label}</Text></TouchableOpacity>;
   return <View style={styles.card}>
     <View style={styles.header}><Text style={styles.label}>{focused?'Trabalho em foco':'Trabalho'} · v{item.proposalVersion}</Text><Text style={styles.state}>{item.state}</Text></View>
@@ -37,8 +47,9 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
       <Text style={styles.label}>Preciso da sua decisão</Text>
       <Text style={styles.body}>{presentation.pendingDecision.explanation}</Text>
       <Text style={styles.state}>O trabalho está pausado em um checkpoint seguro.</Text>
-      <View style={styles.actions}>{presentation.pendingDecision.options.map(option=><TouchableOpacity key={option.id} disabled={busy} onPress={()=>void run(answerWorkDecision(presentation,option.id))} style={styles.action}><Text style={styles.actionText}>{option.label}</Text></TouchableOpacity>)}</View>
+      <View style={styles.actions}>{presentation.pendingDecision.options.map(option=><TouchableOpacity key={option.id} disabled={busy} onPress={()=>void onDecision(option.id)} style={styles.action}><Text style={styles.actionText}>{option.label}</Text></TouchableOpacity>)}</View>
     </View>}
+    {resumeRetry&&<View accessible accessibilityLabel="Retomar no host" style={styles.actions}><TouchableOpacity disabled={busy} onPress={()=>void retryResume()} style={styles.action}><Text style={styles.actionText}>Retomar no host</Text></TouchableOpacity></View>}
     {mode==='none'&&allowed('approve')&&<View style={styles.actions}>{action('Aprovar',()=>void run(decideWork(presentation,{type:'approve'})))}{action('Corrigir',()=>setMode('proposal_changes'))}{action('Adiar',()=>void run(decideWork(presentation,{type:'defer',reason:'Adiado no mobile'})))}{action('Rejeitar',()=>void run(decideWork(presentation,{type:'reject'})))}</View>}
     {mode==='proposal_changes'&&<Editor value={detail} onChange={setDetail} label="Correção da proposta" onConfirm={()=>void run(requestProposalCorrection(presentation,detail.trim()))} />}
     {mode==='none'&&!presentation.pendingDecision&&allowed('start')&&action(item.state==='approved'?'Iniciar':'Retomar',()=>void run(startWork(presentation)))}

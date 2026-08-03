@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { authenticateRequest } from '@/lib/supabase/request-auth';
 import { localRunnerRouteFromEnvironment } from '@/lib/work-orchestration/execution';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
 
@@ -8,12 +8,14 @@ export const maxDuration = 1800;
 // Ponto de entrada do laço mínimo do Supervisor V0: UMA volta por invocação.
 // Não há daemon, agendador nem polling — a periodicidade, se um dia existir,
 // pertence a quem chama. A autenticação real é obrigatória porque toda RPC do
-// ciclo resolve `auth.uid()` e consulta a allowlist de orquestração.
+// ciclo resolve `auth.uid()` e consulta a allowlist de orquestração. Aceita o
+// cookie web e o `Authorization: Bearer` do mobile (paridade UX-04): a mesma
+// autoridade RLS, o mesmo `runSupervisorTurn`, sem duplicar o Supervisor.
 
 export async function POST(request: Request) {
-  const client = await createClient();
-  const { data: { user } } = await client.auth.getUser();
-  if (!user) return Response.json({ ok: false, error: { code: 'authentication_required' } }, { status: 401 });
+  const auth = await authenticateRequest(request);
+  if (!auth) return Response.json({ ok: false, error: { code: 'authentication_required' } }, { status: 401 });
+  const { client } = auth;
 
   const body = await request.json().catch(() => null) as {
     workItemId?: unknown;

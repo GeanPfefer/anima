@@ -38,6 +38,10 @@ export default function ChatScreen() {
   const [isStreaming,      setIsStreaming]       = useState(false);
   const [loading,          setLoading]          = useState(true);
   const [workItems,        setWorkItems]        = useState<Record<string,WorkPresentation>>({});
+  // UX-04 — cartões reencontrados por uma consulta de histórico, indexados pela
+  // mensagem-gatilho. Consulta viva (reperguntar re-lista), independente da
+  // conversa original estar ativa; distinta de workItems (cartão de uma mensagem).
+  const [historyCards,     setHistoryCards]     = useState<Record<string,WorkPresentation[]>>({});
   const [focusedWorkItemId, setFocusedWorkItemId] = useState<string | null>(null);
   const [focusChoice, setFocusChoice] = useState<{ sourceMessageId: string; candidates: readonly { id: string; summary: string }[] } | null>(null);
 
@@ -104,6 +108,10 @@ export default function ChatScreen() {
       if (routing?.kind === 'proposal' || routing?.kind === 'continued') {
         setFocusedWorkItemId(routing.kind === 'proposal' ? routing.presentation.item.id : routing.workItemId);
       }
+      if (routing?.kind === 'history') {
+        const triggerId = [...updated].reverse().find(message => message.role === 'user')?.id;
+        if (triggerId) setHistoryCards(previous => ({ ...previous, [triggerId]: [...routing.presentations] }));
+      }
       setMessages(updated);
       setWorkItems(await loadWorkItems(updated.flatMap(message=>message.role==='user'&&message.id?[message.id]:[])));
       setStreamingContent('');
@@ -138,6 +146,7 @@ export default function ChatScreen() {
             .then(() => {
               setMessages([]);
               setWorkItems({});
+              setHistoryCards({});
               setStreamingContent('');
             })
             .catch(() => Alert.alert('Arquivamento indisponível', 'Há uma resposta em andamento ou a conexão falhou. A conversa atual foi preservada.'));
@@ -169,7 +178,8 @@ export default function ChatScreen() {
             {isStreamed && <Text style={styles.cursor}>▋</Text>}
           </Text>
         </View>
-      </View>{isUser&&'id' in item&&item.id&&workItems[item.id]&&<MobileWorkCard presentation={workItems[item.id]!} focused={focusedWorkItemId===workItems[item.id]!.item.id} onFocus={()=>{const target=workItems[item.id!]!.item.id;setWorkFocus(target).then(()=>setFocusedWorkItemId(target)).catch(()=>Alert.alert('Foco indisponível','Não foi possível alterar o trabalho em foco. Tente novamente.'));}} onChange={next=>setWorkItems(previous=>({...previous,[item.id!]:next}))}/>}</View>
+      </View>{isUser&&'id' in item&&item.id&&workItems[item.id]&&<MobileWorkCard presentation={workItems[item.id]!} focused={focusedWorkItemId===workItems[item.id]!.item.id} onFocus={()=>{const target=workItems[item.id!]!.item.id;setWorkFocus(target).then(()=>setFocusedWorkItemId(target)).catch(()=>Alert.alert('Foco indisponível','Não foi possível alterar o trabalho em foco. Tente novamente.'));}} onChange={next=>setWorkItems(previous=>({...previous,[item.id!]:next}))}/>}
+      {isUser&&'id' in item&&item.id&&historyCards[item.id]?.length?historyCards[item.id]!.map((view,index)=><MobileWorkCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>{const target=view.item.id;setWorkFocus(target).then(()=>setFocusedWorkItemId(target)).catch(()=>Alert.alert('Foco indisponível','Não foi possível alterar o trabalho em foco. Tente novamente.'));}} onChange={next=>setHistoryCards(previous=>({...previous,[item.id!]:previous[item.id!]!.map((existing,position)=>position===index?next:existing)}))}/>):null}</View>
     );
   }
 

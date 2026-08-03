@@ -335,6 +335,18 @@ export async function sendChatMessage(
   const workRouting: MobileWorkRouting = await routeWorkMessage(message, sourceMessage.id)
     .catch((cause): MobileWorkRouting => ({ kind: 'error', message: cause instanceof Error ? cause.message : 'Não foi possível registrar o trabalho.' }));
 
+  // UX-04 — perguntas de histórico NÃO vão ao Ollama: a resposta é ditada pelo
+  // cliente e os cartões reencontrados (fonte persistida) são a verdade. Curto-
+  // circuita detecção e streaming do modelo, persistindo a resposta determinística.
+  if (workRouting.kind === 'history') {
+    const reply = workRouting.presentations.length > 0
+      ? 'Estes são seus trabalhos em aberto. Cada cartão abaixo permite focar, retomar, decidir ou revisar — direto daqui.'
+      : 'Você não tem trabalhos em aberto no momento. Quando algo ficar pendente, pausado ou aguardando decisão, aparece aqui quando você perguntar.';
+    onToken(reply);
+    await supabase.from('ai_conversations').insert({ user_id: userId, role: 'assistant', content: reply, session_id: sourceMessage.session_id });
+    return workRouting;
+  }
+
   // Fire-and-forget: detecção completa (sequencial para não sobrecarregar Ollama)
   ;(async () => {
     const allNames    = pillars.map(p => p.name);
