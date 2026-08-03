@@ -933,6 +933,37 @@ Registro **factual** de ratificação do UX-02 funcional com base nas Camadas 1 
 
 **Fora desta entrega (não iniciados):** paridade mobile do histórico/retomada; qualquer painel/dashboard persistente (fora do escopo canônico). Ratificação final é do humano.
 
+### UX-04 — prova complementar de retomada real pelo checkpoint (2026-08-03)
+
+**Não ratificado.** Registro append-only de uma prova adicional; nenhuma seção anterior foi reescrita. Nenhuma linha de código, schema ou migration foi alterada nesta sessão — a implementação de 2026-07-31 permaneceu intacta e foi apenas exercitada. Branch `claude/ux-04-chat-history-resumption` a partir de `2d49273`; sem push, PR, merge ou alteração de `main`.
+
+**Motivo.** A prova de 2026-07-31 demonstrou principalmente reencontro, foco e revisão de itens já em `review`/`changes_requested` e retomou o de `review` por aceite. Isso é insuficiente para a **promessa central** do UX-04 (aceite: "retomar um trabalho pausado … apenas pelo chat, partindo do checkpoint"). Esta prova fecha exatamente essa lacuna: um trabalho **realmente bloqueado** (`decision_required` → `blocked`), reencontrado em **conversa nova**, com a decisão respondida ali e a execução **retomada a partir do checkpoint persistido** — sem recomeçar do zero.
+
+**Método (honesto).** Endpoints reais do Next.js + Supabase local + executor determinístico. Como nas provas anteriores, a automação de navegador não dirigiu os inputs controlados do React; a sessão veio do GoTrue e as etapas foram dirigidas por **HTTP autenticado contra os mesmos endpoints que a UI chama** (a renderização/interação da lista está coberta pelos testes de componente do `ChatClient`, verdes). Cenário determinístico `ux02-deterministic-decision` (flag existente `ANIMA_UX02_DETERMINISTIC_PROOF`, `configureUx02DeterministicProof`) — **sem modelo** para a execução do trabalho; o executor emite checkpoint + `decision_required` na 1ª tentativa e `result` na retomada. Aprovação (UX-00/01) e classificação INTEL-01 foram **provisionamento por RPC** (sem gatilho conversacional — limitação externa já registrada). Contas descartáveis `@test.invalid`; nunca a conta pessoal.
+
+**Fluxo provado ponta a ponta (item `4184b312`, usuário A `a27f3399`):**
+1. Conversa #1 (`1908adc1`… nesta corrida): `/api/ai/chat` com a frase determinística criou a proposta; aprovação + INTEL-01 (provisionamento); `/supervisor-turn` (1ª volta) executou o executor determinístico → **`checkpoint_recorded`** (seq do evento, `signal.sequence=2`) + **`input_requested`** (`architectural_decision`, opções `continuar`/`encerrar`) + **`work_blocked`** → item **`blocked`**; claim liberado. Tentativa 1 = `d2b24624`.
+2. `archive_current_conversation` arquivou a conversa #1 **sem** concluir o trabalho.
+3. Conversa **nova** #2: `GET /api/work-orchestration/items` reconstruiu o cartão do item **bloqueado** (com `pendingDecision`) através da sessão arquivada; `/api/ai/chat` "quais trabalhos tenho em aberto?" devolveu `kind:work_history` com o cartão, em sessão diferente da arquivada.
+4. Na conversa #2, `POST /api/work-orchestration/decision-responses` (`continuar`) → `input_provided` e item de volta a **`approved`**; `human_decision_resumption_source` reconstruiu `kind:human_decision_checkpoint`.
+5. `/supervisor-turn` (2ª volta) → `begin_human_decision_resumed_attempt`: **nova** tentativa `80c56b2d` (≠ `d2b24624`), `execution_started` com `reason=human_decision_resumed` e correlação explícita `resumed_from_attempt_id=d2b24624`, `resumed_from_checkpoint_event_seq`, `resumed_from_input_requested/_provided_event_id`. O executor recebeu `carriedContext.continueFromCheckpoint` e emitiu `result_submitted` (`summary` "retomou do checkpoint persistido", validação "Retomada consumiu o checkpoint persistido"=`passed`, `resultReferences:["ux02-proof:resumed-from-checkpoint"]`) → item **`review`**. **Não reiniciou do zero.**
+
+**Persistência/reload:** após a retomada, `GET /items` reconstruiu o item (`review`) do banco; `GET /items/by-source/<msg #1>` reidratou o cartão da conversa arquivada.
+
+**Idempotência:** repetir `/decision-responses` (`continuar`) → **1** `input_provided` (sem 2º processamento), item permanece `review`; repetir `/supervisor-turn` → `no_eligible_work`, **sem** nova tentativa (permanecem **2** `execution_started` distintas e **1** `result_submitted`).
+
+**Isolamento:** 2ª conta descartável B (`6c812faf`), autenticada e allowlistada — `GET /items` = **0**; lista conversacional vazia; `/decision-responses` no item de A = **404** (RLS o esconde); `/supervisor-turn` no item de A = `no_eligible_work`; o item de A permaneceu intacto.
+
+**Sem integração externa real:** item terminou em `review` (não `completed`, não integrado); **0** `result_accepted`; **0** eventos de integração; diretório-alvo determinístico **vazio** (executor não tocou filesystem real).
+
+**Validações:** typecheck limpo nos cinco workspaces; core interpret **21/21** (classificador UX-04 + estados retomáveis); web ChatClient **4/4** (lista reencontrada acionável, item terminal só histórico, lista vazia). Nenhuma migration criada (nenhuma necessária). O contrato de banco reutilizado é o já ratificado da Etapa 2B.2/UX-02 (RPCs `record_work_decision_required`, `respond_to_work_decision`, `human_decision_resumption_source`, `begin_human_decision_resumed_attempt`), não modificado.
+
+**Limpeza:** descartáveis (usuários `a27f3399`, `6c812faf` e todos os seus itens/eventos/conversas/sessões e efeitos de detecção — pilares/XP/embeddings) **removidos** por identificação exata em transação com guardas fortes (só `ux04-%@test.invalid`, guarda anti-conta-pessoal, `session_replication_role=replica` local). **Baseline restaurado exatamente**: 6 usuários / 10 itens / 75 eventos / 34 conversas / 6 sessões; `tecopfefer@gmail.com` intacto; **0** órfãos.
+
+**Lacunas encontradas:** nenhuma. A promessa normativa do UX-04 se sustenta pelo comportamento já implementado.
+
+**Veredito:** **UX-04 apto para ratificação.** A ratificação final permanece decisão humana.
+
 ## Dependências entre fases
 
 ```text
