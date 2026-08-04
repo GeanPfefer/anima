@@ -39,6 +39,75 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: { code: 'local_runner_not_configured', message: 'Executor local não configurado.' } }, { status: 503 });
   }
 
+  // Ponte fechada de admissão: além da prova UX-02, aceita somente propostas
+  // GPT de baixo impacto cujo alvo, isolamento, validação e limites foram
+  // fixados pelo servidor. Outros trabalhos continuam sem classificação.
+  if (explicit) {
+    const item = await client.from('work_items')
+      .select('intent, state, proposal_version, impact_level, capability')
+      .eq('id', body!.workItemId as string)
+      .maybeSingle();
+    const intent = item.data?.intent as {
+      planner?: unknown;
+      execution_spec?: {
+        target?: { kind?: unknown; reference?: unknown };
+        permissions?: unknown;
+        validation_criteria?: unknown;
+        limits?: { max_attempts?: unknown; max_duration_minutes?: unknown };
+      };
+    } | null;
+    const approvedVersion = item.data?.state === 'approved'
+      && item.data.proposal_version === body!.expectedProposalVersion
+    const deterministic = approvedVersion
+      && process.env.ANIMA_UX02_DETERMINISTIC_PROOF === '1'
+      && intent?.execution_spec?.target?.reference === 'ux02-deterministic-decision';
+    const spec = intent?.execution_spec;
+    const gptProject = approvedVersion
+      && item.data?.impact_level === 'low'
+      && item.data?.capability === 'programming'
+      && intent?.planner === 'openai_project_tools_v1'
+      && spec?.target?.kind === 'project'
+      && spec.target.reference === 'anima'
+      && Array.isArray(spec.permissions)
+      && spec.permissions.length === 2
+      && spec.permissions[0] === 'workspace_read'
+      && spec.permissions[1] === 'workspace_write_isolated'
+      && Array.isArray(spec.validation_criteria)
+      && spec.validation_criteria.length > 0
+      && spec.limits?.max_attempts === 3
+      && spec.limits.max_duration_minutes === 30;
+    if (deterministic || gptProject) {
+      const current = await client.rpc('current_work_intelligence_classification', {
+        p_work_item_id: body!.workItemId as string,
+      });
+      const currentRoot = current.data as { classification?: unknown } | null;
+      if (!current.error && !currentRoot?.classification) {
+        const classified = await client.rpc('record_work_intelligence_classification', {
+          p_work_item_id: body!.workItemId as string,
+          p_expected_proposal_version: body!.expectedProposalVersion as number,
+          p_expected_classification_revision: 0,
+          p_classification: {
+            schemaVersion: 1,
+            complexity: 'bounded',
+            risk: 'low',
+            reversibility: 'reversible',
+            planClarity: 'clear',
+            urgency: 'normal',
+            provenance: {
+              kind: 'system_assessed',
+              classifiedAt: new Date().toISOString(),
+              classifierId: gptProject ? 'gpt-project-planner-bridge' : 'ux02-deterministic-proof',
+              policyVersion: gptProject ? 'gpt-project-planner-v1' : 'ux02-deterministic-v1',
+            },
+          },
+        });
+        if (classified.error) {
+          return Response.json({ ok: false, error: { code: classified.error.code, message: classified.error.message } }, { status: 409 });
+        }
+      }
+    }
+  }
+
   const result = await runSupervisorTurn({
     client, routes: [route],
     ownerInstanceId: process.env.ANIMA_SUPERVISOR_INSTANCE_ID ?? 'supervisor-v0',

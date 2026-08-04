@@ -24,13 +24,35 @@ import {
 import { isWorkContinuation, isWorkHistoryQuery, resolveWorkFocus } from '@anima/core';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { serializeReconstructedWorkPresentation, serializeWorkPresentation } from '@/lib/work-orchestration/serialize';
-
-const OLLAMA_URL   = process.env.OLLAMA_URL   ?? 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:14b';
+import {
+  ChatProviderError,
+  parseChatProvider,
+  streamChatProvider,
+} from '@/lib/ai/chat-provider';
+import { planExecutableProjectWork } from '@/lib/ai/project-work-planner';
 
 function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
+
+const isFocusedWorkStatusQuestion = (message: string): boolean =>
+  /\b(deu certo|funcionou|terminou|concluiu|qual (?:e|é|o) estado|como (?:esta|está) o trabalho)\b/i.test(message);
+
+const focusedWorkStatusReply = (state: string, summary: string): string => {
+  const subject = summary.trim() || 'O trabalho em foco';
+  switch (state) {
+    case 'completed': return `${subject} foi concluído e o resultado foi aceito.`;
+    case 'review': return `${subject} terminou a execução e está aguardando sua revisão.`;
+    case 'blocked': return `${subject} está pausado e precisa da sua decisão para continuar.`;
+    case 'in_progress': return `${subject} está em execução.`;
+    case 'approved': return `${subject} foi aprovado, mas a execução ainda não começou.`;
+    case 'failed': return `${subject} falhou; nenhum resultado foi aceito.`;
+    case 'cancelled': return `${subject} foi cancelado.`;
+    case 'changes_requested': return `${subject} está aguardando as correções solicitadas.`;
+    case 'rejected': return `${subject} foi rejeitado.`;
+    default: return `${subject} está no estado ${state}.`;
+  }
+};
 
 type LoggedActivity = {
   pillar: string;
@@ -50,8 +72,12 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Response('Não autorizado', { status: 401 });
 
-  const { message } = await req.json() as { message: string };
+  const { message, provider: requestedProvider } = await req.json() as {
+    message: string;
+    provider?: unknown;
+  };
   if (!message?.trim()) return new Response('Mensagem vazia', { status: 400 });
+  const provider = parseChatProvider(requestedProvider);
 
   // ── Contexto do usuário ────────────────────────────────────────
   const [profileRes, pillarsRes, recentRes, questsRes, entitiesRes, identityRes] = await Promise.all([
@@ -494,14 +520,48 @@ ${contextBlock}`;
     .single();
   if (sourceMessageError || !sourceMessage) return Response.json({ error: 'Não foi possível preservar a mensagem.' }, { status: 503 });
 
+  // Perguntas curtas de estado não podem ser respondidas pela memória textual
+  // do modelo. O foco e o work_item persistido são a fonte autoritativa.
+  let authoritativeStatusReply: string | null = null;
+  if (isFocusedWorkStatusQuestion(message)) {
+    const { data: focus } = await supabase.from('work_focus')
+      .select('work_item_id').eq('user_id', user.id).maybeSingle();
+    if (focus?.work_item_id) {
+      const { data: focused } = await supabase.from('work_items')
+        .select('state, proposal').eq('id', focus.work_item_id).maybeSingle();
+      if (focused) {
+        const proposal = focused.proposal as { data?: { summary?: string } };
+        authoritativeStatusReply = focusedWorkStatusReply(focused.state, proposal.data?.summary ?? 'O trabalho em foco');
+      }
+    }
+  }
+
   const rawInterpretation = interpretWorkRequest(message, sourceMessage.id);
-  const interpretation = rawInterpretation.kind === 'work_candidate'
+  let interpretation = rawInterpretation.kind === 'work_candidate'
     ? { ...rawInterpretation, command: configureUx02DeterministicProof(message, rawInterpretation.command) }
     : rawInterpretation;
+  let projectPlanningError: string | null = null;
+  if (
+    provider === 'openai'
+    && rawInterpretation.kind === 'work_candidate'
+    && interpretation.kind === 'work_candidate'
+    && interpretation.command.intent['execution_spec'] === undefined
+  ) {
+    const planned = await planExecutableProjectWork(message, interpretation.command);
+    if (planned.ok) interpretation = { ...interpretation, command: planned.command };
+    else projectPlanningError = planned.message;
+  }
   let orchestrationMetadata: unknown = interpretation.kind === 'clarification_required'
     ? { kind: interpretation.kind, sourceMessageId: sourceMessage.id, question: interpretation.question }
     : { kind: 'conversation', sourceMessageId: sourceMessage.id };
   if (interpretation.kind === 'work_candidate') {
+    if (projectPlanningError) {
+      orchestrationMetadata = {
+        kind: 'work_error',
+        sourceMessageId: sourceMessage.id,
+        error: { code: 'project_planning_failed', message: projectPlanningError },
+      };
+    } else {
     const startedAt = Date.now();
     const result = await createWorkOrchestrationService(supabase).createProposal(interpretation.command);
     console.info('[work-orchestration]', { operation: 'createProposalFromChat', sourceMessageId: sourceMessage.id, result: result.ok ? 'success' : result.error.code, durationMs: Date.now() - startedAt });
@@ -515,6 +575,7 @@ ${contextBlock}`;
     // fallback mudo que deixaria o modelo inventar uma proposta.
     else if (result.error.code === 'orchestration_not_enabled') orchestrationMetadata = { kind: 'work_unavailable', sourceMessageId: sourceMessage.id, reason: 'orchestration_not_enabled' };
     else orchestrationMetadata = { kind: 'work_error', sourceMessageId: sourceMessage.id, error: { code: result.error.code, message: result.error.message } };
+    }
   } else if(interpretation.kind==='conversation'&&isWorkHistoryQuery(message)){
     // UX-04 — reencontrar o próprio trabalho aberto pela conversa. A lista é a
     // MESMA reconstrução autoritativa dos cartões (fonte persistida), isolada por
@@ -542,37 +603,32 @@ ${contextBlock}`;
       : metaKind === 'work_history'
         ? (((orchestrationMetadata as { presentations?: unknown[] }).presentations?.length ?? 0) > 0 ? 'work_history' : 'work_history_empty')
         : 'none';
-  const deterministicWorkReply = buildWorkOrchestrationReply(chatKind);
+  const deterministicWorkReply = buildWorkOrchestrationReply(chatKind)
+    ?? authoritativeStatusReply
+    ?? (projectPlanningError ? `Não consegui preparar uma proposta executável: ${projectPlanningError}` : null);
 
-  // ── Chama Ollama (streaming) ───────────────────────────────────
-  const ollamaRes = deterministicWorkReply
-    ? new Response(`${JSON.stringify({
-        message: { content: deterministicWorkReply },
-        done: true,
-      })}\n`)
-    : await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      stream: true,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...pastMessages,
-        { role: 'user', content: message },
-      ],
-      // Sem isso o Ollama usa o padrão do runtime (2048-4096 tokens), que o
-      // systemPrompt + histórico facilmente excede — o truncamento gera
-      // degeneração de saída (texto incoerente/multilíngue no meio da resposta).
-      options: { num_ctx: 8192 },
-    }),
-    }).catch(() => null);
-
-  if (!ollamaRes?.ok) {
-    return new Response(
-      JSON.stringify({ error: 'Não foi possível conectar ao Ollama.' }),
-      { status: 502, headers: { 'Content-Type': 'application/json' } },
-    );
+  // Respostas determinísticas nunca saem da máquina. Somente uma resposta livre
+  // usa o provedor explicitamente escolhido pelo usuário no compositor do chat.
+  let providerResult: Awaited<ReturnType<typeof streamChatProvider>>;
+  if (deterministicWorkReply) {
+    providerResult = {
+      provider,
+      model: 'anima-deterministic',
+      stream: new Response(deterministicWorkReply).body!,
+    };
+  } else {
+    try {
+      providerResult = await streamChatProvider({
+        provider,
+        systemPrompt,
+        messages: [...pastMessages, { role: 'user', content: message }],
+      });
+    } catch (error) {
+      const providerError = error instanceof ChatProviderError
+        ? error
+        : new ChatProviderError('Não foi possível conectar ao provedor de IA.', 502);
+      return Response.json({ error: providerError.message }, { status: providerError.status });
+    }
   }
 
   // ── Stream para o cliente + salva resposta ────────────────────
@@ -581,7 +637,7 @@ ${contextBlock}`;
 
   const stream = new ReadableStream({
     async start(controller) {
-      const reader  = ollamaRes.body!.getReader();
+      const reader  = providerResult.stream.getReader();
       const decoder = new TextDecoder();
 
       try {
@@ -589,53 +645,35 @@ ${contextBlock}`;
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          for (const line of chunk.split('\n').filter(Boolean)) {
-            try {
-              const json = JSON.parse(line) as { message?: { content?: string }; done?: boolean };
-              const token = json.message?.content ?? '';
-              if (token) {
-                fullResponse += token;
-                controller.enqueue(encoder.encode(token));
-              }
-              if (json.done) {
-                // session_id explícito: a resposta pertence ao turno da pergunta.
-                // Se a sessão foi arquivada nesse meio tempo, o insert falha em
-                // vez de fragmentar a interação na sessão seguinte.
-                await supabase.from('ai_conversations').insert({
-                  user_id: user.id,
-                  role:    'assistant',
-                  content: fullResponse,
-                  session_id: sourceMessage.session_id,
-                });
-                // Arquétipo + Identidade Emergente em cadência (fire-and-forget).
-                // Conta só mensagens do USUÁRIO (passo de 1) — gatilho confiável;
-                // contar user+assistant (passo de 2) podia nunca bater no módulo.
-                ;(async () => {
-                  const { count } = await supabase
-                    .from('ai_conversations')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('user_id', user.id)
-                    .eq('role', 'user');
-                  const n = count ?? 0;
-                  const window = [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }];
-                  if (n > 0 && n % 10 === 0) {
-                    await inferAndSaveArchetype(
-                      user.id,
-                      window,
-                      pillars.map(p => ({ name: p.name, level: p.level, xp_total: p.xp_total })),
-                    );
-                  }
-                  if (n > 0 && n % 5 === 0) {
-                    await inferAndSaveIdentity(user.id, window);
-                  }
-                })().catch(() => {});
-              }
-            } catch {
-              // linha não é JSON válido, ignora
-            }
-          }
+          const token = decoder.decode(value, { stream: true });
+          fullResponse += token;
+          controller.enqueue(encoder.encode(token));
         }
+
+        // session_id explícito: a resposta pertence ao turno da pergunta.
+        await supabase.from('ai_conversations').insert({
+          user_id: user.id,
+          role: 'assistant',
+          content: fullResponse,
+          session_id: sourceMessage.session_id,
+        });
+        ;(async () => {
+          const { count } = await supabase
+            .from('ai_conversations')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user.id)
+            .eq('role', 'user');
+          const n = count ?? 0;
+          const window = [...pastMessages, { role: 'user', content: message }, { role: 'assistant', content: fullResponse }];
+          if (n > 0 && n % 10 === 0) {
+            await inferAndSaveArchetype(
+              user.id,
+              window,
+              pillars.map(p => ({ name: p.name, level: p.level, xp_total: p.xp_total })),
+            );
+          }
+          if (n > 0 && n % 5 === 0) await inferAndSaveIdentity(user.id, window);
+        })().catch(() => {});
       } finally {
         controller.close();
       }
@@ -645,6 +683,8 @@ ${contextBlock}`;
   const responseHeaders: Record<string, string> = {
     'Content-Type':           'text/plain; charset=utf-8',
     'X-Content-Type-Options': 'nosniff',
+    'X-AI-Provider':          providerResult.provider,
+    'X-AI-Model':             providerResult.model,
   };
   responseHeaders['X-Source-Message-Id'] = sourceMessage.id;
   responseHeaders['X-Work-Orchestration'] = encodeURIComponent(JSON.stringify(orchestrationMetadata));

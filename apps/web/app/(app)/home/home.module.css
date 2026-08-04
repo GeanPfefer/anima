@@ -56,9 +56,23 @@
 }
 
 @media (max-width: 680px) {
+  .container {
+    min-height: auto;
+    padding: 24px 16px 40px;
+    gap: 28px;
+  }
+
   .content {
     grid-template-columns: 1fr;
     gap: 32px;
+  }
+
+  .header {
+    gap: 10px;
+  }
+
+  .name {
+    font-size: 24px;
   }
 }
 

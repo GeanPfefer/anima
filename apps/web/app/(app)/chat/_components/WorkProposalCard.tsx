@@ -11,35 +11,48 @@ type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationVi
 
 export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:Props){
   const {item,latestResult,acceptedResult,availableActions}=presentation;
+  const executionSpec=item.intent['execution_spec'] as {
+    target?:{kind?:string;reference?:string};permissions?:string[];
+    validation_criteria?:Array<{label?:string;command?:string}>;
+    limits?:{max_attempts?:number;max_duration_minutes?:number};
+  }|undefined;
   const [status,setStatus]=useState<'idle'|'submitting'|'reconciling'>('idle');
   const [error,setError]=useState('');
   const [mode,setMode]=useState<'none'|'defer'|'correct'|'result'|'review_changes'>('none');
   const [detail,setDetail]=useState('');const[customDeferReason,setCustomDeferReason]=useState('');const[references,setReferences]=useState('');const[validations,setValidations]=useState('');const[limitations,setLimitations]=useState('');
   const allowed=(action:WorkPresentation['availableActions'][number])=>availableActions.includes(action);
   const autonomousEligible=evaluateAutonomousEligibility(item as unknown as WorkItem).eligible;
-  async function reload(){setStatus('reconciling');const response=await fetch(`/api/work-orchestration/items/${item.id}`);const body=await response.json();if(response.ok&&body.ok){onChange(body.value.presentation as WorkPresentationView);setError('');}else setError(body.error?.message??'Não foi possível reler o trabalho.');setStatus('idle');}
+  async function reload(preserveError=false){setStatus('reconciling');const response=await fetch(`/api/work-orchestration/items/${item.id}`);const body=await response.json();if(response.ok&&body.ok){onChange(body.value.presentation as WorkPresentationView);if(!preserveError)setError('');}else setError(body.error?.message??'Não foi possível reler o trabalho.');setStatus('idle');}
   async function mutate(endpoint:string,payload:Record<string,unknown>){if(status!=='idle')return;setStatus('submitting');setError('');const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion,...payload})});const body=await response.json().catch(()=>({}));if(response.ok&&body.ok){setMode('none');setDetail('');setReferences('');setValidations('');setLimitations('');setCustomDeferReason('');await reload();return;}const message=body.error?.message??'Não foi possível atualizar o trabalho.';setError(message);setStatus('idle');if(body.error?.code==='version_conflict'||body.error?.code==='ambiguous_outcome'){await reload();setError(message);}}
   async function startAutonomous(){
     if(status!=='idle')return;
     setStatus('submitting');setError('');
-    let finished=false;
-    const executionRequest=fetch('/api/work-orchestration/supervisor-turn',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion}),
-    }).finally(()=>{finished=true;});
-    while(!finished){
-      await new Promise(resolve=>setTimeout(resolve,500));
-      if(finished)break;
-      const snapshot=await fetch(`/api/work-orchestration/items/${item.id}`).catch(()=>null);
-      if(snapshot?.ok){
-        const body=await snapshot.json().catch(()=>null);
-        if(body?.ok)onChange(body.value.presentation as WorkPresentationView);
+    try{
+      let finished=false;
+      const executionRequest=fetch('/api/work-orchestration/supervisor-turn',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion}),
+      }).finally(()=>{finished=true;});
+      while(!finished){
+        await new Promise(resolve=>setTimeout(resolve,500));
+        if(finished)break;
+        const snapshot=await fetch(`/api/work-orchestration/items/${item.id}`).catch(()=>null);
+        if(snapshot?.ok){
+          const body=await snapshot.json().catch(()=>null);
+          if(body?.ok)onChange(body.value.presentation as WorkPresentationView);
+        }
       }
+      const response=await executionRequest;
+      const body=await response.json().catch(()=>({}));
+      const outcome=body.value?.outcome as string|undefined;
+      if(!response.ok||!body.ok)setError(body.error?.message??body.value?.refusal?.message??'Não foi possível executar este trabalho autonomamente.');
+      else if(outcome==='no_eligible_work')setError('Este trabalho ainda não está apto para entrar na fila autônoma.');
+      else if(body.value?.refusal?.message)setError(body.value.refusal.message);
+    }catch{
+      setError('A conexão com o executor falhou antes de iniciar o trabalho.');
+    }finally{
+      await reload(true).catch(()=>setStatus('idle'));
     }
-    const response=await executionRequest;
-    const body=await response.json().catch(()=>({}));
-    if(!response.ok||!body.ok)setError(body.error?.message??body.value?.refusal?.message??'Não foi possível executar este trabalho autonomamente.');
-    await reload();
   }
   const decide=(decision:ApprovalDecision)=>mutate('/api/work-orchestration/decisions',{decision});
   const review=(decision:ResultReviewDecision)=>mutate('/api/work-orchestration/reviews',{decision,reviewedResultEventId:latestResult?.eventId});
@@ -51,7 +64,19 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
     <dl className={styles.workMeta}><div><dt>Capacidade</dt><dd>{item.capability}</dd></div><div><dt>Impacto</dt><dd>{item.impactLevel}</dd></div></dl>
     <section><strong>Inclui</strong><ul>{item.proposal.data.includedScope.map(value=><li key={value}>{value}</li>)}</ul></section>
     <section><strong>Não inclui</strong><ul>{item.proposal.data.excludedScope.map(value=><li key={value}>{value}</li>)}</ul></section>
+    <section><strong>Efeitos esperados</strong><ul>{item.proposal.data.expectedEffects.map(value=><li key={value}>{value}</li>)}</ul></section>
     <section><strong>Riscos</strong>{item.proposal.data.risks.length?<ul>{item.proposal.data.risks.map(value=><li key={value}>{value}</li>)}</ul>:<p>Nenhum risco declarado.</p>}</section>
+    {executionSpec&&<section className={styles.workNotice} aria-label="Especificação de execução">
+      <strong>Execução local proposta</strong>
+      <dl className={styles.workMeta}>
+        <div><dt>Alvo</dt><dd>{executionSpec.target?.reference??'Não declarado'}</dd></div>
+        <div><dt>Permissões</dt><dd>{executionSpec.permissions?.join(', ')??'Não declaradas'}</dd></div>
+        <div><dt>Limites</dt><dd>{executionSpec.limits?.max_attempts??'?'} tentativas · {executionSpec.limits?.max_duration_minutes??'?'} min</dd></div>
+      </dl>
+      <strong>Validação</strong>
+      <ul>{executionSpec.validation_criteria?.map((criterion,index)=><li key={`${criterion.label}-${index}`}>{criterion.label}{criterion.command?` — ${criterion.command}`:''}</li>)}</ul>
+      <p>A execução ocorrerá numa workspace isolada e retornará para revisão antes de qualquer aplicação no projeto original.</p>
+    </section>}
     {(()=>{const shown=item.state==='review'?latestResult:item.state==='completed'?acceptedResult:null;if(!shown)return null;return <section aria-label={item.state==='completed'?'Resultado aceito':'Resultado para revisão'} className={styles.workNotice}>
       <strong>{item.state==='completed'?'Resultado aceito':'Resultado'} · v{shown.proposalVersion}</strong>
       <p><em>Relato de {shown.author}, não verificado automaticamente:</em> {shown.summary}</p>

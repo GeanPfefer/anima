@@ -130,7 +130,10 @@ const taskFor = (request: WorkExecutorRequest): string => [
 export class SpawnLocalRunnerProcess implements LocalRunnerProcess {
   run(input: LocalRunnerProcessInput): Promise<LocalRunnerProcessResult> {
     return new Promise((resolveResult, reject) => {
-      const args = ['-m', 'local_agent', '--workspace', input.workspace, '--task', input.task, '--produce-only'];
+      // A proposta já autorizou escrita isolada. Alterações preexistentes são
+      // preservadas na cópia; esta flag elimina um segundo prompt ambíguo no
+      // processo filho sem autorizar aplicação no projeto original.
+      const args = ['-m', 'local_agent', '--workspace', input.workspace, '--task', input.task, '--produce-only', '--allow-dirty'];
       if (input.model) args.push('--model', input.model);
       if (input.emitCheckpoints) args.push('--emit-checkpoints');
       if (input.carriedContext) args.push('--carried-context', input.carriedContext);

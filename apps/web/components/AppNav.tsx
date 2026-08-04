@@ -5,12 +5,12 @@ import styles from './AppNav.module.css';
 
 const NAV_ITEMS = [
   { href: '/home',     label: 'Home' },
+  { href: '/chat',     label: 'Chat' },
   { href: '/quests',   label: 'Quests' },
   { href: '/history',  label: 'Histórico' },
   { href: '/notes',    label: 'Notas' },
   { href: '/entities', label: 'Entidades' },
   { href: '/identity', label: 'Identidade' },
-  { href: '/chat',     label: 'Chat' },
   { href: '/reports',  label: 'Relatórios' },
   { href: '/graph',    label: 'Graph' },
   { href: '/settings', label: 'Config' },

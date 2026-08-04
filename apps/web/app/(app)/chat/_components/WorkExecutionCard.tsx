@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AutonomousExecutionProjection } from '@anima/core';
 import styles from './chat.module.css';
 
@@ -28,6 +28,14 @@ const instant = (iso: string): string => {
   return iso.endsWith('Z') ? `${trimmed} UTC` : trimmed;
 };
 
+const elapsed = (startedAt: string, now: number): string => {
+  const seconds = Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1_000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}min ${remainder.toString().padStart(2, '0')}s`;
+};
+
 type Props = {
   execution: AutonomousExecutionProjection;
   workItemId: string;
@@ -35,12 +43,37 @@ type Props = {
   onReload: () => void | Promise<void>;
 };
 
+type LocalRuntime = { name: string; loadedGigabytes: number | null; gpuPercent: number | null };
+
 export function WorkExecutionCard({ execution, workItemId, proposalVersion, onReload }: Props) {
   const [status, setStatus] = useState<'idle' | 'submitting'>('idle');
   const [error, setError] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const [localRuntime, setLocalRuntime] = useState<LocalRuntime | null>(null);
   const busy = status !== 'idle';
   const { limits, latestCheckpoint, pendingControl, appliedControl, budgetBlock } = execution;
+
+  useEffect(() => {
+    if (execution.status !== 'running') return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [execution.status, execution.attemptId]);
+
+  useEffect(() => {
+    if (execution.status !== 'running') return;
+    let active = true;
+    const read = async () => {
+      const response = await fetch('/api/ai/local-runtime-status', { cache: 'no-store' }).catch(() => null);
+      const body = response?.ok ? await response.json().catch(() => null) : null;
+      const models = body?.ok && Array.isArray(body.value?.models) ? body.value.models as LocalRuntime[] : [];
+      if (active) setLocalRuntime(models.find(model => model.name === execution.modelRef) ?? models[0] ?? null);
+    };
+    void read();
+    const timer = window.setInterval(() => void read(), 5_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [execution.status, execution.attemptId, execution.modelRef]);
 
   async function request(action: 'pause' | 'cancel') {
     if (busy) return;
@@ -74,9 +107,21 @@ export function WorkExecutionCard({ execution, workItemId, proposalVersion, onRe
         <div><dt>Início</dt><dd><time dateTime={execution.startedAt}>{instant(execution.startedAt)}</time></dd></div>
         {limitParts.length > 0 && <div><dt>Limites</dt><dd>{limitParts.join(' · ')}</dd></div>}
       </dl>
+      {execution.status === 'running' && (
+        <div className={styles.executionActivity} role="status" aria-live="polite">
+          <span className={styles.executionPulse} aria-hidden="true" />
+          <div>
+            <strong>{latestCheckpoint?.nextStep
+              ? `Executando: ${latestCheckpoint.nextStep}`
+              : 'Preparando a workspace isolada e aguardando o plano do modelo local.'}</strong>
+            <span>Tempo decorrido: {elapsed(execution.startedAt, now)} · tentativa {execution.attemptId.slice(0, 8)}</span>
+            {localRuntime && <span>Ollama ativo: {localRuntime.name}{localRuntime.loadedGigabytes !== null ? ` · ${localRuntime.loadedGigabytes} GB carregados` : ''}{localRuntime.gpuPercent !== null ? ` · ${localRuntime.gpuPercent}% na GPU` : ''}</span>}
+          </div>
+        </div>
+      )}
       {latestCheckpoint
         ? <p>Checkpoint #{latestCheckpoint.signalSequence}: {latestCheckpoint.completedSteps} concluído(s), {latestCheckpoint.remainingSteps} restante(s). Próximo: {latestCheckpoint.nextStep || '—'}</p>
-        : <p>Nenhum checkpoint persistido ainda.</p>}
+        : <p>Última evidência persistida: execução iniciada. O primeiro checkpoint aparecerá após o planejamento local.</p>}
       {budgetBlock && <p>Orçamento atingido: {budgetBlock.reason}{budgetBlock.reachedLimit ? ` (limite: ${budgetBlock.reachedLimit})` : ''}.</p>}
       {pendingControl && <p role="status">Pedido de {pendingControl.action === 'pause' ? 'pausa' : 'cancelamento'} registrado; será aplicado no próximo checkpoint seguro.</p>}
       {appliedControl && <p>{CONTROL_APPLIED_LABEL[appliedControl.reason] ?? appliedControl.reason} em <time dateTime={appliedControl.appliedAt}>{instant(appliedControl.appliedAt)}</time>.</p>}

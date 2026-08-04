@@ -12,8 +12,8 @@ export default function ChatFab() {
       href="/chat"
       style={{
         position:        'fixed',
-        bottom:          24,
-        right:           24,
+        bottom:          'calc(76px + env(safe-area-inset-bottom))',
+        right:           16,
         zIndex:          50,
         width:           52,
         height:          52,

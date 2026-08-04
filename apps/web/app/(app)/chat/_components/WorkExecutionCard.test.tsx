@@ -13,7 +13,11 @@ const projection = (overrides: Partial<AutonomousExecutionProjection> = {}): Aut
 const okResponse = { ok: true, json: async () => ({ ok: true, value: { action: 'recorded', requestEventSeq: 10 } }) };
 
 describe('WorkExecutionCard', () => {
-  beforeEach(() => { global.fetch = jest.fn().mockResolvedValue(okResponse) as jest.Mock; });
+  beforeEach(() => {
+    global.fetch = jest.fn().mockImplementation((input: string) => input === '/api/ai/local-runtime-status'
+      ? Promise.resolve({ ok: true, json: async () => ({ ok: true, value: { available: true, models: [] } }) })
+      : Promise.resolve(okResponse)) as jest.Mock;
+  });
 
   test('projeta executor, provedor, modelo, esforço, limites e checkpoint', () => {
     render(<WorkExecutionCard execution={projection()} workItemId="item-1" proposalVersion={1} onReload={jest.fn()} />);
@@ -32,12 +36,37 @@ describe('WorkExecutionCard', () => {
     expect(screen.getByRole('button', { name: 'Cancelar' })).toBeInTheDocument();
   });
 
+  test('execução sem checkpoint mostra fase honesta e tempo decorrido', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-29T12:00:12.000Z'));
+    render(<WorkExecutionCard execution={projection({ latestCheckpoint: null })} workItemId="item-1" proposalVersion={1} onReload={jest.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Preparando a workspace isolada e aguardando o plano do modelo local.');
+    expect(screen.getByRole('status')).toHaveTextContent('Tempo decorrido: 12s');
+    expect(screen.getByText(/Última evidência persistida: execução iniciada/)).toBeInTheDocument();
+    jest.useRealTimers();
+  });
+
+  test('checkpoint vigente vira a fase acompanhável', () => {
+    render(<WorkExecutionCard execution={projection()} workItemId="item-1" proposalVersion={1} onReload={jest.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Executando: editar calculator.py');
+  });
+
+  test('mostra o processo Ollama confirmado pelo servidor local', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, value: { available: true, models: [{ name: 'qwen2.5-coder:14b', loadedGigabytes: 9, gpuPercent: 80 }] } }),
+    });
+    render(<WorkExecutionCard execution={projection()} workItemId="item-1" proposalVersion={1} onReload={jest.fn()} />);
+    expect(await screen.findByText('Ollama ativo: qwen2.5-coder:14b · 9 GB carregados · 80% na GPU')).toBeInTheDocument();
+  });
+
   test('pausar envia o pedido com item, versão e tentativa exatos e recarrega', async () => {
     const onReload = jest.fn();
     render(<WorkExecutionCard execution={projection()} workItemId="item-1" proposalVersion={2} onReload={onReload} />);
     fireEvent.click(screen.getByRole('button', { name: 'Pausar' }));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/control', expect.objectContaining({ method: 'POST' })));
-    const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body as string);
+    const controlCall = (global.fetch as jest.Mock).mock.calls.find(([input]) => input === '/api/work-orchestration/control');
+    expect(controlCall).toBeDefined();
+    const body = JSON.parse(controlCall![1].body as string);
     expect(body).toEqual({ workItemId: 'item-1', expectedProposalVersion: 2, attemptId: 'att-1', action: 'pause' });
     await waitFor(() => expect(onReload).toHaveBeenCalledTimes(1));
   });
@@ -45,7 +74,7 @@ describe('WorkExecutionCard', () => {
   test('cancelar exige confirmação antes de enviar', async () => {
     render(<WorkExecutionCard execution={projection()} workItemId="item-1" proposalVersion={1} onReload={jest.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalledWith('/api/work-orchestration/control', expect.anything());
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/control', expect.objectContaining({ method: 'POST', body: expect.stringContaining('"action":"cancel"') })));
   });
@@ -77,7 +106,9 @@ describe('WorkExecutionCard', () => {
   });
 
   test('versão obsoleta é recusada com mensagem e força reprojeção', async () => {
-    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, json: async () => ({ ok: false, error: { code: 'version_conflict', message: 'O item mudou desde a última leitura.' } }) });
+    (global.fetch as jest.Mock).mockImplementation((input: string) => input === '/api/ai/local-runtime-status'
+      ? Promise.resolve({ ok: true, json: async () => ({ ok: true, value: { available: true, models: [] } }) })
+      : Promise.resolve({ ok: false, json: async () => ({ ok: false, error: { code: 'version_conflict', message: 'O item mudou desde a última leitura.' } }) }));
     const onReload = jest.fn();
     render(<WorkExecutionCard execution={projection()} workItemId="item-1" proposalVersion={1} onReload={onReload} />);
     fireEvent.click(screen.getByRole('button', { name: 'Pausar' }));

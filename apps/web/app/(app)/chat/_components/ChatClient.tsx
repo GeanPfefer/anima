@@ -8,6 +8,7 @@ import { WorkProposalCard, type WorkPresentationView } from './WorkProposalCard'
 import { WorkFocusChoice } from './WorkFocusChoice';
 
 type Message = { id?: string; role: 'user' | 'assistant'; content: string };
+type ChatProvider = 'openai' | 'ollama';
 
 type ProposedLink = {
   childId:    string;
@@ -30,6 +31,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [continuityError,setContinuityError] = useState(false);
   const [error, setError]             = useState('');
   const [isOnboarding, setIsOnboarding] = useState(isFirstTime);
+  const [provider, setProvider]         = useState<ChatProvider>('openai');
   const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
   const [workItems, setWorkItems] = useState<Record<string, WorkPresentationView>>({});
   // UX-04 — cartões reencontrados por uma consulta de histórico, indexados pela
@@ -44,6 +46,17 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem('anima-chat-provider');
+    if (saved === 'openai' || saved === 'ollama') setProvider(saved);
+  }, []);
+
+  function selectProvider(next: ChatProvider) {
+    if (loading) return;
+    setProvider(next);
+    window.localStorage.setItem('anima-chat-provider', next);
+  }
 
   // Carrega histórico persistido ao montar (evita reset ao trocar de aba)
   useEffect(() => {
@@ -158,7 +171,7 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     const res = await fetch('/api/ai/chat', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ message: text }),
+      body:    JSON.stringify({ message: text, provider }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
@@ -276,11 +289,35 @@ export function ChatClient({ isFirstTime, userName }: Props) {
               : 'Seu assistente pessoal — conhece seus pilares e histórico'}
           </p>
         </div>
-        {messages.length > 0 && !isOnboarding && (
-          <button className={styles.clearBtn} disabled={loading} onClick={clearHistory} title="Arquivar conversa atual">
-            Nova conversa
-          </button>
-        )}
+        <div className={styles.headerActions}>
+          {!isOnboarding && (
+            <div className={styles.providerPicker} aria-label="Provedor de inteligência">
+              <button
+                type="button"
+                className={provider === 'openai' ? styles.providerActive : undefined}
+                disabled={loading}
+                onClick={() => selectProvider('openai')}
+                title="Usa a API da OpenAI; envia a conversa e o contexto relevante do Anima"
+              >
+                GPT
+              </button>
+              <button
+                type="button"
+                className={provider === 'ollama' ? styles.providerActive : undefined}
+                disabled={loading}
+                onClick={() => selectProvider('ollama')}
+                title="Processamento local pelo Ollama; não envia a conversa à OpenAI"
+              >
+                Local
+              </button>
+            </div>
+          )}
+          {messages.length > 0 && !isOnboarding && (
+            <button className={styles.clearBtn} disabled={loading} onClick={clearHistory} title="Arquivar conversa atual">
+              Nova conversa
+            </button>
+          )}
+        </div>
       </div>
 
       <div className={styles.messages}>
