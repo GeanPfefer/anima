@@ -60,9 +60,15 @@ describe('planejador executável do projeto', () => {
     expect(result.command.intent).toMatchObject({
       execution_spec: {
         target: { kind: 'project', reference: 'anima' },
+        executor: 'worktree',
+        coder_backend: 'ollama',
         permissions: ['workspace_read', 'workspace_write_isolated'],
         limits: { max_attempts: 3, max_duration_minutes: 30 },
       },
     });
+    // O SHA-base autorizado foi capturado e persistido no contrato.
+    const spec = (result.command.intent as { execution_spec: { base_sha?: unknown; model?: unknown } }).execution_spec;
+    expect(String(spec.base_sha)).toMatch(/^[a-f0-9]{40}$/);
+    expect(typeof spec.model).toBe('string');
   });
 });

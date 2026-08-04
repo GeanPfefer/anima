@@ -1,5 +1,6 @@
 import type { CreateWorkProposalCommand } from '@anima/core';
 import { executeProjectTool, OPENAI_PROJECT_TOOLS } from './project-tools';
+import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 
 const PLANNER_TOOL_CALL_LIMIT = 24;
 const FORCE_SUBMISSION_AFTER_EVIDENCE = 8;
@@ -143,6 +144,10 @@ export async function planExecutableProjectWork(
     if (submitted && localEvidenceCalls > 0) {
       const proposal = parseProposal(submitted.arguments);
       if (!proposal) return { ok: false, message: 'O GPT produziu uma proposta fora dos limites locais permitidos.' };
+      // Captura e persiste o SHA-base autorizado no momento da proposta. A
+      // execução criará a worktree exatamente deste SHA, nunca do HEAD futuro.
+      const baseSha = await readAuthorizedBaseSha();
+      if (!baseSha) return { ok: false, message: 'Não foi possível capturar o SHA-base autorizado do repositório.' };
       return {
         ok: true,
         command: {
@@ -154,6 +159,12 @@ export async function planExecutableProjectWork(
             execution_spec: {
               schema_version: 1,
               target: { kind: 'project', reference: 'anima' },
+              // Executor e backend persistidos no contrato (ADR-001): project:anima
+              // usa a worktree isolada com o backend de código local selecionável.
+              executor: 'worktree',
+              coder_backend: 'ollama',
+              model: process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
+              base_sha: baseSha,
               permissions: ['workspace_read', 'workspace_write_isolated'],
               validation_criteria: [{ label: proposal.validation_label, command: proposal.validation_command }],
               limits: { max_attempts: 3, max_duration_minutes: 30 },
