@@ -79,3 +79,51 @@ describe('UX-04 — histórico e retomada pela conversa', () => {
     expect(screen.queryByRole('article')).not.toBeInTheDocument();
   });
 });
+
+describe('correção 3 — turno órfão e retry idempotente', () => {
+  function chatOk(headers: Record<string,string>) {
+    let sent = false;
+    return { ok:true, headers:{ get:(k:string)=>headers[k] ?? null }, json:async()=>({}),
+      body:{ getReader:()=>({ read: async () => sent ? { done:true, value:undefined } : (sent = true, { done:false, value:new TextEncoder().encode('resposta') }) }) } } as unknown as Response;
+  }
+  beforeEach(()=>{ global.fetch=jest.fn(); Element.prototype.scrollIntoView=jest.fn(); });
+  afterEach(()=>jest.restoreAllMocks());
+
+  test('reload com mensagem órfã: reconstrói do servidor e oferece retry pelo id (sem duplicar)', async () => {
+    const chatBodies: Record<string, unknown>[] = [];
+    (global.fetch as jest.Mock).mockImplementation((input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/ai/history') return Promise.resolve({ ok:true, json: async () => [{ id:'u1', role:'user', content:'pergunta órfã' }] });
+      if (url === '/api/work-orchestration/focus') return Promise.resolve({ ok:true, json: async () => ({ ok:true, value:null }) });
+      if (url.startsWith('/api/work-orchestration/items/by-source/')) return Promise.resolve({ ok:true, json: async () => ({ ok:true, value:[] }) });
+      if (url === '/api/ai/chat') { chatBodies.push(JSON.parse(String(init?.body))); return Promise.resolve(chatOk({ 'X-Source-Message-Id':'u1' })); }
+      return Promise.resolve({ ok:true, json: async () => ({ ok:true, value:null }) });
+    });
+    render(<ChatClient isFirstTime={false} userName="Ana"/>);
+    // O turno órfão é reconstruído do servidor: a mensagem segue visível e há retry.
+    expect(await screen.findByText('pergunta órfã')).toBeInTheDocument();
+    const retryBtn = await screen.findByRole('button', { name: 'Tentar responder novamente' });
+    fireEvent.click(retryBtn);
+    await waitFor(() => expect(chatBodies.length).toBe(1));
+    // Retry idempotente: reenvia o MESMO turno pelo id — não cria nova mensagem.
+    expect(chatBodies[0]).toMatchObject({ message: 'pergunta órfã', retryMessageId: 'u1' });
+  });
+
+  test('falha no chat mantém a mensagem do usuário e oferece retry (sem silêncio)', async () => {
+    (global.fetch as jest.Mock).mockImplementation((input: string) => {
+      const url = String(input);
+      if (url === '/api/ai/history') return Promise.resolve({ ok:true, json: async () => [] });
+      if (url === '/api/work-orchestration/focus') return Promise.resolve({ ok:true, json: async () => ({ ok:true, value:null }) });
+      if (url === '/api/ai/chat') return Promise.resolve({ ok:false, json: async () => ({ error: 'provedor indisponível' }) });
+      if (url === '/api/ai/turns/abandon') return Promise.resolve({ ok:true, json: async () => ({}) });
+      return Promise.resolve({ ok:true, json: async () => ({ ok:true, value:null }) });
+    });
+    render(<ChatClient isFirstTime={false} userName="Ana"/>);
+    await waitFor(()=>expect(screen.getByRole('textbox')).toBeEnabled());
+    fireEvent.change(screen.getByRole('textbox'), { target:{ value:'minha pergunta' } });
+    fireEvent.click(screen.getByRole('button',{ name:'↑' }));
+    // A mensagem do usuário permanece; erro e retry visíveis — nunca fica órfã em silêncio.
+    expect(await screen.findByText('minha pergunta')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Tentar responder novamente' })).toBeInTheDocument();
+  });
+});

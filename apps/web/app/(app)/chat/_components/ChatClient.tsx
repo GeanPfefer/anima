@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import styles from './chat.module.css';
 import { WorkProposalCard, type WorkPresentationView } from './WorkProposalCard';
 import { WorkFocusChoice } from './WorkFocusChoice';
+import { findInterruptedTurn, type InterruptedTurn } from '@/lib/ai/chat-turn';
 
 type Message = { id?: string; role: 'user' | 'assistant'; content: string };
 type ChatProvider = 'openai' | 'ollama';
@@ -40,8 +41,13 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [historyCards, setHistoryCards] = useState<Record<string, WorkPresentationView[]>>({});
   const [focusedWorkItemId,setFocusedWorkItemId]=useState<string|null>(null);
   const [focusChoice,setFocusChoice]=useState<{sourceMessageId:string;candidates:readonly{id:string;summary:string}[]}|null>(null);
+  // Turno interrompido/órfão (correção 3): mensagem do usuário sem resposta,
+  // retryável. Reconstruído do servidor no reload e marcado ao falhar ao vivo.
+  const [retryTurn, setRetryTurn] = useState<InterruptedTurn | null>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Id persistido da mensagem do usuário do turno em andamento (para retry idempotente).
+  const lastSourceId = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -69,10 +75,15 @@ export function ChatClient({ isFirstTime, userName }: Props) {
       .then(r => r.ok ? r.json() : [])
       .then(async (history: { id: string; role: string; content: string }[]) => {
         if (history.length > 0) {
-          setMessages(history.map(m => ({
+          const loaded = history.map(m => ({
             id: m.id, role: m.role as 'user' | 'assistant',
             content: m.content,
-          })));
+          }));
+          setMessages(loaded);
+          // Reconstrói o estado do turno a partir do servidor: uma mensagem de
+          // usuário sem resposta depois (após um reload durante a geração) é um
+          // turno interrompido e retryável — nunca fica em silêncio indefinido.
+          setRetryTurn(findInterruptedTurn(loaded));
           const userMessages = history.filter(message => message.role === 'user');
           const results = await Promise.all(userMessages.map(async message => {
             const response = await fetch(`/api/work-orchestration/items/by-source/${message.id}`);
@@ -120,12 +131,26 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     }
   }
 
+  // Falha de turno: mantém a mensagem do usuário (remove só o placeholder vazio
+  // do assistente), avisa e marca o turno como retryável. Nunca perde a mensagem
+  // nem inventa resposta.
+  function markTurnFailed(e: unknown, content: string, id?: string) {
+    void fetch('/api/ai/turns/abandon', { method: 'POST' });
+    setError(e instanceof Error ? e.message : 'Erro ao conectar com a IA');
+    setMessages(prev => (prev[prev.length - 1]?.role === 'assistant' && prev[prev.length - 1]?.content === '')
+      ? prev.slice(0, -1)
+      : prev);
+    setRetryTurn(id ? { id, content } : { content });
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || loading || hydrating || continuityError) return;
 
     setInput('');
     setError('');
+    setRetryTurn(null);
+    lastSourceId.current = undefined;
     const newMessages: Message[] = [...messages, { role: 'user', content: text }];
     setMessages(newMessages);
     setLoading(true);
@@ -149,9 +174,26 @@ export function ChatClient({ isFirstTime, userName }: Props) {
         await streamChat(text);
       }
     } catch (e) {
-      void fetch('/api/ai/turns/abandon',{method:'POST'});
-      setError(e instanceof Error ? e.message : 'Erro ao conectar com a IA');
-      setMessages(prev => prev.slice(0, -1));
+      markTurnFailed(e, text, lastSourceId.current);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Retry idempotente: reenvia o MESMO turno pelo id persistido (retryMessageId),
+  // sem criar uma segunda mensagem do usuário no servidor.
+  async function retry() {
+    if (loading || hydrating || continuityError || !retryTurn) return;
+    const turn = retryTurn;
+    setRetryTurn(null);
+    setError('');
+    setLoading(true);
+    lastSourceId.current = turn.id;
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+    try {
+      await streamChat(turn.content, turn.id);
+    } catch (e) {
+      markTurnFailed(e, turn.content, turn.id);
     } finally {
       setLoading(false);
     }
@@ -167,11 +209,11 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     await readStream(res);
   }
 
-  async function streamChat(text: string) {
+  async function streamChat(text: string, retryMessageId?: string) {
     const res = await fetch('/api/ai/chat', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ message: text, provider }),
+      body:    JSON.stringify({ message: text, provider, ...(retryMessageId ? { retryMessageId } : {}) }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
@@ -181,6 +223,8 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     const linksHeader    = res.headers.get('X-Pillar-Links');
     const sourceMessageId = res.headers.get('X-Source-Message-Id');
     const orchestrationHeader = res.headers.get('X-Work-Orchestration');
+    // Guarda o id persistido para um eventual retry idempotente deste turno.
+    if (sourceMessageId) lastSourceId.current = sourceMessageId;
     if (sourceMessageId) setMessages(previous => previous.map((message, index) => index === previous.length - 2 && message.role === 'user' ? { ...message, id: sourceMessageId } : message));
     await readStream(res);
     if (linksHeader) {
@@ -391,6 +435,11 @@ export function ChatClient({ isFirstTime, userName }: Props) {
         )}
 
         {error && <p className={styles.error}>{error}</p>}
+        {retryTurn && !loading && (
+          <button className={styles.suggestion} onClick={retry} aria-label="Tentar responder novamente">
+            Tentar responder de novo
+          </button>
+        )}
         <div ref={bottomRef} />
       </div>
 

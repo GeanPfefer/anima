@@ -31,6 +31,7 @@ import {
 } from '@/lib/ai/chat-provider';
 import { planExecutableProjectWork } from '@/lib/ai/project-work-planner';
 import { isDevelopmentChatAuthorized, resolveChatDevelopmentMode } from '@/lib/ai/chat-surface';
+import { shouldReuseOrphanUserMessage } from '@/lib/ai/chat-turn';
 
 function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -73,10 +74,11 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Response('Não autorizado', { status: 401 });
 
-  const { message, provider: requestedProvider, developmentMode: requestedDevelopmentMode } = await req.json() as {
+  const { message, provider: requestedProvider, developmentMode: requestedDevelopmentMode, retryMessageId: requestedRetryMessageId } = await req.json() as {
     message: string;
     provider?: unknown;
     developmentMode?: unknown;
+    retryMessageId?: unknown;
   };
   if (!message?.trim()) return new Response('Mensagem vazia', { status: 400 });
   const provider = parseChatProvider(requestedProvider);
@@ -513,22 +515,37 @@ ${contextBlock}`;
     .maybeSingle();
   const { data: history } = await supabase
     .from('ai_conversations')
-    .select('role, content')
+    .select('id, role, content, session_id')
     .eq('session_id', activeSession?.id ?? '00000000-0000-0000-0000-000000000000')
     .order('created_at', { ascending: false })
     .limit(10);
 
-  const pastMessages = (history ?? []).reverse().map(m => ({
+  // history vem em ordem DESC; a última mensagem da sessão é a primeira aqui.
+  const latestMessage = history?.[0] ?? null;
+  const pastMessages = [...(history ?? [])].reverse().map(m => ({
     role:    m.role as 'user' | 'assistant',
     content: m.content,
   }));
 
-  const { data: sourceMessage, error: sourceMessageError } = await supabase
-    .from('ai_conversations')
-    .insert({ user_id: user.id, role: 'user', content: message })
-    .select('id, session_id')
-    .single();
-  if (sourceMessageError || !sourceMessage) return Response.json({ error: 'Não foi possível preservar a mensagem.' }, { status: 503 });
+  // Idempotência de retry (correção 3): reaproveita uma mensagem de usuário órfã
+  // idêntica em vez de gravar uma segunda. Cobre o retry explícito
+  // (retryMessageId) e o reenvio do mesmo texto — o duplicado visto na demo.
+  let sourceMessage: { id: string; session_id: string | null };
+  if (shouldReuseOrphanUserMessage({
+    latest: latestMessage,
+    incomingContent: message,
+    retryMessageId: typeof requestedRetryMessageId === 'string' ? requestedRetryMessageId : null,
+  })) {
+    sourceMessage = { id: latestMessage!.id, session_id: latestMessage!.session_id };
+  } else {
+    const { data: inserted, error: sourceMessageError } = await supabase
+      .from('ai_conversations')
+      .insert({ user_id: user.id, role: 'user', content: message })
+      .select('id, session_id')
+      .single();
+    if (sourceMessageError || !inserted) return Response.json({ error: 'Não foi possível preservar a mensagem.' }, { status: 503 });
+    sourceMessage = inserted;
+  }
 
   // Perguntas curtas de estado não podem ser respondidas pela memória textual
   // do modelo. O foco e o work_item persistido são a fonte autoritativa.
@@ -664,7 +681,16 @@ ${contextBlock}`;
           fullResponse += token;
           controller.enqueue(encoder.encode(token));
         }
+      } catch (streamError) {
+        // Interrupção mid-stream: NÃO persiste nada (não inventa resposta do
+        // assistente). O turno fica órfão e retryável; o cliente vê a falha.
+        controller.error(streamError instanceof Error ? streamError : new Error('Geração interrompida.'));
+        return;
+      }
 
+      // Só persiste o assistente numa conclusão REAL e não vazia. Uma conclusão
+      // vazia deixa o turno órfão/retryável em vez de gravar uma resposta em branco.
+      if (fullResponse.trim().length > 0) {
         // session_id explícito: a resposta pertence ao turno da pergunta.
         await supabase.from('ai_conversations').insert({
           user_id: user.id,
@@ -689,9 +715,8 @@ ${contextBlock}`;
           }
           if (n > 0 && n % 5 === 0) await inferAndSaveIdentity(user.id, window);
         })().catch(() => {});
-      } finally {
-        controller.close();
       }
+      controller.close();
     },
   });
 
