@@ -161,8 +161,12 @@ async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderS
   let input: unknown[] = request.messages;
   let toolCalls = 0;
   let finalText = '';
-
-  while (toolCalls <= PROJECT_TOOL_CALL_LIMIT) {
+  // Ao atingir o limite de ferramentas, encerramos o laço de forma controlada e
+  // pedimos UMA resposta textual final SEM ferramentas, usando só o contexto já
+  // obtido — o usuário nunca fica sem retorno (nem recebe um 422 vazio).
+  let forceFinal = false;
+  // Teto rígido de iterações: proteção extra contra laço (limite + a final).
+  for (let iteration = 0; iteration <= PROJECT_TOOL_CALL_LIMIT + 1; iteration++) {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       signal: timeoutSignal(90_000),
@@ -176,8 +180,9 @@ async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderS
         store: false,
         instructions,
         input,
-        // Ferramentas de repositório existem APENAS no modo de desenvolvimento.
-        ...(developmentMode ? { tools: OPENAI_PROJECT_TOOLS, tool_choice: 'auto' } : {}),
+        // Ferramentas SÓ no modo de desenvolvimento e ENQUANTO abaixo do limite.
+        // Na resposta final forçada, nenhuma ferramenta é oferecida.
+        ...(developmentMode && !forceFinal ? { tools: OPENAI_PROJECT_TOOLS, tool_choice: 'auto' } : {}),
       }),
     }).catch(() => null);
 
@@ -197,16 +202,25 @@ async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderS
       && typeof item.name === 'string'
       && typeof item.arguments === 'string');
 
-    if (calls.length === 0) {
+    // Resposta final: sem chamadas de ferramenta, ou já na rodada final forçada.
+    if (forceFinal || calls.length === 0) {
       finalText = body.output_text
         ?? output.flatMap(item => item.content ?? []).filter(item => item.type === 'output_text').map(item => item.text ?? '').join('');
       break;
     }
 
-    toolCalls += calls.length;
-    if (toolCalls > PROJECT_TOOL_CALL_LIMIT) {
-      throw new ChatProviderError('O GPT excedeu o limite de consultas locais deste turno.', 422);
+    // O limite seria excedido: NÃO executa as novas chamadas (nenhuma chamada de
+    // ferramenta após o limite) e força uma resposta textual final na próxima
+    // iteração. Log estruturado, sem segredos.
+    if (toolCalls + calls.length > PROJECT_TOOL_CALL_LIMIT) {
+      console.warn('[chat-provider] limite de ferramentas atingido; encerrando com resposta textual', {
+        toolCalls, pending: calls.length, limit: PROJECT_TOOL_CALL_LIMIT,
+      });
+      forceFinal = true;
+      continue;
     }
+
+    toolCalls += calls.length;
     const toolOutputs = await Promise.all(calls.map(async call => ({
       type: 'function_call_output',
       call_id: call.call_id,
@@ -215,7 +229,11 @@ async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderS
     input = [...input, ...output, ...toolOutputs];
   }
 
-  if (!finalText) throw new ChatProviderError('A OpenAI não retornou uma resposta textual.', 502);
+  if (!finalText) {
+    // Mesmo a resposta final não veio: erro CLARO e recuperável (o cliente mostra
+    // a mensagem e permite tentar de novo). Nunca um 422 silencioso.
+    throw new ChatProviderError('Não consegui concluir a investigação local desta vez. Tente novamente ou reformule o pedido.', 502);
+  }
   return { provider: 'openai', model, stream: textStream(finalText) };
 }
 
