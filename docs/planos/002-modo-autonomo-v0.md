@@ -1019,6 +1019,14 @@ Registro **factual** de ratificação do UX-02 funcional com base nas Camadas 1 
 
 **Pendências nomeadas (não substituídas por afirmação):** (1) **prova ponta a ponta com o provedor OpenAI real** — pedido em linguagem natural → investigação do GPT → proposta executável → aprovação → execução isolada pelo runner → resultado em `review`, com evidências e workspace intacta; (2) a **prova física mobile em Expo Go** da seção anterior (depende do Gean; ambiente e conta descartável preparados). A **validação automatizada** (typecheck, testes, build, suíte do runner) está **feita e registrada acima**; estas duas são **provas ao vivo** distintas dela. **Ratificação final é do humano.**
 
+### Execução local de código em git worktree (ADR-001) — implementado e provado ao vivo (2026-08-04)
+
+Ratificada a **Opção A** do [ADR-001](../arquitetura/adr-001-execucao-local-de-codigo.md) (Gean, 2026-08-04): o Anima passa a executar código no repositório **real** dentro de uma **git worktree isolada**, com o toolchain real, e a inteligência que escreve o código é **selecionável** por adaptadores. Detalhes, invariantes e commits estão no ADR; aqui fica só o marco.
+
+Implementado sobre o contrato `WorkExecutorAdapter` existente (consumido pelo `runExecutorStreamed`), **sem sistema paralelo**: `WorktreeExecutorAdapter` + primitivas de worktree + interface `CoderBackend` (com `ScriptedCoderBackend` determinístico e `OllamaCoderBackend` local). Fronteiras: worktree descartável a partir do SHA autorizado, workspace original nunca tocado (mesmo sujo), `node_modules` real preservado, allowlist de comandos, guardas de segredo/escopo, gates obrigatórios, checkpoint, resultado **sempre** para revisão humana, **sem** merge/push/apply.
+
+**Provado ao vivo no próprio Anima:** (1) determinístico — função pura + teste em `packages/core`, gates `npm test`/`npm run typecheck` reais verdes, `result` → revisão, original byte-idêntico; (2) **modelo local** `qwen3-coder:latest` escreveu uma mudança TypeScript real, gates reais verdes, `result` → revisão, original intacto (~35 s). Provas automatizadas verdes (worktree 11, worktree-executor 11, ollama-coder 4; suíte web 186; typecheck do monorepo limpo). Commits `3f70555`..`ba4c5a8` na branch `claude/ux-04-mobile-parity` (pushados; `origin/main` intacta). **Pendente:** fiar a seleção de rota do Supervisor ao novo executor, backend de nuvem selecionável e a ponte de aplicação (INT-03). **Ratificação final do fluxo completo é do humano.**
+
 ## Dependências entre fases
 
 ```text

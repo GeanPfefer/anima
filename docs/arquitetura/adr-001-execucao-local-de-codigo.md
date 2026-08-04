@@ -85,11 +85,31 @@ A tensão central é **contenção (B) × fidelidade + baixo atrito (A)**. Para 
 - **A revisitar:** se um dia houver multiusuário ou execução não confiável, reintroduzir o contêiner (B) **por cima** de A.
 - **Ainda falta** a ponte de aplicação (INT-03): transformar o branch/resultado aceito em PR revisável — é etapa separada.
 
-## Ação (após decisão)
+## Implementação e prova (2026-08-04)
 
-1. [x] **Gean decidiu**: Opção A ratificada, com modelo selecionável (local + nuvem) — ver *Ratificação* acima.
-2. [ ] Se A: definir o `WorkExecutorAdapter` de worktree — criar worktree/branch, editar, rodar gate `npm` real, produzir diff/branch; especificar allowlist de comandos + denylist de segredos + usuário/escopo.
-3. [ ] Executor de modelo **selecionável** reusando o padrão de `chat-provider` (local + nuvem; avaliar backend "agente existente").
-4. [ ] **Primeiro marco mínimo:** uma mudança trivial e verdadeira (ex.: função pura + teste em `packages/core`, gate `npm run typecheck`/`npm test` escopado) rodando o loop completo chat→proposta→aprovar→executar→review.
-5. [ ] Rotular `tools/local-agent` como **POC de contrato** (não executor de produção do monorepo TS).
-6. [ ] Planejar INT-03 (aplicação do resultado revisado como branch/PR).
+Implementado sobre o contrato `WorkExecutorAdapter` **existente** (consumido pelo `runExecutorStreamed` atual) — sem caminho paralelo. Novos módulos em `apps/web/lib/work-orchestration/`:
+
+- **`worktree.ts`** — `GitWorktree` (branch+worktree descartável de um SHA; diff; arquivos alterados; commit sem push; dispose que remove a *junction* de `node_modules` com `rmdir` **antes** do `git worktree remove`, para nunca apagar o `node_modules` real), `safeJoin` (guardas de raiz/traversal/segredos) e `runProcess`/`runGate` (execução sem shell com allowlist npm explícita, timeout, cancelamento, captura).
+- **`coder-backend.ts`** — interface **selecionável** `CoderBackend` + `ScriptedCoderBackend` determinístico. O adaptador e o Supervisor nunca falam com um provedor direto.
+- **`worktree-executor.ts`** — `WorktreeExecutorAdapter`: worktree → backend confinado → validação de escopo → checkpoint opcional → gates npm → `result` (para revisão) ou `error`; commit na branch descartável como referência, **nunca** push/merge/apply.
+- **`ollama-coder.ts`** — `OllamaCoderBackend`, a primeira inteligência **local** selecionável (single-shot, confinada ao escopo).
+
+Commits (branch `claude/ux-04-mobile-parity`, pushados; `origin/main` intacta): `3f70555` (ratificação), `ea7f40a` (primitivas), `bdad460` (adaptador + backend), `aa893fb` (correção do dispose), `4250f50` (regressões), `ba4c5a8` (backend Ollama).
+
+**Provas automatizadas (verdes):** `worktree` 11, `worktree-executor` 11 (sucesso, gate falhando, fora de escopo, permissão, allowlist, cancelamento, original intacto mesmo sujo, caminho sensível, retomada/checkpoint, concorrência no mesmo alvo, idempotência), `ollama-coder` 4 (fetch mockado). Suíte web inteira **186** verdes; typecheck do monorepo limpo.
+
+**Prova determinística no repositório Anima real** (harness descartável, não commitado): adicionou uma função pura + teste em `packages/core`; gates `npm test`/`npm run typecheck` **reais** verdes com `node_modules` religado; `result` (→ revisão); workspace original **byte-idêntico**; worktree e branch descartáveis limpos.
+
+**Execução real com modelo LOCAL** (`qwen3-coder:latest` via Ollama, harness descartável): o modelo escreveu a mudança TypeScript no escopo; os gates reais passaram; `result` (→ revisão); original intacto; ~35 s. É o "Anima desenvolve o próprio Anima" com inteligência local, ao vivo.
+
+**Invariantes do ADR confirmadas:** worktree sempre isolada do SHA; workspace original nunca tocado (mesmo sujo); `node_modules` real preservado no dispose; allowlist de comandos; guardas de path/segredo; gates obrigatórios; checkpoint; `result` sempre para revisão humana; sem merge/push/apply; inteligência selecionável por `CoderBackend`.
+
+## Ação
+
+1. [x] **Gean decidiu**: Opção A ratificada, com modelo selecionável (local + nuvem).
+2. [x] `WorktreeExecutorAdapter` de worktree — worktree/branch do SHA, edição, gate `npm` real, diff/branch, allowlist + guardas de segredo/escopo.
+3. [x] Inteligência **selecionável** por `CoderBackend` (`ScriptedCoderBackend` + `OllamaCoderBackend` local).
+4. [x] **Marco mínimo** provado ao vivo (determinístico + modelo local) no `packages/core`, com original intacto.
+5. [~] `tools/local-agent` preservado e rebaixado a POC de contrato no ADR e no PRD (o código do runner permanece).
+6. [ ] **Fiar a rota do Supervisor** (`localRunnerRouteFromEnvironment` em `execution.ts`) para oferecer o executor de worktree — hoje o adaptador está pronto e provado, mas a seleção de rota ainda aponta ao runner Python. Backend GPT/nuvem selecionável e persistência da branch como handoff durável.
+7. [ ] Planejar **INT-03** (aplicação do resultado revisado como branch/PR, sob aprovação).
