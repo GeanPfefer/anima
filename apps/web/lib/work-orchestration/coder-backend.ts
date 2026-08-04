@@ -1,0 +1,64 @@
+import type { WorkExecutorRequest } from '@anima/core';
+
+// ============================================================
+// Interface selecionável de inteligência que ESCREVE o código (ADR-001).
+//
+// O Supervisor e o adaptador de worktree nunca falam com OpenAI, Ollama, Claude
+// ou Codex diretamente: falam com esta interface. Um backend recebe um workspace
+// confinado (as guardas de path já foram aplicadas pelo worktree) e devolve o
+// que tocou. Trocar de inteligência é trocar a implementação, não o adaptador.
+// ============================================================
+
+export interface CoderEditRequest {
+  readonly objective: string;
+  readonly includedScope: readonly string[];
+  readonly excludedScope: readonly string[];
+  /** Contexto informativo de uma tentativa anterior; nunca amplia escopo. */
+  readonly carriedContext?: WorkExecutorRequest['carriedContext'];
+}
+
+/** Superfície confinada de arquivos entregue ao backend. Ler/escrever fora da
+ * raiz do worktree ou em caminhos sensíveis já é recusado pelas guardas. */
+export interface CoderWorkspace {
+  readFile(relPath: string): Promise<string | null>;
+  writeFile(relPath: string, content: string): Promise<boolean>;
+}
+
+export interface CoderEditResult {
+  readonly summary: string;
+  readonly touchedResources: readonly string[];
+  readonly notes?: readonly string[];
+}
+
+export interface CoderBackend {
+  readonly id: string;
+  edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult>;
+}
+
+export interface ScriptedEdit { readonly path: string; readonly content: string; }
+
+/**
+ * Backend determinístico: aplica um conjunto fixo de edições. É a inteligência
+ * usada nas provas automatizadas e nos testes — sem modelo, sem rede, sem custo
+ * — para exercitar todo o adaptador de forma reproduzível. Uma edição cujo
+ * caminho a guarda recusa faz o backend falhar fechado.
+ */
+export class ScriptedCoderBackend implements CoderBackend {
+  readonly id: string;
+  constructor(
+    private readonly edits: readonly ScriptedEdit[],
+    private readonly summary = 'Alteração determinística aplicada em worktree isolada.',
+    id = 'scripted',
+  ) { this.id = id; }
+
+  async edit(_request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
+    const touched: string[] = [];
+    for (const edit of this.edits) {
+      if (signal.aborted) break;
+      const ok = await workspace.writeFile(edit.path, edit.content);
+      if (!ok) throw new Error(`Caminho recusado pelas guardas do worktree: ${edit.path}`);
+      touched.push(edit.path.replace(/\\/g, '/'));
+    }
+    return { summary: this.summary, touchedResources: touched };
+  }
+}

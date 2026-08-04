@@ -50,12 +50,17 @@ export function safeJoin(root: string, relPath: string): string | null {
 export function runProcess(
   file: string,
   args: readonly string[],
-  options: { readonly cwd: string; readonly timeoutMs: number; readonly signal?: AbortSignal; readonly env?: NodeJS.ProcessEnv },
+  options: { readonly cwd: string; readonly timeoutMs: number; readonly signal?: AbortSignal; readonly env?: NodeJS.ProcessEnv; readonly shell?: boolean },
 ): Promise<CommandResult> {
   const command = [file, ...args].join(' ');
   return new Promise(resolveResult => {
     const started = Date.now();
-    const child = spawn(file, [...args], { cwd: options.cwd, shell: false, windowsHide: true, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Com shell, passa a linha inteira como um único argumento (sem array), a
+    // forma recomendada: evita o DeprecationWarning de args não escapados. A
+    // segurança vem da allowlist estrita a montante, não do escape.
+    const child = options.shell
+      ? spawn(command, { cwd: options.cwd, shell: true, windowsHide: true, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn(file, [...args], { cwd: options.cwd, shell: false, windowsHide: true, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', settled = false, timedOut = false, cancelled = false;
     const done = (exitCode: number): void => {
       if (settled) return;
@@ -79,7 +84,10 @@ export function runProcess(
 // Allowlist explícita de comandos de gate. Só npm test/typecheck/build/lint,
 // opcionalmente escopado por workspace ou com argumentos passthrough restritos.
 // Qualquer outra coisa é recusada fechada, antes de spawnar.
-const GATE_PATTERN = /^npm(?:\.cmd)? (?:run (?:typecheck|test|build|lint)|test)(?: --workspace=[@a-z0-9._/-]+)?(?: -- [\w./@()\\:*?=-]+(?: [\w./@()\\:*?=-]+)*)?$/i;
+// Charset restrito nos passthrough: sem metacaracteres de encadeamento,
+// redirecionamento ou expansão (`& | ; > < $ * ? ( )`), então nem com shell há
+// como injetar um segundo comando.
+const GATE_PATTERN = /^npm(?:\.cmd)? (?:run (?:typecheck|test|build|lint)|test)(?: --workspace=[@a-z0-9._/-]+)?(?: -- [\w./@:=-]+(?: [\w./@:=-]+)*)?$/i;
 
 export function parseGateCommand(command: string): { readonly file: string; readonly args: string[] } | null {
   if (typeof command !== 'string' || !GATE_PATTERN.test(command.trim())) return null;
@@ -93,11 +101,13 @@ export function parseGateCommand(command: string): { readonly file: string; read
 }
 
 /** Roda um comando de gate permitido no worktree. Comando fora da allowlist é
- * recusado sem spawnar (exitCode -2, cancelado=false). */
+ * recusado sem spawnar (exitCode -2). No Windows npm é batch (npm.cmd) e o Node
+ * atual recusa spawnar batch sem shell; como o comando já passou pela allowlist
+ * estrita (sem metacaracteres de encadeamento), rodamos com shell só ali. */
 export function runGate(command: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<CommandResult> {
   const parsed = parseGateCommand(command);
   if (!parsed) return Promise.resolve({ command, exitCode: -2, stdout: '', stderr: 'Comando de gate fora da allowlist.', durationMs: 0, timedOut: false, cancelled: false });
-  return runProcess(parsed.file, parsed.args, { cwd, timeoutMs, signal });
+  return runProcess(parsed.file, parsed.args, { cwd, timeoutMs, signal, shell: process.platform === 'win32' });
 }
 
 const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promise<CommandResult> =>
