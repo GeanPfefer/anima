@@ -104,6 +104,18 @@ Commits (branch `claude/ux-04-mobile-parity`, pushados; `origin/main` intacta): 
 
 **Invariantes do ADR confirmadas:** worktree sempre isolada do SHA; workspace original nunca tocado (mesmo sujo); `node_modules` real preservado no dispose; allowlist de comandos; guardas de path/segredo; gates obrigatórios; checkpoint; `result` sempre para revisão humana; sem merge/push/apply; inteligência selecionável por `CoderBackend`.
 
+## Fiação da rota do Supervisor (2026-08-04)
+
+O executor de worktree passou a ser alcançável pelo fluxo real, com **seleção explícita pelo contrato persistido** (não heurística). Novo `executor-selection.ts` (`resolveExecutorRoute`) lê `execution_spec.executor` do item e devolve exatamente um `WorkExecutorAdapter`; o Supervisor continua recebendo só rotas.
+
+- **Contrato persistido (sem migration; `intent.execution_spec` é JSONB):** o planejador GPT passou a gravar `executor: 'worktree'`, `coder_backend: 'ollama'`, `model` (local) e **`base_sha` capturado do HEAD na proposta**. A worktree nasce **exatamente desse SHA**, nunca do HEAD posterior à aprovação.
+- **Regras:** `project:anima` exige o worktree (nunca cai no runner Python); o runner Python legado segue disponível para os demais alvos e para a fila autônoma pura; configuração inválida (sem `base_sha`, SHA malformado, backend inválido, executor desconhecido) falha **explícita**, sem fallback silencioso.
+- **Rota `supervisor-turn`:** no caminho explícito (botão "Executar autonomamente"), resolve o executor pelo contrato e passa a rota única; a ponte de admissão (classificação INTEL-01) permanece intacta.
+
+**Provas (verdes):** `executor-selection` 12, `supervisor-turn/route` 5, e **integração determinística `Supervisor → worktree`** 1 — `runSupervisorTurn` real dirige o `WorktreeExecutorAdapter` real: seleção → worktree no SHA autorizado → edição TS → **gate `npm` real** → checkpoint persistido → terminal → item em **`review`**, workspace original **intacto**. Regressões: SHA autorizado vs HEAD posterior, SHA inalcançável recusado, backend inválido, executor incorreto, retomada, concorrência, idempotência, gate falhando, cancelamento. Suíte web inteira **202**; typecheck do monorepo limpo. Commits `ad9eaa7`, `738b582`, `1b9fee2`, `74d8f99`, `63ca2b2`.
+
+**Pendência honesta:** a prova pela **stack HTTP viva com o modelo real** não foi executada — Docker, Supabase local e o dev server estavam **fora** nesta sessão. As duas metades já estão provadas isoladamente (o modelo local real `qwen3-coder` end-to-end no adaptador; a costura `Supervisor → worktree → review`); falta compô-las ao vivo pela rota autenticada. **Ratificação final do fluxo é do humano.**
+
 ## Ação
 
 1. [x] **Gean decidiu**: Opção A ratificada, com modelo selecionável (local + nuvem).
@@ -111,5 +123,7 @@ Commits (branch `claude/ux-04-mobile-parity`, pushados; `origin/main` intacta): 
 3. [x] Inteligência **selecionável** por `CoderBackend` (`ScriptedCoderBackend` + `OllamaCoderBackend` local).
 4. [x] **Marco mínimo** provado ao vivo (determinístico + modelo local) no `packages/core`, com original intacto.
 5. [~] `tools/local-agent` preservado e rebaixado a POC de contrato no ADR e no PRD (o código do runner permanece).
-6. [ ] **Fiar a rota do Supervisor** (`localRunnerRouteFromEnvironment` em `execution.ts`) para oferecer o executor de worktree — hoje o adaptador está pronto e provado, mas a seleção de rota ainda aponta ao runner Python. Backend GPT/nuvem selecionável e persistência da branch como handoff durável.
-7. [ ] Planejar **INT-03** (aplicação do resultado revisado como branch/PR, sob aprovação).
+6. [x] **Rota do Supervisor fiada** à seleção explícita do executor pelo contrato persistido (worktree para `project:anima`, runner Python para o legado), com SHA-base persistido e provas de integração — ver *Fiação da rota do Supervisor* acima.
+7. [ ] **Prova ao vivo pela stack HTTP** (Docker + Supabase + dev server) com o modelo real, compondo as duas metades já provadas.
+8. [ ] Backend **GPT/nuvem** selecionável e persistência da branch como handoff durável.
+9. [ ] Planejar **INT-03** (aplicação do resultado revisado como branch/PR, sob aprovação).
