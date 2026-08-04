@@ -1,10 +1,12 @@
 # Handoff — Anima Local Agent POC
 
-Última atualização: 2026-07-16, branch `fix/complete-requires-passing-tests`.
+Última atualização: 2026-08-04 (integração ao monorepo em `tools/local-agent`; antes: 2026-07-16, branch `fix/complete-requires-passing-tests`).
+
+> **Antes de qualquer tarefa no Anima, leia o `AGENTS.md` na raiz do monorepo** — o roteador operacional canônico. Este handoff cobre apenas o runner local.
 
 ## Propósito
 
-POC de um runner agêntico local que executa tarefas de programação com modelo via Ollama, em workspace isolada, com aprovação humana inicial e gates factuais antes de qualquer alteração persistir. É um projeto **separado** do aplicativo Anima e deve permanecer separado por enquanto; nenhum código daqui é importado por `G:\anima`.
+POC de um runner agêntico local que executa tarefas de programação com modelo via Ollama, em workspace isolada, com aprovação humana inicial e gates factuais antes de qualquer alteração persistir. O código foi **trazido para o monorepo em `tools/local-agent`** (por `git subtree`), mas mantém processo, ambiente Python, workspace temporária e contratos de segurança **separados** da aplicação web — nenhum código do runner é importado por `apps/web`.
 
 ## O que já está comprovado
 

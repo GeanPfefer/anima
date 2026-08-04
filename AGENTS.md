@@ -15,6 +15,16 @@ Antes de qualquer tarefa, leia nesta ordem:
 
 Leia também outros `AGENTS.md` mais próximos dos arquivos envolvidos, caso sejam criados no futuro.
 
+## Convergência de agentes
+
+Todo agente que trabalha no Anima começa por este `AGENTS.md` e segue a mesma ordem de leitura acima — é assim que qualquer um deles retoma o trabalho sem perder o que já foi feito:
+
+- **Claude** chega aqui por `CLAUDE.md`, que aponta para este arquivo.
+- **Codex** lê este `AGENTS.md` nativamente.
+- **Braços locais com Ollama** (`tools/local-agent`) devem ler este roteador antes de qualquer tarefa no repositório; o `README.md` e o `HANDOFF.md` do runner cobrem apenas o próprio runner.
+
+A divisão de fontes é fixa: a **visão de longo prazo** vive em `anima-manifesto.md`; o **estado tático vivo** (o que existe hoje e o que está em andamento) vive em `anima-prd.md`; o **histórico append-only** vive em `docs/planos/` e `docs/marcos/`. Ao encerrar uma sessão relevante, **atualize o estado vivo** — o PRD e o plano da tarefa — para que o próximo agente, humano ou modelo, continue exatamente de onde você parou.
+
 ## Estrutura principal
 
 | Caminho | Responsabilidade |
@@ -24,6 +34,7 @@ Leia também outros `AGENTS.md` mais próximos dos arquivos envolvidos, caso sej
 | `packages/core` | Regras de negócio compartilhadas e puras |
 | `packages/types` | Tipos TypeScript e tipos gerados do Supabase |
 | `supabase/migrations` | Schema versionado, RLS, funções, triggers e views |
+| `tools/local-agent` | Runner agêntico local (Python): execução isolada em contêiner, ambiente e contratos de segurança separados da aplicação |
 | `docs/arquitetura` | Decisões e contratos arquiteturais |
 | `docs/planos` | Planos incrementais de implementação |
 | `docs/marcos` | Mudanças de visão e identidade, append-only |

@@ -2,6 +2,8 @@
 
 Braço local de programação do Anima, usando Ollama e execução isolada. O código vive no monorepo, mas mantém processo, ambiente Python, workspace temporária e contratos de segurança separados da aplicação web.
 
+> **Antes de qualquer tarefa no Anima, leia o `AGENTS.md` na raiz do monorepo** — o roteador operacional canônico (visão, PRD, arquitetura e planos). Este README cobre apenas o runner local.
+
 ## Requisitos
 
 - Windows 10/11, PowerShell e Python 3.11+

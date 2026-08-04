@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-07-28 (sessão: conclusão do INTEL-04 e da Fase F; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-04 (sessão: Fase G — UX-01 a UX-04 ratificados; paridade mobile, integração GPT e runner no monorepo prontos para revisão; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -12,7 +12,7 @@
 
 | Princípio (manifesto) | Consequência operacional (este PRD) |
 |---|---|
-| "O Anima não tem compromisso com ferramentas" | Modelos e ferramentas de IA (hoje: Ollama/qwen2.5:14b) são tratados como substituíveis — nenhuma decisão de produto deve depender de um modelo específico |
+| "O Anima não tem compromisso com ferramentas" | Modelos e ferramentas de IA (hoje: provedor selecionável no chat — GPT/OpenAI na nuvem ou Ollama local; braço de programação em `tools/local-agent`) são tratados como substituíveis — nenhuma decisão de produto deve depender de um modelo específico |
 | "O Anima acompanha jornadas de evolução" | Pilares, quests e futuras features devem permitir acompanhar projetos de vida variados (ver §1g) — não só atividades de tempo cronometrado |
 | "Autonomia por nível de impacto" | Observações de baixo risco (detecção de atividade/nota/entidade) continuam rodando silenciosamente; qualquer ação de impacto estrutural/financeiro/irreversível exigirá confirmação prévia quando capacidades de execução existirem (ver §1f) |
 | "O usuário interage com uma única experiência principal: o Anima" | Capacidades internas (Prisma, e futuras) não viram personas ou telas concorrentes — tudo acontece na mesma frente conversacional (ver reposicionamento do Prisma em §1a) |
@@ -24,7 +24,7 @@
 
 **Nome provisório:** Anima  
 **Plataformas:** Desktop, Web, Mobile (todas)  
-**Estágio atual:** Em desenvolvimento ativo — produto pessoal funcional em web e mobile; Modo Construção comprovado; Modo Autônomo V0 concluído até a Fase F
+**Estágio atual:** Em desenvolvimento ativo — produto pessoal funcional em web e mobile; Modo Construção comprovado; Modo Autônomo V0 concluído até a Fase F; Fase G (experiência no chat) em andamento — UX-01 a UX-04 ratificados; paridade mobile, integração GPT (provedor selecionável) e runner trazido para `tools/local-agent` prontos para revisão (não ratificados)
 **Repositório:** https://github.com/GeanPfefer/anima  
 **Público inicial:** O próprio criador (uso pessoal para validar o sistema)  
 **Público futuro:** Aberto ao público após o sistema estar bem estruturado e funcional
