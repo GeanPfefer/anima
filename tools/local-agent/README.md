@@ -1,24 +1,24 @@
-# Anima Local Agent POC
+# Anima Local Agent
 
-Agente local de programação por terminal, usando Ollama e sem VS Code. Este é um POC isolado; não integra nem altera o Anima.
+Braço local de programação do Anima, usando Ollama e execução isolada. O código vive no monorepo, mas mantém processo, ambiente Python, workspace temporária e contratos de segurança separados da aplicação web.
 
 ## Requisitos
 
 - Windows 10/11, PowerShell e Python 3.11+
 - Git
 - Ollama em `http://127.0.0.1:11434`
-- Modelo `qwen2.5-coder:14b`
+- Modelo local compatível com Ollama; o Anima usa `qwen3-coder:30b` quando configurado
 - Docker Desktop com contêineres Linux
 
 ## Instalação
 
 ```powershell
-cd "CAMINHO\PARA\anima-local-agent-poc"
+cd "CAMINHO\PARA\anima\tools\local-agent"
 py -3.11 -m venv .venv
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-ollama pull qwen2.5-coder:14b
+ollama pull qwen3-coder:30b
 docker build -t anima-local-agent-python:0.1 .
 ```
 
@@ -31,34 +31,24 @@ python -m mypy local_agent
 ollama list
 ```
 
-Prepare a workspace descartável:
-
-```powershell
-cd .\example_workspace
-git init
-git add .
-git commit -m "test: baseline descartável"
-cd ..
-```
-
 ## Uso
 
 Interativo:
 
 ```powershell
-python -m local_agent --workspace "$PWD\example_workspace" --model qwen2.5-coder:14b
+python -m local_agent --workspace "CAMINHO\PARA\workspace" --model qwen3-coder:30b
 ```
 
 Direto:
 
 ```powershell
-python -m local_agent --workspace "$PWD\example_workspace" --task "Adicione uma função sum(a, b), crie testes, rode-os e mostre o diff."
+python -m local_agent --workspace "CAMINHO\PARA\workspace" --task "Adicione uma função sum(a, b), crie testes, rode-os e mostre o diff."
 ```
 
 Produzir resultado para revisão sem alterar a workspace original:
 
 ```powershell
-python -m local_agent --workspace "$PWD\example_workspace" --task "Adicione uma função sum(a, b) e teste." --produce-only
+python -m local_agent --workspace "CAMINHO\PARA\workspace" --task "Adicione uma função sum(a, b) e teste." --produce-only
 ```
 
 Nesse modo, o runner termina em `result_produced`, persiste manifesto, testes, evidência sanitizada e um bundle local dos arquivos produzidos em `.anima-agent-evidence`, e não chama a etapa transacional de aplicação. A evidência referencia o bundle por nome opaco e SHA-256, sem persistir caminho absoluto. A última linha `ANIMA_RESULT_JSON=<json>` expõe o estado, os caminhos relativos produzidos e essas referências em um envelope V1 estável para adaptadores locais. A aplicação permanece uma decisão posterior e separada.
