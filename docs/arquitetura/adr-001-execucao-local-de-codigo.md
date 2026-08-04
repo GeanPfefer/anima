@@ -141,5 +141,5 @@ Executado o fluxo **completo pela rota autenticada real**, com Docker + Supabase
 5. [~] `tools/local-agent` preservado e rebaixado a POC de contrato no ADR e no PRD (o código do runner permanece).
 6. [x] **Rota do Supervisor fiada** à seleção explícita do executor pelo contrato persistido (worktree para `project:anima`, runner Python para o legado), com SHA-base persistido e provas de integração — ver *Fiação da rota do Supervisor* acima.
 7. [x] **Prova ao vivo pela stack HTTP** (Docker + Supabase + dev server) com o modelo real `qwen3-coder` — ver *Prova ao vivo pela stack HTTP* acima; item em `review`, original intacto, descartáveis limpos.
-8. [ ] Backend **GPT/nuvem** selecionável atrás de `CoderBackend` (Ollama permanece a opção local; sem chamadas pagas nos testes; sem acoplar o Supervisor).
+8. [x] Backend **GPT/OpenAI selecionável** atrás de `CoderBackend` (`GptCoderBackend`, Responses API, chave só no servidor), escolhido por `execution_spec.coder_backend='openai'`; Ollama permanece a opção local; Supervisor não acoplado; parser `parseScopedFiles` compartilhado; 6 testes com fetch mockado (sem chamadas pagas). Falta uma prova ao vivo com a OpenAI real (paga, não executada).
 9. [ ] Persistência da branch como handoff durável e **INT-03** (aplicação do resultado revisado como branch/PR, sob aprovação).
