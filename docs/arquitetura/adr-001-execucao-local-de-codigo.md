@@ -116,6 +116,22 @@ O executor de worktree passou a ser alcançável pelo fluxo real, com **seleçã
 
 **Pendência honesta:** a prova pela **stack HTTP viva com o modelo real** não foi executada — Docker, Supabase local e o dev server estavam **fora** nesta sessão. As duas metades já estão provadas isoladamente (o modelo local real `qwen3-coder` end-to-end no adaptador; a costura `Supervisor → worktree → review`); falta compô-las ao vivo pela rota autenticada. **Ratificação final do fluxo é do humano.**
 
+## Prova ao vivo pela stack HTTP (2026-08-04)
+
+Executado o fluxo **completo pela rota autenticada real**, com Docker + Supabase local + dev server (porta 3100) + Ollama (`qwen3-coder:latest`), usuário e dados **totalmente descartáveis** (`worktree-live-…@test.invalid`, allowlisted). Nenhuma conta pessoal, nenhum `db reset`, `main` intocada.
+
+**Percurso e evidências objetivas (item `b9284af1…`, tentativa `adc5dc71…`):**
+
+- **Contrato persistido** em `create_work_proposal`: `executor: worktree`, `coder_backend: ollama`, `model: qwen3-coder:latest`, `base_sha: 6551df2…`, `target: project:anima`, permissões isoladas, limites 3/30.
+- **Aprovação** → `approved`; **`POST /api/work-orchestration/supervisor-turn`** autenticado por Bearer → **HTTP 200**; **`routingDecision.selected.executorId = worktree-v1`** (seleção explícita pela rota real).
+- **Sequência de eventos:** `work_proposed → context_attached → work_approved → work_intelligence_classified → work_routing_adjusted → work_routing_decided → work_claimed → work_started → execution_started → checkpoint_recorded → result_submitted → work_claim_released` (**1 checkpoint persistido**).
+- **Execução real:** `qwen3-coder:latest` editou 2 arquivos no escopo; **gates reais verdes** — `npm test --workspace=packages/core -- live-proof-add` (exit 0) e `npm run typecheck --workspace=packages/core` (exit 0).
+- **Diff produzido** (na branch de execução, nunca merjado): `packages/core/src/work-orchestration/live-proof-add.ts` (`export function liveProofAdd(a, b): number { return a + b; }`) + `live-proof-add.test.ts`, 8 inserções.
+- **Estado final: `review`.** **Workspace original byte-idêntico** (`git status` limpo; nenhum arquivo `live-proof-*` no repo real).
+- **Limpeza:** branch descartável e usuário removidos (cascade); os fixtures `@test.invalid` preexistentes e a conta pessoal **preservados**; sem resíduo.
+
+**Observações honestas:** a primeira invocação terminou em `execution_failed` — o modelo é estocástico e o gate **corretamente reprovou** uma saída ruim, deixando o original intacto; a invocação seguinte passou (não é defeito de produto). Achado de infra corrigido: os testes git-pesados de worktree ganharam `jest.setTimeout(30s)` para não flakar por contenção sob carga paralela.
+
 ## Ação
 
 1. [x] **Gean decidiu**: Opção A ratificada, com modelo selecionável (local + nuvem).
@@ -124,6 +140,6 @@ O executor de worktree passou a ser alcançável pelo fluxo real, com **seleçã
 4. [x] **Marco mínimo** provado ao vivo (determinístico + modelo local) no `packages/core`, com original intacto.
 5. [~] `tools/local-agent` preservado e rebaixado a POC de contrato no ADR e no PRD (o código do runner permanece).
 6. [x] **Rota do Supervisor fiada** à seleção explícita do executor pelo contrato persistido (worktree para `project:anima`, runner Python para o legado), com SHA-base persistido e provas de integração — ver *Fiação da rota do Supervisor* acima.
-7. [ ] **Prova ao vivo pela stack HTTP** (Docker + Supabase + dev server) com o modelo real, compondo as duas metades já provadas.
-8. [ ] Backend **GPT/nuvem** selecionável e persistência da branch como handoff durável.
-9. [ ] Planejar **INT-03** (aplicação do resultado revisado como branch/PR, sob aprovação).
+7. [x] **Prova ao vivo pela stack HTTP** (Docker + Supabase + dev server) com o modelo real `qwen3-coder` — ver *Prova ao vivo pela stack HTTP* acima; item em `review`, original intacto, descartáveis limpos.
+8. [ ] Backend **GPT/nuvem** selecionável atrás de `CoderBackend` (Ollama permanece a opção local; sem chamadas pagas nos testes; sem acoplar o Supervisor).
+9. [ ] Persistência da branch como handoff durável e **INT-03** (aplicação do resultado revisado como branch/PR, sob aprovação).
