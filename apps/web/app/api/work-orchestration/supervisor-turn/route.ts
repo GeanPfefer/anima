@@ -1,5 +1,6 @@
 import { authenticateRequest } from '@/lib/supabase/request-auth';
-import { localRunnerRouteFromEnvironment } from '@/lib/work-orchestration/execution';
+import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from '@/lib/work-orchestration/execution';
+import { readExecutionContract, resolveExecutorRoute } from '@/lib/work-orchestration/executor-selection';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
 
 export const runtime = 'nodejs';
@@ -11,6 +12,11 @@ export const maxDuration = 1800;
 // ciclo resolve `auth.uid()` e consulta a allowlist de orquestração. Aceita o
 // cookie web e o `Authorization: Bearer` do mobile (paridade UX-04): a mesma
 // autoridade RLS, o mesmo `runSupervisorTurn`, sem duplicar o Supervisor.
+//
+// A seleção de executor é EXPLÍCITA e vem do contrato persistido do item
+// (`execution_spec.executor`), não de heurística: `project:anima` usa o executor
+// de worktree; os demais seguem no runner Python legado. O Supervisor continua
+// recebendo só uma rota, sem conhecer worktree/Ollama/OpenAI.
 
 export async function POST(request: Request) {
   const auth = await authenticateRequest(request);
@@ -32,16 +38,7 @@ export async function POST(request: Request) {
     }, { status: 400 });
   }
 
-  // O laço supervisionado liga os checkpoints mid-flight (AUTO-05); o caminho
-  // comandado (INT-04) não, mantendo-se single-shot.
-  const route = localRunnerRouteFromEnvironment({ emitCheckpoints: true });
-  if (!route) {
-    return Response.json({ ok: false, error: { code: 'local_runner_not_configured', message: 'Executor local não configurado.' } }, { status: 503 });
-  }
-
-  // Ponte fechada de admissão: além da prova UX-02, aceita somente propostas
-  // GPT de baixo impacto cujo alvo, isolamento, validação e limites foram
-  // fixados pelo servidor. Outros trabalhos continuam sem classificação.
+  let route: ConfiguredWorkRoute | null;
   if (explicit) {
     const item = await client.from('work_items')
       .select('intent, state, proposal_version, impact_level, capability')
@@ -105,6 +102,21 @@ export async function POST(request: Request) {
           return Response.json({ ok: false, error: { code: classified.error.code, message: classified.error.message } }, { status: 409 });
         }
       }
+    }
+
+    // Seleção EXPLÍCITA do executor pelo contrato persistido. O laço
+    // supervisionado liga os checkpoints mid-flight (AUTO-05). O caminho
+    // comandado (INT-04) do runner Python segue single-shot lá dentro.
+    const selection = resolveExecutorRoute(readExecutionContract(item.data?.intent));
+    if (!selection.ok) {
+      return Response.json({ ok: false, error: selection.error }, { status: 503 });
+    }
+    route = selection.route;
+  } else {
+    // Fila autônoma pura (sem item pedido): mantém o caminho legado do runner Python.
+    route = localRunnerRouteFromEnvironment({ emitCheckpoints: true });
+    if (!route) {
+      return Response.json({ ok: false, error: { code: 'local_runner_not_configured', message: 'Executor local não configurado.' } }, { status: 503 });
     }
   }
 
