@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, rm, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
@@ -162,6 +162,21 @@ export class GitWorktree {
     } catch { return false; }
   }
 
+  /** Remove SOMENTE a ligação de node_modules (junction no Windows, symlink fora),
+   * jamais o alvo. Em junction usa rmdir (apaga o reparse point); em symlink,
+   * unlink. Precisa vir ANTES do `git worktree remove`, senão o git poderia
+   * recursar pela ligação e apagar o node_modules real. */
+  private async removeNodeModulesLink(): Promise<void> {
+    const link = this.nodeModulesLink;
+    if (!link) return;
+    this.nodeModulesLink = null;
+    try {
+      const info = await lstat(link);
+      if (process.platform === 'win32' && info.isDirectory()) await rmdir(link).catch(() => unlink(link).catch(() => {}));
+      else await unlink(link).catch(() => rmdir(link).catch(() => {}));
+    } catch { /* ligação já ausente */ }
+  }
+
   async stageAll(signal?: AbortSignal): Promise<void> { await git(this.root, ['add', '-A'], signal); }
 
   async changedFiles(signal?: AbortSignal): Promise<readonly string[]> {
@@ -192,13 +207,7 @@ export class GitWorktree {
    * desfeita ANTES, para nunca deletar o node_modules real por dentro dela.
    * A branch é preservada por padrão (referência revisável, nunca pushada). */
   async dispose(options: { readonly deleteBranch?: boolean } = {}): Promise<void> {
-    if (this.nodeModulesLink) {
-      // Remover só a junction/symlink, jamais o alvo. rm sem recursive apaga o link.
-      await rm(this.nodeModulesLink, { force: true }).catch(async () => {
-        await rm(this.nodeModulesLink!, { recursive: false, force: true }).catch(() => {});
-      });
-      this.nodeModulesLink = null;
-    }
+    await this.removeNodeModulesLink();
     await git(this.repoRoot, ['worktree', 'remove', '--force', this.root]).catch(() => {});
     await git(this.repoRoot, ['worktree', 'prune']).catch(() => {});
     await rm(this.base, { recursive: true, force: true }).catch(() => {});

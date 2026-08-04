@@ -106,6 +106,22 @@ describe('GitWorktree — ciclo de vida', () => {
     expect(log.stdout.trim().split(/\r?\n/)).toHaveLength(1);
   });
 
+  test('linkNodeModules religa o node_modules real e dispose NÃO o apaga', async () => {
+    await mkdir(join(ctx.repo, 'node_modules', 'pkg'), { recursive: true });
+    await writeFile(join(ctx.repo, 'node_modules', 'pkg', 'sentinel.txt'), 'PRESERVAR');
+    const worktree = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: `anima-work/nm-${Date.now()}` });
+    try {
+      expect(await worktree.linkNodeModules()).toBe(true);
+      // A ligação enxerga o sentinela do node_modules real.
+      expect(await readFile(join(worktree.root, 'node_modules', 'pkg', 'sentinel.txt'), 'utf8')).toBe('PRESERVAR');
+    } finally {
+      await worktree.dispose({ deleteBranch: true });
+    }
+    // O node_modules REAL e o sentinela sobrevivem intactos ao dispose.
+    expect(await readFile(join(ctx.repo, 'node_modules', 'pkg', 'sentinel.txt'), 'utf8')).toBe('PRESERVAR');
+    await rm(join(ctx.repo, 'node_modules'), { recursive: true, force: true });
+  });
+
   test('dispose preserva a branch por padrão como referência revisável', async () => {
     const branch = `anima-work/keep-${Date.now()}`;
     const worktree = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch });
