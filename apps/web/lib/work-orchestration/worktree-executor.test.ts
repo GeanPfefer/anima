@@ -136,6 +136,13 @@ describe('WorktreeExecutorAdapter', () => {
     }
   });
 
+  test('SHA-base inexistente/inalcançável é recusado (execution_failed)', async () => {
+    const adapter = new WorktreeExecutorAdapter({ targets: { resolve: () => ({ repoRoot: ctx.repo, sha: 'b'.repeat(40) }) }, backend: new ScriptedCoderBackend([added]) });
+    const terminal = (await collect(adapter, request(), new AbortController().signal)).at(-1)!;
+    expect(terminal.kind).toBe('error');
+    if (terminal.kind === 'error') expect(terminal.code).toBe('execution_failed');
+  });
+
   test('backend em caminho sensível falha fechado (execution_failed)', async () => {
     const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([{ path: '../escape.ts', content: 'x' }]) });
     const terminal = (await collect(adapter, request(), new AbortController().signal)).at(-1)!;

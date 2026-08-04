@@ -79,4 +79,10 @@ describe('resolveExecutorRoute — seleção explícita', () => {
     expect(selection.ok).toBe(false);
     if (!selection.ok) expect(selection.error.code).toBe('executor_unknown');
   });
+
+  test('backend de código inválido falha explicitamente', () => {
+    const selection = resolveExecutorRoute({ ...anima, coderBackend: 'inexistente' }, { repoRoot: tmpdir() });
+    expect(selection.ok).toBe(false);
+    if (!selection.ok) expect(selection.error.code).toBe('coder_backend_invalid');
+  });
 });

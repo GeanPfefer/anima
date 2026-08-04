@@ -132,4 +132,19 @@ describe('GitWorktree — ciclo de vida', () => {
     expect(branches.stdout).toContain(branch);
     await git(ctx.repo, ['branch', '-D', branch]);
   });
+
+  test('a worktree reflete o SHA autorizado, não o HEAD posterior', async () => {
+    // Um commit posterior à "aprovação" move o HEAD do repositório original.
+    await writeFile(join(ctx.repo, 'packages', 'core', 'src', 'after.ts'), 'export const after = 1;\n');
+    await git(ctx.repo, ['add', '-A']);
+    await git(ctx.repo, ['commit', '-m', 'depois da aprovacao']);
+    // A worktree nasce do SHA autorizado (o primeiro commit), não do HEAD atual.
+    const worktree = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: `anima-work/sha-${Date.now()}` });
+    try {
+      expect(await worktree.readWorkspaceFile('packages/core/src/after.ts')).toBeNull();
+      expect(await worktree.readWorkspaceFile('packages/core/src/existing.ts')).toContain('export const one');
+    } finally {
+      await worktree.dispose({ deleteBranch: true });
+    }
+  });
 });
