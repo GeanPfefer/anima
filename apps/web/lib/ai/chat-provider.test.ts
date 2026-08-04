@@ -67,7 +67,7 @@ describe('chat provider', () => {
     expect(await read(result.stream)).toBe('Olá mundo');
   });
 
-  test('oferece ferramentas locais à Responses API e desativa armazenamento', async () => {
+  test('chat pessoal (default): NENHUMA ferramenta e SEM instrução de investigar o repositório', async () => {
     process.env.OPENAI_API_KEY = 'test-key';
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
@@ -83,8 +83,37 @@ describe('chat provider', () => {
     expect(result.provider).toBe('openai');
     expect(await read(result.stream)).toBe('Olá GPT');
     const init = (global.fetch as jest.Mock).mock.calls[0][1] as RequestInit;
-    const body = JSON.parse(init.body as string) as { store: boolean; stream: boolean; tools: Array<{ name: string }> };
+    const body = JSON.parse(init.body as string) as { store: boolean; stream: boolean; tools?: unknown; tool_choice?: unknown; instructions: string };
     expect(body).toMatchObject({ store: false, stream: false });
-    expect(body.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['project_search', 'project_read_file', 'project_git_status']));
+    // Sem ferramentas nem tool_choice: o modelo não pode ler o repositório.
+    expect(body.tools).toBeUndefined();
+    expect(body.tool_choice).toBeUndefined();
+    // A instrução de investigar o repositório não vaza para o chat pessoal.
+    expect(body.instructions).toBe('sistema');
+    expect(body.instructions).not.toMatch(/repositório Anima/i);
+  });
+
+  test('modo de desenvolvimento explícito: oferece somente as ferramentas de leitura permitidas', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ output_text: 'Olá GPT', output: [] }),
+    });
+
+    const result = await streamChatProvider({
+      provider: 'openai',
+      systemPrompt: 'sistema',
+      messages: [{ role: 'user', content: 'oi' }],
+      developmentMode: true,
+    });
+
+    expect(result.provider).toBe('openai');
+    const init = (global.fetch as jest.Mock).mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { tools: Array<{ name: string }>; tool_choice: string; instructions: string };
+    expect(body.tools.map(tool => tool.name).sort()).toEqual(
+      ['project_git_diff', 'project_git_status', 'project_list_files', 'project_read_file', 'project_search'],
+    );
+    expect(body.tool_choice).toBe('auto');
+    expect(body.instructions).toMatch(/repositório Anima/i);
   });
 });

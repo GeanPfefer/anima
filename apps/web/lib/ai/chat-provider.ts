@@ -15,7 +15,17 @@ export type ChatProviderRequest = {
   provider: ChatProviderId;
   systemPrompt: string;
   messages: ChatProviderMessage[];
+  // Modo de desenvolvimento: só quando explícito E autorizado (ver chat-surface).
+  // No chat pessoal (default) NENHUMA ferramenta de repositório é anexada e o
+  // modelo não recebe instrução para investigar o código.
+  developmentMode?: boolean;
 };
+
+// Instrução de desenvolvimento — anexada SOMENTE no modo de desenvolvimento.
+// Nunca entra no chat pessoal, para o modelo jamais expor caminhos, diffs ou
+// estado Git a um usuário comum.
+const DEVELOPMENT_TOOLS_INSTRUCTION =
+  'Você possui ferramentas locais somente de leitura para o repositório Anima. Use-as quando uma afirmação depender do estado atual do código. Cite caminhos e linhas obtidos pelas ferramentas. Não alegue ter alterado arquivos nem executado trabalho de escrita. Para mudanças, investigue e então oriente o usuário a criar/aprovar uma proposta de trabalho no Anima.';
 
 export type ChatProviderStream = {
   provider: ChatProviderId;
@@ -141,6 +151,13 @@ async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderS
     error?: { message?: string };
   };
 
+  // Chat pessoal (default): SEM ferramentas e SEM instrução de investigar o
+  // repositório. Só o modo de desenvolvimento (explícito + autorizado) as recebe.
+  const developmentMode = request.developmentMode === true;
+  const instructions = developmentMode
+    ? `${request.systemPrompt}\n\n${DEVELOPMENT_TOOLS_INSTRUCTION}`
+    : request.systemPrompt;
+
   let input: unknown[] = request.messages;
   let toolCalls = 0;
   let finalText = '';
@@ -157,10 +174,10 @@ async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderS
         model,
         stream: false,
         store: false,
-        instructions: `${request.systemPrompt}\n\nVocê possui ferramentas locais somente de leitura para o repositório Anima. Use-as quando uma afirmação depender do estado atual do código. Cite caminhos e linhas obtidos pelas ferramentas. Não alegue ter alterado arquivos nem executado trabalho de escrita. Para mudanças, investigue e então oriente o usuário a criar/aprovar uma proposta de trabalho no Anima.`,
+        instructions,
         input,
-        tools: OPENAI_PROJECT_TOOLS,
-        tool_choice: 'auto',
+        // Ferramentas de repositório existem APENAS no modo de desenvolvimento.
+        ...(developmentMode ? { tools: OPENAI_PROJECT_TOOLS, tool_choice: 'auto' } : {}),
       }),
     }).catch(() => null);
 

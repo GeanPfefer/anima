@@ -30,6 +30,7 @@ import {
   streamChatProvider,
 } from '@/lib/ai/chat-provider';
 import { planExecutableProjectWork } from '@/lib/ai/project-work-planner';
+import { isDevelopmentChatAuthorized, resolveChatDevelopmentMode } from '@/lib/ai/chat-surface';
 
 function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -72,12 +73,21 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Response('Não autorizado', { status: 401 });
 
-  const { message, provider: requestedProvider } = await req.json() as {
+  const { message, provider: requestedProvider, developmentMode: requestedDevelopmentMode } = await req.json() as {
     message: string;
     provider?: unknown;
+    developmentMode?: unknown;
   };
   if (!message?.trim()) return new Response('Mensagem vazia', { status: 400 });
   const provider = parseChatProvider(requestedProvider);
+  // Superfície: chat pessoal por padrão. Ferramentas de repositório e o
+  // planejador que investiga o código só entram com ação explícita
+  // (developmentMode) E autorização persistida (allowlist dedicado). O texto da
+  // mensagem nunca habilita nada. Ver lib/ai/chat-surface.
+  const developmentMode = resolveChatDevelopmentMode({
+    requested: requestedDevelopmentMode === true,
+    authorized: isDevelopmentChatAuthorized(user.id),
+  });
 
   // ── Contexto do usuário ────────────────────────────────────────
   const [profileRes, pillarsRes, recentRes, questsRes, entitiesRes, identityRes] = await Promise.all([
@@ -542,11 +552,15 @@ ${contextBlock}`;
     : rawInterpretation;
   let projectPlanningError: string | null = null;
   if (
-    provider === 'openai'
+    developmentMode
+    && provider === 'openai'
     && rawInterpretation.kind === 'work_candidate'
     && interpretation.kind === 'work_candidate'
     && interpretation.command.intent['execution_spec'] === undefined
   ) {
+    // O planejador investiga o repositório real; só roda na superfície de
+    // desenvolvimento. No chat pessoal um pedido de trabalho segue o fluxo
+    // honesto de proposta/indisponibilidade, sem tocar o código.
     const planned = await planExecutableProjectWork(message, interpretation.command);
     if (planned.ok) interpretation = { ...interpretation, command: planned.command };
     else projectPlanningError = planned.message;
@@ -622,6 +636,7 @@ ${contextBlock}`;
         provider,
         systemPrompt,
         messages: [...pastMessages, { role: 'user', content: message }],
+        developmentMode,
       });
     } catch (error) {
       const providerError = error instanceof ChatProviderError
