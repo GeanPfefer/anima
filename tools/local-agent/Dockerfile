@@ -1,0 +1,4 @@
+FROM python:3.11-slim
+RUN useradd --uid 65532 --no-create-home --shell /usr/sbin/nologin agent
+USER 65532:65532
+WORKDIR /workspace
