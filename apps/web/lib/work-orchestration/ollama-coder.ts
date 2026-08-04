@@ -1,4 +1,4 @@
-import type { CoderBackend, CoderEditRequest, CoderEditResult, CoderWorkspace } from './coder-backend';
+import { parseScopedFiles, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 
 // ============================================================
 // Backend de código LOCAL (Ollama) por trás da interface CoderBackend (ADR-001).
@@ -18,8 +18,6 @@ export interface OllamaCoderOptions {
   /** Injeção para teste; por padrão o fetch global. */
   readonly fetchImpl?: typeof fetch;
 }
-
-interface ModelFile { readonly path: string; readonly content: string; }
 
 const SYSTEM = [
   'Você é um engenheiro que edita um repositório TypeScript.',
@@ -67,7 +65,7 @@ export class OllamaCoderBackend implements CoderBackend {
 
     if (!response || !response.ok) throw new Error(`O modelo local não respondeu (${response ? response.status : 'sem conexão'}).`);
     const body = await response.json().catch(() => null) as { message?: { content?: string } } | null;
-    const files = this.parseFiles(body?.message?.content ?? '', new Set(scope));
+    const files = parseScopedFiles(body?.message?.content ?? '', new Set(scope));
     if (files.length === 0) throw new Error('O modelo local não retornou arquivos válidos dentro do escopo.');
 
     const touched: string[] = [];
@@ -77,21 +75,5 @@ export class OllamaCoderBackend implements CoderBackend {
     }
     if (touched.length === 0) throw new Error('Nenhum arquivo do escopo pôde ser escrito.');
     return { summary: `Modelo local ${this.options.model} editou ${touched.length} arquivo(s) do escopo, para validação.`, touchedResources: touched };
-  }
-
-  private parseFiles(raw: string, allowed: ReadonlySet<string>): ModelFile[] {
-    try {
-      const root = JSON.parse(raw) as { files?: unknown };
-      if (!Array.isArray(root.files)) return [];
-      const out: ModelFile[] = [];
-      for (const entry of root.files) {
-        if (!entry || typeof entry !== 'object') continue;
-        const candidate = entry as { path?: unknown; content?: unknown };
-        if (typeof candidate.path !== 'string' || typeof candidate.content !== 'string') continue;
-        const path = candidate.path.replace(/\\/g, '/');
-        if (allowed.has(path)) out.push({ path, content: candidate.content });
-      }
-      return out;
-    } catch { return []; }
   }
 }

@@ -85,4 +85,13 @@ describe('resolveExecutorRoute — seleção explícita', () => {
     expect(selection.ok).toBe(false);
     if (!selection.ok) expect(selection.error.code).toBe('coder_backend_invalid');
   });
+
+  test('backend selecionável de nuvem (openai) resolve o worktree com GPT', () => {
+    const selection = resolveExecutorRoute({ ...anima, coderBackend: 'openai', model: 'gpt-x' }, { repoRoot: tmpdir() });
+    expect(selection.ok).toBe(true);
+    if (selection.ok) {
+      expect(selection.route.adapter.id).toBe('worktree-v1');
+      expect(selection.route.candidate.modelRef).toBe('openai:gpt-x');
+    }
+  });
 });

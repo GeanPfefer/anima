@@ -2,6 +2,7 @@ import { isAbsolute, resolve } from 'node:path';
 import type { WorkRoutingCandidateV1 } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
+import { GptCoderBackend } from './gpt-coder';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from './execution';
 import { WorktreeExecutorAdapter } from './worktree-executor';
 import { runProcess } from './worktree';
@@ -78,7 +79,10 @@ const worktreeCandidate = (executorId: string, modelRef: string): WorkRoutingCan
 const backendFor = (contract: ExecutionContract, override?: CoderBackend): CoderBackend | { readonly error: string } => {
   if (override) return override;
   const kind = contract.coderBackend ?? 'ollama';
+  // Inteligências selecionáveis, ambas atrás de CoderBackend. O Supervisor não
+  // conhece nenhuma delas; a chave da OpenAI vive só no servidor.
   if (kind === 'ollama') return new OllamaCoderBackend({ model: contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest' });
+  if (kind === 'openai') return new GptCoderBackend({ model: contract.model ?? process.env.OPENAI_MODEL });
   // O backend determinístico (`scripted`) só entra por injeção em teste, nunca no fluxo real.
   return { error: `Backend de código "${kind}" não é permitido no fluxo real.` };
 };

@@ -35,6 +35,27 @@ export interface CoderBackend {
   edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult>;
 }
 
+/** Extrai `{"files":[{path,content}]}` da resposta de um modelo, aceitando só
+ * caminhos do escopo permitido. Aceita JSON puro ou embutido em texto. É o
+ * parser compartilhado pelos backends de modelo (Ollama, OpenAI). */
+export function parseScopedFiles(raw: string, allowed: ReadonlySet<string>): { readonly path: string; readonly content: string }[] {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  const candidate = text.startsWith('{') ? text : (text.match(/\{[\s\S]*\}/)?.[0] ?? '');
+  try {
+    const root = JSON.parse(candidate) as { files?: unknown };
+    if (!Array.isArray(root.files)) return [];
+    const out: { path: string; content: string }[] = [];
+    for (const entry of root.files) {
+      if (!entry || typeof entry !== 'object') continue;
+      const item = entry as { path?: unknown; content?: unknown };
+      if (typeof item.path !== 'string' || typeof item.content !== 'string') continue;
+      const path = item.path.replace(/\\/g, '/');
+      if (allowed.has(path)) out.push({ path, content: item.content });
+    }
+    return out;
+  } catch { return []; }
+}
+
 export interface ScriptedEdit { readonly path: string; readonly content: string; }
 
 /**
