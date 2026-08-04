@@ -142,4 +142,46 @@ describe('WorktreeExecutorAdapter', () => {
     expect(terminal.kind).toBe('error');
     if (terminal.kind === 'error') expect(terminal.code).toBe('execution_failed');
   });
+
+  test('retomada: carriedContext chega ao backend e um checkpoint é emitido', async () => {
+    let received: unknown = 'ausente';
+    const backend: CoderBackend = {
+      id: 'capture',
+      async edit(req, ws): Promise<CoderEditResult> { received = req.carriedContext; await ws.writeFile(added.path, added.content); return { summary: 'ok', touchedResources: [added.path] }; },
+    };
+    const carriedContext = { isNewAttempt: true as const, continueFromCheckpoint: true as const, remainingSteps: ['terminar'], nextStep: 'terminar', risks: [], touchedResources: [], previousFailures: [] };
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend, emitCheckpoint: true });
+    const req = request({ carriedContext });
+    const signals = await collect(adapter, req, new AbortController().signal);
+    expect(received).toEqual(carriedContext);
+    expect(signals.some(s => s.kind === 'checkpoint')).toBe(true);
+    expect(signals.at(-1)!.kind).toBe('result');
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
+  });
+
+  test('concorrência no mesmo alvo: attemptIds distintos, branches isoladas', async () => {
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([added]) });
+    const [reqA, reqB] = [request(), request()];
+    const [a, b] = await Promise.all([collect(adapter, reqA, new AbortController().signal), collect(adapter, reqB, new AbortController().signal)]);
+    expect(a.at(-1)!.kind).toBe('result');
+    expect(b.at(-1)!.kind).toBe('result');
+    expect(reqA.attemptId).not.toBe(reqB.attemptId);
+    for (const id of [reqA.attemptId, reqB.attemptId]) {
+      expect((await git(ctx.repo, ['branch', '--list', `anima-work/${id}`])).stdout).toContain(id);
+      await git(ctx.repo, ['branch', '-D', `anima-work/${id}`]);
+    }
+    // Original permanece intacto após duas execuções concorrentes.
+    expect((await git(ctx.repo, ['status', '--porcelain'])).stdout.trim()).toBe('');
+  });
+
+  test('idempotência: repetir o mesmo attemptId falha fechado sem reaplicar', async () => {
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([added]) });
+    const req = request();
+    expect((await collect(adapter, req, new AbortController().signal)).at(-1)!.kind).toBe('result');
+    // A segunda vez com a MESMA tentativa colide na branch e recusa — nunca
+    // reaplica nem produz um segundo resultado.
+    const second = (await collect(adapter, req, new AbortController().signal)).at(-1)!;
+    expect(second.kind).toBe('error');
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
+  });
 });
