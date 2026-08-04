@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitWorktree, parseGateCommand, runGate, runProcess, safeJoin } from './worktree';
 
+// Operações git reais podem ficar lentas sob carga paralela; folga o timeout
+// para não flakar por contenção (o padrão de 5s do jest é curto demais aqui).
+jest.setTimeout(30_000);
+
 const git = (repo: string, args: readonly string[]) => runProcess('git', ['-C', repo, ...args], { cwd: repo, timeoutMs: 30_000 });
 
 async function makeRepo(): Promise<{ repo: string; sha: string; cleanup: () => Promise<void> }> {

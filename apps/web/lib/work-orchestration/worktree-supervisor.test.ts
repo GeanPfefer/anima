@@ -10,6 +10,10 @@ import { runProcess } from './worktree';
 import { ScriptedCoderBackend } from './coder-backend';
 import { WorktreeExecutorAdapter } from './worktree-executor';
 
+// Operações git reais podem ficar lentas sob carga paralela; folga o timeout
+// para não flakar por contenção (o padrão de 5s do jest é curto demais aqui).
+jest.setTimeout(30_000);
+
 // Prova de integração determinística: o Supervisor real dirige o executor de
 // worktree real (repositório git temporário + backend determinístico) por um
 // fake enxuto do caminho feliz. Cobre a costura seleção→worktree no SHA

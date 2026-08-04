@@ -7,6 +7,10 @@ import { runProcess } from './worktree';
 import { ScriptedCoderBackend, type CoderBackend, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { WorktreeExecutorAdapter, type WorktreeTargetResolver } from './worktree-executor';
 
+// Operações git reais podem ficar lentas sob carga paralela; folga o timeout
+// para não flakar por contenção (o padrão de 5s do jest é curto demais aqui).
+jest.setTimeout(30_000);
+
 const git = (repo: string, args: readonly string[]) => runProcess('git', ['-C', repo, ...args], { cwd: repo, timeoutMs: 30_000 });
 
 // Repositório temporário com scripts npm triviais (test/typecheck passam, build
