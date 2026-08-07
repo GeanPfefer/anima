@@ -1,7 +1,6 @@
 import type { CoderBackend, CoderEditRequest, CoderEditResult, CoderWorkspace } from './coder-backend';
 import {
   OllamaProtocolError,
-  applyChangesAtomically,
   applyEditOperations,
   assertNotTruncated,
   assertPromptWithinBudget,
@@ -12,6 +11,7 @@ import {
   parseReadRequests,
   resolveContextBudget,
   serveReadRequests,
+  writeChangeSet,
   type ContextBudget,
   type ManifestInputFile,
   type ServedRead,
@@ -123,11 +123,12 @@ export class OllamaCoderBackend implements CoderBackend {
       if (response.action === 'edit') {
         const operations = parseEditOperations(response.operations as unknown[], allowed);
         const changes = applyEditOperations(operations, contentOf);
-        // Aplicação ATÔMICA: valida tudo contra o snapshot original antes da
-        // primeira escrita; ou o lote inteiro é gravado, ou é revertido. Nunca
-        // deixa aplicação parcial na worktree (ver applyChangesAtomically).
-        const touched = await applyChangesAtomically(
-          changes, contentOf,
+        // Validação integral contra o snapshot já ocorreu (applyEditOperations).
+        // Aqui só escrevemos o lote (escreve-ou-lança, nunca sucesso parcial). A
+        // restauração ao estado-base em caso de falha é da worktree (autoridade
+        // única, via WorktreeExecutorAdapter → GitWorktree.restoreToBase).
+        const touched = await writeChangeSet(
+          changes,
           { writeFile: (path, content) => workspace.writeFile(path, content) },
           signal,
         );

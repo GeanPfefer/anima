@@ -91,7 +91,14 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           workspace, signal,
         );
       } catch (error) {
-        yield attach(++seq, { kind: 'error', code: 'execution_failed', message: `O backend de código falhou: ${clip(error instanceof Error ? error.message : String(error))}`, retryable: true, handoffReference });
+        // Autoridade ÚNICA de restauração (outcome atomicity): a camada da
+        // worktree volta ao estado-base antes de finalizar a falha. Se a própria
+        // restauração falhar, registra e mantém a worktree condenada ao dispose —
+        // nunca converte em sucesso. O `dispose` (finally) é a contenção final.
+        const restored = await worktree.restoreToBase(signal).catch(() => false);
+        const restoreNote = restored ? '' : ' A restauração ao estado-base falhou; a worktree será descartada.';
+        if (signal.aborted) { yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference }); return; }
+        yield attach(++seq, { kind: 'error', code: 'execution_failed', message: `O backend de código falhou: ${clip(error instanceof Error ? error.message : String(error))}.${restoreNote}`, retryable: true, handoffReference });
         return;
       }
       if (signal.aborted) { yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference }); return; }

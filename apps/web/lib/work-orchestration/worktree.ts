@@ -117,7 +117,7 @@ const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promi
  * diretório temporário; o repositório e o workspace original nunca mudam. */
 export class GitWorktree {
   private nodeModulesLink: string | null = null;
-  private constructor(readonly repoRoot: string, readonly root: string, readonly branch: string, private readonly base: string) {}
+  private constructor(readonly repoRoot: string, readonly root: string, readonly branch: string, private readonly base: string, private readonly baseSha: string) {}
 
   static async create(input: { readonly repoRoot: string; readonly sha: string; readonly branch: string; readonly signal?: AbortSignal }): Promise<GitWorktree> {
     const base = await mkdtemp(join(tmpdir(), 'anima-wt-'));
@@ -129,7 +129,7 @@ export class GitWorktree {
       await rm(base, { recursive: true, force: true }).catch(() => {});
       throw new Error(`Falha ao criar worktree: ${created.stderr.trim() || created.stdout.trim() || created.exitCode}`);
     }
-    return new GitWorktree(input.repoRoot, root, input.branch, base);
+    return new GitWorktree(input.repoRoot, root, input.branch, base, input.sha);
   }
 
   /** Resolve um caminho relativo dentro da raiz, com as guardas de segurança. */
@@ -201,6 +201,32 @@ export class GitWorktree {
     if (committed.exitCode !== 0) return null;
     const head = await git(this.root, ['rev-parse', 'HEAD'], signal);
     return head.exitCode === 0 ? head.stdout.trim() : null;
+  }
+
+  /**
+   * Restaura a worktree ao ESTADO-BASE (o SHA de criação). É a autoridade única
+   * de restauração (outcome atomicity): a camada que possui a worktree a chama
+   * quando a aplicação de um lote falha, ANTES de finalizar o caminho de falha.
+   *
+   * NÃO é atomicidade de visibilidade: durante escritas sequenciais pode existir
+   * estado intermediário parcial em disco; esta função garante o DESFECHO — ou o
+   * lote inteiro permanece, ou a worktree volta ao base.
+   *
+   * Mecanismo: desfaz o link de node_modules PRIMEIRO (para o `clean -fdx` nunca
+   * recursar pelo junction e apagar o node_modules real), `git reset --hard`
+   * ao SHA-base (rastreados) e `git clean -fdx` (não-rastreados E ignorados —
+   * remove também arquivos criados sob `.gitignore`). Nesta fase a worktree só
+   * contém as edições do backend; nenhuma infra ignorada existe ainda.
+   *
+   * Devolve `true` só se reset E clean sucederem. `false` sinaliza FALHA de
+   * restauração — o chamador registra isso e mantém a worktree condenada ao
+   * `dispose`; jamais converte em sucesso.
+   */
+  async restoreToBase(signal?: AbortSignal): Promise<boolean> {
+    await this.removeNodeModulesLink();
+    const reset = await git(this.root, ['reset', '--hard', this.baseSha], signal);
+    const clean = await git(this.root, ['clean', '-fdx'], signal);
+    return reset.exitCode === 0 && clean.exitCode === 0;
   }
 
   /** Remove a worktree e o diretório temporário. A ligação de node_modules é

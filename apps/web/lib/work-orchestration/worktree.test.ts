@@ -152,3 +152,82 @@ describe('GitWorktree — ciclo de vida', () => {
     }
   });
 });
+
+describe('GitWorktree.restoreToBase — outcome atomicity ao estado-base', () => {
+  async function makeIgnoreRepo() {
+    const repo = await mkdtemp(join(tmpdir(), 'anima-rb-'));
+    await git(repo, ['init', '-b', 'main']);
+    await git(repo, ['config', 'user.name', 'test']);
+    await git(repo, ['config', 'user.email', 'test@anima.local']);
+    await git(repo, ['config', 'commit.gpgsign', 'false']);
+    await mkdir(join(repo, 'docs'), { recursive: true });
+    await writeFile(join(repo, 'docs', 'existing.md'), '# Base\nlinha original\n');
+    await writeFile(join(repo, '.gitignore'), 'node_modules/\ngenerated/\n');
+    await git(repo, ['add', '-A']);
+    await git(repo, ['commit', '-m', 'inicial']);
+    const head = await git(repo, ['rev-parse', 'HEAD']);
+    return { repo, sha: head.stdout.trim(), cleanup: () => rm(repo, { recursive: true, force: true }) };
+  }
+
+  let ctx: Awaited<ReturnType<typeof makeIgnoreRepo>>;
+  let wt: GitWorktree;
+  let baseExisting: string | null; // conteúdo do arquivo no base (bytes reais do checkout, ex. CRLF no Windows)
+  beforeEach(async () => {
+    ctx = await makeIgnoreRepo();
+    wt = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: `anima-work/rb-${Date.now()}-${Math.random().toString(36).slice(2)}` });
+    baseExisting = await wt.readWorkspaceFile('docs/existing.md');
+  });
+  afterEach(async () => { await wt.dispose({ deleteBranch: true }).catch(() => {}); await ctx.cleanup(); });
+  const status = async () => (await git(wt.root, ['status', '--porcelain'])).stdout.trim();
+
+  test('1) worktree começa limpa no SHA-base', async () => {
+    expect(await status()).toBe('');
+    expect(await wt.readWorkspaceFile('docs/existing.md')).toBe(baseExisting);
+  });
+
+  test('2) write A + write B, restore → ambos exatamente no base', async () => {
+    await wt.writeWorkspaceFile('docs/existing.md', 'MODIFICADO A');
+    await wt.writeWorkspaceFile('docs/novo.md', 'B novo');
+    expect(await status()).not.toBe('');
+    expect(await wt.restoreToBase()).toBe(true);
+    expect(await status()).toBe('');
+    expect(await wt.readWorkspaceFile('docs/existing.md')).toBe(baseExisting);
+    expect(await wt.readWorkspaceFile('docs/novo.md')).toBeNull();
+  });
+
+  test('3) write que altera o próprio arquivo e "falha" → restore volta ao base', async () => {
+    await wt.writeWorkspaceFile('docs/existing.md', 'meio-caminho parcial'); // simula alteração parcial
+    expect(await wt.restoreToBase()).toBe(true);
+    expect(await wt.readWorkspaceFile('docs/existing.md')).toBe(baseExisting);
+  });
+
+  test('4) create_file + falha posterior → arquivo criado desaparece', async () => {
+    await wt.writeWorkspaceFile('docs/criado.md', '# criado');
+    expect(await wt.readWorkspaceFile('docs/criado.md')).toBe('# criado');
+    expect(await wt.restoreToBase()).toBe(true);
+    expect(await wt.readWorkspaceFile('docs/criado.md')).toBeNull();
+  });
+
+  test('5) create em caminho IGNORADO pelo git some com clean -fdx', async () => {
+    await wt.writeWorkspaceFile('generated/saida.md', 'ignorado');
+    expect(await wt.readWorkspaceFile('generated/saida.md')).toBe('ignorado');
+    expect(await wt.restoreToBase()).toBe(true);
+    expect(await wt.readWorkspaceFile('generated/saida.md')).toBeNull(); // -x removeu o ignorado
+  });
+
+  test('6) múltiplos creates + replaces → falha restaura tudo', async () => {
+    await wt.writeWorkspaceFile('docs/existing.md', 'X');
+    await wt.writeWorkspaceFile('docs/n1.md', 'a');
+    await wt.writeWorkspaceFile('generated/n2.md', 'b');
+    expect(await wt.restoreToBase()).toBe(true);
+    expect(await status()).toBe('');
+    expect(await wt.readWorkspaceFile('docs/existing.md')).toBe(baseExisting);
+    expect(await wt.readWorkspaceFile('docs/n1.md')).toBeNull();
+    expect(await wt.readWorkspaceFile('generated/n2.md')).toBeNull();
+  });
+
+  test('7) restore em worktree quebrada devolve false, nunca lança', async () => {
+    await wt.dispose({ deleteBranch: true }); // remove a worktree
+    await expect(wt.restoreToBase()).resolves.toBe(false);
+  });
+});

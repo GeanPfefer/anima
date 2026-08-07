@@ -31,7 +31,6 @@ export type OllamaProtocolErrorCode =
   | 'ollama_ambiguous_replacement'
   | 'ollama_no_effective_edits'
   | 'ollama_aborted'
-  | 'ollama_create_not_atomic'
   | 'ollama_timeout'
   | 'ollama_transport_error';
 
@@ -536,79 +535,43 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
   return all;
 }
 
-// ---- Commit 5: aplicação ATÔMICA do lote (all-or-nothing) ----
+// ---- Escrita do lote (autoridade de restauração fica na worktree) ----
 
-/** Escritor confinado — mesma superfície mínima do CoderWorkspace usada para
- * aplicar. Só `writeFile`; a leitura já foi capturada no snapshot. */
-export interface AtomicWriter {
+/** Escritor confinado — mesma superfície mínima do CoderWorkspace. */
+export interface ChangeWriter {
   writeFile(relPath: string, content: string): Promise<boolean>;
 }
 
 /**
- * Aplica o conjunto de mudanças de forma ATÔMICA: ou o lote inteiro é escrito, ou
- * tudo que já foi gravado é revertido ao snapshot original. Usa apenas
- * `snapshotOf` (conteúdo original lido antes de qualquer escrita) e
- * `writer.writeFile` — o rollback de um `replace_exact` reescreve o conteúdo
- * original, restaurando os bytes exatos.
+ * Escreve o conjunto de mudanças já validado contra o snapshot. Lança em QUALQUER
+ * falha (abort, guarda recusa, exceção) — NUNCA retorna sucesso parcial. `replace`
+ * e `create` são escritos igual; a criação de arquivo novo é feita pela própria
+ * `writeFile`.
  *
- * `create_file` NÃO participa da atomicidade: revertê-lo exigiria remoção de
- * arquivo, que o `CoderWorkspace` não expõe (só read/write). Em vez de improvisar
- * ou ampliar a arquitetura, um lote que contenha `create_file` é recusado
- * fail-closed ANTES de qualquer escrita — nada é aplicado, a propriedade
- * all-or-nothing é preservada, e a limitação fica documentada (o menor ajuste é
- * expor um `removeFile` no `CoderWorkspace`, implementado pela worktree com o
- * `unlink` que ela já importa; pertence a um commit próprio, sob ratificação).
- *
- * `abort`, `writeFile===false` ou exceção durante a aplicação SEMPRE revertem e
- * lançam — nunca retornam sucesso parcial. Devolve os caminhos efetivamente
- * escritos quando (e só quando) o lote inteiro foi aplicado.
+ * NÃO restaura nada: a restauração ao estado-base em caso de falha é a autoridade
+ * ÚNICA da camada da worktree (`GitWorktree.restoreToBase`), evitando duas
+ * camadas concorrentes de rollback. Este helper apenas garante que nenhum sucesso
+ * parcial seja RETORNADO; o estado transitório em disco é revertido pela worktree.
  */
-export async function applyChangesAtomically(
+export async function writeChangeSet(
   changes: readonly AppliedChange[],
-  snapshotOf: (path: string) => string | null,
-  writer: AtomicWriter,
+  writer: ChangeWriter,
   signal?: AbortSignal,
 ): Promise<string[]> {
-  const creates = changes.filter(change => change.kind === 'create');
-  if (creates.length > 0) {
-    throw new OllamaProtocolError(
-      'ollama_create_not_atomic',
-      `create_file não pode ser aplicado atomicamente: o CoderWorkspace não expõe remoção para rollback. Caminho(s): ${creates.map(change => change.path).join(', ')}.`,
-    );
-  }
-  const applied: { path: string; original: string }[] = [];
-  const rollback = async (): Promise<boolean> => {
-    let clean = true;
-    for (const entry of [...applied].reverse()) {
-      try { if (!(await writer.writeFile(entry.path, entry.original))) clean = false; }
-      catch { clean = false; }
-    }
-    return clean;
-  };
+  const touched: string[] = [];
   for (const change of changes) {
-    if (signal?.aborted) {
-      const clean = await rollback();
-      throw new OllamaProtocolError('ollama_aborted', `aplicação abortada; lote revertido ao snapshot${clean ? '' : ' (rollback incompleto)'}.`);
-    }
-    const original = snapshotOf(change.path);
-    if (original === null) {
-      await rollback();
-      throw new OllamaProtocolError('ollama_stale_file_hash', `snapshot original ausente para ${change.path}; lote revertido.`);
-    }
+    if (signal?.aborted) throw new OllamaProtocolError('ollama_aborted', 'aplicação abortada antes de concluir o lote.');
     let ok: boolean;
     try {
       ok = await writer.writeFile(change.path, change.newContent);
     } catch (error) {
-      await rollback();
       throw error instanceof OllamaProtocolError
         ? error
-        : new OllamaProtocolError('ollama_transport_error', `falha ao escrever ${change.path}: ${error instanceof Error ? error.message : String(error)}; lote revertido.`);
+        : new OllamaProtocolError('ollama_transport_error', `falha ao escrever ${change.path}: ${error instanceof Error ? error.message : String(error)}.`);
     }
-    if (!ok) {
-      await rollback();
-      throw new OllamaProtocolError('ollama_edit_outside_scope', `a guarda recusou a escrita em ${change.path}; lote revertido.`);
-    }
-    applied.push({ path: change.path, original });
+    if (!ok) throw new OllamaProtocolError('ollama_edit_outside_scope', `a guarda recusou a escrita em ${change.path}.`);
+    touched.push(change.path);
   }
-  return applied.map(entry => entry.path);
+  if (touched.length === 0) throw new OllamaProtocolError('ollama_no_effective_edits', 'nenhuma alteração foi escrita.');
+  return touched;
 }

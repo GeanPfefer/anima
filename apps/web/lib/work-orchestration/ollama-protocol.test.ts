@@ -3,7 +3,6 @@ import {
   OllamaProtocolError,
   assertNotTruncated,
   assertPromptWithinBudget,
-  applyChangesAtomically,
   applyEditOperations,
   buildManifest,
   callOllamaChat,
@@ -16,6 +15,7 @@ import {
   resolveScopedPath,
   serveReadRequests,
   sha256,
+  writeChangeSet,
   type AppliedChange,
   type EditOperation,
   type OllamaChatInput,
@@ -320,69 +320,57 @@ describe('ollama-protocol — Commit 3: edições exatas', () => {
   });
 });
 
-describe('ollama-protocol — Commit 5: aplicação atômica', () => {
+describe('ollama-protocol — escrita do lote (writeChangeSet)', () => {
   const FALSE = '<<FALSE>>';
   const THROW = '<<THROW>>';
-  function harness(originals: Record<string, string>) {
-    const store: Record<string, string> = { ...originals };
-    const writes: { path: string; content: string }[] = [];
+  function harness() {
+    const store: Record<string, string> = {};
+    const writes: string[] = [];
     const writer = {
       writeFile: async (path: string, content: string): Promise<boolean> => {
         if (content === FALSE) return false;
         if (content === THROW) throw new Error('io fail');
-        store[path] = content; writes.push({ path, content }); return true;
+        store[path] = content; writes.push(path); return true;
       },
     };
-    const snapshotOf = (p: string): string | null => (p in originals ? originals[p]! : null);
-    return { store, writes, writer, snapshotOf };
+    return { store, writes, writer };
   }
   const rep = (path: string, newContent: string): AppliedChange => ({ path, newContent, kind: 'replace' });
   const cre = (path: string, newContent: string): AppliedChange => ({ path, newContent, kind: 'create' });
 
-  test('6) caminho feliz multi-arquivo aplica tudo', async () => {
-    const h = harness({ 'a.md': 'A0', 'b.md': 'B0' });
-    const touched = await applyChangesAtomically([rep('a.md', 'A1'), rep('b.md', 'B1')], h.snapshotOf, h.writer);
+  test('caminho feliz multi-arquivo escreve tudo e devolve os caminhos', async () => {
+    const h = harness();
+    const touched = await writeChangeSet([rep('a.md', 'A1'), rep('b.md', 'B1')], h.writer);
     expect(touched).toEqual(['a.md', 'b.md']);
     expect(h.store).toEqual({ 'a.md': 'A1', 'b.md': 'B1' });
   });
 
-  test('1) falha (writeFile===false) no segundo write reverte tudo ao snapshot', async () => {
-    const h = harness({ 'a.md': 'A0', 'b.md': 'B0' });
-    await expect(applyChangesAtomically([rep('a.md', 'A1'), rep('b.md', FALSE)], h.snapshotOf, h.writer))
+  test('create é escrito como qualquer arquivo (rollback é da worktree)', async () => {
+    const h = harness();
+    const touched = await writeChangeSet([rep('a.md', 'A1'), cre('novo.md', '# novo')], h.writer);
+    expect(touched).toEqual(['a.md', 'novo.md']);
+    expect(h.store['novo.md']).toBe('# novo');
+  });
+
+  test('writeFile===false lança sem retornar sucesso parcial', async () => {
+    await expect(writeChangeSet([rep('a.md', 'A1'), rep('b.md', FALSE)], harness().writer))
       .rejects.toMatchObject({ code: 'ollama_edit_outside_scope' });
-    expect(h.store).toEqual({ 'a.md': 'A0', 'b.md': 'B0' });
   });
 
-  test('2) exceção DEPOIS de uma gravação bem-sucedida reverte e não retorna sucesso', async () => {
-    const h = harness({ 'a.md': 'A0', 'b.md': 'B0' });
-    await expect(applyChangesAtomically([rep('a.md', 'A1'), rep('b.md', THROW)], h.snapshotOf, h.writer))
+  test('exceção durante a escrita vira ollama_transport_error', async () => {
+    await expect(writeChangeSet([rep('a.md', 'A1'), rep('b.md', THROW)], harness().writer))
       .rejects.toMatchObject({ code: 'ollama_transport_error' });
-    expect(h.store).toEqual({ 'a.md': 'A0', 'b.md': 'B0' });
   });
 
-  test('3) abort durante o lote reverte e falha (nunca sucesso parcial)', async () => {
-    const h = harness({ 'a.md': 'A0', 'b.md': 'B0' });
+  test('abort durante o lote lança ollama_aborted (nunca sucesso parcial)', async () => {
+    const h = harness();
     const controller = new AbortController();
-    const writer = { writeFile: async (path: string, content: string) => { const ok = await h.writer.writeFile(path, content); if (h.writes.length === 1) controller.abort(); return ok; } };
-    await expect(applyChangesAtomically([rep('a.md', 'A1'), rep('b.md', 'B1')], h.snapshotOf, writer, controller.signal))
+    const writer = { writeFile: async (p: string, c: string) => { const ok = await h.writer.writeFile(p, c); if (h.writes.length === 1) controller.abort(); return ok; } };
+    await expect(writeChangeSet([rep('a.md', 'A1'), rep('b.md', 'B1')], writer, controller.signal))
       .rejects.toMatchObject({ code: 'ollama_aborted' });
-    expect(h.store).toEqual({ 'a.md': 'A0', 'b.md': 'B0' });
   });
 
-  test('4) lote com create_file + edição existente é recusado ANTES de escrever', async () => {
-    const h = harness({ 'a.md': 'A0' });
-    await expect(applyChangesAtomically([rep('a.md', 'A1'), cre('novo.md', 'X')], h.snapshotOf, h.writer))
-      .rejects.toMatchObject({ code: 'ollama_create_not_atomic' });
-    expect(h.writes).toHaveLength(0);       // nada foi escrito
-    expect(h.store).toEqual({ 'a.md': 'A0' }); // existente intacto, novo.md não criado
-  });
-
-  test('5) rollback preserva os bytes originais exatos (multibyte, CRLF, tab)', async () => {
-    const original = '# Título\nlinha çãé\r\ntab\tfim\n';
-    const h = harness({ 'a.md': original, 'b.md': 'B0' });
-    await expect(applyChangesAtomically([rep('a.md', 'ALTERADO'), rep('b.md', FALSE)], h.snapshotOf, h.writer))
-      .rejects.toBeInstanceOf(OllamaProtocolError);
-    expect(h.store['a.md']).toBe(original);
-    expect(h.store).toEqual({ 'a.md': original, 'b.md': 'B0' });
+  test('lote vazio é no_effective_edits', async () => {
+    await expect(writeChangeSet([], harness().writer)).rejects.toMatchObject({ code: 'ollama_no_effective_edits' });
   });
 });

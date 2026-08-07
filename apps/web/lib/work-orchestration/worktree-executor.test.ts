@@ -195,4 +195,41 @@ describe('WorktreeExecutorAdapter', () => {
     expect(second.kind).toBe('error');
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
   });
+
+  test('falha na aplicação do lote: restaura ao base, execution_failed, nada commitado, sem gate', async () => {
+    // Backend que escreve (estado parcial) e então lança — exercita o caminho de
+    // falha da aplicação. O executor deve chamar restoreToBase antes de finalizar.
+    const writeThenThrow: CoderBackend = {
+      id: 'write-then-throw',
+      edit: async (_req, workspace: CoderWorkspace): Promise<CoderEditResult> => {
+        await workspace.writeFile('src/added.ts', 'parcial\n');
+        throw new Error('falha proposital do backend');
+      },
+    };
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: writeThenThrow, emitCheckpoint: true });
+    const req = request();
+    const signals = await collect(adapter, req, new AbortController().signal);
+    // Nenhum checkpoint (edit falhou), nenhum result, nenhum gate: só o erro.
+    expect(signals.map(s => s.kind)).toEqual(['error']);
+    expect((signals[0] as Extract<WorkExecutorSignal, { kind: 'error' }>).code).toBe('execution_failed');
+    // Nada commitado: a branch preservada aponta exatamente ao SHA-base.
+    const tip = await git(ctx.repo, ['rev-parse', `anima-work/${req.attemptId}`]);
+    expect(tip.stdout.trim()).toBe(ctx.sha);
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
+
+  test('sucesso multi-arquivo: o commit contém todas as alterações', async () => {
+    const backend = new ScriptedCoderBackend([
+      { path: 'src/added.ts', content: 'export const two = 2;\n' },
+      { path: 'src/more.ts', content: 'export const three = 3;\n' },
+    ]);
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend, emitCheckpoint: false });
+    const req = request({ includedScope: ['src/added.ts', 'src/more.ts'] });
+    const signals = await collect(adapter, req, new AbortController().signal);
+    expect(signals.at(-1)!.kind).toBe('result');
+    const files = await git(ctx.repo, ['show', '--name-only', '--format=', `anima-work/${req.attemptId}`]);
+    expect(files.stdout).toContain('src/added.ts');
+    expect(files.stdout).toContain('src/more.ts');
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
 });
