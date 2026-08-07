@@ -1,14 +1,38 @@
-import { parseScopedFiles, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
+import type { CoderBackend, CoderEditRequest, CoderEditResult, CoderWorkspace } from './coder-backend';
+import {
+  OllamaProtocolError,
+  applyEditOperations,
+  assertNotTruncated,
+  assertPromptWithinBudget,
+  buildManifest,
+  callOllamaChat,
+  parseEditOperations,
+  parseProtocolResponse,
+  parseReadRequests,
+  resolveContextBudget,
+  serveReadRequests,
+  type ContextBudget,
+  type ManifestInputFile,
+  type ServedRead,
+} from './ollama-protocol';
 
 // ============================================================
-// Backend de código LOCAL (Ollama) por trás da interface CoderBackend (ADR-001).
+// Backend de código LOCAL (Ollama) por trás de CoderBackend (ADR-001).
 //
-// É uma das inteligências SELECIONÁVEIS: o adaptador de worktree e o Supervisor
-// não conhecem Ollama — recebem um CoderBackend. Single-shot e confinado: lê os
-// arquivos do escopo, pede ao modelo o conteúdo novo COMPLETO de cada um em JSON
-// e escreve só caminhos do escopo (as guardas do worktree ainda valem por cima).
-// Não é agêntico (sem laço de ferramentas): a validação real é o gate, e o
-// resultado sempre vai para revisão humana.
+// NÃO usa mais round-trip de conteúdo integral — provado inviável: um prompt com
+// 4 docs (~73k tokens) foi truncado para ~4k pelo num_ctx=8192, o system prompt
+// se perdeu e o modelo devolveu JSON de schema errado. Reemitir arquivos inteiros
+// é lento e frágil mesmo quando o contexto cabe.
+//
+// Em vez disso, um PROTOCOLO LIMITADO em duas fases (ver ollama-protocol.ts):
+//   Fase 1 (leitura): o modelo recebe só o MANIFESTO (caminhos, tamanho, sha256,
+//     estrutura) e pede TRECHOS numerados, por um número pequeno de rodadas.
+//   Fase 2 (edição): o modelo devolve OPERAÇÕES exatas (replace_exact/create_file)
+//     verificadas por sha256, ocorrência única e não-sobreposição; o host aplica
+//     só na worktree isolada. Nada de arquivo completo entra ou sai.
+//
+// Confinamento: as guardas de path do worktree ainda valem por cima; o resultado
+// sempre vai para revisão humana (nunca merge/push/apply).
 // ============================================================
 
 export interface OllamaCoderOptions {
@@ -17,63 +41,140 @@ export interface OllamaCoderOptions {
   readonly timeoutMs?: number;
   /** Injeção para teste; por padrão o fetch global. */
   readonly fetchImpl?: typeof fetch;
+  /** Teto conservador de num_ctx (nunca ultrapassado). O protocolo mantém os
+   * prompts pequenos, então NÃO se cresce a janela sem limite. */
+  readonly operationalContextCap?: number;
+  readonly outputReserveTokens?: number;
+  readonly numPredict?: number;
+  /** Rodadas máximas de leitura antes de exigir edição. Pequeno de propósito. */
+  readonly maxReadRounds?: number;
+  /** Limite de contexto declarado pelo modelo, quando descoberto. Opcional. */
+  readonly declaredContextLength?: number;
 }
 
 const SYSTEM = [
-  'Você é um engenheiro que edita um repositório TypeScript.',
-  'Receberá um objetivo e o conteúdo atual dos arquivos DENTRO do escopo permitido.',
-  'Responda SOMENTE com JSON no formato {"files":[{"path":"<caminho relativo exato do escopo>","content":"<conteúdo COMPLETO novo do arquivo>"}]}.',
-  'Inclua apenas arquivos do escopo permitido. O content é o arquivo inteiro, nunca um diff. Não explique.',
-].join(' ');
+  'Você edita um repositório por um PROTOCOLO LIMITADO em JSON. Nunca recebe nem devolve arquivos inteiros.',
+  'Você recebe um MANIFESTO (caminho, tamanho, sha256, estrutura) e pode pedir TRECHOS antes de editar.',
+  'Responda SEMPRE com UM objeto JSON, sem texto fora dele, em uma destas formas:',
+  'LER: {"action":"read","reads":[{"path":"<do escopo>","search":"<termo opcional>","lineRange":[inicio,fim],"contextBefore":3,"contextAfter":3,"maxLines":60}]}',
+  'EDITAR: {"action":"edit","operations":[{"kind":"replace_exact","path":"<do escopo>","expected_file_sha256":"<sha do arquivo como lido>","before":"<texto EXATO e ÚNICO do arquivo atual>","after":"<novo texto>","expected_occurrences":1}]}',
+  'Também é permitido {"kind":"create_file","path":"<do escopo>","content":"<conteúdo>"} para arquivo NOVO. Exclusão não é permitida.',
+  'Regras: só caminhos do escopo; "before" deve ser copiado EXATAMENTE de um trecho lido e ocorrer uma única vez; use o sha256 do arquivo como lido; peça leituras antes de editar; não explique.',
+].join('\n');
+
+const clip = (value: string, max: number): string => (value.length <= max ? value : `${value.slice(0, max)}…`);
 
 export class OllamaCoderBackend implements CoderBackend {
   readonly id: string;
   private readonly url: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
+  private readonly maxReadRounds: number;
+  private readonly budget: ContextBudget;
+
   constructor(private readonly options: OllamaCoderOptions) {
     this.id = `ollama:${options.model}`;
     this.url = options.url ?? process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.timeoutMs = options.timeoutMs ?? 120_000;
+    this.maxReadRounds = Math.max(1, Math.min(options.maxReadRounds ?? 3, 6));
+    this.budget = resolveContextBudget({
+      declaredContextLength: options.declaredContextLength ?? null,
+      operationalCap: options.operationalContextCap ?? 8192,
+      outputReserveTokens: options.outputReserveTokens ?? 1536,
+      numPredict: options.numPredict ?? 1536,
+    });
   }
 
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
     const scope = request.includedScope.map(path => path.replace(/\\/g, '/'));
-    const current: string[] = [];
-    for (const path of scope) {
-      const content = await workspace.readFile(path);
-      current.push(`--- ${path} ---\n${content ?? '(arquivo ainda não existe)'}`);
-    }
+    const allowed = new Set(scope);
+
+    // Lê o conteúdo atual do escopo UMA vez (para manifesto, trechos e aplicação).
+    // Nada é injetado inteiro no prompt — só o manifesto e trechos sob demanda.
+    const cache = new Map<string, string | null>();
+    for (const path of scope) cache.set(path, await workspace.readFile(path));
+    const contentOf = (path: string): string | null => cache.get(path) ?? null;
+    const manifestFiles: ManifestInputFile[] = scope.map(path => ({ path, content: cache.get(path) ?? null }));
+    const manifest = buildManifest(manifestFiles);
+
     const carried = request.carriedContext
-      ? `\n\nRetomada — próximo passo: ${request.carriedContext.nextStep}. Restantes: ${request.carriedContext.remainingSteps.join('; ')}.`
+      ? `\nRetomada — próximo passo: ${request.carriedContext.nextStep}. Restantes: ${request.carriedContext.remainingSteps.join('; ')}.`
       : '';
-    const prompt = [
-      `Objetivo: ${request.objective}`,
-      `Escopo permitido (edite apenas estes caminhos):\n${scope.join('\n')}`,
+    const header = [
+      `Tarefa: ${request.objective}`,
+      `Escopo permitido (só estes caminhos): ${scope.join(', ')}`,
       `Fora do escopo (não toque): ${request.excludedScope.join('; ')}`,
-      `Conteúdo atual:\n${current.join('\n\n')}${carried}`,
-    ].join('\n\n');
+      `Manifesto (sem conteúdo integral): ${JSON.stringify(manifest)}`,
+    ].join('\n') + carried;
 
-    const response = await this.fetchImpl(`${this.url}/api/chat`, {
-      method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: this.options.model, stream: false, format: 'json',
-        options: { num_ctx: 8192, temperature: 0 },
-        messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }],
-      }),
-    }).catch(() => null);
+    const servedBlocks: string[] = [];
+    for (let round = 0; round <= this.maxReadRounds; round++) {
+      const roundsLeft = this.maxReadRounds - round;
+      const prompt = [
+        header,
+        servedBlocks.length ? `Contexto já fornecido:\n${servedBlocks.join('\n')}` : 'Nenhum trecho fornecido ainda.',
+        `Orçamento: ${roundsLeft} rodada(s) de leitura restante(s). Peça {"action":"read",...} ou aplique {"action":"edit",...}.`,
+      ].join('\n\n');
 
-    if (!response || !response.ok) throw new Error(`O modelo local não respondeu (${response ? response.status : 'sem conexão'}).`);
-    const body = await response.json().catch(() => null) as { message?: { content?: string } } | null;
-    const files = parseScopedFiles(body?.message?.content ?? '', new Set(scope));
-    if (files.length === 0) throw new Error('O modelo local não retornou arquivos válidos dentro do escopo.');
+      const response = await this.callProtocol(prompt, signal);
 
-    const touched: string[] = [];
-    for (const file of files) {
-      if (signal.aborted) break;
-      if (await workspace.writeFile(file.path, file.content)) touched.push(file.path);
+      if (response.action === 'edit') {
+        const operations = parseEditOperations(response.operations as unknown[], allowed);
+        const changes = applyEditOperations(operations, contentOf);
+        const touched: string[] = [];
+        for (const change of changes) {
+          if (signal.aborted) break;
+          if (!(await workspace.writeFile(change.path, change.newContent))) {
+            throw new OllamaProtocolError('ollama_edit_outside_scope', `a guarda do worktree recusou a escrita em ${change.path}.`);
+          }
+          touched.push(change.path);
+        }
+        if (touched.length === 0) throw new OllamaProtocolError('ollama_no_effective_edits', 'nenhuma alteração foi escrita.');
+        return {
+          summary: `Modelo local ${this.options.model} aplicou ${touched.length} edição(ões) estruturada(s) por protocolo limitado, para revisão.`,
+          touchedResources: touched,
+        };
+      }
+
+      // action === 'read'
+      if (roundsLeft <= 0) {
+        throw new OllamaProtocolError('ollama_read_round_limit', `o modelo esgotou as ${this.maxReadRounds} rodadas de leitura sem propor edições.`);
+      }
+      const { requests, rejected } = parseReadRequests(response.reads as unknown[], allowed);
+      const { served, rejected: missing } = serveReadRequests(requests, contentOf);
+      servedBlocks.push(renderServed(served, [...rejected, ...missing]));
     }
-    if (touched.length === 0) throw new Error('Nenhum arquivo do escopo pôde ser escrito.');
-    return { summary: `Modelo local ${this.options.model} editou ${touched.length} arquivo(s) do escopo, para validação.`, touchedResources: touched };
+    throw new OllamaProtocolError('ollama_read_round_limit', 'protocolo encerrou sem edições.');
+  }
+
+  /** Uma volta do protocolo: chama o modelo, checa truncamento e parseia o
+   * envelope. Um ÚNICO reparo é permitido quando o schema vem errado — apenas
+   * reforçando o formato, sem reapresentar conteúdo algum. */
+  private async callProtocol(prompt: string, signal: AbortSignal) {
+    const messages = [{ role: 'system' as const, content: SYSTEM }, { role: 'user' as const, content: prompt }];
+    assertPromptWithinBudget(SYSTEM + prompt, this.budget);
+    const first = await callOllamaChat({ url: this.url, model: this.options.model, messages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
+    assertNotTruncated(SYSTEM + prompt, first.meta);
+    try {
+      return parseProtocolResponse(first.content);
+    } catch (error) {
+      if (!(error instanceof OllamaProtocolError) || error.code !== 'ollama_invalid_response_schema') throw error;
+      // Reparo só-de-schema: NÃO reapresenta conteúdo, só exige o formato.
+      const repairMessages = [
+        ...messages,
+        { role: 'assistant' as const, content: clip(first.content, 500) },
+        { role: 'user' as const, content: 'Sua resposta não seguiu o schema. Responda SOMENTE com um objeto JSON {"action":"read",...} ou {"action":"edit",...}, sem texto fora dele.' },
+      ];
+      assertPromptWithinBudget(SYSTEM + prompt, this.budget);
+      const repaired = await callOllamaChat({ url: this.url, model: this.options.model, messages: repairMessages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
+      return parseProtocolResponse(repaired.content);
+    }
   }
 }
+
+const renderServed = (served: readonly ServedRead[], rejected: readonly string[]): string => {
+  const blocks = served.map(item => `Arquivo ${item.path} (sha256 ${item.sha256}):\n${item.slice}`);
+  if (rejected.length) blocks.push(`Rejeitados: ${rejected.join('; ')}`);
+  return blocks.join('\n');
+};
