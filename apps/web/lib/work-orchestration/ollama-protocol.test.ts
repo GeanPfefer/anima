@@ -3,16 +3,19 @@ import {
   OllamaProtocolError,
   assertNotTruncated,
   assertPromptWithinBudget,
+  applyEditOperations,
   buildManifest,
   callOllamaChat,
   estimateTokens,
   extractSlice,
+  parseEditOperations,
   parseProtocolResponse,
   parseReadRequests,
   resolveContextBudget,
   resolveScopedPath,
   serveReadRequests,
   sha256,
+  type EditOperation,
   type OllamaChatInput,
   type ReadRequest,
 } from './ollama-protocol';
@@ -205,5 +208,112 @@ describe('ollama-protocol — Commit 2: leitura limitada', () => {
     expect(served[0]!.sha256).toBe(sha256(files['docs/a.md']!));
     expect(served[0]!.slice).toContain('# A');
     expect(rejected).toHaveLength(1);
+  });
+});
+
+describe('ollama-protocol — Commit 3: edições exatas', () => {
+  const FILE = 'docs/a.md';
+  const original = '# Doc\nINT-03 é a ponte de aplicação e cria PR.\nfim.\n';
+  const sha = sha256(original);
+  const contentOf = (files: Record<string, string>) => (p: string): string | null => (p in files ? files[p]! : null);
+
+  const replace = (before: string, after: string, s = sha): unknown =>
+    ({ kind: 'replace_exact', path: FILE, expected_file_sha256: s, before, after, expected_occurrences: 1 });
+
+  test('parse aceita replace_exact e create_file válidos', () => {
+    const ops = parseEditOperations([replace('cria PR', 'é fronteira pura'), { kind: 'create_file', path: 'docs/arquitetura/x.md', content: '# novo' }], new Set([FILE, 'docs/arquitetura/x.md']));
+    expect(ops).toHaveLength(2);
+    expect(ops[0]!.kind).toBe('replace_exact');
+    expect(ops[1]!.kind).toBe('create_file');
+  });
+
+  test('parse recusa: kind desconhecido, fora do escopo, sha inválido, before vazio, occurrences!=1, excesso', () => {
+    const scope = new Set([FILE]);
+    const bad: [unknown, string][] = [
+      [{ kind: 'delete_file', path: FILE }, 'ollama_invalid_response_schema'],
+      [{ kind: 'replace_exact', path: 'fora/y.md', expected_file_sha256: sha, before: 'x', after: 'y' }, 'ollama_edit_outside_scope'],
+      [{ kind: 'replace_exact', path: FILE, expected_file_sha256: 'nope', before: 'x', after: 'y' }, 'ollama_invalid_response_schema'],
+      [{ kind: 'replace_exact', path: FILE, expected_file_sha256: sha, before: '', after: 'y' }, 'ollama_invalid_response_schema'],
+      [{ kind: 'replace_exact', path: FILE, expected_file_sha256: sha, before: 'x', after: 'y', expected_occurrences: 2 }, 'ollama_invalid_response_schema'],
+    ];
+    for (const [op, code] of bad) {
+      try { parseEditOperations([op], scope); throw new Error('deveria lançar'); }
+      catch (e) { expect((e as { code?: string }).code).toBe(code); }
+    }
+    const many = Array.from({ length: 21 }, () => replace('a', 'b'));
+    expect(() => parseEditOperations(many, scope)).toThrow('operações');
+  });
+
+  test('aplica substituição exata e preserva o resto byte a byte', () => {
+    const ops = parseEditOperations([replace('INT-03 é a ponte de aplicação e cria PR.', 'INT-03 é a fronteira pura de integração.')], new Set([FILE]));
+    const changes = applyEditOperations(ops, contentOf({ [FILE]: original }));
+    expect(changes).toHaveLength(1);
+    expect(changes[0]!.newContent).toBe('# Doc\nINT-03 é a fronteira pura de integração.\nfim.\n');
+    expect(changes[0]!.newContent.startsWith('# Doc\n')).toBe(true);
+    expect(changes[0]!.newContent.endsWith('\nfim.\n')).toBe(true);
+  });
+
+  test('hash desatualizado é recusado', () => {
+    const ops = parseEditOperations([replace('cria PR', 'X', sha256('outro conteúdo'))], new Set([FILE]));
+    try { applyEditOperations(ops, contentOf({ [FILE]: original })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_stale_file_hash'); }
+  });
+
+  test('zero ocorrências e múltiplas ocorrências são ambíguas', () => {
+    const zero = parseEditOperations([replace('NÃO EXISTE', 'x')], new Set([FILE]));
+    try { applyEditOperations(zero, contentOf({ [FILE]: original })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+    const multiSrc = 'aa\naa\n';
+    const multi = parseEditOperations([replace('aa', 'bb', sha256(multiSrc))], new Set([FILE]));
+    try { applyEditOperations(multi, contentOf({ [FILE]: multiSrc })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+  });
+
+  test('operações sobrepostas no mesmo arquivo são recusadas', () => {
+    const src = 'abcdef\n';
+    const s = sha256(src);
+    const ops = parseEditOperations([replace('abcd', 'X', s), replace('cdef', 'Y', s)], new Set([FILE]));
+    // ambas casam 1x, mas [0,4) e [2,6) se sobrepõem
+    try { applyEditOperations(ops, contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+  });
+
+  test('duas edições válidas não sobrepostas no mesmo arquivo aplicam ambas', () => {
+    const src = 'INICIO meio FIM\n';
+    const s = sha256(src);
+    const ops = parseEditOperations([replace('INICIO', 'A', s), replace('FIM', 'B', s)], new Set([FILE]));
+    const [change] = applyEditOperations(ops, contentOf({ [FILE]: src }));
+    expect(change!.newContent).toBe('A meio B\n');
+  });
+
+  test('edição sem efeito (before === after) é no_effective_edits', () => {
+    const ops = parseEditOperations([replace('fim.', 'fim.')], new Set([FILE]));
+    try { applyEditOperations(ops, contentOf({ [FILE]: original })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_no_effective_edits'); }
+  });
+
+  test('lote vazio é no_effective_edits', () => {
+    try { applyEditOperations([] as EditOperation[], contentOf({ [FILE]: original })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_no_effective_edits'); }
+  });
+
+  test('create_file sobre caminho existente é recusado; novo arquivo é criado', () => {
+    const scope = new Set(['docs/novo.md', FILE]);
+    const overExisting = parseEditOperations([{ kind: 'create_file', path: FILE, content: 'x' }], scope);
+    expect(() => applyEditOperations(overExisting, contentOf({ [FILE]: original }))).toThrow();
+    const create = parseEditOperations([{ kind: 'create_file', path: 'docs/novo.md', content: '# novo\n' }], scope);
+    const [change] = applyEditOperations(create, contentOf({ [FILE]: original }));
+    expect(change).toMatchObject({ path: 'docs/novo.md', kind: 'create', newContent: '# novo\n' });
+  });
+
+  test('múltiplos arquivos: cada um preserva o não tocado', () => {
+    const f1 = 'um: X\n'; const f2 = 'dois: Y\n';
+    const scope = new Set(['docs/f1.md', 'docs/f2.md']);
+    const ops = parseEditOperations([
+      { kind: 'replace_exact', path: 'docs/f1.md', expected_file_sha256: sha256(f1), before: 'X', after: 'Z', expected_occurrences: 1 },
+      { kind: 'replace_exact', path: 'docs/f2.md', expected_file_sha256: sha256(f2), before: 'Y', after: 'W', expected_occurrences: 1 },
+    ], scope);
+    const changes = applyEditOperations(ops, contentOf({ 'docs/f1.md': f1, 'docs/f2.md': f2 }));
+    expect(changes.map(c => c.newContent).sort()).toEqual(['dois: W\n', 'um: Z\n']);
   });
 });

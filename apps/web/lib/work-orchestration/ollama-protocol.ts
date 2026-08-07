@@ -427,3 +427,109 @@ export function serveReadRequests(
   }
   return { served, rejected };
 }
+
+// ---- Commit 3: edições exatas, verificáveis e aplicadas só na worktree ----
+
+const SHA_HEX = /^[a-f0-9]{64}$/;
+const MAX_OPERATIONS = 20;
+const MAX_BEFORE_CHARS = 20_000;
+const MAX_AFTER_CHARS = 40_000;
+const MAX_CREATE_CHARS = 200_000;
+
+/** Operação estruturada de edição. Sem diff ambíguo: substituição EXATA
+ * verificável, ou criação de arquivo novo. Exclusão não existe neste recorte. */
+export type EditOperation =
+  | { readonly kind: 'replace_exact'; readonly path: string; readonly expectedFileSha256: string; readonly before: string; readonly after: string }
+  | { readonly kind: 'create_file'; readonly path: string; readonly content: string };
+
+/** Parseia o lote de operações, fail-closed com limites de quantidade e tamanho.
+ * Caminho fora do escopo é `ollama_edit_outside_scope`; qualquer outra violação
+ * estrutural é `ollama_invalid_response_schema`. */
+export function parseEditOperations(operations: readonly unknown[], allowed: ReadonlySet<string>): EditOperation[] {
+  if (!Array.isArray(operations)) throw new OllamaProtocolError('ollama_invalid_response_schema', '"operations" precisa ser uma lista.');
+  if (operations.length > MAX_OPERATIONS) throw new OllamaProtocolError('ollama_invalid_response_schema', `no máximo ${MAX_OPERATIONS} operações por lote.`);
+  const out: EditOperation[] = [];
+  for (const raw of operations) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new OllamaProtocolError('ollama_invalid_response_schema', 'operação de edição malformada.');
+    const op = raw as Record<string, unknown>;
+    if (op.kind === 'replace_exact') {
+      if (typeof op.path !== 'string') throw new OllamaProtocolError('ollama_invalid_response_schema', 'replace_exact exige "path" string.');
+      const path = resolveScopedPath(op.path, allowed);
+      if (!path) throw new OllamaProtocolError('ollama_edit_outside_scope', `edição fora do escopo: ${clipStr(op.path)}`);
+      if (typeof op.expected_file_sha256 !== 'string' || !SHA_HEX.test(op.expected_file_sha256)) throw new OllamaProtocolError('ollama_invalid_response_schema', 'replace_exact exige "expected_file_sha256" (64 hex).');
+      if (typeof op.before !== 'string' || op.before.length === 0 || op.before.length > MAX_BEFORE_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'replace_exact exige "before" não vazio e dentro do limite.');
+      if (typeof op.after !== 'string' || op.after.length > MAX_AFTER_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'replace_exact exige "after" string dentro do limite.');
+      if (op.expected_occurrences !== undefined && op.expected_occurrences !== 1) throw new OllamaProtocolError('ollama_invalid_response_schema', '"expected_occurrences" só pode ser 1.');
+      out.push({ kind: 'replace_exact', path, expectedFileSha256: op.expected_file_sha256, before: op.before, after: op.after });
+    } else if (op.kind === 'create_file') {
+      if (typeof op.path !== 'string') throw new OllamaProtocolError('ollama_invalid_response_schema', 'create_file exige "path" string.');
+      const path = resolveScopedPath(op.path, allowed);
+      if (!path) throw new OllamaProtocolError('ollama_edit_outside_scope', `criação fora do escopo: ${clipStr(op.path)}`);
+      if (typeof op.content !== 'string' || op.content.length === 0 || op.content.length > MAX_CREATE_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'create_file exige "content" string não vazio dentro do limite.');
+      out.push({ kind: 'create_file', path, content: op.content });
+    } else {
+      throw new OllamaProtocolError('ollama_invalid_response_schema', `operação não suportada: ${clipStr(op.kind)} (exclusão não é permitida neste recorte).`);
+    }
+  }
+  return out;
+}
+
+const countOccurrences = (haystack: string, needle: string): { count: number; first: number } => {
+  let count = 0; let first = -1; let from = 0;
+  for (;;) {
+    const idx = haystack.indexOf(needle, from);
+    if (idx === -1) break;
+    if (first === -1) first = idx;
+    count++;
+    from = idx + needle.length;
+  }
+  return { count, first };
+};
+
+export interface AppliedChange { readonly path: string; readonly newContent: string; readonly kind: 'replace' | 'create'; }
+
+/** Valida e aplica as operações contra o conteúdo ATUAL (lido da worktree),
+ * produzindo o conjunto final de alterações. Fail-closed: hash divergente,
+ * ocorrência != 1, operações sobrepostas, criação sobre existente, ou zero
+ * mudança real são recusados com o código específico. NÃO escreve nada — devolve
+ * o conjunto para o chamador aplicar exclusivamente na worktree. */
+export function applyEditOperations(operations: readonly EditOperation[], contentOf: (path: string) => string | null): AppliedChange[] {
+  if (operations.length === 0) throw new OllamaProtocolError('ollama_no_effective_edits', 'nenhuma operação de edição foi fornecida.');
+  const creates: AppliedChange[] = [];
+  const replaceByPath = new Map<string, { before: string; after: string; sha: string }[]>();
+  for (const op of operations) {
+    if (op.kind === 'create_file') {
+      if (contentOf(op.path) !== null) throw new OllamaProtocolError('ollama_invalid_response_schema', `create_file exige caminho inexistente: ${op.path}.`);
+      creates.push({ path: op.path, newContent: op.content, kind: 'create' });
+    } else {
+      const list = replaceByPath.get(op.path) ?? [];
+      list.push({ before: op.before, after: op.after, sha: op.expectedFileSha256 });
+      replaceByPath.set(op.path, list);
+    }
+  }
+  const changes: AppliedChange[] = [];
+  for (const [path, ops] of replaceByPath) {
+    const original = contentOf(path);
+    if (original === null) throw new OllamaProtocolError('ollama_stale_file_hash', `arquivo do escopo não encontrado para edição: ${path}.`);
+    const currentSha = sha256(original);
+    const ranges: { start: number; end: number; after: string }[] = [];
+    for (const op of ops) {
+      if (op.sha !== currentSha) throw new OllamaProtocolError('ollama_stale_file_hash', `hash divergente para ${path}: o arquivo mudou desde a leitura.`);
+      const { count, first } = countOccurrences(original, op.before);
+      if (count !== 1) throw new OllamaProtocolError('ollama_ambiguous_replacement', `"before" ocorre ${count} vez(es) em ${path}; esperado exatamente 1.`);
+      ranges.push({ start: first, end: first + op.before.length, after: op.after });
+    }
+    const sorted = [...ranges].sort((a, b) => a.start - b.start);
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i]!.start < sorted[i - 1]!.end) throw new OllamaProtocolError('ollama_ambiguous_replacement', `operações sobrepostas em ${path}.`);
+    }
+    let next = original;
+    for (const range of [...sorted].sort((a, b) => b.start - a.start)) {
+      next = next.slice(0, range.start) + range.after + next.slice(range.end);
+    }
+    if (next !== original) changes.push({ path, newContent: next, kind: 'replace' });
+  }
+  const all = [...changes, ...creates];
+  if (all.length === 0) throw new OllamaProtocolError('ollama_no_effective_edits', 'as operações não produziram mudança real.');
+  return all;
+}
