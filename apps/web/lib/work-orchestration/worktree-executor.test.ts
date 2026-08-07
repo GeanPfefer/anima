@@ -232,4 +232,26 @@ describe('WorktreeExecutorAdapter', () => {
     expect(files.stdout).toContain('src/more.ts');
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
   });
+
+  test('cancelamento DURANTE a aplicação: restaura ao base, emite cancelled, nada commitado, sem gate', async () => {
+    const controller = new AbortController();
+    // Backend escreve estado parcial e cancela a tentativa no meio da aplicação.
+    const abortMidEdit: CoderBackend = {
+      id: 'abort-mid-edit',
+      edit: async (_req, workspace: CoderWorkspace): Promise<CoderEditResult> => {
+        await workspace.writeFile('src/added.ts', 'parcial durante cancelamento\n');
+        controller.abort();
+        throw new Error('abortado durante a edição');
+      },
+    };
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: abortMidEdit, emitCheckpoint: true });
+    const req = request();
+    const signals = await collect(adapter, req, controller.signal);
+    // A restauração (não-cancelável) é tentada ANTES de classificar; desfecho: cancelled.
+    expect(signals.map(s => s.kind)).toEqual(['cancelled']);
+    // Nenhum gate/commit/result: a branch preservada aponta exatamente ao SHA-base.
+    const tip = await git(ctx.repo, ['rev-parse', `anima-work/${req.attemptId}`]);
+    expect(tip.stdout.trim()).toBe(ctx.sha);
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
 });

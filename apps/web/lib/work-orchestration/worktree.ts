@@ -218,15 +218,25 @@ export class GitWorktree {
    * remove também arquivos criados sob `.gitignore`). Nesta fase a worktree só
    * contém as edições do backend; nenhuma infra ignorada existe ainda.
    *
-   * Devolve `true` só se reset E clean sucederem. `false` sinaliza FALHA de
-   * restauração — o chamador registra isso e mantém a worktree condenada ao
-   * `dispose`; jamais converte em sucesso.
+   * NÃO recebe o AbortSignal da tentativa, DE PROPÓSITO: cleanup preserva o
+   * invariant da worktree e não é trabalho produtivo — o cancelamento da tentativa
+   * jamais pode cancelar a restauração (o `runProcess` mataria um `reset`/`clean`
+   * cujo signal já estivesse abortado). É primitiva de limpeza simples e total,
+   * limitada apenas pelo timeout interno do helper `git`.
+   *
+   * Contrato de erro: NUNCA rejeita. Devolve `true` só se reset E clean sucederem;
+   * `false` para qualquer falha de restauração — o chamador registra e mantém a
+   * worktree condenada ao `dispose`; jamais converte em sucesso.
    */
-  async restoreToBase(signal?: AbortSignal): Promise<boolean> {
-    await this.removeNodeModulesLink();
-    const reset = await git(this.root, ['reset', '--hard', this.baseSha], signal);
-    const clean = await git(this.root, ['clean', '-fdx'], signal);
-    return reset.exitCode === 0 && clean.exitCode === 0;
+  async restoreToBase(): Promise<boolean> {
+    try {
+      await this.removeNodeModulesLink();
+      const reset = await git(this.root, ['reset', '--hard', this.baseSha]);
+      const clean = await git(this.root, ['clean', '-fdx']);
+      return reset.exitCode === 0 && clean.exitCode === 0;
+    } catch {
+      return false;
+    }
   }
 
   /** Remove a worktree e o diretório temporário. A ligação de node_modules é

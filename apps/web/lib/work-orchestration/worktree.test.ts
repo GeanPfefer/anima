@@ -230,4 +230,35 @@ describe('GitWorktree.restoreToBase — outcome atomicity ao estado-base', () =>
     await wt.dispose({ deleteBranch: true }); // remove a worktree
     await expect(wt.restoreToBase()).resolves.toBe(false);
   });
+
+  // --- Commit 7: a restauração NÃO é cancelável pelo signal da tentativa ---
+
+  test('8) worktree suja + signal da tentativa JÁ ABORTADO → restore ainda volta ao base', async () => {
+    const controller = new AbortController();
+    controller.abort(); // a tentativa foi cancelada
+    await wt.writeWorkspaceFile('docs/existing.md', 'sujo por cancelamento');
+    await wt.writeWorkspaceFile('docs/novo.md', 'criado durante cancelamento');
+    // restoreToBase nem recebe o signal — a limpeza roda independentemente:
+    expect(controller.signal.aborted).toBe(true);
+    expect(await wt.restoreToBase()).toBe(true);
+    expect(await status()).toBe('');
+    expect(await wt.readWorkspaceFile('docs/existing.md')).toBe(baseExisting);
+    expect(await wt.readWorkspaceFile('docs/novo.md')).toBeNull();
+  });
+
+  test('9) create_file + abort → criado desaparece mesmo com signal abortado', async () => {
+    const controller = new AbortController();
+    await wt.writeWorkspaceFile('docs/criado.md', '# criado');
+    controller.abort();
+    expect(await wt.restoreToBase()).toBe(true);
+    expect(await wt.readWorkspaceFile('docs/criado.md')).toBeNull();
+  });
+
+  test('10) replace + abort → bytes voltam ao base mesmo com signal abortado', async () => {
+    const controller = new AbortController();
+    await wt.writeWorkspaceFile('docs/existing.md', 'ALTERADO e cancelado');
+    controller.abort();
+    expect(await wt.restoreToBase()).toBe(true);
+    expect(await wt.readWorkspaceFile('docs/existing.md')).toBe(baseExisting);
+  });
 });
