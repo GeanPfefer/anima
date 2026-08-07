@@ -191,6 +191,27 @@ export class GitWorktree {
     return result.stdout;
   }
 
+  /** Diff estruturado (numstat) do estado atual vs base: por arquivo, caminho +
+   * inserções/deleções (-1 quando binário). Contagens apenas — nunca linhas
+   * cruas —, para alimentar o resumo do handoff durável (INT-05). Deve ser lido
+   * ANTES do commit (usa o índice staged vs HEAD). */
+  async diffNumstat(signal?: AbortSignal): Promise<readonly { readonly path: string; readonly insertions: number; readonly deletions: number }[]> {
+    await this.stageAll(signal);
+    const result = await git(this.root, ['diff', '--cached', '--numstat'], signal);
+    const out: { path: string; insertions: number; deletions: number }[] = [];
+    for (const line of result.stdout.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split('\t');
+      if (parts.length < 3) continue;
+      const [ins, del, ...rest] = parts;
+      const path = rest.join('\t').replace(/\\/g, '/');
+      const toCount = (value: string): number => (value === '-' ? -1 : (Number.isInteger(Number(value)) ? Number(value) : 0));
+      out.push({ path, insertions: toCount(ins!), deletions: toCount(del!) });
+    }
+    return out;
+  }
+
   /** Cria um commit na branch descartável capturando o estado atual e devolve o
    * SHA — nunca é feito push. Devolve `null` se não há nada para commitar. */
   async commit(message: string, signal?: AbortSignal): Promise<string | null> {

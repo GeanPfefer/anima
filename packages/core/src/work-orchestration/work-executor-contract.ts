@@ -3,6 +3,8 @@ import { containsSensitiveData, type ExecutionAttemptCorrelation } from './execu
 import type { ExecutionEventCorrelation } from './execution-event-correlation';
 import type { HumanDecisionOption, HumanInterruptionReason } from './human-interruption';
 import type { WorkCapability, WorkContextReference, WorkResultValidation } from './types';
+import { parseWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff';
+import type { Json } from '@anima/types';
 
 export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
   readonly capability: WorkCapability;
@@ -78,7 +80,7 @@ export type WorkExecutorSignal =
   | (CorrelatedSignal & { readonly kind: 'progress'; readonly message: string })
   | (CorrelatedSignal & { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 })
   | (CorrelatedSignal & { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] })
-  | (CorrelatedSignal & { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string })
+  | (CorrelatedSignal & { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1 })
   | (CorrelatedSignal & { readonly kind: 'error'; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string })
   | (CorrelatedSignal & { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string });
 
@@ -87,7 +89,7 @@ export type WorkExecutorSignalInput =
   | { readonly kind: 'progress'; readonly message: string }
   | { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 }
   | { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] }
-  | { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string }
+  | { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1 }
   | { readonly kind: 'error'; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string }
   | { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string };
 
@@ -173,6 +175,16 @@ export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSig
         || signal.options.some(option => !nonBlank(option.id) || !nonBlank(option.label)
           || !['resume', 'cancel'].includes(option.effect))) {
         return 'Uma decisão precisa de explicação e ao menos duas alternativas válidas e distintas.';
+      }
+    }
+    // INT-05: quando o resultado carrega o worktreeHandoff opcional, ele deve ser
+    // estruturalmente válido (re-parseável, fail-closed) e correlacionado com a
+    // tentativa. Ausência é aceita — outros executores não emitem o campo.
+    if (signal.kind === 'result' && signal.worktreeHandoff !== undefined) {
+      const parsed = parseWorktreeHandoff(signal.worktreeHandoff as unknown as Json);
+      if (!parsed) return 'O worktreeHandoff do resultado é inválido.';
+      if (parsed.workItemId !== signal.workItemId || parsed.attemptId !== signal.attemptId || parsed.approvedProposalVersion !== signal.approvedProposalVersion) {
+        return 'O worktreeHandoff perdeu a correlação da tentativa.';
       }
     }
     if (terminalKinds.has(signal.kind)) terminalCount++;

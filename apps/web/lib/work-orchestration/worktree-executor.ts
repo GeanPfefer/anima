@@ -1,4 +1,5 @@
 import {
+  buildWorktreeHandoff,
   validateWorkCheckpoint,
   type WorkCheckpointV1,
   type WorkExecutorAdapter,
@@ -6,6 +7,7 @@ import {
   type WorkExecutorSignal,
   type WorkExecutorSignalInput,
   type WorkResultValidation,
+  type WorktreeGateOutcome,
 } from '@anima/core';
 import type { CoderBackend, CoderWorkspace } from './coder-backend';
 import { GitWorktree, parseGateCommand, runGate } from './worktree';
@@ -117,6 +119,9 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         return;
       }
 
+      // Diff estruturado (contagens) capturado ANTES do commit, para o handoff durável.
+      const diffFiles = await worktree.diffNumstat(signal);
+
       if (this.options.emitCheckpoint) {
         const checkpoint: WorkCheckpointV1 = {
           schemaVersion: 1, handoffReference,
@@ -136,6 +141,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
 
       const timeoutMs = (request.limits.maxDurationMinutes ?? 30) * 60_000;
       const validations: WorkResultValidation[] = [];
+      const gateOutcomes: WorktreeGateOutcome[] = [];
       let failure: { command: string; exitCode: number } | null = null;
       for (const criterion of request.validationCriteria) {
         if (!criterion.command) { validations.push({ label: criterion.label, outcome: 'declared' }); continue; }
@@ -143,18 +149,43 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         const gate = await runGate(criterion.command, worktree.root, timeoutMs, signal);
         const passed = gate.exitCode === 0 && !gate.timedOut && !gate.cancelled;
         validations.push({ label: criterion.label, outcome: passed ? 'passed' : 'failed' });
+        gateOutcomes.push({ label: criterion.label, command: gate.command, exitCode: gate.exitCode, outcome: passed ? 'passed' : 'failed' });
         if (!passed) { failure = { command: gate.command, exitCode: gate.exitCode }; break; }
       }
       if (signal.aborted) { yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference }); return; }
 
       // Commit na branch descartável, capturando a mudança como referência
       // revisável — jamais pushado, jamais merjado.
-      await worktree.commit(`anima(worktree): ${clip(request.objective, 80)}`, signal);
+      const commitSha = await worktree.commit(`anima(worktree): ${clip(request.objective, 80)}`, signal);
 
       if (failure) {
         yield attach(++seq, { kind: 'error', code: 'execution_failed', message: `Gate falhou: ${failure.command} terminou com código ${failure.exitCode}.`, retryable: false, handoffReference });
         return;
       }
+
+      // Produtor vivo do handoff durável (INT-05): evidência git estruturada
+      // embutida no sinal `result`, persistida pela RPC de término (sinal inteiro
+      // em executor_signal) e relida por projectWorktreeHandoff. Opcional e
+      // fail-open — sem commit ou sem gate, o resultado ainda vai para revisão.
+      const handoff = commitSha
+        ? buildWorktreeHandoff({
+            workItemId: request.workItemId,
+            attemptId: request.attemptId,
+            approvedProposalVersion: request.approvedProposalVersion,
+            executorId: this.id,
+            backendId: this.options.backend.id,
+            model: null,
+            baseSha: target.sha,
+            branch,
+            commitSha,
+            status: 'succeeded',
+            changedFiles: changed.map(norm),
+            diffFiles,
+            gates: gateOutcomes,
+          })
+        : null;
+      const worktreeHandoff = handoff?.ok ? handoff.value : undefined;
+
       yield attach(++seq, {
         kind: 'result',
         summary: editResult.summary || 'Alteração produzida e validada em worktree isolada.',
@@ -162,6 +193,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         validations,
         limitations: ['Executado em worktree isolada; nenhuma alteração foi aplicada ao workspace original.'],
         handoffReference,
+        ...(worktreeHandoff ? { worktreeHandoff } : {}),
       });
     } finally {
       // Worktree descartável some; a branch fica como referência revisável.

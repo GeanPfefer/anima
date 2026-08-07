@@ -74,7 +74,19 @@ describe('WorktreeExecutorAdapter', () => {
     expect(signals.map(s => s.kind)).toEqual(['checkpoint', 'result']);
     const result = signals.at(-1)!;
     expect(result.kind).toBe('result');
-    if (result.kind === 'result') expect(result.validations).toEqual([{ label: 'testes', outcome: 'passed' }]);
+    if (result.kind === 'result') {
+      expect(result.validations).toEqual([{ label: 'testes', outcome: 'passed' }]);
+      // INT-05: o resultado carrega o handoff durável, coerente com o git real.
+      expect(result.worktreeHandoff).toBeDefined();
+      const h = result.worktreeHandoff!;
+      expect({ workItemId: h.workItemId, attemptId: h.attemptId, baseSha: h.baseSha, branch: h.branch, status: h.status })
+        .toEqual({ workItemId: req.workItemId, attemptId: req.attemptId, baseSha: ctx.sha, branch: `anima-work/${req.attemptId}`, status: 'succeeded' });
+      expect(h.changedFiles).toContain('src/added.ts');
+      expect(h.gates.some(g => g.outcome === 'passed')).toBe(true);
+      expect(h).not.toHaveProperty('createdAt');
+      const branchSha = (await git(ctx.repo, ['rev-parse', `anima-work/${req.attemptId}`])).stdout.trim();
+      expect(h.commitSha).toBe(branchSha); // commitSha durável == commit real da branch
+    }
 
     // Workspace ORIGINAL comprovadamente inalterado.
     await expect(stat(join(ctx.repo, 'src', 'added.ts'))).rejects.toBeTruthy();

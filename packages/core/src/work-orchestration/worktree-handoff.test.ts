@@ -28,7 +28,6 @@ const baseInput = (overrides: Partial<BuildWorktreeHandoffInput> = {}): BuildWor
   changedFiles: ['packages/core/src/live-proof.ts'],
   diffFiles: [{ path: 'packages/core/src/live-proof.ts', insertions: 6, deletions: 0 }],
   gates: [{ label: 'testes do core', command: 'npm test --workspace=packages/core', exitCode: 0, outcome: 'passed' }],
-  createdAt: '2026-08-05T12:00:00.000Z',
   ...overrides,
 });
 
@@ -221,5 +220,59 @@ describe('worktree durable handoff — contrato', () => {
     }
     // Construir jamais afirma publicação/aplicação.
     expect(ok(buildWorktreeHandoff(baseInput())).publicationState).toBe('local_only');
+  });
+});
+
+describe('worktree-handoff — determinismo e retry-safety (INT-05)', () => {
+  test('não carrega createdAt (o instante vem do envelope do evento persistido)', () => {
+    const handoff = ok(buildWorktreeHandoff(baseInput()));
+    expect(handoff).not.toHaveProperty('createdAt');
+    expect(JSON.stringify(handoff)).not.toContain('createdAt');
+  });
+
+  test('mesma evidência em ORDEM diferente → estrutura profundamente E byte-idêntica', () => {
+    const a = ok(buildWorktreeHandoff(baseInput({
+      changedFiles: ['docs/b.md', 'docs/a.md', 'docs/c.md'],
+      diffFiles: [
+        { path: 'docs/b.md', insertions: 2, deletions: 1 },
+        { path: 'docs/a.md', insertions: 3, deletions: 0 },
+        { path: 'docs/c.md', insertions: 1, deletions: 1 },
+      ],
+      gates: [
+        { label: 'typecheck', command: 'npm run typecheck', exitCode: 0, outcome: 'passed' },
+        { label: 'busca', command: 'npm test -- docs', exitCode: 0, outcome: 'passed' },
+      ],
+    })));
+    const b = ok(buildWorktreeHandoff(baseInput({
+      changedFiles: ['docs/c.md', 'docs/a.md', 'docs/b.md'],
+      diffFiles: [
+        { path: 'docs/a.md', insertions: 3, deletions: 0 },
+        { path: 'docs/c.md', insertions: 1, deletions: 1 },
+        { path: 'docs/b.md', insertions: 2, deletions: 1 },
+      ],
+      gates: [
+        { label: 'busca', command: 'npm test -- docs', exitCode: 0, outcome: 'passed' },
+        { label: 'typecheck', command: 'npm run typecheck', exitCode: 0, outcome: 'passed' },
+      ],
+    })));
+    expect(a).toEqual(b);
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b)); // idempotência byte-a-byte do sinal terminal
+    expect(a.changedFiles).toEqual(['docs/a.md', 'docs/b.md', 'docs/c.md']);
+    expect(a.diffSummary.files.map(f => f.path)).toEqual(['docs/a.md', 'docs/b.md', 'docs/c.md']);
+    expect(a.gates.map(g => g.label)).toEqual(['busca', 'typecheck']);
+  });
+
+  test('divergência real (outro commitSha) → estrutura diferente', () => {
+    const a = ok(buildWorktreeHandoff(baseInput()));
+    const b = ok(buildWorktreeHandoff(baseInput({ commitSha: 'c'.repeat(40) })));
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
+  });
+
+  test('reler o JSON persistido é idempotente (mesma estrutura em duas leituras)', () => {
+    const persisted = asJson(ok(buildWorktreeHandoff(baseInput())));
+    const first = parseWorktreeHandoff(persisted);
+    const second = parseWorktreeHandoff(persisted);
+    expect(first).toEqual(second);
+    expect(JSON.stringify(first)).toBe(JSON.stringify(second));
   });
 });

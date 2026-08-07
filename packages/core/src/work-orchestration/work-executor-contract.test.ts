@@ -1,4 +1,4 @@
-import { FakeWorkExecutor, validateWorkCheckpoint, validateWorkExecutorTranscript, type WorkCheckpointV1, type WorkExecutorRequest, type WorkExecutorSignal } from '.';
+import { FakeWorkExecutor, buildWorktreeHandoff, validateWorkCheckpoint, validateWorkExecutorTranscript, type WorkCheckpointV1, type WorkExecutorRequest, type WorkExecutorSignal } from '.';
 
 const request: WorkExecutorRequest = {
   attemptId: 'attempt-1', workItemId: 'work-1', approvedProposalVersion: 3, capability: 'programming', objective: 'Implementar contrato',
@@ -229,5 +229,38 @@ describe('INT-01 — validateWorkCheckpoint (régua estrutural do payload)', () 
 
   test('schemaVersion não suportada é recusada', () => {
     expect(validateWorkCheckpoint({ ...checkpoint, schemaVersion: 2 as never })).toContain('Versão');
+  });
+});
+
+describe('validateWorkExecutorTranscript — worktreeHandoff opcional (INT-05)', () => {
+  const validHandoff = () => {
+    const r = buildWorktreeHandoff({
+      workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 3,
+      executorId: 'worktree-v1', backendId: 'ollama', model: null,
+      baseSha: 'a'.repeat(40), branch: 'anima-work/attempt-1', commitSha: 'b'.repeat(40),
+      status: 'succeeded', changedFiles: ['docs/a.md'],
+      diffFiles: [{ path: 'docs/a.md', insertions: 1, deletions: 0 }],
+      gates: [{ label: 'g', command: 'npm run typecheck', exitCode: 0, outcome: 'passed' }],
+    });
+    if (!r.ok) throw new Error(r.explanation);
+    return r.value;
+  };
+  const resultSignal = (handoff?: unknown): WorkExecutorSignal => ({
+    attemptId: 'attempt-1', workItemId: 'work-1', approvedProposalVersion: 3, origin: 'executor', sequence: 1,
+    kind: 'result', summary: 'ok', resultReferences: [], validations: [], limitations: [], handoffReference: 'worktree:x',
+    ...(handoff !== undefined ? { worktreeHandoff: handoff } : {}),
+  } as WorkExecutorSignal);
+
+  test('ausência do campo é aceita (outros executores não emitem)', () => {
+    expect(validateWorkExecutorTranscript([resultSignal()])).toBeNull();
+  });
+  test('presença válida e correlacionada é aceita', () => {
+    expect(validateWorkExecutorTranscript([resultSignal(validHandoff())])).toBeNull();
+  });
+  test('handoff malformado é recusado fail-closed', () => {
+    expect(validateWorkExecutorTranscript([resultSignal({ schemaVersion: 1, invalido: true })])).toMatch(/worktreeHandoff/i);
+  });
+  test('handoff com correlação divergente é recusado', () => {
+    expect(validateWorkExecutorTranscript([resultSignal({ ...validHandoff(), attemptId: 'outra-tentativa' })])).toMatch(/correlação/i);
   });
 });

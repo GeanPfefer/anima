@@ -108,8 +108,10 @@ export interface WorktreeHandoffV1 {
   readonly diffSummary: WorktreeDiffSummary;
   // Comandos de gate e seus resultados factuais.
   readonly gates: readonly WorktreeGateOutcome[];
-  // Metadados.
-  readonly createdAt: string;
+  // Metadados. SEM `createdAt` (INT-05): o instante durável vem do envelope do
+  // evento persistido (a RPC de término carimba o `work_event`); embutir um
+  // relógio de parede aqui quebraria o determinismo e a idempotência byte-a-byte
+  // do sinal terminal na reentrega/reexecução.
   readonly publicationState: WorktreePublicationState;
 }
 
@@ -133,6 +135,7 @@ const nonBlank = (value: unknown): value is string => typeof value === 'string' 
 const positiveVersion = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0;
 const nonNegativeInt = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
 const bounded = (value: string, max: number): boolean => value.length <= max;
+const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const executionStatuses: ReadonlySet<string> = new Set(['succeeded', 'failed']);
 
 const isFileChange = (value: unknown): value is WorktreeFileChange => {
@@ -178,7 +181,6 @@ export interface BuildWorktreeHandoffInput {
   readonly changedFiles: readonly string[];
   readonly diffFiles: readonly WorktreeFileChange[];
   readonly gates: readonly WorktreeGateOutcome[];
-  readonly createdAt: string;
 }
 
 /** Reúne o conjunto de strings que jamais podem carregar segredo ou caminho
@@ -263,12 +265,13 @@ export function buildWorktreeHandoff(input: BuildWorktreeHandoffInput): Worktree
   if (!Array.isArray(input.gates) || input.gates.length === 0 || !input.gates.every(isGate)) {
     return fail('invalid_gates', 'O handoff precisa registrar ao menos um gate com comando e resultado.');
   }
-  if (!nonBlank(input.createdAt) || Number.isNaN(Date.parse(input.createdAt))) {
-    return fail('invalid_metadata', 'O momento de criação precisa ser um instante ISO válido.');
-  }
-
   const insertions = input.diffFiles.reduce((sum, file) => sum + Math.max(file.insertions, 0), 0);
   const deletions = input.diffFiles.reduce((sum, file) => sum + Math.max(file.deletions, 0), 0);
+  // Ordenação canônica e determinística (INT-05): duas construções com a mesma
+  // evidência lógica produzem a MESMA estrutura, independente da ordem de coleta.
+  const changedFiles = [...input.changedFiles].sort(byString);
+  const diffFiles = [...input.diffFiles].sort((a, b) => byString(a.path, b.path));
+  const gates = [...input.gates].sort((a, b) => byString(a.label, b.label) || byString(a.command, b.command));
   const value: WorktreeHandoffV1 = {
     schemaVersion: 1,
     workItemId: input.workItemId,
@@ -282,10 +285,9 @@ export function buildWorktreeHandoff(input: BuildWorktreeHandoffInput): Worktree
     commitSha: input.commitSha,
     status: input.status,
     safeError,
-    changedFiles: [...input.changedFiles],
-    diffSummary: { filesChanged: input.diffFiles.length, insertions, deletions, files: [...input.diffFiles] },
-    gates: [...input.gates],
-    createdAt: input.createdAt,
+    changedFiles,
+    diffSummary: { filesChanged: diffFiles.length, insertions, deletions, files: diffFiles },
+    gates,
     publicationState: 'local_only',
   };
 
@@ -342,7 +344,6 @@ export function parseWorktreeHandoff(value: Json | undefined): WorktreeHandoffV1
     || !isAnimaWorktreeBranch(root.branch)
     || typeof root.status !== 'string' || !executionStatuses.has(root.status)
     || (safeError !== null && !nonBlank(safeError))
-    || !nonBlank(root.createdAt) || Number.isNaN(Date.parse(root.createdAt))
     || typeof root.publicationState !== 'string' || !publicationStates.has(root.publicationState)
     || !nonNegativeInt(diff.filesChanged) || !nonNegativeInt(diff.insertions) || !nonNegativeInt(diff.deletions)
     || changedFiles.length === 0 || files.length === 0 || gates.length === 0) {
@@ -365,7 +366,6 @@ export function parseWorktreeHandoff(value: Json | undefined): WorktreeHandoffV1
     changedFiles,
     diffSummary: { filesChanged: diff.filesChanged, insertions: diff.insertions, deletions: diff.deletions, files },
     gates,
-    createdAt: root.createdAt,
     publicationState: root.publicationState as WorktreePublicationState,
   };
 
