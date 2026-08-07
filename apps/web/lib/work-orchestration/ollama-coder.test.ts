@@ -114,4 +114,40 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     await expect(new OllamaCoderBackend({ model: 'x', fetchImpl: failing }).edit(request, workspace, new AbortController().signal))
       .rejects.toMatchObject({ code: 'ollama_transport_error' });
   });
+
+  test('lote com create_file é recusado atomicamente, sem escrever nada', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
+    const resp = JSON.stringify({ action: 'edit', operations: [
+      { kind: 'replace_exact', path: 'docs/a.md', expected_file_sha256: bigSha, before: 'Linha ALVO unica para editar', after: 'Linha ALVO EDITADA', expected_occurrences: 1 },
+      { kind: 'create_file', path: 'docs/novo.md', content: '# novo' },
+    ] });
+    const { fetchImpl } = scriptedFetch([resp]);
+    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl }).edit(
+      { objective: 'x', includedScope: ['docs/a.md', 'docs/novo.md'], excludedScope: ['y'] }, workspace, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_create_not_atomic' });
+    expect(workspace.files.get('docs/a.md')).toBe(bigDoc);       // replace NÃO aplicado
+    expect(workspace.files.has('docs/novo.md')).toBe(false);     // create não ocorreu
+  });
+
+  test('falha de writeFile no lote multi-arquivo reverte e não deixa parcial', async () => {
+    const files = new Map([['docs/a.md', 'A0 ALVO fim'], ['docs/b.md', 'B0 aqui fim']]);
+    const sA = sha256(files.get('docs/a.md')!);
+    const sB = sha256(files.get('docs/b.md')!);
+    const workspace = {
+      files,
+      readFile: async (p: string) => files.get(p.replace(/\\/g, '/')) ?? null,
+      // a worktree recusa a escrita do 2º arquivo (simula guarda/IO):
+      writeFile: async (p: string, c: string) => { const path = p.replace(/\\/g, '/'); if (path === 'docs/b.md' && c !== 'B0 aqui fim') return false; files.set(path, c); return true; },
+    };
+    const resp = JSON.stringify({ action: 'edit', operations: [
+      { kind: 'replace_exact', path: 'docs/a.md', expected_file_sha256: sA, before: 'ALVO', after: 'X', expected_occurrences: 1 },
+      { kind: 'replace_exact', path: 'docs/b.md', expected_file_sha256: sB, before: 'aqui', after: 'Y', expected_occurrences: 1 },
+    ] });
+    const { fetchImpl } = scriptedFetch([resp]);
+    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl }).edit(
+      { objective: 'x', includedScope: ['docs/a.md', 'docs/b.md'], excludedScope: ['z'] }, workspace, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_edit_outside_scope' });
+    expect(files.get('docs/a.md')).toBe('A0 ALVO fim'); // revertido ao original
+    expect(files.get('docs/b.md')).toBe('B0 aqui fim'); // nunca mudou
+  });
 });

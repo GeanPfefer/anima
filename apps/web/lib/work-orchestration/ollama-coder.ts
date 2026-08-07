@@ -1,6 +1,7 @@
 import type { CoderBackend, CoderEditRequest, CoderEditResult, CoderWorkspace } from './coder-backend';
 import {
   OllamaProtocolError,
+  applyChangesAtomically,
   applyEditOperations,
   assertNotTruncated,
   assertPromptWithinBudget,
@@ -122,15 +123,14 @@ export class OllamaCoderBackend implements CoderBackend {
       if (response.action === 'edit') {
         const operations = parseEditOperations(response.operations as unknown[], allowed);
         const changes = applyEditOperations(operations, contentOf);
-        const touched: string[] = [];
-        for (const change of changes) {
-          if (signal.aborted) break;
-          if (!(await workspace.writeFile(change.path, change.newContent))) {
-            throw new OllamaProtocolError('ollama_edit_outside_scope', `a guarda do worktree recusou a escrita em ${change.path}.`);
-          }
-          touched.push(change.path);
-        }
-        if (touched.length === 0) throw new OllamaProtocolError('ollama_no_effective_edits', 'nenhuma alteração foi escrita.');
+        // Aplicação ATÔMICA: valida tudo contra o snapshot original antes da
+        // primeira escrita; ou o lote inteiro é gravado, ou é revertido. Nunca
+        // deixa aplicação parcial na worktree (ver applyChangesAtomically).
+        const touched = await applyChangesAtomically(
+          changes, contentOf,
+          { writeFile: (path, content) => workspace.writeFile(path, content) },
+          signal,
+        );
         return {
           summary: `Modelo local ${this.options.model} aplicou ${touched.length} edição(ões) estruturada(s) por protocolo limitado, para revisão.`,
           touchedResources: touched,

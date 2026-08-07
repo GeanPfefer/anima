@@ -30,6 +30,8 @@ export type OllamaProtocolErrorCode =
   | 'ollama_stale_file_hash'
   | 'ollama_ambiguous_replacement'
   | 'ollama_no_effective_edits'
+  | 'ollama_aborted'
+  | 'ollama_create_not_atomic'
   | 'ollama_timeout'
   | 'ollama_transport_error';
 
@@ -532,4 +534,81 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
   const all = [...changes, ...creates];
   if (all.length === 0) throw new OllamaProtocolError('ollama_no_effective_edits', 'as operações não produziram mudança real.');
   return all;
+}
+
+// ---- Commit 5: aplicação ATÔMICA do lote (all-or-nothing) ----
+
+/** Escritor confinado — mesma superfície mínima do CoderWorkspace usada para
+ * aplicar. Só `writeFile`; a leitura já foi capturada no snapshot. */
+export interface AtomicWriter {
+  writeFile(relPath: string, content: string): Promise<boolean>;
+}
+
+/**
+ * Aplica o conjunto de mudanças de forma ATÔMICA: ou o lote inteiro é escrito, ou
+ * tudo que já foi gravado é revertido ao snapshot original. Usa apenas
+ * `snapshotOf` (conteúdo original lido antes de qualquer escrita) e
+ * `writer.writeFile` — o rollback de um `replace_exact` reescreve o conteúdo
+ * original, restaurando os bytes exatos.
+ *
+ * `create_file` NÃO participa da atomicidade: revertê-lo exigiria remoção de
+ * arquivo, que o `CoderWorkspace` não expõe (só read/write). Em vez de improvisar
+ * ou ampliar a arquitetura, um lote que contenha `create_file` é recusado
+ * fail-closed ANTES de qualquer escrita — nada é aplicado, a propriedade
+ * all-or-nothing é preservada, e a limitação fica documentada (o menor ajuste é
+ * expor um `removeFile` no `CoderWorkspace`, implementado pela worktree com o
+ * `unlink` que ela já importa; pertence a um commit próprio, sob ratificação).
+ *
+ * `abort`, `writeFile===false` ou exceção durante a aplicação SEMPRE revertem e
+ * lançam — nunca retornam sucesso parcial. Devolve os caminhos efetivamente
+ * escritos quando (e só quando) o lote inteiro foi aplicado.
+ */
+export async function applyChangesAtomically(
+  changes: readonly AppliedChange[],
+  snapshotOf: (path: string) => string | null,
+  writer: AtomicWriter,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const creates = changes.filter(change => change.kind === 'create');
+  if (creates.length > 0) {
+    throw new OllamaProtocolError(
+      'ollama_create_not_atomic',
+      `create_file não pode ser aplicado atomicamente: o CoderWorkspace não expõe remoção para rollback. Caminho(s): ${creates.map(change => change.path).join(', ')}.`,
+    );
+  }
+  const applied: { path: string; original: string }[] = [];
+  const rollback = async (): Promise<boolean> => {
+    let clean = true;
+    for (const entry of [...applied].reverse()) {
+      try { if (!(await writer.writeFile(entry.path, entry.original))) clean = false; }
+      catch { clean = false; }
+    }
+    return clean;
+  };
+  for (const change of changes) {
+    if (signal?.aborted) {
+      const clean = await rollback();
+      throw new OllamaProtocolError('ollama_aborted', `aplicação abortada; lote revertido ao snapshot${clean ? '' : ' (rollback incompleto)'}.`);
+    }
+    const original = snapshotOf(change.path);
+    if (original === null) {
+      await rollback();
+      throw new OllamaProtocolError('ollama_stale_file_hash', `snapshot original ausente para ${change.path}; lote revertido.`);
+    }
+    let ok: boolean;
+    try {
+      ok = await writer.writeFile(change.path, change.newContent);
+    } catch (error) {
+      await rollback();
+      throw error instanceof OllamaProtocolError
+        ? error
+        : new OllamaProtocolError('ollama_transport_error', `falha ao escrever ${change.path}: ${error instanceof Error ? error.message : String(error)}; lote revertido.`);
+    }
+    if (!ok) {
+      await rollback();
+      throw new OllamaProtocolError('ollama_edit_outside_scope', `a guarda recusou a escrita em ${change.path}; lote revertido.`);
+    }
+    applied.push({ path: change.path, original });
+  }
+  return applied.map(entry => entry.path);
 }
