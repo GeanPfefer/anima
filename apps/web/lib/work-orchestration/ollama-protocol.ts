@@ -236,3 +236,194 @@ export function parseProtocolResponse(raw: string): ProtocolResponse {
   }
   throw new OllamaProtocolError('ollama_invalid_response_schema', 'campo "action" precisa ser "read" ou "edit".');
 }
+
+// ---- Commit 2: manifesto sem conteúdo integral + leitura limitada ----
+
+export const normalizeRelPath = (p: string): string => p.replace(/\\/g, '/');
+const clipStr = (value: unknown, max = 80): string => {
+  const s = typeof value === 'string' ? value : JSON.stringify(value);
+  return typeof s === 'string' && s.length > max ? `${s.slice(0, max)}…` : String(s);
+};
+const clampInt = (value: unknown, min: number, max: number, fallback: number): number => {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
+  return Math.max(min, Math.min(max, n));
+};
+
+/** Resolve um caminho declarado pelo modelo contra o escopo, de forma
+ * DETERMINÍSTICA e fail-closed: normaliza `\`→`/`, colapsa um `./` inicial,
+ * recusa absoluto (POSIX ou `X:`), traversal (`..`) e segmentos vazios/`.`, e
+ * exige pertencer ao escopo. Não adivinha; só normaliza o que é inequívoco. */
+export function resolveScopedPath(raw: unknown, allowed: ReadonlySet<string>): string | null {
+  if (typeof raw !== 'string' || raw.trim().length === 0) return null;
+  let p = raw.replace(/\\/g, '/').trim();
+  if (p.startsWith('./')) p = p.slice(2);
+  if (p.startsWith('/') || /^[A-Za-z]:/.test(p)) return null; // absoluto
+  const segments = p.split('/');
+  if (segments.some(s => s === '' || s === '.' || s === '..')) return null; // traversal/vazio
+  return allowed.has(p) ? p : null;
+}
+
+export type FileKind = 'markdown' | 'typescript' | 'json' | 'other';
+export interface ManifestEntry {
+  readonly path: string;
+  readonly exists: boolean;
+  readonly byteSize: number;
+  readonly lineCount: number;
+  readonly sha256: string | null;
+  readonly kind: FileKind;
+  /** Estrutura resumida SEGURA (headings md / assinaturas exportadas ts), nunca
+   * conteúdo integral. */
+  readonly structure: readonly string[];
+}
+export interface ManifestInputFile { readonly path: string; readonly content: string | null; }
+
+const MANIFEST_MAX_STRUCTURE = 80;
+const STRUCTURE_ITEM_MAX = 200;
+export const MAX_READS_PER_ROUND = 8;
+const READ_MAX_LINES = 200;
+const READ_MAX_CONTEXT = 20;
+const SEARCH_MAX_CHARS = 200;
+const SLICE_MAX_CHARS = 6000;
+const MAX_SEARCH_MATCHES = 10;
+
+const kindFromPath = (path: string): FileKind => {
+  const p = normalizeRelPath(path).toLowerCase();
+  if (p.endsWith('.md') || p.endsWith('.markdown')) return 'markdown';
+  if (p.endsWith('.ts') || p.endsWith('.tsx')) return 'typescript';
+  if (p.endsWith('.json')) return 'json';
+  return 'other';
+};
+
+const structureOf = (kind: FileKind, content: string): string[] => {
+  const out: string[] = [];
+  const push = (line: string) => { if (out.length < MANIFEST_MAX_STRUCTURE) out.push(line.trim().slice(0, STRUCTURE_ITEM_MAX)); };
+  if (kind === 'markdown') {
+    for (const line of content.split('\n')) { if (/^#{1,6}\s+/.test(line)) push(line); if (out.length >= MANIFEST_MAX_STRUCTURE) break; }
+  } else if (kind === 'typescript') {
+    const re = /^\s*export\s+(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|const|enum)\s+[A-Za-z0-9_]+/;
+    for (const line of content.split('\n')) { if (re.test(line)) push(line); if (out.length >= MANIFEST_MAX_STRUCTURE) break; }
+  }
+  return out;
+};
+
+/** Manifesto do escopo SEM conteúdo integral: caminho, existência, tamanho,
+ * linhas, sha256 e estrutura resumida. É tudo que a Fase 1 revela ao modelo. */
+export function buildManifest(files: readonly ManifestInputFile[]): ManifestEntry[] {
+  return files.map(file => {
+    const exists = typeof file.content === 'string';
+    const content = exists ? (file.content as string) : '';
+    const kind = kindFromPath(file.path);
+    return {
+      path: normalizeRelPath(file.path),
+      exists,
+      byteSize: exists ? Buffer.byteLength(content, 'utf8') : 0,
+      lineCount: exists ? content.split('\n').length : 0,
+      sha256: exists ? sha256(content) : null,
+      kind,
+      structure: exists ? structureOf(kind, content) : [],
+    };
+  });
+}
+
+export interface ReadRequest {
+  readonly path: string;
+  readonly search?: string;
+  readonly lineRange?: readonly [number, number];
+  readonly contextBefore: number;
+  readonly contextAfter: number;
+  readonly maxLines: number;
+}
+
+/** Parseia solicitações de leitura, fail-closed. Estouro do teto de leituras é
+ * erro de schema; entradas malformadas ou fora do escopo são REJEITADAS
+ * (relatadas, nunca escondidas), não interrompem as válidas. Parâmetros são
+ * limitados (linhas, contexto, tamanho da busca). */
+export function parseReadRequests(reads: readonly unknown[], allowed: ReadonlySet<string>): { requests: ReadRequest[]; rejected: string[] } {
+  if (!Array.isArray(reads)) throw new OllamaProtocolError('ollama_invalid_response_schema', '"reads" precisa ser uma lista.');
+  if (reads.length > MAX_READS_PER_ROUND) throw new OllamaProtocolError('ollama_invalid_response_schema', `no máximo ${MAX_READS_PER_ROUND} leituras por rodada.`);
+  const requests: ReadRequest[] = [];
+  const rejected: string[] = [];
+  for (const raw of reads) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { rejected.push('entrada de leitura malformada'); continue; }
+    const entry = raw as Record<string, unknown>;
+    const path = resolveScopedPath(entry.path, allowed);
+    if (!path) { rejected.push(`caminho fora do escopo: ${clipStr(entry.path)}`); continue; }
+    const search = typeof entry.search === 'string' && entry.search.trim().length > 0
+      ? entry.search.trim().slice(0, SEARCH_MAX_CHARS) : undefined;
+    let lineRange: [number, number] | undefined;
+    if (Array.isArray(entry.lineRange) && entry.lineRange.length === 2
+      && entry.lineRange.every(n => typeof n === 'number' && Number.isFinite(n))) {
+      const a = Math.max(1, Math.floor(entry.lineRange[0] as number));
+      const b = Math.max(a, Math.floor(entry.lineRange[1] as number));
+      lineRange = [a, b];
+    }
+    requests.push({
+      path,
+      ...(search ? { search } : {}),
+      ...(lineRange ? { lineRange } : {}),
+      contextBefore: clampInt(entry.contextBefore, 0, READ_MAX_CONTEXT, 3),
+      contextAfter: clampInt(entry.contextAfter, 0, READ_MAX_CONTEXT, 3),
+      maxLines: clampInt(entry.maxLines, 1, READ_MAX_LINES, 60),
+    });
+  }
+  return { requests, rejected };
+}
+
+const numberLines = (lines: readonly string[], firstLineNo: number): string =>
+  lines.map((line, i) => `${String(firstLineNo + i).padStart(6, ' ')}| ${line}`).join('\n');
+
+/** Extrai um trecho NUMERADO e LIMITADO do conteúdo, por busca, por intervalo de
+ * linhas, ou (padrão) o começo do arquivo. Sempre limitado por linhas e por
+ * caracteres — nunca devolve o arquivo inteiro. */
+export function extractSlice(content: string, request: ReadRequest): string {
+  const lines = content.split('\n');
+  const total = lines.length;
+  const clampIdx = (n: number) => Math.max(0, Math.min(total - 1, n));
+  let out: string;
+  if (request.search) {
+    const needle = request.search.toLowerCase();
+    const matches: number[] = [];
+    for (let i = 0; i < total && matches.length < MAX_SEARCH_MATCHES; i++) {
+      if (lines[i]!.toLowerCase().includes(needle)) matches.push(i);
+    }
+    if (matches.length === 0) { return `(sem ocorrências de "${clipStr(request.search)}" em ${total} linhas)`; }
+    const chunks: string[] = [];
+    let budgetLines = request.maxLines;
+    for (const m of matches) {
+      if (budgetLines <= 0) break;
+      const start = clampIdx(m - request.contextBefore);
+      const end = clampIdx(m + request.contextAfter);
+      const take = lines.slice(start, end + 1).slice(0, budgetLines);
+      budgetLines -= take.length;
+      chunks.push(numberLines(take, start + 1));
+    }
+    out = chunks.join('\n   …\n');
+  } else if (request.lineRange) {
+    const start = clampIdx(request.lineRange[0] - 1);
+    const endWanted = clampIdx(request.lineRange[1] - 1);
+    const end = Math.min(endWanted, start + request.maxLines - 1);
+    out = numberLines(lines.slice(start, end + 1), start + 1);
+  } else {
+    out = numberLines(lines.slice(0, request.maxLines), 1);
+  }
+  return out.length > SLICE_MAX_CHARS ? `${out.slice(0, SLICE_MAX_CHARS)}\n… (trecho truncado por limite de caracteres)` : out;
+}
+
+export interface ServedRead { readonly path: string; readonly sha256: string; readonly slice: string; }
+
+/** Atende as solicitações válidas com trechos numerados + o sha256 ATUAL de cada
+ * arquivo (âncora para a fase de edição). Arquivo inexistente é rejeitado
+ * (relatado), nunca inventado. */
+export function serveReadRequests(
+  requests: readonly ReadRequest[],
+  contentOf: (path: string) => string | null,
+): { served: ServedRead[]; rejected: string[] } {
+  const served: ServedRead[] = [];
+  const rejected: string[] = [];
+  for (const request of requests) {
+    const content = contentOf(request.path);
+    if (content === null) { rejected.push(`arquivo inexistente no escopo: ${request.path}`); continue; }
+    served.push({ path: request.path, sha256: sha256(content), slice: extractSlice(content, request) });
+  }
+  return { served, rejected };
+}

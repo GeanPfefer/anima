@@ -3,12 +3,18 @@ import {
   OllamaProtocolError,
   assertNotTruncated,
   assertPromptWithinBudget,
+  buildManifest,
   callOllamaChat,
   estimateTokens,
+  extractSlice,
   parseProtocolResponse,
+  parseReadRequests,
   resolveContextBudget,
+  resolveScopedPath,
+  serveReadRequests,
   sha256,
   type OllamaChatInput,
+  type ReadRequest,
 } from './ollama-protocol';
 
 const okFetch = (body: unknown): typeof fetch =>
@@ -121,5 +127,83 @@ describe('ollama-protocol — Commit 1: orçamento e diagnóstico', () => {
     expect(sha256('abc')).toBe(sha256('abc'));
     expect(sha256('abc')).not.toBe(sha256('abd'));
     expect(sha256('abc')).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+const SCOPE = new Set(['docs/a.md', 'docs/arquitetura/x.md']);
+
+describe('ollama-protocol — Commit 2: leitura limitada', () => {
+  test('resolveScopedPath normaliza o inequívoco e recusa o ambíguo/perigoso', () => {
+    expect(resolveScopedPath('docs/a.md', SCOPE)).toBe('docs/a.md');
+    expect(resolveScopedPath('docs\\arquitetura\\x.md', SCOPE)).toBe('docs/arquitetura/x.md'); // Windows
+    expect(resolveScopedPath('./docs/a.md', SCOPE)).toBe('docs/a.md');
+    expect(resolveScopedPath('/etc/passwd', SCOPE)).toBeNull(); // absoluto POSIX
+    expect(resolveScopedPath('C:/anima/docs/a.md', SCOPE)).toBeNull(); // absoluto Windows
+    expect(resolveScopedPath('docs/../secret.md', SCOPE)).toBeNull(); // traversal
+    expect(resolveScopedPath('../a.md', SCOPE)).toBeNull();
+    expect(resolveScopedPath('docs/b.md', SCOPE)).toBeNull(); // fora do escopo
+    expect(resolveScopedPath('', SCOPE)).toBeNull();
+  });
+
+  test('buildManifest revela estrutura mas NUNCA conteúdo integral', () => {
+    const md = '# Título\ntexto secreto que não pode vazar\n## Seção A\nmais texto\n### Sub';
+    const [entry] = buildManifest([{ path: 'docs/a.md', content: md }]);
+    expect(entry).toMatchObject({ path: 'docs/a.md', exists: true, kind: 'markdown' });
+    expect(entry!.sha256).toBe(sha256(md));
+    expect(entry!.byteSize).toBe(Buffer.byteLength(md, 'utf8'));
+    expect(entry!.structure).toEqual(['# Título', '## Seção A', '### Sub']);
+    // Nenhuma chave carrega o conteúdo, e o texto do corpo não aparece no manifesto.
+    expect(Object.keys(entry!)).not.toContain('content');
+    expect(JSON.stringify(entry)).not.toContain('texto secreto');
+  });
+
+  test('buildManifest marca arquivo inexistente sem inventar hash', () => {
+    const [entry] = buildManifest([{ path: 'docs/a.md', content: null }]);
+    expect(entry).toMatchObject({ exists: false, sha256: null, byteSize: 0, structure: [] });
+  });
+
+  test('parseReadRequests: teto de leituras é erro de schema', () => {
+    const many = Array.from({ length: 9 }, () => ({ path: 'docs/a.md' }));
+    expect(() => parseReadRequests(many, SCOPE)).toThrow(OllamaProtocolError);
+    try { parseReadRequests(many, SCOPE); } catch (e) { expect((e as OllamaProtocolError).code).toBe('ollama_invalid_response_schema'); }
+  });
+
+  test('parseReadRequests: caminho fora do escopo é rejeitado (relatado), válidos seguem; limites aplicados', () => {
+    const { requests, rejected } = parseReadRequests(
+      [{ path: 'docs/a.md', maxLines: 99999, contextBefore: 999 }, { path: '/etc/passwd' }, { path: 'docs/b.md' }],
+      SCOPE,
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ path: 'docs/a.md', maxLines: 200, contextBefore: 20 });
+    expect(rejected).toHaveLength(2);
+  });
+
+  test('extractSlice: busca em Markdown grande devolve trechos numerados e limitados', () => {
+    const big = Array.from({ length: 600 }, (_, i) => i === 400 ? '## Marco alvo' : `linha ${i + 1}`).join('\n');
+    const req: ReadRequest = { path: 'docs/a.md', search: 'Marco alvo', contextBefore: 2, contextAfter: 2, maxLines: 20 };
+    const slice = extractSlice(big, req);
+    expect(slice).toContain('Marco alvo');
+    expect(slice).toMatch(/^\s*401\|/m); // linha numerada (1-based)
+    expect(slice.split('\n').length).toBeLessThanOrEqual(6);
+    expect(slice).not.toContain('linha 1\n'); // não vazou o arquivo inteiro
+  });
+
+  test('extractSlice: intervalo de linhas e limite de caracteres', () => {
+    const big = Array.from({ length: 100 }, (_, i) => `L${i + 1}`).join('\n');
+    const slice = extractSlice(big, { path: 'docs/a.md', lineRange: [10, 12], contextBefore: 0, contextAfter: 0, maxLines: 200 });
+    expect(slice).toContain('L10'); expect(slice).toContain('L12'); expect(slice).not.toContain('L13');
+    const huge = 'x'.repeat(20000);
+    const clipped = extractSlice(huge, { path: 'docs/a.md', contextBefore: 0, contextAfter: 0, maxLines: 1 });
+    expect(clipped).toContain('truncado por limite');
+  });
+
+  test('serveReadRequests: entrega trecho + sha256 atual; inexistente é rejeitado', () => {
+    const files: Record<string, string> = { 'docs/a.md': '# A\nconteúdo' };
+    const { requests } = parseReadRequests([{ path: 'docs/a.md', search: 'A' }, { path: 'docs/arquitetura/x.md' }], SCOPE);
+    const { served, rejected } = serveReadRequests(requests, p => files[p] ?? null);
+    expect(served).toHaveLength(1);
+    expect(served[0]!.sha256).toBe(sha256(files['docs/a.md']!));
+    expect(served[0]!.slice).toContain('# A');
+    expect(rejected).toHaveLength(1);
   });
 });
