@@ -13,6 +13,7 @@ export * from './execution-attempt';
 export * from './work-executor-contract';
 export * from './execution-event-correlation';
 export * from './integration-boundary';
+export * from './integration-publication';
 export * from './work-claim';
 export * from './autonomous-queue';
 export * from './autonomous-selection';
