@@ -1,4 +1,4 @@
-import { availableWorkActions, buildProposalRevision, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingWorkDecision, reconstructWorkPresentation, type WorkEvent, type WorkItem } from '.';
+import { availableWorkActions, buildProposalRevision, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingWorkDecision, projectWorkIntegration, reconstructWorkPresentation, type WorkEvent, type WorkItem } from '.';
 const item={id:'i',userId:'u',sourceMessageId:'m',state:'review',impactLevel:'low',capability:'planning',originalRequest:'x',intent:{},proposal:{schemaVersion:1,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:2,createdAt:new Date(),updatedAt:new Date()} satisfies WorkItem;
 const event={id:'r',workItemId:'i',type:'result_submitted',author:'executor',proposalVersion:2,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a']}},occurredAt:new Date()} satisfies WorkEvent;
 describe('projeção de apresentação do trabalho',()=>{
@@ -50,6 +50,14 @@ describe('projeção do resultado aceito',()=>{
   test('referência para evento de outro tipo não vira evidência',()=>expect(projectAcceptedWorkResult([event,{...accepted,payload:{schema_version:1,data:{accepted_result_event_id:'a'}}}])).toBeNull());
   test('resultado referenciado com payload malformado não vira evidência',()=>expect(projectAcceptedWorkResult([{...event,payload:{schema_version:1,data:{summary:42}}},accepted])).toBeNull());
   test('sem evento de aceite não há resultado aceito',()=>expect(projectAcceptedWorkResult([event])).toBeNull());
+});
+describe('projeção da segunda decisão de integração',()=>{
+  const integrationResult={...event,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a'],work_item_id:'i',attempt_id:'attempt-1',approved_proposal_version:2,handoff_reference:'worktree:attempt-1'}}} satisfies WorkEvent;
+  const accepted={id:'accepted',workItemId:'i',type:'result_accepted',author:'user',proposalVersion:2,payload:{schema_version:1,data:{accepted_result_event_id:'r'}},occurredAt:new Date()} satisfies WorkEvent;
+  const decided=(decision:'authorize'|'refuse'):WorkEvent=>({id:`decision-${decision}`,workItemId:'i',type:'integration_decided',author:'user',proposalVersion:2,payload:{schema_version:1,data:{work_item_id:'i',attempt_id:'attempt-1',approved_proposal_version:2,accepted_result_event_id:'r',decision,decision_id:`integration:r:${decision}`}},occurredAt:new Date()});
+  test('só oferece authorize/refuse depois do resultado aceito',()=>{expect(projectWorkIntegration({...item,state:'review'},[integrationResult])).toBeNull();expect(projectWorkIntegration({...item,state:'completed'},[integrationResult,accepted])).toMatchObject({status:'awaiting_decision',acceptedResultEventId:'r',availableDecisions:['authorize','refuse']});});
+  test.each([['authorize','authorized'],['refuse','refused']] as const)('decisão %s remove a affordance e projeta %s',(decision,status)=>expect(projectWorkIntegration({...item,state:'completed'},[integrationResult,accepted,decided(decision)])).toEqual({status,acceptedResultEventId:'r',decision,availableDecisions:[]}));
+  test('versão ou ownership divergentes falham fechado',()=>{expect(projectWorkIntegration({...item,state:'completed',proposalVersion:3},[integrationResult,accepted])).toBeNull();expect(projectWorkIntegration({...item,id:'outro',state:'completed'},[integrationResult,accepted])).toBeNull();});
 });
 describe('projeção da decisão humana',()=>{
   const request=(reason:(typeof HUMAN_INTERRUPTION_REASONS)[number]):WorkEvent=>({id:`q-${reason}`,workItemId:'i',type:'input_requested',author:'anima',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{attempt_id:'attempt-1',reason,explanation:'Escolha necessária.',checkpoint_reference:'checkpoint-1',options:[{id:'seguir',label:'Seguir',effect:'resume'},{id:'parar',label:'Parar',effect:'cancel'}]}}});

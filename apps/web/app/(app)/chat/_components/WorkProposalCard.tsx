@@ -56,6 +56,23 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
   }
   const decide=(decision:ApprovalDecision)=>mutate('/api/work-orchestration/decisions',{decision});
   const review=(decision:ResultReviewDecision)=>mutate('/api/work-orchestration/reviews',{decision,reviewedResultEventId:latestResult?.eventId});
+  async function decideIntegration(decision:'authorize'|'refuse'){
+    if(status!=='idle'||!presentation.integration?.availableDecisions.includes(decision))return;
+    setStatus('submitting');setError('');
+    try{
+      const response=await fetch('/api/work-orchestration/integration-decisions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        workItemId:item.id,expectedProposalVersion:item.proposalVersion,
+        acceptedResultEventId:presentation.integration.acceptedResultEventId,
+        decision,decisionId:`integration:${presentation.integration.acceptedResultEventId}:${decision}`,
+      })});
+      const body=await response.json().catch(()=>({}));
+      if(!response.ok||!body.ok)setError(body.error?.message??'Não foi possível registrar a decisão de integração.');
+      await reload(Boolean(!response.ok||!body.ok));
+    }catch{
+      setError('A conexão falhou; nenhuma decisão de integração foi presumida.');
+      await reload(true).catch(()=>setStatus('idle'));
+    }
+  }
   const busy=status!=='idle';
   return <article className={styles.workCard} aria-label={`Trabalho, versão ${item.proposalVersion}`} aria-busy={busy}>
     <div className={styles.workCardHeader}><strong>{focused?'Trabalho em foco':'Proposta de trabalho'}</strong><span>{item.state} · v{item.proposalVersion}</span></div>
@@ -91,6 +108,11 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
     <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?'Resultado aceito e trabalho concluído; evidências preservadas acima.':'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?'A execução falhou; nenhum resultado foi aceito.':`Estado atual: ${item.state}.`}</p>
     {presentation.execution&&<WorkExecutionCard execution={presentation.execution} workItemId={item.id} proposalVersion={item.proposalVersion} onReload={reload} />}
     {presentation.pendingDecision&&<WorkDecisionCard decision={presentation.pendingDecision} workItemId={item.id} onReload={reload} />}
+    {presentation.integration&&<section className={styles.workNotice} aria-label="Decisão de integração">
+      <strong>{presentation.integration.status==='awaiting_decision'?'Integração aguardando sua decisão':presentation.integration.status==='authorized'?'Integração autorizada':'Integração recusada'}</strong>
+      <p>{presentation.integration.status==='awaiting_decision'?'O resultado foi aceito. Autorizar permite uma futura execução protegida; não publica, envia, cria PR ou integra agora.':presentation.integration.status==='authorized'?'Autorizada e aguardando execução protegida. Nada foi publicado, enviado, integrado ou mergeado.':'A integração deste resultado foi recusada. Nenhum efeito externo ocorreu.'}</p>
+      {presentation.integration.availableDecisions.length>0&&<div className={styles.workActions}><button disabled={busy} onClick={()=>void decideIntegration('authorize')}>Autorizar integração</button><button disabled={busy} onClick={()=>void decideIntegration('refuse')}>Recusar integração</button></div>}
+    </section>}
     {!focused&&onFocus&&!['completed','failed','rejected','cancelled'].includes(item.state)&&<button disabled={busy} onClick={onFocus}>Usar como foco</button>}
     {mode==='none'&&allowed('approve')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>decide({type:'approve'})}>Aprovar</button><button disabled={busy} onClick={()=>setMode('correct')}>Pedir correção</button><button disabled={busy} onClick={()=>setMode('defer')}>Adiar</button><button disabled={busy} onClick={()=>decide({type:'reject'})}>Rejeitar</button></div>}
     {mode==='defer'&&<div className={styles.workDecision}><label>Motivo<select value={detail} onChange={event=>setDetail(event.target.value)}><option value="">Selecione</option><option>Quero decidir depois</option><option>Falta contexto</option><option>Não é prioridade agora</option><option value="other">Outro</option></select></label>{detail==='other'&&<input aria-label="Outro motivo" value={customDeferReason} onChange={event=>setCustomDeferReason(event.target.value)}/>}<button disabled={busy||!(detail==='other'?customDeferReason:detail).trim()} onClick={()=>decide({type:'defer',reason:detail==='other'?customDeferReason:detail})}>Confirmar adiamento</button><button onClick={()=>setMode('none')}>Voltar</button></div>}

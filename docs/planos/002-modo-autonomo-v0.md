@@ -1031,6 +1031,30 @@ Implementado sobre o contrato `WorkExecutorAdapter` existente (consumido pelo `r
 
 **Prova ao vivo pela stack HTTP (2026-08-04):** o fluxo COMPLETO foi executado pela rota autenticada real (Docker + Supabase local + dev server + `qwen3-coder:latest`), com usuário/dados descartáveis `@test.invalid`: proposta com contrato worktree persistido → aprovação → `POST /api/work-orchestration/supervisor-turn` (HTTP 200, `executorId=worktree-v1`) → `qwen3-coder` editou 2 arquivos TS em `packages/core` → **gates `npm` reais verdes** (test + typecheck) → checkpoint persistido → item em **`review`** → workspace original **byte-idêntico**; descartáveis limpos, fixtures e conta pessoal preservados. Detalhes no [ADR-001](../arquitetura/adr-001-execucao-local-de-codigo.md). **Pendente:** backend de nuvem (GPT) selecionável e a ponte de aplicação (INT-03). **Ratificação final do fluxo completo é do humano.**
 
+### Superfície humana da segunda decisão de integração (2026-08-09)
+
+**Implementada em web e mobile, sem publisher.** O `WorkPresentation` existente
+foi estendido — sem criar arquitetura paralela — para projetar do log persistido
+`awaiting_decision | authorized | refused`, sempre correlacionado ao resultado
+aceito, item e versão exatos. O cartão conversacional existente oferece ações
+explícitas **Autorizar integração** e **Recusar integração** somente depois de
+`result_accepted`; após `integration_decided`, as ações desaparecem e o estado é
+reconstruído corretamente em reload/outra sessão.
+
+Web consome `POST /api/work-orchestration/integration-decisions`; mobile consome
+o mesmo `WorkOrchestrationService.decideIntegration`. Ambos usam uma chave de
+idempotência determinística por resultado+decisão, bloqueiam duplo envio enquanto
+a mutação está pendente e só atualizam a UI após reler o estado persistido. Falha
+HTTP, conflito ou versão obsoleta não produz estado otimista. A cópia pós-autorizar
+declara **“autorizada e aguardando execução protegida”** e nega explicitamente
+publicação, envio, integração ou merge. `refuse` declara ausência de efeito externo.
+
+**Provas automatizadas:** core 641/641; web 305/305; mobile 33/33; typecheck dos
+cinco workspaces; build de produção web. O SQL não foi alterado, portanto a suíte
+pgTAP não precisou de nova execução neste incremento. Permanecem proibidos e
+inexistentes neste fluxo: publisher real, push, PR, merge, apply e registro de
+`integrated`.
+
 ## Dependências entre fases
 
 ```text

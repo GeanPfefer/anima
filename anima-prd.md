@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-04 (sessão: Fase G — UX-01 a UX-04 ratificados; paridade mobile, integração GPT e runner no monorepo prontos para revisão; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-09 (sessão: superfície humana da segunda decisão de integração implementada em web e mobile, sem publisher nem efeito externo; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -359,6 +359,14 @@ workspace isolada, com limites, evidências, checkpoints, retomada e revisão
 humana. Claude, Codex, modelos e ferramentas continuam executores
 substituíveis de capacidades, nunca personagens do produto. Não há merge,
 publicação, ampliação de escopo ou uso autônomo de segredos.
+
+Após o aceite de um resultado, o mesmo cartão conversacional agora projeta a
+segunda decisão humana de integração a partir de `work_events`: **autorizar** ou
+**recusar**. A decisão consome a RPC persistida `decide_integration`, é
+versionada/idempotente e reaparece corretamente após reload em web e mobile.
+`authorize` significa somente **integração autorizada, aguardando execução
+protegida**; não significa integrado, publicado, enviado, PR criado ou mergeado.
+Não existe publisher funcional nem efeito Git externo nesta etapa.
 
 O [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md)
 já possui implementação incremental registrada no

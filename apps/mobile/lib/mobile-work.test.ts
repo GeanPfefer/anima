@@ -1,7 +1,7 @@
 jest.mock('@anima/supabase', () => {
   const repo = {
     createProposal: jest.fn(), findResumableWorkItems: jest.fn(), listEvents: jest.fn(),
-    getItem: jest.fn(), attachContext: jest.fn(), findItemsBySourceMessageId: jest.fn(),
+    getItem: jest.fn(), attachContext: jest.fn(), findItemsBySourceMessageId: jest.fn(), decideIntegration:jest.fn(),
   };
   return { SupabaseWorkOrchestrationRepository: jest.fn(() => repo) };
 });
@@ -12,11 +12,11 @@ import type { WorkItem, WorkPresentation, WorkState } from '@anima/core';
 import { SupabaseWorkOrchestrationRepository } from '@anima/supabase';
 import { supabase } from './supabase';
 import { callHostSupervisorTurn } from './mobile-host';
-import { requestHostSupervisorTurn, respondWorkDecision, routeWorkMessage } from './mobile-work';
+import { decideWorkIntegration, requestHostSupervisorTurn, respondWorkDecision, routeWorkMessage } from './mobile-work';
 
 const repo = new (SupabaseWorkOrchestrationRepository as unknown as new () => {
   createProposal: jest.Mock; findResumableWorkItems: jest.Mock; listEvents: jest.Mock;
-  getItem: jest.Mock; attachContext: jest.Mock; findItemsBySourceMessageId: jest.Mock;
+  getItem: jest.Mock; attachContext: jest.Mock; findItemsBySourceMessageId: jest.Mock; decideIntegration:jest.Mock;
 })();
 const rpc = supabase.rpc as jest.Mock;
 const hostCall = callHostSupervisorTurn as jest.Mock;
@@ -86,5 +86,15 @@ describe('requestHostSupervisorTurn — retry só avança o Supervisor', () => {
     expect(hostCall).toHaveBeenCalledWith('work-1', 1);
     expect(rpc).not.toHaveBeenCalled();
     expect(presentation.item.state).toBe('review');
+  });
+});
+describe('decideWorkIntegration — segunda aprovação persistida',()=>{
+  test.each(['authorize','refuse'] as const)('envia %s com IDs exatos e relê a projeção',async decision=>{
+    repo.decideIntegration.mockResolvedValue(ok({action:'recorded',decision,eventSeq:9}));
+    repo.getItem.mockResolvedValue(ok(item('completed')));repo.listEvents.mockResolvedValue(ok([]));
+    const value:WorkPresentation={item:item('completed'),latestResult:null,acceptedResult:null,latestEventType:'result_accepted',availableActions:[],integration:{status:'awaiting_decision',acceptedResultEventId:'result-1',decision:null,availableDecisions:['authorize','refuse']}};
+    await decideWorkIntegration(value,decision);
+    expect(repo.decideIntegration).toHaveBeenCalledWith({workItemId:'work-1',expectedProposalVersion:1,acceptedResultEventId:'result-1',decision,decisionId:`integration:result-1:${decision}`});
+    expect(repo.getItem).toHaveBeenCalledWith('work-1');
   });
 });

@@ -45,6 +45,11 @@ export async function requestProposalCorrection(value:WorkPresentation,requested
 export async function startWork(value:WorkPresentation):Promise<WorkPresentation>{return presentation(required(await service().startWork({workItemId:value.item.id,expectedProposalVersion:value.item.proposalVersion})))}
 export async function submitWorkResult(value:WorkPresentation,summary:string,references:readonly string[],validations:readonly WorkResultValidation[]=[],limitations:readonly string[]=[]):Promise<WorkPresentation>{return presentation(required(await service().submitResult({workItemId:value.item.id,expectedProposalVersion:value.item.proposalVersion,result:{summary,resultReferences:references,validations,limitations}})))}
 export async function reviewWorkResult(value:WorkPresentation,decision:ResultReviewDecision):Promise<WorkPresentation>{if(!value.latestResult)throw new Error('Resultado indisponível para revisão.');return presentation(required(await service().reviewResult({workItemId:value.item.id,expectedProposalVersion:value.item.proposalVersion,reviewedResultEventId:value.latestResult.eventId,decision})))}
+export async function decideWorkIntegration(value:WorkPresentation,decision:'authorize'|'refuse'):Promise<WorkPresentation>{
+  if(!value.integration?.availableDecisions.includes(decision))throw new Error('Decisão de integração indisponível.');
+  required(await service().decideIntegration({workItemId:value.item.id,expectedProposalVersion:value.item.proposalVersion,acceptedResultEventId:value.integration.acceptedResultEventId,decision,decisionId:`integration:${value.integration.acceptedResultEventId}:${decision}`}));
+  return reloadWork(value.item.id);
+}
 // Resposta à decisão (idempotente no banco: repetir a mesma opção NÃO cria um 2º
 // input_provided). Devolve a projeção real relida e se a retomada executora deve
 // ser pedida ao host — nunca inventa estado otimista.

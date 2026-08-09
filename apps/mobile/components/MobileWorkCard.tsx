@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
 import { parseWorkResultValidations, type WorkPresentation } from '@anima/core';
-import { decideWork, reloadWork, requestHostSupervisorTurn, requestProposalCorrection, respondWorkDecision, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
+import { decideWork, decideWorkIntegration, reloadWork, requestHostSupervisorTurn, requestProposalCorrection, respondWorkDecision, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
 import { describeMissingCompletedResult, presentMobileWorkResult } from './mobile-work-result';
 
@@ -48,6 +48,11 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
       <Text style={styles.body}>{presentation.pendingDecision.explanation}</Text>
       <Text style={styles.state}>O trabalho está pausado em um checkpoint seguro.</Text>
       <View style={styles.actions}>{presentation.pendingDecision.options.map(option=><TouchableOpacity key={option.id} disabled={busy} onPress={()=>void onDecision(option.id)} style={styles.action}><Text style={styles.actionText}>{option.label}</Text></TouchableOpacity>)}</View>
+    </View>}
+    {presentation.integration&&<View accessible accessibilityLabel="Decisão de integração" style={styles.result}>
+      <Text style={styles.label}>{presentation.integration.status==='awaiting_decision'?'Integração aguardando sua decisão':presentation.integration.status==='authorized'?'Integração autorizada':'Integração recusada'}</Text>
+      <Text style={styles.body}>{presentation.integration.status==='awaiting_decision'?'Autorizar permite uma futura execução protegida; não publica, envia, cria PR ou integra agora.':presentation.integration.status==='authorized'?'Autorizada e aguardando execução protegida. Nada foi publicado, enviado, integrado ou mergeado.':'A integração deste resultado foi recusada. Nenhum efeito externo ocorreu.'}</Text>
+      {presentation.integration.availableDecisions.length>0&&<View style={styles.actions}>{action('Autorizar integração',()=>void run(decideWorkIntegration(presentation,'authorize')))}{action('Recusar integração',()=>void run(decideWorkIntegration(presentation,'refuse')))}</View>}
     </View>}
     {resumeRetry&&<View accessible accessibilityLabel="Retomar no host" style={styles.actions}><TouchableOpacity disabled={busy} onPress={()=>void retryResume()} style={styles.action}><Text style={styles.actionText}>Retomar no host</Text></TouchableOpacity></View>}
     {mode==='none'&&allowed('approve')&&<View style={styles.actions}>{action('Aprovar',()=>void run(decideWork(presentation,{type:'approve'})))}{action('Corrigir',()=>setMode('proposal_changes'))}{action('Adiar',()=>void run(decideWork(presentation,{type:'defer',reason:'Adiado no mobile'})))}{action('Rejeitar',()=>void run(decideWork(presentation,{type:'reject'})))}</View>}

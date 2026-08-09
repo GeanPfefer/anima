@@ -1,6 +1,7 @@
 import type { Json } from '@anima/types';
 import type { WorkEvent, WorkItem, WorkResultValidation, WorkResultValidationOutcome } from './types';
 import { HUMAN_INTERRUPTION_REASONS, type HumanInterruptionReason } from './human-interruption';
+import { projectIntegrationBoundary, type WorkIntegrationDecision } from './integration-decision';
 
 // null distingue "não informado" de lista vazia: a UI deve declarar a ausência
 // explicitamente, nunca preencher o vazio com o texto livre do autor.
@@ -56,7 +57,13 @@ export interface WorkDecisionProjection {
   readonly options:readonly WorkDecisionOptionProjection[];
   readonly checkpointReference:string;
 }
-export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; }
+export interface WorkIntegrationProjection {
+  readonly status:'awaiting_decision'|'authorized'|'refused';
+  readonly acceptedResultEventId:string;
+  readonly decision:WorkIntegrationDecision|null;
+  readonly availableDecisions:readonly WorkIntegrationDecision[];
+}
+export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly integration?:WorkIntegrationProjection|null; }
 
 const object=(value:Json|undefined):Record<string,Json|undefined>|null=>value!==null&&value!==undefined&&!Array.isArray(value)&&typeof value==='object'?value:null;
 const validationOutcomes:ReadonlySet<string>=new Set(['passed','failed','declared']);
@@ -133,6 +140,17 @@ export function projectPendingWorkDecision(item:WorkItem,events:readonly WorkEve
   }
   return null;
 }
+export function projectWorkIntegration(item:WorkItem,events:readonly WorkEvent[]):WorkIntegrationProjection|null{
+  if(item.state!=='completed')return null;
+  const boundary=projectIntegrationBoundary(events);
+  if(!boundary||boundary.correlation.workItemId!==item.id||boundary.correlation.approvedProposalVersion!==item.proposalVersion)return null;
+  const acceptance=boundary.acceptance;
+  if(!acceptance)return null;
+  if(boundary.status==='result_accepted')return{status:'awaiting_decision',acceptedResultEventId:acceptance.acceptedResultEventId,decision:null,availableDecisions:['authorize','refuse']};
+  if(boundary.status==='integration_authorized')return{status:'authorized',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'authorize',availableDecisions:[]};
+  if(boundary.status==='integration_refused')return{status:'refused',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'refuse',availableDecisions:[]};
+  return null;
+}
 export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEvent[]):AutonomousExecutionProjection|null{
   // Tentativa autônoma corrente = último execution_started com claim_id. A
   // execução comandada (INT-04) não tem claim e não é pausável/cancelável aqui.
@@ -185,7 +203,7 @@ export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEve
     canRequestControl:status==='running'&&pendingControl===null,
   };
 }
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events),pendingDecision:projectPendingWorkDecision(item,events)}};
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events),pendingDecision:projectPendingWorkDecision(item,events),integration:projectWorkIntegration(item,events)}};
 
 // Reconstrói a projeção somente quando os elos persistidos mínimos existem.
 // O estado atual nunca basta para inventar o histórico que deveria explicá-lo.
@@ -206,7 +224,7 @@ export function reconstructWorkPresentation(item:WorkItem,events:readonly WorkEv
   const executionResults=events.filter(event=>event.type==='result_submitted').map(event=>object(object(event.payload)?.data)?.execution_id).filter((value):value is string=>typeof value==='string');
   for(const executionId of executionResults)if(!events.some(event=>event.type==='execution_started'&&object(object(event.payload)?.data)?.execution_id===executionId))issues.push(`missing_execution_${executionId}`);
   const base=presentWorkItem(item,events);
-  return{...base,acceptedResult,availableActions:issues.length?[]:base.availableActions,provenance:{status:issues.length?'incomplete':'complete',issues}};
+  return{...base,acceptedResult,availableActions:issues.length?[]:base.availableActions,integration:base.integration?{...base.integration,availableDecisions:issues.length?[]:base.integration.availableDecisions}:base.integration,provenance:{status:issues.length?'incomplete':'complete',issues}};
 }
 export function buildProposalRevision(item:WorkItem,requestedChanges:string):Pick<import('./commands').RequestProposalRevisionCommand,'intent'|'proposal'|'requestedChanges'>{
   const feedback=requestedChanges.trim();
