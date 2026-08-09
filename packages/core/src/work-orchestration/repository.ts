@@ -1,5 +1,6 @@
 import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, RequestProposalRevisionCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand } from './commands';
 import type { WorkOperationResult } from './errors';
+import type { DecideIntegrationCommand, IntegrationDecisionOutcome } from './integration-decision';
 import type { ApprovalDecision, WorkContextSnapshot, WorkEvent, WorkItem, WorkItemId } from './types';
 export interface ResolveApprovalInput { workItemId: WorkItemId; expectedProposalVersion: number; decision: ApprovalDecision; }
 export interface WorkOrchestrationRepository {
@@ -12,6 +13,9 @@ export interface WorkOrchestrationRepository {
   startExecution(command: StartWorkExecutionCommand): Promise<WorkOperationResult<WorkItem>>;
   finishExecution(command: FinishWorkExecutionCommand): Promise<WorkOperationResult<WorkItem>>;
   reviewResult(command: ReviewWorkResultCommand): Promise<WorkOperationResult<WorkItem>>;
+  // ADR-002 — segunda aprovação humana da integração (persiste integration_decided;
+  // NÃO muda o estado do item, NÃO integra, NÃO publica).
+  decideIntegration(command: DecideIntegrationCommand): Promise<WorkOperationResult<IntegrationDecisionOutcome>>;
   attachContext(command: AttachWorkContextCommand): Promise<WorkOperationResult<WorkContextSnapshot>>;
   getItem(id: WorkItemId): Promise<WorkOperationResult<WorkItem>>;
   findItemsBySourceMessageId(sourceMessageId: string): Promise<WorkOperationResult<readonly WorkItem[]>>;

@@ -1,5 +1,6 @@
 import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, RequestProposalRevisionCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand } from './commands';
 import { failure, type WorkOperationResult } from './errors';
+import type { DecideIntegrationCommand, IntegrationDecisionOutcome } from './integration-decision';
 import type { WorkOrchestrationRepository } from './repository';
 import type { ApprovalDecision, WorkContextSnapshot, WorkEvent, WorkItem, WorkItemId } from './types';
 import { isValidApprovalDecision, isValidProposalVersion, isValidResultReviewDecision, isValidWorkContextReferences, isValidWorkExecutionOutcome, isValidWorkIntent, isValidWorkProposal, isValidWorkResult } from './validation';
@@ -41,6 +42,11 @@ export class WorkOrchestrationService {
   reviewResult(command: ReviewWorkResultCommand): Promise<WorkOperationResult<WorkItem>> {
     if (!this.validVersion(command.expectedProposalVersion) || !command.reviewedResultEventId || !isValidResultReviewDecision(command.decision)) return Promise.resolve(invalid('Decisão de revisão inválida.'));
     return this.repository.reviewResult(command);
+  }
+  decideIntegration(command: DecideIntegrationCommand): Promise<WorkOperationResult<IntegrationDecisionOutcome>> {
+    if (!this.validVersion(command.expectedProposalVersion) || !command.acceptedResultEventId?.trim() || !command.decisionId?.trim()
+      || (command.decision !== 'authorize' && command.decision !== 'refuse')) return Promise.resolve(invalid('Decisão de integração inválida.'));
+    return this.repository.decideIntegration(command);
   }
   attachContext(command: AttachWorkContextCommand): Promise<WorkOperationResult<WorkContextSnapshot>> {
     if (!this.validVersion(command.expectedProposalVersion) || !isValidWorkContextReferences(command.references)) return Promise.resolve(invalid('Referências de contexto inválidas.'));
