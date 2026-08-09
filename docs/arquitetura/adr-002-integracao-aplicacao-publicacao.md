@@ -118,8 +118,11 @@ que produzir resultado jamais implique integrá-lo**.
   falha tipada explícita, nunca sucesso silencioso.
 - **D7 — Persistência DIFERIDA à ratificação humana.** Eventos/RPCs/pgTAP para
   `integration_authorized|refused|integrated` são mudança estrutural que o próprio
-  INT-03 delegou a "itens posteriores". **Este ciclo não cria migration.** O
-  substrato puro é inerte até existirem persistência e uma autorização humana real.
+  INT-03 delegou a "itens posteriores". **Atualização (2026-08-09):** Gean
+  ratificou este ADR e autorizou a etapa de persistência; a decisão
+  (`integration_authorized|refused`) passou a ser persistida — ver *Persistência
+  da decisão* abaixo. O `integrated` **continua diferido** ao publisher real: não
+  existe caminho que o registre sem efeito externo comprovado.
 - **D8 — Sem acoplamento GitHub no core.** Alvos de publicação são referências
   opacas resolvidas só no nó autorizado (espelha o padrão de alvo opaco do INT-04).
 
@@ -143,6 +146,35 @@ Novo módulo `packages/core/src/work-orchestration/integration-publication.ts`:
   `recordIntegrated` ratificado (recordId determinístico da `idempotencyKey`),
   fechando o laço `autorizado → publicado → integrated` sem efeito real.
 
+## Persistência da decisão (implementada 2026-08-09, não provada ao vivo)
+
+Torna vivo e durável o passo que faltava do `IntegrationBoundary`: a **segunda
+aprovação humana** persistida, sem tocar o publisher real.
+
+- **Evento `integration_decided`** (vocabulário isolado) — NÃO-terminal, fora da
+  matriz de estados: registra `authorize`/`refuse` sobre um resultado já aceito
+  **sem mudar o estado do item** (`completed` continua `completed`; não há
+  `WorkState` `integrated`).
+- **RPC `public.decide_integration(work_item_id, expected_proposal_version,
+  accepted_result_event_id, decision, decision_id)`** — decide só por fato
+  persistido, fail-closed: exige item do usuário em `completed`, aceite persistido
+  apontando o resultado exato, versão correta e `decision_id` não vazio; deriva a
+  tentativa (INT-02) do `result_submitted` aceito. **Uma decisão por resultado
+  aceito** (índice único parcial + guardas): replay idêntico sem novo evento,
+  conflito e "already decided" falham fechados (`55000`).
+- **`projectIntegrationBoundary(events)`** (core, puro) — reconstrói a
+  `IntegrationBoundary` ratificada do log, do `result_accepted` em diante; nunca
+  projeta `integrated`. É o read model e a ponte para
+  `buildIntegrationPublicationRequest` quando `integration_authorized`.
+- **`integration-decision.ts`** — contrato do payload (`IntegrationDecisionPayloadV1`)
+  + a projeção; `WorkIntegrationDecision = 'authorize'|'refuse'`.
+- **Sem `integrated`, sem publisher, sem efeito Git.** `decide_integration` só
+  registra a decisão humana; nenhuma linha marca integração como realizada.
+- **Prova:** 8 testes de domínio (core 631) + `supabase/tests/integration_decision.test.sql`
+  (`plan(34)`, todos os ramos). **pgTAP e `supabase gen types` NÃO executados**
+  (Docker/Supabase fora nesta máquina — bloqueio de infraestrutura); a fiação de
+  repositório/rota fica para quando o ambiente subir (depende dos tipos gerados).
+
 ## Matriz de invariantes × infraestrutura
 
 | Invariante | Onde vive | Status |
@@ -157,15 +189,17 @@ Novo módulo `packages/core/src/work-orchestration/integration-publication.ts`:
 | `commitSha` inexistente → recusado | provider confere objeto git antes de publicar | 🆕 (adapter real; fake determinístico) |
 | branch fora do namespace → recusada | `isAnimaWorktreeBranch` no builder | ✅ INT-05 + 🆕 builder |
 | worktree removida, handoff válido → fluxo continua | handoff durável; branch/commit persistem no repo real | ✅ INT-05 |
-| sinal atrasado de tentativa antiga → não publica obsoleto | correlação + `acceptedResultEventId` exato + guarda de estado | ✅ contrato / persistência diferida |
-| dois pedidos concorrentes → no máximo um efeito | `idempotencyKey` + serialização no banco (diferida) + provider idempotente | ◐ parcial (design) |
+| sinal atrasado de tentativa antiga → não publica obsoleto | `decide_integration` exige o resultado aceito exato; `projectIntegrationBoundary` ignora decisão obsoleta | ✅ contrato + 🆕 persistência |
+| dois pedidos concorrentes → no máximo um efeito | `decide_integration`: `FOR UPDATE` + índice único por resultado aceito; `idempotencyKey` + provider idempotente na publicação | ✅ decisão persistida + ◐ publicação (design) |
 | crash após efeito externo → retry não duplica | `idempotencyKey` + "create-or-get" + `recordIntegrated` idempotente | 🆕 (design + fake) |
 | falha externa → estado interno não mente | `recordIntegrated` só após sucesso; falha mantém `integration_authorized` | ✅ contrato + 🆕 outcome |
 | ausência de credenciais/provider → falha explícita | outcome `credentials_missing`/`provider_unavailable` | 🆕 (fake + adapter) |
 | ação sem aprovação → nenhum efeito Git remoto | request indeivável sem `integration_authorized` | 🆕 substrato puro |
 
-Legenda: ✅ já existe e está provado · 🆕 novo substrato puro deste ciclo · ◐
-parcial (enforcement completo depende da persistência diferida em D7).
+Legenda: ✅ já existe e está provado · 🆕 substrato/persistência deste trabalho
+(a persistência da decisão está provada por pgTAP em arquivo, ainda não executado
+ao vivo) · ◐ parcial (o enforcement do efeito de PUBLICAÇÃO depende do publisher
+real, adiante).
 
 ## Faseamento e fronteiras
 
@@ -173,12 +207,17 @@ parcial (enforcement completo depende da persistência diferida em D7).
    (tipos, builder fail-closed, porta, outcome, ponte para `recordIntegrated`) +
    fake determinístico + testes cobrindo as linhas 🆕 da matriz. Sem migration,
    sem efeito, inerte até (2) e (3).
-2. **Requer ratificação humana:** persistência da máquina de integração
-   (evento(s)/RPC(s)/pgTAP) — mudança estrutural (D7). **Não** feita neste ciclo.
-3. **Requer a ação protegida (2ª aprovação humana real):** o adaptador
-   `IntegrationPublisher` concreto que faz push/PR/merge de verdade. **Não** feito
-   neste ciclo.
+2. **Persistência da decisão — IMPLEMENTADA (2026-08-09), pendente prova ao vivo.**
+   `integration_decided` + `decide_integration` + `projectIntegrationBoundary` +
+   pgTAP. Ratificada como etapa por Gean; falta rodar pgTAP/`gen types`/fiação de
+   app quando o ambiente (Docker) subir. Registra só a decisão humana — **nunca**
+   `integrated` nem efeito externo.
+3. **Requer a ação protegida (2ª aprovação humana real, NÃO iniciada):** o
+   adaptador `IntegrationPublisher` concreto que faz push/PR/merge de verdade, e o
+   registro `integrated` do efeito externo comprovado. Atrás de **nova** autorização
+   humana explícita.
 
 **Proibido sem aprovação humana:** push, PR, merge, apply no repositório principal,
-deploy, uso de credenciais externas, e qualquer simulação de ratificação. O
-substrato puro deste ciclo não realiza nenhum deles e é incapaz de expressá-los.
+deploy, uso de credenciais externas, marcar `integrated` sem efeito externo, e
+qualquer simulação de ratificação. Nada implementado até aqui realiza ou é capaz
+de expressar esses efeitos.
