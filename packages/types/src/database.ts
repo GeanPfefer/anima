@@ -1333,6 +1333,16 @@ export type Database = {
           work_item_id: string
         }[]
       }
+      decide_integration: {
+        Args: {
+          accepted_result_event_id: string
+          decision: Database["public"]["Enums"]["work_integration_decision"]
+          decision_id: string
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
       record_commanded_work_terminal: {
         Args: {
           attempt_id: string
@@ -1854,6 +1864,7 @@ export type Database = {
         | "work_routing_adjusted"
         | "work_control_requested"
         | "work_paused"
+        | "integration_decided"
       work_impact_level:
         | "low"
         | "significant"
@@ -1862,6 +1873,7 @@ export type Database = {
         | "financial"
         | "irreversible"
         | "external"
+      work_integration_decision: "authorize" | "refuse"
       work_review_decision: "accept" | "request_changes"
       work_state:
         | "proposed"
@@ -2178,6 +2190,7 @@ export const Constants = {
         "work_routing_adjusted",
         "work_control_requested",
         "work_paused",
+        "integration_decided",
       ],
       work_impact_level: [
         "low",
@@ -2188,6 +2201,7 @@ export const Constants = {
         "irreversible",
         "external",
       ],
+      work_integration_decision: ["authorize", "refuse"],
       work_review_decision: ["accept", "request_changes"],
       work_state: [
         "proposed",
