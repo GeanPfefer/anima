@@ -1,0 +1,15 @@
+-- Camada de aplicação/integração (ADR-002): vocabulário da decisão de integração.
+--
+-- Isolado em migration própria pela mesma razão do AUTO-02, do SUP-04 e do
+-- checkpoint: um valor novo de enum só pode ser usado depois de commitado, então
+-- a RPC e o índice que o consomem vivem na migration seguinte.
+--
+-- `integration_decided` é NÃO-terminal e NÃO muda o estado do work_item. Como
+-- `checkpoint_recorded`, `input_requested` e `work_intelligence_classified`, ele
+-- NÃO entra na matriz `private.work_state_transitions`: registrá-lo jamais avança,
+-- conclui ou reabre um item. Ele afirma estritamente a SEGUNDA aprovação humana
+-- (autorizar ou recusar a integração) sobre um resultado JÁ ACEITO
+-- (`result_accepted` → item `completed`). Não existe `WorkState` `integrated`:
+-- registrar a decisão nunca integra, publica, aplica nem mescla nada por si —
+-- essas ações continuam atrás de efeito externo e de nova aprovação (Marco 003).
+ALTER TYPE public.work_event_type ADD VALUE IF NOT EXISTS 'integration_decided';
