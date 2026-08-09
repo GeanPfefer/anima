@@ -115,4 +115,18 @@ describe('projectIntegrationBoundary — read model da persistência (ADR-002)',
     const blankId = integrationDecided('authorize', { decision_id: '   ' });
     expect(projectIntegrationBoundary([resultSubmitted(), resultAccepted(), blankId])).toMatchObject({ status: 'result_accepted' });
   });
+
+  test('uma decisão sem aceite não projeta fronteira alguma (fail-closed)', () => {
+    // Uma decisão órfã (sem result_accepted no log) nunca vira fronteira.
+    expect(projectIntegrationBoundary([resultSubmitted(), integrationDecided('authorize')])).toBeNull();
+  });
+
+  test('a projeção independe da ordem dos eventos no log', () => {
+    const events = [integrationDecided('authorize'), resultAccepted(), resultSubmitted()];
+    expect(projectIntegrationBoundary(events)).toMatchObject({
+      status: 'integration_authorized',
+      acceptance: { acceptedResultEventId: RESULT_ID },
+      integrationDecision: { decision: 'authorize' },
+    });
+  });
 });
