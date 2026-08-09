@@ -139,3 +139,39 @@ export function projectIntegrationBoundary(events: readonly WorkEvent[]): Integr
     },
   };
 }
+
+// ── Comando e desfecho da fiação de aplicação (rota → serviço → RPC) ──
+
+/** Comando da segunda aprovação humana. `decisionId` é a chave de idempotência
+ * do lado do chamador; `acceptedResultEventId` fixa o resultado aceito exato. */
+export interface DecideIntegrationCommand {
+  readonly workItemId: WorkItemId;
+  readonly expectedProposalVersion: ProposalVersion;
+  readonly acceptedResultEventId: string;
+  readonly decision: WorkIntegrationDecision;
+  readonly decisionId: string;
+}
+
+/** Desfecho tipado da RPC `decide_integration`. `replayed` = reentrega idêntica
+ * sem novo evento; `recorded` = decisão nova gravada. */
+export interface IntegrationDecisionOutcome {
+  readonly action: 'recorded' | 'replayed';
+  readonly decision: WorkIntegrationDecision;
+  readonly eventSeq: number;
+}
+
+/** Reconstrói o desfecho a partir do JSON da RPC, fail-closed: `null` para
+ * qualquer forma inesperada — o chamador declara ambiguidade, nunca inventa. */
+export function parseIntegrationDecisionOutcome(value: Json | undefined): IntegrationDecisionOutcome | null {
+  const root = object(value);
+  if (!root) return null;
+  const action = root.action;
+  const decision = root.decision;
+  const eventSeq = root.event_seq;
+  if ((action !== 'recorded' && action !== 'replayed')
+    || (decision !== 'authorize' && decision !== 'refuse')
+    || typeof eventSeq !== 'number' || !Number.isFinite(eventSeq)) {
+    return null;
+  }
+  return { action, decision, eventSeq };
+}

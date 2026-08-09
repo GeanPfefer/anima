@@ -3,6 +3,7 @@ import {
   buildIntegrationPublicationRequest,
   buildWorktreeHandoff,
   decideIntegration,
+  parseIntegrationDecisionOutcome,
   projectIntegrationBoundary,
   type WorkEvent,
   type WorkEventAuthor,
@@ -128,5 +129,23 @@ describe('projectIntegrationBoundary — read model da persistência (ADR-002)',
       acceptance: { acceptedResultEventId: RESULT_ID },
       integrationDecision: { decision: 'authorize' },
     });
+  });
+});
+
+describe('parseIntegrationDecisionOutcome — desfecho da RPC', () => {
+  test('desfechos válidos', () => {
+    expect(parseIntegrationDecisionOutcome({ action: 'recorded', decision: 'authorize', event_seq: 42 }))
+      .toEqual({ action: 'recorded', decision: 'authorize', eventSeq: 42 });
+    expect(parseIntegrationDecisionOutcome({ action: 'replayed', decision: 'refuse', event_seq: 7 }))
+      .toEqual({ action: 'replayed', decision: 'refuse', eventSeq: 7 });
+  });
+
+  test('formas inesperadas são fail-closed (null)', () => {
+    expect(parseIntegrationDecisionOutcome(null)).toBeNull();
+    expect(parseIntegrationDecisionOutcome(undefined)).toBeNull();
+    expect(parseIntegrationDecisionOutcome({ action: 'done', decision: 'authorize', event_seq: 1 })).toBeNull();
+    expect(parseIntegrationDecisionOutcome({ action: 'recorded', decision: 'maybe', event_seq: 1 })).toBeNull();
+    expect(parseIntegrationDecisionOutcome({ action: 'recorded', decision: 'authorize' })).toBeNull();
+    expect(parseIntegrationDecisionOutcome({ action: 'recorded', decision: 'authorize', event_seq: 'x' })).toBeNull();
   });
 });
