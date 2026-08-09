@@ -1067,11 +1067,25 @@ repo/branch/base/commit falha fechado. Push parcial, PR falho, branch/PR já
 existentes e crash antes da persistência são representáveis por inspeção e
 receipt `already_existed`.
 
-O futuro provider deve executar preflight → inspeção remota → reconciliação →
-uma mutação → verificação pós-efeito → receipt → persistência. A porta pura
-`ProtectedIntegrationProvider` expressa esse protocolo sem implementação. Não
-há estado/transição `merged` ou `integrated`, migration, shell, rede ou efeito
-externo. Provas direcionadas: 21/21 cenários puros.
+### Publisher protegido da branch (2026-08-09)
+
+**Implementado; efeito externo ainda não autorizado pelos fatos disponíveis.**
+`GitBranchPublicationProvider` realiza preflight do remote/repositório, branch
+local, commit, ancestralidade e base remota; inspeciona a branch exata; reconcilia
+o mesmo SHA; recusa conflito; e, quando ausente, usa somente o refspec explícito
+`refs/heads/<anima-work>:refs/heads/<anima-work>`, sem force, tags ou wildcard.
+Um receipt com provider, repositório, remote, branch, commit, branch-base e
+SHA-base só nasce após inspeção pós-efeito. `record_branch_published` persiste o
+fato append-only apenas depois da validação do receipt e da correlação exata com
+autorização, resultado aceito, tentativa, versão e `WorktreeHandoffV1`.
+
+Provas: 21 cenários puros; 13 testes web, incluindo push e replay reais contra
+remote bare temporário local; typecheck dos workspaces; pgTAP específico com 12
+asserções. A migration incremental foi aplicada sem reset. O banco local
+inspecionado não contém um candidato que reúna autorização de integração e
+`WorktreeHandoffV1`; portanto nenhum push ao GitHub e nenhum `branch_published`
+real foram fabricados. PR, review request, merge, apply, `integrated` e alteração
+de `origin/main` permanecem estritamente fora do escopo.
 
 ## Dependências entre fases
 

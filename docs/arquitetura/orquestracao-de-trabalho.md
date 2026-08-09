@@ -270,6 +270,14 @@ result_produced → result_accepted → integration_authorized → integrated
 
 Todas as etapas preservam item, tentativa e versão aprovada do INT-02. Repetir a mesma decisão ou registro devolve o mesmo estado; reutilizar o mesmo ID com entrada divergente falha fechado. Estado, versão, origem, correlação, resultado ou autorização ausentes/incompatíveis também são recusados. Assim, conclusão da tentativa, conclusão do work item e integração permanecem fatos diferentes.
 
+A primeira borda efetiva implementada publica somente a branch derivada do
+`WorktreeHandoffV1`. O target (provider, repositório, remote e branch-base) vem
+da configuração confiável da aplicação; a branch e os SHAs vêm do handoff
+persistido. O provider Git reconcilia antes de mutar, usa refspec explícito sem
+force e comprova o remote depois do push. A persistência de `branch_published`
+ocorre somente após receipt validado e não altera o estado `completed`. Criar PR,
+mesclar, aplicar ou registrar `integrated` não pertence a essa autorização.
+
 Não houve migration nem pgTAP no INT-03: o recorte implementa somente o contrato puro. Eventos persistentes, RPCs e mecanismo real de Git, merge, aplicação, publicação ou deploy pertencem a itens posteriores e não podem ser inferidos desta máquina de estados.
 
 ## Portabilidade e nós locais (Marco 004)

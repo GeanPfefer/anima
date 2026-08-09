@@ -40,7 +40,7 @@ export function buildProtectedIntegrationRequest(boundary:IntegrationBoundary,ha
 
 export interface BranchPublicationReceipt {
   readonly kind:'branch_publication';readonly receiptId:string;readonly idempotencyKey:string;readonly providerId:string;readonly repositoryId:string;
-  readonly remoteName:string;readonly remoteBranch:string;readonly commitSha:string;readonly verifiedBaseSha:string;readonly disposition:'created'|'already_existed';
+  readonly remoteName:string;readonly remoteBranch:string;readonly commitSha:string;readonly baseBranch:string;readonly verifiedBaseSha:string;readonly disposition:'created'|'already_existed';
 }
 export interface ReviewRequestReceipt {
   readonly kind:'review_request';readonly receiptId:string;readonly idempotencyKey:string;readonly providerId:string;readonly repositoryId:string;
@@ -56,9 +56,9 @@ export const beginProtectedIntegration=(request:ProtectedIntegrationRequest):Pro
 export const branchPublicationKey=(request:ProtectedIntegrationRequest):string=>`${request.idempotencyKey}:branch`;
 export const reviewRequestKey=(request:ProtectedIntegrationRequest):string=>`${request.idempotencyKey}:review`;
 
-const sameBranchReceipt=(left:BranchPublicationReceipt,right:BranchPublicationReceipt):boolean=>left.kind===right.kind&&left.receiptId===right.receiptId&&left.idempotencyKey===right.idempotencyKey&&left.providerId===right.providerId&&left.repositoryId===right.repositoryId&&left.remoteName===right.remoteName&&left.remoteBranch===right.remoteBranch&&left.commitSha===right.commitSha&&left.verifiedBaseSha===right.verifiedBaseSha&&left.disposition===right.disposition;
+const sameBranchReceipt=(left:BranchPublicationReceipt,right:BranchPublicationReceipt):boolean=>left.kind===right.kind&&left.receiptId===right.receiptId&&left.idempotencyKey===right.idempotencyKey&&left.providerId===right.providerId&&left.repositoryId===right.repositoryId&&left.remoteName===right.remoteName&&left.remoteBranch===right.remoteBranch&&left.commitSha===right.commitSha&&left.baseBranch===right.baseBranch&&left.verifiedBaseSha===right.verifiedBaseSha&&left.disposition===right.disposition;
 const sameReviewReceipt=(left:ReviewRequestReceipt,right:ReviewRequestReceipt):boolean=>left.kind===right.kind&&left.receiptId===right.receiptId&&left.idempotencyKey===right.idempotencyKey&&left.providerId===right.providerId&&left.repositoryId===right.repositoryId&&left.reviewId===right.reviewId&&left.reviewReference===right.reviewReference&&left.sourceBranch===right.sourceBranch&&left.sourceCommitSha===right.sourceCommitSha&&left.baseBranch===right.baseBranch&&left.verifiedBaseSha===right.verifiedBaseSha&&left.disposition===right.disposition;
-const validBranchReceipt=(request:ProtectedIntegrationRequest,receipt:BranchPublicationReceipt):boolean=>receipt.kind==='branch_publication'&&nonBlank(receipt.receiptId)&&receipt.idempotencyKey===branchPublicationKey(request)&&receipt.providerId===request.target.providerId&&receipt.repositoryId===request.target.repositoryId&&receipt.remoteName===request.target.remoteName&&receipt.remoteBranch===request.remoteBranch&&receipt.commitSha===request.commitSha&&receipt.verifiedBaseSha===request.baseSha&&SHA.test(receipt.commitSha)&&SHA.test(receipt.verifiedBaseSha)&&(receipt.disposition==='created'||receipt.disposition==='already_existed');
+const validBranchReceipt=(request:ProtectedIntegrationRequest,receipt:BranchPublicationReceipt):boolean=>receipt.kind==='branch_publication'&&nonBlank(receipt.receiptId)&&receipt.idempotencyKey===branchPublicationKey(request)&&receipt.providerId===request.target.providerId&&receipt.repositoryId===request.target.repositoryId&&receipt.remoteName===request.target.remoteName&&receipt.remoteBranch===request.remoteBranch&&receipt.commitSha===request.commitSha&&receipt.baseBranch===request.target.baseBranch&&receipt.verifiedBaseSha===request.baseSha&&SHA.test(receipt.commitSha)&&SHA.test(receipt.verifiedBaseSha)&&(receipt.disposition==='created'||receipt.disposition==='already_existed');
 const validReviewReceipt=(request:ProtectedIntegrationRequest,receipt:ReviewRequestReceipt):boolean=>receipt.kind==='review_request'&&nonBlank(receipt.receiptId)&&receipt.idempotencyKey===reviewRequestKey(request)&&receipt.providerId===request.target.providerId&&receipt.repositoryId===request.target.repositoryId&&nonBlank(receipt.reviewId)&&nonBlank(receipt.reviewReference)&&receipt.sourceBranch===request.remoteBranch&&receipt.sourceCommitSha===request.commitSha&&receipt.baseBranch===request.target.baseBranch&&receipt.verifiedBaseSha===request.baseSha&&SHA.test(receipt.sourceCommitSha)&&SHA.test(receipt.verifiedBaseSha)&&(receipt.disposition==='created'||receipt.disposition==='already_existed');
 
 export function recordBranchPublished(state:ProtectedIntegrationState,receipt:BranchPublicationReceipt):ProtectedIntegrationResult<ProtectedIntegrationState>{
@@ -81,6 +81,9 @@ export interface ProtectedIntegrationProvider {
   readonly id:string;
   inspectBranch(request:ProtectedIntegrationRequest,signal?:AbortSignal):Promise<BranchPublicationReceipt|null>;
   publishBranch(request:ProtectedIntegrationRequest,signal?:AbortSignal):Promise<BranchPublicationReceipt>;
+}
+/** Extensão futura, deliberadamente fora da autorização de publicação de branch. */
+export interface ReviewRequestProvider extends ProtectedIntegrationProvider {
   inspectReviewRequest(request:ProtectedIntegrationRequest,branch:BranchPublicationReceipt,signal?:AbortSignal):Promise<ReviewRequestReceipt|null>;
   createReviewRequest(request:ProtectedIntegrationRequest,branch:BranchPublicationReceipt,signal?:AbortSignal):Promise<ReviewRequestReceipt>;
 }

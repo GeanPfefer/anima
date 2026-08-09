@@ -1505,6 +1505,15 @@ export type Database = {
         }
         Returns: Json
       }
+      record_branch_published: {
+        Args: {
+          authorization_decision_id: string
+          expected_proposal_version: number
+          receipt: Json
+          work_item_id: string
+        }
+        Returns: Json
+      }
       human_decision_resumption_source: {
         Args: { p_work_item_id: string }
         Returns: Json
@@ -1865,6 +1874,7 @@ export type Database = {
         | "work_control_requested"
         | "work_paused"
         | "integration_decided"
+        | "branch_published"
       work_impact_level:
         | "low"
         | "significant"
@@ -2191,6 +2201,7 @@ export const Constants = {
         "work_control_requested",
         "work_paused",
         "integration_decided",
+        "branch_published",
       ],
       work_impact_level: [
         "low",

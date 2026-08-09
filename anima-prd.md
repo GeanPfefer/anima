@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-09 (sessão: superfície humana da segunda decisão de integração implementada em web e mobile, sem publisher nem efeito externo; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-09 (sessão: publisher Git de branch autorizado implementado e provado apenas contra remote bare local; publicação externa aguardando candidato persistido válido; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -366,13 +366,18 @@ segunda decisão humana de integração a partir de `work_events`: **autorizar**
 versionada/idempotente e reaparece corretamente após reload em web e mobile.
 `authorize` significa somente **integração autorizada, aguardando execução
 protegida**; não significa integrado, publicado, enviado, PR criado ou mergeado.
-Não existe publisher funcional nem efeito Git externo nesta etapa.
+Existe um publisher Git restrito à primeira etapa autorizada, mas nenhum efeito
+Git externo foi executado: o banco local não contém, no checkpoint atual, um
+`integration_decided=authorize` correlacionado a resultado aceito com
+`WorktreeHandoffV1` persistido. Sem esse conjunto de fatos, o fluxo falha fechado.
 
-O substrato inerte seguinte já separa os fatos futuros de execução protegida:
+O substrato seguinte separa os fatos da execução protegida:
 `integration_authorized → branch_published → review_request_created`. Requests e
 receipts verificáveis preservam repositório, branch, commit e base exatos, com
-reconciliação idempotente após timeout/crash. Merge continua fora da máquina e
-exige nova decisão humana; nenhum provider real foi conectado.
+reconciliação idempotente após timeout/crash. O provider Git da etapa de branch
+faz preflight, inspeção, push por refspec explícito sem force e verificação
+pós-efeito; só então uma RPC append-only admite `branch_published`. PR, merge,
+apply e `integrated` continuam fora desta etapa e exigem novas autorizações.
 
 O [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md)
 já possui implementação incremental registrada no
