@@ -146,10 +146,10 @@ Novo módulo `packages/core/src/work-orchestration/integration-publication.ts`:
   `recordIntegrated` ratificado (recordId determinístico da `idempotencyKey`),
   fechando o laço `autorizado → publicado → integrated` sem efeito real.
 
-## Persistência da decisão (implementada 2026-08-09, não provada ao vivo)
+## Persistência da decisão (implementada e provada ao vivo, 2026-08-09)
 
 Torna vivo e durável o passo que faltava do `IntegrationBoundary`: a **segunda
-aprovação humana** persistida, sem tocar o publisher real.
+aprovação humana** persistida e fiada até a rota HTTP, sem tocar o publisher real.
 
 - **Evento `integration_decided`** (vocabulário isolado) — NÃO-terminal, fora da
   matriz de estados: registra `authorize`/`refuse` sobre um resultado já aceito
@@ -168,12 +168,20 @@ aprovação humana** persistida, sem tocar o publisher real.
   `buildIntegrationPublicationRequest` quando `integration_authorized`.
 - **`integration-decision.ts`** — contrato do payload (`IntegrationDecisionPayloadV1`)
   + a projeção; `WorkIntegrationDecision = 'authorize'|'refuse'`.
+- **Fiação de aplicação:** `DecideIntegrationCommand`/`IntegrationDecisionOutcome`
+  + `parseIntegrationDecisionOutcome` (core), método na interface e no
+  `WorkOrchestrationService` (valida versão/resultado/decisão), implementação no
+  `SupabaseWorkOrchestrationRepository` (mapeia erros pelo `mapSupabaseFailure`
+  existente) e rota `POST /api/work-orchestration/integration-decisions` (auth +
+  encaminhamento). **Sem publisher, sem efeito Git.**
 - **Sem `integrated`, sem publisher, sem efeito Git.** `decide_integration` só
   registra a decisão humana; nenhuma linha marca integração como realizada.
-- **Prova:** 8 testes de domínio (core 631) + `supabase/tests/integration_decision.test.sql`
-  (`plan(34)`, todos os ramos). **pgTAP e `supabase gen types` NÃO executados**
-  (Docker/Supabase fora nesta máquina — bloqueio de infraestrutura); a fiação de
-  repositório/rota fica para quando o ambiente subir (depende dos tipos gerados).
+- **Prova (ao vivo):** migrations aplicadas por `supabase migration up` (não
+  destrutivo, sobre o volume local em `20260729000003`); **pgTAP `supabase test db`
+  verde — 27 arquivos / 704 asserções, incluindo `integration_decision` `plan(34)`**;
+  tipos regenerados (adição cirúrgica de `decide_integration`/`integration_decided`/
+  `work_integration_decision`, sem o reorder/nullability drift do CLI local).
+  Jest: core 637, testes de rota 7, serviço 7, typecheck do monorepo limpo.
 
 ## Matriz de invariantes × infraestrutura
 
@@ -197,9 +205,9 @@ aprovação humana** persistida, sem tocar o publisher real.
 | ação sem aprovação → nenhum efeito Git remoto | request indeivável sem `integration_authorized` | 🆕 substrato puro |
 
 Legenda: ✅ já existe e está provado · 🆕 substrato/persistência deste trabalho
-(a persistência da decisão está provada por pgTAP em arquivo, ainda não executado
-ao vivo) · ◐ parcial (o enforcement do efeito de PUBLICAÇÃO depende do publisher
-real, adiante).
+(a persistência da decisão está **provada ao vivo** por pgTAP — `supabase test db`
+verde — e fiada até a rota) · ◐ parcial (o enforcement do efeito de PUBLICAÇÃO
+depende do publisher real, adiante).
 
 ## Faseamento e fronteiras
 
@@ -207,11 +215,11 @@ real, adiante).
    (tipos, builder fail-closed, porta, outcome, ponte para `recordIntegrated`) +
    fake determinístico + testes cobrindo as linhas 🆕 da matriz. Sem migration,
    sem efeito, inerte até (2) e (3).
-2. **Persistência da decisão — IMPLEMENTADA (2026-08-09), pendente prova ao vivo.**
+2. **Persistência da decisão — IMPLEMENTADA, PROVADA AO VIVO e FIADA (2026-08-09).**
    `integration_decided` + `decide_integration` + `projectIntegrationBoundary` +
-   pgTAP. Ratificada como etapa por Gean; falta rodar pgTAP/`gen types`/fiação de
-   app quando o ambiente (Docker) subir. Registra só a decisão humana — **nunca**
-   `integrated` nem efeito externo.
+   pgTAP (`supabase test db` verde) + tipos regenerados + fiação
+   interface/serviço/repositório/rota com testes. Ratificada como etapa por Gean.
+   Registra só a decisão humana — **nunca** `integrated` nem efeito externo.
 3. **Requer a ação protegida (2ª aprovação humana real, NÃO iniciada):** o
    adaptador `IntegrationPublisher` concreto que faz push/PR/merge de verdade, e o
    registro `integrated` do efeito externo comprovado. Atrás de **nova** autorização
