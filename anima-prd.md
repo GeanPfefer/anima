@@ -368,6 +368,12 @@ versionada/idempotente e reaparece corretamente após reload em web e mobile.
 protegida**; não significa integrado, publicado, enviado, PR criado ou mergeado.
 Não existe publisher funcional nem efeito Git externo nesta etapa.
 
+O substrato inerte seguinte já separa os fatos futuros de execução protegida:
+`integration_authorized → branch_published → review_request_created`. Requests e
+receipts verificáveis preservam repositório, branch, commit e base exatos, com
+reconciliação idempotente após timeout/crash. Merge continua fora da máquina e
+exige nova decisão humana; nenhum provider real foi conectado.
+
 O [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md)
 já possui implementação incremental registrada no
 [Plano 002 — Modo Autônomo V0](docs/planos/002-modo-autonomo-v0.md). As fases

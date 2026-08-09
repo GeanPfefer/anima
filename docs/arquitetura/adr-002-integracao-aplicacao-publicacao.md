@@ -1,6 +1,7 @@
 # ADR-002 — Camada de aplicação/integração/publicação real
 
-> Estado: **desenho + substrato puro proposto, NÃO ratificado.** Este documento
+> Estado: **decisão humana persistida e superfície ratificadas; protocolo puro da
+> execução protegida implementado, ainda sem provider real.** Este documento
 > mapeia a fronteira aberta no item 10 do [ADR-001](adr-001-execucao-local-de-codigo.md)
 > e propõe o menor contrato implementável para ela. Nenhuma decisão aqui
 > autoriza efeito Git externo: a ação protegida continua atrás de aprovação
@@ -229,3 +230,44 @@ depende do publisher real, adiante).
 deploy, uso de credenciais externas, marcar `integrated` sem efeito externo, e
 qualquer simulação de ratificação. Nada implementado até aqui realiza ou é capaz
 de expressar esses efeitos.
+
+## Protocolo de execução protegida por fatos distintos (2026-08-09)
+
+O contrato inicial `IntegrationPublicationOutcome { reviewableReference }`
+comprimia publicação de branch e criação de review request num único sucesso.
+Isso não representa honestamente `push` bem-sucedido seguido de falha ao criar o
+PR. Para um provider real, esse outcome e a ponte direta para `recordIntegrated`
+ficam **superados** pelo protocolo granular em `protected-integration.ts`.
+Permanecem exportados apenas por compatibilidade com os contratos puros
+anteriores; não são autorização para implementação externa.
+
+```text
+integration_authorized → branch_published → review_request_created
+                       → aguarda nova decisão humana sobre merge
+```
+
+Não existe transição pura para `merged` ou `integrated`. A request imutável leva
+autorização/resultado/correlação exatos, provider, repositório, remote, base
+branch/SHA, branch local/remota e commit. `BranchPublicationReceipt` comprova a
+branch; `ReviewRequestReceipt` comprova o review request e sua source/base. Cada
+receipt registra `created | already_existed`.
+
+Receipts avançam estado somente quando todos os identificadores casam com a
+request autorizada. Replay idêntico é idempotente; divergência conflita. Branch
+ou PR já existente só é aceito após inspeção comprovar commit e base exatos. A
+máquina mantém `branch_published` quando criar PR falha e reconcilia após crash
+sem repetir cegamente o efeito.
+
+### Sequência obrigatória do futuro provider real
+
+1. preflight local;
+2. inspeção remota;
+3. reconciliação (`already_existed` ou falha fechada por divergência);
+4. uma única etapa mutante;
+5. verificação pós-efeito por nova leitura;
+6. emissão de receipt verificável;
+7. persistência granular do receipt.
+
+Se o efeito ocorrer e a persistência falhar, o retry volta à inspeção remota e
+reconcilia pela mesma chave idempotente. `ProtectedIntegrationProvider` é apenas
+a porta inerte: nenhum adaptador, shell, rede, GitHub ou efeito foi implementado.

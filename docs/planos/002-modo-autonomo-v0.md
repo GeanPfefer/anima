@@ -1055,6 +1055,24 @@ pgTAP não precisou de nova execução neste incremento. Permanecem proibidos e
 inexistentes neste fluxo: publisher real, push, PR, merge, apply e registro de
 `integrated`.
 
+### Substrato puro da execução protegida (2026-08-09)
+
+**Implementado, inerte e sem provider.** `protected-integration.ts` substitui,
+para a futura execução real, o outcome colapsado `reviewableReference` por fatos
+separados: `integration_authorized → branch_published → review_request_created →
+await_human_merge_decision`. Request e receipts carregam provider, repositório,
+remote, branch local/remota, base branch/SHA, commit SHA, autorização, resultado
+aceito e correlação. Replay idêntico é idempotente; divergência de
+repo/branch/base/commit falha fechado. Push parcial, PR falho, branch/PR já
+existentes e crash antes da persistência são representáveis por inspeção e
+receipt `already_existed`.
+
+O futuro provider deve executar preflight → inspeção remota → reconciliação →
+uma mutação → verificação pós-efeito → receipt → persistência. A porta pura
+`ProtectedIntegrationProvider` expressa esse protocolo sem implementação. Não
+há estado/transição `merged` ou `integrated`, migration, shell, rede ou efeito
+externo. Provas direcionadas: 21/21 cenários puros.
+
 ## Dependências entre fases
 
 ```text
