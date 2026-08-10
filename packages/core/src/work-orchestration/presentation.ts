@@ -2,6 +2,7 @@ import type { Json } from '@anima/types';
 import type { WorkEvent, WorkItem, WorkResultValidation, WorkResultValidationOutcome } from './types';
 import { HUMAN_INTERRUPTION_REASONS, type HumanInterruptionReason } from './human-interruption';
 import { projectIntegrationBoundary, type WorkIntegrationDecision } from './integration-decision';
+import {parseBranchPublicationReceipt} from './protected-integration';
 
 // null distingue "não informado" de lista vazia: a UI deve declarar a ausência
 // explicitamente, nunca preencher o vazio com o texto livre do autor.
@@ -58,10 +59,11 @@ export interface WorkDecisionProjection {
   readonly checkpointReference:string;
 }
 export interface WorkIntegrationProjection {
-  readonly status:'awaiting_decision'|'authorized'|'refused';
+  readonly status:'awaiting_decision'|'authorized'|'branch_published'|'refused';
   readonly acceptedResultEventId:string;
   readonly decision:WorkIntegrationDecision|null;
   readonly availableDecisions:readonly WorkIntegrationDecision[];
+  readonly publication?:{readonly repositoryId:string;readonly remoteName:string;readonly remoteBranch:string;readonly commitSha:string}|null;
 }
 export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly integration?:WorkIntegrationProjection|null; }
 
@@ -146,9 +148,13 @@ export function projectWorkIntegration(item:WorkItem,events:readonly WorkEvent[]
   if(!boundary||boundary.correlation.workItemId!==item.id||boundary.correlation.approvedProposalVersion!==item.proposalVersion)return null;
   const acceptance=boundary.acceptance;
   if(!acceptance)return null;
-  if(boundary.status==='result_accepted')return{status:'awaiting_decision',acceptedResultEventId:acceptance.acceptedResultEventId,decision:null,availableDecisions:['authorize','refuse']};
-  if(boundary.status==='integration_authorized')return{status:'authorized',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'authorize',availableDecisions:[]};
-  if(boundary.status==='integration_refused')return{status:'refused',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'refuse',availableDecisions:[]};
+  if(boundary.status==='result_accepted')return{status:'awaiting_decision',acceptedResultEventId:acceptance.acceptedResultEventId,decision:null,availableDecisions:['authorize','refuse'],publication:null};
+  if(boundary.status==='integration_authorized'){
+    const decision=boundary.integrationDecision!;
+    for(let index=events.length-1;index>=0;index--){const event=events[index]!;if(event.type!=='branch_published'||event.author!=='system'||event.proposalVersion!==item.proposalVersion)continue;const data=eventData(event),receipt=parseBranchPublicationReceipt(data?.receipt);if(receipt&&data?.authorization_decision_id===decision.decisionId&&data?.accepted_result_event_id===acceptance.acceptedResultEventId&&data?.attempt_id===boundary.correlation.attemptId&&receipt.idempotencyKey===`integration-publication:${decision.decisionId}:${receipt.commitSha}:branch`)return{status:'branch_published',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'authorize',availableDecisions:[],publication:{repositoryId:receipt.repositoryId,remoteName:receipt.remoteName,remoteBranch:receipt.remoteBranch,commitSha:receipt.commitSha}};}
+    return{status:'authorized',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'authorize',availableDecisions:[],publication:null};
+  }
+  if(boundary.status==='integration_refused')return{status:'refused',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'refuse',availableDecisions:[],publication:null};
   return null;
 }
 export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEvent[]):AutonomousExecutionProjection|null{
