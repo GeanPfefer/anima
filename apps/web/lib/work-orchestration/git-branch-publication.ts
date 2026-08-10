@@ -32,7 +32,10 @@ export class GitBranchPublicationProvider implements ProtectedIntegrationProvide
   async publishBranch(request:ProtectedIntegrationRequest,signal?:AbortSignal):Promise<BranchPublicationReceipt>{
     const existing=await this.inspectBranch(request,signal);if(existing)return existing;
     const refspec=`refs/heads/${request.localBranch}:refs/heads/${request.remoteBranch}`;
-    const push=await this.run(['push',request.target.remoteName,refspec],signal);
+    // Refspec explícito, sem force (`+`), sem wildcard e sem tags. `--no-follow-tags`
+    // torna a invariante "sem tags" independente de `push.followTags` no ambiente:
+    // nenhuma tag anotada acompanha o commit publicado, mesmo sob config hostil.
+    const push=await this.run(['push','--no-follow-tags',request.target.remoteName,refspec],signal);
     const verified=await this.remoteSha(request,signal).catch(()=>null);
     if(verified===request.commitSha)return this.receipt(request,'created');
     if(push.exitCode!==0)throw new BranchPublicationFailure('push_unverified','O push falhou e o efeito remoto não pôde ser comprovado.');
