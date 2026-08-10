@@ -1,7 +1,7 @@
 # ADR-002 — Camada de aplicação/integração/publicação real
 
-> Estado: **decisão humana persistida e superfície ratificadas; protocolo puro da
-> execução protegida implementado, ainda sem provider real.** Este documento
+> Estado: **decisão humana persistida; publicação protegida da branch implementada,
+> persistível e reconciliável; criação real de review request ainda proibida.** Este documento
 > mapeia a fronteira aberta no item 10 do [ADR-001](adr-001-execucao-local-de-codigo.md)
 > e propõe o menor contrato implementável para ela. Nenhuma decisão aqui
 > autoriza efeito Git externo: a ação protegida continua atrás de aprovação
@@ -258,7 +258,7 @@ ou PR já existente só é aceito após inspeção comprovar commit e base exato
 máquina mantém `branch_published` quando criar PR falha e reconcilia após crash
 sem repetir cegamente o efeito.
 
-### Sequência obrigatória do futuro provider real
+### Sequência obrigatória do provider real
 
 1. preflight local;
 2. inspeção remota;
@@ -269,5 +269,28 @@ sem repetir cegamente o efeito.
 7. persistência granular do receipt.
 
 Se o efeito ocorrer e a persistência falhar, o retry volta à inspeção remota e
-reconcilia pela mesma chave idempotente. `ProtectedIntegrationProvider` é apenas
-a porta inerte: nenhum adaptador, shell, rede, GitHub ou efeito foi implementado.
+reconcilia pela mesma chave idempotente.
+
+### Implementação da primeira etapa externa (2026-08-09)
+
+`GitBranchPublicationProvider` implementa somente
+`integration_authorized → branch_published`. O coordenador
+`executeAuthorizedBranchPublication` deriva boundary, handoff e request do log
+persistido, recebe somente o target confiável do servidor e nunca recebe branch
+da UI. Antes de qualquer mutação ele confere repositório/remote, branch local,
+commit, ancestralidade e base remota; reconcilia a branch exata; usa refspec
+explícito sem force/tags/wildcard; e só emite receipt após nova inspeção remota.
+
+`record_branch_published` persiste o receipt append-only sob lock do item,
+correlacionando ownership, versão, último resultado aceito, autorização,
+tentativa e `WorktreeHandoffV1`. Retry após resposta incerta considera
+`created|already_existed` descrições do mesmo efeito quando toda a identidade
+externa coincide. O read model relê o fato após restart e inspeciona o remote;
+branch removida ou alterada depois da persistência falha fechado e não é
+recriada silenciosamente. A UX compartilhada distingue `authorized` de
+`branch_published` e nunca afirma PR, merge ou integração.
+
+A próxima fronteira permanece apenas pura: `ReviewRequestReceipt` exige
+repositório, remote, review ID/referência, estado `open`, source branch/commit e
+base branch/SHA exatos. Review já mergeado não satisfaz `review_request_created`.
+Não existe provider concreto, RPC ou chamada mutante para criar review request.

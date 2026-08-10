@@ -379,6 +379,15 @@ faz preflight, inspeção, push por refspec explícito sem force e verificação
 pós-efeito; só então uma RPC append-only admite `branch_published`. PR, merge,
 apply e `integrated` continuam fora desta etapa e exigem novas autorizações.
 
+O caminho de branch agora é coordenado a partir de fatos persistidos: boundary,
+resultado aceito, autorização e `WorktreeHandoffV1` são relidos antes do provider.
+Retries após restart reconciliam o remote; resposta incerta entre persistência e
+processo não cria falso conflito; drift posterior (branch removida ou alterada)
+falha fechado. Web e mobile distinguem “autorizada, aguardando publicação” de
+“branch publicada”, mostrando branch/SHA sem afirmar PR ou integração. No banco
+local atual não existe candidato legítimo completo, portanto nenhum push externo
+foi executado. A criação de review request permanece a próxima fronteira humana.
+
 O [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md)
 já possui implementação incremental registrada no
 [Plano 002 — Modo Autônomo V0](docs/planos/002-modo-autonomo-v0.md). As fases

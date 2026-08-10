@@ -1033,7 +1033,7 @@ Implementado sobre o contrato `WorkExecutorAdapter` existente (consumido pelo `r
 
 ### Superfície humana da segunda decisão de integração (2026-08-09)
 
-**Implementada em web e mobile, sem publisher.** O `WorkPresentation` existente
+**Implementada em web e mobile, sem publisher naquele checkpoint.** O `WorkPresentation` existente
 foi estendido — sem criar arquitetura paralela — para projetar do log persistido
 `awaiting_decision | authorized | refused`, sempre correlacionado ao resultado
 aceito, item e versão exatos. O cartão conversacional existente oferece ações
@@ -1057,7 +1057,7 @@ inexistentes neste fluxo: publisher real, push, PR, merge, apply e registro de
 
 ### Substrato puro da execução protegida (2026-08-09)
 
-**Implementado, inerte e sem provider.** `protected-integration.ts` substitui,
+**Implementado, inerte e sem provider naquele checkpoint.** `protected-integration.ts` substitui,
 para a futura execução real, o outcome colapsado `reviewableReference` por fatos
 separados: `integration_authorized → branch_published → review_request_created →
 await_human_merge_decision`. Request e receipts carregam provider, repositório,
@@ -1086,6 +1086,29 @@ inspecionado não contém um candidato que reúna autorização de integração 
 `WorktreeHandoffV1`; portanto nenhum push ao GitHub e nenhum `branch_published`
 real foram fabricados. PR, review request, merge, apply, `integrated` e alteração
 de `origin/main` permanecem estritamente fora do escopo.
+
+### Coordenador, recuperação e observabilidade de `branch_published` (2026-08-09)
+
+O fluxo agora possui um coordenador vivo que relê `work_events`, projeta
+`IntegrationBoundary` e `WorktreeHandoffV1`, deriva a request protegida e só
+então chama o provider. Fato já persistido começa por inspeção remota e não
+repete push; remoção ou alteração externa da branch é drift explícito e
+fail-closed. Concorrência foi exercitada contra remote bare real.
+
+Foi corrigido o caso de resposta incerta após commit da RPC: um retry pode
+observar `already_existed` depois de o receipt original registrar `created` sem
+gerar falso conflito, desde que toda a identidade externa permaneça igual. A
+unicidade de publicação passou de `decision_id` global para item+decisão, e a
+RPC também exige ordem persistida resultado → aceite → autorização. A projeção
+compartilhada web/mobile exibe branch e SHA quando `branch_published`, negando
+explicitamente PR, merge e `integrated`.
+
+Nenhum candidato legítimo foi encontrado no banco local: a consulta cruzando
+resultado aceito, `integration_decided(authorize)`, `WorktreeHandoffV1` e ausência
+de publicação retornou zero linhas. Nenhum candidato artificial foi criado e
+nenhum efeito Git externo ocorreu. A próxima fronteira foi apenas endurecida no
+core com identidade completa e `state='open'`; criar review request real segue
+dependente de nova autorização humana.
 
 ## Dependências entre fases
 
