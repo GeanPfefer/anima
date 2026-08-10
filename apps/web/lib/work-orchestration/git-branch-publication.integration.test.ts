@@ -20,7 +20,9 @@ test('publica e reconcilia idempotentemente contra remote bare local real',async
     const commitSha=git(repo,'rev-parse','HEAD');
     const request:ProtectedIntegrationRequest={protocolVersion:1,idempotencyKey:`integration-publication:auth:${commitSha}`,authorizationDecisionId:'auth',acceptedResultEventId:'result',correlation:{workItemId:'work',attemptId:'attempt-real',approvedProposalVersion:1},target:{providerId:'git-branch-publication-v1',repositoryId:remote,remoteName:'origin',baseBranch:'main'},baseSha,localBranch:'anima-work/attempt-real',remoteBranch:'anima-work/attempt-real',commitSha};
     const provider=new GitBranchPublicationProvider(repo);
-    await expect(provider.publishBranch(request)).resolves.toMatchObject({disposition:'created',commitSha,baseBranch:'main'});
+    const concurrent=await Promise.all([provider.publishBranch(request),provider.publishBranch(request)]);
+    expect(concurrent).toEqual(expect.arrayContaining([expect.objectContaining({commitSha,baseBranch:'main'})]));
+    expect(concurrent.some(value=>value.disposition==='created')).toBe(true);
     await expect(provider.publishBranch(request)).resolves.toMatchObject({disposition:'already_existed',commitSha});
     expect(git(repo,'ls-remote','--heads','origin','refs/heads/anima-work/attempt-real').split(/\s+/)[0]).toBe(commitSha);
   }finally{rmSync(root,{recursive:true,force:true});}
