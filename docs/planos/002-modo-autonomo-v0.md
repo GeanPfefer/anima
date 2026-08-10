@@ -1131,6 +1131,13 @@ confirmou o fluxo fail-closed e encontrou um único fail-open real, corrigido.
   asserções fecham essas lacunas no nível real da RPC (a invariante "divergência
   conflita" só estava provada no core puro). `branch_publication.test.sql` passou
   de 13 para 16 asserções.
+- **Prova negativa da projeção (`96917dd`).** `projectWorkIntegration` só promove a
+  UI a "branch publicada" quando o evento `branch_published` casa exatamente
+  autor=system, versão, autorização, resultado aceito, tentativa e a
+  `idempotencyKey` derivada do commit; qualquer divergência permanece em
+  "autorizada". Só o caminho feliz estava provado. Quatro casos negativos (autor
+  não-system, tentativa/autorização divergentes, `idempotencyKey` adulterada)
+  provam que um evento forjado ou corrompido nunca faz a UI afirmar publicação.
 - **Achado invalidado por verificação:** a suspeita de que a reconciliação
   (`already_persisted`) quebraria após limpeza da branch local não procede — o
   `dispose` do worktree **preserva a branch por padrão** (`deleteBranch` é opt-in),
