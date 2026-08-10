@@ -1110,6 +1110,43 @@ nenhum efeito Git externo ocorreu. A próxima fronteira foi apenas endurecida no
 core com identidade completa e `state='open'`; criar review request real segue
 dependente de nova autorização humana.
 
+### Endurecimento e provas da publicação de branch (2026-08-10)
+
+**Sessão autônoma de revisão sobre `cac188c`; sem push, PR, merge ou alteração de
+`origin/main`.** Nenhuma nova decisão arquitetural: apenas consequências diretas
+de invariantes já ratificadas. A revisão adversarial de `ead91f5..cac188c`
+confirmou o fluxo fail-closed e encontrou um único fail-open real, corrigido.
+
+- **`--no-follow-tags` no push protegido (`ba74976`).** O push usava refspec
+  explícito sem force nem wildcard, mas ainda respeitava `push.followTags` do
+  ambiente: sob essa config uma tag anotada apontando para o commit publicado
+  acompanharia o push, violando a invariante documentada "sem tags". A flag torna
+  a ausência de tags garantida pelo código, não pela configuração local do git.
+  Regressão cobre a presença da flag e a ausência de force/wildcard/tags.
+- **Provas pgTAP da RPC (`9212149`).** `record_branch_published` já recusava (a) um
+  receipt que casa o `WorktreeHandoffV1` mas diverge do persistido num campo de
+  identidade não fixado pelo handoff — conflito, distinto de replay idempotente —,
+  (b) versão de proposta divergente e (c) input inválido; o pgTAP só exercitava
+  replay, reconciliação de `disposition` e mismatch contra o handoff. Três
+  asserções fecham essas lacunas no nível real da RPC (a invariante "divergência
+  conflita" só estava provada no core puro). `branch_publication.test.sql` passou
+  de 13 para 16 asserções.
+- **Achado invalidado por verificação:** a suspeita de que a reconciliação
+  (`already_persisted`) quebraria após limpeza da branch local não procede — o
+  `dispose` do worktree **preserva a branch por padrão** (`deleteBranch` é opt-in),
+  então o preflight da reconciliação a encontra no fluxo normal.
+- **Fronteira preservada:** confirmado que **nenhuma rota viva** dispara
+  `executeAuthorizedBranchPublication`/`GitBranchPublicationProvider`/
+  `record_branch_published`. A maquinaria existe e é testada, mas o gatilho de push
+  real permanece não fiado — postura fail-safe correta. Criar review request real
+  e fiar o gatilho de push seguem dependentes de nova autorização humana.
+
+**Gates verdes no HEAD da sessão:** typecheck dos cinco workspaces; core 669;
+web 324 (serial — o run paralelo tem flake ambiental conhecido de contenção de
+fetch-mock sob os testes git-pesados de worktree, verde isolado e serial, não é
+regressão); mobile 33; pgTAP `branch_publication` 16/16 contra o Supabase local
+(BEGIN/ROLLBACK, sem `db reset`). Nenhum efeito Git externo; `origin/main` intacta.
+
 ## Dependências entre fases
 
 ```text

@@ -375,7 +375,8 @@ O substrato seguinte separa os fatos da execução protegida:
 `integration_authorized → branch_published → review_request_created`. Requests e
 receipts verificáveis preservam repositório, branch, commit e base exatos, com
 reconciliação idempotente após timeout/crash. O provider Git da etapa de branch
-faz preflight, inspeção, push por refspec explícito sem force e verificação
+faz preflight, inspeção, push por refspec explícito sem force, tags ou wildcard
+(`--no-follow-tags` neutraliza `push.followTags` do ambiente) e verificação
 pós-efeito; só então uma RPC append-only admite `branch_published`. PR, merge,
 apply e `integrated` continuam fora desta etapa e exigem novas autorizações.
 
