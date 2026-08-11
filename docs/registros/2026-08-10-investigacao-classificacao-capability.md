@@ -120,6 +120,20 @@ Nenhum. Sem push, PR, merge, `integrated`, deploy. `origin/main` intacta
 (`973ef46`). Branch sem upstream. `G:/anima-local-test` (ambiente de prova do
 operador) **não tocada**. Nenhum executor/worktree disparado.
 
+## Atualização (mesma sessão) — correção de conjugação "corrija"/"corrige"
+
+Após o registro inicial, a passagem adversarial fechou **parte** da lacuna do
+gate `isWork` acima: `operationalVerb` usava `corrig(?:ir|a)`, que casa "corriga"
+(não é palavra) e perdia as formas reais "corrija"/"corrige" — então "Corrija o
+bug no código" virava conversa sem proposta, enquanto o infinitivo "Corrigir"
+funcionava. É um **defeito de conjugação de um verbo já pretendido** (não
+vocabulário novo). Corrigido em `commit ccc6017` (`corrij(?:a|o)` +
+`corrig(?:ir|e|indo)`), fix aditivo e limitado pelo `explicitObject`, com
+regressão (corrija/corrige → proposta `programming`). **Permanece como decisão de
+produto (não feito):** adicionar verbos novos como "adicionar" e objetos como
+"endpoint" ao gate — isso amplia a fronteira conversa/trabalho do UX-00.
+HEAD final passa a `ccc6017`.
+
 ## Próximo ponto exato de retomada
 
 A partir de `a92747b`: (1) o operador pode repetir a prova manual no Anima local —
