@@ -19,9 +19,26 @@ const explicitObject = /\b(?:anima|aplicativo|app|site|sistema|c[oó]digo|tela|f
 // par verbo+objeto não bate, sem transformar conversa comum em trabalho.
 const workIntentPhrase = /\b(?:prepar\w*\s+(?:um[a]?\s+)?proposta|apresent\w*\s+(?:a\s+)?proposta|estrutur\w*\s+(?:esse|este|o)\s+trabalho|organiz\w*\s+(?:esse|este|o)\s+trabalho|proposta\s+antes\s+de\s+come[cç]ar|trabalho\s+de\s+forma\s+segura)\b/i;
 const lifeRecord = /\b(?:hoje|ontem|dormi|corri|treinei|estudei|trabalhei|senti|estou me sentindo)\b/i;
-// Radicais sem fronteira final: "analise", "resumo" e "documente" têm sufixo,
-// então `\b` no fim impediria o match. A capacidade é metadado best-effort.
-const capabilityFor = (message: string): WorkCapability => /\b(?:investig|an[aá]lis|pesquis|resum|document|revis|diagn[oó]stic|bug|problem)/i.test(message) ? 'research' : /\b(?:arquitetura|banco|api|c[oó]digo|implement|refator|corrig)/i.test(message) ? 'programming' : 'planning';
+// A capacidade distingue **mudar código** de **investigar sem mudar** — e o VERBO
+// decide, não o substantivo. Um pedido para implementar/refatorar/corrigir/
+// desenvolver código é `programming` mesmo quando descreve o diagnóstico ou a
+// análise do que será mexido (ex.: "implemente um endpoint que analisa o banco");
+// por isso o verbo de alteração de código tem **precedência** sobre os termos de
+// pesquisa. Criar/adicionar/construir um objeto de código também é `programming`.
+// Sem verbo de alteração, investigação/análise/pesquisa/documentação/revisão/
+// diagnóstico permanecem `research`. Um objeto de código sem verbo de alteração
+// cai em `programming` só como fallback fraco (a etapa seguinte delimita). Radicais
+// de pesquisa sem fronteira final: "analise"/"resumo"/"documente" têm sufixo, então
+// `\b` no fim impediria o match. A capacidade é metadado best-effort.
+const codeChangeVerb = /\b(?:implement(?:ar|e|ando)|refator(?:ar|e|ando)|corrig(?:ir|e|indo)|corrij(?:a|o)|desenvolv(?:er|a|endo)|codific(?:ar|e))\b/i;
+const buildVerb = /\b(?:cri(?:ar|e)|constru(?:ir|a)|adicion(?:ar|e))\b/i;
+const codeObject = /\b(?:arquitetura|banco|api|c[oó]digo|endpoint|fun[cç][aã]o|componente|m[oó]dulo|migration|migra[cç][aã]o|teste|testes|rota|schema|classe)\b/i;
+const researchSignal = /\b(?:investig|an[aá]lis|pesquis|resum|document|revis|diagn[oó]stic|bug|problem)/i;
+const capabilityFor = (message: string): WorkCapability =>
+  codeChangeVerb.test(message) || (buildVerb.test(message) && codeObject.test(message)) ? 'programming'
+    : researchSignal.test(message) ? 'research'
+      : codeObject.test(message) ? 'programming'
+        : 'planning';
 const impactFor = (message: string): WorkImpactLevel => /\b(?:apagar|excluir|migra|produ[cç][aã]o|seguran[cç]a|arquitetura|banco)\b/i.test(message) ? 'structural' : /\b(?:alter|implement|constru|cri)\b/i.test(message) ? 'significant' : 'low';
 
 export function interpretWorkRequest(message: string, sourceMessageId: string): WorkIntentInterpretation {

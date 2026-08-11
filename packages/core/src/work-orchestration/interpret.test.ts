@@ -1,4 +1,38 @@
-import { isWorkContinuation, isWorkHistoryQuery, RESUMABLE_WORK_STATES } from '.';
+import { interpretWorkRequest, isWorkContinuation, isWorkHistoryQuery, RESUMABLE_WORK_STATES } from '.';
+
+describe('interpretWorkRequest — classificação de capability', () => {
+  const cap = (message: string) => {
+    const r = interpretWorkRequest(message, 'src');
+    return r.kind === 'work_candidate' ? r.command.capability : `nao-candidato:${r.kind}`;
+  };
+
+  // Alteração de código vence termos de pesquisa: um pedido para implementar/
+  // refatorar/criar código é `programming` ainda que descreva diagnóstico/análise
+  // do que será mexido. Cada mensagem passa pelo gate de trabalho (verbo + objeto).
+  test.each([
+    ['Implemente uma função que analisa a prontidão do projeto e checa o banco.', 'programming'],
+    ['Implemente um endpoint na api que faz o diagnóstico do sistema.', 'programming'],
+    ['Refatore o código do sistema que tem um bug.', 'programming'],
+    ['Crie um teste para a api do chat.', 'programming'],
+    // Investigação/análise/documentação SEM alteração de código permanecem research.
+    ['Analise a arquitetura do banco de dados.', 'research'],
+    ['Documente a api existente do sistema.', 'research'],
+    ['Investigue o bug no sistema.', 'research'],
+    // Trabalho sem sinal de código nem de pesquisa fica em planning.
+    ['Prepare uma proposta para o projeto.', 'planning'],
+  ] as const)('“%s” → %s', (message, expected) => expect(cap(message)).toBe(expected));
+
+  test('regressão do operador: implementar/refatorar que menciona diagnóstico/banco é programming, não research', () => {
+    // Cenário exato observado na prova manual (endpoint de readiness que checa o banco).
+    expect(cap('Implemente uma função que analisa a prontidão do projeto e checa o banco.')).toBe('programming');
+    expect(cap('Refatore o código do sistema que tem um bug.')).toBe('programming');
+  });
+
+  test('pergunta explicativa não vira trabalho de programação', () => {
+    // Termina em "?" → conversa; nunca uma proposta de programming.
+    expect(cap('Como implementar um endpoint na api?')).toBe('nao-candidato:conversation');
+  });
+});
 
 describe('UX-04 — consulta conversacional de histórico de trabalho', () => {
   const positivos = [
