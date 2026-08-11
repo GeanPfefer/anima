@@ -63,6 +63,42 @@
   color: #000;
 }
 
+/* ── Superfície de autodesenvolvimento (só para usuário autorizado) ── */
+
+.devToggle,
+.devToggleActive {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 10px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.devToggle:disabled,
+.devToggleActive:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.devToggleActive {
+  border-color: #b45309;
+  background: #b45309;
+  color: #fff;
+}
+
+.devBanner {
+  margin: 10px 16px 0;
+  padding: 10px 14px;
+  border: 1px solid #b45309;
+  border-radius: 10px;
+  background: rgba(180, 83, 9, 0.12);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 /* ── Mensagens ── */
 
 .messages {

@@ -21,9 +21,12 @@ type ProposedLink = {
 type Props = {
   isFirstTime: boolean;
   userName:    string;
+  // Superfície de autodesenvolvimento: só existe para quem o servidor autorizou
+  // (allowlist dedicado). Ausente por padrão — o chat comum não a expõe.
+  devAuthorized?: boolean;
 };
 
-export function ChatClient({ isFirstTime, userName }: Props) {
+export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Props) {
   const router = useRouter();
   const [messages, setMessages]       = useState<Message[]>([]);
   const [input, setInput]             = useState('');
@@ -33,6 +36,9 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   const [error, setError]             = useState('');
   const [isOnboarding, setIsOnboarding] = useState(isFirstTime);
   const [provider, setProvider]         = useState<ChatProvider>('openai');
+  // Modo de autodesenvolvimento do Anima: OFF por padrão e NÃO persistido — ativar
+  // é uma ação humana consciente por sessão. Só tem efeito para usuário autorizado.
+  const [devMode, setDevMode]           = useState(false);
   const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
   const [workItems, setWorkItems] = useState<Record<string, WorkPresentationView>>({});
   // UX-04 — cartões reencontrados por uma consulta de histórico, indexados pela
@@ -62,6 +68,17 @@ export function ChatClient({ isFirstTime, userName }: Props) {
     if (loading) return;
     setProvider(next);
     window.localStorage.setItem('anima-chat-provider', next);
+  }
+
+  // Só o usuário autorizado alterna o modo. Ao ativar, fixa o provedor em GPT: o
+  // planejador que investiga o repositório e produz o execution_spec de worktree é
+  // exclusivamente OpenAI. Desativar volta ao chat pessoal comum.
+  const devActive = devAuthorized && devMode;
+  function toggleDevMode() {
+    if (loading || !devAuthorized) return;
+    const next = !devMode;
+    setDevMode(next);
+    if (next) selectProvider('openai');
   }
 
   // Carrega histórico persistido ao montar (evita reset ao trocar de aba)
@@ -210,10 +227,14 @@ export function ChatClient({ isFirstTime, userName }: Props) {
   }
 
   async function streamChat(text: string, retryMessageId?: string) {
+    // `developmentMode:true` só sai desta superfície dedicada e só para quem o
+    // servidor autorizou; o chat pessoal comum nunca o envia. No modo dev o
+    // provedor é sempre GPT (o planejador de worktree é OpenAI). O servidor
+    // re-verifica a autorização — o cliente nunca habilita nada sozinho.
     const res = await fetch('/api/ai/chat', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ message: text, provider, ...(retryMessageId ? { retryMessageId } : {}) }),
+      body:    JSON.stringify({ message: text, provider: devActive ? 'openai' : provider, ...(devActive ? { developmentMode: true } : {}), ...(retryMessageId ? { retryMessageId } : {}) }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
@@ -334,6 +355,18 @@ export function ChatClient({ isFirstTime, userName }: Props) {
           </p>
         </div>
         <div className={styles.headerActions}>
+          {devAuthorized && !isOnboarding && (
+            <button
+              type="button"
+              className={devActive ? styles.devToggleActive : styles.devToggle}
+              disabled={loading}
+              aria-pressed={devActive}
+              onClick={toggleDevMode}
+              title="Desenvolvimento do próprio Anima: neste modo suas mensagens podem gerar propostas de alteração no projeto. Nada é executado sem sua aprovação."
+            >
+              {devActive ? '● Dev do Anima' : 'Dev do Anima'}
+            </button>
+          )}
           {!isOnboarding && (
             <div className={styles.providerPicker} aria-label="Provedor de inteligência">
               <button
@@ -363,6 +396,15 @@ export function ChatClient({ isFirstTime, userName }: Props) {
           )}
         </div>
       </div>
+
+      {devActive && (
+        <div className={styles.devBanner} role="status">
+          <strong>Modo desenvolvimento do Anima ativo.</strong> Suas mensagens aqui
+          podem virar propostas de alteração no próprio projeto, planejadas pelo GPT
+          sobre o código real. Nada é executado sem a sua aprovação — a execução
+          autônoma continua sendo uma ação separada, no cartão do trabalho.
+        </div>
+      )}
 
       <div className={styles.messages}>
         {messages.length === 0 && !isOnboarding && (

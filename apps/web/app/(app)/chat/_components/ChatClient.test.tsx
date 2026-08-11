@@ -127,3 +127,55 @@ describe('correção 3 — turno órfão e retry idempotente', () => {
     expect(await screen.findByRole('button', { name: 'Tentar responder novamente' })).toBeInTheDocument();
   });
 });
+
+describe('superfície de autodesenvolvimento do Anima', () => {
+  beforeEach(() => { global.fetch = jest.fn(); Element.prototype.scrollIntoView = jest.fn(); });
+  afterEach(() => jest.restoreAllMocks());
+
+  const chatStream = (headers: Record<string, string> = {}) => {
+    let sent = false;
+    return { ok: true, headers: { get: (k: string) => headers[k] ?? null }, json: async () => ({}),
+      body: { getReader: () => ({ read: async () => sent ? { done: true, value: undefined } : (sent = true, { done: false, value: new TextEncoder().encode('ok') }) }) } } as unknown as Response;
+  };
+
+  function mount(devAuthorized: boolean, chatBodies: Record<string, unknown>[]) {
+    (global.fetch as jest.Mock).mockImplementation((input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/ai/history') return Promise.resolve({ ok: true, json: async () => [] });
+      if (url === '/api/work-orchestration/focus') return Promise.resolve({ ok: true, json: async () => ({ ok: true, value: null }) });
+      if (url === '/api/ai/chat') { chatBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>); return Promise.resolve(chatStream({ 'X-Source-Message-Id': 'u1' })); }
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, value: null }) });
+    });
+    render(<ChatClient isFirstTime={false} userName="Ana" devAuthorized={devAuthorized} />);
+  }
+
+  test('não autorizado (padrão): o modo não existe na UI', async () => {
+    mount(false, []);
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    expect(screen.queryByRole('button', { name: /Dev do Anima/ })).not.toBeInTheDocument();
+  });
+
+  test('autorizado: ativar mostra o aviso e envia developmentMode:true + GPT somente nessa superfície', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    mount(true, bodies);
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    // O aviso só aparece após uma ação humana consciente.
+    expect(screen.queryByText(/Modo desenvolvimento do Anima ativo/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Dev do Anima/ }));
+    expect(await screen.findByText(/Modo desenvolvimento do Anima ativo/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Refatore uma função pura no código do core.' } });
+    fireEvent.click(screen.getByRole('button', { name: '↑' }));
+    await waitFor(() => expect(bodies.length).toBe(1));
+    expect(bodies[0]).toMatchObject({ developmentMode: true, provider: 'openai' });
+  });
+
+  test('autorizado com o modo desligado: chat comum, nunca envia developmentMode', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    mount(true, bodies);
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Como estão meus pilares?' } });
+    fireEvent.click(screen.getByRole('button', { name: '↑' }));
+    await waitFor(() => expect(bodies.length).toBe(1));
+    expect(bodies[0]?.developmentMode).toBeUndefined();
+  });
+});
