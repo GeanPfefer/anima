@@ -120,11 +120,17 @@ export async function POST(request: Request) {
     }
   }
 
+  // A decisão humana que iniciou a tentativa é persistida antes da execução.
+  // Depois disso, o ciclo não herda o lifetime do transporte HTTP: abandonar a
+  // página ou perder a conexão não equivale a um pedido humano de cancelamento.
+  // Limites aprovados, checkpoints, controle explícito e reconciliação continuam
+  // sendo as fronteiras de interrupção do Supervisor V0.
+  const executionSignal = new AbortController().signal;
   const result = await runSupervisorTurn({
     client, routes: [route],
     ownerInstanceId: process.env.ANIMA_SUPERVISOR_INSTANCE_ID ?? 'supervisor-v0',
     newId: () => crypto.randomUUID(),
-    signal: request.signal,
+    signal: executionSignal,
     requestedWork: explicit ? {
       workItemId: body!.workItemId as string,
       expectedProposalVersion: body!.expectedProposalVersion as number,

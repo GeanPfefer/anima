@@ -49,6 +49,26 @@ test('autenticado → chama o MESMO runSupervisorTurn com o cliente autenticado;
   expect(JSON.stringify(passed.requestedWork)).not.toContain('ATACANTE');
 });
 
+test('a execução iniciada não herda o cancelamento do request HTTP', async () => {
+  const transport = new AbortController();
+  const maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
+  const client = {
+    from: jest.fn(() => ({ select: () => ({ eq: () => ({ maybeSingle }) }) })),
+  };
+  auth.mockResolvedValue({ client, userId: 'user-1' });
+
+  await POST({
+    json: async () => ({ workItemId: 'w', expectedProposalVersion: 1 }),
+    signal: transport.signal,
+  } as unknown as Request);
+  const executionSignal = turn.mock.calls[0][0].signal as AbortSignal;
+
+  expect(executionSignal).not.toBe(transport.signal);
+  transport.abort('client_disconnected');
+  expect(transport.signal.aborted).toBe(true);
+  expect(executionSignal.aborted).toBe(false);
+});
+
 test('proposta GPT aprovada e isolada recebe classificação antes do Supervisor', async () => {
   const maybeSingle = jest.fn().mockResolvedValue({
     error: null,
