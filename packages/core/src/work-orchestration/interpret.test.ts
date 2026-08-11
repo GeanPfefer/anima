@@ -14,12 +14,16 @@ describe('interpretWorkRequest — classificação de capability', () => {
     ['Implemente um endpoint na api que faz o diagnóstico do sistema.', 'programming'],
     ['Refatore o código do sistema que tem um bug.', 'programming'],
     ['Crie um teste para a api do chat.', 'programming'],
-    // Investigação/análise/documentação SEM alteração de código permanecem research.
+    // Investigação/análise/documentação SEM alteração de código permanecem research,
+    // mesmo mencionando código/api (a pesquisa vence o nome de código no fallback).
     ['Analise a arquitetura do banco de dados.', 'research'],
     ['Documente a api existente do sistema.', 'research'],
+    ['Documente o código da api.', 'research'],
     ['Investigue o bug no sistema.', 'research'],
-    // Trabalho sem sinal de código nem de pesquisa fica em planning.
+    // Trabalho sem sinal de código nem de pesquisa fica em planning — NÃO vira
+    // programming só por ser técnico (guarda anti-falso-positivo).
     ['Prepare uma proposta para o projeto.', 'planning'],
+    ['Crie um plano de migração de dados.', 'planning'],
   ] as const)('“%s” → %s', (message, expected) => expect(cap(message)).toBe(expected));
 
   test('regressão do operador: implementar/refatorar que menciona diagnóstico/banco é programming, não research', () => {

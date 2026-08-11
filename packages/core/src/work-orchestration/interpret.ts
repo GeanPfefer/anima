@@ -30,14 +30,18 @@ const lifeRecord = /\b(?:hoje|ontem|dormi|corri|treinei|estudei|trabalhei|senti|
 // cai em `programming` só como fallback fraco (a etapa seguinte delimita). Radicais
 // de pesquisa sem fronteira final: "analise"/"resumo"/"documente" têm sufixo, então
 // `\b` no fim impediria o match. A capacidade é metadado best-effort.
+// Correção MÍNIMA e conservadora: só hoista o verbo de alteração de código acima
+// da pesquisa. O resto do heurístico permanece idêntico ao anterior — nenhum
+// vocabulário novo entra no fallback, para não transformar pedido técnico
+// qualquer em programming (ex.: "descreva a rota", "crie um plano de migração"
+// continuam fora de programming). `codeNoun` é exatamente o conjunto antigo.
 const codeChangeVerb = /\b(?:implement(?:ar|e|ando)|refator(?:ar|e|ando)|corrig(?:ir|e|indo)|corrij(?:a|o)|desenvolv(?:er|a|endo)|codific(?:ar|e))\b/i;
-const buildVerb = /\b(?:cri(?:ar|e)|constru(?:ir|a)|adicion(?:ar|e))\b/i;
-const codeObject = /\b(?:arquitetura|banco|api|c[oó]digo|endpoint|fun[cç][aã]o|componente|m[oó]dulo|migration|migra[cç][aã]o|teste|testes|rota|schema|classe)\b/i;
 const researchSignal = /\b(?:investig|an[aá]lis|pesquis|resum|document|revis|diagn[oó]stic|bug|problem)/i;
+const codeNoun = /\b(?:arquitetura|banco|api|c[oó]digo)\b/i;
 const capabilityFor = (message: string): WorkCapability =>
-  codeChangeVerb.test(message) || (buildVerb.test(message) && codeObject.test(message)) ? 'programming'
+  codeChangeVerb.test(message) ? 'programming'
     : researchSignal.test(message) ? 'research'
-      : codeObject.test(message) ? 'programming'
+      : codeNoun.test(message) ? 'programming'
         : 'planning';
 const impactFor = (message: string): WorkImpactLevel => /\b(?:apagar|excluir|migra|produ[cç][aã]o|seguran[cç]a|arquitetura|banco)\b/i.test(message) ? 'structural' : /\b(?:alter|implement|constru|cri)\b/i.test(message) ? 'significant' : 'low';
 
