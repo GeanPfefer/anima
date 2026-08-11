@@ -131,3 +131,24 @@ e conta descartável preservados como evidência auditável.
    selecionável pelo planejador, que fixa `ollama`) exigiria decisão/ajuste — não
    feito aqui.
 3. `impact = structural` permanece `BLOCKED_BY_HUMAN_DECISION`; não ampliado.
+
+## Correção conceitual (append-only, 2026-08-11)
+
+Duas formulações acima são imprecisas e ficam corrigidas aqui, sem reescrever a
+evidência histórica:
+
+1. **Não foi uma prova ponta a ponta completa pela UI.** O que se comprovou foi,
+   em duas partes distintas:
+   - **pela UI normal:** criação de proposta `programming/low` **sem
+     `execution_spec`**, seguida de `no_eligible_work` no `/supervisor-turn`;
+   - **por sessão autenticada com `developmentMode:true`** (não pela UI, que não o
+     envia): a cadeia autônoma `approved → routing → claim → attempt → worktree →
+     coder`, terminando **fail-closed antes dos gates/review**.
+   Onde o texto diz "prova viva ... pela interface real" da cadeia completa, leia-se
+   esta divisão em duas partes.
+2. **`ollama_read_round_limit` não deve ser chamado de "estocástico".** Onde o
+   registro diz "limitação estocástica do coder local", leia-se apenas: **o coder
+   local atual, sob o protocolo e o orçamento de leitura vigentes, falhou
+   repetidamente em produzir uma edição antes do limite de leitura.** Não se afirma
+   causa aleatória nem se conclui defeito — é o comportamento observado, a diagnosticar
+   antes de qualquer mudança de protocolo, orçamento ou modelo.

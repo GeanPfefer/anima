@@ -1227,9 +1227,12 @@ Prova sobre `1fa71a3`, **sem alteração de código**. Detalhes e evidências no
   worktree a partir do `base_sha` `1fa71a3`.
 - **Resultado:** ambos `execution_failed` = `[ollama_read_round_limit]` (o coder
   não propôs edições no orçamento; os gates nem rodaram). **Não** alcançou `review`.
-  Limitação estocástica do coder local (único modelo `qwen3-coder`), **não** defeito
-  da cadeia/contrato — nenhuma correção feita (não se força verde). A cauda
-  `→ gates → review` já foi comprovada em 2026-08-04 com coder bem-sucedido.
+  Formulação corrigida (ver a correção conceitual no registro): o coder local
+  atual, sob o protocolo e o orçamento de leitura vigentes, **falhou repetidamente
+  em produzir uma edição antes do limite de leitura** — comportamento observado a
+  diagnosticar, **sem** afirmar causa aleatória nem defeito da cadeia/contrato;
+  nenhuma correção feita (não se força verde). A cauda `→ gates → review` já foi
+  comprovada em 2026-08-04 com coder bem-sucedido.
 - **Invariantes:** `G:/anima` byte-intacto (`1fa71a3`, limpo), worktrees isoladas
   dispostas, **0** `result_accepted`/`integration_decided`/`branch_published`,
   `origin/main` `973ef46` intacta, itens `failed` fail-closed, `G:/anima-local-test`

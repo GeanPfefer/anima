@@ -411,19 +411,22 @@ escalonamento e redução auditáveis; o INTEL-04 aplica orçamento por tentativ
 e tempo em janelas móveis, preserva capacidade interativa e interrompe com
 checkpoint e razão tipada. Tokens e custo financeiro permanecem fora do V0.
 
-Uma prova viva em 2026-08-11 (HEAD `1fa71a3`) exercitou o botão **Executar
-autonomamente** (`/supervisor-turn`) sobre um item **novo** mantido em `approved`,
-sem início manual. A cadeia autônoma foi atravessada de fato — classificação,
-roteamento (`worktree-v1`/`ollama:qwen3-coder`), claim, tentativa e **worktree
-isolada** criada a partir do `base_sha` — e falhou fechado no coder local, que
-esgotou seu orçamento de leitura sem propor edições (`ollama_read_round_limit`),
-sem alcançar `review`. É limitação estocástica do coder, não da cadeia: o repo
-original ficou byte-intacto, nada foi aceito/integrado/publicado e o item terminou
-`failed`. A mesma prova revelou que a **UI real do chat não cria um item de
-worktree elegível**: nenhuma tela envia `developmentMode`, então um pedido de
-programação vira proposta sem `execution_spec` e o Supervisor a recusa
-corretamente (`no_eligible_work`). Expor (ou não) uma superfície de
-auto-desenvolvimento é decisão de produto pendente. Detalhes no
+Uma prova em 2026-08-11 (HEAD `1fa71a3`) exercitou o caminho autônomo em duas
+partes distintas — não uma prova ponta a ponta completa pela UI. **Pela UI normal:**
+um pedido de programação vira proposta `programming/low` **sem `execution_spec`**
+(nenhuma tela envia `developmentMode`) e o Supervisor a recusa corretamente
+(`no_eligible_work`). **Por sessão autenticada com `developmentMode:true`** (não
+pela UI): o botão **Executar autonomamente** (`/supervisor-turn`) sobre um item
+**novo** mantido em `approved`, sem início manual, atravessou de fato a cadeia
+`classificação → roteamento (worktree-v1/ollama:qwen3-coder) → claim → tentativa →
+worktree isolada` (a partir do `base_sha`) e **falhou fechado no coder antes dos
+gates/review**: o coder local atual, sob o protocolo e o orçamento de leitura
+vigentes, **falhou repetidamente em produzir uma edição antes do limite de leitura**
+(`ollama_read_round_limit`) — comportamento observado a diagnosticar, sem afirmar
+causa aleatória nem defeito. O repo original ficou byte-intacto, nada foi
+aceito/integrado/publicado, o item terminou `failed`. Conclusão: falta uma
+superfície de UI que crie um item de worktree elegível; expor (ou não) uma
+superfície de auto-desenvolvimento é decisão de produto. Detalhes no
 [registro](docs/registros/2026-08-11-prova-autonoma-supervisor-turn.md).
 
 ## 1g. Jornadas de evolução
