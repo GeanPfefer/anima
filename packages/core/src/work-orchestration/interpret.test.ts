@@ -14,6 +14,9 @@ describe('interpretWorkRequest — classificação de capability', () => {
     ['Implemente um endpoint na api que faz o diagnóstico do sistema.', 'programming'],
     ['Refatore o código do sistema que tem um bug.', 'programming'],
     ['Crie um teste para a api do chat.', 'programming'],
+    // Imperativa "Corrija"/"Corrige" (grafia g→j) agora vira trabalho, não conversa.
+    ['Corrija o bug no código do parser.', 'programming'],
+    ['Corrige o código da api.', 'programming'],
     // Investigação/análise/documentação SEM alteração de código permanecem research,
     // mesmo mencionando código/api (a pesquisa vence o nome de código no fallback).
     ['Analise a arquitetura do banco de dados.', 'research'],
