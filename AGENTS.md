@@ -25,6 +25,8 @@ Todo agente que trabalha no Anima começa por este `AGENTS.md` e segue a mesma o
 
 A divisão de fontes é fixa: a **visão de longo prazo** vive em `anima-manifesto.md`; o **estado tático vivo** (o que existe hoje e o que está em andamento) vive em `anima-prd.md`; o **histórico append-only** vive em `docs/planos/` e `docs/marcos/`. Ao encerrar uma sessão relevante, **atualize o estado vivo** — o PRD e o plano da tarefa — para que o próximo agente, humano ou modelo, continue exatamente de onde você parou.
 
+Além disso, ao final de uma **sessão significativa de desenvolvimento ou de prova**, persista um **registro append-only** em [`docs/registros/`](docs/registros/README.md): o estado operacional (objetivo, branch, HEAD inicial/final, commits, mudanças, decisões, bugs, provas/gates, flakes, invariantes de segurança, efeitos externos realizados ou explicitamente não realizados, fronteiras humanas e o próximo ponto exato de retomada) deve ser **recuperável apenas pelo repositório**, sem depender da memória de nenhum agente. Referencie ADR/PRD/plano em vez de duplicar. Ver o formato em `docs/registros/README.md`.
+
 ## Estrutura principal
 
 | Caminho | Responsabilidade |
@@ -38,6 +40,7 @@ A divisão de fontes é fixa: a **visão de longo prazo** vive em `anima-manifes
 | `docs/arquitetura` | Decisões e contratos arquiteturais |
 | `docs/planos` | Planos incrementais de implementação |
 | `docs/marcos` | Mudanças de visão e identidade, append-only |
+| `docs/registros` | Registros append-only de sessões de desenvolvimento e provas vivas |
 
 ## Comandos existentes
 
