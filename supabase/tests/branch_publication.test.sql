@@ -1,4 +1,4 @@
-BEGIN;CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;SELECT plan(16);
+BEGIN;CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;SELECT plan(17);
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)VALUES('e1000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','branch-publication@test.invalid','',now(),'{}','{}',now(),now());
 SET LOCAL ROLE service_role;INSERT INTO private.work_orchestration_allowlist(user_id,enabled_by,reason)VALUES('e1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001','branch publication proof');INSERT INTO public.ai_conversations(id,user_id,role,content)VALUES('e1000000-0000-0000-0000-0000000000c1','e1000000-0000-0000-0000-000000000001','user','publish authorized branch');RESET ROLE;
 SET LOCAL ROLE authenticated;SELECT set_config('request.jwt.claim.sub','e1000000-0000-0000-0000-000000000001',true);
@@ -31,4 +31,12 @@ SELECT throws_ok($$SELECT public.record_branch_published(current_setting('anima.
 SELECT throws_ok($$SELECT public.record_branch_published(current_setting('anima.item')::uuid,0,'auth-1',current_setting('anima.receipt')::jsonb)$$,'22023','invalid branch publication input','versão inválida recusada antes de qualquer efeito');
 SELECT is((SELECT state::text FROM public.work_items WHERE id=current_setting('anima.item')::uuid),'completed','estado permanece completed');
 SELECT is((SELECT count(*)::int FROM public.work_events WHERE work_item_id=current_setting('anima.item')::uuid AND event_type::text IN('review_request_created','integrated')),0,'não cria PR nem integrated');
+-- Isolamento por dono: um SEGUNDO usuário, mesmo allowlistado, não publica o item
+-- de outra conta. Falha em 'work item not found' (P0002) pela cláusula user_id do
+-- FOR UPDATE — prova a fronteira de ownership, distinta do gate de allowlist.
+RESET ROLE;
+INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)VALUES('e1000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000000','authenticated','authenticated','branch-publication-intruder@test.invalid','',now(),'{}','{}',now(),now());
+SET LOCAL ROLE service_role;INSERT INTO private.work_orchestration_allowlist(user_id,enabled_by,reason)VALUES('e1000000-0000-0000-0000-000000000002','e1000000-0000-0000-0000-000000000002','intruso allowlistado');RESET ROLE;
+SET LOCAL ROLE authenticated;SELECT set_config('request.jwt.claim.sub','e1000000-0000-0000-0000-000000000002',true);
+SELECT throws_ok($$SELECT public.record_branch_published(current_setting('anima.item')::uuid,1,'auth-1',current_setting('anima.receipt')::jsonb)$$,'P0002','work item not found','segundo usuário allowlistado não publica o item de outra conta');
 SELECT * FROM finish();ROLLBACK;
