@@ -385,9 +385,17 @@ resultado aceito, autorização e `WorktreeHandoffV1` são relidos antes do prov
 Retries após restart reconciliam o remote; resposta incerta entre persistência e
 processo não cria falso conflito; drift posterior (branch removida ou alterada)
 falha fechado. Web e mobile distinguem “autorizada, aguardando publicação” de
-“branch publicada”, mostrando branch/SHA sem afirmar PR ou integração. No banco
-local atual não existe candidato legítimo completo, portanto nenhum push externo
-foi executado. A criação de review request permanece a próxima fronteira humana.
+“branch publicada”, mostrando branch/SHA sem afirmar PR ou integração.
+
+Esse caminho está **fiado a uma rota autenticada** (`POST /api/work-orchestration/branch-publications`,
+ratificada em 2026-08-10): o corpo carrega só o `workItemId`; remote, repositório,
+base e provider vêm da configuração do operador, e branch, commit, SHA e
+idempotência do log persistido — nada do cliente vira argumento Git. Sem
+configuração de alvo no servidor a rota recusa fechado (503): habilitar o efeito
+Git externo é um ato explícito do operador. A autoridade é `auth.uid()` via RLS;
+o item de outra conta é invisível e recusado. Nenhum push contra remote externo
+foi executado nesta linha — a fiação foi provada contra remote bare local, com
+`origin/main` intacta. A criação de review request permanece a próxima fronteira humana.
 
 O [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md)
 já possui implementação incremental registrada no

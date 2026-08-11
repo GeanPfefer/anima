@@ -1154,6 +1154,39 @@ fetch-mock sob os testes git-pesados de worktree, verde isolado e serial, não �
 regressão); mobile 33; pgTAP `branch_publication` 16/16 contra o Supabase local
 (BEGIN/ROLLBACK, sem `db reset`). Nenhum efeito Git externo; `origin/main` intacta.
 
+### Fiação da publicação de branch ao caminho vivo (2026-08-10, ratificada por Gean)
+
+**Ratificação humana da próxima fronteira do ADR-002.** A publicação protegida de
+branch — o primeiro efeito Git externo real — foi fiada a uma rota autenticada,
+sem enfraquecer nenhuma invariante. Detalhes em [ADR-002](../arquitetura/adr-002-integracao-aplicacao-publicacao.md);
+resumo:
+
+- **Rota `POST /api/work-orchestration/branch-publications`** (`route.ts`): corpo só
+  com `workItemId` (validado como UUID). `branchPublicationTargetFromEnvironment`
+  reconstrói o alvo confiável **só do ambiente do servidor** (`ANIMA_INTEGRATION_*`),
+  ausente por padrão ⇒ 503 fail-closed. `runAuthorizedBranchPublicationWithSupabase`
+  compõe readEvents/persist do cliente autenticado (RLS) e traduz o desfecho.
+- **O cliente não escolhe nada sensível.** Remote, repositório, base, provider,
+  branch, SHA e idempotencyKey vêm do servidor; campos maliciosos no payload são
+  ignorados. Provado por teste de rota.
+- **Tradução HTTP fail-closed** (`branch-publication-http.ts` + precondições
+  tipadas no coordenador): precondição ⇒ 409; divergência ⇒ 409; remote
+  indisponível/push não comprovado ⇒ 502; inconsistência do servidor ⇒ 500; erro
+  Postgres por SQLSTATE com mensagem controlada; inesperado ⇒ 500. Sem vazamento.
+- **Isolamento por dono** provado em pgTAP (16→17): 2º usuário allowlistado não
+  publica item de outra conta (P0002). RLS + `user_id` no `FOR UPDATE`.
+- **Endurecimentos da 2ª passagem adversarial:** UUID malformado ⇒ 400 (não 500
+  opaco); `invalid_request` do provider ⇒ 500 (inconsistência do servidor, não do
+  cliente); remoção do `executeAuthorizedBranchPublicationWithSupabase` morto
+  (agora usado pela rota).
+- **Sem efeito externo nesta sessão.** Prova ponta-a-ponta contra remote bare
+  LOCAL: publicação real, idempotência (`already_existed` no retry, sem 2º push),
+  invariante "sem tags" com efeito real (sob `push.followTags=true`), base
+  intocada. Nenhum push contra origin/GitHub; `origin/main` intacta.
+
+Fronteira seguinte inalterada: criação real de review request segue pura;
+`merged`/`integrated` sem caminho alcançável.
+
 ## Dependências entre fases
 
 ```text

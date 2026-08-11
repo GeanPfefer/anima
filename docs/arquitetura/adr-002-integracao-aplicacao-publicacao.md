@@ -1,11 +1,14 @@
 # ADR-002 — Camada de aplicação/integração/publicação real
 
 > Estado: **decisão humana persistida; publicação protegida da branch implementada,
-> persistível e reconciliável; criação real de review request ainda proibida.** Este documento
+> persistível, reconciliável e FIADA a uma rota autenticada (ratificada por Gean em
+> 2026-08-10); criação real de review request ainda proibida.** Este documento
 > mapeia a fronteira aberta no item 10 do [ADR-001](adr-001-execucao-local-de-codigo.md)
-> e propõe o menor contrato implementável para ela. Nenhuma decisão aqui
-> autoriza efeito Git externo: a ação protegida continua atrás de aprovação
-> humana explícita, conforme o [Marco 003](../marcos/003-trabalho-autonomo-seguro.md).
+> e propõe o menor contrato implementável para ela. A publicação de branch agora
+> é alcançável pela aplicação, mas o efeito Git externo permanece atrás de um ato
+> explícito do operador (configuração do alvo no servidor, ausente por padrão); a
+> criação de review request e qualquer transição a `merged`/`integrated` seguem
+> exigindo nova autorização humana, conforme o [Marco 003](../marcos/003-trabalho-autonomo-seguro.md).
 
 ## Contexto: o que já existe (e o que falta)
 
@@ -294,3 +297,45 @@ A próxima fronteira permanece apenas pura: `ReviewRequestReceipt` exige
 repositório, remote, review ID/referência, estado `open`, source branch/commit e
 base branch/SHA exatos. Review já mergeado não satisfaz `review_request_created`.
 Não existe provider concreto, RPC ou chamada mutante para criar review request.
+
+## Fiação da publicação de branch ao caminho vivo (2026-08-10, ratificada por Gean)
+
+A publicação protegida de branch — o **primeiro efeito Git externo real** do
+produto — passou de maquinaria testada, porém não acionável, a **alcançável pela
+aplicação** por uma rota autenticada, sem enfraquecer nenhuma invariante.
+
+**Rota `POST /api/work-orchestration/branch-publications`.** O corpo carrega
+**somente `workItemId`** (validado como UUID → 400 se malformado). Tudo o mais é
+reconstruído pelo servidor: remote, repositório, branch-base e `providerId` vêm da
+**configuração do operador** (`branchPublicationTargetFromEnvironment`, lendo
+`ANIMA_INTEGRATION_*` do ambiente); branch, commit, base-SHA, autorização,
+resultado aceito, tentativa e `idempotencyKey` são derivados do **log persistido**
+pelo coordenador. Nenhum campo do cliente vira argumento Git — payloads com
+`target`/`remote`/`refspec`/`provider`/`idempotencyKey` são ignorados.
+
+**Alvo ausente ⇒ 503 fail-closed.** Sem configuração explícita do operador não há
+capacidade de push: a rota recusa antes de qualquer efeito. Habilitar o efeito Git
+externo real é, portanto, um ato de configuração do operador — nunca um payload.
+
+**Autoridade por RLS.** Autenticação obrigatória (cookie web ou Bearer mobile);
+a identidade é `auth.uid()`, jamais um `user_id` do corpo. O item de outra conta
+é invisível por RLS (log vazio ⇒ 409 not-publishable) e, em profundidade, a RPC
+`record_branch_published` recusa por `user_id` no `FOR UPDATE` (P0002) — provado
+em pgTAP.
+
+**Tradução HTTP fail-closed e sem vazamento.** Precondição sobre o estado
+persistido ⇒ 409 (código estável, distinto de um inesperado); divergência de
+repo/branch/base/commit ⇒ 409; remote indisponível ou push não comprovado ⇒ 502
+retryável; inconsistência interna do servidor (`invalid_request`) ⇒ 500; erro da
+RPC mapeado por SQLSTATE com **mensagem controlada** (nunca ecoa o Postgres);
+qualquer inesperado ⇒ 500. Nenhuma mensagem carrega caminho, remote, stderr ou SHA.
+
+**Prova nesta sessão sem efeito externo.** O caminho fiado foi exercitado
+ponta-a-ponta contra um **remote bare LOCAL** (nunca origin/GitHub): publicação
+real, idempotência (retry devolve `already_existed` sem segundo push), a invariante
+"sem tags" comprovada **com efeito** (mesmo sob `push.followTags=true` no ambiente,
+zero tags no remote) e a base intocada. Nenhum push contra remote externo foi
+executado; `origin/main` permaneceu intacta.
+
+A fronteira seguinte é inalterada: a criação real de review request continua
+apenas pura, e `merged`/`integrated` seguem sem caminho alcançável.
