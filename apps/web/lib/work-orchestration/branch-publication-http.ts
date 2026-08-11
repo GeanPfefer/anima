@@ -1,5 +1,8 @@
+import type { IntegrationTarget, ProtectedIntegrationProvider } from '@anima/core';
+import type { Database } from '@anima/types';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { BranchPublicationFailure } from './git-branch-publication';
-import { BranchPublicationPrecondition, executeAuthorizedBranchPublication } from './authorized-branch-publication';
+import { BranchPublicationPrecondition, executeAuthorizedBranchPublication, executeAuthorizedBranchPublicationWithSupabase } from './authorized-branch-publication';
 
 // Tradução fail-closed Git → provider → coordenador → HTTP. Regras:
 // - Precondição sobre o estado persistido (autorização/handoff/branch ausentes ou
@@ -32,8 +35,12 @@ export function classifyBranchPublicationError(error: unknown): BranchPublicatio
     return { code: error.code, message: error.message, status: 409, retryable: false };
   }
   if (error instanceof BranchPublicationFailure) {
+    // invalid_request só dispara por inconsistência do SERVIDOR (a request é
+    // inteiramente derivada do log + config do servidor, nunca do cliente): é
+    // 500, não erro de cliente. remote_unavailable/push_unverified são 502
+    // retryáveis; as demais divergências são conflito de estado (409).
     const status = error.code === 'remote_unavailable' || error.code === 'push_unverified' ? 502
-      : error.code === 'invalid_request' ? 400 : 409;
+      : error.code === 'invalid_request' ? 500 : 409;
     return { code: error.code, message: error.message, status, retryable: status === 502 };
   }
   switch (postgrestCode(error)) {
@@ -47,17 +54,17 @@ export function classifyBranchPublicationError(error: unknown): BranchPublicatio
 
 export interface BranchPublicationHttpResult { readonly status: number; readonly body: unknown; }
 
+type BranchPublicationOutcome = Awaited<ReturnType<typeof executeAuthorizedBranchPublication>>;
+
 /**
- * Executa a publicação protegida e traduz o desfecho para HTTP. O provider é
- * injetado (o servidor decide qual e contra qual repoRoot); o cliente nunca o
- * escolhe. Sucesso devolve só a prova pública (branch/commit/base/disposition);
- * falha devolve um código estável e mensagem controlada.
+ * Executa a publicação e traduz o desfecho para HTTP. Sucesso devolve só a prova
+ * pública (branch/commit/base/disposition), nunca o repoRoot; falha devolve um
+ * código estável e mensagem controlada. Compartilhado pelos dois pontos de
+ * entrada (injeção de fakes nos testes; cliente Supabase real na rota).
  */
-export async function runAuthorizedBranchPublication(
-  input: Parameters<typeof executeAuthorizedBranchPublication>[0],
-): Promise<BranchPublicationHttpResult> {
+async function settle(exec: () => Promise<BranchPublicationOutcome>): Promise<BranchPublicationHttpResult> {
   try {
-    const result = await executeAuthorizedBranchPublication(input);
+    const result = await exec();
     const r = result.receipt;
     const value = {
       status: result.status,
@@ -80,3 +87,16 @@ export async function runAuthorizedBranchPublication(
     };
   }
 }
+
+/** Ponto de entrada de baixo nível (readEvents/persist/provider injetados) — usado
+ * pelos testes com fakes e pela prova de integração com git real. */
+export const runAuthorizedBranchPublication = (
+  input: Parameters<typeof executeAuthorizedBranchPublication>[0],
+): Promise<BranchPublicationHttpResult> => settle(() => executeAuthorizedBranchPublication(input));
+
+/** Ponto de entrada da rota: compõe readEvents/persist a partir do cliente
+ * Supabase autenticado (RLS) e traduz o desfecho para HTTP. */
+export const runAuthorizedBranchPublicationWithSupabase = (
+  client: SupabaseClient<Database>,
+  input: { readonly workItemId: string; readonly target: IntegrationTarget; readonly provider: ProtectedIntegrationProvider; readonly signal?: AbortSignal },
+): Promise<BranchPublicationHttpResult> => settle(() => executeAuthorizedBranchPublicationWithSupabase(client, input));

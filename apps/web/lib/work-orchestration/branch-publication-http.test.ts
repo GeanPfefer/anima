@@ -24,7 +24,7 @@ describe('classifyBranchPublicationError', () => {
       .toMatchObject({ status: 409, code: 'authorization_not_found', retryable: false });
   });
   test.each([
-    ['remote_unavailable', 502], ['push_unverified', 502], ['invalid_request', 400],
+    ['remote_unavailable', 502], ['push_unverified', 502], ['invalid_request', 500],
     ['repository_mismatch', 409], ['remote_branch_conflict', 409], ['local_branch_missing', 409], ['base_mismatch', 409], ['local_commit_mismatch', 409],
   ] as const)('falha do provider %s → %d', (code, status) => {
     const classified = classifyBranchPublicationError(new BranchPublicationFailure(code, 'msg'));

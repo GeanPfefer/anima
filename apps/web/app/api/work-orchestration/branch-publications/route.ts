@@ -1,12 +1,15 @@
 import { authenticateRequest } from '@/lib/supabase/request-auth';
-import { supabaseBranchReceiptPersistence } from '@/lib/work-orchestration/branch-publication-operation';
-import { runAuthorizedBranchPublication } from '@/lib/work-orchestration/branch-publication-http';
+import { runAuthorizedBranchPublicationWithSupabase } from '@/lib/work-orchestration/branch-publication-http';
 import { GitBranchPublicationProvider } from '@/lib/work-orchestration/git-branch-publication';
 import { branchPublicationTargetFromEnvironment } from '@/lib/work-orchestration/integration-target';
-import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
+
+// work_item_id é um UUID gerado pelo banco. Validar o formato aqui traduz um
+// payload malformado em 400, em vez de deixá-lo falhar como 22P02 (cast de UUID)
+// lá no fundo e virar um 500 opaco.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ADR-002 — PRIMEIRO efeito Git externo real do produto, fiado ao caminho vivo.
 // Dispara a publicação PROTEGIDA de branch (push da branch anima-work/ autorizada,
@@ -24,8 +27,8 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null) as { workItemId?: unknown } | null;
   const workItemId = typeof body?.workItemId === 'string' ? body.workItemId.trim() : '';
-  if (!workItemId) {
-    return Response.json({ ok: false, error: { code: 'invalid_input', message: 'workItemId é obrigatório.' } }, { status: 400 });
+  if (!UUID.test(workItemId)) {
+    return Response.json({ ok: false, error: { code: 'invalid_input', message: 'workItemId precisa ser um UUID.' } }, { status: 400 });
   }
 
   const configured = branchPublicationTargetFromEnvironment();
@@ -37,18 +40,10 @@ export async function POST(request: Request) {
   }
 
   const provider = new GitBranchPublicationProvider(configured.repoRoot);
-  const service = createWorkOrchestrationService(client);
-  const readEvents = async (id: string) => {
-    const result = await service.listEvents(id);
-    if (!result.ok) throw new Error(result.error.message);
-    return result.value;
-  };
-  const outcome = await runAuthorizedBranchPublication({
+  const outcome = await runAuthorizedBranchPublicationWithSupabase(client, {
     workItemId,
     target: configured.target,
     provider,
-    readEvents,
-    persist: supabaseBranchReceiptPersistence(client),
     signal: request.signal,
   });
   return Response.json(outcome.body, { status: outcome.status });
