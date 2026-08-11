@@ -1207,6 +1207,35 @@ resumo:
 Fronteira seguinte inalterada: criação real de review request segue pura;
 `merged`/`integrated` sem caminho alcançável.
 
+### Prova viva da execução autônoma por `Executar autonomamente` (2026-08-11)
+
+Prova sobre `1fa71a3`, **sem alteração de código**. Detalhes e evidências no
+[registro](../registros/2026-08-11-prova-autonoma-supervisor-turn.md).
+
+- **Achado central:** a UI real do chat **não** cria item de worktree elegível —
+  nenhuma tela envia `developmentMode`, então um pedido de programação vira
+  proposta **sem `execution_spec`** (item `713a34ff`, `approved`), e o Supervisor
+  a recusa corretamente (`no_eligible_work`). Fail-closed esperado; a lacuna é a
+  ausência de superfície de UI de auto-desenvolvimento — decisão de produto
+  (`BLOCKED_BY_HUMAN_DECISION`).
+- **Cadeia autônoma comprovada até o coder:** com item elegível criado pelo único
+  produtor (o planejador, acionado por `developmentMode` via sessão autenticada —
+  o próprio achado), dois itens (`337ba4ee`, `b72b67f0`, ambos programming/low,
+  executor worktree, coder `ollama:qwen3-coder`) mantidos em `approved` e
+  acionados por `/supervisor-turn` atravessaram `classificação → routing → claim →
+  attempt → worktree isolada → coder`, com routing `worktree-v1`/`effort=strong` e
+  worktree a partir do `base_sha` `1fa71a3`.
+- **Resultado:** ambos `execution_failed` = `[ollama_read_round_limit]` (o coder
+  não propôs edições no orçamento; os gates nem rodaram). **Não** alcançou `review`.
+  Limitação estocástica do coder local (único modelo `qwen3-coder`), **não** defeito
+  da cadeia/contrato — nenhuma correção feita (não se força verde). A cauda
+  `→ gates → review` já foi comprovada em 2026-08-04 com coder bem-sucedido.
+- **Invariantes:** `G:/anima` byte-intacto (`1fa71a3`, limpo), worktrees isoladas
+  dispostas, **0** `result_accepted`/`integration_decided`/`branch_published`,
+  `origin/main` `973ef46` intacta, itens `failed` fail-closed, `G:/anima-local-test`
+  intacta. Setup (conta descartável + superfície dev) revertido; itens preservados
+  como evidência. `impact = structural` não ampliado.
+
 ## Dependências entre fases
 
 ```text

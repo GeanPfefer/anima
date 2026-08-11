@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-11 (sessão: prova pós-correção da classificação e distinção explícita entre execução manual e autônoma; publicação externa segue aguardando candidato persistido válido; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-11 (sessão: prova viva da execução autônoma por `Executar autonomamente` — cadeia atravessada até o coder com fail-closed correto, sem alcançar `review` por limitação do coder local; achado: a UI real não cria item de worktree elegível; ver [registro](docs/registros/2026-08-11-prova-autonoma-supervisor-turn.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -410,6 +410,21 @@ o INTEL-03 ajusta o esforço entre tentativas por histórico persistido, com
 escalonamento e redução auditáveis; o INTEL-04 aplica orçamento por tentativas
 e tempo em janelas móveis, preserva capacidade interativa e interrompe com
 checkpoint e razão tipada. Tokens e custo financeiro permanecem fora do V0.
+
+Uma prova viva em 2026-08-11 (HEAD `1fa71a3`) exercitou o botão **Executar
+autonomamente** (`/supervisor-turn`) sobre um item **novo** mantido em `approved`,
+sem início manual. A cadeia autônoma foi atravessada de fato — classificação,
+roteamento (`worktree-v1`/`ollama:qwen3-coder`), claim, tentativa e **worktree
+isolada** criada a partir do `base_sha` — e falhou fechado no coder local, que
+esgotou seu orçamento de leitura sem propor edições (`ollama_read_round_limit`),
+sem alcançar `review`. É limitação estocástica do coder, não da cadeia: o repo
+original ficou byte-intacto, nada foi aceito/integrado/publicado e o item terminou
+`failed`. A mesma prova revelou que a **UI real do chat não cria um item de
+worktree elegível**: nenhuma tela envia `developmentMode`, então um pedido de
+programação vira proposta sem `execution_spec` e o Supervisor a recusa
+corretamente (`no_eligible_work`). Expor (ou não) uma superfície de
+auto-desenvolvimento é decisão de produto pendente. Detalhes no
+[registro](docs/registros/2026-08-11-prova-autonoma-supervisor-turn.md).
 
 ## 1g. Jornadas de evolução
 
