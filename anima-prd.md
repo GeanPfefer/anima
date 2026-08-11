@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-09 (sessão: publisher Git de branch autorizado implementado e provado apenas contra remote bare local; publicação externa aguardando candidato persistido válido; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-11 (sessão: prova pós-correção da classificação e distinção explícita entre execução manual e autônoma; publicação externa segue aguardando candidato persistido válido; ver [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---

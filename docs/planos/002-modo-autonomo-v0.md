@@ -1,5 +1,25 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — distinção entre início manual e Supervisor (2026-08-11)
+
+A prova viva pós-correção confirmou `capability = programming` para uma tarefa
+explicitamente de programação no commit `44785fb` (antes classificada como
+`research` em `1fa67aa`), mantendo `impact = structural`. Na mesma prova, o
+botão **Iniciar execução manual** levou o item a `in_progress` por `start_work`,
+sem claim ou attempt; uma chamada posterior do Supervisor encontrou
+`attempt_missing` e saiu `requires_human`, sem inventar execução.
+
+A investigação ratificou que não há fiação quebrada: `/start` é a fronteira do
+ciclo manual original, enquanto `/supervisor-turn` possui a fronteira separada
+que seleciona, cria claim e abre attempt atomicamente. A reconciliação permanece
+fail-closed. O gap era de orientação: embora o botão já dissesse “manual” e o
+botão autônomo já fosse separado e condicionado à elegibilidade, a interface não
+explicava que um ciclo manual iniciado não seria assumido depois pelo Supervisor.
+O cartão agora explicita essa irreversibilidade operacional antes do início e,
+em `in_progress`, orienta o operador a registrar o resultado manual. A semântica
+das RPCs, a matriz de estados e a reconciliação não mudaram. Prova detalhada em
+[`docs/registros/2026-08-11-prova-classificacao-e-inicio-manual.md`](../registros/2026-08-11-prova-classificacao-e-inicio-manual.md).
+
 > Plano incremental derivado do [Marco 003 — Trabalho Autônomo Seguro](../marcos/003-trabalho-autonomo-seguro.md). Documento de planejamento: nenhuma fase está implementada. O backlog detalhado por item vive em [`002-modo-autonomo-v0-backlog.md`](002-modo-autonomo-v0-backlog.md).
 
 Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orquestracao-de-trabalho.md), [Plano 001 — Modo Construção MVP](001-modo-construcao-mvp.md).

@@ -10,6 +10,17 @@ describe('WorkProposalCard', () => {
   test('envia aprovação uma única vez enquanto carrega', async () => { let resolveResponse!: (value: unknown) => void; (global.fetch as jest.Mock).mockReturnValue(new Promise(resolve => { resolveResponse = resolve; })); render(<WorkProposalCard presentation={presentation()} onChange={jest.fn()} />); const button=screen.getByRole('button',{name:'Aprovar'}); fireEvent.click(button); fireEvent.click(button); expect(global.fetch).toHaveBeenCalledTimes(1); await waitFor(()=>expect(button).toBeDisabled()); resolveResponse({ok:true,json:async()=>({ok:true,value:{presentation:presentation()}})}); });
   test('ações vêm da projeção e não do estado local', () => { render(<WorkProposalCard presentation={presentation({item:{...item,state:'approved'},availableActions:['start']})} onChange={jest.fn()} />); expect(screen.queryByRole('button',{name:'Aprovar'})).not.toBeInTheDocument(); expect(screen.getByRole('button',{name:'Iniciar execução manual'})).toBeInTheDocument(); });
   test('inicia a execução manual aprovada', async () => { render(<WorkProposalCard presentation={presentation({item:{...item,state:'approved'},availableActions:['start']})} onChange={jest.fn()} />); fireEvent.click(screen.getByRole('button',{name:'Iniciar execução manual'})); await waitFor(()=>expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/start',expect.objectContaining({method:'POST'}))); });
+  test('explica que o ciclo manual não será assumido pelo Supervisor', () => {
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'approved'},availableActions:['start']})} onChange={jest.fn()} />);
+    expect(screen.getByText(/No modo manual, você executa o trabalho e registra o resultado aqui/)).toBeInTheDocument();
+    expect(screen.getByText(/O Supervisor não assumirá esse ciclo depois de iniciado/)).toBeInTheDocument();
+  });
+  test('orienta a concluir um trabalho manual já iniciado pelo registro de resultado', () => {
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'in_progress'},availableActions:['submit_result']})} onChange={jest.fn()} />);
+    expect(screen.getByText(/Execução manual em andamento/)).toHaveTextContent('registre o resultado abaixo');
+    expect(screen.getByRole('button',{name:'Registrar resultado'})).toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:'Executar autonomamente'})).not.toBeInTheDocument();
+  });
   test('inicia somente o trabalho e a versão explícitos no modo autônomo', async () => {
     const autonomousItem={...item,state:'approved' as const,intent:{execution_spec:{schema_version:1,target:{kind:'project',reference:'sup04-live'},permissions:['workspace_read','workspace_write_isolated'],validation_criteria:[{label:'npm test',command:'npm test'}],limits:{max_attempts:1,max_duration_minutes:5}}}};
     render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start']})} onChange={jest.fn()} />);
