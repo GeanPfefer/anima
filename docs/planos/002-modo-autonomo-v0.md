@@ -1340,6 +1340,29 @@ todos os consumidores JS: `presentation.ts` distingue cancelamento humano por
 `control_request_event_seq` e projeta status por evento, nunca pela autoria; o
 `gpt-coder` (single-shot) não compartilha o defeito do reparo do Ollama.
 
+### Desacople do transporte estendido à execução comandada (2026-08-12)
+
+Varredura da classe de defeito do `3c9ac70` por todas as rotas que iniciam
+execução. Achado: `/execute-commanded` (INT-04, runner Python legado) ainda
+repassava `request.signal` ao `runExecutorOnce` — o mesmo acoplamento que o
+`3c9ac70` desfez em `/supervisor-turn`, deixado no irmão comandado. Abandonar a
+conexão abortava o sinal e o executor emitia `cancelled`, um terminal inventado a
+partir de disconnect. Corrigido (`ee15b71`) passando um `AbortController` fresco
+depois de `start_commanded_work_attempt` já ter persistido a tentativa; mesmo
+racional e mesmo caráter single-shot, sem mudar payload de RPC. Consequência
+coerente com o SUP-04: item comandado sem `max_duration` vai a `requires_human` na
+reconciliação em vez de `cancelled` espúrio (fail-safe). A rota não tem chamador de
+UI hoje (a UI usa `/supervisor-turn`), mas é endpoint real usado em provas do
+SUP-04. Nova `route.test` 1/1 (falharia antes do fix); typecheck web.
+
+A varredura fechou a classe: as **duas** rotas que iniciam execução
+(`/supervisor-turn`, `/execute-commanded`) estão desacopladas. `/branch-publications`
+também recebe `request.signal`, mas é **outro caso** e fica intacto: publicação é
+operação discreta, idempotente e verificada (inspeciona→push→reconfirma o SHA
+remoto), não produz terminal de trabalho; cancelar por disconnect apenas adia uma
+retomada idempotente, nunca inventa `work_cancelled`. É a superfície protegida do
+ADR-002 e não tem o defeito.
+
 ## Dependências entre fases
 
 ```text
