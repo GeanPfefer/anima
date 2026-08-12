@@ -1296,6 +1296,11 @@ assinatura, estado alcançado ou tipos gerados. Commit `e3ef7aa`.
   intacta. typecheck 5 workspaces; core 31/687. `origin/main` `973ef46` intacta;
   nenhum push, PR, merge, `db reset`, aceite ou integração. Ver
   [registro](../registros/2026-08-12-proveniencia-cancelamento-executor.md).
+- **Varredura completa (2026-08-12):** os **quatro** produtores de `work_cancelled`
+  ficam uniformemente consistentes — executor (`record_commanded_work_terminal`,
+  `finish_work_execution`) → `author=executor`/`reason=execution_cancelled`; humano
+  (`apply_work_control_at_checkpoint`) → `user`/`cancelled_by_user`; decisão humana
+  (`respond_to_work_decision` encerrar) → `user`. Nenhum outro produtor diverge.
 
 ### Clareza de prompt na volta final do coder (2026-08-12)
 
