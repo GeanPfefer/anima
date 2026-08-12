@@ -150,6 +150,8 @@ Nenhuma decisão anterior é reescrita. As seguintes formulações passam a ser 
 
 Permanecem **fundamentais** (não meramente de maturidade), até definição humana em contrário: modificar a **própria política de segurança** (§10, processo reforçado) e decisões que são intrinsecamente do criador da instância.
 
+> **Correção (2026-08-12) — ver [Marco 006](006-politica-de-seguranca-como-maturidade-maxima.md):** classificar "modificar a própria política de segurança" como **fundamental** aqui está **errado** e foi corrigido pelo Marco 006. Ela é uma **restrição de maturidade de grau máximo** (a capacidade de maior risco, hoje corretamente sob governança humana/reforçada — nada afrouxado), não um teto filosófico. Permanecem fundamentais apenas as decisões **intrinsecamente do criador da instância** e as decisões de produto **ainda não definidas**. Coerente com o §10 e §11 deste marco.
+
 ---
 
 ## Consequência

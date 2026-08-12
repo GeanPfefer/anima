@@ -1,5 +1,29 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — correção da classificação da política de segurança (2026-08-12)
+
+O [Marco 006 — Política de Segurança como Maturidade Máxima](../marcos/006-politica-de-seguranca-como-maturidade-maxima.md)
+**corrige** a classificação registrada na seção seguinte (tabela "Classificação das
+fronteiras atualmente bloqueadas por humano"), na linha **"alterar a própria
+política de segurança"**. Aquela linha a rotulava como **fundamental**; a
+classificação correta é **restrição de maturidade de grau máximo** — a capacidade
+de maior risco do sistema, hoje corretamente sob governança humana/reforçada, cujo
+bloqueio é uma **dívida de evidência excepcionalmente pesada**, e **não** um teto
+filosófico eterno.
+
+Isto **não afrouxa nada**: no estado atual a capacidade permanece fail-closed sob
+governança humana/reforçada. Muda apenas a leitura do porquê. Promovê-la — se e
+quando — exige o processo reforçado do Marco 006 §3 (isolamento, testes
+adversariais, replay/simulação, revisão independente, auditabilidade,
+reversibilidade/rollback, rollout gradual, observabilidade, limites explícitos,
+revogação automática).
+
+Permanecem **fundamentais** (não maturidade), preservados sem alteração: as
+decisões **intrinsecamente do criador da instância** e as decisões de produto
+**ainda não definidas** (ex.: a superfície de UI de auto-desenvolvimento, linha
+seguinte da mesma tabela). A tabela original abaixo é mantida como registro
+histórico append-only; esta seção a supersede quanto à linha da política.
+
 ## Continuação — ratificação da autonomia progressiva (2026-08-12)
 
 O [Marco 005 — Autonomia Progressiva e Identidade Una](../marcos/005-autonomia-progressiva-e-identidade-una.md)
@@ -27,7 +51,7 @@ evidência é **quem/como** autoriza cada fato distinto.
 | deploy | fora do V0 | maturidade |
 | Reviewer/Verifier independente automatizado | revisão hoje é humana | maturidade |
 | habilitar efeito Git externo por config do operador | ato explícito do operador (não payload) | maturidade (config, não teto) |
-| alterar a própria política de segurança | processo reforçado exigido | **fundamental** — o ato mais protegido |
+| alterar a própria política de segurança | processo reforçado exigido | ~~**fundamental**~~ → **maturidade de grau máximo** (corrigido; ver continuação no topo e [Marco 006](../marcos/006-politica-de-seguranca-como-maturidade-maxima.md)) |
 | criar uma superfície de UI de auto-desenvolvimento | decisão de produto (ver prova 2026-08-11) | **fundamental** — não definida |
 
 **Consequência operacional.** Ao encontrar uma capacidade bloqueada por política,
