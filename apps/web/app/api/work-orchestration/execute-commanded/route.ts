@@ -52,7 +52,14 @@ export async function POST(request: Request) {
   const requestPayload = buildExecutorRequest({
     item: current.value, spec: eligibility.spec, attemptId, contextReferences: latestContext?.references ?? [],
   });
-  const run = await runExecutorOnce(adapter, requestPayload, request.signal);
+  // A tentativa comandada já foi persistida (start_commanded_work_attempt) ANTES
+  // da execução. Depois disso, o ciclo NÃO herda o lifetime do transporte HTTP:
+  // abandonar a página ou perder a conexão não equivale a um pedido humano de
+  // cancelamento — mesmo racional de 3c9ac70 para /supervisor-turn. Limites
+  // declarados e a reconciliação (SUP-04) continuam sendo as fronteiras de
+  // interrupção; o cancelamento humano explícito tem o fluxo próprio de UX-01.
+  const executionSignal = new AbortController().signal;
+  const run = await runExecutorOnce(adapter, requestPayload, executionSignal);
   if (!run.ok) return Response.json({ ok: false, error: { code: 'executor_contract_violation', message: run.defect } }, { status: 502 });
   const terminal = run.terminal;
   const { error: terminalError } = await recordExecutionTerminal(client, {
