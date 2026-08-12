@@ -1264,6 +1264,39 @@ alterado modelo, prompt, protocolo ou orçamento. Ver
   intacta. Setup (conta descartável + superfície dev) revertido; itens preservados
   como evidência. `impact = structural` não ampliado.
 
+### Proveniência correta do cancelamento do executor (2026-08-12)
+
+Continuação direta do fio acima. A investigação do transporte deixou registrada
+uma imprecisão da RPC: `record_commanded_work_terminal` gravava o terminal
+`cancelled` do executor com `author=user`. Rastreada a causa, ela é estrutural,
+não do transporte: **todo** terminal que essas RPCs registram tem
+`origin=executor` (validado), e o `cancelled` do executor nasce exclusivamente de
+`signal.aborted` nos adaptadores (`worktree-executor`, `local-runner`, core
+`BoundedWorkExecutor`) — nunca de decisão humana. O cancelamento humano explícito
+tem caminho próprio e auditável (`request_work_control` →
+`apply_work_control_at_checkpoint`, que grava `work_cancelled` com `author=user` e
+`reason=cancelled_by_user`). Atribuir `user` ao cancelamento do executor confundia
+as duas proveniências no log append-only.
+
+Após `3c9ac70` esse terminal está dormante no caminho vivo (o sinal de execução
+nunca aborta) e a projeção (`presentation.ts`) já distingue os dois pelo
+`control_request_event_seq`, não pela autoria; ainda assim a autoria é um fato
+permanente e auditável, e a fronteira do Marco 003 exige separá-las. A migration
+incremental `20260812000000_executor_cancelled_provenance.sql` corrige **apenas** a
+autoria para `executor` em `record_commanded_work_terminal` (reproduzindo a
+definição vigente `20260726000003`, com a lógica de sequência pós-checkpoint
+preservada) e no gêmeo dormante `finish_work_execution` (definição única
+`20260715000004`); `reason=execution_cancelled` já era gravada. Sem mudança de
+assinatura, estado alcançado ou tipos gerados. Commit `e3ef7aa`.
+
+- **Provas:** pgTAP 29 arquivos/730 testes PASS — novo
+  `executor_cancelled_provenance` (5/5: item→`cancelled`, `author=executor`,
+  `reason=execution_cancelled`, origem, idempotência) e `work_execution` estendido
+  para 24 com a asserção de autoria; regressão de checkpoint/retomada/reconciliação
+  intacta. typecheck 5 workspaces; core 31/687. `origin/main` `973ef46` intacta;
+  nenhum push, PR, merge, `db reset`, aceite ou integração. Ver
+  [registro](../registros/2026-08-12-proveniencia-cancelamento-executor.md).
+
 ## Dependências entre fases
 
 ```text

@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-11 (sessão: cancelamento de transporte investigado e desacoplado; nova prova ponta a ponta pela UI chegou novamente ao coder e terminou em `ollama_read_round_limit`, sem `review`; ver [registro](docs/registros/2026-08-11-investigacao-cancelamento-transporte.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-12 (sessão: proveniência do cancelamento do executor corrigida — `record_commanded_work_terminal`/`finish_work_execution` gravam `author=executor` no `work_cancelled` do executor, separando-o do cancelamento humano explícito; migration `20260812000000`, pgTAP 29/730; ver [registro](docs/registros/2026-08-12-proveniencia-cancelamento-executor.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
