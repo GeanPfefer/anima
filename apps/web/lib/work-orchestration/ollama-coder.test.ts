@@ -173,4 +173,40 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     expect(sentBodies[0]).not.toContain('DEVE responder agora');
     expect(sentBodies[2]).toContain('a última');
   });
+
+  test('reparo que estoura o orçamento é recusado ANTES da 2ª chamada (mede o payload real, não o prompt original)', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': 'linha única' });
+    // Objetivo com padding deixa o prompt original perto do teto do orçamento
+    // pequeno; o eco do reparo (clip 500) + a instrução empurram o payload do
+    // reparo além do teto, enquanto a volta original ainda cabe. Antes da correção
+    // o reparo reavaliava o prompt original e passava — mandando um payload maior
+    // que o Ollama truncaria em silêncio.
+    const objective = 'reconciliar '.repeat(20); // ~240 chars
+    const bigInvalid = `{"lixo":"${'x'.repeat(700)}"}`; // schema inválido e grande (eco clip=500)
+    const { fetchImpl, sentBodies } = scriptedFetch([bigInvalid, editReq(sha256('linha única'))]);
+    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, operationalContextCap: 1024 })
+      .edit({ objective, includedScope: ['docs/a.md'], excludedScope: ['x'] }, workspace, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_context_budget_exceeded' });
+    // A 1ª chamada (prompt original) foi enviada; o reparo foi barrado antes da 2ª.
+    expect(sentBodies.length).toBe(1);
+  });
+
+  test('reparo truncado pelo modelo vira ollama_prompt_truncated (guarda do payload do reparo)', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
+    // 1ª chamada: schema inválido, avaliada por inteiro (sem truncamento) → reparo.
+    // 2ª chamada (reparo): resposta válida, mas o modelo avaliou pouquíssimos tokens
+    // do payload do reparo — truncamento que a correção agora detecta.
+    let call = 0;
+    const fetchImpl = (async (_url: unknown, _init: { body: string }) => {
+      call += 1;
+      const first = call === 1;
+      return { ok: true, status: 200, json: async () => ({
+        message: { content: first ? '{"nao":"é protocolo"}' : editReq(bigSha) },
+        prompt_eval_count: first ? 100_000 : 5,
+        eval_count: 50, done_reason: 'stop',
+      }) };
+    }) as unknown as typeof fetch;
+    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl }).edit(request, workspace, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_prompt_truncated' });
+  });
 });

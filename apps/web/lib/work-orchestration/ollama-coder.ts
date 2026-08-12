@@ -171,13 +171,22 @@ export class OllamaCoderBackend implements CoderBackend {
     } catch (error) {
       if (!(error instanceof OllamaProtocolError) || error.code !== 'ollama_invalid_response_schema') throw error;
       // Reparo só-de-schema: NÃO reapresenta conteúdo, só exige o formato.
+      const assistantEcho = clip(first.content, 500);
+      const repairInstruction = 'Sua resposta não seguiu o schema. Responda SOMENTE com um objeto JSON {"action":"read",...} ou {"action":"edit",...}, sem texto fora dele.';
       const repairMessages = [
         ...messages,
-        { role: 'assistant' as const, content: clip(first.content, 500) },
-        { role: 'user' as const, content: 'Sua resposta não seguiu o schema. Responda SOMENTE com um objeto JSON {"action":"read",...} ou {"action":"edit",...}, sem texto fora dele.' },
+        { role: 'assistant' as const, content: assistantEcho },
+        { role: 'user' as const, content: repairInstruction },
       ];
-      assertPromptWithinBudget(SYSTEM + prompt, this.budget);
+      // O reparo envia MAIS tokens que a volta original — o eco do assistente e a
+      // instrução extra. Orçamento e truncamento têm de ser medidos sobre o payload
+      // REAL do reparo, não sobre o prompt original (que já passou acima): senão um
+      // reparo grande é enviado sem guarda e o Ollama o trunca em silêncio, exatamente
+      // o que a Fase 1 evita. Não cresce o orçamento; só mede o que de fato é enviado.
+      const repairText = SYSTEM + prompt + assistantEcho + repairInstruction;
+      assertPromptWithinBudget(repairText, this.budget);
       const repaired = await callOllamaChat({ url: this.url, model: this.options.model, messages: repairMessages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
+      assertNotTruncated(repairText, repaired.meta);
       return parseProtocolResponse(repaired.content);
     }
   }
