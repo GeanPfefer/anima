@@ -1297,6 +1297,23 @@ assinatura, estado alcançado ou tipos gerados. Commit `e3ef7aa`.
   nenhum push, PR, merge, `db reset`, aceite ou integração. Ver
   [registro](../registros/2026-08-12-proveniencia-cancelamento-executor.md).
 
+### Clareza de prompt na volta final do coder (2026-08-12)
+
+Primeiro passo da investigação do `ollama_read_round_limit` que fechou os dois
+recortes acima. Separando os fatores (protocolo, rodadas, prompt, modelo): o
+contrato do protocolo limitado (`ollama-protocol.ts`) está correto e fail-closed;
+o defeito acionável e determinístico é de **prompt**. Com `roundsLeft=0` o coder
+ainda oferecia `{"action":"read"}` embora qualquer leitura ali seja recusada,
+encerrando a tentativa sem edição — um modelo obediente gastava a última chance
+lendo. A volta final passa a **exigir** `{"action":"edit",...}` e não repetir a
+oferta de leitura; a penúltima avisa ser a última rodada. **Não** altera o
+contrato do protocolo, o orçamento de rodadas nem terminal algum; melhora as
+chances de edição sem forçar verde (falha de edição segue fail-closed). Commit
+`e004b2a`; apps/web ollama-coder 11/11, typecheck 5. Fatores restantes (número de
+rodadas, estratégia de leitura, capacidade do modelo) são sensíveis a contrato e
+estocásticos — não tocados aqui, coerente com "antes de alterar qualquer
+contrato".
+
 ## Dependências entre fases
 
 ```text
