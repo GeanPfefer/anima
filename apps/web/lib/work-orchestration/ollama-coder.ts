@@ -112,10 +112,19 @@ export class OllamaCoderBackend implements CoderBackend {
     const servedBlocks: string[] = [];
     for (let round = 0; round <= this.maxReadRounds; round++) {
       const roundsLeft = this.maxReadRounds - round;
+      // Na última volta (sem rodadas de leitura restantes) o prompt EXIGE edição e
+      // não oferece leitura: um {"action":"read"} aqui só seria recusado
+      // (ollama_read_round_limit), então oferecê-lo desperdiça a última chance de
+      // o modelo editar. É clareza de prompt, não mudança do contrato do protocolo.
+      const budgetLine = roundsLeft <= 0
+        ? 'Orçamento: 0 rodadas de leitura restantes. Você DEVE responder agora com {"action":"edit",...}. Um novo pedido de leitura será recusado e encerrará a tentativa sem edição.'
+        : roundsLeft === 1
+          ? 'Orçamento: 1 rodada de leitura restante — a última. Peça {"action":"read",...} agora ou já aplique {"action":"edit",...}; depois só edição será aceita.'
+          : `Orçamento: ${roundsLeft} rodadas de leitura restantes. Peça {"action":"read",...} ou aplique {"action":"edit",...}.`;
       const prompt = [
         header,
         servedBlocks.length ? `Contexto já fornecido:\n${servedBlocks.join('\n')}` : 'Nenhum trecho fornecido ainda.',
-        `Orçamento: ${roundsLeft} rodada(s) de leitura restante(s). Peça {"action":"read",...} ou aplique {"action":"edit",...}.`,
+        budgetLine,
       ].join('\n\n');
 
       const response = await this.callProtocol(prompt, signal);

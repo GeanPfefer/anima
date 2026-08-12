@@ -151,4 +151,26 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
       { objective: 'x', includedScope: ['docs/a.md', 'docs/b.md'], excludedScope: ['z'] }, workspace, new AbortController().signal))
       .rejects.toMatchObject({ code: 'ollama_edit_outside_scope' });
   });
+
+  test('a última volta exige edição e não repete a oferta de leitura; editar nela é aceito', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
+    // Três leituras servidas nas voltas com orçamento e a EDIÇÃO na volta final (roundsLeft=0).
+    const { fetchImpl, sentBodies } = scriptedFetch([readReq, readReq, readReq, editReq(bigSha)]);
+    const result = await new OllamaCoderBackend({ model: 'x', fetchImpl }).edit(request, workspace, new AbortController().signal);
+
+    // Editar na volta final (sem rodadas restantes) é aceito, não recusado.
+    expect(result.touchedResources).toEqual(['docs/a.md']);
+    expect(workspace.files.get('docs/a.md')).toContain('Linha ALVO EDITADA');
+
+    // A volta final EXIGE edição e não repete a oferta de leitura (frases sem
+    // aspas, porque o corpo enviado é JSON e as aspas do prompt vêm escapadas).
+    const finalPrompt = sentBodies[sentBodies.length - 1]!;
+    expect(finalPrompt).toContain('0 rodadas de leitura restantes');
+    expect(finalPrompt).toContain('DEVE responder agora');
+    expect(finalPrompt).toContain('Um novo pedido de leitura será recusado');
+    // A primeira volta ofereceu leitura normalmente; a penúltima avisou ser a última.
+    expect(sentBodies[0]).toContain('3 rodadas de leitura restantes');
+    expect(sentBodies[0]).not.toContain('DEVE responder agora');
+    expect(sentBodies[2]).toContain('a última');
+  });
 });
