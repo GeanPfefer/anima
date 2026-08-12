@@ -112,6 +112,23 @@ describe('WorktreeExecutorAdapter', () => {
     if (terminal.kind === 'error') expect(terminal.code).toBe('contract_violation');
   });
 
+  test('backend que retorna sucesso sem tocar arquivo vira error, nunca um result de revisão vazio', async () => {
+    // Defesa em profundidade: um backend pode alegar sucesso e não escrever nada.
+    // A worktree sem mudança não pode virar um result que iria a revisão humana.
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([]) });
+    const signals = await collect(adapter, request(), new AbortController().signal);
+    const terminal = signals.at(-1)!;
+    expect(terminal.kind).toBe('error');
+    if (terminal.kind === 'error') {
+      expect(terminal.code).toBe('execution_failed');
+      expect(terminal.retryable).toBe(false);
+      expect(terminal.message).toContain('nenhuma alteração');
+    }
+    // Nenhum result é emitido: o desfecho é fechado, não uma revisão de nada.
+    expect(signals.some(s => s.kind === 'result')).toBe(false);
+    expect(validateWorkExecutorTranscript(signals)).toBeNull();
+  });
+
   test('permissão insuficiente vira invalid_request antes de criar worktree', async () => {
     const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([added]) });
     const terminal = (await collect(adapter, request({ permissions: ['workspace_read'] }), new AbortController().signal)).at(-1)!;
