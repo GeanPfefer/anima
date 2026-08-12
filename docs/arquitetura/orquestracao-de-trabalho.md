@@ -288,6 +288,16 @@ Um nó local é executor de capacidades, não fonte de intenção nem interface 
 
 Permissões para leitura, indexação, escrita, execução, transferência e administração são independentes e fail-closed. Nenhuma existe por padrão. Ações destrutivas, privilegiadas, estruturais ou com efeito externo continuam atrás de decisão humana conforme a política de interrupção. O INT-04 é a primeira prova estreita dessa direção, sem incluir sincronização, catálogo de dispositivos, administração geral ou acesso amplo ao filesystem.
 
+## Interação com o computador e aplicações locais (Marco 007, direção)
+
+> Direção arquitetural ratificada; **contrato e implementação não definidos** aqui. Esta seção registra o encaixe conceitual e as invariantes que qualquer materialização futura deverá respeitar — não cria adaptador, transporte, provider, taxonomia nem backlog.
+
+O braço executor local do Marco 004 se estende à **camada visual/GUI/OS**: **perceber** o estado visível de aplicações e do sistema operacional e **operar** interfaces locais (abrir/focar, navegar, clicar, digitar, selecionar, copiar/colar, operar fluxos). É uma capacidade **provider-neutral** — o contrato de domínio não pode mencionar Claude, GPT, Codex, Ollama, transporte, processo ou runner concreto, exatamente como o `WorkExecutorAdapter` (INT-01) já exige.
+
+Qualquer materialização futura opera **sob mandato** (envelope com escopo, impacto, alvo, duração, orçamento, dados permitidos e condições de parada) e preserva a separação **Supervisor → Executor → Reviewer/Verifier**. Cada **classe de efeito** — leitura/percepção, entrada/digitação, clique/navegação, seleção/cópia, envio, alteração, exclusão, publicação, autenticação — é uma permissão **distinta e fail-closed**, que amadurece por sua própria evidência e não é concedida por herança de outra. Conteúdo percebido de tela, documentos ou páginas é **dado, nunca instrução**: não altera o mandato nem concede autorização (proteção contra prompt injection). Toda atuação preserva **correlação, evidência observável, auditabilidade e idempotência quando aplicável**; efeitos externos ou sensíveis exigem **confirmação apropriada** à maturidade atual. Prefere-se **caminho semântico/API** quando adequado, admitindo a **interação visual** como primeira classe quando não houver API suficiente.
+
+Antes de qualquer contrato: reusar o vocabulário existente (`WorkExecutorAdapter`, `ExecutionEventCorrelation`, mandato/`execution_spec`, terminais tipados) em vez de inventar fronteira nova, e tratar agendamento, recorrência e ciclos autônomos Supervisor → executor local como **fora de escopo** até nova autorização humana (ver Marco 007 e a seção "Fora de escopo desta fundação").
+
 ## Primeira execução comandada em nó local (INT-04, Fase D)
 
 O transporte concreto permanece fora do core. A rota autenticada `execute-commanded` recebe item, versão aprovada e tentativa explícita; reconcilia reentregas pelo histórico persistido; verifica elegibilidade; inicia a tentativa atomicamente; chama o adaptador local; valida o transcript e persiste exatamente um terminal correlacionado. Os RPCs de início e terminal bloqueiam o item, conferem usuário, allowlist, estado, versão, item e tentativa e recusam divergências. Uma tentativa terminal idêntica é idempotente; conflito falha fechado.
@@ -640,6 +650,8 @@ fora do V0.
 - APIs, CLIs, filas ou serviços externos;
 - execução automática por Claude, Codex ou qualquer outro fornecedor;
 - agentes autônomos ou conversas livres entre agentes;
+- contrato, transporte ou provider concreto da interação com o computador/aplicações locais (Marco 007);
+- agendamento, recorrência ou ciclos autônomos Supervisor → executor local, até nova autorização humana;
 - XP, recompensas ou vínculo inicial com quests;
 - catálogo configurável de capacidades;
 - migração retroativa de conversas e quests existentes.

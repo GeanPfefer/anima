@@ -86,6 +86,7 @@ O usuário interage com uma única experiência principal: o Anima. As demais in
 - Aprendizado
 - Organização
 - Automação residencial
+- Interação com o computador e aplicações locais (braço executor provider-neutral, sob mandato — ver [Marco 007](docs/marcos/007-interacao-com-computador-e-aplicacoes-locais.md))
 - Reflexão Crítica (ver Prisma, abaixo)
 
 Dentro de uma solicitação aprovada, o Anima pode escolher quais capacidades internas consultar para executar melhor a tarefa. Fora de uma solicitação aprovada, ele não inicia ações por conta própria.
