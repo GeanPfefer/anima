@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(23);
+SELECT plan(24);
 
 INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at) VALUES
 ('81000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','exec-a@test.invalid','',now(),'{}','{}',now(),now()),
@@ -61,6 +61,7 @@ INSERT INTO items SELECT 'cancel',id FROM public.create_work_proposal('82000000-
 DO $$DECLARE v_id uuid; BEGIN SELECT id INTO v_id FROM items WHERE label='cancel'; PERFORM public.resolve_approval(v_id,1,'approve','{}'); PERFORM public.start_work(v_id,1); PERFORM public.start_work_execution(v_id,1,'83000000-0000-0000-0000-000000000003','fake'); END$$;
 SELECT lives_ok($$SELECT public.finish_work_execution((SELECT id FROM items WHERE label='cancel'),1,'83000000-0000-0000-0000-000000000003','{"kind":"cancelled","executor_id":"fake","attempts":1,"terminated_cleanly":true}')$$,'cancelamento persiste');
 SELECT is((SELECT jsonb_build_array(i.state,e.event_type,e.payload->'data'->>'reason') FROM public.work_items i JOIN public.work_events e ON e.work_item_id=i.id AND e.event_type='work_cancelled' WHERE i.id=(SELECT id FROM items WHERE label='cancel')),'["cancelled","work_cancelled","execution_cancelled"]'::jsonb,'cancelamento encerra o item com proveniência');
+SELECT is((SELECT e.author::text FROM public.work_events e WHERE e.work_item_id=(SELECT id FROM items WHERE label='cancel') AND e.event_type='work_cancelled'),'executor','cancelamento do executor tem autoria executor, não user');
 
 -- Outro usuário não enxerga nem encerra execuções alheias.
 SELECT set_config('request.jwt.claim.sub','81000000-0000-0000-0000-000000000002',true);
