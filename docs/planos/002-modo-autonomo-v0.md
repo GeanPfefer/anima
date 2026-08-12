@@ -394,6 +394,13 @@ Zero `result_accepted` e zero itens `completed` em todo o banco local. Todos os 
 - **O AUTO-05 não foi iniciado nem comprovado.** Sem checkpoint estruturado persistido não há de onde `planWorkResumption` eleger retomada; o abandono do SUP-04 não produz handoff algum.
 - **Não há execução contínua.** Uma volta por invocação; quem chama decide a periodicidade.
 - **A `maxDuration` da rota é 1800 s** e uma volta longa ocupa a conexão HTTP inteira. Cliente que desiste no meio produz cancelamento cooperativo, como observado.
+
+> **Correção comprovada em 2026-08-11:** esse cancelamento não era uma decisão
+> humana cooperativa; era o `request.signal` do transporte sendo repassado ao
+> executor e persistido como `work_cancelled [user]`. O commit `3c9ac70`
+> desacoplou a tentativa já aprovada da conexão HTTP. Pausa/cancelamento humano
+> continuam pelo contrato explícito de UX-01 em checkpoint. Queda do processo
+> permanece coberta por lease/checkpoint/reconciliação, sem terminal inventado.
 - O laço herda a estabilidade do executor local: enquanto o modelo falhar seu próprio gate factual, a volta termina corretamente em `execution_failed`, que é comportamento, não defeito.
 
 **A Fase E não está encerrada.** O critério "com N itens elegíveis, o supervisor executa um por vez na ordem definida" está comprovado; a retomada real do AUTO-05 continua pendente.
@@ -1233,6 +1240,24 @@ Prova sobre `1fa71a3`, **sem alteração de código**. Detalhes e evidências no
   diagnosticar, **sem** afirmar causa aleatória nem defeito da cadeia/contrato;
   nenhuma correção feita (não se força verde). A cauda `→ gates → review` já foi
   comprovada em 2026-08-04 com coder bem-sucedido.
+
+### Investigação do cancelamento e nova prova UI (2026-08-11)
+
+O cancelamento anterior foi rastreado de `WorkProposalCard` até a RPC: a rota
+repassava `request.signal`; worktree/coder/processos o convertiam em terminal
+`cancelled`; `record_commanded_work_terminal` gravava `work_cancelled` com
+`reason=execution_cancelled` e `author=user`, embora nenhum pedido explícito de
+controle existisse. Isso divergia do Marco 003 e do UX-01. A menor correção
+(`3c9ac70`) cria um lifetime de execução independente do transporte dentro da
+mesma invocação, sem processo residente ou arquitetura nova.
+
+Nova prova integral pelo navegador real: conta descartável, superfície Dev,
+planner OpenAI, item novo `b6ab5eeb` `programming/low`, aprovação e clique real
+em `Executar autonomamente`; cadeia até worktree/coder com attempt `e6a828fe`.
+Conexão estável; terminal `execution_failed`, não cancelamento, novamente por
+`ollama_read_round_limit`. Nenhum gate, `review`, aceite ou integração. Não foi
+alterado modelo, prompt, protocolo ou orçamento. Ver
+[registro](../registros/2026-08-11-investigacao-cancelamento-transporte.md).
 - **Invariantes:** `G:/anima` byte-intacto (`1fa71a3`, limpo), worktrees isoladas
   dispostas, **0** `result_accepted`/`integration_decided`/`branch_published`,
   `origin/main` `973ef46` intacta, itens `failed` fail-closed, `G:/anima-local-test`

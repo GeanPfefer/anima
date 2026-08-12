@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-11 (sessão: prova viva da execução autônoma por `Executar autonomamente` — cadeia atravessada até o coder com fail-closed correto, sem alcançar `review` por limitação do coder local; achado: a UI real não cria item de worktree elegível; ver [registro](docs/registros/2026-08-11-prova-autonoma-supervisor-turn.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-11 (sessão: cancelamento de transporte investigado e desacoplado; nova prova ponta a ponta pela UI chegou novamente ao coder e terminou em `ollama_read_round_limit`, sem `review`; ver [registro](docs/registros/2026-08-11-investigacao-cancelamento-transporte.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -428,6 +428,18 @@ aceito/integrado/publicado, o item terminou `failed`. Conclusão: falta uma
 superfície de UI que crie um item de worktree elegível; expor (ou não) uma
 superfície de auto-desenvolvimento é decisão de produto. Detalhes no
 [registro](docs/registros/2026-08-11-prova-autonoma-supervisor-turn.md).
+
+Na continuação da sessão, a hipótese de cancelamento foi confirmada no código:
+`/supervisor-turn` repassava o `request.signal` do transporte ao executor, de modo
+que abandonar a conexão virava terminal `cancelled` e a RPC o atribuía a `user`.
+Isso não representava decisão humana explícita e contrariava a continuidade
+aprovada; o commit `3c9ac70` desacoplou os lifetimes sem introduzir daemon ou
+scheduler. Nova prova completa pela UI real criou e aprovou o item
+`b6ab5eeb`, clicou `Executar autonomamente` e atravessou routing, claim, attempt,
+worktree e coder. Com conexão estável, terminou em `execution_failed` por
+`ollama_read_round_limit`; gates não rodaram e `review` não foi alcançado. A
+causa permanece a separar entre modelo, protocolo, limite de três leituras,
+prompt e tarefa. Detalhes no [novo registro](docs/registros/2026-08-11-investigacao-cancelamento-transporte.md).
 
 ## 1g. Jornadas de evolução
 
