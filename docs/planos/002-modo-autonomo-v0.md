@@ -1314,6 +1314,32 @@ rodadas, estratégia de leitura, capacidade do modelo) são sensíveis a contrat
 estocásticos — não tocados aqui, coerente com "antes de alterar qualquer
 contrato".
 
+### Hardening determinístico do coder e do executor de worktree (2026-08-12)
+
+Varredura orientada por evidência nos componentes tocados, dois recortes locais
+sem mudança de contrato:
+
+- **Orçamento/truncamento do reparo do coder** (`684d8e0`): no reparo só-de-schema
+  do protocolo limitado, `assertPromptWithinBudget` reavaliava o prompt **original**
+  (já checado) em vez das mensagens de reparo, que enviam mais tokens (eco do
+  assistente até 500 chars + instrução). Um reparo maior que a janela ia sem guarda
+  e o Ollama o truncava em silêncio — o que a Fase 1 evita. Passa a medir orçamento
+  e truncamento sobre o payload real (`SYSTEM+prompt+eco+instrução`) e acrescenta
+  `assertNotTruncated` após o reparo, em paridade com a 1ª volta. Códigos precisos
+  (`ollama_context_budget_exceeded`/`ollama_prompt_truncated`) em vez de erro de
+  schema a jusante. Regressões que falhariam antes: ollama-coder **13/13**.
+- **Cobertura do desfecho de zero alterações** (`89a161c`): o ramo de defesa em
+  profundidade do `WorktreeExecutorAdapter` — backend alega sucesso e não escreve
+  nada → `error` (execution_failed, não-retryable), NUNCA um `result` de revisão
+  vazio — não tinha teste próprio. `ScriptedCoderBackend([])` exercita o caminho.
+  worktree-executor **16/16**.
+
+typecheck 5 workspaces; sem mudança de SQL/tipos/contrato; `origin/main` `973ef46`
+intacta. Verificado ainda que a mudança de proveniência (`e3ef7aa`) é segura em
+todos os consumidores JS: `presentation.ts` distingue cancelamento humano por
+`control_request_event_seq` e projeta status por evento, nunca pela autoria; o
+`gpt-coder` (single-shot) não compartilha o defeito do reparo do Ollama.
+
 ## Dependências entre fases
 
 ```text
