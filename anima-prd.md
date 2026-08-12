@@ -143,6 +143,12 @@ Não existe convocação de uma persona Prisma. Quando essa capacidade for imple
 
 > **Frase guia:** "O Anima registra a jornada. O Prisma ajuda a enxergar perspectivas. A decisão continua sendo do usuário."
 
+### Proatividade cognitiva (ratificação 2026-08-12)
+
+A necessidade que originou o "Prisma" é a **proatividade cognitiva**, e ela pertence ao **próprio Anima** — não exige uma segunda persona. O Anima evolui de `receber → armazenar → exibir` para `observar → lembrar → relacionar → refletir → projetar → conversar sobre o futuro`: usar os dados acumulados para ajudar o usuário a decidir como seguir adiante.
+
+Neste momento, "proatividade" significa proatividade **cognitiva** — analisar padrões históricos, relacionar dados ao longo do tempo, perceber mudanças, identificar tensões entre objetivos e comportamento real, comparar planos com resultados, projetar cenários, sugerir próximos passos e conversar sobre decisões futuras. **Não** significa, por esta ratificação, iniciar execuções no mundo, começar projetos sozinho ou modificar coisas externas sem um mandato apropriado. A implementação (acionamento reflexivo interno) permanece futura, como já registrado acima. Ver [Marco 005 — Autonomia Progressiva e Identidade Una](docs/marcos/005-autonomia-progressiva-e-identidade-una.md).
+
 ---
 
 ## 1b. Modelo de interação e cadência
@@ -441,6 +447,26 @@ worktree e coder. Com conexão estável, terminou em `execution_failed` por
 causa permanece a separar entre modelo, protocolo, limite de três leituras,
 prompt e tarefa. Detalhes no [novo registro](docs/registros/2026-08-11-investigacao-cancelamento-transporte.md).
 
+### Mapa de maturidade do ciclo de programação (ratificação 2026-08-12)
+
+O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou que a programação autônoma **não tem teto artificial**: o ciclo completo (`entender → investigar → planejar → propor → implementar → testar → revisar → corrigir → commit → publicar → PR → integrar → merge → deploy → observar → reparar`) é destino, e **cada estágio recebe autonomia conforme sua própria maturidade e evidência** — as maturidades não são acopladas. O estado atual, classificando cada barreira como **restrição de maturidade** (promovível por evidência) ou **restrição fundamental** (exige decisão humana por não estar definida):
+
+| Estágio | Estado atual | Classificação da barreira |
+|---|---|---|
+| planejar/propor · implementar (worktree isolada) · testar (gates reais) | maduro e provado ao vivo (ADR-001) | — |
+| revisar | **humana** hoje; Reviewer/Verifier independente automatizado é futuro | maturidade |
+| commit (branch descartável) | feito na worktree, nunca aplicado | — |
+| publicar branch | maduro, atrás de configuração explícita do operador (ADR-002) | maturidade (efeito habilitado por config, não por payload) |
+| criar PR (review request) | contrato puro; **sem** provider/efeito | maturidade |
+| integrar / merge / deploy | **sem** caminho alcançável; exige nova autorização humana | maturidade |
+| alterar a própria política de segurança | exige processo reforçado (proposta, provas, replay, revisão independente, rollout gradual, rollback) | **fundamental** (o ato mais protegido) |
+
+A leitura correta de "sem publicação/merge automáticos" e "revisão humana antes de integrar" (Marco 003, V0) passa a ser **restrição de maturidade**, não teto permanente — sem afrouxar nada agora. Promover um estágio exige **trabalho de evidência** (testes, dry-run, simulação, idempotência, rollback, reconciliação, validação independente, auditabilidade), não remoção arbitrária da proteção.
+
+**Aprovação como mandato.** A direção ratificada é que o usuário expresse **intenção de nível mais alto** e o sistema derive um **mandato/envelope** (escopo, contratos, invariantes, limites, gates, condições de parada e escalonamento), impedindo automaticamente ações fora dele — em vez de aprovar comando por comando. A arquitetura já pratica parte disso (`execution_spec`, elegibilidade, permissões declaradas, limites, gates); o Supervisor é o candidato natural a autor do mandato, e Executor/Reviewer permanecem papéis separáveis que não precisam ser o mesmo provider (Marco 005 §8–9).
+
+**Separação de contextos de chat (direção; UX em aberto).** Considera-se separar o **chat principal** (vida, memória, planejamento pessoal) de um **contexto de Desenvolvimento/Projetos** (repositórios, work items, diffs, branches, revisão, integração, políticas do projeto), servindo a contexto, memória de trabalho, segurança, permissões, custo de contexto e UX — **sem** separar a identidade (ambos são o mesmo Anima). Um primeiro passo defensivo já existe (fronteira `developmentMode` + allowlist dedicada, §10). A **UX final permanece decisão de produto em aberto**; registra-se apenas a direção conceitual.
+
 ## 1g. Jornadas de evolução
 
 > **Conceitual — norte arquitetural, não backlog.** Registrado em [`anima-manifesto.md`](anima-manifesto.md) e [Marco 001](docs/marcos/001-nascimento-da-identidade.md).
@@ -606,6 +632,8 @@ Eventos são ações sem duração — um momento, não uma atividade. Existem 3
 **Lenda (46–50):** perfil público (quando abrir ao público), mentoria de quests, acesso antecipado a features
 
 > **Estado técnico:** ✅ Implementado — `EraPanel` no modo Game do dashboard mostra era atual, barra de progresso dentro da era, chips de features desbloqueadas e prévia da próxima era (tracejadas). Lógica em `packages/core/src/levels.ts` (`ERAS`, `getEraForLevel`).  
+
+> **Papel de XP/níveis/eras — deliberadamente em aberto (ratificação 2026-08-12).** Não há decisão nova sobre a centralidade de XP/níveis/eras; o tema ficou em segundo plano enquanto o foco é o modo autônomo de desenvolvimento. Por ora: **preservar** o sistema, **não** removê-lo, **não** torná-lo fundamento obrigatório de toda arquitetura nova, manter aberta a possibilidade de Game/Analítico/Minimal (ou outras visões) e avaliar sua importância quando houver uso cotidiano real suficiente da parte pessoal do Anima. A decisão permanece em aberto de propósito — não deve ser preenchida por opinião do agente. Ver [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md).
 
 ---
 
@@ -1017,6 +1045,10 @@ O grafo de vida representa visualmente as conexões que emergem dos dados do usu
 | Jornadas de evolução (jul/2026) | Anima não gerencia só tarefas — acompanha jornadas de vida variadas (skate, música, programação, carreira, quarto inteligente, etc.); relação com pilar/entidade/quest fica em aberto | Reconhece que nem toda evolução de vida é uma "atividade cronometrada"; ver §1g — decisão de schema é arquitetura futura, não desta atualização |
 | Trabalho Autônomo Seguro (jul/2026) | Modo Autônomo formalizado e implementado até a Fase F: fila elegível, claim exclusivo, tentativas persistentes, checkpoints, retomada, Supervisor V0, interrupção humana tipada, classificação, roteamento, ajuste de esforço e orçamento com reserva interativa; V0 estreita (um trabalho por projeto, execução local, sem merge/publicação automáticos) | Permite continuidade de trabalho sem supervisão constante mantendo intenção aprovada, limites explícitos, uso sustentável de inteligência e evidências verificáveis — ver [Marco 003](docs/marcos/003-trabalho-autonomo-seguro.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md) |
 | Anima Portátil e Nós Locais (jul/2026) | Contexto pessoal pode acompanhar o usuário entre dispositivos; arquivos, ferramentas e recursos permanecem locais e acessíveis somente por permissões explícitas de cada máquina | Permite continuidade no Nomad e em futuras máquinas sem exigir exposição ou cópia indiscriminada dos arquivos; orienta o INT-04 sem ampliar seu escopo — ver [Marco 004](docs/marcos/004-anima-portatil-e-nos-locais.md) |
+| Autonomia progressiva por evidência (ago/2026) | Não há teto filosófico para a autonomia (merge/deploy/main podem, com evidência, tornar-se autônomos); autoridade é conquistada e revogável por evidência; barreira atual classificada como restrição de maturidade vs fundamental; aprovação evolui de micropermissão para mandato | Segurança limita o estado atual, não a ambição final; nada é afrouxado agora — promover uma capacidade exige trabalho de evidência (testes, dry-run, simulação, idempotência, rollback, reconciliação, auditoria). Alterar a própria política é o ato mais protegido. Ver [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) |
+| Identidade única + proatividade cognitiva (ago/2026) | Uma só identidade conversacional (Anima); programação/pesquisa/arquitetura/reflexão são capacidades internas roteadas pelo Anima; a proatividade cognitiva (`observar → lembrar → relacionar → refletir → projetar → conversar sobre o futuro`) pertence ao Anima, não a uma persona Prisma | Reafirma e nomeia o reposicionamento do Prisma (§1a, Marco 001); proatividade cognitiva ≠ autonomia operacional espontânea. Ver [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) |
+| local-first != local-only (ago/2026) | Prefere capacidades locais quando suficientes, mas usa modelos/ferramentas externos enquanto forem mais capazes; providers (Ollama/OpenAI/Anthropic/outros) são substituíveis; o núcleo preserva memória, contexto, governança e orquestração independentemente do provider | O fluxo externo atual (ChatGPT/Claude/Codex) é arquitetura de transição; provider é decisão de capacidade e política, nunca identidade. Ver [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) |
+| Separação de contextos de chat — direção (ago/2026) | Direção conceitual de separar o chat principal (vida/memória) do contexto de Desenvolvimento/Projetos (repos/work items/diffs/revisão), sem separar a identidade; UX final deliberadamente em aberto | Serve a contexto, memória de trabalho, segurança, permissões, custo e UX; primeiro passo defensivo já existe (`developmentMode` + allowlist). Não concluir a UX por conta própria — é decisão de produto. Ver [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) |
 
 ---
 

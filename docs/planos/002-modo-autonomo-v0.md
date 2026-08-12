@@ -1,5 +1,53 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — ratificação da autonomia progressiva (2026-08-12)
+
+O [Marco 005 — Autonomia Progressiva e Identidade Una](../marcos/005-autonomia-progressiva-e-identidade-una.md)
+reenquadra este plano sem alterar nenhuma proteção vigente e sem autorizar
+nenhum efeito novo. Ele torna canônica a distinção entre:
+
+- **restrição fundamental** — continua exigindo decisão humana porque ainda não
+  foi definida ou é intrinsecamente do criador da instância;
+- **restrição de maturidade** — queremos automatizar, mas ainda falta evidência
+  de segurança suficiente. Não é teto; é dívida de evidência.
+
+Sob essa luz, os "Limites da primeira versão" do
+[Marco 003](../marcos/003-trabalho-autonomo-seguro.md) e a "Execução separada de
+integração" (INT-03) **permanecem vigentes como estado atual**, mas passam a ser
+lidos como **restrições de maturidade**, não tetos permanentes. Nada é afrouxado
+aqui: a separação entre produzir e integrar continua obrigatória; o que evolui por
+evidência é **quem/como** autoriza cada fato distinto.
+
+**Classificação das fronteiras atualmente bloqueadas por humano:**
+
+| Fronteira | Estado | Classificação |
+|---|---|---|
+| criação real de review request (PR) | contrato puro, sem provider/efeito (ADR-002) | maturidade |
+| `merged`/`integrated` (merge/apply) | sem caminho alcançável; nova autorização humana | maturidade |
+| deploy | fora do V0 | maturidade |
+| Reviewer/Verifier independente automatizado | revisão hoje é humana | maturidade |
+| habilitar efeito Git externo por config do operador | ato explícito do operador (não payload) | maturidade (config, não teto) |
+| alterar a própria política de segurança | processo reforçado exigido | **fundamental** — o ato mais protegido |
+| criar uma superfície de UI de auto-desenvolvimento | decisão de produto (ver prova 2026-08-11) | **fundamental** — não definida |
+
+**Consequência operacional.** Ao encontrar uma capacidade bloqueada por política,
+o trabalho deve **classificá-la** e, se for de maturidade, escolher **trabalho
+seguro que aumente evidência** — testes, dry-run, simulações, idempotência,
+rollback, reconciliação, validação independente, auditabilidade, recuperação,
+provas controladas — **em vez de** remover a proteção. Promover um estágio do
+ciclo de programação (ver [`anima-prd.md`](../../anima-prd.md) §1f.1) é acumular
+essa evidência, não relaxar o gate.
+
+**Aprovação como mandato.** A direção ratificada é o usuário expressar intenção de
+alto nível e o sistema derivar um **mandato/envelope** (escopo, contratos,
+invariantes, limites, gates, condições de parada e escalonamento), impedindo
+automaticamente o que estiver fora dele. A fundação já materializa parte disso
+(`execution_spec`, elegibilidade pura do AUTO-01, permissões declaradas, limites,
+gates); o Supervisor é o candidato natural a **autor do mandato**, e Executor e
+Reviewer permanecem papéis **separáveis** que a arquitetura não deve assumir como
+sempre o mesmo provider (Marco 005 §8–9). Nenhuma mudança de contrato ou schema é
+autorizada por esta seção — ela registra direção e reclassifica fronteiras.
+
 ## Continuação — distinção entre início manual e Supervisor (2026-08-11)
 
 A prova viva pós-correção confirmou `capability = programming` para uma tarefa

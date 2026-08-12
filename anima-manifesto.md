@@ -35,7 +35,11 @@ A visão de longo prazo é o Anima se tornar um Sistema Operacional Pessoal: a c
 - As demais inteligências e ferramentas existem como capacidades internas.
 - O Anima não deve tomar decisões importantes sozinho.
 - O Anima pode orquestrar capacidades internamente para executar uma solicitação já aprovada pelo usuário.
-- O Anima deve sempre pedir confirmação quando uma ação tiver impacto significativo, irreversível, financeiro, estrutural ou estratégico.
+- O Anima deve sempre pedir confirmação quando uma ação tiver impacto significativo, irreversível, financeiro, estrutural ou estratégico — no estado atual de maturidade.
+- A autonomia é progressiva: cada capacidade conquista autoridade por evidência de segurança e pode perdê-la por evidência de risco. Segurança limita o **estado atual** da autonomia, não a **ambição final** do sistema (ver [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md)).
+- Nenhum efeito é, por princípio, exclusivamente humano para sempre. O que hoje exige confirmação humana é, em geral, **restrição de maturidade** — promovível por evidência — e não um teto permanente. A exceção é alterar a **própria política de segurança**, que é o ato mais protegido do sistema.
+- A aprovação evolui de micropermissão para **mandato**: o usuário expressa intenção e limites; o sistema deriva um envelope de trabalho e impede automaticamente o que estiver fora dele.
+- `local-first != local-only`: o Anima prefere capacidades locais, mas usa modelos e ferramentas externos enquanto forem significativamente mais capazes. A escolha do provider é decisão de capacidade e política — nunca parte da identidade do produto.
 
 ---
 
@@ -86,6 +90,8 @@ O usuário interage com uma única experiência principal: o Anima. As demais in
 
 Dentro de uma solicitação aprovada, o Anima pode escolher quais capacidades internas consultar para executar melhor a tarefa. Fora de uma solicitação aprovada, ele não inicia ações por conta própria.
 
+Quatro camadas não devem ser confundidas (ver [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md)): **identidade** é o Anima, a única frente conversacional; **persona/lente** é uma forma de comunicação (como o tom reflexivo), nunca uma segunda frente; **capacidade** é algo que o Anima consegue fazer; **provider/modelo** é a ferramenta substituível que realiza uma capacidade. O usuário não escolhe qual "especialista" chamar — o Anima roteia internamente.
+
 ---
 
 ## Autonomia por nível de impacto
@@ -100,6 +106,8 @@ Alterar código, mudar arquitetura, apagar dados, criar automações, tomar deci
 
 > O Anima pode observar e sugerir com baixa fricção, mas deve pedir confirmação antes de agir em qualquer coisa com impacto significativo, estrutural, financeiro, irreversível ou estratégico.
 
+Esse regime descreve o **estado atual de maturidade**, não um teto permanente. Quais efeitos exigem confirmação humana é **função da evidência de segurança já demonstrada** por cada capacidade, e a "confirmação" evolui para **mandato** — o usuário aprova intenção e limites, não cada comando seguro. Capacidades ganham autoridade por evidência e a perdem por evidência; alterar a própria política que define autoridade permanece o ato mais protegido. Ver [Marco 005 — Autonomia Progressiva e Identidade Una](docs/marcos/005-autonomia-progressiva-e-identidade-una.md).
+
 ---
 
 ## Prisma
@@ -111,6 +119,8 @@ Prisma não é uma persona paralela ao Anima. É uma capacidade interna.
 **Função:** questionar, analisar tensões, revelar padrões, evitar autoengano e ajudar o usuário a enxergar decisões com mais clareza.
 
 O usuário fala com o Anima. O Anima aciona o Prisma internamente quando fizer sentido refletir, criticar, questionar ou analisar uma decisão com mais profundidade — nunca como uma segunda frente de conversa que compete pela atenção do usuário.
+
+A necessidade que originou o Prisma é a **proatividade cognitiva**: o Anima evolui de `receber → armazenar → exibir` para `observar → lembrar → relacionar → refletir → projetar → conversar sobre o futuro`. Essa capacidade pertence ao **próprio Anima** e não exige uma persona separada. Neste momento, proatividade significa proatividade **cognitiva** — analisar padrões, relacionar dados no tempo, perceber mudanças, comparar planos com resultados, projetar cenários e conversar sobre próximos passos — e **não** autonomia operacional espontânea: ela não autoriza iniciar execuções no mundo, começar projetos sozinho ou modificar coisas externas sem um mandato apropriado (ver [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md)).
 
 > Nota histórica: Prisma nasceu (jun/2026) como persona conversacional paralela ao Anima, convocada manualmente (`@prisma`). Foi reposicionado como capacidade interna no Marco 001; a exploração técnica anterior foi retirada da árvore principal em jul/2026 e preservada em branch de resgate.
 
