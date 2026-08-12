@@ -114,6 +114,38 @@ Explicitamente **proibido** sem nova base canônica: liberar autonomia ampla de 
 
 ---
 
+## Correção/continuação (2026-08-12) — hierarquia de interação
+
+Continuação **append-only**: o corpo acima (§5) registrou "preferir caminhos
+semânticos/API" e a interação visual como primeira classe, mas **não explicitou** a
+hierarquia conceitual ratificada. Ela é perpetuada aqui sem alterar §1–§6 e sem
+virar contrato/taxonomia/backlog. Provider-neutral: descreve **níveis de acesso**,
+não fornecedores de inteligência.
+
+**Hierarquia de interação — do mais semântico ao último recurso:**
+
+1. **API / ferramenta nativa** da aplicação ou do sistema (o mais semântico, preciso e auditável);
+2. **shell / filesystem**;
+3. **DOM / árvore de acessibilidade do navegador** (browser);
+4. **automação de UI / árvore de acessibilidade do OS** (ex.: Windows UI Automation);
+5. **visão da tela** (perceber pixels / estrutura visual);
+6. **mouse/teclado bruto por coordenadas** — fallback de última instância.
+
+> **Princípio operacional:** *"não clicar se puder chamar"*. Escolha o nível **mais
+> semântico, preciso, auditável e seguro** que cumpra a tarefa; **desça** na
+> hierarquia **apenas** quando o nível anterior for inadequado ou indisponível.
+> Visão e coordenadas são capacidades **legítimas**, mas **fallback**, não default.
+
+Isto **refina** — não contradiz — o §5: "preferir caminhos semânticos/API" passa a
+ter uma ordem explícita de degradação. As garantias do §4 (evidência observável,
+correlação, auditabilidade, idempotência quando aplicável, fail-closed, anti prompt
+injection, confirmação para efeitos externos/sensíveis) valem **em todos os níveis**;
+quanto mais baixo o nível, maior a exigência de evidência e confirmação. A
+materialização operacional vive na [arquitetura](../arquitetura/orquestracao-de-trabalho.md);
+contrato/taxonomia continuam **em aberto**.
+
+---
+
 ## Referências
 
 - [`../../anima-manifesto.md`](../../anima-manifesto.md) — capacidades internas e autonomia por impacto
