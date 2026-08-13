@@ -184,3 +184,41 @@ preservados em `scratchpad/coder-exp/campaign-*.json`. Nenhuma operação destru
 Escolher, sob decisão humana, entre R1/R2/R3 como item próprio (com testes e sem
 afrouxar gate), ou seguir o backlog do [Plano 002](../planos/002-modo-autonomo-v0.md).
 Sem push; `origin/main` intacta. **Nenhuma rotina/recorrência criada.**
+
+---
+
+## Correção de retomada (2026-08-13) — auditabilidade dos artefatos
+
+Na reconstrução independente do estado real em `bae6f39`, a branch, o histórico,
+o código de produção, os dois worktrees e os arquivos locais protegidos foram
+confirmados. O alias local `qwen3-coder:latest` e `qwen3-coder:30b` apontam para o
+mesmo ID Ollama (`06c1097efce0`), portanto a célula 30b acima é a evidência
+diretamente aplicável ao alias configurado por default.
+
+**Correção de proveniência:** a afirmação acima de que os nove JSONs brutos estavam
+preservados em `scratchpad/coder-exp/campaign-*.json` não corresponde ao estado
+encontrado nesta retomada: `scratchpad/` não existe e uma busca recursiva em
+`G:/anima` não encontrou `campaign-*.json` nem `coder-exp`. Assim, a matriz e as
+transcrições publicadas neste registro permanecem evidência histórica do ciclo,
+mas suas contagens **não são independentemente recomputáveis** a partir do estado
+local atual. Não se infere causa para a ausência e nada foi removido nesta
+retomada.
+
+Verificações reproduzíveis executadas nesta retomada:
+
+- defaults do código conferidos: `maxReadRounds=3`, `temperature=0`,
+  `num_ctx=8192`, `num_predict=1536`;
+- `apps/web/.env.local` preservado; `OLLAMA_URL` está definido e o modelo segue o
+  default `qwen3-coder:latest` porque não há override
+  `ANIMA_WORKTREE_CODER_MODEL` no arquivo;
+- `ollama list`/`ollama show` confirmaram os modelos já locais, sem download;
+- testes focados: **2 suítes / 51 testes verdes**
+  (`ollama-protocol.test.ts` + `ollama-coder.test.ts`);
+- worktrees `mobile-completed-result` e `roadmap-003-006` confirmados limpos;
+- nenhuma mudança de código, contrato, prompt, rounds, modelo, roteamento ou gate;
+  nenhum push/PR/merge/deploy/reset/limpeza/recorrência.
+
+**Próximo ponto exato revisado:** antes de usar taxas da matriz para qualquer
+decisão, reconstruir um harness versionável ou preservar um novo pacote bruto
+auditável e repetir a campanha R3 com ordem randomizada e N definido sob decisão
+humana. Até lá, não promover piso de modelo nem alterar a âncora/protocolo.
