@@ -403,6 +403,17 @@ o item de outra conta é invisível e recusado. Nenhum push contra remote extern
 foi executado nesta linha — a fiação foi provada contra remote bare local, com
 `origin/main` intacta. A criação de review request permanece a próxima fronteira humana.
 
+O **substrato de persistência** do próximo fato do protocolo
+(`branch_published → review_request_created`) já existe, **fail-closed e pronto
+para revisão (NÃO ratificado)** (2026-08-13): migration + RPC
+`record_review_request_created` (exige `branch_published` prévia e amarra o receipt
+de review ao de branch), projeção pura `projectReviewRequestReceipt` e orquestração
+`createAndPersistReviewRequest` com provider **injetado**. Espelha a fase 2 do
+branch; a **fase 3** — fiar um `ReviewRequestProvider` real (GitHub) que crie o PR —
+é o **primeiro efeito externo** e continua exigindo autorização humana. Sem provider
+real, o fato `review_request_created` é inalcançável em produção. Detalhes no
+[registro](docs/registros/2026-08-13-substrato-review-request.md).
+
 O [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md)
 já possui implementação incremental registrada no
 [Plano 002 — Modo Autônomo V0](docs/planos/002-modo-autonomo-v0.md). As fases
@@ -457,7 +468,7 @@ O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou q
 | revisar | **humana** hoje; Reviewer/Verifier independente automatizado é futuro | maturidade |
 | commit (branch descartável) | feito na worktree, nunca aplicado | — |
 | publicar branch | maduro, atrás de configuração explícita do operador (ADR-002) | maturidade (efeito habilitado por config, não por payload) |
-| criar PR (review request) | contrato puro; **sem** provider/efeito | maturidade |
+| criar PR (review request) | contrato puro **+ persistência fail-closed** (2026-08-13, pronto p/ revisão, não ratificado); **sem** provider/efeito externo | maturidade |
 | integrar / merge / deploy | **sem** caminho alcançável; exige nova autorização humana | maturidade |
 | alterar a própria política de segurança | exige processo reforçado (isolamento, testes adversariais, replay/simulação, revisão independente, auditabilidade, rollback, rollout gradual, observabilidade, limites explícitos, revogação automática) | **maturidade de grau máximo** — o ato mais protegido, não teto eterno ([Marco 006](docs/marcos/006-politica-de-seguranca-como-maturidade-maxima.md)) |
 
