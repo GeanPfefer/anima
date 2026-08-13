@@ -1,0 +1,76 @@
+# Harness de evidência do coder local (R3)
+
+Harness **versionável e recomputável** que mede a capacidade dos modelos locais
+(via `OllamaCoderBackend`) por classe de tarefa, reconstruindo de forma auditável
+a campanha do registro
+[`2026-08-12-campanha-coder-e-hierarquia-interacao.md`](../../docs/registros/2026-08-12-campanha-coder-e-hierarquia-interacao.md).
+
+## Por que existe
+
+A campanha anterior rodou por **cópias descartáveis no scratchpad**; os JSONs
+brutos **sumiram** e a matriz publicada deixou de ser recomputável (correção de
+proveniência registrada em 2026-08-13). Este diretório fecha essa lacuna: o
+harness é código versionado que **exercita a classe de produção sem modificá-la**
+e pode ser re-executado a qualquer momento; cada execução preserva um pacote
+bruto auditável (`runs/<stamp>/`).
+
+## Garantias (o que este harness NÃO faz)
+
+- **Não modifica** `apps/web/lib/work-orchestration/ollama-coder.ts` nem
+  `ollama-protocol.ts` — importa os módulos de produção por caminho relativo.
+  O único ajuste é um *resolve-hook* de import ([`resolve-ts.mjs`](resolve-ts.mjs))
+  que só afeta a resolução deste harness standalone; produção (Next.js/Jest)
+  continua com o próprio resolvedor e o mesmo código-fonte, byte a byte.
+- **Config de produção** vem dos *defaults do construtor* (não reescrevemos):
+  `maxReadRounds=3`, `num_ctx=8192`, `num_predict=1536`, `temperature=0`.
+- **Não altera** contrato, prompt, rounds, modelo, roteamento ou gates; **não
+  promove** piso de modelo; **não toca** o repositório fora deste diretório.
+- Sem rede externa além do **Ollama local**. O `fetchImpl` é um **observador**
+  que faz *tee* do fetch real (clona a resposta para medir) sem alterar o payload.
+
+## Como rodar
+
+Requer Node 24+ e Ollama local com os modelos já presentes.
+
+```bash
+node --experimental-transform-types \
+  --import ./tools/coder-evidence/register.mjs \
+  tools/coder-evidence/harness.ts \
+  --reps 8 \
+  --models qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3-coder:30b
+```
+
+Flags: `--reps N` (repetições por célula), `--models a,b,c`, `--classes ...`
+(subconjunto das 7 classes), `--seed S` (ordem reprodutível), `--out <dir>`.
+
+## O que mede
+
+Desfecho **primário** por execução: o host **aceitou** a edição ou **falhou**
+(com o código específico do protocolo — `ollama_read_round_limit`,
+`ollama_ambiguous_replacement`, `ollama_invalid_response_schema`, etc.). Métrica
+**secundária**: `achieved` — a mudança pretendida ocorreu de fato (predicado
+semântico da fixture). Além disso: nº e padrão de leituras, rodada da edição e
+orçamento restante nela, ocorrências de cada `before` no arquivo original
+(unicidade da âncora), caminhos tocados, durações e contagens de tokens do Ollama.
+
+Saída em `runs/<stamp>/`: `meta.json` (config + `/api/tags`), `raw.jsonl` (uma
+linha de métricas por execução), `matrix.json` e `matrix.md` (agregado por célula).
+
+## Método e limitações
+
+- **Ordem randomizada** (class × rep) por seed **dentro de cada bloco de modelo**;
+  blocos de modelo ficam contíguos para não recarregar a VRAM a cada execução
+  (18 GB do 30b não coexistem com os demais). Isso remove o viés de *warmup* por
+  cenário (hipótese H3 do registro) sem *thrash* de VRAM.
+- **N igual por célula** — corrige a crítica de reps desiguais da campanha
+  anterior; ainda assim, com poucas reps a estocasticidade a `temperature=0`
+  (batching/GPU) impede afirmar taxas exatas.
+- **Fixtures são proxies sintéticos** pequenos, não o repositório real — não
+  reproduzem o volume/estrutura do alvo autônomo real.
+- `raw.jsonl` guarda **métricas derivadas**, não transcrições integrais do modelo
+  (tamanho/ruído); a auditabilidade vem da recomputabilidade (re-rodar) somada às
+  métricas. As fixtures são sintéticas, sem segredos.
+
+Enquanto a evidência não for reconstruída com N estatístico em alvo realista,
+**não se promove piso de modelo nem se altera a âncora/protocolo** — decisão
+humana, conforme o registro.

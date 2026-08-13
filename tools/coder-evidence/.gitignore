@@ -1,0 +1,3 @@
+# Execuções da campanha por padrão não são versionadas (evita bloat). A execução
+# preservada como pacote bruto auditável é adicionada explicitamente com `git add -f`.
+runs/

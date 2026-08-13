@@ -1,0 +1,207 @@
+{
+  "config": {
+    "startedAt": "2026-08-13T21:20:48.609Z",
+    "node": "v24.16.0",
+    "ollamaUrl": "http://127.0.0.1:11434",
+    "ollamaVersion": "0.32.9",
+    "models": [
+      "qwen2.5-coder:7b",
+      "qwen2.5-coder:14b",
+      "qwen3-coder:30b"
+    ],
+    "classes": [
+      "single_min",
+      "multi_locate",
+      "indent_nested",
+      "multiline_before",
+      "create_new",
+      "structural_add",
+      "cleanup"
+    ],
+    "reps": 8,
+    "seed": 20260813,
+    "productionConfig": "defaults do construtor (maxReadRounds=3, num_ctx=8192, num_predict=1536, temperature=0)",
+    "note": "ordem randomizada por seed DENTRO de cada bloco de modelo (blocos contíguos para não recarregar a VRAM); fixtures são proxies sintéticos."
+  },
+  "finishedAt": "2026-08-13T21:41:46.741Z",
+  "cells": [
+    {
+      "model": "qwen2.5-coder:7b",
+      "class": "structural_add",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen2.5-coder:7b",
+      "class": "single_min",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen2.5-coder:7b",
+      "class": "create_new",
+      "total": 8,
+      "accepted": 0,
+      "achieved": 0,
+      "codes": {
+        "ollama_read_round_limit": 8
+      }
+    },
+    {
+      "model": "qwen2.5-coder:7b",
+      "class": "multiline_before",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen2.5-coder:7b",
+      "class": "indent_nested",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen2.5-coder:7b",
+      "class": "multi_locate",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen2.5-coder:7b",
+      "class": "cleanup",
+      "total": 8,
+      "accepted": 0,
+      "achieved": 0,
+      "codes": {
+        "ollama_ambiguous_replacement": 8
+      }
+    },
+    {
+      "model": "qwen2.5-coder:14b",
+      "class": "create_new",
+      "total": 8,
+      "accepted": 0,
+      "achieved": 0,
+      "codes": {
+        "ollama_invalid_response_schema": 8
+      }
+    },
+    {
+      "model": "qwen2.5-coder:14b",
+      "class": "structural_add",
+      "total": 8,
+      "accepted": 0,
+      "achieved": 0,
+      "codes": {
+        "ollama_ambiguous_replacement": 8
+      }
+    },
+    {
+      "model": "qwen2.5-coder:14b",
+      "class": "indent_nested",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen2.5-coder:14b",
+      "class": "multi_locate",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen2.5-coder:14b",
+      "class": "cleanup",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen2.5-coder:14b",
+      "class": "multiline_before",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen2.5-coder:14b",
+      "class": "single_min",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen3-coder:30b",
+      "class": "create_new",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen3-coder:30b",
+      "class": "cleanup",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen3-coder:30b",
+      "class": "single_min",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen3-coder:30b",
+      "class": "multi_locate",
+      "total": 8,
+      "accepted": 0,
+      "achieved": 0,
+      "codes": {
+        "ollama_ambiguous_replacement": 8
+      }
+    },
+    {
+      "model": "qwen3-coder:30b",
+      "class": "indent_nested",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen3-coder:30b",
+      "class": "structural_add",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    },
+    {
+      "model": "qwen3-coder:30b",
+      "class": "multiline_before",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {}
+    }
+  ]
+}
