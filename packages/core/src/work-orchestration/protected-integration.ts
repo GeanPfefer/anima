@@ -55,6 +55,11 @@ export interface ReviewRequestReceipt {
   readonly kind:'review_request';readonly receiptId:string;readonly idempotencyKey:string;readonly providerId:string;readonly repositoryId:string;
   readonly remoteName:string;readonly reviewId:string;readonly reviewReference:string;readonly state:'open';readonly sourceBranch:string;readonly sourceCommitSha:string;readonly baseBranch:string;readonly verifiedBaseSha:string;readonly disposition:'created'|'already_existed';
 }
+export function parseReviewRequestReceipt(value:Json|undefined):ReviewRequestReceipt|null{
+  const row=objectValue(value);if(!row)return null;
+  const receipt:ReviewRequestReceipt={kind:row.kind as 'review_request',receiptId:row.receiptId as string,idempotencyKey:row.idempotencyKey as string,providerId:row.providerId as string,repositoryId:row.repositoryId as string,remoteName:row.remoteName as string,reviewId:row.reviewId as string,reviewReference:row.reviewReference as string,state:row.state as 'open',sourceBranch:row.sourceBranch as string,sourceCommitSha:row.sourceCommitSha as string,baseBranch:row.baseBranch as string,verifiedBaseSha:row.verifiedBaseSha as string,disposition:row.disposition as 'created'|'already_existed'};
+  return nonBlank(receipt.receiptId)&&nonBlank(receipt.idempotencyKey)&&nonBlank(receipt.providerId)&&nonBlank(receipt.repositoryId)&&safeRef(receipt.remoteName)&&nonBlank(receipt.reviewId)&&nonBlank(receipt.reviewReference)&&receipt.state==='open'&&safeRef(receipt.sourceBranch)&&SHA.test(receipt.sourceCommitSha)&&safeRef(receipt.baseBranch)&&SHA.test(receipt.verifiedBaseSha)&&(receipt.disposition==='created'||receipt.disposition==='already_existed')&&receipt.kind==='review_request'?receipt:null;
+}
 
 export type ProtectedIntegrationState=
   |{readonly status:'integration_authorized';readonly request:ProtectedIntegrationRequest}
@@ -82,6 +87,14 @@ export function projectBranchPublicationReceipt(events:readonly WorkEvent[],requ
   if(matching.length!==1)return fail('receipt_conflict','Mais de um fato branch_published foi encontrado para o item.');
   const event=matching[0]!;const payload=objectValue(event.payload);const data=objectValue(payload?.data);const receipt=parseBranchPublicationReceipt(data?.receipt);
   if(event.author!=='system'||event.proposalVersion!==request.correlation.approvedProposalVersion||payload?.schema_version!==1||data?.authorization_decision_id!==request.authorizationDecisionId||data?.accepted_result_event_id!==request.acceptedResultEventId||data?.attempt_id!==request.correlation.attemptId||receipt===null||!validBranchReceipt(request,receipt))return fail('receipt_mismatch','O fato branch_published persistido não corresponde à autorização, resultado, tentativa, versão e target esperados.');
+  return{ok:true,value:receipt};
+}
+export function projectReviewRequestReceipt(events:readonly WorkEvent[],request:ProtectedIntegrationRequest):ProtectedIntegrationResult<ReviewRequestReceipt|null>{
+  const matching=events.filter(event=>event.type==='review_request_created'&&event.workItemId===request.correlation.workItemId);
+  if(matching.length===0)return{ok:true,value:null};
+  if(matching.length!==1)return fail('receipt_conflict','Mais de um fato review_request_created foi encontrado para o item.');
+  const event=matching[0]!;const payload=objectValue(event.payload);const data=objectValue(payload?.data);const receipt=parseReviewRequestReceipt(data?.receipt);
+  if(event.author!=='system'||event.proposalVersion!==request.correlation.approvedProposalVersion||payload?.schema_version!==1||data?.authorization_decision_id!==request.authorizationDecisionId||data?.accepted_result_event_id!==request.acceptedResultEventId||data?.attempt_id!==request.correlation.attemptId||receipt===null||!validReviewReceipt(request,receipt))return fail('receipt_mismatch','O fato review_request_created persistido não corresponde à autorização, resultado, tentativa, versão e target esperados.');
   return{ok:true,value:receipt};
 }
 export function recordReviewRequestCreated(state:ProtectedIntegrationState,receipt:ReviewRequestReceipt):ProtectedIntegrationResult<ProtectedIntegrationState>{
