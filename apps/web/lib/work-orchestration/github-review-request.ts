@@ -48,6 +48,10 @@ export interface GitHubApiConfig {
   readonly token: string;
   /** Injeção do transporte; por padrão o fetch global. */
   readonly fetchImpl?: typeof fetch;
+  /** Bound server-side por chamada. Uma resposta pendurada do provider falha
+   * fechado (provider_unavailable, retryável) em vez de consumir todo o
+   * maxDuration da rota. Composto com o signal injetado; padrão 30s. */
+  readonly timeoutMs?: number;
 }
 
 const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
@@ -120,14 +124,21 @@ export class GitHubReviewRequestProvider implements ReviewRequestProvider {
     };
   }
 
-  /** Uma chamada à API. Erros de rede viram provider_unavailable; a resposta crua
-   * (status + json) volta para o chamador mapear por status. NÃO decide efeito. */
+  /** Compõe o signal injetado com um timeout server-side por chamada, para que uma
+   * resposta pendurada do provider aborte de forma limitada e determinística. */
+  private callSignal(signal?: AbortSignal): AbortSignal {
+    const timeout = AbortSignal.timeout(this.config.timeoutMs ?? 30_000);
+    return signal ? AbortSignal.any([signal, timeout]) : timeout;
+  }
+
+  /** Uma chamada à API. Erros de rede/timeout viram provider_unavailable; a resposta
+   * crua (status + json) volta para o chamador mapear por status. NÃO decide efeito. */
   private async call(method: 'GET' | 'POST', path: string, body: unknown, signal?: AbortSignal): Promise<{ status: number; json: unknown }> {
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.apiBaseUrl}${path}`, {
         method,
-        signal,
+        signal: this.callSignal(signal),
         headers: { ...this.headers(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });

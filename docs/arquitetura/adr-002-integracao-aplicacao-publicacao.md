@@ -397,6 +397,10 @@ Endurecimentos desta fase (todos com teste de regressão):
   autorização é persistida antes do efeito e o ciclo mutativo não pode ser
   abortado no meio por desconexão do cliente (efeito possível + nada persistido =
   ambiguidade).
+- **Timeout server-side por chamada** no provider do GitHub (composto com o signal
+  injetado; padrão 30s): uma resposta pendurada falha fechado e rápido
+  (`provider_unavailable`, retryável) em vez de consumir todo o `maxDuration` da
+  rota — modo de falha observável para a futura primeira execução externa.
 
 **Prova end-to-end LOCAL sem efeito externo** (`review-request-chain.integration.test.ts`):
 o grafo exato que a rota constrói — `GitHubReviewRequestProvider` envolvendo o

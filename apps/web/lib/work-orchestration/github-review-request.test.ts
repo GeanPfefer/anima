@@ -58,6 +58,7 @@ describe('GitHubReviewRequestProvider — criação idempotente (create-or-get)'
 describe('GitHubReviewRequestProvider — mapeamento de erros HTTP',()=>{
   test.each([[401,'not_authorized'],[403,'not_authorized'],[404,'repository_not_found'],[409,'conflict'],[429,'rate_limited'],[500,'provider_unavailable'],[502,'provider_unavailable']] as const)('GET %i → %s',async(status,code)=>{const{fetchImpl}=mockFetch(()=>({status,body:{}}));await expect(make(fetchImpl).inspectReviewRequest(request(),branchReceipt)).rejects.toMatchObject({code});});
   test('erro de rede vira provider_unavailable',async()=>{const fetchImpl=(async()=>{throw new Error('ECONNREFUSED');})as unknown as typeof fetch;await expect(make(fetchImpl).inspectReviewRequest(request(),branchReceipt)).rejects.toMatchObject({code:'provider_unavailable'});});
+  test('resposta pendurada aborta pelo timeout server-side → provider_unavailable',async()=>{const hanging=((_url:string,init:{signal?:AbortSignal})=>new Promise<Response>((_res,rej)=>{init.signal?.addEventListener('abort',()=>rej(new DOMException('aborted','AbortError')));}))as unknown as typeof fetch;const provider=new GitHubReviewRequestProvider(branchProvider(),{apiBaseUrl:'https://api.github.test',token:'tok',fetchImpl:hanging,timeoutMs:20});await expect(provider.inspectReviewRequest(request(),branchReceipt)).rejects.toMatchObject({code:'provider_unavailable'});},5_000);
 });
 
 describe('githubReviewRequestConfigFromEnvironment — fail-closed',()=>{
