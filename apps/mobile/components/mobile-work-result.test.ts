@@ -28,13 +28,14 @@ describe('apresentação do resultado no cartão mobile', () => {
       accessibilityLabel: 'Resultado aceito', title: 'Resultado aceito · v3 · executor',
       summary: expect.stringContaining('Correção entregue'), references: 'commit:abc123, artifact:qa',
       validations: 'typecheck mobile — passou; teste físico — falhou', limitations: 'sem teste offline',
+      handoff: 'runner-bundle:mobile',
       completionMessage: expect.stringContaining('evidências preservadas'),
     });
   });
 
   test('declara ausências opcionais sem crash', () => {
-    const content = presentMobileWorkResult(presentation('completed', { acceptedResult: { ...result, references: [], validations: null, limitations: null } }));
-    expect(content).toMatchObject({ references: 'nenhuma referência informada', validations: 'nenhuma validação registrada', limitations: 'nenhuma limitação declarada' });
+    const content = presentMobileWorkResult(presentation('completed', { acceptedResult: { ...result, references: [], validations: null, limitations: null, handoffReference: null } }));
+    expect(content).toMatchObject({ references: 'nenhuma referência informada', validations: 'nenhuma validação registrada', limitations: 'nenhuma limitação declarada', handoff: 'nenhuma referência de handoff' });
   });
 
   test('completed sem resultado não inventa evidências e expõe a lacuna', () => {

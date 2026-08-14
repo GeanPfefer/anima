@@ -7,6 +7,7 @@ export interface MobileWorkResultContent {
   readonly references: string;
   readonly validations: string;
   readonly limitations: string;
+  readonly handoff: string;
   readonly completionMessage: string | null;
 }
 
@@ -24,6 +25,7 @@ export function presentMobileWorkResult(presentation: WorkPresentation): MobileW
       ? result.validations.map(validation => `${validation.label} — ${describeValidationOutcome(validation.outcome)}`).join('; ')
       : 'nenhuma validação registrada',
     limitations: result.limitations?.length ? result.limitations.join('; ') : 'nenhuma limitação declarada',
+    handoff: result.handoffReference ?? 'nenhuma referência de handoff',
     completionMessage: item.state === 'completed'
       ? 'Resultado aceito e trabalho concluído; evidências preservadas acima.'
       : null,

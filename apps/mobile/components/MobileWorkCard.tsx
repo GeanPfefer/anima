@@ -43,6 +43,7 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
       <Text style={styles.state}>Referências: {shownResult.references}</Text>
       <Text style={styles.state}>Validações: {shownResult.validations}</Text>
       <Text style={styles.state}>Limitações: {shownResult.limitations}</Text>
+      <Text style={styles.state}>Handoff: {shownResult.handoff}</Text>
       {shownResult.completionMessage&&<Text accessibilityLiveRegion="polite" style={styles.completed}>{shownResult.completionMessage}</Text>}
     </View>}
     {missingCompletedResult&&<Text accessibilityRole="alert" style={styles.error}>{missingCompletedResult}</Text>}
