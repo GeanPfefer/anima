@@ -1,4 +1,4 @@
-import {buildProtectedIntegrationRequest,projectBranchPublicationReceipt,projectReviewRequestReceipt,projectIntegrationBoundary,projectWorktreeHandoff,type IntegrationTarget,type ReviewRequestProvider,type WorkEvent}from'@anima/core';
+import {buildProtectedIntegrationRequest,projectBranchPublicationReceipt,projectReviewRequestReceipt,projectIntegrationBoundary,projectWorktreeHandoff,sameReviewReceipt,type IntegrationTarget,type ReviewRequestProvider,type WorkEvent}from'@anima/core';
 import type{Database}from'@anima/types';import type{SupabaseClient}from'@supabase/supabase-js';
 import{createAndPersistReviewRequest,supabaseReviewReceiptPersistence}from'./review-request-operation';
 import{createWorkOrchestrationService}from'./server';
@@ -22,7 +22,7 @@ export async function executeAuthorizedReviewRequest(input:{readonly workItemId:
   const branch=projectBranchPublicationReceipt(events,request);if(!branch.ok)throw new ReviewRequestPrecondition('receipt_projection_conflict',branch.explanation);
   if(branch.value===null)throw new ReviewRequestPrecondition('branch_not_published','A branch precisa estar publicada e persistida antes do review request.');
   const persisted=projectReviewRequestReceipt(events,request);if(!persisted.ok)throw new ReviewRequestPrecondition('receipt_projection_conflict',persisted.explanation);
-  if(persisted.value){const observed=await input.provider.inspectReviewRequest(request,branch.value,input.signal);if(observed===null)throw new ReviewRequestPrecondition('remote_drift','O review request persistido não existe mais no provider.');return{status:'already_persisted' as const,request,receipt:persisted.value,observed};}
+  if(persisted.value){const observed=await input.provider.inspectReviewRequest(request,branch.value,input.signal);if(observed===null)throw new ReviewRequestPrecondition('remote_drift','O review request persistido não existe mais no provider.');if(!sameReviewReceipt(persisted.value,observed))throw new ReviewRequestPrecondition('remote_drift','O review request observado no provider diverge do persistido (identidade/referência).');return{status:'already_persisted' as const,request,receipt:persisted.value,observed};}
   const outcome=await createAndPersistReviewRequest(request,branch.value,input.provider,input.persist,input.signal);return{status:'created' as const,request,...outcome};
 }
 

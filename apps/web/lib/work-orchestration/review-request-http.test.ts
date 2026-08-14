@@ -68,6 +68,20 @@ describe('runAuthorizedReviewRequest', () => {
     expect(p.createReviewRequest).not.toHaveBeenCalled();
     expect(persist).not.toHaveBeenCalled();
   });
+  test('review persistido some e OUTRO PR ocupa a branch → 409 remote_drift, sem criar nem persistir', async () => {
+    // O PR #7 persistido foi fechado; um PR #8 ocupa a mesma branch@commit→base.
+    // A inspeção devolve um receipt válido, porém com identidade divergente. A
+    // liveness precisa falhar fechado: o fato persistido não descreve mais a
+    // realidade, e a resposta não pode afirmar que #7 segue aberto.
+    const persist = jest.fn();
+    const divergent: ReviewRequestReceipt = { ...reviewReceipt(), reviewId: '8', reviewReference: 'https://github.com/anima/repo/pull/8', disposition: 'already_existed' };
+    const p = provider({ inspectReviewRequest: jest.fn().mockResolvedValue(divergent), createReviewRequest: jest.fn() });
+    const result = await run({ readEvents: async () => [...withBranch(), reviewCreated()], provider: p, persist });
+    expect(result.status).toBe(409);
+    expect((result.body as { error: { code: string } }).error.code).toBe('remote_drift');
+    expect(p.createReviewRequest).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
+  });
   test('autorização ausente (log vazio) → 404, sem chamar o provider', async () => {
     const p = provider();
     const result = await run({ readEvents: async () => [], provider: p });
