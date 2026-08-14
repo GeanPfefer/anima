@@ -2,7 +2,7 @@ import type { Json } from '@anima/types';
 import type { WorkEvent, WorkItem, WorkResultValidation, WorkResultValidationOutcome } from './types';
 import { HUMAN_INTERRUPTION_REASONS, type HumanInterruptionReason } from './human-interruption';
 import { projectIntegrationBoundary, type WorkIntegrationDecision } from './integration-decision';
-import {parseBranchPublicationReceipt} from './protected-integration';
+import {parseBranchPublicationReceipt,parseReviewRequestReceipt} from './protected-integration';
 
 // null distingue "não informado" de lista vazia: a UI deve declarar a ausência
 // explicitamente, nunca preencher o vazio com o texto livre do autor.
@@ -59,11 +59,15 @@ export interface WorkDecisionProjection {
   readonly checkpointReference:string;
 }
 export interface WorkIntegrationProjection {
-  readonly status:'awaiting_decision'|'authorized'|'branch_published'|'refused';
+  readonly status:'awaiting_decision'|'authorized'|'branch_published'|'review_request_created'|'refused';
   readonly acceptedResultEventId:string;
   readonly decision:WorkIntegrationDecision|null;
   readonly availableDecisions:readonly WorkIntegrationDecision[];
   readonly publication?:{readonly repositoryId:string;readonly remoteName:string;readonly remoteBranch:string;readonly commitSha:string}|null;
+  // Estado posterior do protocolo: review request (PR) criado e persistido.
+  // Só é preenchido quando o fato review_request_created existe e casa a
+  // autorização; nunca afirma merge ou integração.
+  readonly reviewRequest?:{readonly repositoryId:string;readonly remoteName:string;readonly reviewReference:string;readonly reviewId:string;readonly sourceBranch:string;readonly sourceCommitSha:string;readonly baseBranch:string}|null;
 }
 export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly integration?:WorkIntegrationProjection|null; }
 
@@ -151,7 +155,16 @@ export function projectWorkIntegration(item:WorkItem,events:readonly WorkEvent[]
   if(boundary.status==='result_accepted')return{status:'awaiting_decision',acceptedResultEventId:acceptance.acceptedResultEventId,decision:null,availableDecisions:['authorize','refuse'],publication:null};
   if(boundary.status==='integration_authorized'){
     const decision=boundary.integrationDecision!;
-    for(let index=events.length-1;index>=0;index--){const event=events[index]!;if(event.type!=='branch_published'||event.author!=='system'||event.proposalVersion!==item.proposalVersion)continue;const data=eventData(event),receipt=parseBranchPublicationReceipt(data?.receipt);if(receipt&&data?.authorization_decision_id===decision.decisionId&&data?.accepted_result_event_id===acceptance.acceptedResultEventId&&data?.attempt_id===boundary.correlation.attemptId&&receipt.idempotencyKey===`integration-publication:${decision.decisionId}:${receipt.commitSha}:branch`)return{status:'branch_published',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'authorize',availableDecisions:[],publication:{repositoryId:receipt.repositoryId,remoteName:receipt.remoteName,remoteBranch:receipt.remoteBranch,commitSha:receipt.commitSha}};}
+    let publication:{repositoryId:string;remoteName:string;remoteBranch:string;commitSha:string}|null=null;
+    for(let index=events.length-1;index>=0;index--){const event=events[index]!;if(event.type!=='branch_published'||event.author!=='system'||event.proposalVersion!==item.proposalVersion)continue;const data=eventData(event),receipt=parseBranchPublicationReceipt(data?.receipt);if(receipt&&data?.authorization_decision_id===decision.decisionId&&data?.accepted_result_event_id===acceptance.acceptedResultEventId&&data?.attempt_id===boundary.correlation.attemptId&&receipt.idempotencyKey===`integration-publication:${decision.decisionId}:${receipt.commitSha}:branch`){publication={repositoryId:receipt.repositoryId,remoteName:receipt.remoteName,remoteBranch:receipt.remoteBranch,commitSha:receipt.commitSha};break;}}
+    if(publication){
+      // Estado posterior: review request criado e persistido. Só promove quando o
+      // fato review_request_created casa autor=system, versão, autorização,
+      // resultado aceito, tentativa e a idempotencyKey de review derivada do
+      // commit. Divergência é ignorada e a projeção permanece em branch_published.
+      for(let index=events.length-1;index>=0;index--){const event=events[index]!;if(event.type!=='review_request_created'||event.author!=='system'||event.proposalVersion!==item.proposalVersion)continue;const data=eventData(event),receipt=parseReviewRequestReceipt(data?.receipt);if(receipt&&data?.authorization_decision_id===decision.decisionId&&data?.accepted_result_event_id===acceptance.acceptedResultEventId&&data?.attempt_id===boundary.correlation.attemptId&&receipt.idempotencyKey===`integration-publication:${decision.decisionId}:${receipt.sourceCommitSha}:review`)return{status:'review_request_created',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'authorize',availableDecisions:[],publication,reviewRequest:{repositoryId:receipt.repositoryId,remoteName:receipt.remoteName,reviewReference:receipt.reviewReference,reviewId:receipt.reviewId,sourceBranch:receipt.sourceBranch,sourceCommitSha:receipt.sourceCommitSha,baseBranch:receipt.baseBranch}};}
+      return{status:'branch_published',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'authorize',availableDecisions:[],publication,reviewRequest:null};
+    }
     return{status:'authorized',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'authorize',availableDecisions:[],publication:null};
   }
   if(boundary.status==='integration_refused')return{status:'refused',acceptedResultEventId:acceptance.acceptedResultEventId,decision:'refuse',availableDecisions:[],publication:null};
