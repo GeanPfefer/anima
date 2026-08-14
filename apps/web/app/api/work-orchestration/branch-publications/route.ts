@@ -40,11 +40,20 @@ export async function POST(request: Request) {
   }
 
   const provider = new GitBranchPublicationProvider(configured.repoRoot);
+  // A autorização de integração já está persistida ANTES desta rota; publicar a
+  // branch é efeito mutativo externo (git push). Depois disso, o ciclo NÃO herda o
+  // lifetime do transporte HTTP: abandonar a página ou perder a conexão não
+  // equivale a um pedido humano de cancelamento e não pode abortar o push no meio
+  // (efeito possível + nada persistido = ambiguidade). Mesmo racional de
+  // /supervisor-turn (3c9ac70) e /execute-commanded; a reconciliação
+  // (inspect-antes-de-publicar + idempotência) e a autorização persistida são as
+  // fronteiras reais.
+  const executionSignal = new AbortController().signal;
   const outcome = await runAuthorizedBranchPublicationWithSupabase(client, {
     workItemId,
     target: configured.target,
     provider,
-    signal: request.signal,
+    signal: executionSignal,
   });
   return Response.json(outcome.body, { status: outcome.status });
 }

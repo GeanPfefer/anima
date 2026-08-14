@@ -41,11 +41,19 @@ export async function POST(request: Request) {
   }
 
   const provider = new GitHubReviewRequestProvider(new GitBranchPublicationProvider(configured.repoRoot), githubConfig);
+  // A autorização de integração já está persistida ANTES desta rota; criar o PR é
+  // efeito mutativo externo. Depois disso, o ciclo NÃO herda o lifetime do
+  // transporte HTTP: abandonar a página ou perder a conexão não equivale a um
+  // pedido humano de cancelamento e não pode abortar a criação no meio (efeito
+  // possível + nada persistido = ambiguidade). Mesmo racional de /supervisor-turn
+  // (3c9ac70) e /execute-commanded; a reconciliação (inspect-antes-de-criar +
+  // idempotência) e a autorização persistida são as fronteiras reais.
+  const executionSignal = new AbortController().signal;
   const outcome = await runAuthorizedReviewRequestWithSupabase(client, {
     workItemId,
     target: configured.target,
     provider,
-    signal: request.signal,
+    signal: executionSignal,
   });
   return Response.json(outcome.body, { status: outcome.status });
 }

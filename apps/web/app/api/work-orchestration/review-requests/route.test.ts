@@ -95,3 +95,19 @@ test('desfecho de falha do runner é repassado com o mesmo status', async () => 
   expect(res.status).toBe(404);
   expect(await res.json()).toMatchObject({ ok: false, error: { code: 'not_reviewable' } });
 });
+
+test('cliente desconectado NÃO aborta a operação durável: signal desacoplado do request', async () => {
+  // A autorização de integração já está persistida; criar o PR é efeito mutativo.
+  // Abandonar a página / perder a conexão não pode abortar o POST /pulls no meio
+  // (efeito possível + nada persistido = ambiguidade). Mesmo racional de
+  // /supervisor-turn e /execute-commanded: o ciclo não herda o lifetime do HTTP.
+  createClientMock.mockResolvedValue(authed({ id: 'u' }));
+  const controller = new AbortController();
+  controller.abort();
+  const req = { json: async () => ({ workItemId: WID }), headers: { get: () => null }, signal: controller.signal } as unknown as Request;
+  await POST(req);
+  expect(runMock).toHaveBeenCalledTimes(1);
+  const input = runMock.mock.calls[0][1];
+  expect(input.signal).toBeDefined();
+  expect((input.signal as AbortSignal).aborted).toBe(false);
+});
