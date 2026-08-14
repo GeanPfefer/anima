@@ -59,6 +59,21 @@ const streamingProcess = (stdout: string, exitCode = 0): LocalRunnerProcess => (
   run: async (input) => { for (const line of stdout.split('\n')) input.onLine?.(line); return { exitCode, stderr: '', stdout }; },
 });
 
+test('a task NÃO nomeia arquivos do escopo excluído no prompt (nomeá-los induz o modelo a editá-los)', async () => {
+  // Defeito conhecido do taskFor(): "Fora do escopo: <arquivos>" no prompt fazia
+  // o modelo local fraco tratar um arquivo nomeado como ALVO (plano "Atualizar
+  // test_calculator.py" → iteration_limit). A segurança do escopo é estrutural
+  // (producedPaths ⊆ includedScope, validado no host), não o prompt. O prompt
+  // deve comunicar a allow-list do escopo incluído e NUNCA nomear o excluído.
+  const run = jest.fn().mockResolvedValue({ exitCode: 0, stderr: '', stdout: RESULT_LINE });
+  const req: WorkExecutorRequest = { ...request, includedScope: ['a.py'], excludedScope: ['test_calculator.py', 'deploy/'] };
+  await collect(new LocalRunnerAdapter({ runnerRoot: 'runner', targets, process: { run } }), req);
+  const task = (run.mock.calls[0]![0] as { task: string }).task;
+  expect(task).toContain('a.py'); // a allow-list (escopo incluído) é comunicada
+  expect(task).not.toContain('test_calculator.py'); // nome do excluído jamais no prompt
+  expect(task).not.toContain('deploy/');
+});
+
 test('em stream, o checkpoint vira sinal checkpoint ANTES do terminal, sem virar progresso', async () => {
   const stdout = checkpointLine() + '\n' + RESULT_LINE + '\n';
   const signals = await collect(new LocalRunnerAdapter({ runnerRoot: 'G:\\runner', targets, process: streamingProcess(stdout), emitCheckpoints: true }));

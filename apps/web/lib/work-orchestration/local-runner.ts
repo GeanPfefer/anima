@@ -120,10 +120,17 @@ const terminalInputFrom = (request: WorkExecutorRequest, result: LocalRunnerProc
   };
 };
 
+// A task comunica o limite do escopo pela ALLOW-LIST do escopo incluído — que é
+// exatamente o que o host enforça (producedPaths ⊆ includedScope). NÃO nomeia o
+// escopo excluído: citar um arquivo real na lista "fora do escopo" fazia o modelo
+// local fraco tratá-lo como ALVO e planejar editá-lo (defeito conhecido do INT-04,
+// reproduzido: plano "Atualizar test_calculator.py" → iteration_limit). O escopo
+// excluído continua garantido estruturalmente pela validação de producedPaths, não
+// pelo prompt; removê-lo daqui é correção de implementação, não de contrato.
 const taskFor = (request: WorkExecutorRequest): string => [
   request.objective,
-  `Escopo incluído: ${request.includedScope.join('; ')}.`,
-  `Fora do escopo: ${request.excludedScope.join('; ')}.`,
+  `Edite somente arquivos deste escopo: ${request.includedScope.join('; ')}.`,
+  'Não crie nem edite nenhum arquivo fora desse escopo.',
   `Critérios: ${request.validationCriteria.map(item => item.label).join('; ')}.`,
 ].join('\n');
 
