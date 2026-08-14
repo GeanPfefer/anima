@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-native';
 import { parseWorkResultValidations, type WorkPresentation } from '@anima/core';
-import { decideWork, decideWorkIntegration, reloadWork, requestHostSupervisorTurn, requestProposalCorrection, respondWorkDecision, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
+import { decideWork, decideWorkIntegration, reloadWork, requestHostSupervisorTurn, requestProposalCorrection, requestWorkControl, respondWorkDecision, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
 import { describeMissingCompletedResult, presentMobileWorkResult } from './mobile-work-result';
+import { presentMobileWorkExecution } from './mobile-work-execution';
 
 export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void;focused?:boolean;onFocus?:()=>void}) {
   const {item,latestResult,availableActions}=presentation;
   const shownResult=presentMobileWorkResult(presentation);
   const missingCompletedResult=describeMissingCompletedResult(presentation);
+  const execution=presentation.execution?presentMobileWorkExecution(presentation.execution):null;
+  const [confirmCancel,setConfirmCancel]=useState(false);
   const [detail,setDetail]=useState('');
   const [references,setReferences]=useState('');
   const [validations,setValidations]=useState('');
@@ -21,7 +24,7 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
   // decisão não é reenviada — sem 2º input_provided).
   const [resumeRetry,setResumeRetry]=useState(false);
   const allowed=(action:WorkPresentation['availableActions'][number])=>availableActions.includes(action);
-  async function run(operation:Promise<WorkPresentation>){setBusy(true);setError('');try{onChange(await operation);setMode('none');setDetail('');setReferences('');setValidations('');setLimitations('');}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível atualizar o trabalho.');onChange(await reloadWork(item.id).catch(()=>presentation));}setBusy(false);}
+  async function run(operation:Promise<WorkPresentation>){setBusy(true);setError('');try{onChange(await operation);setMode('none');setConfirmCancel(false);setDetail('');setReferences('');setValidations('');setLimitations('');}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível atualizar o trabalho.');onChange(await reloadWork(item.id).catch(()=>presentation));}setBusy(false);}
   // Responde à decisão e, só quando o efeito é `resume` e o estado persistido é
   // `approved`, pede ao host UMA volta do Supervisor (retomada canônica pelo
   // checkpoint). O mobile não executa nada; relê a projeção persistida.
@@ -43,6 +46,19 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
       {shownResult.completionMessage&&<Text accessibilityLiveRegion="polite" style={styles.completed}>{shownResult.completionMessage}</Text>}
     </View>}
     {missingCompletedResult&&<Text accessibilityRole="alert" style={styles.error}>{missingCompletedResult}</Text>}
+    {execution&&<View accessible accessibilityLabel="Execução autônoma" style={styles.result}>
+      <View style={styles.header}><Text style={styles.label}>Execução autônoma</Text><Text style={styles.state}>{execution.statusLabel}</Text></View>
+      <Text style={styles.state}>{execution.meta}</Text>
+      <Text style={styles.state}>Início: {execution.startedAt}</Text>
+      {execution.limits&&<Text style={styles.state}>Limites: {execution.limits}</Text>}
+      {execution.activity&&<Text accessibilityLiveRegion="polite" style={styles.body}>{execution.activity}</Text>}
+      <Text style={styles.state}>{execution.checkpoint}</Text>
+      {execution.budgetBlock&&<Text style={styles.state}>{execution.budgetBlock}</Text>}
+      {execution.pendingControl&&<Text accessibilityLiveRegion="polite" style={styles.state}>{execution.pendingControl}</Text>}
+      {execution.appliedControl&&<Text style={styles.state}>{execution.appliedControl}</Text>}
+      {execution.canRequestControl&&!confirmCancel&&<View style={styles.actions}>{action('Pausar',()=>void run(requestWorkControl(presentation,'pause')))}{action('Cancelar',()=>setConfirmCancel(true))}</View>}
+      {execution.canRequestControl&&confirmCancel&&<View style={styles.actions}><Text style={styles.body}>Cancelar encerra esta execução no próximo checkpoint seguro. Confirmar?</Text>{action('Confirmar cancelamento',()=>void run(requestWorkControl(presentation,'cancel')))}{action('Voltar',()=>setConfirmCancel(false))}</View>}
+    </View>}
     {presentation.pendingDecision&&<View accessible accessibilityLabel="Decisão necessária" style={styles.result}>
       <Text style={styles.label}>Preciso da sua decisão</Text>
       <Text style={styles.body}>{presentation.pendingDecision.explanation}</Text>
