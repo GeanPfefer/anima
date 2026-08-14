@@ -408,11 +408,24 @@ O **substrato de persistência** do próximo fato do protocolo
 para revisão (NÃO ratificado)** (2026-08-13): migration + RPC
 `record_review_request_created` (exige `branch_published` prévia e amarra o receipt
 de review ao de branch), projeção pura `projectReviewRequestReceipt` e orquestração
-`createAndPersistReviewRequest` com provider **injetado**. Espelha a fase 2 do
-branch; a **fase 3** — fiar um `ReviewRequestProvider` real (GitHub) que crie o PR —
-é o **primeiro efeito externo** e continua exigindo autorização humana. Sem provider
-real, o fato `review_request_created` é inalcançável em produção. Detalhes no
-[registro](docs/registros/2026-08-13-substrato-review-request.md).
+`createAndPersistReviewRequest` com provider **injetado**.
+
+A **fase 3** — o substrato completo de criação de review request — foi então
+**implementada e fiada atrás dos gates do operador, com zero efeito externo**
+(2026-08-14, pronto p/ revisão, NÃO ratificado): provider concreto
+`GitHubReviewRequestProvider` (só `GET`/`POST /pulls`, idempotente, token só do
+ambiente), composição server-side, rota `POST /api/work-orchestration/review-requests`
+(corpo só `workItemId`; **duplo gate fail-closed** — sem alvo `ANIMA_INTEGRATION_*`
+OU sem `ANIMA_INTEGRATION_GITHUB_TOKEN` ⇒ `503`), e projeção de apresentação do
+estado `review_request_created` (web+mobile, sem afirmar merge). Endurecimentos:
+liveness da autoridade persistida (`remote_drift` quando o PR observado diverge do
+persistido) e desacoplamento das rotas mutativas do `request.signal`. Provado
+end-to-end **localmente** (bare Git local + servidor HTTP local emulando o GitHub),
+com idempotência e crash-recovery. A **primeira criação real de PR** contra o
+GitHub continua sendo o **primeiro efeito externo** e a fronteira humana explícita
+— não atravessada. Detalhes nos registros de
+[2026-08-13](docs/registros/2026-08-13-substrato-review-request.md) e
+[2026-08-14](docs/registros/2026-08-14-fase3-review-request-fiada.md).
 
 O [Marco 003 — Trabalho Autônomo Seguro](docs/marcos/003-trabalho-autonomo-seguro.md)
 já possui implementação incremental registrada no
@@ -468,7 +481,7 @@ O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou q
 | revisar | **humana** hoje; Reviewer/Verifier independente automatizado é futuro | maturidade |
 | commit (branch descartável) | feito na worktree, nunca aplicado | — |
 | publicar branch | maduro, atrás de configuração explícita do operador (ADR-002) | maturidade (efeito habilitado por config, não por payload) |
-| criar PR (review request) | contrato puro **+ persistência fail-closed** (2026-08-13, pronto p/ revisão, não ratificado); **sem** provider/efeito externo | maturidade |
+| criar PR (review request) | substrato completo fiado atrás de **duplo gate do operador** (provider GitHub + RPC + rota `503` fail-closed + apresentação), provado só localmente, **zero efeito externo** (2026-08-14, pronto p/ revisão, não ratificado); **primeira criação real de PR = fronteira humana, não atravessada** | maturidade (efeito habilitado por config, não por payload) |
 | integrar / merge / deploy | **sem** caminho alcançável; exige nova autorização humana | maturidade |
 | alterar a própria política de segurança | exige processo reforçado (isolamento, testes adversariais, replay/simulação, revisão independente, auditabilidade, rollback, rollout gradual, observabilidade, limites explícitos, revogação automática) | **maturidade de grau máximo** — o ato mais protegido, não teto eterno ([Marco 006](docs/marcos/006-politica-de-seguranca-como-maturidade-maxima.md)) |
 

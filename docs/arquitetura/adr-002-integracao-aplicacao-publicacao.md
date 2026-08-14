@@ -2,13 +2,19 @@
 
 > Estado: **decisão humana persistida; publicação protegida da branch implementada,
 > persistível, reconciliável e FIADA a uma rota autenticada (ratificada por Gean em
-> 2026-08-10); criação real de review request ainda proibida.** Este documento
-> mapeia a fronteira aberta no item 10 do [ADR-001](adr-001-execucao-local-de-codigo.md)
-> e propõe o menor contrato implementável para ela. A publicação de branch agora
-> é alcançável pela aplicação, mas o efeito Git externo permanece atrás de um ato
-> explícito do operador (configuração do alvo no servidor, ausente por padrão); a
-> criação de review request e qualquer transição a `merged`/`integrated` seguem
-> exigindo nova autorização humana, conforme o [Marco 003](../marcos/003-trabalho-autonomo-seguro.md).
+> 2026-08-10); substrato de review request (fase 3) implementado e fiado atrás dos
+> gates do operador — provider concreto do GitHub, RPC de persistência, rota HTTP
+> fail-closed e projeção de apresentação — com ZERO efeito externo; a PRIMEIRA
+> criação real de PR permanece proibida e é a próxima fronteira humana.** Este
+> documento mapeia a fronteira aberta no item 10 do
+> [ADR-001](adr-001-execucao-local-de-codigo.md) e propõe o menor contrato
+> implementável para ela. A publicação de branch e agora a criação de review
+> request são alcançáveis pela aplicação, mas ambos os efeitos externos permanecem
+> atrás de atos explícitos do operador (configuração de alvo e de token no
+> servidor, ausentes por padrão); qualquer transição a `merged`/`integrated` segue
+> exigindo nova autorização humana, conforme o
+> [Marco 003](../marcos/003-trabalho-autonomo-seguro.md). Ver *Fase 3 — substrato
+> de review request implementado e fiado (2026-08-14)* ao final.
 
 ## Contexto: o que já existe (e o que falta)
 
@@ -339,3 +345,82 @@ executado; `origin/main` permaneceu intacta.
 
 A fronteira seguinte é inalterada: a criação real de review request continua
 apenas pura, e `merged`/`integrated` seguem sem caminho alcançável.
+
+## Fase 3 — substrato de review request implementado e fiado (2026-08-14)
+
+Esta seção **supersede** as afirmações "a criação real de review request continua
+apenas pura" e "não existe provider concreto, RPC ou chamada mutante para criar
+review request" das seções de 2026-08-09/08-10 acima: o substrato de criação de
+review request passou de puro a **implementado e alcançável pela aplicação, ainda
+com zero efeito externo**. A criação real de PR contra o GitHub continua sendo a
+fronteira humana explícita e **não foi atravessada**.
+
+O que passou a existir (tudo atrás de gates do operador, provado só localmente):
+
+- **Persistência `record_review_request_created`** (migration `20260813000001`):
+  append-only sob lock do item, exige a branch já publicada (ordenação
+  `branch_published → review_request_created`) e amarra o receipt de review ao
+  handoff E ao receipt de branch persistidos (source/commit/base/provider/repo/
+  remote). Índice único por `authorization_decision_id` ⇒ um review por
+  autorização. Idempotência: replay idêntico devolve `replayed`; divergência de
+  `reviewId` conflita (`55000`); isolamento por dono via `FOR UPDATE` (`P0002`).
+  pgTAP `review_request.test.sql` (`plan(17)`).
+- **Provider concreto `GitHubReviewRequestProvider`** (`apps/web`, fora do core):
+  preparar → inspecionar/reconciliar → criar → pós-verificar, com transporte
+  (`fetch`) injetado. Idempotente ("create-or-get"): inspeciona antes de criar,
+  reconcilia `422 already exists` por releitura, nunca duplica. Só `GET` e
+  `POST /pulls`; nunca merge/push/force/deploy. Token EXCLUSIVAMENTE do ambiente
+  (`ANIMA_INTEGRATION_GITHUB_TOKEN`), nunca do cliente.
+- **Composição server-side** (`authorized-review-request.ts`,
+  `review-request-operation.ts`): lê fatos persistidos → projeta boundary/handoff/
+  branch-receipt/review-receipt → deriva a request → reconcilia → cria → aplica a
+  máquina de estados pura (`branch_published → review_request_created`) → persiste.
+- **Rota `POST /api/work-orchestration/review-requests`**: corpo só `workItemId`;
+  alvo, provider, branch, SHA e token vêm do servidor. **Dois gates fail-closed**:
+  sem alvo `ANIMA_INTEGRATION_*` OU sem token do GitHub ⇒ `503` antes de qualquer
+  efeito. Autenticação obrigatória; autoridade por `auth.uid()` via RLS.
+- **Apresentação**: `projectWorkIntegration` promove ao estado posterior
+  `review_request_created` quando o fato existe e casa autor/versão/autorização/
+  resultado/tentativa/idempotencyKey de review; web e mobile exibem o PR aberto
+  sem afirmar merge nem integração (fechando a afirmação "Nenhum PR foi criado",
+  que seria falsa uma vez criado o PR).
+
+Endurecimentos desta fase (todos com teste de regressão):
+
+- **Liveness da autoridade persistida**: na reconciliação do caminho já
+  persistido, comparar o review observado com o persistido por identidade
+  (`sameReviewReceipt`) e falhar fechado (`remote_drift` → 409) quando divergem —
+  o fato persistido descreve o MESMO review, não um PR qualquer na branch.
+- **Desacoplamento do transporte HTTP**: as rotas de publicação de branch e de
+  review request usam um `AbortController` fresco (nunca abortado) em vez de
+  `request.signal`, alinhando-se a `/supervisor-turn` e `/execute-commanded`: a
+  autorização é persistida antes do efeito e o ciclo mutativo não pode ser
+  abortado no meio por desconexão do cliente (efeito possível + nada persistido =
+  ambiguidade).
+
+**Prova end-to-end LOCAL sem efeito externo** (`review-request-chain.integration.test.ts`):
+o grafo exato que a rota constrói — `GitHubReviewRequestProvider` envolvendo o
+`GitBranchPublicationProvider` real — exercitado com os DOIS transportes reais
+juntos: `git push` contra um remote **bare local** e `POST /pulls` contra um
+servidor **HTTP local** que emula o GitHub. Provado: publish real → create real
+(um único POST), replay idempotente sem 2º POST, republish sem 2º push, e crash
+após criar o PR (persistência falha depois do efeito) reconciliado pela releitura
+real sem PR duplicado. Nenhum push/POST contra origin/GitHub; `origin/main`
+intacta.
+
+### Menor ação humana para a primeira prova externa
+
+A implementação anterior à fronteira está completa. Para a primeira criação real
+(decisão humana explícita, fora de sessão autônoma), basta, no nó autorizado:
+
+1. configurar o alvo do operador (`ANIMA_INTEGRATION_REPOSITORY_ID`,
+   `ANIMA_INTEGRATION_REMOTE_NAME`, `ANIMA_INTEGRATION_BASE_BRANCH`,
+   `ANIMA_INTEGRATION_REPO_ROOT`) — já exigido pela publicação de branch;
+2. configurar `ANIMA_INTEGRATION_GITHUB_TOKEN` (e, se GHE, `ANIMA_INTEGRATION_GITHUB_API_URL`);
+3. sobre um item com `branch_published` persistido, chamar
+   `POST /api/work-orchestration/review-requests` com `{ workItemId }`.
+
+O provider inspeciona antes de criar, emite exatamente um `POST /pulls`,
+pós-verifica head/base/commit/estado e persiste o receipt. Ausência de qualquer
+gate mantém o `503` fail-closed. Nada além desses três passos de configuração/
+chamada humana é necessário — e nenhum deles é executável por payload de cliente.
