@@ -102,6 +102,17 @@ A **primeira criação real de PR** contra o GitHub. Menor ação humana necess�
 persistido, chamar `POST /api/work-orchestration/review-requests` com
 `{ workItemId }`. Nada além disso; nada executável por payload de cliente.
 
+## Adendo (mesma sessão, após a escrita acima)
+
+- **7º commit `6eae676`** — timeout server-side por chamada no
+  `GitHubReviewRequestProvider` (compõe com o signal injetado; padrão 30s). Uma
+  resposta pendurada do provider falha fechado e rápido (`provider_unavailable`)
+  em vez de consumir todo o `maxDuration`. Fecha o item de auditoria "timeout
+  depois de POST com resultado remoto desconhecido". Teste de regressão + ADR-002
+  (endurecimentos) atualizada. **HEAD final real: `6eae676`.**
+- **Gates atualizados:** github-review-request 37, web `work-orchestration` 29
+  suítes / 352 testes; demais números inalterados. Zero efeito externo.
+
 ## Próximo ponto exato de retomada
 
 Substrato da fase 3 completo e provado localmente, **pronto para revisão, NÃO
