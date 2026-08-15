@@ -1,8 +1,10 @@
 import {
+  buildHostObservedGitEvidence,
   buildWorktreeHandoff,
   presentWorkItem,
   verifyPersistedWorkResult,
   verifyWorkResult,
+  type HostObservedGitEvidenceV1,
   type WorkEvent,
   type WorkItem,
   type WorkResultVerificationInput,
@@ -226,6 +228,56 @@ describe('verifyWorkResult — cross-check adversarial (independência)', () => 
     const report = verifyWorkResult(baseInput({ handoff: null }));
     expect(report.verdict).toBe('inconclusive');
     expect(report.restsOnAttestedEvidence).toBe(false);
+  });
+
+  const observed = (over: Partial<Parameters<typeof buildHostObservedGitEvidence>[0]> = {}): HostObservedGitEvidenceV1 => {
+    const built = buildHostObservedGitEvidence({
+      workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2,
+      baseSha: BASE, observedCommitSha: COMMIT,
+      observedChangedFiles: ['src/a.ts'],
+      observedDiffFiles: [{ path: 'src/a.ts', insertions: 3, deletions: 1 }],
+      observedAt: '2026-08-14T12:00:00.000Z',
+      ...over,
+    });
+    if (!built.ok) throw new Error(built.explanation);
+    return built.value;
+  };
+
+  test('evidência observada consistente ⇒ escopo é INDEPENDENTE (não atestado)', () => {
+    const report = verifyWorkResult(baseInput({ observed: observed() }));
+    expect(report.verdict).toBe('verified');
+    expect(codes(report)).toContain('scope_independently_observed');
+    expect(report.findings.find(f => f.code === 'scope_respected')?.provenance).toBe('independent');
+  });
+
+  test('ATAQUE: executor mente (atesta só a.ts) mas o host observou z.ts no escopo excluído ⇒ rejected', () => {
+    const report = verifyWorkResult(baseInput({
+      // Atestado: só a.ts (em escopo). Observado pelo git: a.ts + z.ts (excluído).
+      handoff: handoffWith({ changedFiles: ['src/a.ts'], diffFiles: [{ path: 'src/a.ts', insertions: 1, deletions: 0 }] }),
+      authorized: { includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'], validationCriteria: [{ label: 'unit', command: 'npm test' }] },
+      observed: observed({
+        observedChangedFiles: ['src/a.ts', 'src/z.ts'],
+        observedDiffFiles: [{ path: 'src/a.ts', insertions: 1, deletions: 0 }, { path: 'src/z.ts', insertions: 9, deletions: 0 }],
+      }),
+    }));
+    expect(report.verdict).toBe('rejected');
+    // A mentira é detectada por DUAS vias independentes.
+    expect(codes(report)).toContain('attested_contradicts_observed');
+    expect(codes(report)).toContain('change_in_excluded_scope');
+    expect(report.findings.find(f => f.code === 'change_in_excluded_scope')?.provenance).toBe('independent');
+  });
+
+  test('divergência de commit observado × atestado ⇒ attested_contradicts_observed', () => {
+    const report = verifyWorkResult(baseInput({ observed: observed({ observedCommitSha: 'c'.repeat(40) }) }));
+    expect(report.verdict).toBe('rejected');
+    expect(codes(report)).toContain('attested_contradicts_observed');
+  });
+
+  test('evidência observada de outra tentativa ⇒ observed_correlation_mismatch (independente)', () => {
+    const report = verifyWorkResult(baseInput({ observed: observed({ attemptId: 'outra' }) }));
+    expect(report.verdict).toBe('rejected');
+    expect(codes(report)).toContain('observed_correlation_mismatch');
+    expect(report.findings.find(f => f.code === 'observed_correlation_mismatch')?.provenance).toBe('independent');
   });
 
   test('caminho fora do escopo escondido no diffSummary (não em changedFiles) ⇒ rejected', () => {

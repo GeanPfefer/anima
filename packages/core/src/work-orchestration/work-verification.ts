@@ -1,4 +1,5 @@
 import { readAutonomousExecutionSpec, type AutonomousValidationCriterion } from './eligibility';
+import type { HostObservedGitEvidenceV1 } from './host-observed-evidence';
 import type { ProposalVersion, WorkEvent, WorkItem, WorkItemId, WorkResultValidation } from './types';
 import { isAnimaWorktreeBranch, projectWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff';
 
@@ -69,6 +70,10 @@ export type WorkVerificationFindingCode =
   | 'scope_respected'
   | 'change_out_of_included_scope'
   | 'change_in_excluded_scope'
+  // Escopo conferido contra a evidência OBSERVADA pelo host (git), não a atestada.
+  | 'scope_independently_observed'
+  | 'attested_contradicts_observed'
+  | 'observed_correlation_mismatch'
   // Gates realmente executados.
   | 'gates_passed'
   | 'gate_failed'
@@ -163,6 +168,15 @@ export interface WorkResultVerificationInput {
    * independência. Ausente ⇒ o cross-check é omitido.
    */
   readonly declaredValidations?: readonly WorkResultValidation[];
+  /**
+   * Evidência OBSERVADA pelo host (git), independente do sinal do executor. Quando
+   * presente e correlacionada, é a AUTORIDADE sobre quais arquivos foram alterados
+   * (o git não mente): o escopo passa a ser conferido contra ela (proveniência
+   * `independent`), e uma divergência entre o que o executor atestou e o que o host
+   * observou é uma mentira detectada (`attested_contradicts_observed`). Ausente ⇒
+   * o escopo recai na atestação (comportamento anterior), marcado como tal.
+   */
+  readonly observed?: HostObservedGitEvidenceV1 | null;
 }
 
 const norm = (path: string): string => path.replace(/\\/g, '/');
@@ -219,30 +233,58 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     findings.push(ok('branch_ownership_verified', 'A evidência aponta uma branch descartável do namespace do Anima.', handoff.branch));
   }
 
-  // ---------- Contenção de escopo (conferida contra a proposta aprovada) ----------
-  // Cobre a UNIÃO de changedFiles e dos caminhos do diffSummary: um adversário
-  // não pode esconder um caminho fora do escopo em um campo enquanto lista só
-  // arquivos em escopo no outro. Todo caminho REPORTADO como alterado é conferido.
+  // ---------- Contenção de escopo ----------
+  // Autoridade sobre "quais arquivos foram alterados": a evidência OBSERVADA pelo
+  // host (git), quando presente e correlacionada — o executor não a controla. Sem
+  // ela, recai na UNIÃO changedFiles∪diffSummary ATESTADA (comportamento anterior).
   const included = new Set(authorized.includedScope.map(norm));
   const excluded = new Set(authorized.excludedScope.map(norm));
-  const reportedPaths = new Set<string>([
+  const attestedPaths = new Set<string>([
     ...handoff.changedFiles.map(norm),
     ...handoff.diffSummary.files.map(file => norm(file.path)),
   ]);
+  const { observed } = input;
+  const observedUsable = observed !== null && observed !== undefined
+    && observed.workItemId === expected.workItemId
+    && observed.attemptId === expected.attemptId
+    && observed.approvedProposalVersion === expected.approvedProposalVersion;
+  if (observed !== null && observed !== undefined && !observedUsable) {
+    findings.push(violation('observed_correlation_mismatch',
+      'A evidência observada pelo host não corresponde à tentativa esperada; o escopo recai na atestação.', undefined, 'independent'));
+  }
+  let scopePaths = attestedPaths;
+  let scopeProvenance: WorkVerificationProvenance = 'attested';
+  if (observedUsable) {
+    scopeProvenance = 'independent';
+    scopePaths = new Set<string>([
+      ...observed!.observedChangedFiles.map(norm),
+      ...observed!.observedDiffSummary.files.map(file => norm(file.path)),
+    ]);
+    // Mentira detectada: o executor atestou um conjunto diferente do observado, ou
+    // um commit/base diferente. O git é a verdade — a divergência é violação.
+    const same = attestedPaths.size === scopePaths.size && [...attestedPaths].every(p => scopePaths.has(p));
+    if (!same || handoff.commitSha !== observed!.observedCommitSha || handoff.baseSha !== observed!.baseSha) {
+      findings.push(violation('attested_contradicts_observed',
+        'O que o executor atestou (arquivos/commit) diverge do que o host observou no git; a observação prevalece.', undefined, 'independent'));
+    } else {
+      findings.push(ok('scope_independently_observed',
+        'Os arquivos alterados foram confirmados por observação independente do host no git.', undefined, 'independent'));
+    }
+  }
   let scopeClean = true;
-  for (const path of reportedPaths) {
+  for (const path of scopePaths) {
     if (excluded.has(path)) {
       findings.push(violation('change_in_excluded_scope',
-        `O arquivo "${path}" foi alterado, mas está no escopo explicitamente excluído da proposta aprovada.`, path));
+        `O arquivo "${path}" foi alterado, mas está no escopo explicitamente excluído da proposta aprovada.`, path, scopeProvenance));
       scopeClean = false;
     } else if (!included.has(path)) {
       findings.push(violation('change_out_of_included_scope',
-        `O arquivo "${path}" foi alterado, mas não pertence ao escopo incluído da proposta aprovada.`, path));
+        `O arquivo "${path}" foi alterado, mas não pertence ao escopo incluído da proposta aprovada.`, path, scopeProvenance));
       scopeClean = false;
     }
   }
   if (scopeClean) {
-    findings.push(ok('scope_respected', 'Todo arquivo alterado pertence ao escopo incluído e nenhum ao excluído.'));
+    findings.push(ok('scope_respected', 'Todo arquivo alterado pertence ao escopo incluído e nenhum ao excluído.', undefined, scopeProvenance));
   }
 
   // ---------- Coerência de desfecho com os gates ----------
