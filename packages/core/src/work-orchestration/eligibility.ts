@@ -207,3 +207,23 @@ export function evaluateAutonomousEligibility(item: WorkItem): AutonomousEligibi
 
 export const buildNotEligibleBlockPayload = (evaluation: AutonomousEligibilityEvaluation): WorkBlockedNotEligiblePayloadV1 | null =>
   evaluation.eligible ? null : { schema_version: 1, reason: 'not_eligible', gaps: evaluation.gaps.map(entry => entry.code) };
+
+/**
+ * Lê o `execution_spec` declarado, **independente do estado do item**, reusando
+ * exatamente os mesmos parsers privados de `evaluateAutonomousEligibility` — não
+ * há segunda cópia da régua. Devolve o spec completo quando bem-formado, ou `null`
+ * em qualquer lacuna (ausente, malformado ou campo inválido). Diferente de
+ * `evaluateAutonomousEligibility`, NÃO exige estado `approved`: serve a leitores
+ * que precisam do contrato declarado de um item já em `review`/terminal (ex.: o
+ * Verifier, que confere um resultado contra os critérios que o autorizaram).
+ */
+export function readAutonomousExecutionSpec(intent: WorkIntent): AutonomousExecutionSpecV1 | null {
+  const spec = readSpec(intent);
+  if (spec.kind !== 'declared') return null;
+  const target = parseTarget(spec.raw);
+  const permissions = parsePermissions(spec.raw);
+  const validationCriteria = parseValidationCriteria(spec.raw);
+  const limits = parseLimits(spec.raw);
+  if (target === null || permissions === null || validationCriteria === null || limits === null) return null;
+  return { schemaVersion: 1, target, permissions, validationCriteria, limits };
+}

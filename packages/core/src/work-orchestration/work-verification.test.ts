@@ -1,9 +1,13 @@
 import {
   buildWorktreeHandoff,
+  verifyPersistedWorkResult,
   verifyWorkResult,
+  type WorkEvent,
+  type WorkItem,
   type WorkResultVerificationInput,
   type WorktreeHandoffV1,
 } from './index';
+import type { Json } from '@anima/types';
 
 const BASE = 'a'.repeat(40);
 const COMMIT = 'b'.repeat(40);
@@ -160,5 +164,71 @@ describe('verifyWorkResult — precedência e determinismo', () => {
   test('mesma evidência ⇒ parecer idêntico (determinístico)', () => {
     const input = baseInput();
     expect(verifyWorkResult(input)).toEqual(verifyWorkResult(input));
+  });
+});
+
+describe('verifyPersistedWorkResult — composição a partir de fatos persistidos', () => {
+  const item = (overrides: Partial<WorkItem> = {}): WorkItem => ({
+    id: 'work-1', userId: 'user-1', sourceMessageId: 'msg-1',
+    state: 'review', impactLevel: 'low', capability: 'programming',
+    originalRequest: 'faça X',
+    intent: {
+      execution_spec: {
+        schema_version: 1, target: { kind: 'project', reference: 'proj' },
+        permissions: ['workspace_read', 'workspace_write_isolated'],
+        validation_criteria: [{ label: 'unit', command: 'npm test' }],
+        limits: { max_attempts: 3 },
+      },
+    } as unknown as WorkItem['intent'],
+    proposal: {
+      schemaVersion: 1,
+      data: { summary: 's', objective: 'o', includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'], expectedEffects: ['e'], risks: [] },
+    },
+    proposalVersion: 2, createdAt: new Date('2026-08-14T00:00:00Z'), updatedAt: new Date('2026-08-14T00:00:00Z'),
+    ...overrides,
+  });
+
+  const resultEvent = (handoff: WorktreeHandoffV1, version = 2): WorkEvent => ({
+    id: 'ev-result', workItemId: 'work-1', type: 'result_submitted', author: 'executor',
+    proposalVersion: version,
+    payload: {
+      schema_version: 1,
+      data: {
+        work_item_id: 'work-1', attempt_id: handoff.attemptId, approved_proposal_version: version,
+        summary: 'feito', result_references: ['worktree-branch:anima-work/attempt-1'],
+        executor_signal: { worktreeHandoff: handoff as unknown as Json },
+      },
+    } as unknown as Json,
+    occurredAt: new Date('2026-08-14T00:00:00Z'),
+  });
+
+  test('item + evento com handoff coerente ⇒ verified', () => {
+    const report = verifyPersistedWorkResult(item(), [resultEvent(handoffWith())]);
+    expect(report.verdict).toBe('verified');
+    expect(report.workItemId).toBe('work-1');
+    expect(report.approvedProposalVersion).toBe(2);
+  });
+
+  test('sem evento de resultado com handoff ⇒ inconclusive', () => {
+    const report = verifyPersistedWorkResult(item(), []);
+    expect(report.verdict).toBe('inconclusive');
+    expect(report.findings.map(f => f.code)).toEqual(['missing_result_evidence']);
+  });
+
+  test('evidência sobre versão de proposta obsoleta ⇒ rejected (correlação)', () => {
+    // O handoff/evento são da v2, mas o item já avançou para a v3.
+    const report = verifyPersistedWorkResult(item({ proposalVersion: 3 }), [resultEvent(handoffWith(), 2)]);
+    expect(report.verdict).toBe('rejected');
+    expect(report.findings.map(f => f.code)).toContain('correlation_mismatch');
+  });
+
+  test('alteração fora do escopo da proposta ⇒ rejected', () => {
+    const handoff = handoffWith({
+      changedFiles: ['src/a.ts', 'src/fora.ts'],
+      diffFiles: [{ path: 'src/a.ts', insertions: 1, deletions: 0 }, { path: 'src/fora.ts', insertions: 2, deletions: 0 }],
+    });
+    const report = verifyPersistedWorkResult(item(), [resultEvent(handoff)]);
+    expect(report.verdict).toBe('rejected');
+    expect(report.findings.map(f => f.code)).toContain('change_out_of_included_scope');
   });
 });

@@ -1,6 +1,6 @@
-import type { AutonomousValidationCriterion } from './eligibility';
-import type { ProposalVersion, WorkItemId } from './types';
-import { isAnimaWorktreeBranch, type WorktreeHandoffV1 } from './worktree-handoff';
+import { readAutonomousExecutionSpec, type AutonomousValidationCriterion } from './eligibility';
+import type { ProposalVersion, WorkEvent, WorkItem, WorkItemId } from './types';
+import { isAnimaWorktreeBranch, projectWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff';
 
 // Verifier V0 — validação independente, pura e ADVISORY (governança
 // `Supervisor → Executor → Reviewer/Verifier`, mapa de maturidade do PRD §1f.1).
@@ -240,6 +240,39 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   }
 
   return finalize(expected, findings);
+}
+
+/**
+ * Composição a partir de fatos persistidos: deriva a entrada do Verifier de um
+ * `WorkItem` + o log de `WorkEvent`, sem I/O nem estado externo, e produz o
+ * parecer advisory.
+ *
+ * A AUTORIDADE independente vem do item: `workItemId` e `approvedProposalVersion`
+ * são os do item (e não os do handoff), então uma evidência produzida sobre uma
+ * versão de proposta obsoleta é detectada como `correlation_mismatch`. O escopo
+ * autorizado vem da proposta aprovada; os critérios, do `execution_spec` lido de
+ * forma independente do estado. A evidência vem de `projectWorktreeHandoff` (o
+ * último `result_submitted` com handoff durável, já cruzado com o envelope do
+ * evento). Ausência de handoff ⇒ inconclusivo, nunca positivo.
+ */
+export function verifyPersistedWorkResult(item: WorkItem, events: readonly WorkEvent[]): WorkVerificationReport {
+  const handoff = projectWorktreeHandoff(events);
+  const spec = readAutonomousExecutionSpec(item.intent);
+  return verifyWorkResult({
+    expected: {
+      workItemId: item.id,
+      // O handoff já foi cruzado com o envelope do evento por projectWorktreeHandoff;
+      // quando ausente, a tentativa é irrelevante (o parecer já é inconclusivo).
+      attemptId: handoff?.attemptId ?? '',
+      approvedProposalVersion: item.proposalVersion,
+    },
+    authorized: {
+      includedScope: item.proposal.data.includedScope,
+      excludedScope: item.proposal.data.excludedScope,
+      validationCriteria: spec?.validationCriteria ?? [],
+    },
+    handoff,
+  });
 }
 
 const finalize = (
