@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { describeValidationOutcome, evaluateAutonomousEligibility, parseWorkResultValidations, type ApprovalDecision, type ResultReviewDecision, type WorkItem, type WorkPresentation } from '@anima/core';
+import { describeValidationOutcome, evaluateAutonomousEligibility, parseWorkResultValidations, type ApprovalDecision, type ResultReviewDecision, type WorkItem, type WorkPresentation, type WorkVerificationVerdict } from '@anima/core';
 import styles from './chat.module.css';
 import { WorkExecutionCard } from './WorkExecutionCard';
 import { WorkDecisionCard } from './WorkDecisionCard';
@@ -8,6 +8,14 @@ import { WorkDecisionCard } from './WorkDecisionCard';
 type WorkItemView=Omit<WorkItem,'createdAt'|'updatedAt'>&{createdAt:string;updatedAt:string};
 export type WorkPresentationView=Omit<WorkPresentation,'item'>&{item:WorkItemView};
 type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void};
+
+// Rótulos do parecer advisory do Verifier. Read-only: informa a revisão humana,
+// nunca a substitui nem altera as ações disponíveis (que vêm da projeção).
+const VERDICT_LABEL:Record<WorkVerificationVerdict,string>={
+  verified:'evidência suficiente e coerente com o contrato aprovado',
+  inconclusive:'evidência insuficiente para concluir automaticamente',
+  rejected:'evidência de violação ou incoerência com o contrato aprovado',
+};
 
 export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:Props){
   const {item,latestResult,acceptedResult,availableActions}=presentation;
@@ -105,6 +113,11 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
         <div><dt>Handoff</dt><dd>{shown.handoffReference??'Nenhuma referência de handoff'}</dd></div>
       </dl>
     </section>;})()}
+    {presentation.verification&&<section aria-label="Verificação independente" className={styles.workNotice}>
+      <strong>Verificação independente (advisory)</strong>
+      <p>Parecer do Verifier: {VERDICT_LABEL[presentation.verification.verdict]}. É consultivo, derivado da evidência persistida, e não substitui a sua revisão nem os gates.</p>
+      {presentation.verification.findings.some(finding=>finding.severity!=='ok')&&<ul>{presentation.verification.findings.filter(finding=>finding.severity!=='ok').map((finding,index)=><li key={`${finding.code}-${index}`}>{finding.severity==='violation'?'Violação':'Lacuna'}: {finding.detail}</li>)}</ul>}
+    </section>}
     <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento; quando terminar, registre o resultado abaixo. O Supervisor não assume um ciclo manual já iniciado.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?'Resultado aceito e trabalho concluído; evidências preservadas acima.':'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?'A execução falhou; nenhum resultado foi aceito.':`Estado atual: ${item.state}.`}</p>
     {presentation.execution&&<WorkExecutionCard execution={presentation.execution} workItemId={item.id} proposalVersion={item.proposalVersion} onReload={reload} />}
     {presentation.pendingDecision&&<WorkDecisionCard decision={presentation.pendingDecision} workItemId={item.id} onReload={reload} />}

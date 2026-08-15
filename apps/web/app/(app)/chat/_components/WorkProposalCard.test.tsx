@@ -86,4 +86,22 @@ describe('WorkProposalCard', () => {
     expect(screen.getByLabelText('Trabalho, versão 3')).toBeInTheDocument();
   });
   test('correção envia somente o pedido, sem reescrever a proposta no cliente', async () => { render(<WorkProposalCard presentation={presentation()} onChange={jest.fn()} />); fireEvent.click(screen.getByRole('button',{name:'Pedir correção'})); fireEvent.change(screen.getByLabelText('O que deve mudar?'),{target:{value:'Reduzir o escopo'}}); fireEvent.click(screen.getByRole('button',{name:'Criar nova versão coerente'})); await waitFor(()=>expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/proposal-corrections',expect.objectContaining({method:'POST',body:expect.stringContaining('"requestedChanges":"Reduzir o escopo"')}))); const body=JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body as string); expect(body.proposal).toBeUndefined(); expect(body.intent).toBeUndefined(); });
+  const verification=(verdict:'verified'|'inconclusive'|'rejected',extra:Array<{code:string;severity:'ok'|'gap'|'violation';detail:string}>=[])=>({schemaVersion:1 as const,verdict,workItemId:'item',attemptId:'attempt-1',approvedProposalVersion:2,findings:[{code:'correlation_verified',severity:'ok' as const,detail:'ok'},...extra],summary:{violations:extra.filter(f=>f.severity==='violation').length,gaps:extra.filter(f=>f.severity==='gap').length,checks:1+extra.length},advisory:true as const});
+  test('exibe o parecer advisory sem alterar as ações de revisão', () => {
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes'],verification:verification('verified') as unknown as WorkPresentationView['verification']})} onChange={jest.fn()} />);
+    expect(screen.getByText(/Verificação independente \(advisory\)/)).toBeInTheDocument();
+    expect(screen.getByText(/evidência suficiente e coerente/)).toBeInTheDocument();
+    expect(screen.getByText(/não substitui a sua revisão/)).toBeInTheDocument();
+    // O parecer é read-only: as ações continuam vindo da projeção.
+    expect(screen.getByRole('button',{name:'Aceitar resultado v2'})).toBeInTheDocument();
+  });
+  test('parecer rejeitado lista as violações estruturadas', () => {
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes'],verification:verification('rejected',[{code:'change_out_of_included_scope',severity:'violation',detail:'O arquivo "src/x.ts" foi alterado fora do escopo.'}]) as unknown as WorkPresentationView['verification']})} onChange={jest.fn()} />);
+    expect(screen.getByText(/evidência de violação ou incoerência/)).toBeInTheDocument();
+    expect(screen.getByText(/Violação: O arquivo "src\/x.ts" foi alterado fora do escopo\./)).toBeInTheDocument();
+  });
+  test('sem parecer, nenhum painel de verificação é exibido', () => {
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes']})} onChange={jest.fn()} />);
+    expect(screen.queryByText(/Verificação independente/)).not.toBeInTheDocument();
+  });
 });
