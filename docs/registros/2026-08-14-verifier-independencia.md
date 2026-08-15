@@ -62,6 +62,10 @@ ratificado INT-05 **intocado** — o Verifier re-deriva a coerência em vez de c
   `attested`) + `summary.attested/independent` + **`restsOnAttestedEvidence`**. A
   UI (web+mobile) passou a declarar, nesses casos, que o parecer é *"baseado na
   evidência reportada pelo executor… não é prova independente"*.
+- **Escopo sobre a UNIÃO de `changedFiles` e `diffSummary.files`** (`6e1c202`,
+  segundo gap reproduzido): um caminho no escopo excluído escondido só no numstat
+  evadia o check. Agora todo caminho reportado como alterado, em qualquer campo, é
+  conferido — sem falso-positivo (handoffs legítimos têm os campos coincidentes).
 
 ## Respostas objetivas (critérios de validação, seção 6)
 
@@ -115,7 +119,7 @@ evidência; persistir agrega auditoria histórica, não correção.
 
 ## Gates
 
-typecheck 5/5 · core **32/718** · web `WorkProposalCard` **39/39** (chat
+typecheck 5/5 · core **32/719** · web `WorkProposalCard` **39/39** (chat
 `75/75`; o `project-tools` que falhou 1× na suíte web completa **passa isolado** —
 flake de paralelismo pré-existente, alheio a este eixo) · mobile **5/42**.
 
