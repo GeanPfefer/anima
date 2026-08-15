@@ -46,10 +46,17 @@ describe('verifyWorkResult — caso positivo', () => {
   test('resultado limpo e coerente é verified', () => {
     const report = verifyWorkResult(baseInput());
     expect(report.verdict).toBe('verified');
-    expect(report.summary).toEqual({ violations: 0, gaps: 0, checks: report.findings.length });
+    expect(report.summary).toMatchObject({ violations: 0, gaps: 0 });
+    expect(report.summary.checks).toBe(report.findings.length);
+    expect(report.summary.attested + report.summary.independent).toBe(report.findings.length);
     expect(codes(report)).toEqual(expect.arrayContaining([
       'correlation_verified', 'branch_ownership_verified', 'scope_respected', 'status_coherent', 'gates_passed', 'criterion_covered',
     ]));
+    // Honestidade de independência: um `verified` de handoff de worktree SEMPRE
+    // repousa em evidência atestada (gates/escopo). Nunca é prova independente.
+    expect(report.restsOnAttestedEvidence).toBe(true);
+    expect(report.findings.find(f => f.code === 'correlation_verified')?.provenance).toBe('independent');
+    expect(report.findings.find(f => f.code === 'gates_passed')?.provenance).toBe('attested');
   });
 
   test('critério apenas declarado (sem comando) não bloqueia verified, mas fica visível', () => {
@@ -165,6 +172,60 @@ describe('verifyWorkResult — precedência e determinismo', () => {
   test('mesma evidência ⇒ parecer idêntico (determinístico)', () => {
     const input = baseInput();
     expect(verifyWorkResult(input)).toEqual(verifyWorkResult(input));
+  });
+});
+
+describe('verifyWorkResult — cross-check adversarial (independência)', () => {
+  test('gate declarado passed com exitCode != 0 é contradição interna ⇒ rejected', () => {
+    // Adversário: afirma outcome "passed" mas o código de saída observado contradiz.
+    const report = verifyWorkResult(baseInput({
+      handoff: handoffWith({ gates: [{ label: 'unit', command: 'npm test', exitCode: 3, outcome: 'passed' }] }),
+    }));
+    expect(report.verdict).toBe('rejected');
+    expect(codes(report)).toContain('gate_exit_code_incoherent');
+  });
+
+  test('gate failed com exitCode 0 (timeout/cancel) NÃO é contradição', () => {
+    // Só checamos passed⟹0; um failed com código 0 é legítimo (timeout/cancel).
+    const report = verifyWorkResult(baseInput({
+      handoff: handoffWith({ status: 'failed', gates: [{ label: 'unit', command: 'npm test', exitCode: 0, outcome: 'failed' }] }),
+    }));
+    expect(codes(report)).not.toContain('gate_exit_code_incoherent');
+  });
+
+  test('validação autodeclarada que contradiz o gate correspondente ⇒ rejected', () => {
+    const report = verifyWorkResult(baseInput({ declaredValidations: [{ label: 'unit', outcome: 'failed' }] }));
+    expect(report.verdict).toBe('rejected');
+    expect(codes(report)).toContain('contradictory_validation_claim');
+  });
+
+  test('validações autodeclaradas consistentes com os gates ⇒ finding ok', () => {
+    const report = verifyWorkResult(baseInput({ declaredValidations: [{ label: 'unit', outcome: 'passed' }] }));
+    expect(report.verdict).toBe('verified');
+    expect(codes(report)).toContain('validation_consistent_with_gates');
+  });
+
+  test('LIMITE FUNDAMENTAL: um handoff totalmente fabricado mas coerente retorna verified — mas o parecer marca que repousa em atestação', () => {
+    // O Verifier V0 confere COERÊNCIA + consistência com o contrato, não a VERDADE.
+    // Um Executor mal-comportado que emita gates/arquivos falsos porém coerentes
+    // obtém `verified`. A honestidade fica em restsOnAttestedEvidence=true: o
+    // veredito NÃO é prova independente; a evidência decisiva é atestada.
+    const report = verifyWorkResult(baseInput());
+    expect(report.verdict).toBe('verified');
+    expect(report.restsOnAttestedEvidence).toBe(true);
+    expect(report.findings.filter(f => f.code === 'gates_passed' || f.code === 'scope_respected').every(f => f.provenance === 'attested')).toBe(true);
+  });
+
+  test('rejeição por correlação é independente (restsOnAttestedEvidence=false)', () => {
+    const report = verifyWorkResult(baseInput({ expected: { workItemId: 'work-1', attemptId: 'outra', approvedProposalVersion: 2 } }));
+    expect(report.verdict).toBe('rejected');
+    expect(report.restsOnAttestedEvidence).toBe(false);
+  });
+
+  test('ausência de evidência é independente (restsOnAttestedEvidence=false)', () => {
+    const report = verifyWorkResult(baseInput({ handoff: null }));
+    expect(report.verdict).toBe('inconclusive');
+    expect(report.restsOnAttestedEvidence).toBe(false);
   });
 });
 

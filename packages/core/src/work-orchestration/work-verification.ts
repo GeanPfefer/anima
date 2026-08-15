@@ -1,5 +1,5 @@
 import { readAutonomousExecutionSpec, type AutonomousValidationCriterion } from './eligibility';
-import type { ProposalVersion, WorkEvent, WorkItem, WorkItemId } from './types';
+import type { ProposalVersion, WorkEvent, WorkItem, WorkItemId, WorkResultValidation } from './types';
 import { isAnimaWorktreeBranch, projectWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff';
 
 // Verifier V0 — validação independente, pura e ADVISORY (governança
@@ -40,6 +40,26 @@ export type WorkVerificationVerdict = 'verified' | 'inconclusive' | 'rejected';
  * `violation` ⇒ rejected; senão `gap` ⇒ inconclusive; senão verified. */
 export type WorkVerificationSeverity = 'ok' | 'gap' | 'violation';
 
+/**
+ * Proveniência da evidência sobre a qual um achado repousa — o eixo que separa o
+ * que o Verifier estabelece de forma INDEPENDENTE do que ele apenas confere na
+ * ATESTAÇÃO do Executor.
+ *
+ * - `independent`: repousa em fatos que o Executor não controla — o contrato
+ *   aprovado (item/versão/escopo/critérios), a correlação amarrada pela
+ *   persistência confiável (`begin_work_attempt` + a RPC de término que força o
+ *   sinal a casar com a tentativa real), ou a ausência de evidência observada
+ *   pelo próprio Verifier.
+ * - `attested`: repousa em campos que o Executor colocou no sinal — arquivos
+ *   alterados, diff, gates (outcome/exitCode), status, SHAs. O Verifier confere a
+ *   COERÊNCIA interna e a consistência com o contrato, mas NÃO re-observa a
+ *   execução. Um `verified` que repousa em evidência `attested` é
+ *   "coerente e consistente com o contrato, DADO o que o Executor reportou" —
+ *   nunca "provado independentemente". Ver o mapa de proveniência no registro
+ *   2026-08-14-verifier-independencia.md.
+ */
+export type WorkVerificationProvenance = 'independent' | 'attested';
+
 export type WorkVerificationFindingCode =
   // Correlação da tentativa (INT-02).
   | 'correlation_verified'
@@ -53,6 +73,8 @@ export type WorkVerificationFindingCode =
   | 'gates_passed'
   | 'gate_failed'
   | 'no_gates_present'
+  // Contradição interna do gate: outcome vs código de saída observado.
+  | 'gate_exit_code_incoherent'
   // Cobertura dos critérios declarados por um gate factual.
   | 'criterion_covered'
   | 'criterion_without_gate_coverage'
@@ -61,6 +83,9 @@ export type WorkVerificationFindingCode =
   | 'status_coherent'
   | 'status_contradicts_gates'
   | 'reported_failure'
+  // Cross-check das validações autodeclaradas do resultado contra os gates.
+  | 'validation_consistent_with_gates'
+  | 'contradictory_validation_claim'
   // Estrutura do handoff durável (INT-05).
   | 'branch_ownership_verified'
   | 'branch_not_owned'
@@ -70,6 +95,7 @@ export type WorkVerificationFindingCode =
 export interface WorkVerificationFinding {
   readonly code: WorkVerificationFindingCode;
   readonly severity: WorkVerificationSeverity;
+  readonly provenance: WorkVerificationProvenance;
   readonly detail: string;
   /** Fato auditável que gerou o achado (arquivo, rótulo de gate/critério), quando aplicável. */
   readonly subject?: string;
@@ -90,7 +116,21 @@ export interface WorkVerificationReport {
     readonly gaps: number;
     /** Total de achados (inclui os `ok`), para leitura rápida. */
     readonly checks: number;
+    /** Achados que repousam em evidência atestada pelo Executor. */
+    readonly attested: number;
+    /** Achados que repousam em evidência independente do Executor. */
+    readonly independent: number;
   };
+  /**
+   * Honestidade de independência: verdadeiro quando o veredito repousa, em algum
+   * ponto necessário, sobre evidência ATESTADA pelo Executor (gates, arquivos,
+   * status). Para um handoff de worktree, um `verified` é SEMPRE assim —
+   * `gates_passed`/`scope_respected` são atestados. Um consumidor (política de
+   * maturidade, humano) NUNCA deve tratar um `verified` com esta marca como prova
+   * independente de que o resultado está correto; ela apenas atesta coerência e
+   * consistência com o contrato, DADO o que o Executor reportou.
+   */
+  readonly restsOnAttestedEvidence: boolean;
   /** Invariante do contrato: o parecer JAMAIS autoriza efeito nem dispensa o humano. */
   readonly advisory: true;
 }
@@ -114,18 +154,30 @@ export interface WorkResultVerificationInput {
    * veio de uma execução de worktree: sem evidência independente, o parecer é
    * inconclusivo, nunca positivo. */
   readonly handoff: WorktreeHandoffV1 | null;
+  /**
+   * Validações AUTODECLARADAS pelo sinal `result` do Executor (opcional). Ambas
+   * as fontes — estas e os gates do handoff — são atestadas pelo Executor, então
+   * este cross-check pega inconsistência (Executor buggy ou adversário desleixado
+   * que reporta validações discordantes dos próprios gates), NÃO um adversário
+   * cuidadoso que as mantém consistentes. É defesa em profundidade, não prova de
+   * independência. Ausente ⇒ o cross-check é omitido.
+   */
+  readonly declaredValidations?: readonly WorkResultValidation[];
 }
 
 const norm = (path: string): string => path.replace(/\\/g, '/');
 const nonBlankCommand = (criterion: AutonomousValidationCriterion): boolean =>
   typeof criterion.command === 'string' && criterion.command.trim().length > 0;
 
-const ok = (code: WorkVerificationFindingCode, detail: string, subject?: string): WorkVerificationFinding =>
-  subject === undefined ? { code, severity: 'ok', detail } : { code, severity: 'ok', detail, subject };
-const gap = (code: WorkVerificationFindingCode, detail: string, subject?: string): WorkVerificationFinding =>
-  subject === undefined ? { code, severity: 'gap', detail } : { code, severity: 'gap', detail, subject };
-const violation = (code: WorkVerificationFindingCode, detail: string, subject?: string): WorkVerificationFinding =>
-  subject === undefined ? { code, severity: 'violation', detail } : { code, severity: 'violation', detail, subject };
+// Proveniência default = `attested` (conservador): tudo que descreve o que
+// ACONTECEU repousa na atestação do Executor, salvo o que é marcado `independent`
+// explicitamente (contrato aprovado, correlação amarrada, ausência observada).
+const make = (severity: WorkVerificationSeverity) =>
+  (code: WorkVerificationFindingCode, detail: string, subject?: string, provenance: WorkVerificationProvenance = 'attested'): WorkVerificationFinding =>
+    subject === undefined ? { code, severity, provenance, detail } : { code, severity, provenance, detail, subject };
+const ok = make('ok');
+const gap = make('gap');
+const violation = make('violation');
 
 /**
  * Verifica, de forma pura e determinística, um resultado já produzido contra o
@@ -143,18 +195,20 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
 
   if (handoff === null) {
     findings.push(gap('missing_result_evidence',
-      'Não há handoff durável de worktree para conferir: sem evidência estruturada, o resultado não é independentemente verificável.'));
+      'Não há handoff durável de worktree para conferir: sem evidência estruturada, o resultado não é independentemente verificável.',
+      undefined, 'independent'));
     return finalize(expected, findings);
   }
 
-  // ---------- Correlação (INT-02) ----------
+  // ---------- Correlação (INT-02) — independente: amarrada pela persistência ----------
   if (handoff.workItemId !== expected.workItemId
     || handoff.attemptId !== expected.attemptId
     || handoff.approvedProposalVersion !== expected.approvedProposalVersion) {
     findings.push(violation('correlation_mismatch',
-      `A evidência pertence a (${handoff.workItemId}/${handoff.attemptId}/v${handoff.approvedProposalVersion}), não à tentativa esperada (${expected.workItemId}/${expected.attemptId}/v${expected.approvedProposalVersion}).`));
+      `A evidência pertence a (${handoff.workItemId}/${handoff.attemptId}/v${handoff.approvedProposalVersion}), não à tentativa esperada (${expected.workItemId}/${expected.attemptId}/v${expected.approvedProposalVersion}).`,
+      undefined, 'independent'));
   } else {
-    findings.push(ok('correlation_verified', 'A evidência corresponde ao item, tentativa e versão aprovada esperados.'));
+    findings.push(ok('correlation_verified', 'A evidência corresponde ao item, tentativa e versão aprovada esperados.', undefined, 'independent'));
   }
 
   // ---------- Propriedade da branch (INT-05) ----------
@@ -200,6 +254,16 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   }
 
   // ---------- Gates realmente executados ----------
+  // Contradição interna adversarial: um gate "passed" com código de saída não-zero
+  // é incoerente — passar significa código 0 (o inverso NÃO vale: um gate pode
+  // falhar por timeout/cancelamento com código 0, então só checamos passed⟹0).
+  // O contrato INT-05 (`buildWorktreeHandoff`) não força isso; o Verifier não
+  // confia na coerência do handoff, ele a re-deriva.
+  const incoherentGates = handoff.gates.filter(g => g.outcome === 'passed' && g.exitCode !== 0);
+  for (const g of incoherentGates) {
+    findings.push(violation('gate_exit_code_incoherent',
+      `O gate "${g.label}" declara "passed", mas o código de saída observado é ${g.exitCode}; passar exige código 0.`, g.label));
+  }
   if (handoff.gates.length === 0) {
     findings.push(gap('no_gates_present',
       'Nenhum gate foi registrado: não há evidência factual de que a alteração foi validada.'));
@@ -208,8 +272,8 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
       findings.push(violation('gate_failed',
         `O gate "${g.label}" (${g.command}) terminou com código ${g.exitCode}.`, g.label));
     }
-    if (failedGates.length === 0) {
-      findings.push(ok('gates_passed', `Todos os ${handoff.gates.length} gate(s) registrado(s) passaram.`));
+    if (failedGates.length === 0 && incoherentGates.length === 0) {
+      findings.push(ok('gates_passed', `Todos os ${handoff.gates.length} gate(s) registrado(s) passaram com código 0.`));
     }
   }
 
@@ -224,7 +288,7 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   for (const criterion of authorized.validationCriteria) {
     if (!nonBlankCommand(criterion)) {
       findings.push(ok('declared_criterion_unverifiable',
-        `O critério "${criterion.label}" foi apenas declarado (sem comando) e não é verificável por evidência; permanece a cargo do humano.`, criterion.label));
+        `O critério "${criterion.label}" foi apenas declarado (sem comando) e não é verificável por evidência; permanece a cargo do humano.`, criterion.label, 'independent'));
       continue;
     }
     if (passedByLabel.has(criterion.label)) {
@@ -236,6 +300,28 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     } else {
       findings.push(gap('criterion_without_gate_coverage',
         `O critério "${criterion.label}" exige validação por comando, mas nenhum gate correspondente foi executado.`, criterion.label));
+    }
+  }
+
+  // ---------- Cross-check das validações autodeclaradas do resultado × gates ----------
+  // Ambas as fontes são atestadas pelo Executor: isto pega inconsistência interna
+  // (uma validação que discorda do próprio gate de mesmo rótulo), não fabrica
+  // independência. Um `passed`/`failed` declarado que contradiz o outcome do gate
+  // correspondente é evidência contraditória ⇒ violação.
+  if (input.declaredValidations !== undefined) {
+    const gateOutcomeByLabel = new Map(handoff.gates.map(g => [g.label, g.outcome]));
+    let anyCrossChecked = false;
+    for (const declared of input.declaredValidations) {
+      const gateOutcome = gateOutcomeByLabel.get(declared.label);
+      if (gateOutcome === undefined || declared.outcome === 'declared') continue;
+      anyCrossChecked = true;
+      if (declared.outcome !== gateOutcome) {
+        findings.push(violation('contradictory_validation_claim',
+          `O resultado declara "${declared.label} — ${declared.outcome}", mas o gate correspondente registrou "${gateOutcome}".`, declared.label));
+      }
+    }
+    if (anyCrossChecked && !findings.some(f => f.code === 'contradictory_validation_claim')) {
+      findings.push(ok('validation_consistent_with_gates', 'As validações autodeclaradas do resultado concordam com os gates registrados.'));
     }
   }
 
@@ -281,7 +367,13 @@ const finalize = (
 ): WorkVerificationReport => {
   const violations = findings.filter(f => f.severity === 'violation').length;
   const gaps = findings.filter(f => f.severity === 'gap').length;
+  const attested = findings.filter(f => f.provenance === 'attested').length;
   const verdict: WorkVerificationVerdict = violations > 0 ? 'rejected' : gaps > 0 ? 'inconclusive' : 'verified';
+  // O veredito repousa em atestação quando algum achado NECESSÁRIO a ele é
+  // atestado: para `verified`, os `ok` atestados (gates/escopo); para `rejected`,
+  // a(s) violação(ões) atestada(s); para `inconclusive`, a(s) lacuna(s) atestada(s).
+  const decisive: WorkVerificationSeverity = verdict === 'verified' ? 'ok' : verdict === 'rejected' ? 'violation' : 'gap';
+  const restsOnAttestedEvidence = findings.some(f => f.severity === decisive && f.provenance === 'attested');
   return {
     schemaVersion: 1,
     verdict,
@@ -289,7 +381,8 @@ const finalize = (
     attemptId: expected.attemptId,
     approvedProposalVersion: expected.approvedProposalVersion,
     findings,
-    summary: { violations, gaps, checks: findings.length },
+    summary: { violations, gaps, checks: findings.length, attested, independent: findings.length - attested },
+    restsOnAttestedEvidence,
     advisory: true,
   };
 };
