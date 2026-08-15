@@ -1,4 +1,4 @@
-import { describeValidationOutcome, type WorkPresentation } from '@anima/core';
+import { describeValidationOutcome, type WorkPresentation, type WorkVerificationVerdict } from '@anima/core';
 
 export interface MobileWorkResultContent {
   readonly accessibilityLabel: 'Resultado aceito' | 'Resultado para revisão';
@@ -36,4 +36,28 @@ export function describeMissingCompletedResult(presentation: WorkPresentation): 
   return presentation.item.state === 'completed' && !presentation.acceptedResult
     ? 'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'
     : null;
+}
+
+// Paridade do parecer advisory do Verifier (mesma projeção pura da web). Read-only:
+// informa a revisão, não a substitui. Ausente ⇒ null (sem evidência durável a conferir).
+export interface MobileWorkVerificationContent {
+  readonly verdictLabel: string;
+  readonly issues: readonly string[];
+}
+
+const MOBILE_VERDICT_LABEL: Record<WorkVerificationVerdict, string> = {
+  verified: 'evidência suficiente e coerente com o contrato aprovado',
+  inconclusive: 'evidência insuficiente para concluir automaticamente',
+  rejected: 'evidência de violação ou incoerência com o contrato aprovado',
+};
+
+export function presentMobileWorkVerification(presentation: WorkPresentation): MobileWorkVerificationContent | null {
+  const report = presentation.verification;
+  if (!report) return null;
+  return {
+    verdictLabel: MOBILE_VERDICT_LABEL[report.verdict],
+    issues: report.findings
+      .filter(finding => finding.severity !== 'ok')
+      .map(finding => `${finding.severity === 'violation' ? 'Violação' : 'Lacuna'}: ${finding.detail}`),
+  };
 }

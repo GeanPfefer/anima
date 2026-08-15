@@ -3,12 +3,13 @@ import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-nativ
 import { parseWorkResultValidations, type WorkPresentation } from '@anima/core';
 import { decideWork, decideWorkIntegration, reloadWork, requestHostSupervisorTurn, requestProposalCorrection, requestWorkControl, respondWorkDecision, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
-import { describeMissingCompletedResult, presentMobileWorkResult } from './mobile-work-result';
+import { describeMissingCompletedResult, presentMobileWorkResult, presentMobileWorkVerification } from './mobile-work-result';
 import { presentMobileWorkExecution } from './mobile-work-execution';
 
 export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void;focused?:boolean;onFocus?:()=>void}) {
   const {item,latestResult,availableActions}=presentation;
   const shownResult=presentMobileWorkResult(presentation);
+  const verification=presentMobileWorkVerification(presentation);
   const missingCompletedResult=describeMissingCompletedResult(presentation);
   const execution=presentation.execution?presentMobileWorkExecution(presentation.execution):null;
   const [confirmCancel,setConfirmCancel]=useState(false);
@@ -47,6 +48,11 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
       {shownResult.completionMessage&&<Text accessibilityLiveRegion="polite" style={styles.completed}>{shownResult.completionMessage}</Text>}
     </View>}
     {missingCompletedResult&&<Text accessibilityRole="alert" style={styles.error}>{missingCompletedResult}</Text>}
+    {verification&&<View accessible accessibilityLabel="Verificação independente" style={styles.result}>
+      <Text style={styles.label}>Verificação independente (advisory)</Text>
+      <Text style={styles.body}>Parecer do Verifier: {verification.verdictLabel}. É consultivo e não substitui a sua revisão.</Text>
+      {verification.issues.map((issue,index)=><Text key={index} style={styles.state}>{issue}</Text>)}
+    </View>}
     {execution&&<View accessible accessibilityLabel="Execução autônoma" style={styles.result}>
       <View style={styles.header}><Text style={styles.label}>Execução autônoma</Text><Text style={styles.state}>{execution.statusLabel}</Text></View>
       <Text style={styles.state}>{execution.meta}</Text>
