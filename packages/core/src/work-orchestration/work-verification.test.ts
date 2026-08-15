@@ -1,5 +1,6 @@
 import {
   buildWorktreeHandoff,
+  presentWorkItem,
   verifyPersistedWorkResult,
   verifyWorkResult,
   type WorkEvent,
@@ -230,5 +231,14 @@ describe('verifyPersistedWorkResult — composição a partir de fatos persistid
     const report = verifyPersistedWorkResult(item(), [resultEvent(handoff)]);
     expect(report.verdict).toBe('rejected');
     expect(report.findings.map(f => f.code)).toContain('change_out_of_included_scope');
+  });
+
+  test('presentWorkItem anexa o parecer só quando há evidência durável', () => {
+    const withEvidence = presentWorkItem(item(), [resultEvent(handoffWith())]);
+    expect(withEvidence.verification?.verdict).toBe('verified');
+    expect(withEvidence.verification?.advisory).toBe(true);
+    // Sem handoff durável no log, o parecer não é anexado (não é ruído inconclusivo).
+    const withoutEvidence = presentWorkItem(item({ state: 'proposed' }), []);
+    expect(withoutEvidence.verification).toBeNull();
   });
 });
