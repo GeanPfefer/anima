@@ -220,11 +220,17 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   }
 
   // ---------- Contenção de escopo (conferida contra a proposta aprovada) ----------
+  // Cobre a UNIÃO de changedFiles e dos caminhos do diffSummary: um adversário
+  // não pode esconder um caminho fora do escopo em um campo enquanto lista só
+  // arquivos em escopo no outro. Todo caminho REPORTADO como alterado é conferido.
   const included = new Set(authorized.includedScope.map(norm));
   const excluded = new Set(authorized.excludedScope.map(norm));
+  const reportedPaths = new Set<string>([
+    ...handoff.changedFiles.map(norm),
+    ...handoff.diffSummary.files.map(file => norm(file.path)),
+  ]);
   let scopeClean = true;
-  for (const raw of handoff.changedFiles) {
-    const path = norm(raw);
+  for (const path of reportedPaths) {
     if (excluded.has(path)) {
       findings.push(violation('change_in_excluded_scope',
         `O arquivo "${path}" foi alterado, mas está no escopo explicitamente excluído da proposta aprovada.`, path));

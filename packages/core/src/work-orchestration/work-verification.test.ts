@@ -227,6 +227,21 @@ describe('verifyWorkResult — cross-check adversarial (independência)', () => 
     expect(report.verdict).toBe('inconclusive');
     expect(report.restsOnAttestedEvidence).toBe(false);
   });
+
+  test('caminho fora do escopo escondido no diffSummary (não em changedFiles) ⇒ rejected', () => {
+    // Adversário: lista só arquivos em escopo em changedFiles, mas o numstat
+    // (diffSummary.files) carrega um caminho no escopo excluído. O escopo deve
+    // cobrir TODO caminho reportado, não só um campo.
+    const report = verifyWorkResult(baseInput({
+      handoff: handoffWith({
+        changedFiles: ['src/a.ts'],
+        diffFiles: [{ path: 'src/a.ts', insertions: 1, deletions: 0 }, { path: 'src/z.ts', insertions: 9, deletions: 0 }],
+      }),
+      authorized: { includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'], validationCriteria: [{ label: 'unit', command: 'npm test' }] },
+    }));
+    expect(report.verdict).toBe('rejected');
+    expect(codes(report)).toContain('change_in_excluded_scope');
+  });
 });
 
 describe('verifyPersistedWorkResult — composição a partir de fatos persistidos', () => {
