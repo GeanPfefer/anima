@@ -478,7 +478,7 @@ O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou q
 | Estágio | Estado atual | Classificação da barreira |
 |---|---|---|
 | planejar/propor · implementar (worktree isolada) · testar (gates reais) | maduro e provado ao vivo (ADR-001) | — |
-| revisar | **humana** hoje; Reviewer/Verifier independente automatizado é futuro | maturidade |
+| revisar | **humana** hoje; já existe um **Verifier V0 advisory** (parecer independente por evidência persistida — correlação, escopo, gates, coerência — read-only no cartão de revisão web+mobile, que **NÃO** substitui o humano nem os gates); a substituição automatizada da revisão por classe, com política baseada em evidência, segue futuro | maturidade (evidência acumulando) |
 | commit (branch descartável) | feito na worktree, nunca aplicado | — |
 | publicar branch | maduro, atrás de configuração explícita do operador (ADR-002) | maturidade (efeito habilitado por config, não por payload) |
 | criar PR (review request) | substrato completo fiado atrás de **duplo gate do operador** (provider GitHub + RPC + rota `503` fail-closed + apresentação), provado só localmente, **zero efeito externo** (2026-08-14, pronto p/ revisão, não ratificado); **primeira criação real de PR = fronteira humana, não atravessada** | maturidade (efeito habilitado por config, não por payload) |
