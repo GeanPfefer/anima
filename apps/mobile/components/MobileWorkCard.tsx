@@ -51,6 +51,7 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
     {verification&&<View accessible accessibilityLabel="Verificação independente" style={styles.result}>
       <Text style={styles.label}>Verificação independente (advisory)</Text>
       <Text style={styles.body}>Parecer do Verifier: {verification.verdictLabel}. É consultivo e não substitui a sua revisão.</Text>
+      {verification.restsOnAttestedEvidence&&<Text style={styles.state}>Baseado na evidência reportada pelo executor; não é prova independente.</Text>}
       {verification.issues.map((issue,index)=><Text key={index} style={styles.state}>{issue}</Text>)}
     </View>}
     {execution&&<View accessible accessibilityLabel="Execução autônoma" style={styles.result}>

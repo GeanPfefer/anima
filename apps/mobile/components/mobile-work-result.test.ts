@@ -56,20 +56,21 @@ describe('apresentação do resultado no cartão mobile', () => {
 });
 
 describe('apresentação do parecer advisory no cartão mobile', () => {
-  const report = (verdict: 'verified' | 'inconclusive' | 'rejected', issues: Array<{ code: string; severity: 'ok' | 'gap' | 'violation'; detail: string }> = []) =>
+  const report = (verdict: 'verified' | 'inconclusive' | 'rejected', issues: Array<{ code: string; severity: 'ok' | 'gap' | 'violation'; detail: string }> = [], rests = true) =>
     ({ schemaVersion: 1 as const, verdict, workItemId: 'work-1', attemptId: 'a1', approvedProposalVersion: 3,
-      findings: [{ code: 'correlation_verified', severity: 'ok' as const, detail: 'ok' }, ...issues],
-      summary: { violations: issues.filter(i => i.severity === 'violation').length, gaps: issues.filter(i => i.severity === 'gap').length, checks: 1 + issues.length },
-      advisory: true as const });
+      findings: [{ code: 'correlation_verified', severity: 'ok' as const, provenance: 'independent' as const, detail: 'ok' }, ...issues.map(i => ({ ...i, provenance: 'attested' as const }))],
+      summary: { violations: issues.filter(i => i.severity === 'violation').length, gaps: issues.filter(i => i.severity === 'gap').length, checks: 1 + issues.length, attested: issues.length, independent: 1 },
+      restsOnAttestedEvidence: rests, advisory: true as const });
 
   test('sem parecer ⇒ null (não inventa verificação)', () => {
     expect(presentMobileWorkVerification(presentation('review', { latestResult: result }))).toBeNull();
   });
 
-  test('parecer verified traz o rótulo sem listar violações', () => {
+  test('parecer verified traz o rótulo, sem violações, e marca a atestação', () => {
     const content = presentMobileWorkVerification(presentation('review', { latestResult: result, verification: report('verified') as unknown as WorkPresentation['verification'] }));
     expect(content?.verdictLabel).toContain('evidência suficiente e coerente');
     expect(content?.issues).toEqual([]);
+    expect(content?.restsOnAttestedEvidence).toBe(true);
   });
 
   test('parecer rejeitado lista as violações estruturadas', () => {

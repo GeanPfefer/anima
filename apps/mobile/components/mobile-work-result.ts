@@ -43,6 +43,8 @@ export function describeMissingCompletedResult(presentation: WorkPresentation): 
 export interface MobileWorkVerificationContent {
   readonly verdictLabel: string;
   readonly issues: readonly string[];
+  /** Honestidade: o veredito repousa em evidência reportada pelo executor. */
+  readonly restsOnAttestedEvidence: boolean;
 }
 
 const MOBILE_VERDICT_LABEL: Record<WorkVerificationVerdict, string> = {
@@ -59,5 +61,6 @@ export function presentMobileWorkVerification(presentation: WorkPresentation): M
     issues: report.findings
       .filter(finding => finding.severity !== 'ok')
       .map(finding => `${finding.severity === 'violation' ? 'Violação' : 'Lacuna'}: ${finding.detail}`),
+    restsOnAttestedEvidence: report.restsOnAttestedEvidence,
   };
 }
