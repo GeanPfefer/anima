@@ -21,6 +21,7 @@ export * from './autonomous-queue';
 export * from './autonomous-selection';
 export * from './work-handoff';
 export * from './worktree-handoff';
+export * from './work-verification';
 export * from './work-resumption';
 export * from './work-reconciliation';
 export * from './work-checkpoint';
