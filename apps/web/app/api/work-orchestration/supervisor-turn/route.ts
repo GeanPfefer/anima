@@ -1,8 +1,10 @@
 import { authenticateRequest } from '@/lib/supabase/request-auth';
+import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from '@/lib/work-orchestration/execution';
 import { projectRoot, readExecutionContract, resolveExecutorRoute, type ExecutionContract } from '@/lib/work-orchestration/executor-selection';
 import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from '@/lib/work-orchestration/host-evidence';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
+import { computeAndPersistVerifierOpinion, verifierOpinionSinkFor } from '@/lib/work-orchestration/verifier-opinion';
 import { worktreeBranchFor } from '@/lib/work-orchestration/worktree-executor';
 
 export const runtime = 'nodejs';
@@ -144,25 +146,44 @@ export async function POST(request: Request) {
     } : undefined,
   });
 
-  // Evidência OBSERVADA PELO HOST (independência real). Só o caminho worktree
-  // deixa uma branch git no repositório real; o host inspeciona `anima-work/<attempt>`
-  // contra o SHA-base do contrato e persiste o que o git de fato registrou — nunca
-  // o que o executor atestou. FAIL-OPEN por construção: qualquer falha aqui só
-  // significa "sem evidência independente nesta volta" (o Verifier recai na
-  // atestação), jamais altera o desfecho da tentativa nem a resposta.
-  if (executionContract?.executor === 'worktree' && executionContract.baseSha
-      && result.terminalKind === 'result' && result.attemptId && result.selection) {
-    await observeAndPersistHostGitEvidence(
-      {
-        repoRoot: projectRoot(),
-        baseSha: executionContract.baseSha,
-        branch: worktreeBranchFor(result.attemptId),
-        workItemId: result.selection.workItemId,
-        attemptId: result.attemptId,
-        approvedProposalVersion: result.selection.approvedProposalVersion,
-      },
-      hostEvidenceSinkFor(client),
-    ).catch(() => undefined);
+  // Pós-terminal, quando a volta produziu um resultado: (1) o host observa o git
+  // independentemente e (2) o Verifier registra seu parecer sobre a evidência.
+  // Ambos FAIL-OPEN — nunca alteram o desfecho da tentativa nem a resposta.
+  if (result.terminalKind === 'result' && result.attemptId && result.selection) {
+    // (1) Evidência OBSERVADA PELO HOST (independência real). Só o caminho worktree
+    // deixa uma branch git no repositório real; o host inspeciona `anima-work/<attempt>`
+    // contra o SHA-base do contrato e persiste o que o git de fato registrou — nunca
+    // o que o executor atestou. Falha aqui só significa "sem evidência independente
+    // nesta volta" (o Verifier recai na atestação).
+    if (executionContract?.executor === 'worktree' && executionContract.baseSha) {
+      await observeAndPersistHostGitEvidence(
+        {
+          repoRoot: projectRoot(),
+          baseSha: executionContract.baseSha,
+          branch: worktreeBranchFor(result.attemptId),
+          workItemId: result.selection.workItemId,
+          attemptId: result.attemptId,
+          approvedProposalVersion: result.selection.approvedProposalVersion,
+        },
+        hostEvidenceSinkFor(client),
+      ).catch(() => undefined);
+    }
+
+    // (2) PARECER do Verifier. Lê o estado FRESCO — inclui a evidência observada
+    // recém-persistida — e registra o parecer sobre ela. Advisory e recomputável:
+    // sem handoff durável não há parecer (skipped); persistir é auditoria, não
+    // decisão. NÃO aceita resultado, não autoriza integração, não remove o humano.
+    const service = createWorkOrchestrationService(client);
+    const [freshItem, freshEvents] = await Promise.all([
+      service.getItem(result.selection.workItemId),
+      service.listEvents(result.selection.workItemId),
+    ]);
+    if (freshItem.ok && freshEvents.ok) {
+      await computeAndPersistVerifierOpinion(
+        { item: freshItem.value, events: freshEvents.value },
+        verifierOpinionSinkFor(client),
+      ).catch(() => undefined);
+    }
   }
 
   // Toda volta que o laço conduziu até um desfecho conhecido responde 200 com o
