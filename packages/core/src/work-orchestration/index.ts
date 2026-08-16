@@ -22,6 +22,7 @@ export * from './autonomous-selection';
 export * from './work-handoff';
 export * from './worktree-handoff';
 export * from './host-observed-evidence';
+export * from './host-observed-gate-evidence';
 export * from './work-verification';
 export * from './verifier-opinion';
 export * from './work-resumption';

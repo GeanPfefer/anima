@@ -1523,6 +1523,15 @@ export type Database = {
         }
         Returns: Json
       }
+      record_host_observed_gate_evidence: {
+        Args: {
+          attempt_id: string
+          evidence: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
       record_review_request_created: {
         Args: {
           authorization_decision_id: string
@@ -1905,6 +1914,7 @@ export type Database = {
         | "review_request_created"
         | "host_observed_evidence_recorded"
         | "verifier_opinion_recorded"
+        | "host_observed_gate_evidence_recorded"
       work_impact_level:
         | "low"
         | "significant"
@@ -2235,6 +2245,7 @@ export const Constants = {
         "review_request_created",
         "host_observed_evidence_recorded",
         "verifier_opinion_recorded",
+        "host_observed_gate_evidence_recorded",
       ],
       work_impact_level: [
         "low",
