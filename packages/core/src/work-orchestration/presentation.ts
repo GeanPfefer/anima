@@ -5,6 +5,7 @@ import { projectIntegrationBoundary, type WorkIntegrationDecision } from './inte
 import {parseBranchPublicationReceipt,parseReviewRequestReceipt} from './protected-integration';
 import { projectWorktreeHandoff } from './worktree-handoff';
 import { verifyPersistedWorkResult, type WorkVerificationReport } from './work-verification';
+import { projectVerifierOpinionHistory, type VerifierOpinionV1 } from './verifier-opinion';
 
 // null distingue "não informado" de lista vazia: a UI deve declarar a ausência
 // explicitamente, nunca preencher o vazio com o texto livre do autor.
@@ -71,7 +72,10 @@ export interface WorkIntegrationProjection {
   // autorização; nunca afirma merge ou integração.
   readonly reviewRequest?:{readonly repositoryId:string;readonly remoteName:string;readonly reviewReference:string;readonly reviewId:string;readonly sourceBranch:string;readonly sourceCommitSha:string;readonly baseBranch:string}|null;
 }
-export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null; }
+export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
+  // Histórico append-only dos pareceres do Verifier persistidos (auditoria). Só
+  // presente quando há ao menos um; read-only, nunca altera ações nem decide.
+  readonly opinionHistory?:readonly VerifierOpinionV1[]; }
 
 const object=(value:Json|undefined):Record<string,Json|undefined>|null=>value!==null&&value!==undefined&&!Array.isArray(value)&&typeof value==='object'?value:null;
 const validationOutcomes:ReadonlySet<string>=new Set(['passed','failed','declared']);
@@ -224,10 +228,12 @@ export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEve
     canRequestControl:status==='running'&&pendingControl===null,
   };
 }
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events),pendingDecision:projectPendingWorkDecision(item,events),integration:projectWorkIntegration(item,events),
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events),pendingDecision:projectPendingWorkDecision(item,events),integration:projectWorkIntegration(item,events),
   // Parecer advisory do Verifier — só quando há evidência git durável a conferir.
   // É projeção pura e read-only; nunca altera ações nem substitui a revisão humana.
-  verification:projectWorktreeHandoff(events)?verifyPersistedWorkResult(item,events):null};};
+  verification:projectWorktreeHandoff(events)?verifyPersistedWorkResult(item,events):null,
+  // Histórico persistido dos pareceres (auditoria), quando existe.
+  ...(opinionHistory.length>0?{opinionHistory}:{})};};
 
 // Reconstrói a projeção somente quando os elos persistidos mínimos existem.
 // O estado atual nunca basta para inventar o histórico que deveria explicá-lo.
