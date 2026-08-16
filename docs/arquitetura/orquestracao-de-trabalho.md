@@ -644,6 +644,82 @@ limites de tentativas são gates entre tentativas; não encerram uma tentativa j
 admitida. Tokens, dinheiro e janelas específicas de fornecedores permanecem
 fora do V0.
 
+## Verifier e evidência observada pelo host (independência real)
+
+> Direção arquitetural ratificada (Marco 005/006) e **parcialmente implementada**.
+> O Verifier é **advisory**: confere, não autoriza. O humano continua o gate final
+> de aceite/integração. Detalhes de sessão em `docs/registros/2026-08-14-verifier-v0.md`,
+> `2026-08-14-verifier-independencia.md` e `2026-08-15-host-observed-evidence-e-auto-mode.md`.
+
+Duas independências distintas governam o ciclo autônomo, e são o eixo desta seção:
+
+1. **`Policy != Executor`** (direção futura): quem quer executar não é a única
+   autoridade que decide se pode. É a peça de um Policy Gate anterior à ação
+   (registrada em "Benchmark do Claude Auto Mode" abaixo), ainda **não implementada**.
+2. **`Evidence/Verifier != Executor`** (implementado no escopo abaixo): quem executa
+   não é a única autoridade que produz a evidência usada para verificar o próprio
+   trabalho.
+
+O **Verifier V0** (`verifyWorkResult`/`verifyPersistedWorkResult`, puro e
+determinístico em `packages/core`) re-deriva um parecer de três valores
+(`verified`/`inconclusive`/`rejected`) do **contrato autorizador** (proposta
+aprovada + critérios) cruzado com a evidência estruturada. Cada achado carrega
+proveniência `independent` ou `attested`, e o parecer expõe `restsOnAttestedEvidence`:
+honestidade de independência, nunca substituição do humano nem promoção automática.
+
+### Evidência OBSERVADA pelo host vs ATESTADA pelo executor
+
+O `WorktreeHandoffV1` (INT-05) é **atestado**: o executor põe os valores (arquivos
+alterados, diff, SHAs, gates) no sinal `result`. Um executor mal-comportado pode
+mantê-los internamente coerentes e assim **fabricar um `verified`** — a mitigação
+antes desta etapa era só honestidade (`restsOnAttestedEvidence` exposto), não
+prevenção.
+
+A prevenção real, agora implementada para **git**: depois da execução, a branch
+descartável `anima-work/<attemptId>` permanece no repositório (o dispose preserva a
+branch). O **host** — código servidor que o executor não controla — inspeciona
+essa branch diretamente (`observeHostGitEvidence`: `git diff` base..branch) e produz
+uma `HostObservedGitEvidenceV1`. O git não mente sobre o que foi commitado.
+
+**Persistência append-only** (`record_host_observed_evidence` → evento
+`host_observed_evidence_recorded`): `author='system'` + `origin='host'` — proveniência
+que o sinal do executor **não forja** por este nem por nenhum outro caminho (é outro
+tipo de evento, outra RPC, outro autor). A RPC exige item do usuário, allowlist, uma
+**tentativa real correlacionada** (`execution_started` na versão aprovada) e a
+correlação casando com os parâmetros; é **idempotente por tentativa ignorando
+`observedAt`** (reobservação determinística do mesmo git replaya; conteúdo divergente
+é conflito `55000`) — impossível criar duas verdades num retry, ou reconciliável após
+crash entre observar e persistir. Um índice único parcial por `attempt_id` é a garantia
+final. A régua estrutural SQL espelha `buildHostObservedGitEvidence` (SHAs, `base!=commit`,
+caminhos relativos, cobertura fixa `git=true`/`gates=false`).
+
+**Consumo pelo Verifier**: `projectHostObservedEvidence` reconstrói a última evidência
+do log (cruzando a correlação declarada contra o envelope do próprio evento) e
+`verifyPersistedWorkResult` a passa como `observed`. Como `presentation` já compõe o
+Verifier, a comparação **observed × attested** é viva e sem I/O: quando presente e
+correlacionada, a evidência observada é a **autoridade sobre quais arquivos foram
+alterados** (o escopo passa a ser conferido contra ela, proveniência `independent`), e
+uma divergência entre atestado e observado vira `attested_contradicts_observed`.
+**Observado vence; a contradição permanece visível como finding.**
+
+A cadeia viva fecha assim: `Executor → host observa git → evento append-only →
+projeção → Verifier compara observed × attested → humano (gate final)`. A observação é
+fiada na rota `/supervisor-turn` (o host que conhece `repoRoot`/`baseSha`/`attempt`),
+**fail-open**: qualquer falha só significa "sem evidência independente nesta volta" (o
+Verifier recai na atestação), jamais altera o desfecho nem a resposta. O Supervisor
+permanece provider-neutral — a observação vive na rota, não nele.
+
+### Cobertura honesta V0
+
+- **Git → independente.** Se o executor mentir sobre os arquivos alterados ou o commit,
+  o host tem evidência independente suficiente para o Verifier detectar a mentira. Para
+  git, a resposta é **SIM**.
+- **Gates → ainda atestados** (`coverage.gates=false`). Observar gates independentemente
+  exigiria **re-executá-los** num sandbox controlado — evolução futura, fora deste
+  recorte. Independência real PARCIAL é preferível a uma falsa promessa total.
+- **Não implementado**: reexecução/captura independente de gates; persistência do
+  parecer do Verifier; qualquer política automática de maturidade.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
@@ -654,6 +730,7 @@ fora do V0.
 - agentes autônomos ou conversas livres entre agentes;
 - contrato, transporte ou provider concreto da interação com o computador/aplicações locais (Marco 007);
 - agendamento, recorrência ou ciclos autônomos Supervisor → executor local, até nova autorização humana;
+- reexecução/captura independente de gates (evidência observada de gate); persistência automática decisória do parecer do Verifier;
 - XP, recompensas ou vínculo inicial com quests;
 - catálogo configurável de capacidades;
 - migração retroativa de conversas e quests existentes.
