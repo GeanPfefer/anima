@@ -1,5 +1,5 @@
 import { containsSensitiveData } from './execution-attempt';
-import type { ProposalVersion, WorkItemId } from './types';
+import type { ProposalVersion, WorkEvent, WorkItemId } from './types';
 import type { WorktreeDiffSummary, WorktreeFileChange } from './worktree-handoff';
 import type { Json } from '@anima/types';
 
@@ -181,4 +181,33 @@ export function parseHostObservedGitEvidence(value: Json | undefined): HostObser
     observedAt: root.observedAt as string,
     coverage: { git: true, gates: false },
   };
+}
+
+/**
+ * Projeta a evidência observada pelo host a partir dos fatos persistidos: lê o
+ * último evento `host_observed_evidence_recorded` (RPC `record_host_observed_evidence`),
+ * reconstrói a `HostObservedGitEvidenceV1` de `data.evidence` com a mesma régua
+ * fail-closed do `parse`, e — como `projectWorktreeHandoff` — CRUZA a correlação
+ * declarada na evidência contra o envelope persistido do próprio evento
+ * (`data.work_item_id`/`attempt_id`/`approved_proposal_version`). Uma evidência
+ * cuja tríade discorde do envelope é incoerente e vira ausência (`null`).
+ *
+ * É a fonte independente que o Verifier consome: sobrevive a reinício e à remoção
+ * da worktree, e o executor não a produz (o evento é `author='system'`/`origin='host'`).
+ */
+export function projectHostObservedEvidence(events: readonly WorkEvent[]): HostObservedGitEvidenceV1 | null {
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index]!;
+    if (event.type !== 'host_observed_evidence_recorded') continue;
+    const data = object(object(event.payload)?.data);
+    const evidence = parseHostObservedGitEvidence(data?.evidence);
+    if (!evidence) return null;
+    if (data?.work_item_id !== evidence.workItemId
+      || data?.attempt_id !== evidence.attemptId
+      || data?.approved_proposal_version !== evidence.approvedProposalVersion) {
+      return null;
+    }
+    return evidence;
+  }
+  return null;
 }

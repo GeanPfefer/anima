@@ -1,5 +1,5 @@
 import { readAutonomousExecutionSpec, type AutonomousValidationCriterion } from './eligibility';
-import type { HostObservedGitEvidenceV1 } from './host-observed-evidence';
+import { projectHostObservedEvidence, type HostObservedGitEvidenceV1 } from './host-observed-evidence';
 import type { ProposalVersion, WorkEvent, WorkItem, WorkItemId, WorkResultValidation } from './types';
 import { isAnimaWorktreeBranch, projectWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff';
 
@@ -385,12 +385,21 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
  * são os do item (e não os do handoff), então uma evidência produzida sobre uma
  * versão de proposta obsoleta é detectada como `correlation_mismatch`. O escopo
  * autorizado vem da proposta aprovada; os critérios, do `execution_spec` lido de
- * forma independente do estado. A evidência vem de `projectWorktreeHandoff` (o
- * último `result_submitted` com handoff durável, já cruzado com o envelope do
+ * forma independente do estado. A evidência ATESTADA vem de `projectWorktreeHandoff`
+ * (o último `result_submitted` com handoff durável, já cruzado com o envelope do
  * evento). Ausência de handoff ⇒ inconclusivo, nunca positivo.
+ *
+ * A evidência OBSERVADA pelo host (git) vem de `projectHostObservedEvidence` (o
+ * último `host_observed_evidence_recorded`, `author='system'`/`origin='host'`, que
+ * o executor não produz). Quando presente e correlacionada, é a AUTORIDADE sobre
+ * quais arquivos foram alterados: o escopo passa a ser conferido contra ela
+ * (proveniência `independent`) e uma divergência entre atestado e observado vira a
+ * mentira detectada `attested_contradicts_observed`. É assim que a cadeia fecha —
+ * a composição viva (presentation) compara observed + attested sem I/O.
  */
 export function verifyPersistedWorkResult(item: WorkItem, events: readonly WorkEvent[]): WorkVerificationReport {
   const handoff = projectWorktreeHandoff(events);
+  const observed = projectHostObservedEvidence(events);
   const spec = readAutonomousExecutionSpec(item.intent);
   return verifyWorkResult({
     expected: {
@@ -406,6 +415,7 @@ export function verifyPersistedWorkResult(item: WorkItem, events: readonly WorkE
       validationCriteria: spec?.validationCriteria ?? [],
     },
     handoff,
+    observed,
   });
 }
 

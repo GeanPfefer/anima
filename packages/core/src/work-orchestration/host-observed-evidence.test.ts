@@ -1,4 +1,4 @@
-import { buildHostObservedGitEvidence, parseHostObservedGitEvidence, type HostObservedGitEvidenceV1 } from './index';
+import { buildHostObservedGitEvidence, parseHostObservedGitEvidence, projectHostObservedEvidence, type HostObservedGitEvidenceV1, type WorkEvent } from './index';
 import type { Json } from '@anima/types';
 
 const BASE = 'a'.repeat(40);
@@ -70,5 +70,43 @@ describe('parseHostObservedGitEvidence', () => {
   test('coverage.gates é sempre false na reconstrução (nunca promove a observação de gate)', () => {
     const parsed = parseHostObservedGitEvidence(serialized()) as HostObservedGitEvidenceV1;
     expect(parsed.coverage.gates).toBe(false);
+  });
+});
+
+describe('projectHostObservedEvidence', () => {
+  const evidence = (): HostObservedGitEvidenceV1 => {
+    const built = build();
+    if (!built.ok) throw new Error('build falhou');
+    return built.value;
+  };
+
+  const event = (data: Record<string, Json>, type: WorkEvent['type'] = 'host_observed_evidence_recorded'): WorkEvent => ({
+    id: 'ev', workItemId: 'work-1', type, author: 'system', proposalVersion: 2,
+    payload: { schema_version: 1, data } as unknown as Json, occurredAt: new Date('2026-08-14T00:00:00Z'),
+  });
+
+  const wrap = (ev: HostObservedGitEvidenceV1, over: Record<string, Json> = {}): WorkEvent =>
+    event({ work_item_id: ev.workItemId, attempt_id: ev.attemptId, approved_proposal_version: ev.approvedProposalVersion, origin: 'host', evidence: ev as unknown as Json, ...over });
+
+  test('reconstrói a última evidência observada do log', () => {
+    const projected = projectHostObservedEvidence([wrap(evidence())]);
+    expect(projected?.observedChangedFiles).toEqual(['src/a.ts']);
+  });
+
+  test('sem evento host_observed_evidence_recorded ⇒ null', () => {
+    expect(projectHostObservedEvidence([])).toBeNull();
+    expect(projectHostObservedEvidence([event({}, 'result_submitted')])).toBeNull();
+  });
+
+  test('envelope do evento discordante da evidência ⇒ null (não confia cegamente)', () => {
+    expect(projectHostObservedEvidence([wrap(evidence(), { attempt_id: 'outro' })])).toBeNull();
+    expect(projectHostObservedEvidence([wrap(evidence(), { approved_proposal_version: 3 })])).toBeNull();
+  });
+
+  test('evidence persistida malformada ⇒ null (fail-closed)', () => {
+    const ev = evidence();
+    const broken = JSON.parse(JSON.stringify(ev)) as Record<string, Json>;
+    (broken.coverage as Record<string, Json>).gates = true as unknown as Json;
+    expect(projectHostObservedEvidence([wrap(ev, { evidence: broken as unknown as Json })])).toBeNull();
   });
 });

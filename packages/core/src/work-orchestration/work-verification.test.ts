@@ -361,6 +361,70 @@ describe('verifyPersistedWorkResult — composição a partir de fatos persistid
     expect(report.findings.map(f => f.code)).toContain('change_out_of_included_scope');
   });
 
+  const hostEvidence = (over: Partial<Parameters<typeof buildHostObservedGitEvidence>[0]> = {}): HostObservedGitEvidenceV1 => {
+    const built = buildHostObservedGitEvidence({
+      workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2,
+      baseSha: BASE, observedCommitSha: COMMIT,
+      observedChangedFiles: ['src/a.ts'],
+      observedDiffFiles: [{ path: 'src/a.ts', insertions: 3, deletions: 1 }],
+      observedAt: '2026-08-14T12:00:00.000Z',
+      ...over,
+    });
+    if (!built.ok) throw new Error(built.explanation);
+    return built.value;
+  };
+
+  const hostEvidenceEvent = (evidence: HostObservedGitEvidenceV1, envelope?: { attemptId?: string }): WorkEvent => ({
+    id: 'ev-host', workItemId: 'work-1', type: 'host_observed_evidence_recorded', author: 'system',
+    proposalVersion: 2,
+    payload: {
+      schema_version: 1,
+      data: {
+        work_item_id: 'work-1', attempt_id: envelope?.attemptId ?? evidence.attemptId, approved_proposal_version: 2,
+        origin: 'host', coverage: { git: true, gates: false }, evidence: evidence as unknown as Json,
+      },
+    } as unknown as Json,
+    occurredAt: new Date('2026-08-14T00:01:00Z'),
+  });
+
+  test('evidência observada coerente com o atestado ⇒ escopo confirmado independentemente', () => {
+    const report = verifyPersistedWorkResult(item(), [resultEvent(handoffWith()), hostEvidenceEvent(hostEvidence())]);
+    expect(report.verdict).toBe('verified');
+    const scope = report.findings.find(f => f.code === 'scope_independently_observed');
+    expect(scope?.provenance).toBe('independent');
+    // Git é independente, mas os gates continuam atestados: um verified honesto
+    // ainda repousa em atestação (gates), nunca é prova independente total.
+    expect(report.restsOnAttestedEvidence).toBe(true);
+  });
+
+  test('executor mente sobre os arquivos: host observa git divergente ⇒ rejected (mentira detectada)', () => {
+    // O handoff atestado é limpo e em escopo; o host observou no git um arquivo e
+    // um commit diferentes. É a prova do critério de aceitação: para Git, SIM.
+    const observed = hostEvidence({
+      observedCommitSha: 'c'.repeat(40),
+      observedChangedFiles: ['src/evil.ts'],
+      observedDiffFiles: [{ path: 'src/evil.ts', insertions: 9, deletions: 0 }],
+    });
+    const report = verifyPersistedWorkResult(item(), [resultEvent(handoffWith()), hostEvidenceEvent(observed)]);
+    expect(report.verdict).toBe('rejected');
+    const codesList = report.findings.map(f => f.code);
+    expect(codesList).toContain('attested_contradicts_observed');
+    expect(codesList).toContain('change_out_of_included_scope');
+    expect(report.findings.find(f => f.code === 'attested_contradicts_observed')?.provenance).toBe('independent');
+  });
+
+  test('evidência observada com envelope incoerente é ignorada (recai na atestação, sem falso positivo)', () => {
+    // O evento persiste uma evidência cuja tríade discorda do envelope do próprio
+    // evento: a projeção vira ausência e o escopo recai no atestado — ainda verified.
+    const report = verifyPersistedWorkResult(item(), [
+      resultEvent(handoffWith()),
+      hostEvidenceEvent(hostEvidence(), { attemptId: 'attempt-OTHER' }),
+    ]);
+    expect(report.verdict).toBe('verified');
+    expect(report.findings.some(f => f.code === 'scope_independently_observed')).toBe(false);
+    expect(report.findings.some(f => f.code === 'observed_correlation_mismatch')).toBe(false);
+  });
+
   test('presentWorkItem anexa o parecer só quando há evidência durável', () => {
     const withEvidence = presentWorkItem(item(), [resultEvent(handoffWith())]);
     expect(withEvidence.verification?.verdict).toBe('verified');
