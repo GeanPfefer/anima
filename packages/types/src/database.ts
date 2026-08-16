@@ -1532,6 +1532,15 @@ export type Database = {
         }
         Returns: Json
       }
+      record_verifier_opinion: {
+        Args: {
+          attempt_id: string
+          expected_proposal_version: number
+          opinion: Json
+          work_item_id: string
+        }
+        Returns: Json
+      }
       human_decision_resumption_source: {
         Args: { p_work_item_id: string }
         Returns: Json
@@ -1895,6 +1904,7 @@ export type Database = {
         | "branch_published"
         | "review_request_created"
         | "host_observed_evidence_recorded"
+        | "verifier_opinion_recorded"
       work_impact_level:
         | "low"
         | "significant"
@@ -2224,6 +2234,7 @@ export const Constants = {
         "branch_published",
         "review_request_created",
         "host_observed_evidence_recorded",
+        "verifier_opinion_recorded",
       ],
       work_impact_level: [
         "low",
