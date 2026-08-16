@@ -714,11 +714,89 @@ permanece provider-neutral — a observação vive na rota, não nele.
 - **Git → independente.** Se o executor mentir sobre os arquivos alterados ou o commit,
   o host tem evidência independente suficiente para o Verifier detectar a mentira. Para
   git, a resposta é **SIM**.
-- **Gates → ainda atestados** (`coverage.gates=false`). Observar gates independentemente
-  exigiria **re-executá-los** num sandbox controlado — evolução futura, fora deste
+- **Gates → ainda atestados** (`coverage.gates=false`). Ver "Independência dos gates —
+  investigação" abaixo: por que a captura independente não é trivial e qual é o próximo
   recorte. Independência real PARCIAL é preferível a uma falsa promessa total.
-- **Não implementado**: reexecução/captura independente de gates; persistência do
-  parecer do Verifier; qualquer política automática de maturidade.
+- **Não implementado**: reexecução/captura independente de gates; qualquer política
+  automática de maturidade.
+
+### Parecer do Verifier persistido (append-only, versionado) — IMPLEMENTADO
+
+> A distinção canônica: **EVIDÊNCIA** (histórico observado/atestado) ≠ **PARECER**
+> (interpretação versionada da evidência) ≠ **DECISÃO** (autorização humana/política).
+
+O `WorkVerificationReport` é o parecer EM MEMÓRIA (puro/determinístico). O
+`VerifierOpinionV1` o embala para persistência auditável, acrescentando `verifierVersion`
+(a versão da LÓGICA que concluiu — a política está embutida nela; não há hoje config de
+política separada a versionar) e `evidenceBasis` (a identidade dos eventos de evidência
+considerados: o `result_submitted` do handoff e o `host_observed_evidence_recorded` quando
+presente, + a cobertura independente). Os achados vão compactados (código/severidade/
+proveniência/sujeito), sem a prosa recomputável.
+
+**Persistência** (`record_verifier_opinion` → evento `verifier_opinion_recorded`,
+`author=system`/`origin=verifier`): o Verifier é uma função pura do host/system, não do
+executor — o sinal do executor não forja esta proveniência. A RPC exige tentativa real,
+correlação com os parâmetros e uma base de evidência que aponte eventos reais DESTA
+tentativa (parecer não referencia evidência alheia).
+
+**Histórico versionado, não verdade única.** O mesmo attempt pode legitimamente receber
+mais de um parecer: quando a **evidência muda** (a observação do host aparece depois da
+atestação: parecer sobre atestado apenas → parecer sobre atestado + observado) ou quando o
+**Verifier evolui de versão**. A identidade é `(attempt, verifier_version, result_event_id,
+observed_event_id)`: idêntico replaya; conteúdo divergente na mesma base é conflito `55000`
+(o Verifier é determinístico); base ou versão diferente **acrescenta** sem apagar o
+anterior. `projectVerifierOpinionHistory` reconstrói a evolução para auditoria.
+
+**Recomputável = auditoria, não verdade a proteger.** Como `computeVerifierOpinion` é puro
+sobre (item, eventos), um crash entre computar e persistir **não perde nada**: recomputa-se
+no próximo seam a partir do log. Por isso a persistência não introduz efeito irreversível e
+o wiring vivo (na rota `/supervisor-turn`, após o terminal `result`, lendo o estado fresco
+que já inclui a evidência observada) é **fail-open**.
+
+**Separação rígida vs `integration_decision` (ADR-002).** Um `VERIFIED` persistido NÃO
+aceita resultado, NÃO cria nem decide integração (`integration_decided` é `author=user`,
+outro fato, outro momento — pós-aceite humano, item em `completed`), não publica, não
+mergeia, não deploya, não aumenta maturidade e não remove o gate humano. O parecer nasce em
+`review` (pós-resultado, pré-aceite) e mantém o item em `review`. O parecer é **advisory**;
+a autoridade permanece humana.
+
+### Independência dos gates — investigação (não implementado; próximo recorte)
+
+Achado, comprovado no código: os gate commands são executados **em processo** pelo host
+(`runGate` → `runProcess` → `child_process.spawn`, em `apps/web/lib/work-orchestration/worktree.ts`),
+que observa diretamente `command`, `exitCode`, `durationMs`, `timedOut` e `cancelled` no
+momento da execução. **Porém** quem chama `runGate` é o `WorktreeExecutorAdapter` — o papel
+**executor** do contrato INT-01 —, e o resultado é empacotado no handoff **atestado**
+(`worktreeHandoff.gates`). O Verifier, provider-neutral, não distingue o adaptador confiável
+in-process de um executor futuro não-confiável (ex.: runner Python em contêiner, backend em
+nuvem), então trata todo desfecho de gate como atestado.
+
+Nuance importante do caminho worktree: quem **escreve o código** (o `CoderBackend`/LLM) é a
+parte não-confiável; quem **roda o gate** (`runGate`, TS de host) é confiável. O desfecho do
+gate é portanto independente do **autor do código**, mas é capturado **pelo papel executor** e
+flui pela atestação. Diferente do git, que o host **reinspeciona** de um artefato persistido
+depois do fato sem confiar em código em voo, o desfecho do gate é um fato **de runtime**:
+não há artefato a reinspecionar depois.
+
+Por isso independência de gate ao nível do Verifier exige uma de duas mudanças, **nenhuma
+trivial** — o que contraindica implementá-la sem nova base:
+
+1. **Reexecução pelo host** dos gates contra a branch persistida (extensão do seam de
+   observação: o host faz checkout da branch e roda os gates de novo, observando o
+   `exitCode` real). Independência verdadeira e provider-agnóstica; **custo**: trabalho
+   duplicado, latência, um checkout/worktree extra e o gate roda duas vezes. É a única via
+   que generaliza para executores não-confiáveis. O usuário já sinalizou "não reexecutar sem
+   necessidade".
+2. **Mover a execução de gate para um passo do host** fora do contrato `WorkExecutorAdapter`
+   (o adaptador produziria só a mudança de código; o host rodaria os gates). Sem reexecução,
+   mas **altera o contrato INT-01** e a propriedade da worktree; não generaliza sozinha para
+   executores remotos.
+
+Recomendação: registrar como próximo recorte candidato, com decisão humana sobre custo ×
+benefício (a opção 1 dá independência real ao custo de reexecutar; a 2 é uma refatoração de
+fronteira). Até lá, `coverage.gates=false` permanece a leitura **honesta**. O teste central
+do futuro recorte, quando autorizado: *executor diz gate passou; host observa `exitCode!=0`;
+Verifier NÃO conclui `verified`.*
 
 ## Benchmark do Claude Auto Mode e autonomia progressiva (direção)
 
