@@ -720,6 +720,69 @@ permanece provider-neutral — a observação vive na rota, não nele.
 - **Não implementado**: reexecução/captura independente de gates; persistência do
   parecer do Verifier; qualquer política automática de maturidade.
 
+## Benchmark do Claude Auto Mode e autonomia progressiva (direção)
+
+> Direção arquitetural ratificada; **não implementada**. Registra a comparação com um
+> sistema autônomo real (o Auto Mode do Claude Code) como benchmark externo e os
+> princípios daí derivados. Detalhe em `docs/registros/2026-08-15-host-observed-evidence-e-auto-mode.md`
+> e no [Marco 005](../marcos/005-autonomia-progressiva-e-identidade-una.md).
+
+O Auto Mode do Claude é usado como **benchmark, não blueprint**: a pergunta não é "como
+copiar o Claude?", e sim "que mecanismo resolve bem um problema real e merece ser
+adaptado ao Anima?". A comparação cruza documentação declarada, comportamento real
+observado durante o desenvolvimento do próprio Anima, princípios canônicos do Anima e a
+arquitetura já implementada.
+
+A cadeia arquitetural completa que orienta a direção (sem pular etapas):
+
+```text
+Policy Gate      → decide se a ação pode começar        (DIREÇÃO, não implementado)
+Executor         → executa
+HostObservedEvidence → registra fatos independentes      (IMPLEMENTADO p/ git)
+Verifier         → avalia usando observado + atestado     (IMPLEMENTADO, advisory)
+Historical Evidence  → acumula resultado real             (DIREÇÃO)
+Maturity Policy  → poderá usar histórico p/ conquistar    (DIREÇÃO, BLOQUEADO)
+                   mais autonomia por classe de ação
+```
+
+Princípios preservados como **direção ratificada** (a política automática permanece
+**bloqueada**):
+
+- **`Policy != Executor`** antes da ação, simétrico ao já implementado `Verifier != Executor`
+  depois da ação. Um Policy Gate independente do Executor poderia classificar ações em
+  `ALLOW` / `REQUIRE_HUMAN` / `DENY` (vocabulário **não congelado**).
+- **Hard boundary vs maturity boundary.** Hard boundary: limite que a execução atual não
+  pode atravessar mesmo que o Executor queira. Maturity boundary: limite que existe hoje
+  mas é **conquistável por evidência e segurança**. Segurança limita o **estado atual** da
+  autonomia, não a ambição final — uma maturity boundary não vira proibição eterna.
+- **O componente não concede poder a si próprio.** O Anima pode editar o próprio código e
+  propor evolução de permissões, mas uma execução **não** pode "determinar que já é M4" e
+  imediatamente usar o novo poder. Promoções vêm de outra autoridade/processo e de
+  evidência acumulada — o equivalente, no domínio de permissões, ao princípio de que o
+  Executor não fabrica sozinho seu `VERIFIED`. Políticas que ampliam poderes devem viver
+  numa camada de confiança que o próprio trabalho executado não consiga modificar e ativar
+  na mesma execução (crítico para o futuro em que o Anima edita o Anima).
+- **Dados estruturados e confiáveis > texto arbitrário para decisões de política.** O
+  Policy Gate futuro deve receber fatos estruturados (ação, alvo, escopo de autorização,
+  maturidade atual × exigida, efeito externo, rollback) e gates determinísticos, não a
+  narrativa do Executor nem texto de páginas/arquivos não confiáveis.
+- **Classificador semântico útil, nunca autoridade única.** Um classificador pode responder
+  o difícil de codificar (escalada de escopo? compatível com a intenção? sinais de prompt
+  injection?), mas o desenho preferido combina **política determinística + maturidade +
+  evidência histórica + classificador quando necessário + Verifier**. Se uma ação exige M5 e
+  o Anima está em M2, "parece seguro" não a torna permitida.
+- **Bloqueios como evidência histórica.** Uma decisão de bloqueio pode virar evidência:
+  ação bloqueada → autorizada explicitamente pelo humano → executada → host observa → Verifier
+  confirma → padrão repetido sem incidentes pode contribuir para avaliar promoção de
+  maturidade; o inverso (ação autorizada que produz problema) é evidência negativa. Maturidade
+  futura é orientada por **histórico real**, não por confiança abstrata.
+
+A diferença central que o Anima pretende manter: o Auto Mode ajuda a decidir "esta ação
+pode ser executada agora?"; o Anima pretende também responder "o sistema já acumulou
+evidência suficiente para **conquistar** mais autonomia nesta classe de ação?". Essa
+autonomia progressivamente conquistada por evidência continua sendo uma diferença central
+— e a política automática que a materializaria permanece **explicitamente não autorizada**.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;
@@ -730,6 +793,7 @@ permanece provider-neutral — a observação vive na rota, não nele.
 - agentes autônomos ou conversas livres entre agentes;
 - contrato, transporte ou provider concreto da interação com o computador/aplicações locais (Marco 007);
 - agendamento, recorrência ou ciclos autônomos Supervisor → executor local, até nova autorização humana;
+- Policy Gate / classificador de permissão funcional, política automática de maturidade, promoção automática de nível, ou uso de histórico para conceder permissões — a evidência histórica pode ser registrada, mas **não** decide autonomia sozinha; o gate humano permanece;
 - reexecução/captura independente de gates (evidência observada de gate); persistência automática decisória do parecer do Verifier;
 - XP, recompensas ou vínculo inicial com quests;
 - catálogo configurável de capacidades;
