@@ -12,7 +12,7 @@ e refatoração de fronteira. A decisão desta sessão foi **nenhuma das duas**:
 host já mede.
 
 **Branch:** `claude/integration-application-layer`.
-**HEAD inicial:** `2127356`. **HEAD final:** este commit documental.
+**HEAD inicial:** `2127356`. **HEAD final:** `b46f165`.
 **origin/main:** `973ef465acaa3955f8e176c72903975cf3912ac6` — **intacta, SEM push.**
 
 ## Commits (técnico antes de documentação)
@@ -22,7 +22,9 @@ host já mede.
 | `c806670` | Adicione a evidência de gate observada pelo host (primeira parte, sem reexecução) | core + migration + pgTAP + tipos |
 | `f328112` | Faça o Verifier consumir os gates observados (observed > attested) | core + migration + pgTAP |
 | `1399639` | Capture os gates observados pelo host e fie ao caminho vivo (fail-open) | web (adapter + rota) |
-| _este_ | Documente a independência de gates implementada | doc |
+| `7005353` | Documente a independência de gates implementada | doc |
+| `9e43647` | Surfe a evidência observada bruta (git+gate) na composição (auditoria) | core (presentation) |
+| `b46f165` | Prove o parecer sobre git E gate observados juntos (caminho vivo) | core (teste de integração) |
 
 ## O que foi implementado
 
@@ -91,7 +93,8 @@ Cadeia fechada para gates: **host executa e observa o gate → evidência append
   worktree elegível executado pelo Supervisor); os testes cobrem cada elo isoladamente e a
   fiação, mas a prova viva integrada não foi executada nesta sessão.
 - **Superfície de UI** para o histórico de pareceres / evidência de gate: `presentWorkItem` já
-  expõe `opinionHistory`; nenhuma tela nova foi fiada.
+  expõe `opinionHistory` e agora `observedEvidence` {git, gates} (fatos brutos, read-only);
+  nenhuma **tela** nova foi fiada (só a camada de composição do core).
 - **Próximo eixo elegível** (autorizado pela visão, sem ampliar autoridade): captura de gate
   para executores remotos, OU avançar outro recorte de evidência/auditoria do modo autônomo.
   A **política automática de maturidade** permanece BLOQUEADA (exige decisão humana explícita).
