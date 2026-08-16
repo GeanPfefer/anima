@@ -1,4 +1,6 @@
-import { buildHostObservedGitEvidence, type HostObservedEvidenceResult } from '@anima/core';
+import { buildHostObservedGitEvidence, type HostObservedEvidenceResult, type HostObservedGitEvidenceV1 } from '@anima/core';
+import type { Database, Json } from '@anima/types';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { runProcess } from './worktree';
 
 // Produtor HOST-SIDE da evidência observada (independência real). Depois que o
@@ -85,3 +87,69 @@ export async function observeHostGitEvidence(
     observedAt: now().toISOString(),
   });
 }
+
+// ============================================================
+// Composição observe + persist (fecha o lado de escrita da cadeia)
+// ============================================================
+//
+// O produtor (observeHostGitEvidence) só OBSERVA; a persistência mora atrás de
+// uma porta injetada para manter o transporte (Supabase/RPC) fora da observação e
+// testável sem banco. Uma execução persiste EXATAMENTE UMA evidência por
+// tentativa: a idempotência real vive na RPC (mesmo git replaya, conteúdo
+// divergente é conflito), então o produtor não precisa deduplicar.
+
+/** Porta de persistência da evidência observada. O caller injeta a implementação
+ * real (uma RPC); a composição não conhece o transporte nem o Supabase. */
+export interface HostEvidenceSink {
+  record(evidence: HostObservedGitEvidenceV1): Promise<
+    | { readonly ok: true; readonly action: 'recorded' | 'replayed' }
+    | { readonly ok: false; readonly message: string }
+  >;
+}
+
+export type HostEvidenceOutcome =
+  | { readonly ok: true; readonly action: 'recorded' | 'replayed'; readonly evidence: HostObservedGitEvidenceV1 }
+  // `stage` distingue falha ao observar (git indisponível/branch ausente) de falha
+  // ao persistir (RPC recusou). Ambas são NÃO-FATAIS para a volta do supervisor: a
+  // ausência de evidência observada apenas faz o Verifier recair na atestação.
+  | { readonly ok: false; readonly stage: 'observe' | 'persist'; readonly reason: string };
+
+/**
+ * Observa o git da branch persistida e, em sucesso, persiste a evidência pela
+ * porta injetada. Fail-open por contrato: devolve um desfecho tipado, nunca lança;
+ * o chamador (rota) trata qualquer `ok:false` como "sem evidência independente
+ * nesta volta", jamais como erro que quebre a execução.
+ */
+export async function observeAndPersistHostGitEvidence(
+  input: HostEvidenceObservationInput,
+  sink: HostEvidenceSink,
+  runGit?: GitRunner,
+  now?: () => Date,
+): Promise<HostEvidenceOutcome> {
+  const observed = await observeHostGitEvidence(input, runGit, now);
+  if (!observed.ok) return { ok: false, stage: 'observe', reason: observed.explanation };
+  const persisted = await sink.record(observed.value).catch((error: unknown) =>
+    ({ ok: false as const, message: error instanceof Error ? error.message : String(error) }));
+  if (!persisted.ok) return { ok: false, stage: 'persist', reason: persisted.message };
+  return { ok: true, action: persisted.action, evidence: observed.value };
+}
+
+/**
+ * Sink real: persiste pela RPC `record_host_observed_evidence`. Os parâmetros
+ * autoritativos vêm da PRÓPRIA evidência observada (nunca de um relato do
+ * executor), e a RPC recarimba proveniência system/host e recorrelaciona contra a
+ * tentativa real — o cliente não fabrica.
+ */
+export const hostEvidenceSinkFor = (client: SupabaseClient<Database>): HostEvidenceSink => ({
+  record: async (evidence) => {
+    const { data, error } = await client.rpc('record_host_observed_evidence', {
+      work_item_id: evidence.workItemId,
+      expected_proposal_version: evidence.approvedProposalVersion,
+      attempt_id: evidence.attemptId,
+      evidence: evidence as unknown as Json,
+    });
+    if (error) return { ok: false, message: error.message };
+    const action = (data as { action?: string } | null)?.action === 'replayed' ? 'replayed' : 'recorded';
+    return { ok: true, action };
+  },
+});

@@ -24,6 +24,14 @@ import { GitWorktree, parseGateCommand, runGate } from './worktree';
 // por `CoderBackend`.
 // ============================================================
 
+export const WORKTREE_BRANCH_PREFIX = 'anima-work';
+/**
+ * Convenção de nome da branch descartável de uma tentativa. O HOST usa a MESMA
+ * convenção para observar o git independentemente do adaptador (host-evidence),
+ * então a fonte única evita que a observação e a execução divirjam no nome.
+ */
+export const worktreeBranchFor = (attemptId: string, prefix: string = WORKTREE_BRANCH_PREFIX): string => `${prefix}/${attemptId}`;
+
 export interface WorktreeTarget { readonly repoRoot: string; readonly sha: string; }
 export interface WorktreeTargetResolver { resolve(reference: string): WorktreeTarget | null; }
 
@@ -70,7 +78,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       return;
     }
 
-    const branch = `${this.options.branchPrefix ?? 'anima-work'}/${request.attemptId}`;
+    const branch = worktreeBranchFor(request.attemptId, this.options.branchPrefix ?? WORKTREE_BRANCH_PREFIX);
     const handoffReference = `worktree:${request.target.reference}:${branch}`;
     let worktree: GitWorktree | null = null;
     try {

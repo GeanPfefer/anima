@@ -1,7 +1,9 @@
 import { authenticateRequest } from '@/lib/supabase/request-auth';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from '@/lib/work-orchestration/execution';
-import { readExecutionContract, resolveExecutorRoute } from '@/lib/work-orchestration/executor-selection';
+import { projectRoot, readExecutionContract, resolveExecutorRoute, type ExecutionContract } from '@/lib/work-orchestration/executor-selection';
+import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from '@/lib/work-orchestration/host-evidence';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
+import { worktreeBranchFor } from '@/lib/work-orchestration/worktree-executor';
 
 export const runtime = 'nodejs';
 export const maxDuration = 1800;
@@ -39,6 +41,9 @@ export async function POST(request: Request) {
   }
 
   let route: ConfiguredWorkRoute | null;
+  // Contrato do executor selecionado nesta volta. Guardado para, DEPOIS do
+  // desfecho, o host observar o git independentemente no caminho worktree.
+  let executionContract: ExecutionContract | null = null;
   if (explicit) {
     const item = await client.from('work_items')
       .select('intent, state, proposal_version, impact_level, capability')
@@ -107,7 +112,9 @@ export async function POST(request: Request) {
     // Seleção EXPLÍCITA do executor pelo contrato persistido. O laço
     // supervisionado liga os checkpoints mid-flight (AUTO-05). O caminho
     // comandado (INT-04) do runner Python segue single-shot lá dentro.
-    const selection = resolveExecutorRoute(readExecutionContract(item.data?.intent));
+    const contract = readExecutionContract(item.data?.intent);
+    executionContract = contract;
+    const selection = resolveExecutorRoute(contract);
     if (!selection.ok) {
       return Response.json({ ok: false, error: selection.error }, { status: 503 });
     }
@@ -136,6 +143,27 @@ export async function POST(request: Request) {
       expectedProposalVersion: body!.expectedProposalVersion as number,
     } : undefined,
   });
+
+  // Evidência OBSERVADA PELO HOST (independência real). Só o caminho worktree
+  // deixa uma branch git no repositório real; o host inspeciona `anima-work/<attempt>`
+  // contra o SHA-base do contrato e persiste o que o git de fato registrou — nunca
+  // o que o executor atestou. FAIL-OPEN por construção: qualquer falha aqui só
+  // significa "sem evidência independente nesta volta" (o Verifier recai na
+  // atestação), jamais altera o desfecho da tentativa nem a resposta.
+  if (executionContract?.executor === 'worktree' && executionContract.baseSha
+      && result.terminalKind === 'result' && result.attemptId && result.selection) {
+    await observeAndPersistHostGitEvidence(
+      {
+        repoRoot: projectRoot(),
+        baseSha: executionContract.baseSha,
+        branch: worktreeBranchFor(result.attemptId),
+        workItemId: result.selection.workItemId,
+        attemptId: result.attemptId,
+        approvedProposalVersion: result.selection.approvedProposalVersion,
+      },
+      hostEvidenceSinkFor(client),
+    ).catch(() => undefined);
+  }
 
   // Toda volta que o laço conduziu até um desfecho conhecido responde 200 com o
   // desfecho tipado: perder a corrida do claim é resultado normal do supervisor,
