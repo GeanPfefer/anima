@@ -714,11 +714,12 @@ permanece provider-neutral — a observação vive na rota, não nele.
 - **Git → independente.** Se o executor mentir sobre os arquivos alterados ou o commit,
   o host tem evidência independente suficiente para o Verifier detectar a mentira. Para
   git, a resposta é **SIM**.
-- **Gates → ainda atestados** (`coverage.gates=false`). Ver "Independência dos gates —
-  investigação" abaixo: por que a captura independente não é trivial e qual é o próximo
-  recorte. Independência real PARCIAL é preferível a uma falsa promessa total.
-- **Não implementado**: reexecução/captura independente de gates; qualquer política
-  automática de maturidade.
+- **Gates → independentes no caminho worktree** (`coverage.gates=true` quando há evidência
+  observada). Ver "Independência dos gates — IMPLEMENTADA" abaixo: o host preserva sua
+  observação de primeira parte dos gates que ele mesmo executa, sem reexecução, e o Verifier
+  a trata como autoridade. Para executores que rodem gates fora do host, permanece atestado.
+- **Não implementado**: captura de gate para executores remotos/não-confiáveis; qualquer
+  política automática de maturidade.
 
 ### Parecer do Verifier persistido (append-only, versionado) — IMPLEMENTADO
 
@@ -760,43 +761,49 @@ mergeia, não deploya, não aumenta maturidade e não remove o gate humano. O pa
 `review` (pós-resultado, pré-aceite) e mantém o item em `review`. O parecer é **advisory**;
 a autoridade permanece humana.
 
-### Independência dos gates — investigação (não implementado; próximo recorte)
+### Independência dos gates — IMPLEMENTADA (captura de primeira parte, sem reexecução)
 
-Achado, comprovado no código: os gate commands são executados **em processo** pelo host
-(`runGate` → `runProcess` → `child_process.spawn`, em `apps/web/lib/work-orchestration/worktree.ts`),
-que observa diretamente `command`, `exitCode`, `durationMs`, `timedOut` e `cancelled` no
-momento da execução. **Porém** quem chama `runGate` é o `WorktreeExecutorAdapter` — o papel
-**executor** do contrato INT-01 —, e o resultado é empacotado no handoff **atestado**
-(`worktreeHandoff.gates`). O Verifier, provider-neutral, não distingue o adaptador confiável
-in-process de um executor futuro não-confiável (ex.: runner Python em contêiner, backend em
-nuvem), então trata todo desfecho de gate como atestado.
+> Decisão humana (2026-08-16): **não** reexecutar gates só para o Verifier. Em vez disso,
+> preservar como evidência observada de primeira parte do host os desfechos que o host JÁ
+> observa ao executar cada gate. A investigação anterior havia deixado duas opções (reexecução
+> ou mover a execução de gate para fora do contrato); a decisão escolheu **nenhuma das duas** —
+> capturar o que o host já mede, sem duplicar trabalho.
 
-Nuance importante do caminho worktree: quem **escreve o código** (o `CoderBackend`/LLM) é a
-parte não-confiável; quem **roda o gate** (`runGate`, TS de host) é confiável. O desfecho do
-gate é portanto independente do **autor do código**, mas é capturado **pelo papel executor** e
-flui pela atestação. Diferente do git, que o host **reinspeciona** de um artefato persistido
-depois do fato sem confiar em código em voo, o desfecho do gate é um fato **de runtime**:
-não há artefato a reinspecionar depois.
+Fato do código: os gate commands rodam **em processo** no host (`runGate` → `runProcess` →
+`child_process.spawn`), que mede diretamente `command`, `exitCode`, `durationMs`, `timedOut` e
+`cancelled`. Quem roda o gate (`runGate`, TS de host) **não** é o `CoderBackend`/LLM (o autor
+não-confiável do código) — é código de host. A independência é, portanto, relativa ao **autor
+do código**: um executor que minta no `worktreeHandoff.gates` é contraditado pelo que o host
+mediu.
 
-Por isso independência de gate ao nível do Verifier exige uma de duas mudanças, **nenhuma
-trivial** — o que contraindica implementá-la sem nova base:
+O mecanismo separa os papéis sem reexecutar:
 
-1. **Reexecução pelo host** dos gates contra a branch persistida (extensão do seam de
-   observação: o host faz checkout da branch e roda os gates de novo, observando o
-   `exitCode` real). Independência verdadeira e provider-agnóstica; **custo**: trabalho
-   duplicado, latência, um checkout/worktree extra e o gate roda duas vezes. É a única via
-   que generaliza para executores não-confiáveis. O usuário já sinalizou "não reexecutar sem
-   necessidade".
-2. **Mover a execução de gate para um passo do host** fora do contrato `WorkExecutorAdapter`
-   (o adaptador produziria só a mudança de código; o host rodaria os gates). Sem reexecução,
-   mas **altera o contrato INT-01** e a propriedade da worktree; não generaliza sozinha para
-   executores remotos.
+1. **Observação host-side** — o `WorktreeExecutorAdapter` recebe um `onGateObserved` injetado
+   pela rota (o host), e reporta a ele os fatos brutos logo após cada `runGate`, **num canal do
+   host separado** do `worktreeHandoff.gates` atestado. Inclui o gate que falhou.
+2. **Evidência durável** — a rota `/supervisor-turn` coleta essas observações e persiste
+   `HostObservedGateEvidenceV1` (evento `host_observed_gate_evidence_recorded`, `author=system`/
+   `origin=host`, `record_host_observed_gate_evidence`), **inclusive em terminal de erro** (gate
+   falho é a evidência mais valiosa). O `outcome` é **DERIVADO** do exitCode/timeout/cancelamento
+   (a régua recusa um outcome que não seja o derivado), então o desfecho não pode discordar do
+   código observado. Idempotente por tentativa; a proveniência system/host não é forjável pelo
+   sinal do executor.
+3. **Consumo pelo Verifier** — quando presente e correlacionada, a evidência de gate é a
+   **autoridade** sobre o desfecho: gate observado falho reprova (`gate_failed`, `independent`);
+   divergência por rótulo entre atestado e observado é `attested_gate_contradicts_observed`;
+   todos passando é `gates_independently_observed`. `coverage.gates` do parecer vira **true**.
 
-Recomendação: registrar como próximo recorte candidato, com decisão humana sobre custo ×
-benefício (a opção 1 dá independência real ao custo de reexecutar; a 2 é uma refatoração de
-fronteira). Até lá, `coverage.gates=false` permanece a leitura **honesta**. O teste central
-do futuro recorte, quando autorizado: *executor diz gate passou; host observa `exitCode!=0`;
-Verifier NÃO conclui `verified`.*
+**Honestidade preservada.** Isto só produz evidência quando o **host** executa o gate (caminho
+worktree in-process). Um executor futuro que rode seus próprios gates num processo separado
+(ex.: runner em contêiner, backend em nuvem) **não** gera esta evidência — e aí `coverage.gates`
+é honestamente **false** para aquele executor. Não há promessa de independência onde o host não
+observa; `coverage.gates=true` só aparece quando a observação real existe.
+
+Teste central provado: *executor atesta gate passou; host observa `exitCode != 0`; Verifier
+marca `attested_gate_contradicts_observed` + `gate_failed` e NÃO conclui `verified`.* A
+evolução da base (a evidência de gate chega depois) acrescenta um novo parecer versionado, sem
+apagar o anterior. Fica **fora** deste recorte (futuro): captura de gate para executores
+remotos/não-confiáveis, que exigiria reexecução ou um protocolo de atestação assinada.
 
 ## Benchmark do Claude Auto Mode e autonomia progressiva (direção)
 
