@@ -1,5 +1,5 @@
 import { isAbsolute, resolve } from 'node:path';
-import type { WorkRoutingCandidateV1 } from '@anima/core';
+import type { ObservedGateInput, WorkRoutingCandidateV1 } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { GptCoderBackend } from './gpt-coder';
@@ -89,7 +89,13 @@ const backendFor = (contract: ExecutionContract, override?: CoderBackend): Coder
 
 export function resolveExecutorRoute(
   contract: ExecutionContract,
-  options: { readonly backendOverride?: CoderBackend; readonly repoRoot?: string } = {},
+  options: {
+    readonly backendOverride?: CoderBackend;
+    readonly repoRoot?: string;
+    /** Observador host-side dos gates, injetado pela rota para captar a evidência
+     * observada de gate. Só o executor de worktree (host in-process) o usa. */
+    readonly gateObserver?: (outcome: ObservedGateInput) => void;
+  } = {},
 ): ExecutorSelection {
   const err = (code: string, message: string): ExecutorSelection => ({ ok: false, error: { code, message } });
   const isAnima = contract.targetKind === 'project' && contract.targetReference === 'anima';
@@ -106,6 +112,7 @@ export function resolveExecutorRoute(
     const adapter = new WorktreeExecutorAdapter({
       targets: { resolve: ref => ref === reference ? { repoRoot, sha: baseSha } : null },
       backend, emitCheckpoint: true, linkNodeModules: true,
+      ...(options.gateObserver ? { onGateObserved: options.gateObserver } : {}),
     });
     return { ok: true, route: { adapter, candidate: worktreeCandidate(adapter.id, backend.id) } };
   }

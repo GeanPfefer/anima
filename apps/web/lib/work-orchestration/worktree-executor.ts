@@ -1,6 +1,7 @@
 import {
   buildWorktreeHandoff,
   validateWorkCheckpoint,
+  type ObservedGateInput,
   type WorkCheckpointV1,
   type WorkExecutorAdapter,
   type WorkExecutorRequest,
@@ -44,6 +45,14 @@ export interface WorktreeExecutorOptions {
   readonly linkNodeModules?: boolean;
   /** Emite um checkpoint mid-flight após a edição e antes do gate. */
   readonly emitCheckpoint?: boolean;
+  /**
+   * Observador de gate de PRIMEIRA PARTE DO HOST. Chamado com os fatos brutos que
+   * `runGate` (código de host, não o CoderBackend) mediu logo após cada gate. É o
+   * canal do HOST — o host injeta e persiste como evidência observada, separada do
+   * `worktreeHandoff.gates` atestado. Um executor que não seja este adaptador não o
+   * populará; por isso a evidência só existe quando o host de fato roda o gate.
+   */
+  readonly onGateObserved?: (outcome: ObservedGateInput) => void;
 }
 
 const REQUIRED_PERMISSIONS = ['workspace_read', 'workspace_write_isolated'] as const;
@@ -155,6 +164,13 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         if (!criterion.command) { validations.push({ label: criterion.label, outcome: 'declared' }); continue; }
         if (signal.aborted) break;
         const gate = await runGate(criterion.command, worktree.root, timeoutMs, signal);
+        // Observação de primeira parte do host: os fatos BRUTOS que o host mediu ao
+        // rodar o gate, no canal do host (separado do handoff atestado). Inclui o
+        // gate que falhou, ANTES do break — é a evidência mais valiosa.
+        this.options.onGateObserved?.({
+          label: criterion.label, command: gate.command, exitCode: gate.exitCode,
+          durationMs: gate.durationMs, timedOut: gate.timedOut, cancelled: gate.cancelled,
+        });
         const passed = gate.exitCode === 0 && !gate.timedOut && !gate.cancelled;
         validations.push({ label: criterion.label, outcome: passed ? 'passed' : 'failed' });
         gateOutcomes.push({ label: criterion.label, command: gate.command, exitCode: gate.exitCode, outcome: passed ? 'passed' : 'failed' });

@@ -1,7 +1,9 @@
+import type { ObservedGateInput } from '@anima/core';
 import { authenticateRequest } from '@/lib/supabase/request-auth';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from '@/lib/work-orchestration/execution';
 import { projectRoot, readExecutionContract, resolveExecutorRoute, type ExecutionContract } from '@/lib/work-orchestration/executor-selection';
+import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from '@/lib/work-orchestration/gate-evidence';
 import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from '@/lib/work-orchestration/host-evidence';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
 import { computeAndPersistVerifierOpinion, verifierOpinionSinkFor } from '@/lib/work-orchestration/verifier-opinion';
@@ -46,6 +48,9 @@ export async function POST(request: Request) {
   // Contrato do executor selecionado nesta volta. Guardado para, DEPOIS do
   // desfecho, o host observar o git independentemente no caminho worktree.
   let executionContract: ExecutionContract | null = null;
+  // Coletor host-side dos gates: o executor de worktree reporta aqui os fatos brutos
+  // que o host mediu ao rodar cada gate (canal do host, separado do handoff atestado).
+  const gateObservations: ObservedGateInput[] = [];
   if (explicit) {
     const item = await client.from('work_items')
       .select('intent, state, proposal_version, impact_level, capability')
@@ -116,7 +121,7 @@ export async function POST(request: Request) {
     // comandado (INT-04) do runner Python segue single-shot lá dentro.
     const contract = readExecutionContract(item.data?.intent);
     executionContract = contract;
-    const selection = resolveExecutorRoute(contract);
+    const selection = resolveExecutorRoute(contract, { gateObserver: outcome => gateObservations.push(outcome) });
     if (!selection.ok) {
       return Response.json({ ok: false, error: selection.error }, { status: 503 });
     }
@@ -146,43 +151,55 @@ export async function POST(request: Request) {
     } : undefined,
   });
 
-  // Pós-terminal, quando a volta produziu um resultado: (1) o host observa o git
-  // independentemente e (2) o Verifier registra seu parecer sobre a evidência.
-  // Ambos FAIL-OPEN — nunca alteram o desfecho da tentativa nem a resposta.
-  if (result.terminalKind === 'result' && result.attemptId && result.selection) {
-    // (1) Evidência OBSERVADA PELO HOST (independência real). Só o caminho worktree
-    // deixa uma branch git no repositório real; o host inspeciona `anima-work/<attempt>`
-    // contra o SHA-base do contrato e persiste o que o git de fato registrou — nunca
-    // o que o executor atestou. Falha aqui só significa "sem evidência independente
-    // nesta volta" (o Verifier recai na atestação).
-    if (executionContract?.executor === 'worktree' && executionContract.baseSha) {
-      await observeAndPersistHostGitEvidence(
-        {
-          repoRoot: projectRoot(),
-          baseSha: executionContract.baseSha,
-          branch: worktreeBranchFor(result.attemptId),
-          workItemId: result.selection.workItemId,
-          attemptId: result.attemptId,
-          approvedProposalVersion: result.selection.approvedProposalVersion,
-        },
-        hostEvidenceSinkFor(client),
-      ).catch(() => undefined);
+  // Pós-terminal, quando a volta iniciou uma tentativa: o host persiste sua evidência
+  // observada e o Verifier registra seu parecer. Tudo FAIL-OPEN — nunca altera o
+  // desfecho da tentativa nem a resposta.
+  if (result.attemptId && result.selection) {
+    const correlation = {
+      workItemId: result.selection.workItemId,
+      attemptId: result.attemptId,
+      approvedProposalVersion: result.selection.approvedProposalVersion,
+    };
+
+    // (0) Evidência de GATE observada pelo host. Persiste os fatos que o host mediu ao
+    // rodar cada gate — INCLUSIVE em terminal de erro (um gate falho é a evidência mais
+    // valiosa: é o que contradiz um executor que minta que passou).
+    if (gateObservations.length > 0) {
+      await persistHostObservedGateEvidence(correlation, gateObservations, gateEvidenceSinkFor(client)).catch(() => undefined);
     }
 
-    // (2) PARECER do Verifier. Lê o estado FRESCO — inclui a evidência observada
-    // recém-persistida — e registra o parecer sobre ela. Advisory e recomputável:
-    // sem handoff durável não há parecer (skipped); persistir é auditoria, não
-    // decisão. NÃO aceita resultado, não autoriza integração, não remove o humano.
-    const service = createWorkOrchestrationService(client);
-    const [freshItem, freshEvents] = await Promise.all([
-      service.getItem(result.selection.workItemId),
-      service.listEvents(result.selection.workItemId),
-    ]);
-    if (freshItem.ok && freshEvents.ok) {
-      await computeAndPersistVerifierOpinion(
-        { item: freshItem.value, events: freshEvents.value },
-        verifierOpinionSinkFor(client),
-      ).catch(() => undefined);
+    if (result.terminalKind === 'result') {
+      // (1) Evidência de GIT observada pelo host. Só o caminho worktree deixa uma branch
+      // git no repositório real; o host inspeciona `anima-work/<attempt>` contra o SHA-base
+      // do contrato e persiste o que o git de fato registrou — nunca o que o executor
+      // atestou. Falha aqui só significa "sem evidência de git independente nesta volta".
+      if (executionContract?.executor === 'worktree' && executionContract.baseSha) {
+        await observeAndPersistHostGitEvidence(
+          {
+            repoRoot: projectRoot(),
+            baseSha: executionContract.baseSha,
+            branch: worktreeBranchFor(result.attemptId),
+            ...correlation,
+          },
+          hostEvidenceSinkFor(client),
+        ).catch(() => undefined);
+      }
+
+      // (2) PARECER do Verifier. Lê o estado FRESCO — inclui as evidências observadas
+      // (git e gate) recém-persistidas — e registra o parecer sobre elas. Advisory e
+      // recomputável: sem handoff durável não há parecer (skipped); persistir é
+      // auditoria, não decisão. NÃO aceita resultado, não autoriza, não remove o humano.
+      const service = createWorkOrchestrationService(client);
+      const [freshItem, freshEvents] = await Promise.all([
+        service.getItem(correlation.workItemId),
+        service.listEvents(correlation.workItemId),
+      ]);
+      if (freshItem.ok && freshEvents.ok) {
+        await computeAndPersistVerifierOpinion(
+          { item: freshItem.value, events: freshEvents.value },
+          verifierOpinionSinkFor(client),
+        ).catch(() => undefined);
+      }
     }
   }
 
