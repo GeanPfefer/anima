@@ -4,6 +4,8 @@ import { HUMAN_INTERRUPTION_REASONS, type HumanInterruptionReason } from './huma
 import { projectIntegrationBoundary, type WorkIntegrationDecision } from './integration-decision';
 import {parseBranchPublicationReceipt,parseReviewRequestReceipt} from './protected-integration';
 import { projectWorktreeHandoff } from './worktree-handoff';
+import { projectHostObservedEvidence, type HostObservedGitEvidenceV1 } from './host-observed-evidence';
+import { projectHostObservedGateEvidence, type HostObservedGateEvidenceV1 } from './host-observed-gate-evidence';
 import { verifyPersistedWorkResult, type WorkVerificationReport } from './work-verification';
 import { projectVerifierOpinionHistory, type VerifierOpinionV1 } from './verifier-opinion';
 
@@ -75,7 +77,11 @@ export interface WorkIntegrationProjection {
 export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
   // Histórico append-only dos pareceres do Verifier persistidos (auditoria). Só
   // presente quando há ao menos um; read-only, nunca altera ações nem decide.
-  readonly opinionHistory?:readonly VerifierOpinionV1[]; }
+  readonly opinionHistory?:readonly VerifierOpinionV1[];
+  // Fatos BRUTOS que o host observou de forma independente (git e gate), ao lado do
+  // parecer que os interpreta. Auditoria read-only; só presente quando há alguma
+  // evidência observada. Nunca altera ações nem substitui a atestação por si só.
+  readonly observedEvidence?:{ readonly git:HostObservedGitEvidenceV1|null; readonly gates:HostObservedGateEvidenceV1|null }; }
 
 const object=(value:Json|undefined):Record<string,Json|undefined>|null=>value!==null&&value!==undefined&&!Array.isArray(value)&&typeof value==='object'?value:null;
 const validationOutcomes:ReadonlySet<string>=new Set(['passed','failed','declared']);
@@ -228,12 +234,14 @@ export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEve
     canRequestControl:status==='running'&&pendingControl===null,
   };
 }
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events),pendingDecision:projectPendingWorkDecision(item,events),integration:projectWorkIntegration(item,events),
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);const observedGit=projectHostObservedEvidence(events);const observedGates=projectHostObservedGateEvidence(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events),pendingDecision:projectPendingWorkDecision(item,events),integration:projectWorkIntegration(item,events),
   // Parecer advisory do Verifier — só quando há evidência git durável a conferir.
   // É projeção pura e read-only; nunca altera ações nem substitui a revisão humana.
   verification:projectWorktreeHandoff(events)?verifyPersistedWorkResult(item,events):null,
   // Histórico persistido dos pareceres (auditoria), quando existe.
-  ...(opinionHistory.length>0?{opinionHistory}:{})};};
+  ...(opinionHistory.length>0?{opinionHistory}:{}),
+  // Fatos brutos observados pelo host (git e gate), quando existe algum.
+  ...(observedGit!==null||observedGates!==null?{observedEvidence:{git:observedGit,gates:observedGates}}:{})};};
 
 // Reconstrói a projeção somente quando os elos persistidos mínimos existem.
 // O estado atual nunca basta para inventar o histórico que deveria explicá-lo.

@@ -102,3 +102,14 @@ describe('histórico de pareceres do Verifier na apresentação',()=>{
   test('sem parecer persistido, o campo é omitido (não polui a apresentação)',()=>expect(presentWorkItem(item,[event]).opinionHistory).toBeUndefined());
   test('surfar o parecer não altera as ações disponíveis (advisory)',()=>expect(presentWorkItem(item,[event,opinionEvent]).availableActions).toEqual(presentWorkItem(item,[event]).availableActions));
 });
+
+describe('evidência observada bruta na apresentação (auditoria)',()=>{
+  const gitEv={schemaVersion:1,workItemId:'i',attemptId:'a1',approvedProposalVersion:2,baseSha:'a'.repeat(40),observedCommitSha:'b'.repeat(40),observedChangedFiles:['src/a.ts'],observedDiffSummary:{filesChanged:1,insertions:2,deletions:0,files:[{path:'src/a.ts',insertions:2,deletions:0}]},observedAt:'2026-08-16T10:00:00Z',coverage:{git:true,gates:false}};
+  const gitEvent={id:'g',workItemId:'i',type:'host_observed_evidence_recorded',author:'system',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{work_item_id:'i',attempt_id:'a1',approved_proposal_version:2,origin:'host',evidence:gitEv}}} satisfies WorkEvent;
+  const gateEv={schemaVersion:1,workItemId:'i',attemptId:'a1',approvedProposalVersion:2,gates:[{label:'unit',command:'npm test',exitCode:0,durationMs:1,timedOut:false,cancelled:false,outcome:'passed'}],observedAt:'2026-08-16T10:00:00Z',coverage:{gates:true}};
+  const gateEvent={id:'ge',workItemId:'i',type:'host_observed_gate_evidence_recorded',author:'system',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{work_item_id:'i',attempt_id:'a1',approved_proposal_version:2,origin:'host',evidence:gateEv}}} satisfies WorkEvent;
+  test('surfa os fatos brutos observados (git e gate) quando existem',()=>{const p=presentWorkItem(item,[event,gitEvent,gateEvent]);expect(p.observedEvidence?.git?.observedChangedFiles).toEqual(['src/a.ts']);expect(p.observedEvidence?.gates?.gates[0]).toMatchObject({label:'unit',outcome:'passed'});});
+  test('só git observado ⇒ gates null, git presente',()=>{const p=presentWorkItem(item,[event,gitEvent]);expect(p.observedEvidence?.git).not.toBeNull();expect(p.observedEvidence?.gates).toBeNull();});
+  test('sem evidência observada ⇒ campo omitido',()=>expect(presentWorkItem(item,[event]).observedEvidence).toBeUndefined());
+  test('surfar evidência não altera as ações disponíveis',()=>expect(presentWorkItem(item,[event,gitEvent,gateEvent]).availableActions).toEqual(presentWorkItem(item,[event]).availableActions));
+});
