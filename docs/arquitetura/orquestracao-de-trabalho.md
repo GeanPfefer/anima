@@ -644,6 +644,78 @@ limites de tentativas são gates entre tentativas; não encerram uma tentativa j
 admitida. Tokens, dinheiro e janelas específicas de fornecedores permanecem
 fora do V0.
 
+## Governança de recursos da máquina — Resource Governor (direção)
+
+> Direção arquitetural **investigada, não implementada**. Estende a "reserva interativa" do
+> INTEL-04 (que reserva *tempo* de execução autônoma) para os **recursos físicos da máquina**
+> (CPU/RAM/disco/GPU), e generaliza o "sob mandato" do [Marco 007](../marcos/007-interacao-com-computador-e-aplicacoes-locais.md)
+> e os "recursos locais sob permissão explícita" do [Marco 004](../marcos/004-anima-portatil-e-nos-locais.md).
+> Origem: sessão em **modo de convivência** (usuário jogando no mesmo PC). Detalhe/achado em
+> `docs/registros/2026-08-16-modo-convivencia-resource-governor.md`.
+
+O problema: o Anima executa trabalho local (gates, coder backends, modelos locais, Docker/
+Supabase, suítes) na **mesma máquina** que o usuário usa interativamente. Rodar workloads
+pesados durante uso interativo degrada a experiência do usuário. O INTEL-04 já reserva *tempo*
+de modo autônomo; falta reservar **recursos físicos**.
+
+A direção **não** é aplicar thresholds fixos cegamente. O alvo é um **Resource Governor** que
+**aprenda o custo real**:
+
+```text
+tipo de tarefa + repo + comando + histórico da máquina
+   → previsão de CPU / RAM / I/O / GPU / duração
+comparado com
+recursos atuais + reserva do usuário
+   → pode executar agora? adiar? exigir máquina exclusiva?
+```
+
+Capacidades desejadas (nenhuma implementada): conhecer a carga atual (CPU, RAM livre, processos,
+I/O, GPU/VRAM, Docker/WSL, Ollama); prever o consumo de uma tarefa por classe (CPU-/RAM-/disk-/
+network-/GPU-bound); aprender o custo real de execuções anteriores; reservar recursos para o
+usuário; detectar atividade interativa importante (ex.: um jogo); limitar concorrência
+automaticamente; rodar tarefas leves durante uso interativo; acumular/deferir tarefas pesadas;
+avisar antes de uma fase de carga alta; aproveitar janelas ociosas para trabalho pesado; saber
+quando precisa de "máquina exclusiva".
+
+**Heurística V0 grosseira** (stopgap, enquanto não há predição aprendida): classificar cada
+operação em **LOW** (leitura, edição, git local, testes muito focados), **MEDIUM** (typecheck
+pequeno, suíte focada, poucos processos) e **HIGH** (full suites, builds, pgTAP completo, Docker
+pesado, campanhas, modelos 14B/30B, GPU compute, paralelismo amplo). LOW/MEDIUM rodam sob
+convivência; HIGH é adiado até uma janela de máquina livre, e — quando um HIGH for realmente
+necessário para provar um recorte — o sistema **avisa e espera**, nunca afrouxa o gate. A
+classificação é **coarse e provisória**: o alvo é a predição aprendida, não o rótulo fixo.
+
+**Fundação já existente, subutilizada (through-line com o implementado):**
+
+- **Custo observado.** A evidência de gate observada pelo host (`HostObservedGateEvidenceV1`) já
+  registra `durationMs` real por gate — uma **semente de custo** que o governor pode acumular por
+  `(comando, repo)` para prever duração. O mesmo padrão "host observa fatos de runtime" serviria
+  para observar CPU/RAM/GPU de uma execução.
+- **Observação barata.** O host mede a pressão da máquina com chamadas leves (`Get-CimInstance
+  Win32_OperatingSystem`, `Get-Process`, `docker ps`, `ollama ps`, `nvidia-smi`), sem virar
+  workload pesado — a medição não pode custar como o que ela evita.
+- **Reserva sob mandato.** O "sob mandato" do Marco 007 e a "reserva interativa" do INTEL-04 já
+  fixam que o usuário tem precedência; o governor generaliza isso de *tempo* para *recursos
+  físicos*, e não concede autoridade nova — apenas decide **quando/como** executar o já autorizado.
+
+**Achado concreto** (medido barato no modo de convivência): com o usuário jogando, o maior
+consumidor atribuível ao trabalho de dev do Anima era o `vmmem` (VM do WSL2/Docker hospedando os
+contêineres do Supabase), ~1,2 GB, com ~4,6 GB de RAM livre no total; **nenhum** modelo Ollama
+carregado. Ou seja: em repouso, o gargalo dominante do modo autônomo local é o **Docker/Supabase**,
+não os modelos. Um Resource Governor deveria tratar "subir Supabase" como custo **HIGH de RAM** e
+liberá-lo quando ocioso — exatamente a ação tomada manualmente nesta sessão.
+
+Exemplos do comportamento desejado (ilustrativos, não regras fixas): jogo ativo + GPU/VRAM
+pressionadas → não carregar Ollama 30B; jogo ativo + alteração documental → executar normalmente;
+jogo ativo + teste unitário pequeno → baixa concorrência; full suite + build + Supabase + Ollama →
+esperar janela de máquina exclusiva.
+
+**Fora do escopo desta direção:** implementação do governor, coleta persistente de telemetria,
+modelo de predição, agendador, e qualquer automação que ganhe autoridade nova. É **direção**, não
+contrato; a construção real exige recorte próprio e autorização, proporcional ao valor. Invariante
+mantido: nenhuma decisão de recurso afrouxa gate ou validação — a economia é de **quando/como**
+executar, nunca de remover prova.
+
 ## Verifier e evidência observada pelo host (independência real)
 
 > Direção arquitetural ratificada (Marco 005/006) e **parcialmente implementada**.
