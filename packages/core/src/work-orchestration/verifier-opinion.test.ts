@@ -1,10 +1,12 @@
 import {
+  buildHostObservedGateEvidence,
   buildHostObservedGitEvidence,
   buildWorktreeHandoff,
   computeVerifierOpinion,
   parseVerifierOpinion,
   projectVerifierOpinionHistory,
   VERIFIER_VERSION,
+  type HostObservedGateEvidenceV1,
   type HostObservedGitEvidenceV1,
   type VerifierOpinionV1,
   type WorkEvent,
@@ -85,6 +87,28 @@ const observedEvent = (evidence: HostObservedGitEvidenceV1, id = 'ev-host'): Wor
   occurredAt: new Date('2026-08-15T00:01:00Z'),
 });
 
+const gateEvidence = (): HostObservedGateEvidenceV1 => {
+  const built = buildHostObservedGateEvidence({
+    workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2,
+    gates: [{ label: 'unit', command: 'npm test', exitCode: 0, durationMs: 100, timedOut: false, cancelled: false }],
+    observedAt: '2026-08-15T12:00:00.000Z',
+  });
+  if (!built.ok) throw new Error(built.explanation);
+  return built.value;
+};
+
+const gateEvent = (evidence: HostObservedGateEvidenceV1, id = 'ev-gate'): WorkEvent => ({
+  id, workItemId: 'work-1', type: 'host_observed_gate_evidence_recorded', author: 'system', proposalVersion: 2,
+  payload: {
+    schema_version: 1,
+    data: {
+      work_item_id: 'work-1', attempt_id: evidence.attemptId, approved_proposal_version: 2,
+      origin: 'host', coverage: { gates: true }, evidence: evidence as unknown as Json,
+    },
+  } as unknown as Json,
+  occurredAt: new Date('2026-08-15T00:02:00Z'),
+});
+
 describe('computeVerifierOpinion', () => {
   test('sem handoff durável ⇒ null (parecer é sobre um resultado produzido)', () => {
     expect(computeVerifierOpinion(item(), [])).toBeNull();
@@ -122,6 +146,18 @@ describe('computeVerifierOpinion', () => {
     expect(opinion!.verdict).toBe('rejected');
     expect(opinion!.findings.map(f => f.code)).toContain('attested_contradicts_observed');
     expect(opinion!.evidenceBasis.observedEventId).toBe('ev-host');
+  });
+
+  test('git E gate observados juntos (caminho vivo) ⇒ coverage {git,gates}=true, ambas as bases', () => {
+    // É o cenário que a rota persiste de fato: git + gate observados na mesma tentativa.
+    const opinion = computeVerifierOpinion(item(), [resultEvent(handoffWith()), observedEvent(hostEvidence()), gateEvent(gateEvidence())]);
+    expect(opinion!.verdict).toBe('verified');
+    expect(opinion!.evidenceBasis.coverage).toEqual({ git: true, gates: true });
+    expect(opinion!.evidenceBasis.observedEventId).toBe('ev-host');
+    expect(opinion!.evidenceBasis.observedGateEventId).toBe('ev-gate');
+    const codes = opinion!.findings.map(f => f.code);
+    expect(codes).toContain('scope_independently_observed');
+    expect(codes).toContain('gates_independently_observed');
   });
 
   test('determinístico: mesmos inputs ⇒ parecer idêntico byte a byte', () => {
