@@ -1,9 +1,11 @@
 import {
+  buildHostObservedGateEvidence,
   buildHostObservedGitEvidence,
   buildWorktreeHandoff,
   presentWorkItem,
   verifyPersistedWorkResult,
   verifyWorkResult,
+  type HostObservedGateEvidenceV1,
   type HostObservedGitEvidenceV1,
   type WorkEvent,
   type WorkItem,
@@ -11,6 +13,55 @@ import {
   type WorktreeHandoffV1,
 } from './index';
 import type { Json } from '@anima/types';
+
+const gateEvidenceWith = (over: Partial<Parameters<typeof buildHostObservedGateEvidence>[0]> = {}): HostObservedGateEvidenceV1 => {
+  const built = buildHostObservedGateEvidence({
+    workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2,
+    gates: [{ label: 'unit', command: 'npm test', exitCode: 0, durationMs: 100, timedOut: false, cancelled: false }],
+    observedAt: '2026-08-16T12:00:00.000Z', ...over,
+  });
+  if (!built.ok) throw new Error(built.explanation);
+  return built.value;
+};
+
+describe('verifyWorkResult — gates observados pelo host (observed > attested)', () => {
+  const base = (over: Partial<WorkResultVerificationInput> = {}): WorkResultVerificationInput => baseInput(over);
+
+  test('gate observado passou + atestado passou ⇒ confirmação independente, verified', () => {
+    const report = verifyWorkResult(base({ observedGates: gateEvidenceWith() }));
+    expect(report.verdict).toBe('verified');
+    const finding = report.findings.find(f => f.code === 'gates_independently_observed');
+    expect(finding?.provenance).toBe('independent');
+  });
+
+  test('gate observado FALHOU + Executor atestou passou ⇒ rejected (mentira detectada)', () => {
+    const report = verifyWorkResult(base({ observedGates: gateEvidenceWith({ gates: [{ label: 'unit', command: 'npm test', exitCode: 1, durationMs: 50, timedOut: false, cancelled: false }] }) }));
+    expect(report.verdict).toBe('rejected');
+    const codes = report.findings.map(f => f.code);
+    expect(codes).toContain('attested_gate_contradicts_observed');
+    expect(codes).toContain('gate_failed');
+    expect(report.findings.find(f => f.code === 'gate_failed')?.provenance).toBe('independent');
+  });
+
+  test('gate observado por timeout (código 0 mas timedOut) ⇒ failed independente', () => {
+    const report = verifyWorkResult(base({ observedGates: gateEvidenceWith({ gates: [{ label: 'unit', command: 'npm test', exitCode: 0, durationMs: 999, timedOut: true, cancelled: false }] }) }));
+    expect(report.verdict).toBe('rejected');
+    expect(report.findings.map(f => f.code)).toContain('gate_failed');
+  });
+
+  test('evidência de gate de outra tentativa ⇒ mismatch (violação) e recai na atestação', () => {
+    const report = verifyWorkResult(base({ observedGates: gateEvidenceWith({ attemptId: 'attempt-OUTRA' }) }));
+    expect(report.findings.map(f => f.code)).toContain('observed_gate_correlation_mismatch');
+    expect(report.verdict).toBe('rejected');
+  });
+
+  test('sem evidência de gate observada ⇒ gates atestados (comportamento anterior), verified', () => {
+    const report = verifyWorkResult(base());
+    expect(report.verdict).toBe('verified');
+    expect(report.findings.map(f => f.code)).toContain('gates_passed');
+    expect(report.findings.some(f => f.code === 'gates_independently_observed')).toBe(false);
+  });
+});
 
 const BASE = 'a'.repeat(40);
 const COMMIT = 'b'.repeat(40);

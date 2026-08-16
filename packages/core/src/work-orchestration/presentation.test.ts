@@ -96,7 +96,7 @@ describe('projeção da decisão humana',()=>{
 });
 
 describe('histórico de pareceres do Verifier na apresentação',()=>{
-  const opinion={schemaVersion:1,workItemId:'i',attemptId:'a1',approvedProposalVersion:2,verifierVersion:'work-verifier-v1',verdict:'verified',restsOnAttestedEvidence:true,summary:{violations:0,gaps:0,checks:1,attested:1,independent:0},findings:[{code:'gates_passed',severity:'ok',provenance:'attested'}],evidenceBasis:{resultEventId:'r',observedEventId:null,coverage:{git:false,gates:false}}};
+  const opinion={schemaVersion:1,workItemId:'i',attemptId:'a1',approvedProposalVersion:2,verifierVersion:'work-verifier-v1',verdict:'verified',restsOnAttestedEvidence:true,summary:{violations:0,gaps:0,checks:1,attested:1,independent:0},findings:[{code:'gates_passed',severity:'ok',provenance:'attested'}],evidenceBasis:{resultEventId:'r',observedEventId:null,observedGateEventId:null,coverage:{git:false,gates:false}}};
   const opinionEvent={id:'op1',workItemId:'i',type:'verifier_opinion_recorded',author:'system',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{work_item_id:'i',attempt_id:'a1',approved_proposal_version:2,origin:'verifier',verifier_version:'work-verifier-v1',verdict:'verified',opinion}}} satisfies WorkEvent;
   test('surfa o histórico persistido (read-only, auditoria) quando existe',()=>{const p=presentWorkItem(item,[event,opinionEvent]);expect(p.opinionHistory).toHaveLength(1);expect(p.opinionHistory?.[0]).toMatchObject({verdict:'verified',verifierVersion:'work-verifier-v1'});});
   test('sem parecer persistido, o campo é omitido (não polui a apresentação)',()=>expect(presentWorkItem(item,[event]).opinionHistory).toBeUndefined());

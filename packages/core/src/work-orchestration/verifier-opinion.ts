@@ -1,4 +1,5 @@
 import { projectHostObservedEvidence } from './host-observed-evidence';
+import { projectHostObservedGateEvidence } from './host-observed-gate-evidence';
 import type { ProposalVersion, WorkEvent, WorkItem, WorkItemId } from './types';
 import {
   verifyPersistedWorkResult,
@@ -52,9 +53,14 @@ export interface VerifierOpinionFinding {
 export interface VerifierOpinionEvidenceBasis {
   /** O `result_submitted` cujo handoff foi verificado. Identidade append-only. */
   readonly resultEventId: string;
-  /** O `host_observed_evidence_recorded` considerado, ou `null` quando ainda não há
-   * evidência independente observada — a diferença que legitima um novo parecer. */
+  /** O `host_observed_evidence_recorded` (git) considerado, ou `null` quando ainda
+   * não há evidência independente de git — a diferença que legitima um novo parecer. */
   readonly observedEventId: string | null;
+  /** O `host_observed_gate_evidence_recorded` considerado, ou `null` quando ainda não
+   * há evidência independente de gate. Faz parte da identidade do parecer: quando a
+   * evidência de gate aparece, a base muda e um NOVO parecer é acrescentado (não um
+   * conflito com o anterior). */
+  readonly observedGateEventId: string | null;
   /** O que foi observado de forma INDEPENDENTE no momento deste parecer. */
   readonly coverage: { readonly git: boolean; readonly gates: boolean };
 }
@@ -97,6 +103,13 @@ export function computeVerifierOpinion(item: WorkItem, events: readonly WorkEven
   if (!resultEvent) return null;
   const observed = projectHostObservedEvidence(events);
   const observedEvent = lastEventOfType(events, 'host_observed_evidence_recorded');
+  const observedGates = projectHostObservedGateEvidence(events);
+  const observedGateEvent = lastEventOfType(events, 'host_observed_gate_evidence_recorded');
+  // Evidência de gate usável = presente e correlacionada a ESTA tentativa/versão.
+  const gatesUsable = observedGates !== null
+    && observedGates.attemptId === handoff.attemptId
+    && observedGates.workItemId === item.id
+    && observedGates.approvedProposalVersion === item.proposalVersion;
   const report = verifyPersistedWorkResult(item, events);
   return {
     schemaVersion: 1,
@@ -114,7 +127,8 @@ export function computeVerifierOpinion(item: WorkItem, events: readonly WorkEven
       resultEventId: resultEvent.id,
       // Só referencia a observação quando ela é a base real do veredito (correlacionada).
       observedEventId: observed !== null && observedEvent !== null ? observedEvent.id : null,
-      coverage: observed !== null ? observed.coverage : { git: false, gates: false },
+      observedGateEventId: gatesUsable && observedGateEvent !== null ? observedGateEvent.id : null,
+      coverage: { git: observed !== null, gates: gatesUsable },
     },
   };
 }
@@ -152,6 +166,7 @@ export function parseVerifierOpinion(value: Json | undefined): VerifierOpinionV1
   if (!nonBlank(root.workItemId) || !nonBlank(root.attemptId) || !positiveInt(root.approvedProposalVersion)
     || !nonBlank(root.verifierVersion) || !isVerdict(root.verdict) || typeof root.restsOnAttestedEvidence !== 'boolean'
     || !nonBlank(basis.resultEventId) || (basis.observedEventId !== null && !nonBlank(basis.observedEventId))
+    || (basis.observedGateEventId !== null && !nonBlank(basis.observedGateEventId))
     || typeof coverage.git !== 'boolean' || typeof coverage.gates !== 'boolean') {
     return null;
   }
@@ -171,6 +186,7 @@ export function parseVerifierOpinion(value: Json | undefined): VerifierOpinionV1
     evidenceBasis: {
       resultEventId: basis.resultEventId,
       observedEventId: (basis.observedEventId as string | null) ?? null,
+      observedGateEventId: (basis.observedGateEventId as string | null) ?? null,
       coverage: { git: coverage.git, gates: coverage.gates },
     },
   };

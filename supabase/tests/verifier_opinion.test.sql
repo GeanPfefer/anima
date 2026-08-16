@@ -11,7 +11,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 \ir helpers/routing.inc
-SELECT plan(20);
+SELECT plan(22);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('b6000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','vop@test.invalid','',now(),'{}','{}',now(),now()),
@@ -33,7 +33,7 @@ SELECT set_config('request.jwt.claim.sub','b6000000-0000-0000-0000-000000000000'
 
 -- Construtor de parecer válido. `p_observed` uuid ⇒ string; NULL ⇒ JSON null.
 CREATE FUNCTION pg_temp.vop(p_item uuid, p_attempt uuid, p_result uuid, p_observed uuid,
-  p_verdict text DEFAULT 'verified', p_version text DEFAULT 'work-verifier-v1', p_git boolean DEFAULT false)
+  p_verdict text DEFAULT 'verified', p_version text DEFAULT 'work-verifier-v1', p_git boolean DEFAULT false, p_gate uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE sql AS $$
   SELECT jsonb_build_object(
     'schemaVersion',1,
@@ -44,8 +44,16 @@ RETURNS jsonb LANGUAGE sql AS $$
       jsonb_build_object('code','scope_respected','severity','ok','provenance',CASE WHEN p_git THEN 'independent' ELSE 'attested' END),
       jsonb_build_object('code','gates_passed','severity','ok','provenance','attested')),
     'evidenceBasis',jsonb_build_object(
-      'resultEventId',p_result,'observedEventId',p_observed,
-      'coverage',jsonb_build_object('git',p_git,'gates',false)));
+      'resultEventId',p_result,'observedEventId',p_observed,'observedGateEventId',p_gate,
+      'coverage',jsonb_build_object('git',p_git,'gates',p_gate IS NOT NULL)));
+$$;
+
+-- Construtor de evidência de gate observada (para referência da base de gate).
+CREATE FUNCTION pg_temp.hge(p_item uuid, p_attempt uuid)
+RETURNS jsonb LANGUAGE sql AS $$
+  SELECT jsonb_build_object('schemaVersion',1,'workItemId',p_item,'attemptId',p_attempt,'approvedProposalVersion',1,
+    'gates',jsonb_build_array(jsonb_build_object('label','unit','command','npm test','exitCode',0,'durationMs',100,'timedOut',false,'cancelled',false,'outcome','passed')),
+    'observedAt','2026-08-16T10:00:00Z','coverage',jsonb_build_object('gates',true));
 $$;
 
 -- Construtor de evidência observada válida (para referência da base observada).
@@ -90,6 +98,9 @@ CREATE TEMP TABLE r2 AS SELECT id FROM public.work_events WHERE work_item_id=(SE
 SELECT public.record_host_observed_evidence((SELECT id FROM i1),1,'b6000000-0000-0000-0000-0000000000a1',
   pg_temp.hoe((SELECT id FROM i1),'b6000000-0000-0000-0000-0000000000a1'));
 CREATE TEMP TABLE ho1 AS SELECT id FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_evidence_recorded' LIMIT 1;
+SELECT public.record_host_observed_gate_evidence((SELECT id FROM i1),1,'b6000000-0000-0000-0000-0000000000a1',
+  pg_temp.hge((SELECT id FROM i1),'b6000000-0000-0000-0000-0000000000a1'));
+CREATE TEMP TABLE hg1 AS SELECT id FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_gate_evidence_recorded' LIMIT 1;
 
 -- ============================================================
 -- (1) Registro válido, proveniência system/verifier, sem tocar o estado
@@ -131,7 +142,16 @@ SELECT is(
   (public.record_verifier_opinion((SELECT id FROM i1),1,'b6000000-0000-0000-0000-0000000000a1',
     pg_temp.vop((SELECT id FROM i1),'b6000000-0000-0000-0000-0000000000a1',(SELECT id FROM r1),NULL,'rejected','work-verifier-v2')))->>'action',
   'recorded','versão do Verifier diferente é NOVO parecer append-only');
-SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='verifier_opinion_recorded'),3::bigint,'a história preserva os três pareceres distintos');
+-- A evidência de GATE observada aparece: a base muda ⇒ novo parecer, NÃO conflito.
+SELECT is(
+  (public.record_verifier_opinion((SELECT id FROM i1),1,'b6000000-0000-0000-0000-0000000000a1',
+    pg_temp.vop((SELECT id FROM i1),'b6000000-0000-0000-0000-0000000000a1',(SELECT id FROM r1),NULL,'verified','work-verifier-v1',false,(SELECT id FROM hg1))))->>'action',
+  'recorded','a chegada da evidência de gate é NOVA base ⇒ novo parecer, não conflito');
+SELECT throws_ok(
+  $$ SELECT public.record_verifier_opinion((SELECT id FROM i1),1,'b6000000-0000-0000-0000-0000000000a1',
+       pg_temp.vop((SELECT id FROM i1),'b6000000-0000-0000-0000-0000000000a1',(SELECT id FROM r1),NULL,'verified','work-verifier-v1',false,'b6000000-0000-0000-0000-000000000fff')) $$,
+  'P0002',NULL,'observedGateEventId inexistente é recusado');
+SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='verifier_opinion_recorded'),4::bigint,'a história preserva os quatro pareceres distintos');
 
 -- ============================================================
 -- (4) Correlação e base de evidência DESTA tentativa

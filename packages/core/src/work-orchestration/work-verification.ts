@@ -1,5 +1,6 @@
 import { readAutonomousExecutionSpec, type AutonomousValidationCriterion } from './eligibility';
 import { projectHostObservedEvidence, type HostObservedGitEvidenceV1 } from './host-observed-evidence';
+import { projectHostObservedGateEvidence, type HostObservedGateEvidenceV1 } from './host-observed-gate-evidence';
 import type { ProposalVersion, WorkEvent, WorkItem, WorkItemId, WorkResultValidation } from './types';
 import { isAnimaWorktreeBranch, projectWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff';
 
@@ -80,6 +81,10 @@ export type WorkVerificationFindingCode =
   | 'no_gates_present'
   // Contradição interna do gate: outcome vs código de saída observado.
   | 'gate_exit_code_incoherent'
+  // Gates conferidos contra a evidência OBSERVADA pelo host (execução real), não a atestada.
+  | 'gates_independently_observed'
+  | 'attested_gate_contradicts_observed'
+  | 'observed_gate_correlation_mismatch'
   // Cobertura dos critérios declarados por um gate factual.
   | 'criterion_covered'
   | 'criterion_without_gate_coverage'
@@ -177,6 +182,16 @@ export interface WorkResultVerificationInput {
    * o escopo recai na atestação (comportamento anterior), marcado como tal.
    */
   readonly observed?: HostObservedGitEvidenceV1 | null;
+  /**
+   * Evidência de GATE observada pelo host (desfechos reais que o host mediu ao
+   * executar cada gate), independente do `worktreeHandoff.gates` atestado. Quando
+   * presente e correlacionada, é a AUTORIDADE sobre o desfecho dos gates: um gate que
+   * o host observou falhar reprova (proveniência `independent`), e uma divergência
+   * entre o atestado e o observado é `attested_gate_contradicts_observed`. Ausente ⇒
+   * os gates recaem na atestação (comportamento anterior). Malformada/de outra
+   * tentativa ⇒ tratada como ausente/mismatch, nunca vira autoridade (fail-closed).
+   */
+  readonly observedGates?: HostObservedGateEvidenceV1 | null;
 }
 
 const norm = (path: string): string => path.replace(/\\/g, '/');
@@ -302,37 +317,75 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   }
 
   // ---------- Gates realmente executados ----------
-  // Contradição interna adversarial: um gate "passed" com código de saída não-zero
-  // é incoerente — passar significa código 0 (o inverso NÃO vale: um gate pode
-  // falhar por timeout/cancelamento com código 0, então só checamos passed⟹0).
-  // O contrato INT-05 (`buildWorktreeHandoff`) não força isso; o Verifier não
-  // confia na coerência do handoff, ele a re-deriva.
-  const incoherentGates = handoff.gates.filter(g => g.outcome === 'passed' && g.exitCode !== 0);
-  for (const g of incoherentGates) {
-    findings.push(violation('gate_exit_code_incoherent',
-      `O gate "${g.label}" declara "passed", mas o código de saída observado é ${g.exitCode}; passar exige código 0.`, g.label));
+  // Autoridade sobre o desfecho dos gates: a evidência OBSERVADA pelo host (execução
+  // real), quando presente e correlacionada — o executor não a controla. Sem ela,
+  // recai nos gates ATESTADOS do handoff (comportamento anterior).
+  const observedGates = input.observedGates;
+  const observedGatesUsable = observedGates !== null && observedGates !== undefined
+    && observedGates.workItemId === expected.workItemId
+    && observedGates.attemptId === expected.attemptId
+    && observedGates.approvedProposalVersion === expected.approvedProposalVersion;
+  if (observedGates !== null && observedGates !== undefined && !observedGatesUsable) {
+    findings.push(violation('observed_gate_correlation_mismatch',
+      'A evidência de gate observada pelo host não corresponde à tentativa esperada; os gates recaem na atestação.', undefined, 'independent'));
   }
-  if (handoff.gates.length === 0) {
-    findings.push(gap('no_gates_present',
-      'Nenhum gate foi registrado: não há evidência factual de que a alteração foi validada.'));
-  } else {
-    for (const g of failedGates) {
-      findings.push(violation('gate_failed',
-        `O gate "${g.label}" (${g.command}) terminou com código ${g.exitCode}.`, g.label));
+  if (observedGatesUsable) {
+    // O host mediu os gates de primeira parte. Cada gate observado falho reprova; e
+    // uma divergência por rótulo entre o atestado e o observado é a mentira detectada.
+    const attestedByLabel = new Map(handoff.gates.map(g => [g.label, g.outcome]));
+    let anyGateProblem = false;
+    for (const g of observedGates!.gates) {
+      if (g.outcome === 'failed') {
+        const why = g.timedOut ? ' (timeout)' : g.cancelled ? ' (cancelado)' : '';
+        findings.push(violation('gate_failed',
+          `O host observou o gate "${g.label}" (${g.command}) terminar com código ${g.exitCode}${why}.`, g.label, 'independent'));
+        anyGateProblem = true;
+      }
+      const attested = attestedByLabel.get(g.label);
+      if (attested !== undefined && attested !== g.outcome) {
+        findings.push(violation('attested_gate_contradicts_observed',
+          `O executor atestou o gate "${g.label}" como "${attested}", mas o host observou "${g.outcome}"; a observação prevalece.`, g.label, 'independent'));
+        anyGateProblem = true;
+      }
     }
-    if (failedGates.length === 0 && incoherentGates.length === 0) {
-      findings.push(ok('gates_passed', `Todos os ${handoff.gates.length} gate(s) registrado(s) passaram com código 0.`));
+    if (!anyGateProblem) {
+      findings.push(ok('gates_independently_observed',
+        `Todos os ${observedGates!.gates.length} gate(s) foram confirmados por observação independente do host.`, undefined, 'independent'));
+    }
+  } else {
+    // Contradição interna adversarial: um gate "passed" com código de saída não-zero
+    // é incoerente — passar significa código 0 (o inverso NÃO vale: um gate pode
+    // falhar por timeout/cancelamento com código 0, então só checamos passed⟹0).
+    // O contrato INT-05 (`buildWorktreeHandoff`) não força isso; o Verifier não
+    // confia na coerência do handoff, ele a re-deriva.
+    const incoherentGates = handoff.gates.filter(g => g.outcome === 'passed' && g.exitCode !== 0);
+    for (const g of incoherentGates) {
+      findings.push(violation('gate_exit_code_incoherent',
+        `O gate "${g.label}" declara "passed", mas o código de saída observado é ${g.exitCode}; passar exige código 0.`, g.label));
+    }
+    if (handoff.gates.length === 0) {
+      findings.push(gap('no_gates_present',
+        'Nenhum gate foi registrado: não há evidência factual de que a alteração foi validada.'));
+    } else {
+      for (const g of failedGates) {
+        findings.push(violation('gate_failed',
+          `O gate "${g.label}" (${g.command}) terminou com código ${g.exitCode}.`, g.label));
+      }
+      if (failedGates.length === 0 && incoherentGates.length === 0) {
+        findings.push(ok('gates_passed', `Todos os ${handoff.gates.length} gate(s) registrado(s) passaram com código 0.`));
+      }
     }
   }
 
   // ---------- Cobertura dos critérios declarados por um gate factual ----------
-  // Cruzamento por RÓTULO: o Executor grava o rótulo do critério em cada gate, e
-  // o rótulo não sofre normalização (diferente do comando). Um critério com
-  // comando exige um gate correspondente aprovado; sem ele, a evidência é
-  // insuficiente (lacuna). Um critério só declarado não é verificável por
-  // evidência — informativo, não bloqueia `verified`.
-  const passedByLabel = new Set(handoff.gates.filter(g => g.outcome === 'passed').map(g => g.label));
-  const anyGateByLabel = new Set(handoff.gates.map(g => g.label));
+  // Cruzamento por RÓTULO: um critério com comando exige um gate correspondente
+  // aprovado; sem ele, a evidência é insuficiente (lacuna). Um critério só declarado
+  // não é verificável por evidência — informativo, não bloqueia `verified`. A fonte
+  // do desfecho é a observada quando usável, senão a atestada.
+  const gateOutcomeSource: readonly { readonly label: string; readonly outcome: 'passed' | 'failed' }[] =
+    observedGatesUsable ? observedGates!.gates : handoff.gates;
+  const passedByLabel = new Set(gateOutcomeSource.filter(g => g.outcome === 'passed').map(g => g.label));
+  const anyGateByLabel = new Set(gateOutcomeSource.map(g => g.label));
   for (const criterion of authorized.validationCriteria) {
     if (!nonBlankCommand(criterion)) {
       findings.push(ok('declared_criterion_unverifiable',
@@ -400,6 +453,7 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
 export function verifyPersistedWorkResult(item: WorkItem, events: readonly WorkEvent[]): WorkVerificationReport {
   const handoff = projectWorktreeHandoff(events);
   const observed = projectHostObservedEvidence(events);
+  const observedGates = projectHostObservedGateEvidence(events);
   const spec = readAutonomousExecutionSpec(item.intent);
   return verifyWorkResult({
     expected: {
@@ -416,6 +470,7 @@ export function verifyPersistedWorkResult(item: WorkItem, events: readonly WorkE
     },
     handoff,
     observed,
+    observedGates,
   });
 }
 
