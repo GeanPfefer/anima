@@ -26,7 +26,7 @@ O V0 aprende com fatos: não trata thresholds como verdade universal (as faixas 
 percentis dos dados; a reserva interativa é injetada, não embutida) e responde `unknown`/
 `insufficient_evidence` quando não há evidência bastante — honestidade em vez de faixa inventada.
 
-## O que foi implementado (2 commits de produção)
+## O que foi implementado (3 commits de produção + 1 de documentação)
 
 Detalhe arquitetural em `docs/arquitetura/orquestracao-de-trabalho.md`
 §"Governança de recursos da máquina — Resource Governor" → "Resource Governor V0 implementado".
@@ -57,9 +57,20 @@ Detalhe arquitetural em `docs/arquitetura/orquestracao-de-trabalho.md`
   o histórico dos eventos, lê o snapshot vivo e compõe a visão — em vez de espalhar telemetria por
   cada executor.
 
+**Commit 3 — surface na presentation (`packages/core/.../presentation.ts`):**
+
+- `projectWorkResourceCost` + campo opcional `resourceCost` em `presentWorkItem`: deriva o custo dos
+  gates observados DESTE item e projeta distribuição + perfis por comando com a classe **relativa à
+  distribuição do próprio item** (num mesmo attempt os comandos distintos — typecheck/unit/e2e — já
+  dão espalhamento: typecheck → low, e2e → high). É **EVIDÊNCIA + HISTÓRICO + CLASSIFICAÇÃO
+  read-only**; NÃO traz advisory (que depende do snapshot vivo e fica no seam host-side), preservando
+  a separação de camadas. Sem gate observado → campo omitido / projeção `null`. Surfar o custo **não
+  altera as ações disponíveis** (advisory, não decisão).
+
 ## Provas (determinísticas, sem LLM, sem Supabase)
 
-- **core:** 847/847 (39 suítes), incluindo **57 testes** novos do governor. typecheck 0.
+- **core:** 852/852 (39 suítes), incluindo **62 testes** novos do governor (57 nas camadas + 5 na
+  presentation). typecheck 0.
 - **web:** **11 testes** novos (telemetria + seam ponta a ponta com eventos de gate reais). typecheck 0.
 - Casos adversariais cobertos: pouca evidência → `insufficient`; barato → `safe_to_run`; caro+usuário
   ativo → `machine_exclusive_recommended`; caro+pressão moderada → `prefer_defer`; duração alta →
@@ -96,6 +107,7 @@ Recortes elegíveis (locais, reversíveis, sem efeito externo, prováveis):
    surfando o parecer do governor junto às evidências observadas — nunca adiando/bloqueando sozinho).
 2. **Persistência própria** de observações de custo/telemetria de máquina (evento append-only +
    RPC + proveniência host), abrindo o histórico cross-item além do que o log de gate já oferece.
-3. **Surfar o governor na presentation** (read-model machine-scoped) para auditoria humana.
+3. ~~Surfar o governor na presentation~~ — **feito nesta sessão** (commit 3, `resourceCost` em
+   `presentWorkItem`). Um passo futuro é a versão **machine-scoped** (cross-item), que depende de (2).
 Qualquer automação de **controle** (matar/parar/descarregar/agendar/prioridade) permanece FORA do V0
 e exige recorte próprio + autorização humana.
