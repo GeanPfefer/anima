@@ -1,4 +1,4 @@
-import { availableWorkActions, buildProposalRevision, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingWorkDecision, projectWorkIntegration, reconstructWorkPresentation, type WorkEvent, type WorkItem } from '.';
+import { availableWorkActions, buildProposalRevision, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingWorkDecision, projectWorkIntegration, projectWorkResourceCost, reconstructWorkPresentation, type WorkEvent, type WorkItem } from '.';
 const item={id:'i',userId:'u',sourceMessageId:'m',state:'review',impactLevel:'low',capability:'planning',originalRequest:'x',intent:{},proposal:{schemaVersion:1,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:2,createdAt:new Date(),updatedAt:new Date()} satisfies WorkItem;
 const event={id:'r',workItemId:'i',type:'result_submitted',author:'executor',proposalVersion:2,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a']}},occurredAt:new Date()} satisfies WorkEvent;
 describe('projeção de apresentação do trabalho',()=>{
@@ -112,4 +112,25 @@ describe('evidência observada bruta na apresentação (auditoria)',()=>{
   test('só git observado ⇒ gates null, git presente',()=>{const p=presentWorkItem(item,[event,gitEvent]);expect(p.observedEvidence?.git).not.toBeNull();expect(p.observedEvidence?.gates).toBeNull();});
   test('sem evidência observada ⇒ campo omitido',()=>expect(presentWorkItem(item,[event]).observedEvidence).toBeUndefined());
   test('surfar evidência não altera as ações disponíveis',()=>expect(presentWorkItem(item,[event,gitEvent,gateEvent]).availableActions).toEqual(presentWorkItem(item,[event]).availableActions));
+});
+describe('Resource Governor V0 na presentation (custo derivado dos gates, read-only)',()=>{
+  const resultEvent={id:'r',workItemId:'i',type:'result_submitted',author:'executor',proposalVersion:2,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a']}},occurredAt:new Date()} satisfies WorkEvent;
+  // Um attempt com três gates de comandos distintos → a distribuição tem espalhamento real.
+  const gateEv={schemaVersion:1,workItemId:'i',attemptId:'a1',approvedProposalVersion:2,gates:[
+    {label:'typecheck',command:'npm run typecheck',exitCode:0,durationMs:300,timedOut:false,cancelled:false,outcome:'passed'},
+    {label:'unit',command:'npm test',exitCode:0,durationMs:3000,timedOut:false,cancelled:false,outcome:'passed'},
+    {label:'e2e',command:'npm run test:e2e',exitCode:0,durationMs:90000,timedOut:false,cancelled:false,outcome:'passed'},
+  ],observedAt:'2026-08-17T10:00:00Z',coverage:{gates:true}};
+  const gateEvent={id:'ge',workItemId:'i',type:'host_observed_gate_evidence_recorded',author:'system',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{work_item_id:'i',attempt_id:'a1',approved_proposal_version:2,origin:'host',evidence:gateEv}}} satisfies WorkEvent;
+  test('deriva perfis por comando com classe relativa à distribuição do próprio item',()=>{
+    const cost=projectWorkResourceCost([resultEvent,gateEvent]);
+    expect(cost?.distribution).toMatchObject({count:3,maxMs:90000});
+    const byCommand=Object.fromEntries((cost?.profiles??[]).map(p=>[p.key.command,p.predominantClass]));
+    expect(byCommand['npm run typecheck']).toBe('low');
+    expect(byCommand['npm run test:e2e']).toBe('high');
+  });
+  test('presentWorkItem surfa resourceCost quando há gate observado',()=>expect(presentWorkItem(item,[resultEvent,gateEvent]).resourceCost?.distribution.count).toBe(3));
+  test('sem gate observado ⇒ resourceCost omitido',()=>expect(presentWorkItem(item,[resultEvent]).resourceCost).toBeUndefined());
+  test('nenhum gate ⇒ projeção null (não inventa histórico)',()=>expect(projectWorkResourceCost([resultEvent])).toBeNull());
+  test('surfar custo não altera as ações disponíveis (advisory, não decisão)',()=>expect(presentWorkItem(item,[resultEvent,gateEvent]).availableActions).toEqual(presentWorkItem(item,[resultEvent]).availableActions));
 });

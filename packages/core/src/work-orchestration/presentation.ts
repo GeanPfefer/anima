@@ -8,6 +8,9 @@ import { projectHostObservedEvidence, type HostObservedGitEvidenceV1 } from './h
 import { projectHostObservedGateEvidence, type HostObservedGateEvidenceV1 } from './host-observed-gate-evidence';
 import { verifyPersistedWorkResult, type WorkVerificationReport } from './work-verification';
 import { projectVerifierOpinionHistory, type VerifierOpinionV1 } from './verifier-opinion';
+import { deriveWorkloadCostObservationsFromEvents } from './resource-observation';
+import { buildCostDistribution, type CostDistribution } from './resource-classification';
+import { projectWorkloadCostProfiles, type WorkloadCostProfile } from './resource-history';
 
 // null distingue "não informado" de lista vazia: a UI deve declarar a ausência
 // explicitamente, nunca preencher o vazio com o texto livre do autor.
@@ -81,7 +84,23 @@ export interface WorkPresentation { readonly item: WorkItem; readonly latestResu
   // Fatos BRUTOS que o host observou de forma independente (git e gate), ao lado do
   // parecer que os interpreta. Auditoria read-only; só presente quando há alguma
   // evidência observada. Nunca altera ações nem substitui a atestação por si só.
-  readonly observedEvidence?:{ readonly git:HostObservedGitEvidenceV1|null; readonly gates:HostObservedGateEvidenceV1|null }; }
+  readonly observedEvidence?:{ readonly git:HostObservedGitEvidenceV1|null; readonly gates:HostObservedGateEvidenceV1|null };
+  // Resource Governor V0 (leitura): custo derivado dos gates observados deste item —
+  // observações → perfis por comando + classe relativa à distribuição do próprio item.
+  // Auditoria read-only (EVIDÊNCIA + HISTÓRICO + CLASSIFICAÇÃO); NÃO traz advisory, que
+  // depende do snapshot vivo da máquina e vive no seam host-side. Só presente quando há
+  // ao menos um gate observado. Nunca altera ações nem decide nada.
+  readonly resourceCost?:WorkResourceCostProjection; }
+
+export interface WorkResourceCostProjection { readonly distribution:CostDistribution; readonly profiles:readonly WorkloadCostProfile[]; }
+/** Projeta o custo de recursos deste item a partir dos gates observados pelo host. Puro
+ * e read-only; `null` quando o item ainda não tem nenhum gate observado. */
+export function projectWorkResourceCost(events:readonly WorkEvent[]):WorkResourceCostProjection|null{
+  const observations=deriveWorkloadCostObservationsFromEvents(events);
+  if(observations.length===0)return null;
+  const distribution=buildCostDistribution(observations);
+  return{distribution,profiles:projectWorkloadCostProfiles(observations,distribution)};
+}
 
 const object=(value:Json|undefined):Record<string,Json|undefined>|null=>value!==null&&value!==undefined&&!Array.isArray(value)&&typeof value==='object'?value:null;
 const validationOutcomes:ReadonlySet<string>=new Set(['passed','failed','declared']);
@@ -241,7 +260,9 @@ export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPre
   // Histórico persistido dos pareceres (auditoria), quando existe.
   ...(opinionHistory.length>0?{opinionHistory}:{}),
   // Fatos brutos observados pelo host (git e gate), quando existe algum.
-  ...(observedGit!==null||observedGates!==null?{observedEvidence:{git:observedGit,gates:observedGates}}:{})};};
+  ...(observedGit!==null||observedGates!==null?{observedEvidence:{git:observedGit,gates:observedGates}}:{}),
+  // Custo de recursos derivado dos gates observados (Resource Governor V0), quando há.
+  ...((()=>{const resourceCost=projectWorkResourceCost(events);return resourceCost!==null?{resourceCost}:{};})())};};
 
 // Reconstrói a projeção somente quando os elos persistidos mínimos existem.
 // O estado atual nunca basta para inventar o histórico que deveria explicá-lo.
