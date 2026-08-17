@@ -139,3 +139,29 @@ sem infra de teste de componente RN → prova viva no dispositivo); (2) **observ
 (coder/suite/build — ponto de observação NOVO no executor, risco no caminho quente, schema/derivação a
 decidir); (3) classificação ciente de desfecho/recência (refinamento sem consumidor claro). CONTROLE
 segue FORA do V0.
+
+## Prova viva: isolamento RLS do read machine-wide (`listEventsByType`)
+
+A fronteira antes **skipped sem Docker** foi fechada AO VIVO contra o Supabase local (Docker iniciado
+nesta sessão; `supabase_db_anima` healthy — só o container `vector`/analytics reiniciava, irrelevante).
+O `integration.test.ts` gated por env **não** roda de fábrica aqui: depende de fixture não semeada neste
+DB (allowlist de orquestração + source message elegível → `orchestration_not_enabled`), o que é lacuna
+de **dados**, não de código. Em vez de semear a cadeia inteira, provei diretamente a propriedade que o
+read machine-wide depende — a **política SELECT de `work_events` já ratificada** —, usando dados reais
+já presentes (35 work_items de 10 usuários).
+
+Método (read-only, só SELECTs; DB inalterado): sob o contexto `authenticated` de dois usuários reais
+(`SET ROLE authenticated` + `request.jwt.claims.sub`, pois o superuser bypassa RLS), rodei a **query
+exata** do `listEventsByType` (`… FROM public.work_events WHERE event_type='work_proposed'`, sem filtro
+de `work_item_id`):
+
+- **Usuário A** (dono de 16 `work_proposed`): `visiveis_total=16`, `proprios_A=16`, `de_B_VAZAMENTO=0`;
+  adversarial (A busca o evento de B por id via o read machine-wide) → `0` (RLS esconde).
+- **Usuário B** (dono de 5): `visiveis_total=5`, `proprios_B=5`, `de_A_VAZAMENTO=0`; controle positivo
+  (B busca o próprio evento por id) → `1` (RLS não sobre-oculta).
+
+Conclusão: o read machine-wide (`.eq('event_type', …)` sem filtro de item) é **corretamente isolado por
+usuário** pela RLS de `work_events` — sem vazamento e sem sobre-ocultação, confirmando ao vivo a decisão
+de arquitetura (a isolação é da política ratificada, não deste código, o mesmo padrão de
+`findResumableWorkItems`). Prova **recomputável**: reexecutar a mesma query sob os dois contextos dá os
+mesmos números. Nenhuma mudança de RLS/schema foi feita para fabricar a prova.
