@@ -2,7 +2,17 @@
 import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateWorkExecutorTranscript, type WorkCapability, type WorkExecutorRequest, type WorkExecutorSignal } from '@anima/core';
+import {
+  buildHostObservedGateEvidence,
+  buildWorktreeHandoff,
+  validateWorkExecutorTranscript,
+  verifyWorkResult,
+  type ObservedGateInput,
+  type WorkCapability,
+  type WorkExecutorRequest,
+  type WorkExecutorSignal,
+  type WorktreeHandoffV1,
+} from '@anima/core';
 import { runProcess } from './worktree';
 import { ScriptedCoderBackend, type CoderBackend, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { WorktreeExecutorAdapter, type WorktreeTargetResolver } from './worktree-executor';
@@ -281,6 +291,83 @@ describe('WorktreeExecutorAdapter', () => {
     // Nenhum gate/commit/result: a branch preservada aponta exatamente ao SHA-base.
     const tip = await git(ctx.repo, ['rev-parse', `anima-work/${req.attemptId}`]);
     expect(tip.stdout.trim()).toBe(ctx.sha);
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
+});
+
+describe('WorktreeExecutorAdapter — evidência de gate observada de primeira parte (ponta a ponta)', () => {
+  let ctx: Awaited<ReturnType<typeof makeNpmRepo>>;
+  beforeAll(async () => { ctx = await makeNpmRepo(); });
+  afterAll(async () => { await ctx.cleanup(); });
+  const added = { path: 'src/added.ts', content: 'export const two = 2;\n' };
+
+  // Coletor host-side idêntico ao que a rota /supervisor-turn injeta.
+  const runWithObserver = async (req: WorkExecutorRequest) => {
+    const observed: ObservedGateInput[] = [];
+    const adapter = new WorktreeExecutorAdapter({
+      targets: ctx.resolver, backend: new ScriptedCoderBackend([added]),
+      onGateObserved: o => observed.push(o),
+    });
+    const signals = await collect(adapter, req, new AbortController().signal);
+    return { observed, terminal: signals.at(-1)! };
+  };
+
+  test('gate REAL que passa: host observa exitCode 0 e o Verifier confirma independentemente', async () => {
+    const req = request(); // npm test → exit 0
+    const { observed, terminal } = await runWithObserver(req);
+    // 1) O adaptador reportou a observação BRUTA de primeira parte do host.
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({ label: 'testes', exitCode: 0, timedOut: false, cancelled: false });
+    expect(observed[0]!.command).toContain('test');
+    // 2) A evidência construída dos fatos observados deriva 'passed'.
+    const built = buildHostObservedGateEvidence({ workItemId: req.workItemId, attemptId: req.attemptId, approvedProposalVersion: req.approvedProposalVersion, gates: observed, observedAt: new Date().toISOString() });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value.gates[0]!.outcome).toBe('passed');
+    // 3) O Verifier, com o handoff atestado REAL + a evidência observada, confirma o gate.
+    expect(terminal.kind).toBe('result');
+    const handoff = (terminal as { worktreeHandoff?: WorktreeHandoffV1 }).worktreeHandoff!;
+    const report = verifyWorkResult({
+      expected: { workItemId: req.workItemId, attemptId: req.attemptId, approvedProposalVersion: req.approvedProposalVersion },
+      authorized: { includedScope: req.includedScope, excludedScope: req.excludedScope, validationCriteria: req.validationCriteria },
+      handoff, observedGates: built.value,
+    });
+    expect(report.findings.map(f => f.code)).toContain('gates_independently_observed');
+    expect(report.verdict).toBe('verified');
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
+
+  test('gate REAL que falha: host observa exitCode≠0 e o Verifier detecta a mentira do atestado', async () => {
+    const req = request({ validationCriteria: [{ label: 'build', command: 'npm run build' }] }); // exit 1
+    const { observed, terminal } = await runWithObserver(req);
+    // O adaptador honesto termina em erro (sem result) — mas a observação do host EXISTE.
+    expect(terminal.kind).toBe('error');
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({ label: 'build', timedOut: false, cancelled: false });
+    expect(observed[0]!.exitCode).not.toBe(0);
+    const built = buildHostObservedGateEvidence({ workItemId: req.workItemId, attemptId: req.attemptId, approvedProposalVersion: req.approvedProposalVersion, gates: observed, observedAt: new Date().toISOString() });
+    expect(built.ok && built.value.gates[0]!.outcome).toBe('failed');
+    if (!built.ok) return;
+    // Adversário: um handoff que MENTE que o mesmo gate passou. A observação é REAL;
+    // só a atestação é fabricada, como um executor mal-comportado faria.
+    const lying = buildWorktreeHandoff({
+      workItemId: req.workItemId, attemptId: req.attemptId, approvedProposalVersion: req.approvedProposalVersion,
+      executorId: 'worktree-v1', backendId: 'fake', model: null,
+      baseSha: 'a'.repeat(40), branch: `anima-work/${req.attemptId}`, commitSha: 'b'.repeat(40), status: 'succeeded',
+      changedFiles: ['src/added.ts'], diffFiles: [{ path: 'src/added.ts', insertions: 1, deletions: 0 }],
+      gates: [{ label: 'build', command: 'npm run build', exitCode: 0, outcome: 'passed' }],
+    });
+    expect(lying.ok).toBe(true);
+    if (!lying.ok) return;
+    const report = verifyWorkResult({
+      expected: { workItemId: req.workItemId, attemptId: req.attemptId, approvedProposalVersion: req.approvedProposalVersion },
+      authorized: { includedScope: req.includedScope, excludedScope: req.excludedScope, validationCriteria: req.validationCriteria },
+      handoff: lying.value, observedGates: built.value,
+    });
+    const codes = report.findings.map(f => f.code);
+    expect(codes).toContain('attested_gate_contradicts_observed');
+    expect(codes).toContain('gate_failed');
+    expect(report.verdict).toBe('rejected');
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
   });
 });
