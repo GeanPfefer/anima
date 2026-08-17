@@ -5,6 +5,7 @@ import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from '@/lib
 import { projectRoot, readExecutionContract, resolveExecutorRoute, type ExecutionContract } from '@/lib/work-orchestration/executor-selection';
 import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from '@/lib/work-orchestration/gate-evidence';
 import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from '@/lib/work-orchestration/host-evidence';
+import { composeSupervisorResourceAdvisory, type ResourceGovernorAdvisoryReport } from '@/lib/work-orchestration/resource-governor';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
 import { computeAndPersistVerifierOpinion, verifierOpinionSinkFor } from '@/lib/work-orchestration/verifier-opinion';
 import { worktreeBranchFor } from '@/lib/work-orchestration/worktree-executor';
@@ -203,10 +204,34 @@ export async function POST(request: Request) {
     }
   }
 
+  // (3) ADVISORY do Resource Governor (read-only), anexado ao read-model da resposta.
+  // Bloco INDEPENDENTE e TOTALMENTE fail-open: deriva o custo histórico dos gates
+  // observados do item + lê o snapshot vivo da máquina (seam central) → um parecer por
+  // workload. Roda para qualquer terminal registrado (um gate falho também tem custo). NÃO
+  // decide, NÃO bloqueia, NÃO muda elegibilidade nem o `value: result`: só informa. Toda a
+  // leitura (inclusive o fetch de eventos) está sob try/catch — um defeito de telemetria ou
+  // de transporte vira advisory AUSENTE, jamais um erro que altere a resposta do turno.
+  let resourceGovernor: ResourceGovernorAdvisoryReport | undefined;
+  if (result.selection && result.terminalKind !== null) {
+    try {
+      const events = await createWorkOrchestrationService(client).listEvents(result.selection.workItemId);
+      if (events.ok) {
+        resourceGovernor = composeSupervisorResourceAdvisory({ events: events.value }) ?? undefined;
+      }
+    } catch {
+      resourceGovernor = undefined;
+    }
+  }
+
   // Toda volta que o laço conduziu até um desfecho conhecido responde 200 com o
   // desfecho tipado: perder a corrida do claim é resultado normal do supervisor,
   // não erro de transporte. Só a incerteza real — tentativa aberta sem terminal
   // confiável — sobe como 500, porque exige nova invocação para fechar.
   const incomplete = result.outcome === 'execution_interrupted' || result.outcome === 'terminal_refused';
-  return Response.json({ ok: true, value: result }, { status: incomplete ? 500 : 200 });
+  // O advisory de recursos é anexado só quando existe (histórico suficiente): read-model
+  // ao lado do desfecho, nunca dentro de `value` (o resultado do Supervisor é intocado).
+  return Response.json(
+    { ok: true, value: result, ...(resourceGovernor ? { resourceGovernor } : {}) },
+    { status: incomplete ? 500 : 200 },
+  );
 }

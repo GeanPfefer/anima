@@ -4,15 +4,21 @@
 jest.mock('@/lib/supabase/request-auth', () => ({ authenticateRequest: jest.fn() }));
 jest.mock('@/lib/work-orchestration/execution', () => ({ localRunnerRouteFromEnvironment: jest.fn() }));
 jest.mock('@/lib/work-orchestration/supervisor', () => ({ runSupervisorTurn: jest.fn() }));
+jest.mock('@/lib/work-orchestration/server', () => ({ createWorkOrchestrationService: jest.fn() }));
+jest.mock('@/lib/work-orchestration/resource-governor', () => ({ composeSupervisorResourceAdvisory: jest.fn() }));
 
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/supabase/request-auth';
 import { localRunnerRouteFromEnvironment } from '@/lib/work-orchestration/execution';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
+import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
+import { composeSupervisorResourceAdvisory } from '@/lib/work-orchestration/resource-governor';
 
 const auth = authenticateRequest as jest.Mock;
 const route = localRunnerRouteFromEnvironment as jest.Mock;
 const turn = runSupervisorTurn as jest.Mock;
+const service = createWorkOrchestrationService as jest.Mock;
+const advisory = composeSupervisorResourceAdvisory as jest.Mock;
 
 const request = (body: unknown): Request => ({
   json: async () => body, signal: new AbortController().signal,
@@ -22,6 +28,11 @@ beforeEach(() => {
   jest.clearAllMocks();
   route.mockReturnValue({ candidate: { routeId: 'r' }, adapter: { id: 'local-runner-v1' } });
   turn.mockResolvedValue({ outcome: 'execution_completed', reconciliation: [] });
+  service.mockReturnValue({
+    listEvents: jest.fn().mockResolvedValue({ ok: true, value: [] }),
+    getItem: jest.fn().mockResolvedValue({ ok: true, value: {} }),
+  });
+  advisory.mockReturnValue(null);
 });
 
 test('sem autenticação → 401 e o Supervisor não é chamado', async () => {
@@ -139,6 +150,76 @@ test('proposta GPT fora do contrato isolado não recebe classificação', async 
 
   expect(rpc).not.toHaveBeenCalled();
   expect(turn).toHaveBeenCalledTimes(1);
+});
+
+// ---------------------------------------------------------------------------
+// Resource Governor V0: advisory read-only anexado ao read-model do turno.
+// A fila autônoma pura (corpo sem workItemId) evita o executor de worktree e mantém
+// o foco na fiação: o desfecho já é terminal e carrega attemptId+selection.
+const terminalResult = (overrides: Record<string, unknown> = {}) => ({
+  outcome: 'execution_failed', reconciliation: [], attemptId: 'att-1', terminalKind: 'error',
+  selection: { workItemId: 'w', approvedProposalVersion: 2 }, ...overrides,
+});
+
+test('terminal com histórico → advisory read-only anexado AO LADO de value (result intocado)', async () => {
+  auth.mockResolvedValue({ client: { from: jest.fn() }, userId: 'user-1' });
+  const result = terminalResult();
+  turn.mockResolvedValue(result);
+  const listEvents = jest.fn().mockResolvedValue({ ok: true, value: [{ id: 'e1' }] });
+  service.mockReturnValue({ listEvents, getItem: jest.fn() });
+  const report = { snapshot: null, pressure: 'low', distribution: { count: 3, p50Ms: 1, p90Ms: 2, maxMs: 3 }, advisories: [] };
+  advisory.mockReturnValue(report);
+
+  const res = await POST(request({}));
+
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.value).toEqual(result);            // o resultado do Supervisor não é tocado
+  expect(body.resourceGovernor).toEqual(report); // o advisory viaja ao lado, não dentro
+  // Consumiu os eventos FRESCOS do item (seam central), não outra fonte.
+  expect(listEvents).toHaveBeenCalledWith('w');
+  expect(advisory).toHaveBeenCalledWith({ events: [{ id: 'e1' }] });
+});
+
+test('advisory que lança é engolido (FAIL-OPEN): value e status inalterados, sem resourceGovernor', async () => {
+  auth.mockResolvedValue({ client: { from: jest.fn() }, userId: 'user-1' });
+  const result = terminalResult();
+  turn.mockResolvedValue(result);
+  service.mockReturnValue({ listEvents: jest.fn().mockResolvedValue({ ok: true, value: [] }), getItem: jest.fn() });
+  advisory.mockImplementation(() => { throw new Error('telemetria falhou'); });
+
+  const res = await POST(request({}));
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true, value: result }); // nenhum campo extra, nada muda
+});
+
+test('histórico insuficiente (advisory null) → campo omitido, resposta limpa', async () => {
+  auth.mockResolvedValue({ client: { from: jest.fn() }, userId: 'user-1' });
+  const result = terminalResult();
+  turn.mockResolvedValue(result);
+  advisory.mockReturnValue(null);
+
+  const res = await POST(request({}));
+
+  const body = await res.json();
+  expect(body).toEqual({ ok: true, value: result });
+  expect('resourceGovernor' in body).toBe(false);
+});
+
+test('volta sem terminal (interrompida) → NENHUMA leitura de advisory; resposta 500 intocada', async () => {
+  auth.mockResolvedValue({ client: { from: jest.fn() }, userId: 'user-1' });
+  const result = terminalResult({ outcome: 'execution_interrupted', terminalKind: null });
+  turn.mockResolvedValue(result);
+  const listEvents = jest.fn();
+  service.mockReturnValue({ listEvents, getItem: jest.fn() });
+
+  const res = await POST(request({}));
+
+  expect(res.status).toBe(500);
+  expect(listEvents).not.toHaveBeenCalled();     // não contamina o caminho incompleto
+  expect(advisory).not.toHaveBeenCalled();
+  expect(await res.json()).toEqual({ ok: true, value: result });
 });
 
 test('alvo Anima sem executor declarado → 503, sem fallback silencioso e sem Supervisor', async () => {

@@ -5,7 +5,7 @@ import {
   type WorkEvent,
 } from '@anima/core';
 import type { Json } from '@anima/types';
-import { composeHostResourceGovernorView } from './resource-governor';
+import { composeHostResourceGovernorView, composeSupervisorResourceAdvisory } from './resource-governor';
 
 let seq = 0;
 const gateEvidenceEvent = (attemptId: string, gates: ObservedGateInput[], observedAt = '2026-08-17T12:00:00.000Z'): WorkEvent => {
@@ -75,5 +75,61 @@ describe('composeHostResourceGovernorView (seam central, ponta a ponta)', () => 
   test('a pressão da máquina reflete o snapshot vivo injetado', () => {
     expect(composeHostResourceGovernorView({ events, readSnapshot: () => snapshot(400) }).pressure).toBe('high');
     expect(composeHostResourceGovernorView({ events, readSnapshot: () => snapshot(8_000) }).pressure).toBe('low');
+  });
+});
+
+// Consumidor real do Supervisor: advisory por workload contra o snapshot vivo.
+describe('composeSupervisorResourceAdvisory (read-model do supervisor-turn)', () => {
+  const advisoryFor = (report: NonNullable<ReturnType<typeof composeSupervisorResourceAdvisory>>, command: string) =>
+    report.advisories.find(a => a.key.command === command)?.advisory.recommendation;
+
+  test('histórico insuficiente (nenhum gate observado) → null (nada a aconselhar)', () => {
+    expect(composeSupervisorResourceAdvisory({ events: [], readSnapshot: () => snapshot(8_000) })).toBeNull();
+  });
+
+  test('múltiplos comandos/perfis → um parecer por workload, relativo ao próprio custo', () => {
+    const report = composeSupervisorResourceAdvisory({
+      events,
+      reserve: { interactiveReserveActive: true, minFreeMemFraction: 0.1, comfortableFreeMemFraction: 0.25 },
+      readSnapshot: () => snapshot(8_000), // pressão baixa, mas usuário ativo
+    })!;
+    expect(report.advisories.map(a => a.key.command).sort()).toEqual(['npm run test:e2e', 'npm run typecheck']);
+    // Barato → seguro sempre; caro + usuário ativo → janela de máquina exclusiva.
+    expect(advisoryFor(report, 'npm run typecheck')).toBe('safe_to_run');
+    expect(advisoryFor(report, 'npm run test:e2e')).toBe('machine_exclusive_recommended');
+  });
+
+  test('máquina sob baixa pressão, workload caro sem reserva ativa → safe_to_run', () => {
+    const report = composeSupervisorResourceAdvisory({ events, readSnapshot: () => snapshot(8_000) })!;
+    expect(report.pressure).toBe('low');
+    expect(advisoryFor(report, 'npm run test:e2e')).toBe('safe_to_run');
+  });
+
+  test('máquina sob pressão, workload caro → machine_exclusive_recommended', () => {
+    const report = composeSupervisorResourceAdvisory({ events, readSnapshot: () => snapshot(400) })!;
+    expect(report.pressure).toBe('high');
+    expect(advisoryFor(report, 'npm run test:e2e')).toBe('machine_exclusive_recommended');
+    // Barato segue seguro mesmo sob pressão: o custo do workload domina.
+    expect(advisoryFor(report, 'npm run typecheck')).toBe('safe_to_run');
+  });
+
+  test('telemetria parcial (sem memória livre) → pressão unknown, sem inventar número', () => {
+    const partial: MachineSnapshotV1 = { schemaVersion: 1, capturedAt: '2026-08-17T12:00:00.000Z', observer: 'host', cpuCount: 8 };
+    const report = composeSupervisorResourceAdvisory({ events, readSnapshot: () => partial })!;
+    expect(report.pressure).toBe('unknown');
+    // Custo conhecido ainda aconselha; a pressão unknown apenas não escala a recomendação.
+    expect(advisoryFor(report, 'npm run typecheck')).toBe('safe_to_run');
+  });
+
+  test('a distribuição de referência acompanha o report (o que "caro" significa aqui)', () => {
+    const report = composeSupervisorResourceAdvisory({ events, readSnapshot: () => snapshot(8_000) })!;
+    expect(report.distribution.count).toBe(12);
+    expect(report.distribution.maxMs).toBe(90_000);
+  });
+
+  test('determinismo com snapshot injetado: recomputar dá o mesmo report', () => {
+    const once = composeSupervisorResourceAdvisory({ events, readSnapshot: () => snapshot(400) });
+    const twice = composeSupervisorResourceAdvisory({ events, readSnapshot: () => snapshot(400) });
+    expect(once).toEqual(twice);
   });
 });
