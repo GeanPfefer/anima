@@ -130,4 +130,20 @@ describe('WorkProposalCard', () => {
     render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result'],resourceCost:resourceCost([]) as unknown as WorkPresentationView['resourceCost']})} onChange={jest.fn()} />);
     expect(screen.queryByText(/Custo de recursos observado/)).not.toBeInTheDocument();
   });
+  const autonomousItem={...item,state:'approved' as const,intent:{execution_spec:{schema_version:1,target:{kind:'project',reference:'sup04-live'},permissions:['workspace_read','workspace_write_isolated'],validation_criteria:[{label:'npm test',command:'npm test'}],limits:{max_attempts:1,max_duration_minutes:5}}}};
+  test('antes de qualquer execução autônoma, nenhum painel de advisory do governor aparece', () => {
+    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start']})} onChange={jest.fn()} />);
+    expect(screen.queryByText(/Resource Governor \(advisory\)/)).not.toBeInTheDocument();
+  });
+  test('exibe o parecer do Resource Governor devolvido pela execução autônoma (read-only, transparência)', async () => {
+    const governor={pressure:'high',distribution:{count:3,p50Ms:1,p90Ms:2,maxMs:3},snapshot:null,advisories:[{key:{workloadKind:'gate',command:'npm run test:e2e',repo:null},advisory:{recommendation:'machine_exclusive_recommended',rationale:'x',basis:{workloadClass:'high',machinePressure:'high',sampleCount:3,reserveActive:false}}}]};
+    (global.fetch as jest.Mock).mockImplementation((url:string)=>typeof url==='string'&&url.includes('/supervisor-turn')
+      ? Promise.resolve({ok:true,json:async()=>({ok:true,value:{outcome:'execution_completed'},resourceGovernor:governor})})
+      : Promise.resolve({ok:true,json:async()=>({ok:true,value:{presentation:presentation({item:autonomousItem,availableActions:['start']})}})}));
+    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start']})} onChange={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button',{name:'Executar autonomamente'}));
+    await waitFor(()=>expect(screen.getByText(/Resource Governor \(advisory\)/)).toBeInTheDocument());
+    expect(screen.getByText(/Pressão da máquina agora: alta/)).toBeInTheDocument();
+    expect(screen.getByText(/npm run test:e2e — custo alto: recomende uma janela de máquina exclusiva/)).toBeInTheDocument();
+  });
 });

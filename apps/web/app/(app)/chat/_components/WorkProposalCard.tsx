@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { describeCostClass, describeValidationOutcome, evaluateAutonomousEligibility, formatObservedDurationMs, parseWorkResultValidations, type ApprovalDecision, type ResultReviewDecision, type WorkItem, type WorkPresentation, type WorkVerificationVerdict } from '@anima/core';
+import { describeCostClass, describeExecutionAdvisory, describeMachinePressure, describeValidationOutcome, evaluateAutonomousEligibility, formatObservedDurationMs, parseWorkResultValidations, type ApprovalDecision, type MachinePressure, type ResultReviewDecision, type WorkItem, type WorkloadAdvisory, type WorkPresentation, type WorkVerificationVerdict } from '@anima/core';
 import styles from './chat.module.css';
 import { WorkExecutionCard } from './WorkExecutionCard';
 import { WorkDecisionCard } from './WorkDecisionCard';
@@ -27,6 +27,9 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
   }|undefined;
   const [status,setStatus]=useState<'idle'|'submitting'|'reconciling'>('idle');
   const [error,setError]=useState('');
+  // Advisory do Resource Governor devolvido pela última execução autônoma (read-only).
+  // Transparência: mostra o parecer machine-wide; nunca decidiu/bloqueou esta execução.
+  const [resourceAdvisory,setResourceAdvisory]=useState<{pressure:MachinePressure;advisories:readonly WorkloadAdvisory[]}|null>(null);
   const [mode,setMode]=useState<'none'|'defer'|'correct'|'result'|'review_changes'>('none');
   const [detail,setDetail]=useState('');const[customDeferReason,setCustomDeferReason]=useState('');const[references,setReferences]=useState('');const[validations,setValidations]=useState('');const[limitations,setLimitations]=useState('');
   const allowed=(action:WorkPresentation['availableActions'][number])=>availableActions.includes(action);
@@ -53,6 +56,10 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
       }
       const response=await executionRequest;
       const body=await response.json().catch(()=>({}));
+      // Read-only: o advisory viaja AO LADO de value; ausente quando sem histórico. Nunca
+      // interferiu nesta execução — só informa o parecer do governor após o desfecho.
+      const governor=body.resourceGovernor as {pressure:MachinePressure;advisories:readonly WorkloadAdvisory[]}|undefined;
+      setResourceAdvisory(governor&&governor.advisories.length>0?{pressure:governor.pressure,advisories:governor.advisories}:null);
       const outcome=body.value?.outcome as string|undefined;
       if(!response.ok||!body.ok)setError(body.error?.message??body.value?.refusal?.message??'Não foi possível executar este trabalho autonomamente.');
       else if(outcome==='no_eligible_work')setError('Este trabalho ainda não está apto para entrar na fila autônoma.');
@@ -124,6 +131,11 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
       <strong>Custo de recursos observado (gates)</strong>
       <p>Derivado do que o host mediu ao rodar os gates deste trabalho. Read-only: informa o custo histórico, não decide, não bloqueia e não muda a elegibilidade. A classe é relativa ao custo observado deste item.</p>
       <ul>{presentation.resourceCost.profiles.map(profile=><li key={`${profile.key.workloadKind}-${profile.key.command}`}>{profile.key.command} — {profile.count}× · mediana {formatObservedDurationMs(profile.durationMedianMs)} · custo {describeCostClass(profile.predominantClass)}{profile.failureCount>0?` · ${profile.failureCount} falha(s)`:''}</li>)}</ul>
+    </section>}
+    {resourceAdvisory&&<section aria-label="Parecer do Resource Governor" className={styles.workNotice}>
+      <strong>Resource Governor (advisory)</strong>
+      <p>Pressão da máquina agora: {describeMachinePressure(resourceAdvisory.pressure)}. Parecer consultivo por workload (histórico de toda a máquina). Read-only: não decidiu nem bloqueou esta execução, não muda a elegibilidade.</p>
+      <ul>{resourceAdvisory.advisories.map(entry=><li key={`${entry.key.workloadKind}-${entry.key.command}`}>{entry.key.command} — custo {describeCostClass(entry.advisory.basis.workloadClass)}: {describeExecutionAdvisory(entry.advisory.recommendation)}</li>)}</ul>
     </section>}
     <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento; quando terminar, registre o resultado abaixo. O Supervisor não assume um ciclo manual já iniciado.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?'Resultado aceito e trabalho concluído; evidências preservadas acima.':'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?'A execução falhou; nenhum resultado foi aceito.':`Estado atual: ${item.state}.`}</p>
     {presentation.execution&&<WorkExecutionCard execution={presentation.execution} workItemId={item.id} proposalVersion={item.proposalVersion} onReload={reload} />}

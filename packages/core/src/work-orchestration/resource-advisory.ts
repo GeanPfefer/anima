@@ -47,6 +47,19 @@ export interface ResourceAdvisory {
   };
 }
 
+/** Rótulo legível (PT-BR) da recomendação do advisory. Descritor de APRESENTAÇÃO
+ * compartilhado web/mobile — a régua de `describeValidationOutcome`/`describeCostClass`.
+ * Read-only: a recomendação informa, jamais atua. */
+export const describeExecutionAdvisory = (recommendation: ExecutionAdvisory): string =>
+  recommendation === 'safe_to_run' ? 'seguro rodar agora'
+    : recommendation === 'prefer_defer' ? 'prefira adiar para uma janela ociosa'
+    : recommendation === 'machine_exclusive_recommended' ? 'recomende uma janela de máquina exclusiva'
+    : 'evidência insuficiente para recomendar';
+
+/** Rótulo legível (PT-BR) da pressão da máquina. Compartilhado web/mobile. */
+export const describeMachinePressure = (pressure: MachinePressure): string =>
+  pressure === 'low' ? 'baixa' : pressure === 'moderate' ? 'moderada' : pressure === 'high' ? 'alta' : 'indeterminada';
+
 export interface AdviseWorkloadExecutionInput {
   readonly profile: WorkloadCostProfile | null;
   readonly snapshot: MachineSnapshotV1 | null;

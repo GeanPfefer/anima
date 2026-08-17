@@ -3,6 +3,8 @@ import {
   adviseWorkloadProfiles,
   buildWorkloadCostObservation,
   composeResourceGovernorView,
+  describeExecutionAdvisory,
+  describeMachinePressure,
   type CostClass,
   type InteractiveReserve,
   type MachineSnapshotV1,
@@ -82,6 +84,21 @@ describe('adviseWorkloadExecution (advisory ≠ decisão; nunca executa ação)'
     const first = adviseWorkloadExecution(input);
     const second = adviseWorkloadExecution(input);
     expect(first).toEqual(second); // sem efeito colateral; recomputável
+  });
+});
+
+describe('descritores de advisory compartilhados (web/mobile)', () => {
+  test('describeExecutionAdvisory rotula cada recomendação em PT-BR', () => {
+    expect(describeExecutionAdvisory('safe_to_run')).toBe('seguro rodar agora');
+    expect(describeExecutionAdvisory('prefer_defer')).toContain('adiar');
+    expect(describeExecutionAdvisory('machine_exclusive_recommended')).toContain('máquina exclusiva');
+    expect(describeExecutionAdvisory('insufficient_evidence')).toContain('insuficiente');
+  });
+  test('describeMachinePressure rotula cada pressão, honesto no indeterminado', () => {
+    expect(describeMachinePressure('low')).toBe('baixa');
+    expect(describeMachinePressure('moderate')).toBe('moderada');
+    expect(describeMachinePressure('high')).toBe('alta');
+    expect(describeMachinePressure('unknown')).toBe('indeterminada');
   });
 });
 
