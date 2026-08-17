@@ -644,14 +644,17 @@ limites de tentativas são gates entre tentativas; não encerram uma tentativa j
 admitida. Tokens, dinheiro e janelas específicas de fornecedores permanecem
 fora do V0.
 
-## Governança de recursos da máquina — Resource Governor (direção)
+## Governança de recursos da máquina — Resource Governor (V0 implementado)
 
-> Direção arquitetural **investigada, não implementada**. Estende a "reserva interativa" do
-> INTEL-04 (que reserva *tempo* de execução autônoma) para os **recursos físicos da máquina**
-> (CPU/RAM/disco/GPU), e generaliza o "sob mandato" do [Marco 007](../marcos/007-interacao-com-computador-e-aplicacoes-locais.md)
-> e os "recursos locais sob permissão explícita" do [Marco 004](../marcos/004-anima-portatil-e-nos-locais.md).
+> Direção arquitetural **investigada** (abaixo) e, no **V0 observacional/advisory**,
+> **implementada** (ver §"Resource Governor V0 implementado" ao fim desta seção).
+> Estende a "reserva interativa" do INTEL-04 (que reserva *tempo* de execução autônoma)
+> para os **recursos físicos da máquina** (CPU/RAM/disco/GPU), e generaliza o "sob mandato"
+> do [Marco 007](../marcos/007-interacao-com-computador-e-aplicacoes-locais.md) e os
+> "recursos locais sob permissão explícita" do [Marco 004](../marcos/004-anima-portatil-e-nos-locais.md).
 > Origem: sessão em **modo de convivência** (usuário jogando no mesmo PC). Detalhe/achado em
-> `docs/registros/2026-08-16-modo-convivencia-resource-governor.md`.
+> `docs/registros/2026-08-16-modo-convivencia-resource-governor.md`; a implementação do V0 em
+> `docs/registros/2026-08-17-resource-governor-v0.md`.
 
 O problema: o Anima executa trabalho local (gates, coder backends, modelos locais, Docker/
 Supabase, suítes) na **mesma máquina** que o usuário usa interativamente. Rodar workloads
@@ -710,11 +713,49 @@ pressionadas → não carregar Ollama 30B; jogo ativo + alteração documental �
 jogo ativo + teste unitário pequeno → baixa concorrência; full suite + build + Supabase + Ollama →
 esperar janela de máquina exclusiva.
 
-**Fora do escopo desta direção:** implementação do governor, coleta persistente de telemetria,
-modelo de predição, agendador, e qualquer automação que ganhe autoridade nova. É **direção**, não
-contrato; a construção real exige recorte próprio e autorização, proporcional ao valor. Invariante
-mantido: nenhuma decisão de recurso afrouxa gate ou validação — a economia é de **quando/como**
-executar, nunca de remover prova.
+**Fora do escopo desta direção:** modelo de predição, agendador, e qualquer automação que ganhe
+autoridade nova. É **direção**, não contrato; a construção real exige recorte próprio e autorização,
+proporcional ao valor. Invariante mantido: nenhuma decisão de recurso afrouxa gate ou validação — a
+economia é de **quando/como** executar, nunca de remover prova.
+
+### Resource Governor V0 implementado
+
+O V0 realiza o eixo `observação real → evidência durável → classificação/advisory → histórico`
+**antes** de `previsão → controle automático`. É **observacional e advisory**: sensor + histórico
++ classificação + parecer, **sem autoridade nova** — não mata processo, não para Docker/Supabase,
+não descarrega modelo, não agenda, não produz nenhum efeito externo. Preserva a separação canônica
+do Verifier: **EVIDÊNCIA ≠ CLASSIFICAÇÃO ≠ ADVISORY/DECISÃO**.
+
+Camadas puras e determináveis (`packages/core`, sem LLM, sem schema novo):
+
+- **Evidência** (`resource-observation.ts`): `WorkloadCostObservationV1` (tipo, comando, repo,
+  instante, duração, desfecho, proveniência) + `MachineSnapshotV1` (memória/CPU/loadavg), com
+  todos os campos de recurso **opcionais e honestos** (ausência > número falso). A **semente real**
+  é `deriveWorkloadCostObservationsFromEvents`: reaproveita o `durationMs` já registrado na evidência
+  de gate observada pelo host (`host_observed_gate_evidence_recorded`, append-only) — **custo zero
+  de schema**. Idempotente; histórico não é apagado nem colapsado; envelope incoerente é descartado.
+- **Classificação** (`resource-classification.ts`): custo `low/medium/high/unknown` **relativo à
+  distribuição observada** (percentis p50/p90 dos próprios dados), não a thresholds universais;
+  amostras insuficientes ou sem espalhamento → `unknown`. Pressão da máquina relativa à **reserva
+  interativa injetada** (não constante embutida no core).
+- **Histórico** (`resource-history.ts`): perfil `(tipo, comando, repo) → distribuição` com
+  estatísticas simples e determinísticas (contagem, mediana, máximo, faixa de memória, classe
+  predominante, última observação, falhas). Isolamento por chave (um workload não contamina outro).
+- **Advisory** (`resource-advisory.ts`): `adviseWorkloadExecution` puro →
+  `safe_to_run | prefer_defer | machine_exclusive_recommended | insufficient_evidence`, decidindo
+  **quando/como**, nunca **se pode**, e nunca executando ação. `composeResourceGovernorView` é o
+  read-model recomputável.
+
+Lado host-side (`apps/web/lib/work-orchestration`): `machine-telemetry.ts` lê uma amostra barata e
+pontual via `node:os` (sem dependência nova, sem polling; **omite `loadAvg1` no Windows**, onde
+`os.loadavg()` é sempre 0). `resource-governor.ts` (`composeHostResourceGovernorView`) é o **seam
+central de leitura**: deriva o histórico dos eventos, lê o snapshot vivo e compõe a visão — em vez de
+espalhar telemetria por cada executor.
+
+**Ainda fora do V0 (fronteiras honestas):** persistência de telemetria de máquina **nova** (o V0 só
+reaproveita o log já existente); fiação viva no caminho quente do Supervisor (o seam está pronto,
+sem consumidor ainda); predição/ML; agendador; qualquer UI. Nada disso concede autoridade — o V0 é
+sensor + parecer. A construção de qualquer automação de controle exige recorte próprio e autorização.
 
 ## Verifier e evidência observada pelo host (independência real)
 
