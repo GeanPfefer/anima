@@ -132,4 +132,22 @@ describe('composeSupervisorResourceAdvisory (read-model do supervisor-turn)', ()
     const twice = composeSupervisorResourceAdvisory({ events, readSnapshot: () => snapshot(400) });
     expect(once).toEqual(twice);
   });
+
+  test('MACHINE-WIDE: o mesmo comando em itens DIFERENTES vira um único perfil (custo é da máquina)', () => {
+    const forItem = (workItemId: string, attemptId: string, durationMs: number): WorkEvent => {
+      const built = buildHostObservedGateEvidence({ workItemId, attemptId, approvedProposalVersion: 2, gates: [gate('npm run typecheck', durationMs)], observedAt: '2026-08-17T12:00:00.000Z' });
+      if (!built.ok) throw new Error(`fixture inválida: ${built.explanation}`);
+      return {
+        id: `mw-${++seq}`, workItemId, type: 'host_observed_gate_evidence_recorded', author: 'system', proposalVersion: 2,
+        payload: { data: { work_item_id: workItemId, attempt_id: attemptId, approved_proposal_version: 2, evidence: built.value as unknown as Json } },
+        occurredAt: new Date('2026-08-17T12:00:00.000Z'),
+      };
+    };
+    // Três itens distintos rodando o MESMO comando: sem escopo de item, o Governor os funde.
+    const crossItem = [forItem('item-a', 'a1', 300), forItem('item-b', 'b1', 320), forItem('item-c', 'c1', 310)];
+    const report = composeSupervisorResourceAdvisory({ events: crossItem, readSnapshot: () => snapshot(8_000) })!;
+    const typecheck = report.advisories.filter(a => a.key.command === 'npm run typecheck');
+    expect(typecheck).toHaveLength(1);                          // um perfil, não um por item
+    expect(typecheck[0]!.advisory.basis.sampleCount).toBe(3);   // as três observações agregadas
+  });
 });

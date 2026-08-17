@@ -12,4 +12,16 @@ describe('adapter Supabase',()=>{
   test('anexa somente referências de contexto',async()=>{const rpc=jest.fn().mockResolvedValue({data:{id:'c',work_item_id:'i',version:1,context_references:[{kind:'message',id:'m'}],created_at:'2026-07-15T00:00:00Z'},error:null});const repo=new SupabaseWorkOrchestrationRepository(clientWithRpc(rpc));const result=await repo.attachContext({workItemId:'i',expectedProposalVersion:1,references:[{kind:'message',id:'m'}]});expect(result.ok).toBe(true);expect(rpc).toHaveBeenCalledWith('attach_work_context',{work_item_id:'i',expected_proposal_version:1,context_references:[{kind:'message',id:'m'}]});});
   test('mapeia SQLSTATE sem vazar mensagem',()=>{const result=mapSupabaseFailure({code:'55000',message:'detalhe interno'},true);expect(result).toEqual({ok:false,error:{code:'version_conflict',message:'O item mudou desde a última leitura.',retryable:false}});});
   test('falha de transporte após mutação é ambígua',async()=>{const rpc=jest.fn().mockResolvedValue({data:null,error:{message:'fetch failed'}});const result=await new SupabaseWorkOrchestrationRepository(clientWithRpc(rpc)).startWork({workItemId:'i',expectedProposalVersion:1});expect(result.ok).toBe(false);if(!result.ok)expect(result.error.code).toBe('ambiguous_outcome');expect(rpc).toHaveBeenCalledTimes(1);});
+  test('listEventsByType filtra por event_type SEM filtro de item (RLS é a fronteira) e mapeia',async()=>{
+    const eventRow:Tables<'work_events'>={id:'ev-1',work_item_id:'item-9',event_type:'host_observed_gate_evidence_recorded',author:'system',proposal_version:2,payload:{schema_version:1,data:{}},created_at:'2026-08-17T00:00:00Z',seq:5};
+    let fromArg='';const eqCalls:Array<[string,unknown]>=[];
+    const query:Record<string,unknown>={select:()=>query,eq:(col:string,val:unknown)=>{eqCalls.push([col,val]);return query;},order:async()=>({data:[eventRow],error:null})};
+    const client={from:(t:string)=>{fromArg=t;return query;}} as unknown as SupabaseClient<Database>;
+    const result=await new SupabaseWorkOrchestrationRepository(client).listEventsByType('host_observed_gate_evidence_recorded');
+    expect(fromArg).toBe('work_events');
+    // Machine-scoped: SÓ event_type. Nenhum eq de work_item_id — a RLS isola por dono.
+    expect(eqCalls).toEqual([['event_type','host_observed_gate_evidence_recorded']]);
+    expect(result.ok).toBe(true);
+    if(result.ok){expect(result.value).toHaveLength(1);expect(result.value[0]!.type).toBe('host_observed_gate_evidence_recorded');expect(result.value[0]!.workItemId).toBe('item-9');}
+  });
 });

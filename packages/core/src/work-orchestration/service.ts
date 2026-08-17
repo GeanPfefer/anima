@@ -56,6 +56,7 @@ export class WorkOrchestrationService {
   findItemsBySourceMessageId(sourceMessageId: string): Promise<WorkOperationResult<readonly WorkItem[]>> { return sourceMessageId ? this.repository.findItemsBySourceMessageId(sourceMessageId) : Promise.resolve(invalid('Mensagem inválida.')); }
   findResumableWorkItems(): Promise<WorkOperationResult<readonly WorkItem[]>> { return this.repository.findResumableWorkItems(); }
   listEvents(id: WorkItemId): Promise<WorkOperationResult<readonly WorkEvent[]>> { return id ? this.repository.listEvents(id) : Promise.resolve(invalid('Item inválido.')); }
+  listEventsByType(eventType: WorkEvent['type']): Promise<WorkOperationResult<readonly WorkEvent[]>> { return eventType ? this.repository.listEventsByType(eventType) : Promise.resolve(invalid('Tipo de evento inválido.')); }
   listContexts(id: WorkItemId): Promise<WorkOperationResult<readonly WorkContextSnapshot[]>> { return id ? this.repository.listContexts(id) : Promise.resolve(invalid('Item inválido.')); }
   private validVersion(value: number): boolean { return isValidProposalVersion(value); }
 }

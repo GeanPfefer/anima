@@ -30,6 +30,7 @@ beforeEach(() => {
   turn.mockResolvedValue({ outcome: 'execution_completed', reconciliation: [] });
   service.mockReturnValue({
     listEvents: jest.fn().mockResolvedValue({ ok: true, value: [] }),
+    listEventsByType: jest.fn().mockResolvedValue({ ok: true, value: [] }),
     getItem: jest.fn().mockResolvedValue({ ok: true, value: {} }),
   });
   advisory.mockReturnValue(null);
@@ -165,8 +166,8 @@ test('terminal com histórico → advisory read-only anexado AO LADO de value (r
   auth.mockResolvedValue({ client: { from: jest.fn() }, userId: 'user-1' });
   const result = terminalResult();
   turn.mockResolvedValue(result);
-  const listEvents = jest.fn().mockResolvedValue({ ok: true, value: [{ id: 'e1' }] });
-  service.mockReturnValue({ listEvents, getItem: jest.fn() });
+  const listEventsByType = jest.fn().mockResolvedValue({ ok: true, value: [{ id: 'e1' }] });
+  service.mockReturnValue({ listEventsByType, listEvents: jest.fn(), getItem: jest.fn() });
   const report = { snapshot: null, pressure: 'low', distribution: { count: 3, p50Ms: 1, p90Ms: 2, maxMs: 3 }, advisories: [] };
   advisory.mockReturnValue(report);
 
@@ -176,8 +177,8 @@ test('terminal com histórico → advisory read-only anexado AO LADO de value (r
   const body = await res.json();
   expect(body.value).toEqual(result);            // o resultado do Supervisor não é tocado
   expect(body.resourceGovernor).toEqual(report); // o advisory viaja ao lado, não dentro
-  // Consumiu os eventos FRESCOS do item (seam central), não outra fonte.
-  expect(listEvents).toHaveBeenCalledWith('w');
+  // Consumiu a evidência de gate MACHINE-WIDE (todos os itens), não só deste item.
+  expect(listEventsByType).toHaveBeenCalledWith('host_observed_gate_evidence_recorded');
   expect(advisory).toHaveBeenCalledWith({ events: [{ id: 'e1' }] });
 });
 
@@ -185,7 +186,7 @@ test('advisory que lança é engolido (FAIL-OPEN): value e status inalterados, s
   auth.mockResolvedValue({ client: { from: jest.fn() }, userId: 'user-1' });
   const result = terminalResult();
   turn.mockResolvedValue(result);
-  service.mockReturnValue({ listEvents: jest.fn().mockResolvedValue({ ok: true, value: [] }), getItem: jest.fn() });
+  service.mockReturnValue({ listEventsByType: jest.fn().mockResolvedValue({ ok: true, value: [] }), listEvents: jest.fn(), getItem: jest.fn() });
   advisory.mockImplementation(() => { throw new Error('telemetria falhou'); });
 
   const res = await POST(request({}));
@@ -211,13 +212,13 @@ test('volta sem terminal (interrompida) → NENHUMA leitura de advisory; respost
   auth.mockResolvedValue({ client: { from: jest.fn() }, userId: 'user-1' });
   const result = terminalResult({ outcome: 'execution_interrupted', terminalKind: null });
   turn.mockResolvedValue(result);
-  const listEvents = jest.fn();
-  service.mockReturnValue({ listEvents, getItem: jest.fn() });
+  const listEventsByType = jest.fn();
+  service.mockReturnValue({ listEventsByType, listEvents: jest.fn(), getItem: jest.fn() });
 
   const res = await POST(request({}));
 
   expect(res.status).toBe(500);
-  expect(listEvents).not.toHaveBeenCalled();     // não contamina o caminho incompleto
+  expect(listEventsByType).not.toHaveBeenCalled();     // não contamina o caminho incompleto
   expect(advisory).not.toHaveBeenCalled();
   expect(await res.json()).toEqual({ ok: true, value: result });
 });

@@ -205,16 +205,19 @@ export async function POST(request: Request) {
   }
 
   // (3) ADVISORY do Resource Governor (read-only), anexado ao read-model da resposta.
-  // Bloco INDEPENDENTE e TOTALMENTE fail-open: deriva o custo histórico dos gates
-  // observados do item + lê o snapshot vivo da máquina (seam central) → um parecer por
-  // workload. Roda para qualquer terminal registrado (um gate falho também tem custo). NÃO
-  // decide, NÃO bloqueia, NÃO muda elegibilidade nem o `value: result`: só informa. Toda a
-  // leitura (inclusive o fetch de eventos) está sob try/catch — um defeito de telemetria ou
-  // de transporte vira advisory AUSENTE, jamais um erro que altere a resposta do turno.
+  // Bloco INDEPENDENTE e TOTALMENTE fail-open: deriva o custo dos gates observados de TODA
+  // a máquina (evidência de gate de todos os itens do usuário, isolada por RLS — não só
+  // deste item, senão um item novo nunca teria histórico) + lê o snapshot vivo da máquina
+  // (seam central) → um parecer por workload. Roda para qualquer terminal registrado (um
+  // gate falho também tem custo). NÃO decide, NÃO bloqueia, NÃO muda elegibilidade nem o
+  // `value: result`: só informa. Toda a leitura (inclusive o fetch de eventos) está sob
+  // try/catch — um defeito de telemetria/transporte vira advisory AUSENTE, jamais um erro
+  // que altere a resposta do turno.
   let resourceGovernor: ResourceGovernorAdvisoryReport | undefined;
   if (result.selection && result.terminalKind !== null) {
     try {
-      const events = await createWorkOrchestrationService(client).listEvents(result.selection.workItemId);
+      const events = await createWorkOrchestrationService(client)
+        .listEventsByType('host_observed_gate_evidence_recorded');
       if (events.ok) {
         resourceGovernor = composeSupervisorResourceAdvisory({ events: events.value }) ?? undefined;
       }

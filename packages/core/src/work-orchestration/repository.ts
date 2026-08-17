@@ -23,5 +23,10 @@ export interface WorkOrchestrationRepository {
   // ordem determinística (mais recentes primeiro). Base da consulta de histórico.
   findResumableWorkItems(): Promise<WorkOperationResult<readonly WorkItem[]>>;
   listEvents(id: WorkItemId): Promise<WorkOperationResult<readonly WorkEvent[]>>;
+  // Eventos de UM tipo em TODOS os itens do usuário autenticado (isolados por RLS,
+  // como findResumableWorkItems — sem filtro de item). Leitura machine-scoped: a base
+  // do Resource Governor para o custo de um workload agregado por toda a máquina, não só
+  // um item. Ordem determinística por sequência global.
+  listEventsByType(eventType: WorkEvent['type']): Promise<WorkOperationResult<readonly WorkEvent[]>>;
   listContexts(id: WorkItemId): Promise<WorkOperationResult<readonly WorkContextSnapshot[]>>;
 }
