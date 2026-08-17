@@ -127,6 +127,31 @@ export function adviseWorkloadExecution(input: AdviseWorkloadExecutionInput): Re
     workloadClass, pressure, sampleCount, reserveActive);
 }
 
+/** Advisory de UM workload histórico, emparelhado à sua chave `(kind, command, repo)`.
+ * Read-only: informa, jamais atua. */
+export interface WorkloadAdvisory {
+  readonly key: WorkloadCostProfileKey;
+  readonly advisory: ResourceAdvisory;
+}
+
+/**
+ * Produz o advisory de CADA perfil histórico contra o MESMO snapshot e a MESMA reserva.
+ * Puro e determinístico. Um turno do Supervisor exercita vários workloads (múltiplos
+ * gates → múltiplos perfis); cada um recebe seu parecer RELATIVO ao seu próprio custo
+ * histórico, sem colapsar workloads distintos num único juízo. Preserva a ordem
+ * (já determinística) dos perfis. Não decide nem atua — só empilha pareceres.
+ */
+export function adviseWorkloadProfiles(
+  profiles: readonly WorkloadCostProfile[],
+  snapshot: MachineSnapshotV1 | null,
+  reserve: InteractiveReserve = DEFAULT_INTERACTIVE_RESERVE,
+): readonly WorkloadAdvisory[] {
+  return profiles.map(profile => ({
+    key: profile.key,
+    advisory: adviseWorkloadExecution({ profile, snapshot, reserve }),
+  }));
+}
+
 /** Visão composta do Resource Governor: o read-model que a presentation/host consome. */
 export interface ResourceGovernorView {
   readonly distribution: CostDistribution;

@@ -1,5 +1,6 @@
 import {
   adviseWorkloadExecution,
+  adviseWorkloadProfiles,
   buildWorkloadCostObservation,
   composeResourceGovernorView,
   type CostClass,
@@ -81,6 +82,44 @@ describe('adviseWorkloadExecution (advisory ≠ decisão; nunca executa ação)'
     const first = adviseWorkloadExecution(input);
     const second = adviseWorkloadExecution(input);
     expect(first).toEqual(second); // sem efeito colateral; recomputável
+  });
+});
+
+describe('adviseWorkloadProfiles (advisory por perfil; múltiplos workloads no mesmo turno)', () => {
+  const keyed = (command: string, predominantClass: CostClass): WorkloadCostProfile =>
+    ({ ...profile(predominantClass), key: { workloadKind: 'gate', command, repo: null } });
+
+  test('cada perfil recebe o parecer RELATIVO à sua própria classe, sob o mesmo snapshot', () => {
+    const advisories = adviseWorkloadProfiles(
+      [keyed('lint', 'low'), keyed('e2e', 'high')],
+      lowMem,
+      reserve(true),
+    );
+    const byCommand = new Map(advisories.map(a => [a.key.command, a.advisory.recommendation]));
+    // Barato segue seguro mesmo sob pressão; caro com usuário ativo pede janela exclusiva.
+    expect(byCommand.get('lint')).toBe('safe_to_run');
+    expect(byCommand.get('e2e')).toBe('machine_exclusive_recommended');
+  });
+
+  test('preserva a ordem e a chave de cada perfil (não colapsa workloads)', () => {
+    const advisories = adviseWorkloadProfiles([keyed('a', 'low'), keyed('b', 'high'), keyed('c', 'medium')], highMem);
+    expect(advisories.map(a => a.key.command)).toEqual(['a', 'b', 'c']);
+  });
+
+  test('sem perfis → lista vazia (nada a aconselhar)', () => {
+    expect(adviseWorkloadProfiles([], highMem, reserve(false))).toEqual([]);
+  });
+
+  test('snapshot ausente → pressão unknown propaga em cada base, sem inventar', () => {
+    const advisories = adviseWorkloadProfiles([keyed('x', 'high')], null, reserve(false));
+    expect(advisories[0]!.advisory.basis.machinePressure).toBe('unknown');
+  });
+
+  test('pureza: determinística e sem mutação das entradas', () => {
+    const profiles = Object.freeze([Object.freeze(keyed('a', 'high')), Object.freeze(keyed('b', 'low'))]);
+    const first = adviseWorkloadProfiles(profiles, Object.freeze(lowMem), Object.freeze(reserve(true)));
+    const second = adviseWorkloadProfiles(profiles, Object.freeze(lowMem), Object.freeze(reserve(true)));
+    expect(first).toEqual(second);
   });
 });
 
