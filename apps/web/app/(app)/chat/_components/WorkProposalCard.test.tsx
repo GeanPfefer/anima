@@ -111,4 +111,23 @@ describe('WorkProposalCard', () => {
     render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes']})} onChange={jest.fn()} />);
     expect(screen.queryByText(/Verificação independente/)).not.toBeInTheDocument();
   });
+  const resourceCost=(profiles:Array<{command:string;count:number;failureCount:number;durationMedianMs:number;predominantClass:'low'|'medium'|'high'|'unknown'}>)=>({
+    distribution:{count:profiles.reduce((n,p)=>n+p.count,0),p50Ms:300,p90Ms:90000,maxMs:90000},
+    profiles:profiles.map(p=>({key:{workloadKind:'gate' as const,command:p.command,repo:null},count:p.count,failureCount:p.failureCount,durationMedianMs:p.durationMedianMs,durationMaxMs:p.durationMedianMs,memObservedRange:null,predominantClass:p.predominantClass,lastObservedAt:'2026-08-17T12:00:00.000Z'})),
+  });
+  test('exibe o custo de recursos observado dos gates (read-only, sem alterar ações)', () => {
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes'],resourceCost:resourceCost([{command:'npm run typecheck',count:9,failureCount:0,durationMedianMs:300,predominantClass:'low'},{command:'npm run test:e2e',count:3,failureCount:1,durationMedianMs:90000,predominantClass:'high'}]) as unknown as WorkPresentationView['resourceCost']})} onChange={jest.fn()} />);
+    expect(screen.getByText(/Custo de recursos observado \(gates\)/)).toBeInTheDocument();
+    expect(screen.getByText(/não decide, não bloqueia/)).toBeInTheDocument();
+    expect(screen.getByText(/npm run typecheck — 9× · mediana 300 ms · custo baixo/)).toBeInTheDocument();
+    expect(screen.getByText(/npm run test:e2e — 3× · mediana 90\.0 s · custo alto · 1 falha\(s\)/)).toBeInTheDocument();
+    // Read-only: as ações continuam vindo da projeção.
+    expect(screen.getByRole('button',{name:'Aceitar resultado v2'})).toBeInTheDocument();
+  });
+  test('sem custo observado (projeção ausente ou sem perfis), nenhum painel de custo aparece', () => {
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result']})} onChange={jest.fn()} />);
+    expect(screen.queryByText(/Custo de recursos observado/)).not.toBeInTheDocument();
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result'],resourceCost:resourceCost([]) as unknown as WorkPresentationView['resourceCost']})} onChange={jest.fn()} />);
+    expect(screen.queryByText(/Custo de recursos observado/)).not.toBeInTheDocument();
+  });
 });

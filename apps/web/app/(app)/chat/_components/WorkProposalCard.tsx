@@ -17,6 +17,15 @@ const VERDICT_LABEL:Record<WorkVerificationVerdict,string>={
   rejected:'evidência de violação ou incoerência com o contrato aprovado',
 };
 
+// Rótulos da classe de custo do Resource Governor (read-only). A classe é RELATIVA à
+// distribuição observada deste item — não um limiar universal —, por isso "indeterminado"
+// é a resposta honesta quando ainda faltam amostras para ranquear.
+const COST_CLASS_LABEL:Record<'low'|'medium'|'high'|'unknown',string>={
+  low:'baixo',medium:'médio',high:'alto',unknown:'indeterminado',
+};
+// Duração legível sem precisão falsa: segundos com uma casa acima de 1s, senão ms inteiros.
+const formatDurationMs=(ms:number):string=>ms>=1000?`${(ms/1000).toFixed(1)} s`:`${Math.round(ms)} ms`;
+
 export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:Props){
   const {item,latestResult,acceptedResult,availableActions}=presentation;
   const executionSpec=item.intent['execution_spec'] as {
@@ -118,6 +127,11 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
       <p>Parecer do Verifier: {VERDICT_LABEL[presentation.verification.verdict]}. É consultivo e não substitui a sua revisão nem os gates.</p>
       {presentation.verification.restsOnAttestedEvidence&&<p>Baseado na evidência <strong>reportada pelo executor</strong> (gates, arquivos alterados) e conferida contra o contrato aprovado — não é prova independente de que o resultado está correto.</p>}
       {presentation.verification.findings.some(finding=>finding.severity!=='ok')&&<ul>{presentation.verification.findings.filter(finding=>finding.severity!=='ok').map((finding,index)=><li key={`${finding.code}-${index}`}>{finding.severity==='violation'?'Violação':'Lacuna'}: {finding.detail}</li>)}</ul>}
+    </section>}
+    {presentation.resourceCost&&presentation.resourceCost.profiles.length>0&&<section aria-label="Custo de recursos observado" className={styles.workNotice}>
+      <strong>Custo de recursos observado (gates)</strong>
+      <p>Derivado do que o host mediu ao rodar os gates deste trabalho. Read-only: informa o custo histórico, não decide, não bloqueia e não muda a elegibilidade. A classe é relativa ao custo observado deste item.</p>
+      <ul>{presentation.resourceCost.profiles.map(profile=><li key={`${profile.key.workloadKind}-${profile.key.command}`}>{profile.key.command} — {profile.count}× · mediana {formatDurationMs(profile.durationMedianMs)} · custo {COST_CLASS_LABEL[profile.predominantClass]}{profile.failureCount>0?` · ${profile.failureCount} falha(s)`:''}</li>)}</ul>
     </section>}
     <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento; quando terminar, registre o resultado abaixo. O Supervisor não assume um ciclo manual já iniciado.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?'Resultado aceito e trabalho concluído; evidências preservadas acima.':'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?'A execução falhou; nenhum resultado foi aceito.':`Estado atual: ${item.state}.`}</p>
     {presentation.execution&&<WorkExecutionCard execution={presentation.execution} workItemId={item.id} proposalVersion={item.proposalVersion} onReload={reload} />}
