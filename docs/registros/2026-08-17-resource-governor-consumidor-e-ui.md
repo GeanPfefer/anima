@@ -165,3 +165,41 @@ usuário** pela RLS de `work_events` — sem vazamento e sem sobre-ocultação, 
 de arquitetura (a isolação é da política ratificada, não deste código, o mesmo padrão de
 `findResumableWorkItems`). Prova **recomputável**: reexecutar a mesma query sob os dois contextos dá os
 mesmos números. Nenhuma mudança de RLS/schema foi feita para fabricar a prova.
+
+## Investigação (read-only): observação de custo além do gate (coder/LLM)
+
+Com a prova viva fechada, investiguei o próximo fork sem escrever código de produção. Perguntas do
+mandato respondidas concretamente (só leitura de código):
+
+- **Fronteira da chamada coder/LLM:** `apps/web/lib/work-orchestration/worktree-executor.ts:108` — o
+  único `await this.options.backend.edit(...)`. É código do **host** (o `WorktreeExecutorAdapter`, não o
+  CoderBackend), com try/catch, no mesmo módulo onde `runGate`→`onGateObserved` já mede gates (l.166-172).
+- **Eventos que cercam:** `execution_started` (persistido pelo Supervisor antes) e o terminal
+  (result/error/cancelled, depois). O coder roda ENTRE eles, dentro de um attempt conhecido.
+- **Correlação já disponível no call-site:** `request.attemptId`, `request.workItemId`,
+  `request.approvedProposalVersion` (l.72) + `backend.id` (provider). O **model** é campo interno do
+  backend (ollama-coder), hoje não exposto em `CoderEditResult`.
+- **Duração observável host-side SEM mudar contrato do provider:** SIM. `Date.now()` ao redor do `edit()`
+  + um callback `onCoderObserved?` **espelhando `onGateObserved`**. Zero mudança em `CoderBackend`; o host
+  mede o wall-clock do que já roda — o mesmo princípio do HostObservedGateEvidence. **Baixo risco**
+  (código de host, padrão já provado para gates).
+- **Tokens:** JÁ presentes na resposta HTTP crua (Ollama `total_duration`/`eval_count`/`prompt_eval_count`;
+  GPT `body.usage`) mas **descartados** pelos backends (`CoderEditResult` = `{summary, touchedResources,
+  notes}`, sem usage). Observar tokens **EXIGE mudar o contrato** (expor usage) — passo SEPARADO e mais
+  invasivo que a duração. A duração é host-observável sem tocar o contrato; tokens não.
+- **Custo monetário:** DERIVÁVEL a read-time de `tokens × preço(model)` como **CLASSIFICAÇÃO**, nunca
+  persistido como fato — preserva EVIDÊNCIA ≠ CLASSIFICAÇÃO (como low/medium/high emerge da duração).
+- **Menor evento append-only, SE necessário:** reusa a forma `WorkloadCostObservationV1` já existente
+  (`workloadKind:'coder'`, `command=backend.id`[+model], `durationMs`=wall-clock, `outcome` do sucesso/
+  falha do edit, `workItemId`/`attemptId`). NÃO há derivação zero-schema como no gate: **nenhum evento
+  persistido hoje carrega a duração do coder** (a semente do gate reusava `durationMs` já logado; aqui
+  não há). Logo, custo de coder exige um **ponto de observação novo + persistência nova**.
+
+**Barreira exata (para o próximo ciclo):** o recorte tem duas partes de risco distinto — (1) o **callback
+de observação** no `worktree-executor` (baixo risco, host, espelha `onGateObserved`, sem tocar contrato do
+provider); (2) a **persistência append-only** (novo evento `host_observed_coder_evidence_recorded` + RPC +
+migration + types regen + pgTAP), que é mudança de schema com custo real. A parte (2) é o que o mandato
+disse para NÃO iniciar sem budget para concluir impl+regressão+gates+commit. Recorte próprio, começando
+pelo callback+derivação (parte 1) e a menor persistência coerente com `record_host_observed_gate_evidence`
+(parte 2). Enquanto (2) não existir, o Governor segue honesto observando só gates — sem inventar custo de
+coder. CONTROLE (matar/parar/descarregar/priorizar) permanece FORA do V0.
