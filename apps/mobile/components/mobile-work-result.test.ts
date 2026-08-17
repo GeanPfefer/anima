@@ -1,5 +1,5 @@
 import type { WorkPresentation, WorkResultProjection, WorkState } from '@anima/core';
-import { describeMissingCompletedResult, presentMobileWorkResult, presentMobileWorkVerification } from './mobile-work-result';
+import { describeMissingCompletedResult, presentMobileWorkResourceCost, presentMobileWorkResult, presentMobileWorkVerification } from './mobile-work-result';
 
 const result: WorkResultProjection = {
   eventId: 'result-3', proposalVersion: 3, author: 'executor', summary: 'Correção entregue',
@@ -77,5 +77,28 @@ describe('apresentação do parecer advisory no cartão mobile', () => {
     const content = presentMobileWorkVerification(presentation('review', { latestResult: result, verification: report('rejected', [{ code: 'change_out_of_included_scope', severity: 'violation', detail: 'Arquivo fora do escopo.' }]) as unknown as WorkPresentation['verification'] }));
     expect(content?.verdictLabel).toContain('violação ou incoerência');
     expect(content?.issues).toEqual(['Violação: Arquivo fora do escopo.']);
+  });
+});
+
+describe('apresentação do custo de recursos observado no cartão mobile (paridade web)', () => {
+  const resourceCost = (profiles: Array<{ command: string; count: number; failureCount: number; durationMedianMs: number; predominantClass: 'low' | 'medium' | 'high' | 'unknown' }>) => ({
+    distribution: { count: profiles.reduce((n, p) => n + p.count, 0), p50Ms: 300, p90Ms: 90000, maxMs: 90000 },
+    profiles: profiles.map(p => ({ key: { workloadKind: 'gate' as const, command: p.command, repo: null }, count: p.count, failureCount: p.failureCount, durationMedianMs: p.durationMedianMs, durationMaxMs: p.durationMedianMs, memObservedRange: null, predominantClass: p.predominantClass, lastObservedAt: '2026-08-17T12:00:00.000Z' })),
+  });
+
+  test('formata uma linha por comando com contagem, mediana, classe e falhas', () => {
+    const content = presentMobileWorkResourceCost(presentation('review', { latestResult: result, resourceCost: resourceCost([
+      { command: 'npm run typecheck', count: 9, failureCount: 0, durationMedianMs: 300, predominantClass: 'low' },
+      { command: 'npm run test:e2e', count: 3, failureCount: 1, durationMedianMs: 90000, predominantClass: 'high' },
+    ]) as unknown as WorkPresentation['resourceCost'] }));
+    expect(content?.lines).toEqual([
+      'npm run typecheck — 9× · mediana 300 ms · custo baixo',
+      'npm run test:e2e — 3× · mediana 90.0 s · custo alto · 1 falha(s)',
+    ]);
+  });
+
+  test('sem projeção ou sem perfis ⇒ null (nada a mostrar)', () => {
+    expect(presentMobileWorkResourceCost(presentation('review', { latestResult: result }))).toBeNull();
+    expect(presentMobileWorkResourceCost(presentation('review', { latestResult: result, resourceCost: resourceCost([]) as unknown as WorkPresentation['resourceCost'] }))).toBeNull();
   });
 });

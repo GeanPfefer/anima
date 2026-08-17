@@ -3,13 +3,14 @@ import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-nativ
 import { parseWorkResultValidations, type WorkPresentation } from '@anima/core';
 import { decideWork, decideWorkIntegration, reloadWork, requestHostSupervisorTurn, requestProposalCorrection, requestWorkControl, respondWorkDecision, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
-import { describeMissingCompletedResult, presentMobileWorkResult, presentMobileWorkVerification } from './mobile-work-result';
+import { describeMissingCompletedResult, presentMobileWorkResult, presentMobileWorkResourceCost, presentMobileWorkVerification } from './mobile-work-result';
 import { presentMobileWorkExecution } from './mobile-work-execution';
 
 export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void;focused?:boolean;onFocus?:()=>void}) {
   const {item,latestResult,availableActions}=presentation;
   const shownResult=presentMobileWorkResult(presentation);
   const verification=presentMobileWorkVerification(presentation);
+  const resourceCost=presentMobileWorkResourceCost(presentation);
   const missingCompletedResult=describeMissingCompletedResult(presentation);
   const execution=presentation.execution?presentMobileWorkExecution(presentation.execution):null;
   const [confirmCancel,setConfirmCancel]=useState(false);
@@ -53,6 +54,11 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
       <Text style={styles.body}>Parecer do Verifier: {verification.verdictLabel}. É consultivo e não substitui a sua revisão.</Text>
       {verification.restsOnAttestedEvidence&&<Text style={styles.state}>Baseado na evidência reportada pelo executor; não é prova independente.</Text>}
       {verification.issues.map((issue,index)=><Text key={index} style={styles.state}>{issue}</Text>)}
+    </View>}
+    {resourceCost&&<View accessible accessibilityLabel="Custo de recursos observado" style={styles.result}>
+      <Text style={styles.label}>Custo de recursos observado (gates)</Text>
+      <Text style={styles.body}>Derivado do que o host mediu ao rodar os gates deste trabalho. Read-only: informa o custo, não decide nem bloqueia.</Text>
+      {resourceCost.lines.map((line,index)=><Text key={index} style={styles.state}>{line}</Text>)}
     </View>}
     {execution&&<View accessible accessibilityLabel="Execução autônoma" style={styles.result}>
       <View style={styles.header}><Text style={styles.label}>Execução autônoma</Text><Text style={styles.state}>{execution.statusLabel}</Text></View>

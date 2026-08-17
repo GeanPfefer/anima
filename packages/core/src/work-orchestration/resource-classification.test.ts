@@ -4,6 +4,8 @@ import {
   classifyMachinePressure,
   classifyObservationCost,
   DEFAULT_INTERACTIVE_RESERVE,
+  describeCostClass,
+  formatObservedDurationMs,
   MIN_SAMPLES_TO_RANK,
   type InteractiveReserve,
   type MachineSnapshotV1,
@@ -83,5 +85,22 @@ describe('classifyMachinePressure (relativo à reserva injetada)', () => {
     // 8000/16000 = 0.5: com a reserva padrão é 'low', com a estrita vira 'moderate'.
     expect(classifyMachinePressure(snapshot(), DEFAULT_INTERACTIVE_RESERVE)).toBe('low');
     expect(classifyMachinePressure(snapshot(), strict)).toBe('moderate');
+  });
+});
+
+describe('descritores de apresentação compartilhados (web/mobile)', () => {
+  test('describeCostClass rotula cada classe em PT-BR, honesto no unknown', () => {
+    expect(describeCostClass('low')).toBe('baixo');
+    expect(describeCostClass('medium')).toBe('médio');
+    expect(describeCostClass('high')).toBe('alto');
+    expect(describeCostClass('unknown')).toBe('indeterminado');
+  });
+
+  test('formatObservedDurationMs: ms inteiros abaixo de 1s, segundos (1 casa) a partir de 1s', () => {
+    expect(formatObservedDurationMs(300)).toBe('300 ms');
+    expect(formatObservedDurationMs(999)).toBe('999 ms');
+    expect(formatObservedDurationMs(1000)).toBe('1.0 s'); // fronteira exata
+    expect(formatObservedDurationMs(90_000)).toBe('90.0 s');
+    expect(formatObservedDurationMs(0)).toBe('0 ms');
   });
 });

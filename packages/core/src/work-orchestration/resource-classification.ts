@@ -92,6 +92,18 @@ export function classifyObservationCost(durationMs: number, distribution: CostDi
 /** Severidade ordinal para desempate/agregação conservadora. */
 export const COST_CLASS_SEVERITY: Readonly<Record<CostClass, number>> = { unknown: 0, low: 1, medium: 2, high: 3 };
 
+/** Rótulo legível (PT-BR) da classe de custo. Descritor de APRESENTAÇÃO compartilhado
+ * entre web e mobile — a mesma régua de `describeValidationOutcome`, para o Governor
+ * renderizar idêntico nas duas plataformas. `unknown` = amostras insuficientes para
+ * ranquear (resposta honesta, não uma faixa inventada). */
+export const describeCostClass = (cls: CostClass): string =>
+  cls === 'low' ? 'baixo' : cls === 'medium' ? 'médio' : cls === 'high' ? 'alto' : 'indeterminado';
+
+/** Duração observada legível sem precisão falsa: segundos com uma casa acima de 1s, senão
+ * milissegundos inteiros. Compartilhado web/mobile para rendering idêntico. */
+export const formatObservedDurationMs = (ms: number): string =>
+  ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
+
 /**
  * Classifica a pressão da máquina a partir de um snapshot e da reserva injetada.
  * `unknown` quando não há telemetria de memória confiável. Fronteiras vêm da reserva

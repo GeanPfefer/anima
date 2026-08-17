@@ -1,4 +1,4 @@
-import { describeValidationOutcome, type WorkPresentation, type WorkVerificationVerdict } from '@anima/core';
+import { describeCostClass, describeValidationOutcome, formatObservedDurationMs, type WorkPresentation, type WorkVerificationVerdict } from '@anima/core';
 
 export interface MobileWorkResultContent {
   readonly accessibilityLabel: 'Resultado aceito' | 'Resultado para revisão';
@@ -62,5 +62,23 @@ export function presentMobileWorkVerification(presentation: WorkPresentation): M
       .filter(finding => finding.severity !== 'ok')
       .map(finding => `${finding.severity === 'violation' ? 'Violação' : 'Lacuna'}: ${finding.detail}`),
     restsOnAttestedEvidence: report.restsOnAttestedEvidence,
+  };
+}
+
+// Paridade do custo de recursos observado do Resource Governor (mesma projeção pura da
+// web, mesmos descritores do core). Read-only: mostra CUSTO (evidência + classificação
+// per-item), nunca o advisory machine-wide. Ausente/sem perfis ⇒ null (nada a mostrar).
+export interface MobileWorkResourceCostContent {
+  /** Uma linha legível por comando de gate observado. */
+  readonly lines: readonly string[];
+}
+
+export function presentMobileWorkResourceCost(presentation: WorkPresentation): MobileWorkResourceCostContent | null {
+  const cost = presentation.resourceCost;
+  if (!cost || cost.profiles.length === 0) return null;
+  return {
+    lines: cost.profiles.map(profile =>
+      `${profile.key.command} — ${profile.count}× · mediana ${formatObservedDurationMs(profile.durationMedianMs)} · custo ${describeCostClass(profile.predominantClass)}`
+      + (profile.failureCount > 0 ? ` · ${profile.failureCount} falha(s)` : '')),
   };
 }
