@@ -767,9 +767,14 @@ não do item; a chave do perfil `(kind, command, repo)` já agrega cross-item.
 **Superfície na UI (implementada, read-only).** A projeção per-item `resourceCost`
 (`projectWorkResourceCost`, pura, serializada pela presentation) é renderizada no `WorkProposalCard`
 (web) e no `MobileWorkCard` (paridade UX-04): por comando de gate, contagem, duração mediana, classe
-de custo e falhas. Mostra **CUSTO** (evidência + classificação per-item), **não** o advisory
-machine-wide — que depende do snapshot vivo e vive no seam host-side. Descritores compartilhados no
-core (`describeCostClass`, `formatObservedDurationMs`), a régua de `describeValidationOutcome`.
+de custo e falhas — o **CUSTO** per-item (evidência + classificação), durável e serializado. Além
+disso, o `WorkProposalCard` (web) surfa o **advisory machine-wide** devolvido pela resposta de
+`/supervisor-turn` **após** uma execução autônoma, como painel de transparência (pressão da máquina +
+recomendação por workload) — read-only, pós-execução, sem endpoint novo (usa o `resourceGovernor` que
+já viaja na resposta). O advisory não teve papel na execução que já rodou; só informa. Descritores
+compartilhados no core (`describeCostClass`, `formatObservedDurationMs`, `describeExecutionAdvisory`,
+`describeMachinePressure`), a régua de `describeValidationOutcome`. Paridade mobile do painel de
+advisory ainda não feita.
 
 **Persistência própria: avaliada e dispensada.** Antes de considerar schema/RPC novos, ficou
 **demonstrado** que derivar de `host_observed_gate_evidence_recorded` **é suficiente** para o custo
