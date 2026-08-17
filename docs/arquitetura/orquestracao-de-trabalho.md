@@ -776,15 +776,27 @@ compartilhados no core (`describeCostClass`, `formatObservedDurationMs`, `descri
 `describeMachinePressure`), a régua de `describeValidationOutcome`. Paridade mobile do painel de
 advisory ainda não feita.
 
+**Advisory pré-execução (implementado, read-only).** Além do parecer pós-turno, há um advisory
+ACIONÁVEL antes de rodar: a rota `GET /api/work-orchestration/items/[id]/resource-advisory` compõe,
+para os gates **declarados** no contrato do item (`declaredGateCommands` ← `execution_spec.validation_criteria`),
+o parecer relativo ao histórico **machine-wide** de cada comando + a pressão viva (`composeItemGateAdvisory`
+→ core `adviseDeclaredGates`). Diferente do pós-turno: um gate declarado mas **nunca observado** aparece
+como `insufficient_evidence` em vez de sumir, e o report **nunca** é null (para pré-execução, mostrar os
+gates do item é o ponto). No `WorkProposalCard`, o botão "Consultar parecer de recursos" (só quando o
+item está aprovado e elegível) busca o endpoint e mostra o painel — **consultar não executa**. Read-only:
+informa a decisão de rodar, não decide/bloqueia/muda elegibilidade.
+
 **Persistência própria: avaliada e dispensada.** Antes de considerar schema/RPC novos, ficou
 **demonstrado** que derivar de `host_observed_gate_evidence_recorded` **é suficiente** para o custo
 cross-item — a limitação era só o **escopo per-item da leitura**, resolvido por uma leitura machine-wide
 dos eventos que já existem. Nenhuma persistência nova foi criada.
 
 **Ainda fora do V0 (fronteiras honestas):** predição/ML; agendador/daemon; qualquer **controle**
-(matar, parar, descarregar, priorizar); telemetria de máquina persistida; um endpoint de leitura
-dedicado (o advisory hoje só é produzido como leitura pós-turno). Nada disso concede autoridade — o V0
-é sensor + parecer. A construção de qualquer automação de controle exige recorte próprio e autorização.
+(matar, parar, descarregar, priorizar); telemetria de máquina persistida; observação de custo **além do
+gate** (coder/suite/build/container — só o gate carrega `durationMs` num evento persistido; o resto
+exigiria um ponto de observação novo no executor, com cuidado no caminho quente); paridade mobile do
+painel de advisory. Nada disso concede autoridade — o V0 é sensor + parecer. A construção de qualquer
+automação de controle exige recorte próprio e autorização.
 
 ## Verifier e evidência observada pelo host (independência real)
 

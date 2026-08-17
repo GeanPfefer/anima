@@ -10,8 +10,8 @@
 no fluxo do Supervisor e na UI. Advisory continua advisory: informa, **nunca** decide/bloqueia/atua.
 
 **Branch:** `claude/integration-application-layer`.
-**HEAD inicial:** `36ab186`. **HEAD final:** `be9f080` (5 commits abaixo).
-**origin/main:** `973ef465acaa3955f8e176c72903975cf3912ac6` — **intacta, SEM push.** ~295 ahead.
+**HEAD inicial:** `36ab186`. **HEAD final:** `b1dd8fa` (9 commits; ver "Continuação" ao fim).
+**origin/main:** `973ef465acaa3955f8e176c72903975cf3912ac6` — **intacta, SEM push.** ~299 ahead.
 **Árvore:** limpa exceto `.worktrees/` (preservada).
 
 Detalhe arquitetural vivo em `docs/arquitetura/orquestracao-de-trabalho.md`
@@ -110,3 +110,32 @@ Qualquer automação de **controle** (matar/parar/descarregar/agendar/prioridade
 e exige recorte próprio + autorização humana. A progressão continua
 `OBSERVAR → evidência → histórico → classificar → advisory → PROVAR advisory → decisão assistida →
 controle limitado → controle autônomo maduro` — sem pular níveis.
+
+## Continuação (mesma sessão, +4 commits → HEAD `b1dd8fa`)
+
+Após o registro acima (HEAD `be9f080`), a sessão continuou com mais recortes elegíveis:
+
+- **`e134d98`** — painel de transparência no `WorkProposalCard`: surfa o advisory machine-wide devolvido
+  por `/supervisor-turn` **após** a execução autônoma (pressão + recomendação por workload). Usa o
+  `resourceGovernor` que já viaja na resposta — **sem endpoint/fetch novo**. Descritores
+  `describeExecutionAdvisory`/`describeMachinePressure` no core. Fecha o passo "surfar o ADVISORY" (antes
+  a UI só mostrava CUSTO). core 862, WorkProposalCard 43.
+- **`cce4526`** — correção da arquitetura viva (a UI web agora surfa o advisory).
+- **`b1dd8fa`** — **advisory PRÉ-EXECUÇÃO** (o item 3 do "próximo ponto" acima, agora feito):
+  core `adviseDeclaredGates` (parecer por gate DECLARADO no contrato, inclusive nunca observado →
+  insufficient) + seam `declaredGateCommands`/`composeItemGateAdvisory` (sempre devolve report) + rota
+  `GET items/[id]/resource-advisory` (auth/RLS, item→gates declarados + evidência machine-wide + snapshot)
+  + botão "Consultar parecer de recursos" no card (só quando aprovado+elegível; **consultar não executa**).
+  Dá ao advisory um **lar per-item acionável antes de rodar**. core 866 (+4), seam 17 (+4), endpoint 3,
+  WorkProposalCard 44 (+1, prova que consultar NÃO chama supervisor-turn), typecheck 5.
+
+**Provas totais da sessão (9 commits):** core 866, supabase repo 8, web (seam 17 + rota supervisor 10 +
+endpoint 3 + card 44), mobile 44, typecheck 5 workspaces. origin/main intacta, SEM push, árvore limpa
+exceto `.worktrees/`.
+
+**"Próximo ponto" revisado:** item 3 (advisory relativo ao item) FEITO. Restam: (1) paridade **mobile**
+do botão/painel de advisory (plumbing em `callHostSupervisorTurn`/`requestHostSupervisorTurn` + render
+sem infra de teste de componente RN → prova viva no dispositivo); (2) **observar custo além do gate**
+(coder/suite/build — ponto de observação NOVO no executor, risco no caminho quente, schema/derivação a
+decidir); (3) classificação ciente de desfecho/recência (refinamento sem consumidor claro). CONTROLE
+segue FORA do V0.
