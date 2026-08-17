@@ -3,9 +3,10 @@ import {
   type MachineSnapshotV1,
   type ObservedGateInput,
   type WorkEvent,
+  type WorkItem,
 } from '@anima/core';
 import type { Json } from '@anima/types';
-import { composeHostResourceGovernorView, composeSupervisorResourceAdvisory } from './resource-governor';
+import { composeHostResourceGovernorView, composeItemGateAdvisory, composeSupervisorResourceAdvisory, declaredGateCommands } from './resource-governor';
 
 let seq = 0;
 const gateEvidenceEvent = (attemptId: string, gates: ObservedGateInput[], observedAt = '2026-08-17T12:00:00.000Z'): WorkEvent => {
@@ -149,5 +150,41 @@ describe('composeSupervisorResourceAdvisory (read-model do supervisor-turn)', ()
     const typecheck = report.advisories.filter(a => a.key.command === 'npm run typecheck');
     expect(typecheck).toHaveLength(1);                          // um perfil, não um por item
     expect(typecheck[0]!.advisory.basis.sampleCount).toBe(3);   // as três observações agregadas
+  });
+});
+
+// Advisory ANTES de rodar, sobre os gates declarados no contrato do item.
+describe('declaredGateCommands + composeItemGateAdvisory (pré-execução)', () => {
+  const itemWith = (validationCriteria: unknown): WorkItem => ({
+    id: 'work-1', userId: 'u', sourceMessageId: 'm', state: 'approved', impactLevel: 'low', capability: 'programming',
+    originalRequest: 'x', intent: { execution_spec: { validation_criteria: validationCriteria } } as unknown as WorkItem['intent'],
+    proposal: { schemaVersion: 1, data: { summary: 's', objective: 'o', includedScope: [], excludedScope: [], expectedEffects: [], risks: [] } },
+    proposalVersion: 2, createdAt: new Date(), updatedAt: new Date(),
+  });
+
+  test('declaredGateCommands extrai os comandos, ignorando entradas sem command', () => {
+    const item = itemWith([{ label: 'Typecheck', command: 'npm run typecheck' }, { label: 'sem comando' }, { command: '  ' }, { command: 'npm run test:e2e' }]);
+    expect(declaredGateCommands(item)).toEqual(['npm run typecheck', 'npm run test:e2e']);
+  });
+
+  test('item sem contrato/validation_criteria → lista vazia (fail-safe)', () => {
+    expect(declaredGateCommands({ ...itemWith(undefined), intent: {} as WorkItem['intent'] })).toEqual([]);
+    expect(declaredGateCommands(itemWith('não-é-array'))).toEqual([]);
+  });
+
+  test('gate declarado com histórico → advised; declarado mas nunca observado → insufficient', () => {
+    const report = composeItemGateAdvisory({
+      commands: ['npm run typecheck', 'npm run brand-new-gate'],
+      events, readSnapshot: () => snapshot(8_000),
+    });
+    const byCommand = new Map(report.advisories.map(a => [a.key.command, a.advisory.recommendation]));
+    expect(byCommand.get('npm run typecheck')).toBe('safe_to_run');
+    expect(byCommand.get('npm run brand-new-gate')).toBe('insufficient_evidence'); // não some
+  });
+
+  test('SEMPRE devolve report: sem histórico, cada gate declarado vira insufficient (não null)', () => {
+    const report = composeItemGateAdvisory({ commands: ['a', 'b'], events: [], readSnapshot: () => snapshot(8_000) });
+    expect(report.advisories.map(a => a.key.command)).toEqual(['a', 'b']);
+    expect(report.advisories.every(a => a.advisory.recommendation === 'insufficient_evidence')).toBe(true);
   });
 });

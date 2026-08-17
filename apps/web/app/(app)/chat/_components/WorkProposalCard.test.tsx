@@ -146,4 +146,18 @@ describe('WorkProposalCard', () => {
     expect(screen.getByText(/Pressão da máquina agora: alta/)).toBeInTheDocument();
     expect(screen.getByText(/npm run test:e2e — custo alto: recomende uma janela de máquina exclusiva/)).toBeInTheDocument();
   });
+  test('consulta o parecer de recursos ANTES de rodar e exibe o painel (read-only, sem executar)', async () => {
+    const governor={pressure:'moderate',distribution:{count:0,p50Ms:0,p90Ms:0,maxMs:0},snapshot:null,advisories:[{key:{workloadKind:'gate',command:'npm test',repo:null},advisory:{recommendation:'prefer_defer',rationale:'x',basis:{workloadClass:'medium',machinePressure:'moderate',sampleCount:5,reserveActive:true}}}]};
+    (global.fetch as jest.Mock).mockImplementation((url:string)=>typeof url==='string'&&url.includes('/resource-advisory')
+      ? Promise.resolve({ok:true,json:async()=>({ok:true,value:{resourceGovernor:governor}})})
+      : Promise.resolve({ok:true,json:async()=>({ok:true,value:{presentation:presentation({item:autonomousItem,availableActions:['start']})}})}));
+    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start']})} onChange={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button',{name:'Consultar parecer de recursos'}));
+    await waitFor(()=>expect(screen.getByText(/Resource Governor \(advisory\)/)).toBeInTheDocument());
+    expect(screen.getByText(/Pressão da máquina agora: moderada/)).toBeInTheDocument();
+    expect(screen.getByText(/npm test — custo médio: prefira adiar/)).toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/items/item/resource-advisory');
+    // Consultar NÃO executa: o supervisor-turn nunca é chamado.
+    expect((global.fetch as jest.Mock).mock.calls.some(c=>typeof c[0]==='string'&&c[0].includes('/supervisor-turn'))).toBe(false);
+  });
 });

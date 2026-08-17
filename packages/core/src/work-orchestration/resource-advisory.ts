@@ -165,6 +165,39 @@ export function adviseWorkloadProfiles(
   }));
 }
 
+export interface AdviseDeclaredGatesInput {
+  /** Comandos de gate DECLARADOS no contrato do item (o que ele VAI rodar). */
+  readonly commands: readonly string[];
+  /** Observações de custo MACHINE-WIDE (todos os itens) das quais tirar o histórico. */
+  readonly observations: readonly WorkloadCostObservationV1[];
+  readonly snapshot: MachineSnapshotV1 | null;
+  readonly reserve?: InteractiveReserve;
+}
+
+/**
+ * Advisory ANTES de rodar: para cada gate **declarado** no contrato do item, o parecer
+ * relativo ao histórico **machine-wide** daquele comando + a pressão atual. Difere de
+ * `adviseWorkloadProfiles` (que aconselha sobre o que JÁ foi observado): aqui um gate
+ * declarado mas **nunca observado** aparece honestamente como `insufficient_evidence`,
+ * em vez de sumir. Puro e determinístico; deduplica comandos e ignora vazios, preservando
+ * a ordem de declaração. Não decide nem atua — só informa a decisão de rodar.
+ */
+export function adviseDeclaredGates(input: AdviseDeclaredGatesInput): readonly WorkloadAdvisory[] {
+  const reserve = input.reserve ?? DEFAULT_INTERACTIVE_RESERVE;
+  const distribution = buildCostDistribution(input.observations);
+  const profiles = projectWorkloadCostProfiles(input.observations, distribution);
+  const seen = new Set<string>();
+  const advisories: WorkloadAdvisory[] = [];
+  for (const command of input.commands) {
+    if (typeof command !== 'string' || command.trim().length === 0 || seen.has(command)) continue;
+    seen.add(command);
+    const key: WorkloadCostProfileKey = { workloadKind: 'gate', command, repo: null };
+    const profile = findWorkloadCostProfile(profiles, key);
+    advisories.push({ key, advisory: adviseWorkloadExecution({ profile, snapshot: input.snapshot, reserve }) });
+  }
+  return advisories;
+}
+
 /** Visão composta do Resource Governor: o read-model que a presentation/host consome. */
 export interface ResourceGovernorView {
   readonly distribution: CostDistribution;

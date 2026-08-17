@@ -1,4 +1,5 @@
 import {
+  adviseDeclaredGates,
   adviseWorkloadProfiles,
   buildCostDistribution,
   classifyMachinePressure,
@@ -12,6 +13,7 @@ import {
   type MachineSnapshotV1,
   type ResourceGovernorView,
   type WorkEvent,
+  type WorkItem,
   type WorkloadAdvisory,
   type WorkloadCostProfileKey,
 } from '@anima/core';
@@ -114,5 +116,53 @@ export function composeSupervisorResourceAdvisory(
     pressure: classifyMachinePressure(snapshot, reserve),
     distribution,
     advisories: adviseWorkloadProfiles(profiles, snapshot, reserve),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Advisory ANTES de rodar: sobre os gates DECLARADOS no contrato do item.
+//
+// Diferente do consumidor pós-turno (que aconselha sobre o que já foi observado), este
+// serve à decisão de rodar: para cada gate que o item VAI rodar, o parecer relativo ao
+// histórico machine-wide daquele comando. Um gate declarado mas nunca observado aparece
+// honestamente como `insufficient_evidence`. Sempre devolve um report (mesmo sem histórico:
+// para pré-execução, mostrar os gates declarados é o ponto). Read-only, nunca atua.
+
+/** Extrai os comandos de gate declarados no `execution_spec.validation_criteria` do item.
+ * Fail-safe: navega o intent como Json, ignora entradas sem `command` string; item sem
+ * contrato → lista vazia. */
+export function declaredGateCommands(item: WorkItem): readonly string[] {
+  const intent = item.intent as { execution_spec?: { validation_criteria?: unknown } } | null | undefined;
+  const criteria = intent?.execution_spec?.validation_criteria;
+  if (!Array.isArray(criteria)) return [];
+  const commands: string[] = [];
+  for (const entry of criteria) {
+    const command = (entry as { command?: unknown } | null)?.command;
+    if (typeof command === 'string' && command.trim().length > 0) commands.push(command);
+  }
+  return commands;
+}
+
+export interface ItemGateAdvisoryInput {
+  /** Comandos de gate declarados no contrato do item (via `declaredGateCommands`). */
+  readonly commands: readonly string[];
+  /** Evidência de gate machine-wide (todos os itens do usuário). */
+  readonly events: readonly WorkEvent[];
+  readonly reserve?: InteractiveReserve;
+  readonly readSnapshot?: () => MachineSnapshotV1;
+}
+
+/** Compõe o advisory pré-execução dos gates declarados do item. Ao contrário de
+ * `composeSupervisorResourceAdvisory`, NUNCA devolve null: sem histórico, cada gate
+ * declarado vira `insufficient_evidence` — honesto e ainda útil (mostra o que o item roda). */
+export function composeItemGateAdvisory(input: ItemGateAdvisoryInput): ResourceGovernorAdvisoryReport {
+  const observations = deriveWorkloadCostObservationsFromEvents(input.events);
+  const reserve = input.reserve ?? DEFAULT_INTERACTIVE_RESERVE;
+  const snapshot = (input.readSnapshot ?? readMachineSnapshot)();
+  return {
+    snapshot,
+    pressure: classifyMachinePressure(snapshot, reserve),
+    distribution: buildCostDistribution(observations),
+    advisories: adviseDeclaredGates({ commands: input.commands, observations, snapshot, reserve }),
   };
 }

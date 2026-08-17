@@ -1,4 +1,5 @@
 import {
+  adviseDeclaredGates,
   adviseWorkloadExecution,
   adviseWorkloadProfiles,
   buildWorkloadCostObservation,
@@ -137,6 +138,39 @@ describe('adviseWorkloadProfiles (advisory por perfil; múltiplos workloads no m
     const first = adviseWorkloadProfiles(profiles, Object.freeze(lowMem), Object.freeze(reserve(true)));
     const second = adviseWorkloadProfiles(profiles, Object.freeze(lowMem), Object.freeze(reserve(true)));
     expect(first).toEqual(second);
+  });
+});
+
+describe('adviseDeclaredGates (advisory ANTES de rodar, sobre os gates declarados)', () => {
+  const obs = (command: string, durationMs: number, n: number): WorkloadCostObservationV1[] =>
+    Array.from({ length: n }, () => {
+      const built = buildWorkloadCostObservation({ workloadKind: 'gate', command, durationMs, observedAt: '2026-08-17T12:00:00.000Z', outcome: 'succeeded' });
+      if (!built.ok) throw new Error('fixture inválida');
+      return built.value;
+    });
+  const machineWide = [...obs('npm run typecheck', 300, 9), ...obs('npm run test:e2e', 90_000, 3)];
+
+  test('cada gate declarado recebe parecer relativo ao histórico machine-wide', () => {
+    const advisories = adviseDeclaredGates({ commands: ['npm run typecheck', 'npm run test:e2e'], observations: machineWide, snapshot: highMem, reserve: reserve(true) });
+    const byCommand = new Map(advisories.map(a => [a.key.command, a.advisory.recommendation]));
+    expect(byCommand.get('npm run typecheck')).toBe('safe_to_run');       // barato historicamente
+    expect(byCommand.get('npm run test:e2e')).toBe('machine_exclusive_recommended'); // caro + usuário ativo
+  });
+
+  test('gate declarado mas NUNCA observado → insufficient_evidence (não some da lista)', () => {
+    const advisories = adviseDeclaredGates({ commands: ['npm run brand-new-gate'], observations: machineWide, snapshot: highMem });
+    expect(advisories).toHaveLength(1);
+    expect(advisories[0]!.advisory.recommendation).toBe('insufficient_evidence');
+  });
+
+  test('deduplica comandos e ignora vazios, preservando a ordem de declaração', () => {
+    const advisories = adviseDeclaredGates({ commands: ['a', '', '  ', 'b', 'a'], observations: [], snapshot: null });
+    expect(advisories.map(x => x.key.command)).toEqual(['a', 'b']);
+  });
+
+  test('sem histórico algum → todos os declarados insufficient_evidence (honesto)', () => {
+    const advisories = adviseDeclaredGates({ commands: ['x', 'y'], observations: [], snapshot: highMem });
+    expect(advisories.every(a => a.advisory.recommendation === 'insufficient_evidence')).toBe(true);
   });
 });
 
