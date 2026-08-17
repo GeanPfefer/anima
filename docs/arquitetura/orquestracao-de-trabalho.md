@@ -744,18 +744,42 @@ Camadas puras e determináveis (`packages/core`, sem LLM, sem schema novo):
 - **Advisory** (`resource-advisory.ts`): `adviseWorkloadExecution` puro →
   `safe_to_run | prefer_defer | machine_exclusive_recommended | insufficient_evidence`, decidindo
   **quando/como**, nunca **se pode**, e nunca executando ação. `composeResourceGovernorView` é o
-  read-model recomputável.
+  read-model recomputável de UM alvo; `adviseWorkloadProfiles` estende o parecer a **cada** perfil
+  histórico contra o mesmo snapshot/reserva (um turno exercita vários gates), sem colapsar workloads.
 
 Lado host-side (`apps/web/lib/work-orchestration`): `machine-telemetry.ts` lê uma amostra barata e
 pontual via `node:os` (sem dependência nova, sem polling; **omite `loadAvg1` no Windows**, onde
-`os.loadavg()` é sempre 0). `resource-governor.ts` (`composeHostResourceGovernorView`) é o **seam
-central de leitura**: deriva o histórico dos eventos, lê o snapshot vivo e compõe a visão — em vez de
-espalhar telemetria por cada executor.
+`os.loadavg()` é sempre 0). `resource-governor.ts` é o **seam central de leitura**: deriva o histórico
+dos eventos, lê o snapshot vivo e compõe a visão — em vez de espalhar telemetria por cada executor.
 
-**Ainda fora do V0 (fronteiras honestas):** persistência de telemetria de máquina **nova** (o V0 só
-reaproveita o log já existente); fiação viva no caminho quente do Supervisor (o seam está pronto,
-sem consumidor ainda); predição/ML; agendador; qualquer UI. Nada disso concede autoridade — o V0 é
-sensor + parecer. A construção de qualquer automação de controle exige recorte próprio e autorização.
+**Consumidor real (implementado).** O advisory deixou de ser um seam sem consumidor:
+`composeSupervisorResourceAdvisory` (em `resource-governor.ts`) é anexado ao read-model da resposta de
+`POST /supervisor-turn` (`resourceGovernor`, **ao lado** de `value`, nunca dentro do resultado do
+Supervisor). É um bloco **independente e totalmente fail-open** (fetch de eventos + composição sob
+`try/catch`), **pós-terminal**, **fora do caminho quente** (`runSupervisorTurn`): um defeito de
+telemetria/transporte vira advisory **ausente**, jamais um erro que altere a resposta do turno. Não
+decide, não bloqueia, não muda elegibilidade. A leitura é **machine-wide**: alimenta o advisory com a
+evidência de gate de **todos os itens do usuário** (`listEventsByType('host_observed_gate_evidence_recorded')`,
+isolada pela **RLS já ratificada** de `work_events`, o mesmo padrão de `findResumableWorkItems`), não só
+o item do turno — senão um item novo cairia sempre em `insufficient_evidence`. O custo é da **máquina**,
+não do item; a chave do perfil `(kind, command, repo)` já agrega cross-item.
+
+**Superfície na UI (implementada, read-only).** A projeção per-item `resourceCost`
+(`projectWorkResourceCost`, pura, serializada pela presentation) é renderizada no `WorkProposalCard`
+(web) e no `MobileWorkCard` (paridade UX-04): por comando de gate, contagem, duração mediana, classe
+de custo e falhas. Mostra **CUSTO** (evidência + classificação per-item), **não** o advisory
+machine-wide — que depende do snapshot vivo e vive no seam host-side. Descritores compartilhados no
+core (`describeCostClass`, `formatObservedDurationMs`), a régua de `describeValidationOutcome`.
+
+**Persistência própria: avaliada e dispensada.** Antes de considerar schema/RPC novos, ficou
+**demonstrado** que derivar de `host_observed_gate_evidence_recorded` **é suficiente** para o custo
+cross-item — a limitação era só o **escopo per-item da leitura**, resolvido por uma leitura machine-wide
+dos eventos que já existem. Nenhuma persistência nova foi criada.
+
+**Ainda fora do V0 (fronteiras honestas):** predição/ML; agendador/daemon; qualquer **controle**
+(matar, parar, descarregar, priorizar); telemetria de máquina persistida; um endpoint de leitura
+dedicado (o advisory hoje só é produzido como leitura pós-turno). Nada disso concede autoridade — o V0
+é sensor + parecer. A construção de qualquer automação de controle exige recorte próprio e autorização.
 
 ## Verifier e evidência observada pelo host (independência real)
 
