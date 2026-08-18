@@ -114,6 +114,11 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       const workspace: CoderWorkspace = {
         readFile: relPath => worktree!.readWorkspaceFile(relPath),
         writeFile: (relPath, content) => worktree!.writeWorkspaceFile(relPath, content),
+        // Seam para backends enraizados (ex.: DeepSeek Harness) que rodam o próprio
+        // laço agêntico e precisam de um cwd real. Os backends que só propõem edições
+        // ignoram este campo. O host segue sendo a autoridade única do git observado,
+        // escopo, gates, commit e restauração — o cwd não afrouxa nada disso.
+        rootPath: worktree!.root,
       };
       let editResult;
       // Relógio host de primeira parte ao redor de `backend.edit()` (visão §12): o host
