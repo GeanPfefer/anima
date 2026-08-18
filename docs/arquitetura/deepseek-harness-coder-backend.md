@@ -71,6 +71,37 @@ O `pwsh` (e qualquer shell) das ferramentas do Harness executa comandos **arbitr
 - **Ligação viva do `HarnessRuntime` com o `@deepseek-ai/dsh`** — bloqueada por: (a) o pacote **não** está instalado neste repo; (b) sua API pública precisa ser verificada contra o pacote real (não adivinhada); (c) a revisão de segurança do `pwsh` acima. Adicionar a dependência e cruzar essa fronteira é decisão humana.
 - **Retry na mesma sessão após falha de gate observada pelo host** (POC ponto 6) — a **semântica** está provada, mas o **mecanismo** muda o contrato compartilhado `CoderBackend` (threading de sessão + realimentação de evidência de gate) e o laço central do `WorktreeExecutorAdapter` (de single-shot para laço limitado). É alto raio de impacto e a forma exata depende da API `resume` real do Harness. Fica para a fatia da ligação viva, onde há consumidor real.
 
-## Próximo ponto de continuação
+## Próximo ponto de continuação (pré-ratificação)
 
-Quando houver decisão humana de instalar/vendorar o `@deepseek-ai/dsh` e ratificar a fronteira do `pwsh`: implementar o `HarnessRuntime` real (borda de composição, importando o `dsh`; `create`/`resume`, `temperature`, ferramentas, hook `agent/pre-step` → `agent.cancel`), depois o laço de retry-na-mesma-sessão no host (limitado, **só** após falha de gate observada pelo host), depois o registro no `backendFor` sob contrato explícito `coder_backend: "deepseek-harness"` e a previsão no advisory pré-execução. Cada passo com testes focados e gates existentes.
+Quando houver decisão humana de instalar/vendorar o `@deepseek-ai/dsh` e ratificar a fronteira do `pwsh`: implementar o `HarnessRuntime` real, `temperature`, ferramentas, hook `agent/pre-step`, depois o laço de retry no host, depois o registro no `backendFor` sob contrato explícito e a previsão no advisory. Cada passo com testes focados e gates existentes.
+
+---
+
+## Atualização 2026-08-18 — ligação viva ratificada (recorte experimental controlado)
+
+Gean ratificou, **para este recorte experimental controlado**, as duas decisões que bloqueavam a ligação viva: (1) adicionar/versionar a dependência do Harness fixada em `@deepseek-ai/dsh 0.1.0-rc.7` (+ só as diretamente necessárias); (2) uma capacidade **experimental estreita** do Harness executar ferramentas locais dentro do worktree isolado, sob envelope: sandbox `workspace-write`; filesystem confinado ao worktree (+ temporárias inevitáveis do runtime); **rede desabilitada** para o coder; sem `danger-full-access`; sem acesso a credenciais; nenhum efeito externo; sem alterar `origin/main`; host mantém worktree/Git observado/escopo/gates/cancelamento/Resource Governor/commit-handoff/Verifier/classificação final; `completed`/exit 0 nunca é sucesso; gates do host obrigatórios; execução cancelável; runaway limitado por lifecycle hook; **qualquer saída do envelope falha fechada**. **NÃO** é autorização para ampliar o envelope depois, nem ratificar Harness como default, budget=12, retry=1 ou remoção universal de `str_replace_editor`.
+
+### Dependências adicionadas (pinadas, exatas)
+
+Em `apps/web`: `@deepseek-ai/dsh@0.1.0-rc.7` (CLI + profiles + runtime cordis), `@deepseek-ai/dsh-headless@0.1.0-rc.7` (profile one-shot dirigido), `@deepseek-ai/dsh-llm-pi-ai@0.1.0-rc.7` (provider compatível com Ollama). **Nada mais atualizado**; `npm audit fix` **não** executado (evita upgrades oportunistas — a árvore reporta 6 advisories high, contidos ao subprocesso experimental, fora do caminho do servidor Anima).
+
+### Arquitetura decidida: SUBPROCESSO confinado (não embedding in-process)
+
+O `@deepseek-ai/dsh` é um app agêntico grande sobre o framework cordis, com binário `dsh` (`bin: lib/bin.js`). A ligação viva roda o Harness como **processo filho confinado** no worktree, **não** embutido no processo do servidor Next.js do Anima. Razões: o envelope ratificado É um sandbox de processo (`workspace-write`, rede off, sem `danger-full-access`) — exatamente o sandbox nativo do CLI; a fronteira de processo é a contenção mais forte e mantém o Harness fora da memória/credenciais do servidor Anima; casa com o `runProcess` que o host já usa para gates; o host cancela matando o filho (autoridade de cancelamento preservada); o host lê `turn/end` do log durável de sessão (nunca confia no texto do modelo). **Consequência de desenho:** o binding **spawna** o `dsh` (não importa módulo TS do dsh), então tipa e testa **sem** o dsh presente (fake do spawner, como o Anima fake-a `fetchImpl`); o dsh é dependência de **runtime**.
+
+### Contrato público VERIFICADO do CLI (na versão instalada)
+
+- Invocação one-shot: `dsh --profile headless "<task>"` (responde uma tarefa, imprime, sai).
+- Configuração pública **sem editar `node_modules`**: overlays de patch cordis via `--patch <arquivo.yml>` (repetível) + variáveis de ambiente. `--dump-default-config` imprime a composição.
+- Envelope mapeado a controles reais (do `--dump-default-config` do profile `headless`):
+  - **workspace-write** e **cwd-confinado**: `sandbox-policy` = `mode: DSH_PERMISSION_MODE ?? 'workspace-write'`, `workspaceRoot: process.cwd()` → o host roda o filho com `cwd = worktree.root`.
+  - **rede off para o coder**: `approval: ask` (headless sem humano → escalonamentos como rede/fora-do-workspace **auto-negados**, falha fechada), `tool-web.fetch: false`, telemetria OTEL `DSH_TELEMETRY_MODE ?? 'DISABLED'` (o exportador `harness-telemetry.deepseeksvc.com` é o único URL externo — mantido DESABILITADO explicitamente); web tools adicionalmente desabilitados por patch (defesa em profundidade).
+  - **provider/model**: patch sobre `agent-default-model` → `{ provider: <rota pi-ai>, model: 'qwen3-coder:latest' }` (Ollama), pois o default é o cloud `deepseek-official`.
+  - **temperature=0**: `LlmCallConfig` tem `temperature?: number`; um plugin de patch intercepta o waterfall `agent/request` e devolve `{ ...config, temperature: 0 }` (evento público verificado). Não há chave de temperature no profile composto.
+  - **step budget**: um plugin de patch escuta o waterfall `agent/pre-step` (`{ agent, turn, step, signal }`) e, ao ultrapassar o orçamento, chama `agent.cancel(cause)` com causa observável — a política pura já vive em `harness-turn-lifecycle`. Runaway limitado estruturalmente.
+  - **desabilitar `str_replace_editor`**: é o plugin `tool-str-replace-editor` — patch `disabled: true` (configurável, não regra universal).
+  - **sessão**: `session-persistence-jsonl` grava JSONL em `$DSH_HOME/sessions` — a fonte durável que o host lê para `turn/end`. O host usa um `DSH_HOME` isolado por execução.
+
+### Limitação pública verificada: resume de sessão no headless
+
+O profile `headless` **não** expõe flag pública de `--resume`; o resume do POC (`DSH_RESUME_SESSION_ID`) era patch em `node_modules` (proibido). O resume in-process existe (`ctx.agents.resume`), mas exigiria embedding (troca de contenção por conveniência — recusado). Portanto, no modelo de subprocesso confinado, o **retry após falha de gate observada pelo host** é feito com **sessão NOVA que recebe a evidência observada do host na tarefa** (dirigido por evidência, limitado, fail-closed, sem confiar em texto do modelo) — não literalmente a mesma sessão. Preserva a propriedade essencial do POC (retry só após gate FAIL do host) sem cruzar `node_modules` nem enfraquecer a contenção.
