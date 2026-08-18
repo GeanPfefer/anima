@@ -77,7 +77,7 @@ export interface WorkIntegrationProjection {
   // autorização; nunca afirma merge ou integração.
   readonly reviewRequest?:{readonly repositoryId:string;readonly remoteName:string;readonly reviewReference:string;readonly reviewId:string;readonly sourceBranch:string;readonly sourceCommitSha:string;readonly baseBranch:string}|null;
 }
-export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
+export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; readonly progress:WorkProgressPhaseProjection; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
   // Histórico append-only dos pareceres do Verifier persistidos (auditoria). Só
   // presente quando há ao menos um; read-only, nunca altera ações nem decide.
   readonly opinionHistory?:readonly VerifierOpinionV1[];
@@ -254,7 +254,49 @@ export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEve
     canRequestControl:status==='running'&&pendingControl===null,
   };
 }
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);const observedGit=projectHostObservedEvidence(events);const observedGates=projectHostObservedGateEvidence(events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution:projectAutonomousExecution(item,events),pendingDecision:projectPendingWorkDecision(item,events),integration:projectWorkIntegration(item,events),
+// Fase HUMANA do trabalho autônomo, derivada SOMENTE de fatos já projetados
+// (estado do item, execução + checkpoint, integração) — nunca da narrativa do LLM.
+// É projeção pura e read-only: não persiste estado novo nem inventa fases sem
+// fato que as sustente. Analisar e implementar não têm fronteira de evento (o
+// coder edita numa chamada opaca), então ambos caem em `implementing`.
+export type WorkProgressPhase =
+  |'proposal'|'approved'|'implementing'|'testing'|'paused'
+  |'reviewing'|'ready_to_integrate'|'integrating'
+  |'done'|'blocked'|'failed'|'rejected'|'cancelled';
+export interface WorkProgressPhaseProjection{readonly phase:WorkProgressPhase;readonly label:string;readonly active:boolean;readonly terminal:boolean;}
+const PROGRESS_LABEL:Record<WorkProgressPhase,string>={proposal:'Proposta',approved:'Aprovado',implementing:'Implementando',testing:'Testando',paused:'Pausado',reviewing:'Revisando',ready_to_integrate:'Pronto para integrar',integrating:'Integrando',done:'Concluído',blocked:'Bloqueado',failed:'Falhou',rejected:'Rejeitado',cancelled:'Cancelado'};
+const PROGRESS_ACTIVE=new Set<WorkProgressPhase>(['implementing','testing']);
+const PROGRESS_TERMINAL=new Set<WorkProgressPhase>(['done','failed','rejected','cancelled']);
+const progressPhase=(phase:WorkProgressPhase):WorkProgressPhaseProjection=>({phase,label:PROGRESS_LABEL[phase],active:PROGRESS_ACTIVE.has(phase),terminal:PROGRESS_TERMINAL.has(phase)});
+const integrationProgressPhase=(integration:WorkIntegrationProjection):WorkProgressPhaseProjection=>integration.status==='awaiting_decision'?progressPhase('ready_to_integrate'):integration.status==='refused'?progressPhase('reviewing'):progressPhase('integrating');
+/**
+ * Deriva a fase humana a partir dos fatos projetados. Ordem: estados terminais do
+ * item (autoridade do domínio) → execução autônoma em andamento (running:
+ * `testing` quando existe o checkpoint de pós-edição do worktree, senão
+ * `implementing`) → integração (pós-resultado) → espera humana/pré-execução.
+ */
+export function deriveWorkProgressPhase(input:{readonly item:WorkItem;readonly execution:AutonomousExecutionProjection|null;readonly integration:WorkIntegrationProjection|null;}):WorkProgressPhaseProjection{
+  const{item,execution,integration}=input;
+  if(item.state==='completed')return progressPhase('done');
+  if(item.state==='rejected')return progressPhase('rejected');
+  if(item.state==='cancelled')return progressPhase('cancelled');
+  if(item.state==='failed')return progressPhase('failed');
+  if(execution){
+    if(execution.status==='running')return progressPhase(execution.latestCheckpoint!==null?'testing':'implementing');
+    if(execution.status==='paused')return progressPhase('paused');
+    if(execution.status==='submitted_for_review')return integration?integrationProgressPhase(integration):progressPhase('reviewing');
+    if(execution.status==='failed')return progressPhase('failed');
+    if(execution.status==='blocked')return progressPhase('blocked');
+    if(execution.status==='cancelled'||execution.status==='abandoned')return progressPhase('cancelled');
+  }
+  if(integration)return integrationProgressPhase(integration);
+  if(item.state==='blocked')return progressPhase('blocked');
+  if(item.state==='review'||item.state==='changes_requested')return progressPhase('reviewing');
+  if(item.state==='in_progress')return progressPhase('implementing');
+  if(item.state==='approved')return progressPhase('approved');
+  return progressPhase('proposal');
+}
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);const observedGit=projectHostObservedEvidence(events);const observedGates=projectHostObservedGateEvidence(events);const execution=projectAutonomousExecution(item,events);const integration=projectWorkIntegration(item,events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution,pendingDecision:projectPendingWorkDecision(item,events),integration,progress:deriveWorkProgressPhase({item,execution,integration}),
   // Parecer advisory do Verifier — só quando há evidência git durável a conferir.
   // É projeção pura e read-only; nunca altera ações nem substitui a revisão humana.
   verification:projectWorktreeHandoff(events)?verifyPersistedWorkResult(item,events):null,

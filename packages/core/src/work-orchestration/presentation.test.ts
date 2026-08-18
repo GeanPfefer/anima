@@ -1,4 +1,4 @@
-import { availableWorkActions, buildProposalRevision, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingWorkDecision, projectWorkIntegration, projectWorkResourceCost, reconstructWorkPresentation, type WorkEvent, type WorkItem } from '.';
+import { availableWorkActions, buildProposalRevision, deriveWorkProgressPhase, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingWorkDecision, projectWorkIntegration, projectWorkResourceCost, reconstructWorkPresentation, type AutonomousExecutionProjection, type WorkEvent, type WorkIntegrationProjection, type WorkItem } from '.';
 const item={id:'i',userId:'u',sourceMessageId:'m',state:'review',impactLevel:'low',capability:'planning',originalRequest:'x',intent:{},proposal:{schemaVersion:1,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:2,createdAt:new Date(),updatedAt:new Date()} satisfies WorkItem;
 const event={id:'r',workItemId:'i',type:'result_submitted',author:'executor',proposalVersion:2,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a']}},occurredAt:new Date()} satisfies WorkEvent;
 describe('projeção de apresentação do trabalho',()=>{
@@ -147,4 +147,46 @@ describe('Resource Governor V0 na presentation (custo derivado dos gates, read-o
     expect(coder?.durationMedianMs).toBe(84000);
   });
   test('coder observado sozinho (sem gate) já surfa resourceCost',()=>expect(projectWorkResourceCost([resultEvent,coderEvent])?.profiles.some(p=>p.key.workloadKind==='coder')).toBe(true));
+});
+
+describe('deriveWorkProgressPhase — fase humana projetada de fatos',()=>{
+  const base:Omit<WorkItem,'state'>={id:'i',userId:'u',sourceMessageId:'m',impactLevel:'low',capability:'programming',originalRequest:'x',intent:{},proposal:{schemaVersion:1,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:1,createdAt:new Date(),updatedAt:new Date()};
+  const withState=(state:WorkItem['state']):WorkItem=>({...base,state});
+  const exec=(status:AutonomousExecutionProjection['status'],hasCheckpoint=false):AutonomousExecutionProjection=>({attemptId:'a',status,startedAt:'',executorId:null,providerRef:null,modelRef:null,effort:null,limits:{maxAttempts:null,maxDurationMinutes:null},latestCheckpoint:hasCheckpoint?{signalSequence:1,completedSteps:2,remainingSteps:1,nextStep:'gates'}:null,pendingControl:null,appliedControl:null,budgetBlock:null,canRequestControl:false});
+  const integ=(status:WorkIntegrationProjection['status']):WorkIntegrationProjection=>({status,acceptedResultEventId:'r',decision:null,availableDecisions:[]});
+
+  test('estados terminais do item têm precedência',()=>{
+    expect(deriveWorkProgressPhase({item:withState('completed'),execution:null,integration:null})).toMatchObject({phase:'done',label:'Concluído',terminal:true});
+    expect(deriveWorkProgressPhase({item:withState('rejected'),execution:null,integration:null}).phase).toBe('rejected');
+    expect(deriveWorkProgressPhase({item:withState('cancelled'),execution:null,integration:null}).phase).toBe('cancelled');
+    expect(deriveWorkProgressPhase({item:withState('failed'),execution:null,integration:null}).phase).toBe('failed');
+  });
+
+  test('execução em andamento: implementando sem checkpoint, testando com o checkpoint de pós-edição',()=>{
+    expect(deriveWorkProgressPhase({item:withState('in_progress'),execution:exec('running',false),integration:null})).toMatchObject({phase:'implementing',active:true,terminal:false});
+    expect(deriveWorkProgressPhase({item:withState('in_progress'),execution:exec('running',true),integration:null})).toMatchObject({phase:'testing',active:true});
+  });
+
+  test('submetido para revisão sem aceite → Revisando; com integração aguardando → Pronto para integrar',()=>{
+    expect(deriveWorkProgressPhase({item:withState('review'),execution:exec('submitted_for_review'),integration:null}).phase).toBe('reviewing');
+    expect(deriveWorkProgressPhase({item:withState('review'),execution:exec('submitted_for_review'),integration:integ('awaiting_decision')}).phase).toBe('ready_to_integrate');
+  });
+
+  test('integração pós-resultado: aguardando → Pronto para integrar; publicada → Integrando',()=>{
+    expect(deriveWorkProgressPhase({item:withState('completed'),execution:null,integration:integ('awaiting_decision')}).phase).toBe('done'); // completed vence
+    expect(deriveWorkProgressPhase({item:withState('review'),execution:null,integration:integ('branch_published')}).phase).toBe('integrating');
+    expect(deriveWorkProgressPhase({item:withState('review'),execution:null,integration:integ('review_request_created')}).phase).toBe('integrating');
+  });
+
+  test('espera humana / pré-execução: proposta, aprovado, revisão, bloqueado',()=>{
+    expect(deriveWorkProgressPhase({item:withState('proposed'),execution:null,integration:null}).phase).toBe('proposal');
+    expect(deriveWorkProgressPhase({item:withState('approved'),execution:null,integration:null}).phase).toBe('approved');
+    expect(deriveWorkProgressPhase({item:withState('review'),execution:null,integration:null}).phase).toBe('reviewing');
+    expect(deriveWorkProgressPhase({item:withState('blocked'),execution:null,integration:null}).phase).toBe('blocked');
+  });
+
+  test('presentWorkItem expõe a fase (projeção pura, read-only)',()=>{
+    const p=presentWorkItem(withState('proposed'),[]);
+    expect(p.progress).toMatchObject({phase:'proposal',label:'Proposta',active:false});
+  });
 });
