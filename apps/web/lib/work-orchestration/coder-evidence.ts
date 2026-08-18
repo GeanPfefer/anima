@@ -40,21 +40,75 @@ export type CoderEvidenceOutcome =
  */
 export async function persistHostObservedCoderEvidence(
   correlation: CoderEvidenceCorrelation,
-  observed: ObservedCoderInput | null,
+  observed: ObservedCoderInput | readonly ObservedCoderInput[] | null,
   sink: CoderEvidenceSink,
   now: () => Date = () => new Date(),
 ): Promise<CoderEvidenceOutcome> {
-  if (!observed) return { ok: false, stage: 'skipped', reason: 'no coder observed' };
+  const observations = observed === null
+    ? []
+    : Array.isArray(observed)
+      ? observed
+      : [observed];
+
+  if (observations.length === 0) {
+    return { ok: false, stage: 'skipped', reason: 'no coder observed' };
+  }
+
+  const observedAt = now().toISOString();
+
+  // Valida cada fato bruto individualmente pela mesma régua canônica do V1.
+  // Assim uma duração/outcome/backend inválido em um turno intermediário não
+  // pode desaparecer por causa da agregação.
+  const validated: HostObservedCoderEvidenceV1[] = [];
+
+  for (const observation of observations) {
+    const turn = buildHostObservedCoderEvidence({
+      workItemId: correlation.workItemId,
+      attemptId: correlation.attemptId,
+      approvedProposalVersion: correlation.approvedProposalVersion,
+      backendId: observation.backendId,
+      durationMs: observation.durationMs,
+      outcome: observation.outcome,
+      observedAt,
+    });
+
+    if (!turn.ok) {
+      return { ok: false, stage: 'build', reason: turn.explanation };
+    }
+
+    validated.push(turn.value);
+  }
+
+  const backendId = validated[0]!.backendId;
+
+  if (validated.some(turn => turn.backendId !== backendId)) {
+    return {
+      ok: false,
+      stage: 'build',
+      reason: 'coder observations from one attempt must use the same backend',
+    };
+  }
+
+  const durationMs = validated.reduce(
+    (total, turn) => total + turn.durationMs,
+    0,
+  );
+
+  const finalTurn = validated.at(-1)!;
+
   const built = buildHostObservedCoderEvidence({
     workItemId: correlation.workItemId,
     attemptId: correlation.attemptId,
     approvedProposalVersion: correlation.approvedProposalVersion,
-    backendId: observed.backendId,
-    durationMs: observed.durationMs,
-    outcome: observed.outcome,
-    observedAt: now().toISOString(),
+    backendId,
+    durationMs,
+    outcome: finalTurn.outcome,
+    observedAt,
   });
-  if (!built.ok) return { ok: false, stage: 'build', reason: built.explanation };
+
+  if (!built.ok) {
+    return { ok: false, stage: 'build', reason: built.explanation };
+  }
   const persisted = await sink.record(built.value).catch((error: unknown) =>
     ({ ok: false as const, message: error instanceof Error ? error.message : String(error) }));
   if (!persisted.ok) return { ok: false, stage: 'persist', reason: persisted.message };

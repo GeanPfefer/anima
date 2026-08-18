@@ -166,7 +166,7 @@ export class GitWorktree {
    * jamais o alvo. Em junction usa rmdir (apaga o reparse point); em symlink,
    * unlink. Precisa vir ANTES do `git worktree remove`, senão o git poderia
    * recursar pela ligação e apagar o node_modules real. */
-  private async removeNodeModulesLink(): Promise<void> {
+  async unlinkNodeModules(): Promise<void> {
     const link = this.nodeModulesLink;
     if (!link) return;
     this.nodeModulesLink = null;
@@ -251,7 +251,7 @@ export class GitWorktree {
    */
   async restoreToBase(): Promise<boolean> {
     try {
-      await this.removeNodeModulesLink();
+      await this.unlinkNodeModules();
       const reset = await git(this.root, ['reset', '--hard', this.baseSha]);
       const clean = await git(this.root, ['clean', '-fdx']);
       return reset.exitCode === 0 && clean.exitCode === 0;
@@ -264,7 +264,7 @@ export class GitWorktree {
    * desfeita ANTES, para nunca deletar o node_modules real por dentro dela.
    * A branch é preservada por padrão (referência revisável, nunca pushada). */
   async dispose(options: { readonly deleteBranch?: boolean } = {}): Promise<void> {
-    await this.removeNodeModulesLink();
+    await this.unlinkNodeModules();
     await git(this.repoRoot, ['worktree', 'remove', '--force', this.root]).catch(() => {});
     await git(this.repoRoot, ['worktree', 'prune']).catch(() => {});
     await rm(this.base, { recursive: true, force: true }).catch(() => {});

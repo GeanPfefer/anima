@@ -48,6 +48,11 @@ export interface WorktreeExecutorOptions {
   /** Emite um checkpoint mid-flight após a edição e antes do gate. */
   readonly emitCheckpoint?: boolean;
   /**
+   * Internal retries driven only by host-observed gate failure.
+   * They stay inside the same attempt/worktree. Default: 0.
+   */
+  readonly gateRetryLimit?: number;
+  /**
    * Observador de gate de PRIMEIRA PARTE DO HOST. Chamado com os fatos brutos que
    * `runGate` (código de host, não o CoderBackend) mediu logo após cada gate. É o
    * canal do HOST — o host injeta e persiste como evidência observada, separada do
@@ -120,100 +125,306 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         // escopo, gates, commit e restauração — o cwd não afrouxa nada disso.
         rootPath: worktree!.root,
       };
-      let editResult;
-      // Relógio host de primeira parte ao redor de `backend.edit()` (visão §12): o host
-      // cronometra a própria chamada — nada aqui confia no provider. `observeCoder` emite
-      // o fato bruto no canal do host EM TODOS os caminhos. Desfecho honesto: `cancelled`
-      // quando a tentativa foi abortada (medição parcial, casa o terminal `cancelled`),
-      // `failed` quando a edição lançou sem cancelamento, `succeeded` caso contrário. A
-      // duração é sempre medida ao redor da edição, ANTES de qualquer restauração.
-      const coderStartedAt = Date.now();
-      const observeCoder = (threw: boolean): void => {
-        const outcome: HostObservedCoderOutcome = signal.aborted ? 'cancelled' : threw ? 'failed' : 'succeeded';
-        this.options.onCoderObserved?.({ backendId: this.options.backend.id, durationMs: Date.now() - coderStartedAt, outcome });
-      };
-      try {
-        editResult = await this.options.backend.edit(
-          { objective: request.objective, includedScope: request.includedScope, excludedScope: request.excludedScope, ...(request.carriedContext ? { carriedContext: request.carriedContext } : {}) },
-          workspace, signal,
-        );
-        observeCoder(false);
-      } catch (error) {
-        observeCoder(true);
-        // Autoridade ÚNICA de restauração (outcome atomicity): a camada da
-        // worktree volta ao estado-base. A restauração é SEMPRE tentada — ANTES de
-        // classificar o desfecho e INDEPENDENTE de `signal.aborted` —, porque o
-        // cancelamento da tentativa não pode cancelar a limpeza que preserva o
-        // invariant. `restoreToBase()` nunca rejeita: devolve false em falha, e a
-        // worktree segue condenada ao dispose (contenção final); nunca vira sucesso.
-        const restored = await worktree.restoreToBase();
-        if (signal.aborted) { yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference }); return; }
-        const restoreNote = restored ? '' : ' A restauração ao estado-base falhou; a worktree será descartada.';
-        yield attach(++seq, { kind: 'error', code: 'execution_failed', message: `O backend de código falhou: ${clip(error instanceof Error ? error.message : String(error))}.${restoreNote}`, retryable: true, handoffReference });
-        return;
-      }
-      if (signal.aborted) { yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference }); return; }
+      const gateRetryLimit =
+        Number.isInteger(this.options.gateRetryLimit) && (this.options.gateRetryLimit ?? 0) > 0
+          ? this.options.gateRetryLimit!
+          : 0;
 
-      const changed = await worktree.changedFiles(signal);
-      if (changed.length === 0) {
-        yield attach(++seq, { kind: 'error', code: 'execution_failed', message: 'O backend não produziu nenhuma alteração para revisão.', retryable: false, handoffReference });
-        return;
-      }
-      const approved = new Set(request.includedScope.map(norm));
-      const outOfScope = changed.filter(path => !approved.has(norm(path)));
-      if (outOfScope.length > 0) {
-        yield attach(++seq, { kind: 'error', code: 'contract_violation', message: `Alteração fora do escopo aprovado: ${outOfScope.map(norm).join(', ')}.`, retryable: false, handoffReference });
-        return;
-      }
+      let retryIndex = 0;
+      let editResult: Awaited<ReturnType<CoderBackend['edit']>>;
+      let changed: readonly string[] = [];
+      let diffFiles: Awaited<ReturnType<GitWorktree['diffNumstat']>> = [];
+      let validations: WorkResultValidation[] = [];
+      let gateOutcomes: WorktreeGateOutcome[] = [];
+      let failure: {
+        label: string;
+        command: string;
+        exitCode: number;
+        timedOut: boolean;
+        cancelled: boolean;
+      } | null = null;
 
-      // Diff estruturado (contagens) capturado ANTES do commit, para o handoff durável.
-      const diffFiles = await worktree.diffNumstat(signal);
-
-      if (this.options.emitCheckpoint) {
-        const checkpoint: WorkCheckpointV1 = {
-          schemaVersion: 1, handoffReference,
-          completedSteps: ['Worktree isolada criada a partir do SHA autorizado', 'Alteração aplicada pelo backend de código'],
-          remainingSteps: ['Executar os gates de validação e produzir o resultado'],
-          nextStep: 'Rodar os critérios de validação e entregar o resultado para revisão',
-          decisions: [], risks: [],
-          touchedResources: changed.map(norm),
-          validations: [{ label: 'Alteração aplicada na worktree isolada', outcome: 'passed' }],
-          failures: [], evidenceReferences: [branch],
+      while (true) {
+        // Relogio de primeira parte do HOST por chamada ao coder. Um retry interno
+        // continua sendo uma nova observacao de execucao do backend, embora permaneça
+        // dentro do mesmo attemptId/worktree.
+        const coderStartedAt = Date.now();
+        const observeCoder = (threw: boolean): void => {
+          const outcome: HostObservedCoderOutcome =
+            signal.aborted ? 'cancelled' : threw ? 'failed' : 'succeeded';
+          this.options.onCoderObserved?.({
+            backendId: this.options.backend.id,
+            durationMs: Date.now() - coderStartedAt,
+            outcome,
+          });
         };
-        if (validateWorkCheckpoint(checkpoint) === null) yield attach(++seq, { kind: 'checkpoint', checkpoint });
+
+        try {
+          editResult = await this.options.backend.edit(
+            {
+              objective: request.objective,
+              includedScope: request.includedScope,
+              excludedScope: request.excludedScope,
+              ...(request.carriedContext
+                ? { carriedContext: request.carriedContext }
+                : {}),
+              ...(retryIndex > 0 && failure
+                ? {
+                    hostValidationFeedback: {
+                      failedGate: {
+                        label: failure.label,
+                        command: failure.command,
+                        exitCode: failure.exitCode,
+                        timedOut: failure.timedOut,
+                        cancelled: failure.cancelled,
+                      },
+                      retryIndex,
+                      retryLimit: gateRetryLimit,
+                    },
+                  }
+                : {}),
+            },
+            workspace,
+            signal,
+          );
+          observeCoder(false);
+        } catch (error) {
+          observeCoder(true);
+
+          const restored = await worktree.restoreToBase();
+
+          if (signal.aborted) {
+            yield attach(++seq, {
+              kind: 'cancelled',
+              acknowledged: true,
+              handoffReference,
+            });
+            return;
+          }
+
+          const restoreNote = restored
+            ? ''
+            : ' A restauração ao estado-base falhou; a worktree será descartada.';
+
+          yield attach(++seq, {
+            kind: 'error',
+            code: 'execution_failed',
+            message: `O backend de código falhou: ${clip(
+              error instanceof Error ? error.message : String(error),
+            )}.${restoreNote}`,
+            retryable: true,
+            handoffReference,
+          });
+          return;
+        }
+
+        if (signal.aborted) {
+          yield attach(++seq, {
+            kind: 'cancelled',
+            acknowledged: true,
+            handoffReference,
+          });
+          return;
+        }
+
+        changed = await worktree.changedFiles(signal);
+        const noChanges = changed.length === 0;
+
+        // Preserve the historical fail-closed behavior unless this executor was
+        // explicitly given an internal host-gate retry budget.
+        if (noChanges && retryIndex >= gateRetryLimit) {
+          yield attach(++seq, {
+            kind: 'error',
+            code: 'execution_failed',
+            message: 'O backend não produziu nenhuma alteração para revisão.',
+            retryable: false,
+            handoffReference,
+          });
+          return;
+        }
+
+        if (!noChanges) {
+          const approved = new Set(request.includedScope.map(norm));
+          const outOfScope = changed.filter(path => !approved.has(norm(path)));
+
+          if (outOfScope.length > 0) {
+            yield attach(++seq, {
+              kind: 'error',
+              code: 'contract_violation',
+              message: `Alteração fora do escopo aprovado: ${outOfScope
+                .map(norm)
+                .join(', ')}.`,
+              retryable: false,
+              handoffReference,
+            });
+            return;
+          }
+
+          diffFiles = await worktree.diffNumstat(signal);
+
+          // Keep checkpoint semantics stable: no empty checkpoint and no duplicate
+          // checkpoint merely because the coder received an internal retry.
+          if (this.options.emitCheckpoint && retryIndex === 0) {
+            const checkpoint: WorkCheckpointV1 = {
+              schemaVersion: 1,
+              handoffReference,
+              completedSteps: [
+                'Worktree isolada criada a partir do SHA autorizado',
+                'Alteração aplicada pelo backend de código',
+              ],
+              remainingSteps: [
+                'Executar os gates de validação e produzir o resultado',
+              ],
+              nextStep:
+                'Rodar os critérios de validação e entregar o resultado para revisão',
+              decisions: [],
+              risks: [],
+              touchedResources: changed.map(norm),
+              validations: [
+                {
+                  label: 'Alteração aplicada na worktree isolada',
+                  outcome: 'passed',
+                },
+              ],
+              failures: [],
+              evidenceReferences: [branch],
+            };
+
+            if (validateWorkCheckpoint(checkpoint) === null) {
+              yield attach(++seq, { kind: 'checkpoint', checkpoint });
+            }
+          }
+        } else {
+          diffFiles = [];
+        }
+
+        if (signal.aborted) {
+          yield attach(++seq, {
+            kind: 'cancelled',
+            acknowledged: true,
+            handoffReference,
+          });
+          return;
+        }
+
+        if (this.options.linkNodeModules) {
+          await worktree.linkNodeModules(signal);
+        }
+
+        const timeoutMs =
+          (request.limits.maxDurationMinutes ?? 30) * 60_000;
+
+        validations = [];
+        gateOutcomes = [];
+        failure = null;
+
+        for (const criterion of request.validationCriteria) {
+          if (!criterion.command) {
+            validations.push({
+              label: criterion.label,
+              outcome: 'declared',
+            });
+            continue;
+          }
+
+          if (signal.aborted) break;
+
+          const gate = await runGate(
+            criterion.command,
+            worktree.root,
+            timeoutMs,
+            signal,
+          );
+
+          this.options.onGateObserved?.({
+            label: criterion.label,
+            command: gate.command,
+            exitCode: gate.exitCode,
+            durationMs: gate.durationMs,
+            timedOut: gate.timedOut,
+            cancelled: gate.cancelled,
+          });
+
+          const passed =
+            gate.exitCode === 0 && !gate.timedOut && !gate.cancelled;
+
+          validations.push({
+            label: criterion.label,
+            outcome: passed ? 'passed' : 'failed',
+          });
+
+          gateOutcomes.push({
+            label: criterion.label,
+            command: gate.command,
+            exitCode: gate.exitCode,
+            outcome: passed ? 'passed' : 'failed',
+          });
+
+          if (!passed) {
+            failure = {
+              label: criterion.label,
+              command: gate.command,
+              exitCode: gate.exitCode,
+              timedOut: gate.timedOut,
+              cancelled: gate.cancelled,
+            };
+            break;
+          }
+        }
+
+        if (signal.aborted) {
+          yield attach(++seq, {
+            kind: 'cancelled',
+            acknowledged: true,
+            handoffReference,
+          });
+          return;
+        }
+
+        const canRetry =
+          failure !== null &&
+          failure.exitCode !== 0 &&
+          !failure.timedOut &&
+          !failure.cancelled &&
+          retryIndex < gateRetryLimit;
+
+        if (!canRetry) {
+          if (noChanges) {
+            yield attach(++seq, {
+              kind: 'error',
+              code: 'execution_failed',
+              message: 'O backend não produziu nenhuma alteração para revisão.',
+              retryable: false,
+              handoffReference,
+            });
+            return;
+          }
+
+          break;
+        }
+
+        // O gate pode ter ligado o node_modules REAL por junction/symlink.
+        // Antes de devolver controle ao coder, essa ponte precisa desaparecer.
+        await worktree.unlinkNodeModules();
+
+        retryIndex += 1;
       }
-      if (signal.aborted) { yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference }); return; }
 
-      if (this.options.linkNodeModules) await worktree.linkNodeModules(signal);
-
-      const timeoutMs = (request.limits.maxDurationMinutes ?? 30) * 60_000;
-      const validations: WorkResultValidation[] = [];
-      const gateOutcomes: WorktreeGateOutcome[] = [];
-      let failure: { command: string; exitCode: number } | null = null;
-      for (const criterion of request.validationCriteria) {
-        if (!criterion.command) { validations.push({ label: criterion.label, outcome: 'declared' }); continue; }
-        if (signal.aborted) break;
-        const gate = await runGate(criterion.command, worktree.root, timeoutMs, signal);
-        // Observação de primeira parte do host: os fatos BRUTOS que o host mediu ao
-        // rodar o gate, no canal do host (separado do handoff atestado). Inclui o
-        // gate que falhou, ANTES do break — é a evidência mais valiosa.
-        this.options.onGateObserved?.({
-          label: criterion.label, command: gate.command, exitCode: gate.exitCode,
-          durationMs: gate.durationMs, timedOut: gate.timedOut, cancelled: gate.cancelled,
-        });
-        const passed = gate.exitCode === 0 && !gate.timedOut && !gate.cancelled;
-        validations.push({ label: criterion.label, outcome: passed ? 'passed' : 'failed' });
-        gateOutcomes.push({ label: criterion.label, command: gate.command, exitCode: gate.exitCode, outcome: passed ? 'passed' : 'failed' });
-        if (!passed) { failure = { command: gate.command, exitCode: gate.exitCode }; break; }
-      }
-      if (signal.aborted) { yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference }); return; }
-
-      // Commit na branch descartável, capturando a mudança como referência
-      // revisável — jamais pushado, jamais merjado.
-      const commitSha = await worktree.commit(`anima(worktree): ${clip(request.objective, 80)}`, signal);
+      // Nenhum gate intermediario falho cria commit. A branch recebe no maximo
+      // o estado final desta tentativa.
+      const commitSha = await worktree.commit(
+        `anima(worktree): ${clip(request.objective, 80)}`,
+        signal,
+      );
 
       if (failure) {
-        yield attach(++seq, { kind: 'error', code: 'execution_failed', message: `Gate falhou: ${failure.command} terminou com código ${failure.exitCode}.`, retryable: false, handoffReference });
+        yield attach(++seq, {
+          kind: 'error',
+          code: 'execution_failed',
+          message: `Gate falhou: ${failure.command} terminou com c?digo ${failure.exitCode}.`,
+          retryable: false,
+          handoffReference,
+        });
         return;
       }
 

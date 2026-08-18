@@ -29,6 +29,43 @@ describe('persistHostObservedCoderEvidence (fail-open)', () => {
     expect(calls[0]!.observedAt).toBe('2026-08-17T12:00:00.000Z');
   });
 
+  test('multiple coder turns aggregate into one attempt evidence', async () => {
+    const { sink, calls } = capturing();
+
+    const observations: readonly ObservedCoderInput[] = [
+      {
+        backendId: 'ollama-coder',
+        durationMs: 1_200,
+        outcome: 'succeeded',
+      },
+      {
+        backendId: 'ollama-coder',
+        durationMs: 800,
+        outcome: 'succeeded',
+      },
+    ];
+
+    const outcome = await persistHostObservedCoderEvidence(
+      correlation,
+      observations,
+      sink,
+      at,
+    );
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      workItemId: 'work-1',
+      attemptId: 'attempt-1',
+      approvedProposalVersion: 2,
+      backendId: 'ollama-coder',
+      durationMs: 2_000,
+      outcome: 'succeeded',
+    });
+  });
+
   test('nenhuma edição de coder observada ⇒ skipped e o sink NUNCA é chamado', async () => {
     const { sink, calls } = capturing();
     const outcome = await persistHostObservedCoderEvidence(correlation, null, sink, at);

@@ -1,4 +1,4 @@
-import type { WorkExecutorRequest } from '@anima/core';
+import type { ObservedGateInput, WorkExecutorRequest } from '@anima/core';
 
 // ============================================================
 // Interface selecionável de inteligência que ESCREVE o código (ADR-001).
@@ -9,12 +9,27 @@ import type { WorkExecutorRequest } from '@anima/core';
 // que tocou. Trocar de inteligência é trocar a implementação, não o adaptador.
 // ============================================================
 
+export interface HostValidationFeedback {
+  /** Gate observed directly by the host; never inferred from model output. */
+  readonly failedGate: Pick<ObservedGateInput, 'label' | 'command' | 'exitCode' | 'timedOut' | 'cancelled'>;
+  /** 1 = first internal retry after the initial host gate failure. */
+  readonly retryIndex: number;
+  /** Configured internal retry limit for this execution attempt. */
+  readonly retryLimit: number;
+}
+
 export interface CoderEditRequest {
   readonly objective: string;
   readonly includedScope: readonly string[];
   readonly excludedScope: readonly string[];
   /** Contexto informativo de uma tentativa anterior; nunca amplia escopo. */
   readonly carriedContext?: WorkExecutorRequest['carriedContext'];
+  /**
+   * Host-observed validation feedback from the CURRENT execution attempt.
+   * This is not persisted resumption context, does not create a new attempt,
+   * and never expands scope or permissions.
+   */
+  readonly hostValidationFeedback?: HostValidationFeedback;
 }
 
 /** Superfície confinada de arquivos entregue ao backend. Ler/escrever fora da

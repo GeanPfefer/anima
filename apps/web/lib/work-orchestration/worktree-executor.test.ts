@@ -34,8 +34,20 @@ async function makeNpmRepo(): Promise<{ repo: string; sha: string; resolver: Wor
   await git(repo, ['config', 'commit.gpgsign', 'false']);
   await writeFile(join(repo, 'package.json'), JSON.stringify({
     name: 'fixture', version: '0.0.0', private: true,
-    scripts: { test: 'node -e "process.exit(0)"', typecheck: 'node -e "process.exit(0)"', build: 'node -e "process.exit(1)"' },
+    scripts: {
+      test: 'node retry-gate.js',
+      typecheck: 'node -e "process.exit(0)"',
+      build: 'node -e "process.exit(1)"',
+    },
   }, null, 2));
+  await writeFile(
+    join(repo, 'retry-gate.js'),
+    `const fs = require('fs');
+if (!process.argv.includes('retry')) process.exit(0);
+const p = 'src/added.ts';
+process.exit(fs.existsSync(p) && fs.readFileSync(p, 'utf8').includes('fixed') ? 0 : 1);
+`,
+  );
   await mkdir(join(repo, 'src'), { recursive: true });
   await writeFile(join(repo, 'src', 'existing.ts'), 'export const one = 1;\n');
   await writeFile(join(repo, '.gitignore'), 'node_modules/\n');
@@ -431,4 +443,164 @@ describe('WorktreeExecutorAdapter — duração do coder observada de primeira p
     expect(observed[0]).toMatchObject({ backendId: 'aborting-coder', outcome: 'cancelled' });
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
   });
+});
+
+describe('WorktreeExecutorAdapter — retry interno dirigido por gate do host', () => {
+  let ctx: Awaited<ReturnType<typeof makeNpmRepo>>;
+
+  beforeAll(async () => { ctx = await makeNpmRepo(); });
+  afterAll(async () => { await ctx.cleanup(); });
+
+  test('gate FAIL realimentado ao coder permite uma correção limitada na mesma tentativa antes do commit', async () => {
+    await mkdir(join(ctx.repo, 'node_modules'), { recursive: true });
+    await writeFile(join(ctx.repo, 'node_modules', '.anima-retry-sentinel'), 'real-node-modules\n');
+
+    let edits = 0;
+    const receivedFeedback: unknown[] = [];
+    const observed: ObservedGateInput[] = [];
+
+    const backend: CoderBackend = {
+      id: 'gate-retry-coder',
+      async edit(req, ws): Promise<CoderEditResult> {
+        edits += 1;
+
+        const feedback = req.hostValidationFeedback;
+
+        receivedFeedback.push(feedback);
+
+        if (edits === 2) {
+          expect(ws.rootPath).toBeDefined();
+          const nodeModulesVisible = await stat(join(ws.rootPath!, 'node_modules'))
+            .then(() => true, () => false);
+          expect(nodeModulesVisible).toBe(false);
+        }
+
+        await ws.writeFile(
+          'src/added.ts',
+          edits === 1
+            ? 'export const state = "broken";\n'
+            : 'export const state = "fixed";\n',
+        );
+
+        return {
+          summary: `edição ${edits}`,
+          touchedResources: ['src/added.ts'],
+        };
+      },
+    };
+
+    const options = {
+      targets: ctx.resolver,
+      backend,
+      linkNodeModules: true,
+      gateRetryLimit: 1,
+      onGateObserved: (outcome: ObservedGateInput) => observed.push(outcome),
+    };
+
+    const req = request({
+      validationCriteria: [{ label: 'retry gate', command: 'npm test -- retry' }],
+    });
+
+    const signals = await collect(
+      new WorktreeExecutorAdapter(options),
+      req,
+      new AbortController().signal,
+    );
+
+
+    expect(edits).toBe(2);
+    expect(receivedFeedback[0]).toBeUndefined();
+    expect(receivedFeedback[1]).toEqual(expect.objectContaining({
+      failedGate: expect.objectContaining({
+        label: 'retry gate',
+        exitCode: expect.any(Number),
+      }),
+    }));
+
+    expect(observed).toHaveLength(2);
+    expect(observed[0]!.exitCode).not.toBe(0);
+    expect(observed[1]!.exitCode).toBe(0);
+
+    const terminal = signals.at(-1)!;
+    expect(terminal.kind).toBe('result');
+
+    const branch = `anima-work/${req.attemptId}`;
+    const committed = await git(ctx.repo, ['show', `${branch}:src/added.ts`]);
+    expect(committed.stdout).toContain('fixed');
+    expect(committed.stdout).not.toContain('broken');
+
+    await git(ctx.repo, ['branch', '-D', branch]).catch(() => undefined);
+  });
+  test('no-change inicial ainda pode receber feedback de gate e corrigir no retry', async () => {
+    let edits = 0;
+    const receivedFeedback: unknown[] = [];
+    const observed: ObservedGateInput[] = [];
+
+    const backend: CoderBackend = {
+      id: 'no-change-retry-coder',
+
+      async edit(req, ws): Promise<CoderEditResult> {
+        edits += 1;
+        receivedFeedback.push(req.hostValidationFeedback);
+
+        if (edits === 2) {
+          await ws.writeFile(
+            'src/added.ts',
+            'export const state = "fixed";\n',
+          );
+        }
+
+        return {
+          summary: `turn-${edits}`,
+          touchedResources: edits === 1 ? [] : ['src/added.ts'],
+        };
+      },
+    };
+
+    const req = request({
+      validationCriteria: [
+        { label: 'retry gate', command: 'npm test -- retry' },
+      ],
+    });
+
+    const signals = await collect(
+      new WorktreeExecutorAdapter({
+        targets: ctx.resolver,
+        backend,
+        gateRetryLimit: 1,
+        onGateObserved: outcome => observed.push(outcome),
+      }),
+      req,
+      new AbortController().signal,
+    );
+
+    expect(edits).toBe(2);
+
+    expect(receivedFeedback[0]).toBeUndefined();
+    expect(receivedFeedback[1]).toEqual(expect.objectContaining({
+      failedGate: expect.objectContaining({
+        label: 'retry gate',
+        exitCode: expect.any(Number),
+      }),
+      retryIndex: 1,
+      retryLimit: 1,
+    }));
+
+    expect(observed).toHaveLength(2);
+    expect(observed[0]!.exitCode).not.toBe(0);
+    expect(observed[1]!.exitCode).toBe(0);
+
+    expect(signals.at(-1)?.kind).toBe('result');
+
+    const branch = `anima-work/${req.attemptId}`;
+    const committed = await git(
+      ctx.repo,
+      ['show', `${branch}:src/added.ts`],
+    );
+
+    expect(committed.stdout).toContain('fixed');
+
+    await git(ctx.repo, ['branch', '-D', branch]).catch(() => undefined);
+  });
+
 });
