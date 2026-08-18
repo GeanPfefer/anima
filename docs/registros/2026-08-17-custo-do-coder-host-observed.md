@@ -16,13 +16,15 @@ e `HOST_OBSERVED ≠ PROVIDER_REPORTED`.
   `main` consolidada).
 - HEAD inicial: `99bec54` (= `main` = `origin/main`; consolidação manual + doc de visão já
   pushados antes desta sessão).
-- HEAD final: `2611e45`.
+- HEAD final: `68485ac` (4 commits à frente de `main`).
 - `main` / `origin/main` permanecem em `99bec54` — intactas, sem push.
 
 ## Commits criados
 
 - `876af54` — Observe a duração host-observed do coder como evidência durável (slice 1).
 - `2611e45` — Derive o custo do coder no histórico do Resource Governor (Fork A).
+- `39e53bc` — Registre o custo do coder host-observed e a investigação de tokens (este registro).
+- `68485ac` — Inclua o coder no advisory pré-execução do item (slice 3).
 
 ## Mudanças relevantes
 
@@ -59,6 +61,23 @@ e `HOST_OBSERVED ≠ PROVIDER_REPORTED`.
   machine-wide e concatena.
 - `packages/core/.../presentation.ts` — `projectWorkResourceCost` inclui o coder; o custo do
   coder surfa read-only no card **web e mobile** (presentation é core compartilhado).
+
+### Slice 3 — coder no advisory PRÉ-EXECUÇÃO do item (`68485ac`)
+
+- `packages/core/.../resource-advisory.ts` — `adviseDeclaredCoder`: análogo de
+  `adviseDeclaredGates`, com distribuição de referência PRÓPRIA do coder (classe = "caro entre
+  coders"). `null` quando o backendId não é previsível; coder nunca observado →
+  `insufficient_evidence`. A semântica gate-only do advisory de gate fica intocada.
+- `apps/web/.../coder-backend.ts` — `coderBackendId(provider, model)` vira FONTE ÚNICA da
+  identidade `provider:model`; `OllamaCoderBackend`/`GptCoderBackend` a usam para o próprio `id`,
+  e a previsão do contrato a usa — evidência observada e previsão não podem divergir (pino em teste).
+- `apps/web/.../resource-governor.ts` — `declaredCoderBackendId(item)` prevê o backendId do
+  contrato (`coder_backend`+`model`); `null` sem `model` pinado (fallback de ambiente ⇒ não
+  previsível ⇒ honesto omitir). `composeItemGateAdvisory` anexa o parecer do coder ao lado dos
+  gates (distribuições separadas).
+- `apps/web/.../items/[id]/resource-advisory/route.ts` — lê gate E coder machine-wide + passa o
+  coderBackendId. A UI web renderiza os pareceres genericamente (por workload) → o coder surfa no
+  painel "Consultar parecer de recursos" existente, sem mudança de UI.
 
 ## Decisões
 
@@ -98,13 +117,14 @@ providers; não forçar schema universal além de input/output tokens.
 ## Provas / gates
 
 - `npm run typecheck` — 5 workspaces, verde.
-- Jest core — **892** testes (40 suites), verde (inclui `host-observed-coder-evidence` 19,
-  derivação/coexistência coder 7, presentation coder 2).
-- Jest web — **533** testes (48 suites), verde (inclui `coder-evidence` 7, `worktree-executor`
-  +3 do observador do coder, `supervisor-turn/route` fiação gate+coder).
+- Jest core — **895** testes (40 suites), verde (inclui `host-observed-coder-evidence` 19,
+  derivação/coexistência coder 7, presentation coder 2, `adviseDeclaredCoder` 3).
+- Jest web — **537** testes (48 suites), verde (inclui `coder-evidence` 7, `worktree-executor`
+  +3 do observador do coder, `supervisor-turn/route` fiação gate+coder, `resource-governor`
+  coder pré-execução + pino do backendId, rota `resource-advisory` gate+coder).
 - pgTAP local (`supabase test db --local`) — **34 arquivos / 820 testes**, verde;
   `host_observed_coder_evidence.test.sql` (15 asserções) incluso. Migrations aplicadas por
-  `supabase migration up` (não-destrutivo); regen de tipos confere.
+  `supabase migration up` (não-destrutivo); regen de tipos confere. Slice 3 não tocou schema.
 
 ## Flakes conhecidos
 
@@ -117,6 +137,12 @@ mockada esperada (o teste passa).
 - Custo monetário (Fork C): não iniciado (gated em evidência de tokens + catálogo).
 - Compute distribuído (Fork D): não iniciado (visão, não autoridade presente).
 - Nenhuma classificação/advisory NOVO por tokens; classificação segue por duração host-observed.
+- Paridade MOBILE do painel de advisory pré-execução: o mobile ainda não tem o botão/painel
+  "Consultar parecer" (o custo por-item já surfa via presentation compartilhada, mas o advisory
+  pré-execução com snapshot vivo é só web). É UI-heavy e a prova física depende do Expo/Gean —
+  deixado como fork de paridade, não bloqueio.
+- Advisory pré-execução do coder só quando o `model` está pinado no contrato (sem model ⇒
+  backendId não previsível ⇒ omitido, honesto).
 
 ## Invariantes de segurança preservadas
 
@@ -140,8 +166,15 @@ mockada esperada (o teste passa).
 
 ## Próximo ponto exato de retomada
 
-Fork B (tokens) está investigado e pronto para implementação **quando surgir o consumidor**
-(Fork C / custo monetário): começar por `CoderEditResult.usage?` + captura no GPT (trivial,
-`gpt-coder.ts:88`) e acumulação no Ollama (`ollama-coder.ts` `callProtocol`/`edit`), depois
-campo `usage?` opcional em `HostObservedCoderEvidenceV1` + validador do RPC. Até lá, o custo do
-coder é honestamente só a duração host-observed.
+O custo do coder por DURAÇÃO está completo de ponta a ponta: observar → persistir → histórico →
+surface pós-execução (web+mobile) → advisory pré-execução (web). Forks elegíveis, em ordem:
+
+1. **Paridade mobile do advisory pré-execução** (`MobileWorkCard` + rota bearer + painel): UI-heavy,
+   prova física via Expo/Gean pendente; o custo por-item já surfa no mobile.
+2. **Fork B (tokens provider-reported)** — investigado e pronto **quando surgir o consumidor**
+   (Fork C / custo monetário): começar por `CoderEditResult.usage?` + captura no GPT (trivial,
+   `gpt-coder.ts:88`) e acumulação no Ollama (`ollama-coder.ts` `callProtocol`/`edit`), depois
+   campo `usage?` opcional em `HostObservedCoderEvidenceV1` + validador do RPC.
+3. **Fork C (custo monetário derivado)** — só após tokens existirem como evidência.
+
+Até lá, o custo do coder é honestamente só a duração host-observed.
