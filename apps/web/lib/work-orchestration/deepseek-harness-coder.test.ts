@@ -107,7 +107,9 @@ describe('DeepSeekHarnessCoderBackend — hook de pré-passo (step budget)', () 
     const runtime = fakeRuntime(completed());
     const backend = new DeepSeekHarnessCoderBackend({ runtime, model: 'm', stepBudget: 3 });
     await backend.edit(request, rootedWorkspace(), new AbortController().signal);
-    const onPreStep = runtime.last!.onPreStep;
+    // O adaptador SEMPRE passa onPreStep (a variante in-process); no port é opcional
+    // porque o runtime de subprocesso o ignora (aplica o orçamento no plugin do filho).
+    const onPreStep = runtime.last!.onPreStep!;
     expect(onPreStep(3)).toEqual({ cancel: false });
     expect(onPreStep(4)).toEqual({ cancel: true, reason: 'step-budget-exhausted:3' });
   });

@@ -76,12 +76,16 @@ export interface HarnessRunTurnInput {
   /** Orçamento de passos já resolvido (inteiro positivo). */
   readonly stepBudget: number;
   /**
-   * Hook `agent/pre-step`: o runtime DEVE chamar isto a cada passo com o número do
-   * passo prestes a rodar; se a decisão for `cancel`, o runtime DEVE emitir
-   * `agent.cancel({ kind: "hook", reason })` — o seam oficial de step budget. O
-   * adaptador liga isto à política pura do core (`decideHarnessPreStep`).
+   * Hook `agent/pre-step` para um runtime IN-PROCESS: chamado a cada passo com o
+   * número do passo; se a decisão for `cancel`, o runtime emite `agent.cancel({
+   * kind:"hook", reason })`. O adaptador liga isto à política pura do core
+   * (`decideHarnessPreStep`). OPCIONAL: o runtime de SUBPROCESSO confinado aplica o
+   * mesmo orçamento DENTRO do processo filho (plugin cordis via `--patch`, usando
+   * `stepBudget`), então ignora este callback — a fronteira de processo impede um
+   * callback do pai de interferir no filho. O seam oficial é o mesmo; muda só onde
+   * roda. Ambos usam a mesma semântica pura do core.
    */
-  readonly onPreStep: (step: number) => HarnessPreStepDecision;
+  readonly onPreStep?: (step: number) => HarnessPreStepDecision;
   /**
    * Continuação na MESMA sessão (`ctx.agents.resume`), quando presente. Ausente ⇒
    * `create` de uma sessão nova. O retry na mesma sessão após falha de gate observada
