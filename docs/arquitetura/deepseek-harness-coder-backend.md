@@ -149,3 +149,41 @@ O bloqueio registrado como "modelos emitem tool call como texto" foi investigado
 **Prova viva** (scratch isolado, sem efeito externo): com o patch **gerado pelo planejador versionado**, o modelo criou arquivos de ponta a ponta chamando `write` — `ok.txt`=`READY`, `note.txt`=`DONE`.
 
 **Caveat honesto (não ratificado):** o sucesso de **turno único** é **variável** — o mesmo caminho às vezes narra sem agir ou emite tool call em texto (uma execução falhou em criar `result.txt`). Bate com o POC (`FIRST_PASS 0/5`): a **confiabilidade** vem do **laço de retry após gate FAIL do host** (deferido), não do turno único. Por isso o registro em `backendFor` continua deferido — um backend selecionável precisa da confiabilidade do retry.
+
+---
+
+## Atualização 2026-08-18 (3ª) — retry interno host-observed, borda Node real, roteamento e Verifier terminal
+
+Fatia entregue: o Harness passa a ser **selecionável no fluxo real** (`coder_backend: "deepseek-harness"`), com **retry INTERNO** dirigido por falha de gate observada pelo host — o gap de confiabilidade de turno único que estava deferido. **`backendFor` NÃO tem novo default** (segue `ollama`).
+
+### Retry interno do executor (host é autoridade)
+
+`WorktreeExecutorAdapter` ganha `gateRetryLimit` (default **0** — comportamento histórico intacto; Ollama/OpenAI não retriam). Quando `>0`, um gate que o **host** observou falhar (`exitCode≠0`, `!timedOut`, `!cancelled`) realimenta o coder com `hostValidationFeedback` (novo campo opcional em `CoderEditRequest`) e o coder corrige **dentro do mesmo `attemptId`/worktree**. Invariantes:
+
+- `hostValidationFeedback` **não** é `carriedContext` persistido, **não** cria novo attempt, **não** amplia escopo/permissão;
+- scope violation e `backend.edit()` throw **nunca** retriam (fail-closed); timeout/cancelamento **nunca** retriam;
+- o junction de `node_modules` é desligado (`GitWorktree.unlinkNodeModules`) **antes** de reentrar no coder;
+- **nenhum commit intermediário** de turno falho (commit uma vez após o laço); checkpoint só no primeiro turno.
+- roteamento: `gateRetryLimitForCoderBackend(kind)` = **1 só para `deepseek-harness`**, 0 para os demais.
+
+### Evidência multi-turn (EVIDÊNCIA ≠ CLASSIFICAÇÃO ≠ CUSTO)
+
+- **Gate:** o host coleta TODAS as observações de gate do attempt (`onGateObserved` por turno) e persiste **UMA** `HostObservedGateEvidenceV1` append-only. Um FAIL→PASS legítimo fica gravado como os dois — evidência auditável, nunca colapsada.
+- **Coder:** `persistHostObservedCoderEvidence` agrega por attempt — `durationMs` = **soma** dos turns, `outcome` = **último** turn.
+- **Verifier (correção do bug):** `terminalObservedGates` (helper puro) projeta a ÚLTIMA observação por identidade `label+command` e o Verifier classifica pelo **estado terminal** (`gate_failed`, `gates_independently_observed`, cobertura de critério). A comparação `attested_gate_contradicts_observed` casa por **rótulo** (o handoff e a evidência podem gravar formas diferentes do mesmo comando). Assim FAIL→PASS ⇒ `verified`; PASS→FAIL ⇒ `rejected`; A FAIL→PASS + B FAIL ⇒ `rejected` por B. **Não** cria schema V2, **não** apaga história.
+- **Resource Governor:** consome os gates **brutos** (não a projeção terminal) — um gate que rodou duas vezes gastou recursos duas vezes; o custo preserva isso.
+
+### Borda Node real
+
+`node-harness-runtime.ts`: `HarnessFileSystem`/`HarnessSpawner` reais (`child_process.spawn`, **`shell:false`**, cwd/env explícitos, `AbortSignal→child.kill()`, exitCode como evidência). `createNodeDeepSeekHarnessBackend` resolve o pacote `dsh` por `require.resolve('@deepseek-ai/dsh/package.json')` (**sem hardcode**), o `lib/bin.js` real, o plugin versionado e um `DSH_HOME` temporário **único por run** (as sessões são enumeradas só nesse root isolado, sem copiar o `projectKey` privado).
+
+### Prova viva do caminho REAL (scratch isolado, sem efeito externo)
+
+Contrato real (`coder_backend: deepseek-harness`, `executor: worktree`, `model: qwen3-coder:latest`) → factory Node → DSH rc.7 → Ollama local → worktree isolado (repo alvo descartável com teste falhando) → coder REAL editou `src/sum.js` → gate `npm test` do host → **exitCode 0** → handoff → **Verifier = `verified`** (`gates_independently_observed`, `criterion_covered`, …). Reproduzido **2/2**. `dsh` exit 0 **não** foi tratado como sucesso — o desfecho é do host (gate). Nenhum efeito externo; artefatos descartáveis limpos; worktrees do Anima intactos.
+
+### Limitações restantes (não escondidas)
+
+- **Retry vivo não disparado:** o `qwen3-coder` corrigiu o bug simples em **um** turno (2/2), então o FAIL→PASS **vivo** não foi exercido. O retry+classificação terminal é provado pelas **regressões de integração** do `worktree-executor` (worktree e gates reais, backend determinístico) e do Verifier. Turno único do LLM permanece variável (POC `FIRST_PASS 0/5`).
+- **Accounting do coder:** `durationMs` soma turns e `outcome` = último turn; um cancelamento final pode fazer o Resource Governor subcontar trabalho anterior. **Não** afirmar accounting exato enquanto isso existir.
+- **Env do subprocesso:** a prova passou com o env mínimo do planejador (tarefa via `write`, sem `pwsh`). Um coder que dependa de `pwsh` precisaria de `PATH`/`SystemRoot` no env do filho — não exercido aqui; investigar só sob evidência real.
+- **`child.kill()`** pode não matar toda a árvore de descendentes no Windows; investigar só se uma prova real mostrar processo órfão.
