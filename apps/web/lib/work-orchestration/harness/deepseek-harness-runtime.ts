@@ -5,7 +5,7 @@ import type {
   HarnessRunTurnResult,
   HarnessRuntime,
 } from '../deepseek-harness-coder';
-import { planHarnessInvocation, type HarnessInvocationInput } from './harness-invocation';
+import { HARNESS_FOCUSED_DISABLED_PLUGINS, planHarnessInvocation, type HarnessInvocationInput } from './harness-invocation';
 
 // ============================================================
 // Driver REAL do `HarnessRuntime` (ligação viva, recorte experimental — ver
@@ -66,6 +66,9 @@ export interface DeepSeekHarnessRuntimeOptions {
   readonly fs: HarnessFileSystem;
   /** Injeção para teste; por padrão o zstd nativo do Node. */
   readonly decompress?: (buf: Buffer) => Buffer;
+  /** Plugins de ferramenta distratores a desabilitar (catálogo focado); default
+   * `HARNESS_FOCUSED_DISABLED_PLUGINS` — a correção com prova viva do tool-protocol. */
+  readonly disabledToolPlugins?: readonly string[];
 }
 
 /**
@@ -170,6 +173,7 @@ export class DeepSeekHarnessRuntime implements HarnessRuntime {
       stepBudget: input.stepBudget,
       permissionMode: 'workspace-write',
       disableStrReplaceEditor: input.tools.disabled.includes('str_replace_editor'),
+      disabledToolPlugins: this.options.disabledToolPlugins ?? HARNESS_FOCUSED_DISABLED_PLUGINS,
     };
     // planHarnessInvocation falha fechada fora do envelope — nunca roda sem confinamento.
     const plan = planHarnessInvocation(invocation);

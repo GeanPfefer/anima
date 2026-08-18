@@ -28,6 +28,24 @@ export const HARNESS_OLLAMA_API_KEY_DUMMY = 'ollama-local-nokey';
  * `read-only` são recusados: o coder precisa escrever no worktree e nada além. */
 export type HarnessPermissionMode = 'workspace-write';
 
+/**
+ * Plugins de FERRAMENTA distratores desabilitados por default — a correção com
+ * PROVA VIVA da lacuna de tool-protocol. O profile headless oferece 24 ferramentas;
+ * um modelo local (qwen3-coder) se DERRAPA com o catálogo inteiro: com as 24, ele
+ * chamou `web_search`/`update_goal` alucinando tarefas alheias; com o catálogo
+ * FOCADO (edit/glob/grep/pwsh/read/read_image/write) chamou `write` e concluiu a
+ * tarefa. Não é o transporte (as `tool_calls` já vinham estruturadas do Ollama):
+ * é a SELEÇÃO — reduzir o catálogo refoca o modelo. Espelha a config vencedora do
+ * POC (só ferramentas de arquivo/shell). Configurável; NÃO é regra universal —
+ * um modelo forte pode preferir o catálogo cheio.
+ */
+export const HARNESS_FOCUSED_DISABLED_PLUGINS: readonly string[] = [
+  'tool-web', 'tool-goal', 'tool-ralph',
+  'tool-subagent', 'tool-subagent-fork', 'tool-subagent-control',
+  'tool-subagent-list-agents', 'tool-subagent-report',
+  'tool-workflow', 'tool-todo', 'tool-skill', 'plan-mode', 'tool-jobs',
+];
+
 export interface HarnessInvocationInput {
   /** Raiz absoluta do worktree isolado — o cwd (confinamento do sandbox). */
   readonly worktreeRoot: string;
@@ -51,6 +69,12 @@ export interface HarnessInvocationInput {
   readonly permissionMode: HarnessPermissionMode;
   /** Desabilita o plugin `tool-str-replace-editor` (default do POC no Windows). */
   readonly disableStrReplaceEditor: boolean;
+  /**
+   * IDs de plugins de ferramenta distratores a desabilitar (catálogo focado). Ver
+   * `HARNESS_FOCUSED_DISABLED_PLUGINS` — a correção com prova viva. Vazio mantém as
+   * 24 ferramentas do profile (derrapa modelo local).
+   */
+  readonly disabledToolPlugins: readonly string[];
   /** Marcador de saúde opcional: caminho onde o plugin comprova que carregou. */
   readonly pluginMarkerPath?: string;
 }
@@ -103,8 +127,13 @@ export function buildHarnessPatchYaml(input: HarnessInvocationInput): string {
     `    provider: ${HARNESS_OLLAMA_ROUTE}`,
     `    model: ${yamlSingle(input.model)}`,
   ];
-  if (input.disableStrReplaceEditor) {
-    lines.push(`- id: tool-str-replace-editor`, `  disabled: true`);
+  // Catálogo FOCADO (correção com prova viva): desabilita os plugins de ferramenta
+  // distratores para o modelo local não se derrapar. `tool-str-replace-editor` é
+  // desabilitado só uma vez (dedup) quando também presente na lista.
+  const disabled = new Set<string>(input.disabledToolPlugins);
+  if (input.disableStrReplaceEditor) disabled.add('tool-str-replace-editor');
+  for (const pluginId of disabled) {
+    lines.push(`- id: ${pluginId}`, `  disabled: true`);
   }
   lines.push(
     `- insert:`,

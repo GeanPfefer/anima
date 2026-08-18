@@ -139,6 +139,9 @@ describe('DeepSeekHarnessRuntime.runTurn — I/O injetado', () => {
     expect(patch).toContain('provider: ollama');
     expect(patch).toContain("model: 'qwen3-coder:latest'");
     expect(patch).toContain('anima-harness-budget');
+    // Catálogo focado por default (correção do tool-protocol, prova viva).
+    expect(patch).toContain('- id: tool-web');
+    expect(patch).toContain('- id: tool-goal');
     expect(fs.mkdirs).toContain('C:/tmp/anima-wt/dsh-home');
     // spawn: node + bin do dsh, cwd = worktree, envelope no env.
     expect(spawner.last?.command).toBe('C:/node/node.exe');

@@ -1,5 +1,6 @@
 /** @jest-environment node */
 import {
+  HARNESS_FOCUSED_DISABLED_PLUGINS,
   HARNESS_OLLAMA_API_KEY_ENV,
   buildHarnessPatchYaml,
   planHarnessInvocation,
@@ -19,6 +20,7 @@ const base = (over: Partial<HarnessInvocationInput> = {}): HarnessInvocationInpu
   stepBudget: 12,
   permissionMode: 'workspace-write',
   disableStrReplaceEditor: true,
+  disabledToolPlugins: HARNESS_FOCUSED_DISABLED_PLUGINS,
   ...over,
 });
 
@@ -55,12 +57,28 @@ describe('buildHarnessPatchYaml — formato verificado ao vivo', () => {
     expect(yaml).toContain('temperature: 0');
   });
 
-  test('str_replace_editor NÃO é desabilitado quando disableStrReplaceEditor=false', () => {
-    const yaml = buildHarnessPatchYaml(base({ disableStrReplaceEditor: false }));
+  test('str_replace_editor NÃO é desabilitado quando disableStrReplaceEditor=false e a lista não o inclui', () => {
+    const yaml = buildHarnessPatchYaml(base({ disableStrReplaceEditor: false, disabledToolPlugins: [] }));
     expect(yaml).not.toContain('tool-str-replace-editor');
     // o insert e a rota continuam presentes
     expect(yaml).toContain('- insert:');
     expect(yaml).toContain('- id: agent-default-model');
+  });
+
+  test('catálogo focado: desabilita os plugins distratores verificados (correção do tool-protocol)', () => {
+    const yaml = buildHarnessPatchYaml(base());
+    // Os distratores que derrapavam o modelo local (prova viva: 24→7 ferramentas).
+    for (const plugin of ['tool-web', 'tool-goal', 'tool-ralph', 'tool-subagent', 'tool-workflow', 'tool-todo', 'tool-skill', 'plan-mode', 'tool-jobs']) {
+      expect(yaml).toContain(`- id: ${plugin}`);
+    }
+    // As ferramentas de arquivo/shell NÃO são desabilitadas.
+    expect(yaml).not.toContain('- id: tool-fs\n');
+    expect(yaml).not.toContain('- id: tool-pwsh\n');
+  });
+
+  test('tool-str-replace-editor é desabilitado só uma vez mesmo se também na lista (dedup)', () => {
+    const yaml = buildHarnessPatchYaml(base({ disableStrReplaceEditor: true, disabledToolPlugins: ['tool-str-replace-editor', 'tool-web'] }));
+    expect(yaml.match(/- id: tool-str-replace-editor/g)?.length).toBe(1);
   });
 
   test('marcador opcional entra na config do plugin quando presente', () => {
