@@ -172,10 +172,16 @@ describe('deriveWorkProgressPhase — fase humana projetada de fatos',()=>{
     expect(deriveWorkProgressPhase({item:withState('review'),execution:exec('submitted_for_review'),integration:integ('awaiting_decision')}).phase).toBe('ready_to_integrate');
   });
 
-  test('integração pós-resultado: aguardando → Pronto para integrar; publicada → Integrando',()=>{
-    expect(deriveWorkProgressPhase({item:withState('completed'),execution:null,integration:integ('awaiting_decision')}).phase).toBe('done'); // completed vence
-    expect(deriveWorkProgressPhase({item:withState('review'),execution:null,integration:integ('branch_published')}).phase).toBe('integrating');
-    expect(deriveWorkProgressPhase({item:withState('review'),execution:null,integration:integ('review_request_created')}).phase).toBe('integrating');
+  test('integração pós-resultado tem precedência sobre completed → Pronto para integrar',()=>{
+    // Um item ACEITO (completed) com integração pendente ainda espera a decisão humana:
+    // a fase é `ready_to_integrate`, não `done` — senão a fase "Pronto para integrar" nunca apareceria.
+    expect(deriveWorkProgressPhase({item:withState('completed'),execution:null,integration:integ('awaiting_decision')}).phase).toBe('ready_to_integrate');
+    expect(deriveWorkProgressPhase({item:withState('completed'),execution:null,integration:integ('branch_published')}).phase).toBe('integrating');
+    expect(deriveWorkProgressPhase({item:withState('completed'),execution:null,integration:integ('review_request_created')}).phase).toBe('integrating');
+    // Recusada: o humano decidiu não integrar; o trabalho está concluído.
+    expect(deriveWorkProgressPhase({item:withState('completed'),execution:null,integration:integ('refused')}).phase).toBe('done');
+    // Concluído SEM fronteira de integração → done.
+    expect(deriveWorkProgressPhase({item:withState('completed'),execution:null,integration:null}).phase).toBe('done');
   });
 
   test('espera humana / pré-execução: proposta, aprovado, revisão, bloqueado',()=>{

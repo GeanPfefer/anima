@@ -268,7 +268,11 @@ const PROGRESS_LABEL:Record<WorkProgressPhase,string>={proposal:'Proposta',appro
 const PROGRESS_ACTIVE=new Set<WorkProgressPhase>(['implementing','testing']);
 const PROGRESS_TERMINAL=new Set<WorkProgressPhase>(['done','failed','rejected','cancelled']);
 const progressPhase=(phase:WorkProgressPhase):WorkProgressPhaseProjection=>({phase,label:PROGRESS_LABEL[phase],active:PROGRESS_ACTIVE.has(phase),terminal:PROGRESS_TERMINAL.has(phase)});
-const integrationProgressPhase=(integration:WorkIntegrationProjection):WorkProgressPhaseProjection=>integration.status==='awaiting_decision'?progressPhase('ready_to_integrate'):integration.status==='refused'?progressPhase('reviewing'):progressPhase('integrating');
+// `awaiting_decision` = resultado aceito, integração pendente do humano → Pronto
+// para integrar. `refused` = humano recusou a integração; o trabalho está aceito
+// (concluído sem integrar) → Concluído. Demais (authorized/branch_published/
+// review_request_created) = integração em andamento → Integrando.
+const integrationProgressPhase=(integration:WorkIntegrationProjection):WorkProgressPhaseProjection=>integration.status==='awaiting_decision'?progressPhase('ready_to_integrate'):integration.status==='refused'?progressPhase('done'):progressPhase('integrating');
 /**
  * Deriva a fase humana a partir dos fatos projetados. Ordem: estados terminais do
  * item (autoridade do domínio) → execução autônoma em andamento (running:
@@ -277,19 +281,25 @@ const integrationProgressPhase=(integration:WorkIntegrationProjection):WorkProgr
  */
 export function deriveWorkProgressPhase(input:{readonly item:WorkItem;readonly execution:AutonomousExecutionProjection|null;readonly integration:WorkIntegrationProjection|null;}):WorkProgressPhaseProjection{
   const{item,execution,integration}=input;
-  if(item.state==='completed')return progressPhase('done');
+  // Estados terminais NEGATIVOS do item vêm primeiro (autoridade do domínio).
   if(item.state==='rejected')return progressPhase('rejected');
   if(item.state==='cancelled')return progressPhase('cancelled');
   if(item.state==='failed')return progressPhase('failed');
+  // Execução autônoma ATIVA tem precedência (running/paused).
   if(execution){
     if(execution.status==='running')return progressPhase(execution.latestCheckpoint!==null?'testing':'implementing');
     if(execution.status==='paused')return progressPhase('paused');
-    if(execution.status==='submitted_for_review')return integration?integrationProgressPhase(integration):progressPhase('reviewing');
     if(execution.status==='failed')return progressPhase('failed');
     if(execution.status==='blocked')return progressPhase('blocked');
     if(execution.status==='cancelled'||execution.status==='abandoned')return progressPhase('cancelled');
   }
+  // Integração (pós-aceite) ANTES de `completed`: um item aceito (completed) ainda
+  // pode ter uma decisão de integração pendente — é justamente o `ready_to_integrate`.
   if(integration)return integrationProgressPhase(integration);
+  // Resultado submetido, ainda não aceito → revisão.
+  if(execution?.status==='submitted_for_review')return progressPhase('reviewing');
+  // Concluído sem fronteira de integração → done.
+  if(item.state==='completed')return progressPhase('done');
   if(item.state==='blocked')return progressPhase('blocked');
   if(item.state==='review'||item.state==='changes_requested')return progressPhase('reviewing');
   if(item.state==='in_progress')return progressPhase('implementing');
