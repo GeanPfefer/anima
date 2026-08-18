@@ -24,6 +24,7 @@ export * from './worktree-handoff';
 export * from './host-observed-evidence';
 export * from './host-observed-gate-evidence';
 export * from './host-observed-coder-evidence';
+export * from './harness-turn-lifecycle';
 export * from './work-verification';
 export * from './verifier-opinion';
 export * from './work-resumption';
