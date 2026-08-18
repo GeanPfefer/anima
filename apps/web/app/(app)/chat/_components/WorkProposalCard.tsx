@@ -103,6 +103,10 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
   const busy=status!=='idle';
   return <article className={styles.workCard} aria-label={`Trabalho, versão ${item.proposalVersion}`} aria-busy={busy}>
     <div className={styles.workCardHeader}><strong>{focused?'Trabalho em foco':'Proposta de trabalho'}</strong><span>{item.state} · v{item.proposalVersion}</span></div>
+    {/* Fase humana (read-only): projeção pura dos fatos — nunca narrativa do LLM.
+       Defensivo: uma projeção antiga (cache/rede anterior ao deploy) pode não ter
+       `progress`; nesse caso o indicador só não aparece, em vez de quebrar o cartão. */}
+    {presentation.progress&&<div className={styles.workPhase} data-active={presentation.progress.active} data-terminal={presentation.progress.terminal} aria-label={`Fase do trabalho: ${presentation.progress.label}`}>{presentation.progress.active&&<span className={styles.workPhaseDot} aria-hidden="true" />}{presentation.progress.label}</div>}
     <h3>{item.proposal.data.summary}</h3><p>{item.proposal.data.objective}</p>
     {presentation.provenance?.status==='incomplete'&&<p role="alert" className={styles.error}>A proveniência persistida deste trabalho está incompleta. As ações permanecem bloqueadas para evitar uma decisão sobre contexto inconsistente.</p>}
     <dl className={styles.workMeta}><div><dt>Capacidade</dt><dd>{item.capability}</dd></div><div><dt>Impacto</dt><dd>{item.impactLevel}</dd></div></dl>

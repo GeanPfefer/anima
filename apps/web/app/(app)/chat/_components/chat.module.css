@@ -404,6 +404,10 @@
 
 .workCard { box-sizing: border-box; width: min(100%, 620px); min-width: 0; overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 14px; padding: 16px; color: var(--text-primary); text-align: left; }
 .workCardHeader { display: flex; justify-content: space-between; gap: 12px; color: var(--accent); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+.workPhase { display: inline-flex; align-items: center; gap: 6px; width: fit-content; margin: 10px 0 2px; padding: 3px 11px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); font-size: .74rem; font-weight: 600; }
+.workPhase[data-terminal="true"] { opacity: .6; }
+.workPhaseDot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: workPhasePulse 1.4s ease-in-out infinite; }
+@keyframes workPhasePulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 .workCard h3 { margin: 14px 0 6px; font-size: 1rem; }
 .workCard p { margin: 6px 0; }
 .workCard section { margin-top: 12px; font-size: .86rem; }

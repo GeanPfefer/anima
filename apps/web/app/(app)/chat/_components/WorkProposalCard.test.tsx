@@ -2,11 +2,21 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { WorkPresentationView } from './WorkProposalCard';
 import { WorkProposalCard } from './WorkProposalCard';
 const item = { id:'item',userId:'user',sourceMessageId:'message',state:'proposed',impactLevel:'significant',capability:'programming',originalRequest:'pedido',intent:{},proposal:{schemaVersion:1,data:{summary:'Construir tela',objective:'Criar uma tela segura',includedScope:['Tela'],excludedScope:['Execução'],expectedEffects:['Proposta'],risks:['Escopo']}},proposalVersion:2,createdAt:'2026-07-14T00:00:00Z',updatedAt:'2026-07-14T00:00:00Z' } as const;
-const presentation = (overrides: Partial<WorkPresentationView> = {}): WorkPresentationView => ({ item, latestResult:null, acceptedResult:null, latestEventType:null, availableActions:['approve','reject','defer','revise_proposal'], ...overrides });
+const presentation = (overrides: Partial<WorkPresentationView> = {}): WorkPresentationView => ({ item, latestResult:null, acceptedResult:null, latestEventType:null, availableActions:['approve','reject','defer','revise_proposal'], progress:{phase:'proposal',label:'Proposta',active:false,terminal:false}, ...overrides });
 const result = { eventId:'e1', proposalVersion:2, author:'user' as const, summary:'Resumo apresentado', references:['docs/prova.md'], validations:null, limitations:null, handoffReference:null };
 describe('WorkProposalCard', () => {
   beforeEach(() => { global.fetch = jest.fn().mockResolvedValue({ ok:true, json:async()=>({ok:true,value:{presentation:presentation()}}) }) as jest.Mock; });
   test('renderiza proposta e versão apresentadas', () => { render(<WorkProposalCard presentation={presentation()} onChange={jest.fn()} />); expect(screen.getByText('Construir tela')).toBeInTheDocument(); expect(screen.getByText('proposed · v2')).toBeInTheDocument(); expect(screen.getByText('Aguardando sua decisão.')).toBeInTheDocument(); });
+  test('exibe a FASE humana projetada (read-only) a partir dos fatos', () => {
+    render(<WorkProposalCard presentation={presentation({ progress:{ phase:'testing', label:'Testando', active:true, terminal:false } })} onChange={jest.fn()} />);
+    expect(screen.getByLabelText('Fase do trabalho: Testando')).toHaveTextContent('Testando');
+  });
+  test('a fase é read-only: não adiciona nenhuma ação/botão', () => {
+    const { container } = render(<WorkProposalCard presentation={presentation({ progress:{ phase:'ready_to_integrate', label:'Pronto para integrar', active:false, terminal:false } })} onChange={jest.fn()} />);
+    expect(screen.getByLabelText('Fase do trabalho: Pronto para integrar')).toBeInTheDocument();
+    // O indicador de fase não é um controle.
+    expect(container.querySelector('[aria-label^="Fase do trabalho"] button')).toBeNull();
+  });
   test('envia aprovação uma única vez enquanto carrega', async () => { let resolveResponse!: (value: unknown) => void; (global.fetch as jest.Mock).mockReturnValue(new Promise(resolve => { resolveResponse = resolve; })); render(<WorkProposalCard presentation={presentation()} onChange={jest.fn()} />); const button=screen.getByRole('button',{name:'Aprovar'}); fireEvent.click(button); fireEvent.click(button); expect(global.fetch).toHaveBeenCalledTimes(1); await waitFor(()=>expect(button).toBeDisabled()); resolveResponse({ok:true,json:async()=>({ok:true,value:{presentation:presentation()}})}); });
   test('ações vêm da projeção e não do estado local', () => { render(<WorkProposalCard presentation={presentation({item:{...item,state:'approved'},availableActions:['start']})} onChange={jest.fn()} />); expect(screen.queryByRole('button',{name:'Aprovar'})).not.toBeInTheDocument(); expect(screen.getByRole('button',{name:'Iniciar execução manual'})).toBeInTheDocument(); });
   test('inicia a execução manual aprovada', async () => { render(<WorkProposalCard presentation={presentation({item:{...item,state:'approved'},availableActions:['start']})} onChange={jest.fn()} />); fireEvent.click(screen.getByRole('button',{name:'Iniciar execução manual'})); await waitFor(()=>expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/start',expect.objectContaining({method:'POST'}))); });
