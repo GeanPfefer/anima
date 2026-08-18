@@ -1,6 +1,8 @@
 import {
   buildWorktreeHandoff,
   validateWorkCheckpoint,
+  type HostObservedCoderOutcome,
+  type ObservedCoderInput,
   type ObservedGateInput,
   type WorkCheckpointV1,
   type WorkExecutorAdapter,
@@ -53,6 +55,16 @@ export interface WorktreeExecutorOptions {
    * populará; por isso a evidência só existe quando o host de fato roda o gate.
    */
   readonly onGateObserved?: (outcome: ObservedGateInput) => void;
+  /**
+   * Observador do CODER de PRIMEIRA PARTE DO HOST. Chamado com o tempo de parede que o
+   * HOST cronometrou ao redor de `backend.edit()` (não o provider) e o desfecho observado
+   * da própria chamada. É o canal do HOST — o host injeta e persiste como evidência
+   * observada (`host_observed_coder_evidence_recorded`), separada de qualquer atestação do
+   * executor. Emitido EM TODOS os caminhos (sucesso, falha, cancelamento): a duração é
+   * fato mesmo quando a edição termina em erro. NÃO carrega tokens/modelo do provider —
+   * isso é uma mudança contratual separada (proveniência host-observed ≠ provider-reported).
+   */
+  readonly onCoderObserved?: (outcome: ObservedCoderInput) => void;
 }
 
 const REQUIRED_PERMISSIONS = ['workspace_read', 'workspace_write_isolated'] as const;
@@ -104,12 +116,25 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         writeFile: (relPath, content) => worktree!.writeWorkspaceFile(relPath, content),
       };
       let editResult;
+      // Relógio host de primeira parte ao redor de `backend.edit()` (visão §12): o host
+      // cronometra a própria chamada — nada aqui confia no provider. `observeCoder` emite
+      // o fato bruto no canal do host EM TODOS os caminhos. Desfecho honesto: `cancelled`
+      // quando a tentativa foi abortada (medição parcial, casa o terminal `cancelled`),
+      // `failed` quando a edição lançou sem cancelamento, `succeeded` caso contrário. A
+      // duração é sempre medida ao redor da edição, ANTES de qualquer restauração.
+      const coderStartedAt = Date.now();
+      const observeCoder = (threw: boolean): void => {
+        const outcome: HostObservedCoderOutcome = signal.aborted ? 'cancelled' : threw ? 'failed' : 'succeeded';
+        this.options.onCoderObserved?.({ backendId: this.options.backend.id, durationMs: Date.now() - coderStartedAt, outcome });
+      };
       try {
         editResult = await this.options.backend.edit(
           { objective: request.objective, includedScope: request.includedScope, excludedScope: request.excludedScope, ...(request.carriedContext ? { carriedContext: request.carriedContext } : {}) },
           workspace, signal,
         );
+        observeCoder(false);
       } catch (error) {
+        observeCoder(true);
         // Autoridade ÚNICA de restauração (outcome atomicity): a camada da
         // worktree volta ao estado-base. A restauração é SEMPRE tentada — ANTES de
         // classificar o desfecho e INDEPENDENTE de `signal.aborted` —, porque o

@@ -7,6 +7,7 @@ import {
   buildWorktreeHandoff,
   validateWorkExecutorTranscript,
   verifyWorkResult,
+  type ObservedCoderInput,
   type ObservedGateInput,
   type WorkCapability,
   type WorkExecutorRequest,
@@ -368,6 +369,66 @@ describe('WorktreeExecutorAdapter — evidência de gate observada de primeira p
     expect(codes).toContain('attested_gate_contradicts_observed');
     expect(codes).toContain('gate_failed');
     expect(report.verdict).toBe('rejected');
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
+});
+
+describe('WorktreeExecutorAdapter — duração do coder observada de primeira parte pelo host', () => {
+  let ctx: Awaited<ReturnType<typeof makeNpmRepo>>;
+  beforeAll(async () => { ctx = await makeNpmRepo(); });
+  afterAll(async () => { await ctx.cleanup(); });
+  const added = { path: 'src/added.ts', content: 'export const two = 2;\n' };
+
+  const runWithCoderObserver = async (req: WorkExecutorRequest, backend: CoderBackend, signal?: AbortSignal) => {
+    const observed: ObservedCoderInput[] = [];
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend, onCoderObserved: o => observed.push(o) });
+    const signals = await collect(adapter, req, signal ?? new AbortController().signal);
+    return { observed, terminal: signals.at(-1)! };
+  };
+
+  test('edição que resolve: host observa backendId, duração e desfecho succeeded', async () => {
+    const req = request();
+    const { observed, terminal } = await runWithCoderObserver(req, new ScriptedCoderBackend([added], 'ok', 'scripted-coder'));
+    expect(terminal.kind).toBe('result');
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({ backendId: 'scripted-coder', outcome: 'succeeded' });
+    expect(observed[0]!.durationMs).toBeGreaterThanOrEqual(0);
+    // A duração é do coder, NÃO do gate: reportada mesmo antes de qualquer gate.
+    expect(Number.isInteger(observed[0]!.durationMs)).toBe(true);
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
+
+  test('edição que lança sem cancelamento: host observa failed com a duração medida', async () => {
+    const throwing: CoderBackend = {
+      id: 'throwing-coder',
+      edit: async (_req, workspace: CoderWorkspace): Promise<CoderEditResult> => {
+        await workspace.writeFile('src/added.ts', 'parcial\n');
+        throw new Error('falha proposital');
+      },
+    };
+    const req = request();
+    const { observed, terminal } = await runWithCoderObserver(req, throwing);
+    expect(terminal.kind).toBe('error');
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({ backendId: 'throwing-coder', outcome: 'failed' });
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
+
+  test('cancelamento durante a edição: host observa cancelled (medição parcial)', async () => {
+    const controller = new AbortController();
+    const aborting: CoderBackend = {
+      id: 'aborting-coder',
+      edit: async (_req, workspace: CoderWorkspace): Promise<CoderEditResult> => {
+        await workspace.writeFile('src/added.ts', 'parcial durante cancelamento\n');
+        controller.abort();
+        throw new Error('abortado durante a edição');
+      },
+    };
+    const req = request();
+    const { observed, terminal } = await runWithCoderObserver(req, aborting, controller.signal);
+    expect(terminal.kind).toBe('cancelled');
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({ backendId: 'aborting-coder', outcome: 'cancelled' });
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
   });
 });

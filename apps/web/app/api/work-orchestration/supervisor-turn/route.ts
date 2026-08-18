@@ -1,9 +1,10 @@
-import type { ObservedGateInput } from '@anima/core';
+import type { ObservedCoderInput, ObservedGateInput } from '@anima/core';
 import { authenticateRequest } from '@/lib/supabase/request-auth';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from '@/lib/work-orchestration/execution';
 import { projectRoot, readExecutionContract, resolveExecutorRoute, type ExecutionContract } from '@/lib/work-orchestration/executor-selection';
 import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from '@/lib/work-orchestration/gate-evidence';
+import { coderEvidenceSinkFor, persistHostObservedCoderEvidence } from '@/lib/work-orchestration/coder-evidence';
 import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from '@/lib/work-orchestration/host-evidence';
 import { composeSupervisorResourceAdvisory, type ResourceGovernorAdvisoryReport } from '@/lib/work-orchestration/resource-governor';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
@@ -52,6 +53,10 @@ export async function POST(request: Request) {
   // Coletor host-side dos gates: o executor de worktree reporta aqui os fatos brutos
   // que o host mediu ao rodar cada gate (canal do host, separado do handoff atestado).
   const gateObservations: ObservedGateInput[] = [];
+  // Coletor host-side do coder: o executor reporta aqui a duração wall-clock que o host
+  // cronometrou ao redor de `backend.edit()` (uma edição por tentativa). Array só para
+  // uniformizar com o coletor de gate; na prática tem 0 ou 1 elemento.
+  const coderObservations: ObservedCoderInput[] = [];
   if (explicit) {
     const item = await client.from('work_items')
       .select('intent, state, proposal_version, impact_level, capability')
@@ -122,7 +127,10 @@ export async function POST(request: Request) {
     // comandado (INT-04) do runner Python segue single-shot lá dentro.
     const contract = readExecutionContract(item.data?.intent);
     executionContract = contract;
-    const selection = resolveExecutorRoute(contract, { gateObserver: outcome => gateObservations.push(outcome) });
+    const selection = resolveExecutorRoute(contract, {
+      gateObserver: outcome => gateObservations.push(outcome),
+      coderObserver: outcome => coderObservations.push(outcome),
+    });
     if (!selection.ok) {
       return Response.json({ ok: false, error: selection.error }, { status: 503 });
     }
@@ -167,6 +175,15 @@ export async function POST(request: Request) {
     // valiosa: é o que contradiz um executor que minta que passou).
     if (gateObservations.length > 0) {
       await persistHostObservedGateEvidence(correlation, gateObservations, gateEvidenceSinkFor(client)).catch(() => undefined);
+    }
+
+    // (0b) Evidência do CODER observada pelo host. Persiste a duração wall-clock que o host
+    // cronometrou ao redor de `backend.edit()` — INCLUSIVE em terminal de erro/cancelamento
+    // (a duração é fato mesmo quando a edição termina em falha; o desfecho observado a
+    // qualifica). Fail-open: gravar a observação não pode transformar uma edição
+    // bem-sucedida em falha da tentativa.
+    if (coderObservations.length > 0) {
+      await persistHostObservedCoderEvidence(correlation, coderObservations.at(-1) ?? null, coderEvidenceSinkFor(client)).catch(() => undefined);
     }
 
     if (result.terminalKind === 'result') {
