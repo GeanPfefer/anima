@@ -63,6 +63,62 @@ describe('verifyWorkResult — gates observados pelo host (observed > attested)'
   });
 });
 
+describe('verifyWorkResult — retry INTERNO do mesmo attempt (classificação terminal FAIL→PASS)', () => {
+  const base = (over: Partial<WorkResultVerificationInput> = {}): WorkResultVerificationInput => baseInput(over);
+
+  test('FAIL→PASS do mesmo gate (label+command) ⇒ verified, sem gate_failed nem contradição', () => {
+    // Evidência bruta preserva os DOIS (append-only); a classificação usa o terminal.
+    const report = verifyWorkResult(base({
+      observedGates: gateEvidenceWith({ gates: [
+        { label: 'unit', command: 'npm test', exitCode: 1, durationMs: 50, timedOut: false, cancelled: false },
+        { label: 'unit', command: 'npm test', exitCode: 0, durationMs: 80, timedOut: false, cancelled: false },
+      ] }),
+    }));
+    expect(report.verdict).toBe('verified');
+    const c = codes(report);
+    expect(c).not.toContain('gate_failed');
+    expect(c).not.toContain('attested_gate_contradicts_observed');
+    expect(c).toContain('gates_independently_observed');
+    expect(c).toContain('criterion_covered');
+  });
+
+  test('PASS→FAIL do mesmo gate ⇒ rejected, com gate_failed e attested_gate_contradicts_observed', () => {
+    const report = verifyWorkResult(base({
+      observedGates: gateEvidenceWith({ gates: [
+        { label: 'unit', command: 'npm test', exitCode: 0, durationMs: 80, timedOut: false, cancelled: false },
+        { label: 'unit', command: 'npm test', exitCode: 1, durationMs: 50, timedOut: false, cancelled: false },
+      ] }),
+    }));
+    expect(report.verdict).toBe('rejected');
+    const c = codes(report);
+    expect(c).toContain('gate_failed');
+    expect(c).toContain('attested_gate_contradicts_observed');
+  });
+
+  test('A FAIL→PASS + B FAIL terminal (gates distintos) ⇒ rejected por B, A coberto', () => {
+    const report = verifyWorkResult(base({
+      authorized: {
+        includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'],
+        validationCriteria: [{ label: 'A', command: 'npm test' }, { label: 'B', command: 'npm test' }],
+      },
+      handoff: handoffWith({ gates: [
+        { label: 'A', command: 'npm test', exitCode: 0, outcome: 'passed' },
+        { label: 'B', command: 'npm test', exitCode: 0, outcome: 'passed' },
+      ] }),
+      observedGates: gateEvidenceWith({ gates: [
+        { label: 'A', command: 'npm test', exitCode: 1, durationMs: 50, timedOut: false, cancelled: false },
+        { label: 'A', command: 'npm test', exitCode: 0, durationMs: 80, timedOut: false, cancelled: false },
+        { label: 'B', command: 'npm test', exitCode: 1, durationMs: 40, timedOut: false, cancelled: false },
+      ] }),
+    }));
+    expect(report.verdict).toBe('rejected');
+    // Reprovado por B (terminal FAIL), enquanto A (terminal PASS) fica coberto.
+    const gateFailed = report.findings.filter(f => f.code === 'gate_failed');
+    expect(gateFailed.map(f => f.subject)).toEqual(['B']);
+    expect(codes(report)).toContain('criterion_covered');
+  });
+});
+
 const BASE = 'a'.repeat(40);
 const COMMIT = 'b'.repeat(40);
 const BRANCH = 'anima-work/attempt-1';

@@ -3,7 +3,9 @@ import {
   deriveObservedGateOutcome,
   parseHostObservedGateEvidence,
   projectHostObservedGateEvidence,
+  terminalObservedGates,
   type HostObservedGateEvidenceV1,
+  type ObservedGateOutcomeV1,
   type WorkEvent,
 } from './index';
 import type { Json } from '@anima/types';
@@ -67,6 +69,37 @@ describe('buildHostObservedGateEvidence', () => {
   test('rejeita comando/label com credencial ou caminho local', () => {
     expect(build({ gates: [gate({ command: 'npm test -- --secret=abc' })] }).ok).toBe(false);
     expect(build({ gates: [gate({ label: '/etc/config gate' })] }).ok).toBe(false);
+  });
+});
+
+describe('terminalObservedGates', () => {
+  const g = (label: string, command: string, outcome: 'passed' | 'failed'): ObservedGateOutcomeV1 =>
+    ({ label, command, exitCode: outcome === 'passed' ? 0 : 1, durationMs: 10, timedOut: false, cancelled: false, outcome });
+
+  test('mantém a ÚLTIMA observação por identidade (label+command): FAIL→PASS ⇒ PASS', () => {
+    const out = terminalObservedGates([g('unit', 'npm test', 'failed'), g('unit', 'npm test', 'passed')]);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.outcome).toBe('passed');
+  });
+
+  test('preserva a ordem de PRIMEIRA aparição de cada identidade', () => {
+    const out = terminalObservedGates([
+      g('A', 'npm test', 'failed'), g('B', 'npm test', 'failed'),
+      g('A', 'npm test', 'passed'), g('B', 'npm test', 'failed'),
+    ]);
+    expect(out.map(x => x.label)).toEqual(['A', 'B']);
+    expect(out.map(x => x.outcome)).toEqual(['passed', 'failed']);
+  });
+
+  test('label igual mas command diferente são identidades DISTINTAS', () => {
+    const out = terminalObservedGates([g('unit', 'npm test', 'passed'), g('unit', 'npm run test:e2e', 'failed')]);
+    expect(out).toHaveLength(2);
+  });
+
+  test('lista vazia ⇒ vazia; um único gate é preservado', () => {
+    expect(terminalObservedGates([])).toEqual([]);
+    const one = terminalObservedGates([g('unit', 'npm test', 'passed')]);
+    expect(one).toHaveLength(1);
   });
 });
 

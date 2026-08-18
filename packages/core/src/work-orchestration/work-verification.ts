@@ -1,6 +1,6 @@
 import { readAutonomousExecutionSpec, type AutonomousValidationCriterion } from './eligibility';
 import { projectHostObservedEvidence, type HostObservedGitEvidenceV1 } from './host-observed-evidence';
-import { projectHostObservedGateEvidence, type HostObservedGateEvidenceV1 } from './host-observed-gate-evidence';
+import { projectHostObservedGateEvidence, terminalObservedGates, type HostObservedGateEvidenceV1 } from './host-observed-gate-evidence';
 import type { ProposalVersion, WorkEvent, WorkItem, WorkItemId, WorkResultValidation } from './types';
 import { isAnimaWorktreeBranch, projectWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff';
 
@@ -329,19 +329,26 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     findings.push(violation('observed_gate_correlation_mismatch',
       'A evidência de gate observada pelo host não corresponde à tentativa esperada; os gates recaem na atestação.', undefined, 'independent'));
   }
+  // Projeção TERMINAL: com retry INTERNO do MESMO attempt, a evidência bruta pode
+  // conter FAIL→PASS do mesmo gate lógico (label+command). A EVIDÊNCIA persistida
+  // preserva os dois (append-only, auditável); a CLASSIFICAÇÃO do estado ATUAL de
+  // cada gate usa a ÚLTIMA observação. Sem isso, um FAIL histórico legítimo geraria
+  // `gate_failed` para sempre mesmo após a correção aceita pelo host.
+  const terminalGates = observedGatesUsable ? terminalObservedGates(observedGates!.gates) : [];
   if (observedGatesUsable) {
-    // O host mediu os gates de primeira parte. Cada gate observado falho reprova; e
-    // uma divergência por rótulo entre o atestado e o observado é a mentira detectada.
-    const attestedByLabel = new Map(handoff.gates.map(g => [g.label, g.outcome]));
+    // O host mediu os gates de primeira parte. O estado TERMINAL de cada gate lógico
+    // reprova se falho; uma divergência por identidade (label+command) entre o
+    // atestado (handoff terminal) e o observado terminal é a mentira detectada.
+    const attestedByIdentity = new Map(handoff.gates.map(g => [`${g.label} ${g.command}`, g.outcome]));
     let anyGateProblem = false;
-    for (const g of observedGates!.gates) {
+    for (const g of terminalGates) {
       if (g.outcome === 'failed') {
         const why = g.timedOut ? ' (timeout)' : g.cancelled ? ' (cancelado)' : '';
         findings.push(violation('gate_failed',
           `O host observou o gate "${g.label}" (${g.command}) terminar com código ${g.exitCode}${why}.`, g.label, 'independent'));
         anyGateProblem = true;
       }
-      const attested = attestedByLabel.get(g.label);
+      const attested = attestedByIdentity.get(`${g.label} ${g.command}`);
       if (attested !== undefined && attested !== g.outcome) {
         findings.push(violation('attested_gate_contradicts_observed',
           `O executor atestou o gate "${g.label}" como "${attested}", mas o host observou "${g.outcome}"; a observação prevalece.`, g.label, 'independent'));
@@ -350,7 +357,7 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     }
     if (!anyGateProblem) {
       findings.push(ok('gates_independently_observed',
-        `Todos os ${observedGates!.gates.length} gate(s) foram confirmados por observação independente do host.`, undefined, 'independent'));
+        `Todos os ${terminalGates.length} gate(s) foram confirmados por observação independente do host (estado terminal).`, undefined, 'independent'));
     }
   } else {
     // Contradição interna adversarial: um gate "passed" com código de saída não-zero
@@ -383,7 +390,7 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   // não é verificável por evidência — informativo, não bloqueia `verified`. A fonte
   // do desfecho é a observada quando usável, senão a atestada.
   const gateOutcomeSource: readonly { readonly label: string; readonly outcome: 'passed' | 'failed' }[] =
-    observedGatesUsable ? observedGates!.gates : handoff.gates;
+    observedGatesUsable ? terminalGates : handoff.gates;
   const passedByLabel = new Set(gateOutcomeSource.filter(g => g.outcome === 'passed').map(g => g.label));
   const anyGateByLabel = new Set(gateOutcomeSource.map(g => g.label));
   for (const criterion of authorized.validationCriteria) {
