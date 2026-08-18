@@ -337,9 +337,13 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   const terminalGates = observedGatesUsable ? terminalObservedGates(observedGates!.gates) : [];
   if (observedGatesUsable) {
     // O host mediu os gates de primeira parte. O estado TERMINAL de cada gate lógico
-    // reprova se falho; uma divergência por identidade (label+command) entre o
-    // atestado (handoff terminal) e o observado terminal é a mentira detectada.
-    const attestedByIdentity = new Map(handoff.gates.map(g => [`${g.label} ${g.command}`, g.outcome]));
+    // reprova se falho; uma divergência por RÓTULO entre o atestado (handoff terminal)
+    // e o observado terminal é a mentira detectada. A comparação é por `label` (não
+    // label+command) porque o handoff atestado e a evidência observada podem gravar
+    // formas ligeiramente diferentes do MESMO comando (ex.: `npm test` declarado vs a
+    // forma normalizada executada); a identidade label+command é para a PROJEÇÃO
+    // terminal (deduplicar turns do mesmo gate), não para casar as duas fontes.
+    const attestedByLabel = new Map(handoff.gates.map(g => [g.label, g.outcome]));
     let anyGateProblem = false;
     for (const g of terminalGates) {
       if (g.outcome === 'failed') {
@@ -348,7 +352,7 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
           `O host observou o gate "${g.label}" (${g.command}) terminar com código ${g.exitCode}${why}.`, g.label, 'independent'));
         anyGateProblem = true;
       }
-      const attested = attestedByIdentity.get(`${g.label} ${g.command}`);
+      const attested = attestedByLabel.get(g.label);
       if (attested !== undefined && attested !== g.outcome) {
         findings.push(violation('attested_gate_contradicts_observed',
           `O executor atestou o gate "${g.label}" como "${attested}", mas o host observou "${g.outcome}"; a observação prevalece.`, g.label, 'independent'));
