@@ -1,4 +1,5 @@
 import {
+  adviseDeclaredCoder,
   adviseDeclaredGates,
   adviseWorkloadProfiles,
   buildCostDistribution,
@@ -19,6 +20,7 @@ import {
   type WorkloadAdvisory,
   type WorkloadCostProfileKey,
 } from '@anima/core';
+import { coderBackendId, type CoderProvider } from './coder-backend';
 import { readMachineSnapshot } from './machine-telemetry';
 
 // Seam central host-side do Resource Governor V0 (leitura). Em vez de espalhar
@@ -157,29 +159,56 @@ export function declaredGateCommands(item: WorkItem): readonly string[] {
   return commands;
 }
 
+/**
+ * Prevê o `backendId` (provider:model) do coder que o item VAI rodar, a partir do
+ * `execution_spec.coder_backend` + `execution_spec.model` do contrato — a mesma identidade
+ * que o backend real registrará na evidência (fonte única `coderBackendId`). Devolve `null`
+ * quando NÃO é previsível com honestidade: sem `model` pinado o backend real cai num fallback
+ * de ambiente (o backendId divergiria), então preferimos omitir o parecer a arriscar aconselhar
+ * sobre um coder que talvez nem seja o executado. Provider desconhecido também ⇒ `null`.
+ */
+export function declaredCoderBackendId(item: WorkItem): string | null {
+  const spec = (item.intent as { execution_spec?: { coder_backend?: unknown; model?: unknown } } | null | undefined)?.execution_spec;
+  if (!spec) return null;
+  const model = typeof spec.model === 'string' && spec.model.trim().length > 0 ? spec.model : null;
+  if (!model) return null;
+  const kind = typeof spec.coder_backend === 'string' && spec.coder_backend.trim().length > 0 ? spec.coder_backend : 'ollama';
+  if (kind !== 'ollama' && kind !== 'openai') return null;
+  return coderBackendId(kind as CoderProvider, model);
+}
+
 export interface ItemGateAdvisoryInput {
   /** Comandos de gate declarados no contrato do item (via `declaredGateCommands`). */
   readonly commands: readonly string[];
-  /** Evidência de gate machine-wide (todos os itens do usuário). */
+  /** `backendId` do coder que o item vai rodar (via `declaredCoderBackendId`); `null` quando
+   * não previsível. Quando presente, um parecer do coder é anexado ao lado dos gates. */
+  readonly coderBackendId?: string | null;
+  /** Evidência machine-wide (gate E coder) de todos os itens do usuário. */
   readonly events: readonly WorkEvent[];
   readonly reserve?: InteractiveReserve;
   readonly readSnapshot?: () => MachineSnapshotV1;
 }
 
-/** Compõe o advisory pré-execução dos gates declarados do item. Ao contrário de
- * `composeSupervisorResourceAdvisory`, NUNCA devolve null: sem histórico, cada gate
- * declarado vira `insufficient_evidence` — honesto e ainda útil (mostra o que o item roda). */
+/** Compõe o advisory pré-execução do item: os GATES declarados + o CODER que ele vai rodar.
+ * Ao contrário de `composeSupervisorResourceAdvisory`, NUNCA devolve null: sem histórico, cada
+ * workload declarado vira `insufficient_evidence` — honesto e ainda útil (mostra o que o item
+ * roda). Gate e coder mantêm distribuições de referência SEPARADAS (cada classe é relativa ao
+ * seu próprio tipo de workload), então a semântica gate-only do advisory de gate fica intocada
+ * e o coder é julgado "caro entre coders". */
 export function composeItemGateAdvisory(input: ItemGateAdvisoryInput): ResourceGovernorAdvisoryReport {
-  // Gate-scoped de propósito: este advisory é sobre os GATES declarados do item. O coder não
-  // é um gate declarado, então nem o parecer nem a distribuição de referência o incluem —
-  // as classes de custo aqui significam "caro entre gates", não "entre todos os workloads".
-  const observations = deriveWorkloadCostObservationsFromEvents(input.events);
+  const gateObservations = deriveWorkloadCostObservationsFromEvents(input.events);
+  const coderObservations = deriveCoderWorkloadCostObservationsFromEvents(input.events);
   const reserve = input.reserve ?? DEFAULT_INTERACTIVE_RESERVE;
   const snapshot = (input.readSnapshot ?? readMachineSnapshot)();
+  const gateAdvisories = adviseDeclaredGates({ commands: input.commands, observations: gateObservations, snapshot, reserve });
+  // Parecer do coder com distribuição de referência PRÓPRIA (só coder): não altera as classes
+  // dos gates. `null` quando o backendId não é previsível — nenhum parecer inventado.
+  const coderAdvisory = adviseDeclaredCoder({ backendId: input.coderBackendId ?? null, observations: coderObservations, snapshot, reserve });
   return {
     snapshot,
     pressure: classifyMachinePressure(snapshot, reserve),
-    distribution: buildCostDistribution(observations),
-    advisories: adviseDeclaredGates({ commands: input.commands, observations, snapshot, reserve }),
+    // `distribution` headline permanece a dos gates (referência do que "caro" significa entre gates).
+    distribution: buildCostDistribution(gateObservations),
+    advisories: coderAdvisory ? [...gateAdvisories, coderAdvisory] : gateAdvisories,
   };
 }

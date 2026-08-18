@@ -198,6 +198,35 @@ export function adviseDeclaredGates(input: AdviseDeclaredGatesInput): readonly W
   return advisories;
 }
 
+export interface AdviseDeclaredCoderInput {
+  /** Identidade (`backendId` = provider:model) do coder que o item VAI rodar. `null` quando
+   * o contrato não permite prevê-la (ex.: modelo não pinado) — honestamente omitido. */
+  readonly backendId: string | null;
+  /** Observações de custo do CODER machine-wide (só coder — proveniência preservada). */
+  readonly observations: readonly WorkloadCostObservationV1[];
+  readonly snapshot: MachineSnapshotV1 | null;
+  readonly reserve?: InteractiveReserve;
+}
+
+/**
+ * Advisory ANTES de rodar para o CODER declarado do item — o análogo de `adviseDeclaredGates`
+ * para a inteligência que escreve o código (a parte tipicamente MAIS cara de um run). A
+ * distribuição de referência é a do PRÓPRIO coder (só observações de coder), então a classe
+ * significa "caro entre execuções de coder" e a semântica gate-only do advisory de gate
+ * permanece intocada. `null` quando o backendId não é previsível (contrato sem modelo pinado):
+ * honestidade em vez de um parecer sobre um workload que talvez nem seja o executado. Coder
+ * declarado mas nunca observado vira `insufficient_evidence`. Puro e determinístico.
+ */
+export function adviseDeclaredCoder(input: AdviseDeclaredCoderInput): WorkloadAdvisory | null {
+  if (typeof input.backendId !== 'string' || input.backendId.trim().length === 0) return null;
+  const reserve = input.reserve ?? DEFAULT_INTERACTIVE_RESERVE;
+  const distribution = buildCostDistribution(input.observations);
+  const profiles = projectWorkloadCostProfiles(input.observations, distribution);
+  const key: WorkloadCostProfileKey = { workloadKind: 'coder', command: input.backendId, repo: null };
+  const profile = findWorkloadCostProfile(profiles, key);
+  return { key, advisory: adviseWorkloadExecution({ profile, snapshot: input.snapshot, reserve }) };
+}
+
 /** Visão composta do Resource Governor: o read-model que a presentation/host consome. */
 export interface ResourceGovernorView {
   readonly distribution: CostDistribution;

@@ -1,4 +1,4 @@
-import { parseScopedFiles, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
+import { coderBackendId, parseScopedFiles, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 
 // ============================================================
 // Backend de código na NUVEM (OpenAI/GPT) por trás da interface CoderBackend
@@ -52,7 +52,7 @@ export class GptCoderBackend implements CoderBackend {
 
   constructor(options: GptCoderOptions = {}) {
     this.model = options.model ?? process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
-    this.id = `openai:${this.model}`;
+    this.id = coderBackendId('openai', this.model);
     this.url = options.url ?? 'https://api.openai.com/v1/responses';
     this.apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
     this.fetchImpl = options.fetchImpl ?? fetch;

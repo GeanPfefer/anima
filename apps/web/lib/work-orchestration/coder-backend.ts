@@ -35,6 +35,13 @@ export interface CoderBackend {
   edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult>;
 }
 
+/** Identidade estável de um backend de código: `provider:model`. FONTE ÚNICA — os
+ * backends reais (Ollama, OpenAI) a usam para o próprio `id`, e o Resource Governor
+ * a usa para PREVER, a partir do contrato, qual coder um item vai rodar (advisory
+ * pré-execução). Assim a evidência (`backendId` observado) e a previsão nunca divergem. */
+export type CoderProvider = 'ollama' | 'openai';
+export const coderBackendId = (provider: CoderProvider, model: string): string => `${provider}:${model}`;
+
 /** Extrai `{"files":[{path,content}]}` da resposta de um modelo, aceitando só
  * caminhos do escopo permitido. Aceita JSON puro ou embutido em texto. É o
  * parser compartilhado pelos backends de modelo (Ollama, OpenAI). */

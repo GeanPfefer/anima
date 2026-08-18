@@ -1,4 +1,5 @@
 import {
+  adviseDeclaredCoder,
   adviseDeclaredGates,
   adviseWorkloadExecution,
   adviseWorkloadProfiles,
@@ -171,6 +172,35 @@ describe('adviseDeclaredGates (advisory ANTES de rodar, sobre os gates declarado
   test('sem histórico algum → todos os declarados insufficient_evidence (honesto)', () => {
     const advisories = adviseDeclaredGates({ commands: ['x', 'y'], observations: [], snapshot: highMem });
     expect(advisories.every(a => a.advisory.recommendation === 'insufficient_evidence')).toBe(true);
+  });
+});
+
+describe('adviseDeclaredCoder (advisory ANTES de rodar, sobre o coder que o item vai rodar)', () => {
+  const coderObs = (backendId: string, durationMs: number, n: number): WorkloadCostObservationV1[] =>
+    Array.from({ length: n }, () => {
+      const built = buildWorkloadCostObservation({ workloadKind: 'coder', command: backendId, durationMs, observedAt: '2026-08-17T12:00:00.000Z', outcome: 'succeeded' });
+      if (!built.ok) throw new Error('fixture inválida');
+      return built.value;
+    });
+  // Histórico só de coder: um backend caro (84s) e um barato (2s) → distribuição própria do coder.
+  const coderHistory = [...coderObs('ollama:qwen3-coder:latest', 84_000, 4), ...coderObs('openai:gpt-5.6-terra', 2_000, 4)];
+
+  test('o coder declarado recebe parecer relativo ao histórico do PRÓPRIO coder', () => {
+    const advisory = adviseDeclaredCoder({ backendId: 'ollama:qwen3-coder:latest', observations: coderHistory, snapshot: highMem, reserve: reserve(true) });
+    expect(advisory).not.toBeNull();
+    expect(advisory!.key).toEqual({ workloadKind: 'coder', command: 'ollama:qwen3-coder:latest', repo: null });
+    // Caro entre coders + usuário ativo → janela exclusiva.
+    expect(advisory!.advisory.recommendation).toBe('machine_exclusive_recommended');
+  });
+
+  test('backendId null (contrato sem modelo pinado) → null (não aconselha um coder incerto)', () => {
+    expect(adviseDeclaredCoder({ backendId: null, observations: coderHistory, snapshot: highMem })).toBeNull();
+    expect(adviseDeclaredCoder({ backendId: '   ', observations: coderHistory, snapshot: highMem })).toBeNull();
+  });
+
+  test('coder declarado mas nunca observado → insufficient_evidence (parecer honesto, não null)', () => {
+    const advisory = adviseDeclaredCoder({ backendId: 'ollama:modelo-novo', observations: coderHistory, snapshot: highMem });
+    expect(advisory!.advisory.recommendation).toBe('insufficient_evidence');
   });
 });
 

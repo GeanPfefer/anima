@@ -1,12 +1,16 @@
 import {
+  buildHostObservedCoderEvidence,
   buildHostObservedGateEvidence,
+  type HostObservedCoderOutcome,
   type MachineSnapshotV1,
   type ObservedGateInput,
   type WorkEvent,
   type WorkItem,
 } from '@anima/core';
 import type { Json } from '@anima/types';
-import { composeHostResourceGovernorView, composeItemGateAdvisory, composeSupervisorResourceAdvisory, declaredGateCommands } from './resource-governor';
+import { composeHostResourceGovernorView, composeItemGateAdvisory, composeSupervisorResourceAdvisory, declaredCoderBackendId, declaredGateCommands } from './resource-governor';
+import { OllamaCoderBackend } from './ollama-coder';
+import { GptCoderBackend } from './gpt-coder';
 
 let seq = 0;
 const gateEvidenceEvent = (attemptId: string, gates: ObservedGateInput[], observedAt = '2026-08-17T12:00:00.000Z'): WorkEvent => {
@@ -22,6 +26,17 @@ const gateEvidenceEvent = (attemptId: string, gates: ObservedGateInput[], observ
 
 const gate = (command: string, durationMs: number): ObservedGateInput =>
   ({ label: command, command, exitCode: 0, durationMs, timedOut: false, cancelled: false });
+
+const coderEvidenceEvent = (attemptId: string, backendId: string, durationMs: number, outcome: HostObservedCoderOutcome = 'succeeded', observedAt = '2026-08-17T12:00:00.000Z'): WorkEvent => {
+  const built = buildHostObservedCoderEvidence({ workItemId: 'work-1', attemptId, approvedProposalVersion: 2, backendId, durationMs, outcome, observedAt });
+  if (!built.ok) throw new Error(`fixture inválida: ${built.explanation}`);
+  return {
+    id: `cev-${++seq}`, workItemId: 'work-1', type: 'host_observed_coder_evidence_recorded',
+    author: 'system', proposalVersion: 2,
+    payload: { data: { work_item_id: 'work-1', attempt_id: attemptId, approved_proposal_version: 2, evidence: built.value as unknown as Json } },
+    occurredAt: new Date(observedAt),
+  };
+};
 
 const snapshot = (freeMemBytes: number): MachineSnapshotV1 =>
   ({ schemaVersion: 1, capturedAt: '2026-08-17T12:00:00.000Z', observer: 'host', totalMemBytes: 16_000, freeMemBytes });
@@ -186,5 +201,65 @@ describe('declaredGateCommands + composeItemGateAdvisory (pré-execução)', () 
     const report = composeItemGateAdvisory({ commands: ['a', 'b'], events: [], readSnapshot: () => snapshot(8_000) });
     expect(report.advisories.map(a => a.key.command)).toEqual(['a', 'b']);
     expect(report.advisories.every(a => a.advisory.recommendation === 'insufficient_evidence')).toBe(true);
+  });
+
+  // --- Coder declarado no advisory pré-execução ---
+  const itemWithSpec = (spec: Record<string, unknown>): WorkItem => ({
+    id: 'work-1', userId: 'u', sourceMessageId: 'm', state: 'approved', impactLevel: 'low', capability: 'programming',
+    originalRequest: 'x', intent: { execution_spec: spec } as unknown as WorkItem['intent'],
+    proposal: { schemaVersion: 1, data: { summary: 's', objective: 'o', includedScope: [], excludedScope: [], expectedEffects: [], risks: [] } },
+    proposalVersion: 2, createdAt: new Date(), updatedAt: new Date(),
+  });
+
+  test('declaredCoderBackendId prevê provider:model do contrato; sem modelo pinado → null', () => {
+    expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'ollama', model: 'qwen3-coder:latest' }))).toBe('ollama:qwen3-coder:latest');
+    expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'openai', model: 'gpt-5.6-terra' }))).toBe('openai:gpt-5.6-terra');
+    // coder_backend ausente assume ollama (mesmo default do backendFor).
+    expect(declaredCoderBackendId(itemWithSpec({ model: 'qwen3-coder:latest' }))).toBe('ollama:qwen3-coder:latest');
+    // Sem modelo pinado, o backend real cairia num fallback de ambiente → não previsível → null.
+    expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'ollama' }))).toBeNull();
+    expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'desconhecido', model: 'x' }))).toBeNull();
+  });
+
+  test('a identidade prevista casa EXATAMENTE com o id do backend real (fonte única)', () => {
+    // Pino do acoplamento: se o formato do backendId mudar num lado, este teste falha.
+    // `fetchImpl` dummy só evita a referência ao `fetch` global no env de teste — nunca é chamado.
+    const fetchImpl = (() => Promise.reject(new Error('sem rede no teste'))) as unknown as typeof fetch;
+    expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'ollama', model: 'qwen3-coder:latest' })))
+      .toBe(new OllamaCoderBackend({ model: 'qwen3-coder:latest', fetchImpl }).id);
+    expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'openai', model: 'gpt-5.6-terra' })))
+      .toBe(new GptCoderBackend({ model: 'gpt-5.6-terra', fetchImpl }).id);
+  });
+
+  test('o coder declarado ganha parecer AO LADO dos gates, com referência de custo própria', () => {
+    // Histórico machine-wide: gates + coder com SPREAD (um caro 84s, um barato 2s) para que
+    // "caro" emerja entre coders — a distribuição do coder é relativa ao próprio coder.
+    const mixed = [
+      ...events,
+      ...Array.from({ length: 4 }, (_, i) => coderEvidenceEvent(`coder-heavy-${i}`, 'ollama:qwen3-coder:latest', 84_000)),
+      ...Array.from({ length: 4 }, (_, i) => coderEvidenceEvent(`coder-cheap-${i}`, 'openai:gpt-5.6-terra', 2_000)),
+    ];
+    const report = composeItemGateAdvisory({
+      commands: ['npm run typecheck'],
+      coderBackendId: 'ollama:qwen3-coder:latest',
+      events: mixed, readSnapshot: () => snapshot(400), // pressão alta
+    });
+    const kinds = report.advisories.map(a => a.key.workloadKind);
+    expect(kinds).toContain('gate');
+    expect(kinds).toContain('coder');
+    const coder = report.advisories.find(a => a.key.workloadKind === 'coder');
+    expect(coder!.key.command).toBe('ollama:qwen3-coder:latest');
+    // Caro entre coders + pressão alta → janela exclusiva (a semântica dos gates fica intocada).
+    expect(coder!.advisory.recommendation).toBe('machine_exclusive_recommended');
+    // O advisory de gate NÃO é afetado pela presença do coder (distribuição separada).
+    const gateOnly = composeItemGateAdvisory({ commands: ['npm run typecheck'], events, readSnapshot: () => snapshot(400) });
+    const withCoder = report.advisories.find(a => a.key.workloadKind === 'gate' && a.key.command === 'npm run typecheck');
+    const only = gateOnly.advisories.find(a => a.key.command === 'npm run typecheck');
+    expect(withCoder!.advisory.recommendation).toBe(only!.advisory.recommendation);
+  });
+
+  test('sem coderBackendId (não previsível) → só os gates, nenhum parecer de coder', () => {
+    const report = composeItemGateAdvisory({ commands: ['npm run typecheck'], events, readSnapshot: () => snapshot(8_000) });
+    expect(report.advisories.some(a => a.key.workloadKind === 'coder')).toBe(false);
   });
 });

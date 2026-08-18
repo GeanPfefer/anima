@@ -1,4 +1,4 @@
-import type { CoderBackend, CoderEditRequest, CoderEditResult, CoderWorkspace } from './coder-backend';
+import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import {
   OllamaProtocolError,
   applyEditOperations,
@@ -74,7 +74,7 @@ export class OllamaCoderBackend implements CoderBackend {
   private readonly budget: ContextBudget;
 
   constructor(private readonly options: OllamaCoderOptions) {
-    this.id = `ollama:${options.model}`;
+    this.id = coderBackendId('ollama', options.model);
     this.url = options.url ?? process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 120_000;
