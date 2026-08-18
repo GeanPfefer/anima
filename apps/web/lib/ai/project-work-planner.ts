@@ -1,6 +1,7 @@
 import type { CreateWorkProposalCommand } from '@anima/core';
 import { executeProjectTool, OPENAI_PROJECT_TOOLS } from './project-tools';
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
+import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
 
 const PLANNER_TOOL_CALL_LIMIT = 24;
 const FORCE_SUBMISSION_AFTER_EVIDENCE = 8;
@@ -162,7 +163,9 @@ export async function planExecutableProjectWork(
               // Executor e backend persistidos no contrato (ADR-001): project:anima
               // usa a worktree isolada com o backend de código local selecionável.
               executor: 'worktree',
-              coder_backend: 'ollama',
+              // Backend de código = config de DEPLOY (ANIMA_WORKTREE_CODER_BACKEND),
+              // não escolha por-proposta do usuário. Default 'ollama' (Harness não é default).
+              coder_backend: resolveConfiguredCoderBackend(),
               model: process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
               base_sha: baseSha,
               permissions: ['workspace_read', 'workspace_write_isolated'],

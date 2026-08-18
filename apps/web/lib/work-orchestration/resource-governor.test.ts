@@ -214,6 +214,8 @@ describe('declaredGateCommands + composeItemGateAdvisory (pré-execução)', () 
   test('declaredCoderBackendId prevê provider:model do contrato; sem modelo pinado → null', () => {
     expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'ollama', model: 'qwen3-coder:latest' }))).toBe('ollama:qwen3-coder:latest');
     expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'openai', model: 'gpt-5.6-terra' }))).toBe('openai:gpt-5.6-terra');
+    // deepseek-harness é selecionável por deploy → também previsível.
+    expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'deepseek-harness', model: 'qwen3-coder:latest' }))).toBe('deepseek-harness:qwen3-coder:latest');
     // coder_backend ausente assume ollama (mesmo default do backendFor).
     expect(declaredCoderBackendId(itemWithSpec({ model: 'qwen3-coder:latest' }))).toBe('ollama:qwen3-coder:latest');
     // Sem modelo pinado, o backend real cairia num fallback de ambiente → não previsível → null.

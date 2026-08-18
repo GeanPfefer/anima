@@ -20,7 +20,7 @@ import {
   type WorkloadAdvisory,
   type WorkloadCostProfileKey,
 } from '@anima/core';
-import { coderBackendId, type CoderProvider } from './coder-backend';
+import { WORKTREE_CODER_BACKENDS, coderBackendId, type CoderProvider } from './coder-backend';
 import { readMachineSnapshot } from './machine-telemetry';
 
 // Seam central host-side do Resource Governor V0 (leitura). Em vez de espalhar
@@ -173,7 +173,9 @@ export function declaredCoderBackendId(item: WorkItem): string | null {
   const model = typeof spec.model === 'string' && spec.model.trim().length > 0 ? spec.model : null;
   if (!model) return null;
   const kind = typeof spec.coder_backend === 'string' && spec.coder_backend.trim().length > 0 ? spec.coder_backend : 'ollama';
-  if (kind !== 'ollama' && kind !== 'openai') return null;
+  // Só backends do fluxo real (`backendFor`) são previsíveis — inclui deepseek-harness,
+  // agora selecionável por deploy. Provider fora do conjunto ⇒ não previsível.
+  if (!(WORKTREE_CODER_BACKENDS as readonly string[]).includes(kind)) return null;
   return coderBackendId(kind as CoderProvider, model);
 }
 

@@ -68,6 +68,24 @@ export interface CoderBackend {
 export type CoderProvider = 'ollama' | 'openai' | 'deepseek-harness';
 export const coderBackendId = (provider: CoderProvider, model: string): string => `${provider}:${model}`;
 
+/** Backends de código permitidos no fluxo real de worktree (fonte única de runtime
+ * para validar a config de deploy). Espelha `backendFor`. */
+export const WORKTREE_CODER_BACKENDS: readonly CoderProvider[] = ['ollama', 'openai', 'deepseek-harness'];
+
+/**
+ * Resolve o backend de código do worktree a partir da configuração de DEPLOY
+ * (`ANIMA_WORKTREE_CODER_BACKEND`), nunca de escolha por-proposta do usuário: qual
+ * coder roda é detalhe de INFRAESTRUTURA (como o modelo, já resolvido por env), não
+ * microgerência do usuário — o usuário autoriza o TRABALHO. Default: `ollama` (o
+ * DeepSeek Harness NÃO é default). Valor não reconhecido cai no default seguro. É a
+ * superfície dev/admin coerente para escolher a capacidade já implementada sem um
+ * dropdown cru de infraestrutura no chat.
+ */
+export function resolveConfiguredCoderBackend(env: Record<string, string | undefined> = process.env): CoderProvider {
+  const raw = env.ANIMA_WORKTREE_CODER_BACKEND?.trim();
+  return raw !== undefined && (WORKTREE_CODER_BACKENDS as readonly string[]).includes(raw) ? (raw as CoderProvider) : 'ollama';
+}
+
 /** Extrai `{"files":[{path,content}]}` da resposta de um modelo, aceitando só
  * caminhos do escopo permitido. Aceita JSON puro ou embutido em texto. É o
  * parser compartilhado pelos backends de modelo (Ollama, OpenAI). */
