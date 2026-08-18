@@ -69,17 +69,46 @@ describe('composeHarnessTask', () => {
     expect(task).toContain('Make the change, then stop.');
   });
 
-  test('no retry, carrega a evidência do host e proíbe alegar testes verdes', () => {
+  test('carriedContext is prior-attempt resumption, not internal gate retry', () => {
     const carried = {
-      isNewAttempt: true, continueFromCheckpoint: true,
-      nextStep: 'ajustar projector', remainingSteps: ['rodar teste'],
-      risks: [], touchedResources: [], previousFailures: ['npm test: 1 failing'],
+      isNewAttempt: true,
+      continueFromCheckpoint: true,
+      nextStep: 'ajustar projector',
+      remainingSteps: ['rodar teste'],
+      risks: [],
+      touchedResources: [],
+      previousFailures: ['npm test: 1 failing'],
     } as const;
+
     const task = composeHarnessTask(input({ carriedContext: carried }));
-    expect(task).toContain('retry after the host observed a gate failure');
-    expect(task).toContain('do NOT claim tests pass');
+
+    expect(task).toContain('resuming work from a previous attempt');
+    expect(task).not.toContain('retry after the host observed a gate failure');
     expect(task).toContain('npm test: 1 failing');
     expect(task).toContain('ajustar projector');
+  });
+
+  test('hostValidationFeedback is internal retry after real host gate failure', () => {
+    const feedback = {
+      failedGate: {
+        label: 'unit',
+        command: 'npm test',
+        exitCode: 1,
+        timedOut: false,
+        cancelled: false,
+      },
+      retryIndex: 1,
+      retryLimit: 1,
+    } as const;
+
+    const task = composeHarnessTask(input({ hostValidationFeedback: feedback }));
+
+    expect(task).toContain('retry after the host observed a gate failure');
+    expect(task).toContain('do NOT claim tests pass');
+    expect(task).toContain('unit');
+    expect(task).toContain('npm test');
+    expect(task).toContain('exitCode: 1');
+    expect(task).toContain('retry 1 of 1');
   });
 });
 

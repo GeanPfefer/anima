@@ -90,12 +90,42 @@ export function composeHarnessTask(input: HarnessRunTurnInput): string {
   if (carried) {
     parts.push(
       '',
-      'This is a retry after the host observed a gate failure. Use the host-observed evidence below; do NOT claim tests pass — the host re-runs the gates and decides.',
+      'You are resuming work from a previous attempt using a persisted checkpoint. This is not an internal retry of the current attempt.',
       `Next step: ${carried.nextStep}`,
     );
-    if (carried.previousFailures.length > 0) parts.push('Previous failures:', ...carried.previousFailures.map(f => `  - ${f}`));
-    if (carried.remainingSteps.length > 0) parts.push('Remaining steps:', ...carried.remainingSteps.map(s => `  - ${s}`));
+
+    if (carried.previousFailures.length > 0) {
+      parts.push(
+        'Previous attempt failures:',
+        ...carried.previousFailures.map(f => `  - ${f}`),
+      );
+    }
+
+    if (carried.remainingSteps.length > 0) {
+      parts.push(
+        'Remaining steps:',
+        ...carried.remainingSteps.map(s => `  - ${s}`),
+      );
+    }
   }
+
+  const feedback = input.hostValidationFeedback;
+  if (feedback) {
+    const gate = feedback.failedGate;
+
+    parts.push(
+      '',
+      'This is a retry after the host observed a gate failure. Use the host-observed evidence below; do NOT claim tests pass - the host re-runs the gates and decides.',
+      `Internal retry ${feedback.retryIndex} of ${feedback.retryLimit}.`,
+      'Host-observed failed gate:',
+      `  label: ${gate.label}`,
+      `  command: ${gate.command}`,
+      `  exitCode: ${gate.exitCode}`,
+      `  timedOut: ${gate.timedOut}`,
+      `  cancelled: ${gate.cancelled}`,
+    );
+  }
+
   parts.push('', 'Make the change, then stop.');
   return parts.join('\n');
 }

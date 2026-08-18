@@ -98,6 +98,25 @@ describe('DeepSeekHarnessCoderBackend — worktree enraizada', () => {
     expect(runtime.last?.includedScope).toEqual(['src/projector.js']);
     expect(runtime.last?.excludedScope).toEqual(['node_modules']);
     expect(runtime.last?.carriedContext).toEqual(carried);
+    const feedback = {
+      failedGate: {
+        label: 'unit',
+        command: 'npm test',
+        exitCode: 1,
+        timedOut: false,
+        cancelled: false,
+      },
+      retryIndex: 1,
+      retryLimit: 1,
+    } as const;
+
+    await backend.edit(
+      { ...request, hostValidationFeedback: feedback },
+      rootedWorkspace(),
+      signal,
+    );
+
+    expect(runtime.last?.hostValidationFeedback).toEqual(feedback);
     expect(runtime.last?.signal).toBe(signal);
   });
 });
