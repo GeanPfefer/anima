@@ -105,3 +105,33 @@ O `@deepseek-ai/dsh` é um app agêntico grande sobre o framework cordis, com bi
 ### Limitação pública verificada: resume de sessão no headless
 
 O profile `headless` **não** expõe flag pública de `--resume`; o resume do POC (`DSH_RESUME_SESSION_ID`) era patch em `node_modules` (proibido). O resume in-process existe (`ctx.agents.resume`), mas exigiria embedding (troca de contenção por conveniência — recusado). Portanto, no modelo de subprocesso confinado, o **retry após falha de gate observada pelo host** é feito com **sessão NOVA que recebe a evidência observada do host na tarefa** (dirigido por evidência, limitado, fail-closed, sem confiar em texto do modelo) — não literalmente a mesma sessão. Preserva a propriedade essencial do POC (retry só após gate FAIL do host) sem cruzar `node_modules` nem enfraquecer a contenção.
+
+### Resultado da ligação viva — o que foi PROVADO ao vivo (evidência)
+
+Provas empíricas locais contra o `dsh` instalado (todas em `$DSH_HOME`/cwd de scratch isolados, `workspace-write`, telemetria off — **nenhum efeito externo**):
+
+- O CLI `dsh` **boota** o profile headless neste ambiente (koffi nativo + worker threads carregam) e **falha fechado** sem credencial/rede (`MISSING_CREDENTIAL: … deepseek-official`).
+- Ollama local disponível com `qwen3-coder:latest` (e `llama3.1:8b`); a rota pi-ai `openai-completions` → `http://127.0.0.1:11434/v1` (com `apiKeyEnv` dummy — o endpoint exige o campo, ignora o valor) **conecta e o modelo responde**.
+- Configuração por `--patch` **funciona** (merge verificado por `--dump-config`): override de `agent-default-model` → Ollama, `tool-str-replace-editor` `disabled: true`.
+- O **plugin cordis local versionado** (`anima-harness-plugin.mjs`) **carrega** via `--patch` com um bare-`insert` (sem id-âncora) e `name: 'file:///…'`; seu `apply()` roda no boot (marcador durável escrito) e registra os hooks `agent/request` (temperature) e `agent/pre-step` (step budget). É a forma **pública** do temperature + step budget, sem editar `node_modules`.
+- Sessões persistem em `$DSH_HOME/sessions/<cwd-sanitizado>/session-<uuid>/session.jsonl.zstd` (JSONL **comprimido em zstd**; o Node 24 descompacta nativamente). Envelope de evento **plano** `{type, ...}`; `turn/end` = `{type:'turn/end', turn, reason: TurnEndReason}` — mapeia 1:1 para `classifyHarnessTurnEnd` do core. O flush do log **não** ocorre em saída suja (kill/erro precoce), então o host trata o log como enriquecimento e usa os **sinais de processo** como autoridade de fallback.
+
+### Bloqueio técnico honesto — protocolo de tool calls modelo↔Harness
+
+Ainda **não** foi conseguida uma execução viva end-to-end em que o modelo **complete uma tarefa de código usando as ferramentas estruturadas**. Ambos os modelos testados (`qwen3-coder:latest` e `llama3.1:8b`) — mesmo com `temperature=0` aplicado pelo plugin — **emitem a chamada de ferramenta como TEXTO** (`<function=web_search>…`, `{"type":"function","name":"runtime_context"}`) em vez de `tool_calls` estruturados, e não executam a tarefa. Como se reproduz em **dois** modelos, é um problema de **integração/config do protocolo de tool calls** (adaptador pi-ai `openai-completions` ↔ endpoint OpenAI-compat do Ollama nesta versão/ambiente), **não** específico de um modelo. É EVIDÊNCIA, não causa raiz ratificada: a causa (o adaptador envia `tools`? o Ollama devolve `tool_calls`? falta um `compat`/tools-mode?) precisa ser comprovada inspecionando o payload HTTP real. É o próximo passo técnico exato; **nada aqui é fingido como vivo**.
+
+### Ligação viva — código versionado e testado (candidato completo)
+
+A cadeia do candidato existe versionada e verde, sem importar módulo TS do dsh (spawn do subprocesso), então tipa/testa sem dsh nem Ollama no teste:
+
+- `harness/anima-harness-plugin.mjs` — plugin cordis (temperature + step budget), **provado carregando ao vivo**.
+- `harness/harness-invocation.ts` — planejador PURO do comando/`--patch`/env verificado; envelope fail-closed.
+- `harness/deepseek-harness-runtime.ts` — driver `HarnessRuntime` real por subprocesso: compõe a tarefa (com evidência do host no retry), spawna `node dsh`, cancela matando o filho, lê `turn/end` do log (zstd) com fallback nos sinais de processo. Pluga no `DeepSeekHarnessCoderBackend`.
+
+**NÃO** ratificado / **NÃO** feito neste ciclo (bloqueado pela lacuna de tool-protocol acima, que impede um consumidor vivo verde):
+
+- **Registro em `backendFor`** como backend selecionável explícito (`coder_backend: "deepseek-harness"`). O driver ainda exige opções de construção (caminho do `dsh`/plugin, URL do Ollama, modelo, spawner, fs) que a fábrica atual não injeta — fiar isso é parte desta fatia. **NÃO** vira default de forma alguma.
+- **Laço de retry no host** (coder turn → gates do host → se FAIL e há orçamento, nova sessão com a evidência observada do host → verifica de novo): muda o contrato `CoderBackend` + o laço central do `WorktreeExecutorAdapter` (alto raio) e precisa de um consumidor vivo verde para ser provado. Deferido de propósito.
+- **Prova viva end-to-end** (modelo completa tarefa via ferramentas + gates do host): bloqueada pela lacuna de tool-protocol.
+
+Continuam **não ratificados**: Harness como default, orçamento `12`, retry `1`, remoção universal de `str_replace_editor`.
