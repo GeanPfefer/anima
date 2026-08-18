@@ -135,3 +135,17 @@ A cadeia do candidato existe versionada e verde, sem importar módulo TS do dsh 
 - **Prova viva end-to-end** (modelo completa tarefa via ferramentas + gates do host): bloqueada pela lacuna de tool-protocol.
 
 Continuam **não ratificados**: Harness como default, orçamento `12`, retry `1`, remoção universal de `str_replace_editor`.
+
+### Investigação do tool-protocol — causa raiz e correção (prova viva)
+
+O bloqueio registrado como "modelos emitem tool call como texto" foi investigado por **comparação controlada** com um **proxy localhost read-only** (127.0.0.1:11500 → :11434) capturando o payload real `DSH → pi-ai → Ollama` e a resposta bruta do Ollama (artefato descartável em scratch; nenhuma credencial gravada; nenhuma rede externa).
+
+**A causa NÃO é transporte/protocolo.** O request do DSH está correto: `POST /v1/chat/completions`, `stream:true`, `temperature:0` (aplicado pelo plugin), **24 ferramentas estruturadas** (`{type:function, function:{name,description,parameters,strict}}`), `max_completion_tokens`, sem `tool_choice`; a mensagem do usuário é a tarefa exata. E o **Ollama JÁ devolve `tool_calls` ESTRUTURADAS** (`finish_reason: tool_calls`) para esse request.
+
+**A causa é a SELEÇÃO de ferramenta pelo modelo local.** Com o catálogo inteiro (24), `qwen3-coder` chamou `web_search`/`update_goal` **alucinando tarefas alheias** (segurança em JS, educação e IA) e nunca tocou nas ferramentas de arquivo. Experimento de **UMA variável** (o MESMO request, `tools` filtradas para o conjunto de arquivo/shell) → o modelo chamou `write {"file_path":"note.txt","content":"DONE"}` e **concluiu a tarefa**. Isto espelha exatamente a config vencedora do POC (só ferramentas de arquivo/shell) — o ganho não vinha só de desabilitar `str_replace_editor`, mas do **catálogo pequeno**.
+
+**Correção mínima e configurável:** o planejador (`harness-invocation.ts`) desabilita por default os plugins de ferramenta distratores (`HARNESS_FOCUSED_DISABLED_PLUGINS`: `tool-web`, `tool-goal`, `tool-ralph`, `tool-subagent*`, `tool-workflow`, `tool-todo`, `tool-skill`, `plan-mode`, `tool-jobs`) via `--patch` — reduz o catálogo de **24 → 7** (`edit/glob/grep/pwsh/read/read_image/write`). Configurável; **não é regra universal** (um modelo forte pode preferir o catálogo cheio). Regressão focada nos testes.
+
+**Prova viva** (scratch isolado, sem efeito externo): com o patch **gerado pelo planejador versionado**, o modelo criou arquivos de ponta a ponta chamando `write` — `ok.txt`=`READY`, `note.txt`=`DONE`.
+
+**Caveat honesto (não ratificado):** o sucesso de **turno único** é **variável** — o mesmo caminho às vezes narra sem agir ou emite tool call em texto (uma execução falhou em criar `result.txt`). Bate com o POC (`FIRST_PASS 0/5`): a **confiabilidade** vem do **laço de retry após gate FAIL do host** (deferido), não do turno único. Por isso o registro em `backendFor` continua deferido — um backend selecionável precisa da confiabilidade do retry.
