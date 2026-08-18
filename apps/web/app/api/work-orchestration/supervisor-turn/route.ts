@@ -53,9 +53,9 @@ export async function POST(request: Request) {
   // Coletor host-side dos gates: o executor de worktree reporta aqui os fatos brutos
   // que o host mediu ao rodar cada gate (canal do host, separado do handoff atestado).
   const gateObservations: ObservedGateInput[] = [];
-  // Coletor host-side do coder: o executor reporta aqui a duração wall-clock que o host
-  // cronometrou ao redor de `backend.edit()` (uma edição por tentativa). Array só para
-  // uniformizar com o coletor de gate; na prática tem 0 ou 1 elemento.
+  // Coletor host-side do coder: o executor reporta cada duração wall-clock que o host
+  // cronometrou ao redor de `backend.edit()`. Retries internos permanecem na mesma
+  // tentativa e podem gerar múltiplas observações; a persistência agrega o custo total.
   const coderObservations: ObservedCoderInput[] = [];
   if (explicit) {
     const item = await client.from('work_items')
@@ -177,13 +177,12 @@ export async function POST(request: Request) {
       await persistHostObservedGateEvidence(correlation, gateObservations, gateEvidenceSinkFor(client)).catch(() => undefined);
     }
 
-    // (0b) Evidência do CODER observada pelo host. Persiste a duração wall-clock que o host
-    // cronometrou ao redor de `backend.edit()` — INCLUSIVE em terminal de erro/cancelamento
-    // (a duração é fato mesmo quando a edição termina em falha; o desfecho observado a
-    // qualifica). Fail-open: gravar a observação não pode transformar uma edição
-    // bem-sucedida em falha da tentativa.
+    // (0b) Evidência do CODER observada pelo host. Persiste UMA evidência por tentativa,
+    // agregando a duração wall-clock de todas as chamadas `backend.edit()` observadas.
+    // O desfecho final qualifica o custo total. Continua FAIL-OPEN: persistir a
+    // evidência nunca altera o desfecho da tentativa nem a resposta.
     if (coderObservations.length > 0) {
-      await persistHostObservedCoderEvidence(correlation, coderObservations.at(-1) ?? null, coderEvidenceSinkFor(client)).catch(() => undefined);
+      await persistHostObservedCoderEvidence(correlation, coderObservations, coderEvidenceSinkFor(client)).catch(() => undefined);
     }
 
     if (result.terminalKind === 'result') {

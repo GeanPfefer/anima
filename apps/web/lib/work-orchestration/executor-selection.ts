@@ -3,6 +3,7 @@ import type { ObservedCoderInput, ObservedGateInput, WorkRoutingCandidateV1 } fr
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { GptCoderBackend } from './gpt-coder';
+import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from './execution';
 import { WorktreeExecutorAdapter } from './worktree-executor';
 import { runProcess } from './worktree';
@@ -76,16 +77,44 @@ const worktreeCandidate = (executorId: string, modelRef: string): WorkRoutingCan
   priority: 100,
 });
 
-const backendFor = (contract: ExecutionContract, override?: CoderBackend): CoderBackend | { readonly error: string } => {
+const backendFor = (
+  contract: ExecutionContract,
+  repoRoot: string,
+  override?: CoderBackend,
+): CoderBackend | { readonly error: string } => {
   if (override) return override;
   const kind = contract.coderBackend ?? 'ollama';
-  // Inteligências selecionáveis, ambas atrás de CoderBackend. O Supervisor não
-  // conhece nenhuma delas; a chave da OpenAI vive só no servidor.
-  if (kind === 'ollama') return new OllamaCoderBackend({ model: contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest' });
-  if (kind === 'openai') return new GptCoderBackend({ model: contract.model ?? process.env.OPENAI_MODEL });
-  // O backend determinístico (`scripted`) só entra por injeção em teste, nunca no fluxo real.
-  return { error: `Backend de código "${kind}" não é permitido no fluxo real.` };
+
+  // Intelig?ncias selecion?veis atr?s da mesma seam CoderBackend.
+  // O Supervisor continua sem conhecer detalhes de provider.
+  if (kind === 'ollama') {
+    return new OllamaCoderBackend({
+      model: contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
+    });
+  }
+
+  if (kind === 'openai') {
+    return new GptCoderBackend({
+      model: contract.model ?? process.env.OPENAI_MODEL,
+    });
+  }
+
+  if (kind === 'deepseek-harness') {
+    return createNodeDeepSeekHarnessBackend({
+      repoRoot,
+      model: contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
+    });
+  }
+
+  // O backend determin?stico (`scripted`) s? entra por inje??o em teste.
+  return { error: `Backend de c?digo "${kind}" n?o ? permitido no fluxo real.` };
 };
+
+export function gateRetryLimitForCoderBackend(kind: string | null): number {
+  // Uma ?nica corre??o interna ap?s falha ordin?ria de gate observada pelo host,
+  // no mesmo attempt/worktree. Outros backends preservam retry zero.
+  return kind === 'deepseek-harness' ? 1 : 0;
+}
 
 export function resolveExecutorRoute(
   contract: ExecutionContract,
@@ -107,15 +136,18 @@ export function resolveExecutorRoute(
   if (contract.executor === 'worktree') {
     if (contract.targetKind !== 'project' || !contract.targetReference) return err('worktree_target_invalid', 'O executor de worktree exige um alvo de projeto com referência.');
     if (!contract.baseSha || !SHA.test(contract.baseSha)) return err('worktree_base_sha_missing', 'O SHA-base autorizado não foi persistido ou é inválido.');
-    const backend = backendFor(contract, options.backendOverride);
-    if ('error' in backend) return err('coder_backend_invalid', backend.error);
     const repoRoot = options.repoRoot ?? projectRoot();
-    if (!isAbsolute(repoRoot)) return err('project_root_invalid', 'A raiz do projeto não está configurada.');
+    if (!isAbsolute(repoRoot)) return err('project_root_invalid', 'A raiz do projeto n?o est? configurada.');
+    const backend = backendFor(contract, repoRoot, options.backendOverride);
+    if ('error' in backend) return err('coder_backend_invalid', backend.error);
     const reference = contract.targetReference;
     const baseSha = contract.baseSha;
     const adapter = new WorktreeExecutorAdapter({
       targets: { resolve: ref => ref === reference ? { repoRoot, sha: baseSha } : null },
-      backend, emitCheckpoint: true, linkNodeModules: true,
+      backend,
+      emitCheckpoint: true,
+      linkNodeModules: true,
+      gateRetryLimit: gateRetryLimitForCoderBackend(contract.coderBackend),
       ...(options.gateObserver ? { onGateObserved: options.gateObserver } : {}),
       ...(options.coderObserver ? { onCoderObserved: options.coderObserver } : {}),
     });
