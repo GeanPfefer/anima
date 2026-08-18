@@ -133,4 +133,18 @@ describe('Resource Governor V0 na presentation (custo derivado dos gates, read-o
   test('sem gate observado ⇒ resourceCost omitido',()=>expect(presentWorkItem(item,[resultEvent]).resourceCost).toBeUndefined());
   test('nenhum gate ⇒ projeção null (não inventa histórico)',()=>expect(projectWorkResourceCost([resultEvent])).toBeNull());
   test('surfar custo não altera as ações disponíveis (advisory, não decisão)',()=>expect(presentWorkItem(item,[resultEvent,gateEvent]).availableActions).toEqual(presentWorkItem(item,[resultEvent]).availableActions));
+
+  // Custo do CODER host-observed no mesmo card: perfil SEPARADO do gate (chave por workloadKind).
+  const coderEv={schemaVersion:1,workItemId:'i',attemptId:'a1',approvedProposalVersion:2,backendId:'ollama-coder',durationMs:84000,outcome:'succeeded',observedAt:'2026-08-17T10:05:00Z'};
+  const coderEvent={id:'ce',workItemId:'i',type:'host_observed_coder_evidence_recorded',author:'system',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{work_item_id:'i',attempt_id:'a1',approved_proposal_version:2,origin:'host',evidence:coderEv}}} satisfies WorkEvent;
+  test('coder e gate coexistem no card como perfis distintos por workloadKind',()=>{
+    const cost=projectWorkResourceCost([resultEvent,gateEvent,coderEvent]);
+    const kinds=(cost?.profiles??[]).map(p=>p.key.workloadKind);
+    expect(kinds).toContain('gate');
+    expect(kinds).toContain('coder');
+    const coder=(cost?.profiles??[]).find(p=>p.key.workloadKind==='coder');
+    expect(coder?.key.command).toBe('ollama-coder');
+    expect(coder?.durationMedianMs).toBe(84000);
+  });
+  test('coder observado sozinho (sem gate) já surfa resourceCost',()=>expect(projectWorkResourceCost([resultEvent,coderEvent])?.profiles.some(p=>p.key.workloadKind==='coder')).toBe(true));
 });

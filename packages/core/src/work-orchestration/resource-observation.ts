@@ -1,4 +1,5 @@
 import { containsSensitiveData } from './execution-attempt';
+import { parseHostObservedCoderEvidence } from './host-observed-coder-evidence';
 import { parseHostObservedGateEvidence } from './host-observed-gate-evidence';
 import type { WorkEvent } from './types';
 import type { Json } from '@anima/types';
@@ -255,6 +256,52 @@ export function deriveWorkloadCostObservationsFromEvents(events: readonly WorkEv
       });
       if (built.ok) observations.push(built.value);
     }
+  }
+  return observations;
+}
+
+/**
+ * DERIVA observações de custo do CODER do log append-only já persistido (evidência do
+ * coder observada pelo host — reaproveita a duração wall-clock que o host cronometrou ao
+ * redor de `backend.edit()`). Uma observação por evento (uma edição de coder por tentativa),
+ * com `workloadKind: 'coder'` e `command` = `backendId` (a identidade estável do workload).
+ *
+ * Coexistência SEM mistura: a chave de perfil é `(kind, command, repo)`, então observações
+ * de coder (`kind='coder'`, `command='ollama-coder'`) formam perfis SEPARADOS das de gate
+ * (`kind='gate'`, `command='npm test'`) — proveniência preservada, workloads incompatíveis
+ * nunca somados.
+ *
+ * Cancelamento é PULADO: uma edição abortada por fora (não pelo próprio workload) tem duração
+ * arbitrária — não é amostra de custo. A evidência bruta segue persistida e recomputável; o
+ * histórico só agrega execuções que rodaram até o próprio término (succeeded/failed).
+ *
+ * É PURA e determinística do log (idempotente); tentativas distintas viram observações
+ * distintas (o histórico não é apagado nem colapsado).
+ */
+export function deriveCoderWorkloadCostObservationsFromEvents(events: readonly WorkEvent[]): readonly WorkloadCostObservationV1[] {
+  const observations: WorkloadCostObservationV1[] = [];
+  for (const event of events) {
+    if (event.type !== 'host_observed_coder_evidence_recorded') continue;
+    const data = object(object(event.payload)?.data);
+    const evidence = parseHostObservedCoderEvidence(data?.evidence);
+    if (!evidence) continue;
+    // Envelope incoerente com a evidência: descarta (não confia cegamente no persistido).
+    if (data?.work_item_id !== evidence.workItemId
+      || data?.attempt_id !== evidence.attemptId
+      || data?.approved_proposal_version !== evidence.approvedProposalVersion) {
+      continue;
+    }
+    if (evidence.outcome === 'cancelled') continue;
+    const built = buildWorkloadCostObservation({
+      workloadKind: 'coder',
+      command: evidence.backendId,
+      observedAt: evidence.observedAt,
+      durationMs: evidence.durationMs,
+      outcome: evidence.outcome === 'succeeded' ? 'succeeded' : 'failed',
+      workItemId: evidence.workItemId,
+      attemptId: evidence.attemptId,
+    });
+    if (built.ok) observations.push(built.value);
   }
   return observations;
 }

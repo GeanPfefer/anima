@@ -8,7 +8,7 @@ import { projectHostObservedEvidence, type HostObservedGitEvidenceV1 } from './h
 import { projectHostObservedGateEvidence, type HostObservedGateEvidenceV1 } from './host-observed-gate-evidence';
 import { verifyPersistedWorkResult, type WorkVerificationReport } from './work-verification';
 import { projectVerifierOpinionHistory, type VerifierOpinionV1 } from './verifier-opinion';
-import { deriveWorkloadCostObservationsFromEvents } from './resource-observation';
+import { deriveCoderWorkloadCostObservationsFromEvents, deriveWorkloadCostObservationsFromEvents } from './resource-observation';
 import { buildCostDistribution, type CostDistribution } from './resource-classification';
 import { projectWorkloadCostProfiles, type WorkloadCostProfile } from './resource-history';
 
@@ -85,18 +85,19 @@ export interface WorkPresentation { readonly item: WorkItem; readonly latestResu
   // parecer que os interpreta. Auditoria read-only; só presente quando há alguma
   // evidência observada. Nunca altera ações nem substitui a atestação por si só.
   readonly observedEvidence?:{ readonly git:HostObservedGitEvidenceV1|null; readonly gates:HostObservedGateEvidenceV1|null };
-  // Resource Governor V0 (leitura): custo derivado dos gates observados deste item —
-  // observações → perfis por comando + classe relativa à distribuição do próprio item.
-  // Auditoria read-only (EVIDÊNCIA + HISTÓRICO + CLASSIFICAÇÃO); NÃO traz advisory, que
-  // depende do snapshot vivo da máquina e vive no seam host-side. Só presente quando há
-  // ao menos um gate observado. Nunca altera ações nem decide nada.
+  // Resource Governor V0 (leitura): custo derivado dos workloads observados deste item —
+  // gates (durationMs por gate) E coder (duração wall-clock de backend.edit()) → perfis por
+  // workload + classe relativa à distribuição do próprio item. Gate e coder ficam em perfis
+  // SEPARADOS (chave por workloadKind). Auditoria read-only (EVIDÊNCIA + HISTÓRICO +
+  // CLASSIFICAÇÃO); NÃO traz advisory, que depende do snapshot vivo da máquina e vive no seam
+  // host-side. Só presente quando há ao menos um workload observado. Nunca altera ações nem decide.
   readonly resourceCost?:WorkResourceCostProjection; }
 
 export interface WorkResourceCostProjection { readonly distribution:CostDistribution; readonly profiles:readonly WorkloadCostProfile[]; }
-/** Projeta o custo de recursos deste item a partir dos gates observados pelo host. Puro
- * e read-only; `null` quando o item ainda não tem nenhum gate observado. */
+/** Projeta o custo de recursos deste item a partir dos workloads observados pelo host (gates
+ * + coder). Puro e read-only; `null` quando o item ainda não tem nenhum workload observado. */
 export function projectWorkResourceCost(events:readonly WorkEvent[]):WorkResourceCostProjection|null{
-  const observations=deriveWorkloadCostObservationsFromEvents(events);
+  const observations=[...deriveWorkloadCostObservationsFromEvents(events),...deriveCoderWorkloadCostObservationsFromEvents(events)];
   if(observations.length===0)return null;
   const distribution=buildCostDistribution(observations);
   return{distribution,profiles:projectWorkloadCostProfiles(observations,distribution)};

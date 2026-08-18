@@ -1,9 +1,13 @@
 import {
+  buildHostObservedCoderEvidence,
   buildHostObservedGateEvidence,
   buildWorkloadCostObservation,
+  deriveCoderWorkloadCostObservationsFromEvents,
   deriveWorkloadCostObservationsFromEvents,
   parseMachineSnapshot,
   parseWorkloadCostObservation,
+  projectWorkloadCostProfiles,
+  type HostObservedCoderOutcome,
   type ObservedGateInput,
   type WorkEvent,
 } from './index';
@@ -176,5 +180,95 @@ describe('deriveWorkloadCostObservationsFromEvents (semente real: durationMs de 
   test('descarta evidência cujo envelope discorda da correlação (não confia cegamente)', () => {
     const tampered = gateEvidenceEvent({ gates: [gate()], envelopeAttemptId: 'attempt-OUTRO' });
     expect(deriveWorkloadCostObservationsFromEvents([tampered])).toHaveLength(0);
+  });
+});
+
+const coderEvidenceEvent = (opts: {
+  workItemId?: string;
+  attemptId?: string;
+  version?: number;
+  backendId?: string;
+  durationMs?: number;
+  outcome?: HostObservedCoderOutcome;
+  observedAt?: string;
+  envelopeAttemptId?: string;
+}): WorkEvent => {
+  const workItemId = opts.workItemId ?? 'work-1';
+  const attemptId = opts.attemptId ?? 'attempt-1';
+  const version = opts.version ?? 2;
+  const observedAt = opts.observedAt ?? '2026-08-17T12:00:00.000Z';
+  const built = buildHostObservedCoderEvidence({
+    workItemId, attemptId, approvedProposalVersion: version,
+    backendId: opts.backendId ?? 'ollama-coder', durationMs: opts.durationMs ?? 84_000,
+    outcome: opts.outcome ?? 'succeeded', observedAt,
+  });
+  if (!built.ok) throw new Error(`fixture inválida: ${built.explanation}`);
+  return {
+    id: `cev-${++seq}`,
+    workItemId,
+    type: 'host_observed_coder_evidence_recorded',
+    author: 'system',
+    proposalVersion: version,
+    payload: {
+      data: {
+        work_item_id: workItemId,
+        attempt_id: opts.envelopeAttemptId ?? attemptId,
+        approved_proposal_version: version,
+        evidence: built.value as unknown as Json,
+      },
+    },
+    occurredAt: new Date(observedAt),
+  };
+};
+
+describe('deriveCoderWorkloadCostObservationsFromEvents (custo do coder host-observed)', () => {
+  test('deriva uma observação por evento com kind=coder e command=backendId', () => {
+    const events = [coderEvidenceEvent({ backendId: 'gpt-coder', durationMs: 12_000 })];
+    const [observation] = deriveCoderWorkloadCostObservationsFromEvents(events);
+    expect(observation).toMatchObject({ workloadKind: 'coder', command: 'gpt-coder', durationMs: 12_000, outcome: 'succeeded', observer: 'host' });
+  });
+
+  test('desfecho failed é preservado como amostra de custo', () => {
+    const [observation] = deriveCoderWorkloadCostObservationsFromEvents([coderEvidenceEvent({ outcome: 'failed', durationMs: 500 })]);
+    expect(observation?.outcome).toBe('failed');
+    expect(observation?.durationMs).toBe(500);
+  });
+
+  test('cancelamento é PULADO (medição parcial, não é amostra de custo)', () => {
+    const events = [
+      coderEvidenceEvent({ attemptId: 'a1', outcome: 'succeeded' }),
+      coderEvidenceEvent({ attemptId: 'a2', outcome: 'cancelled' }),
+    ];
+    const observations = deriveCoderWorkloadCostObservationsFromEvents(events);
+    expect(observations).toHaveLength(1);
+    expect(observations[0]!.attemptId).toBe('a1');
+  });
+
+  test('ignora eventos que não são evidência do coder e envelope discordante', () => {
+    const other: WorkEvent = { id: 'x', workItemId: 'work-1', type: 'result_submitted', author: 'system', proposalVersion: 2, payload: {}, occurredAt: new Date() };
+    expect(deriveCoderWorkloadCostObservationsFromEvents([other])).toHaveLength(0);
+    const tampered = coderEvidenceEvent({ envelopeAttemptId: 'attempt-OUTRO' });
+    expect(deriveCoderWorkloadCostObservationsFromEvents([tampered])).toHaveLength(0);
+  });
+});
+
+describe('coexistência gate + coder no histórico (sem misturar workloads)', () => {
+  test('gate e coder formam perfis SEPARADOS por workloadKind, proveniência preservada', () => {
+    const observations = [
+      ...deriveWorkloadCostObservationsFromEvents([gateEvidenceEvent({ gates: [gate({ command: 'npm test', durationMs: 2000 })] })]),
+      ...deriveCoderWorkloadCostObservationsFromEvents([coderEvidenceEvent({ backendId: 'ollama-coder', durationMs: 84_000 })]),
+    ];
+    const profiles = projectWorkloadCostProfiles(observations);
+    // Dois perfis distintos: um gate ('npm test'), um coder ('ollama-coder').
+    expect(profiles).toHaveLength(2);
+    const gateProfile = profiles.find(p => p.key.workloadKind === 'gate');
+    const coderProfile = profiles.find(p => p.key.workloadKind === 'coder');
+    expect(gateProfile?.key.command).toBe('npm test');
+    expect(coderProfile?.key.command).toBe('ollama-coder');
+    // As durações não se somam entre workloads incompatíveis: cada perfil só vê as suas.
+    expect(gateProfile?.durationMedianMs).toBe(2000);
+    expect(coderProfile?.durationMedianMs).toBe(84_000);
+    expect(gateProfile?.count).toBe(1);
+    expect(coderProfile?.count).toBe(1);
   });
 });

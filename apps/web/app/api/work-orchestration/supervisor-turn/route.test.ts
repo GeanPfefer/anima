@@ -166,7 +166,8 @@ test('terminal com histórico → advisory read-only anexado AO LADO de value (r
   auth.mockResolvedValue({ client: { from: jest.fn() }, userId: 'user-1' });
   const result = terminalResult();
   turn.mockResolvedValue(result);
-  const listEventsByType = jest.fn().mockResolvedValue({ ok: true, value: [{ id: 'e1' }] });
+  const listEventsByType = jest.fn().mockImplementation((type: string) =>
+    Promise.resolve({ ok: true, value: type === 'host_observed_gate_evidence_recorded' ? [{ id: 'g1' }] : [{ id: 'c1' }] }));
   service.mockReturnValue({ listEventsByType, listEvents: jest.fn(), getItem: jest.fn() });
   const report = { snapshot: null, pressure: 'low', distribution: { count: 3, p50Ms: 1, p90Ms: 2, maxMs: 3 }, advisories: [] };
   advisory.mockReturnValue(report);
@@ -177,9 +178,11 @@ test('terminal com histórico → advisory read-only anexado AO LADO de value (r
   const body = await res.json();
   expect(body.value).toEqual(result);            // o resultado do Supervisor não é tocado
   expect(body.resourceGovernor).toEqual(report); // o advisory viaja ao lado, não dentro
-  // Consumiu a evidência de gate MACHINE-WIDE (todos os itens), não só deste item.
+  // Consumiu a evidência de gate E de coder MACHINE-WIDE (todos os itens), não só deste item.
   expect(listEventsByType).toHaveBeenCalledWith('host_observed_gate_evidence_recorded');
-  expect(advisory).toHaveBeenCalledWith({ events: [{ id: 'e1' }] });
+  expect(listEventsByType).toHaveBeenCalledWith('host_observed_coder_evidence_recorded');
+  // Gate e coder concatenados numa única leitura machine-wide de custo.
+  expect(advisory).toHaveBeenCalledWith({ events: [{ id: 'g1' }, { id: 'c1' }] });
 });
 
 test('advisory que lança é engolido (FAIL-OPEN): value e status inalterados, sem resourceGovernor', async () => {

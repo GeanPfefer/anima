@@ -5,8 +5,10 @@ import {
   classifyMachinePressure,
   composeResourceGovernorView,
   DEFAULT_INTERACTIVE_RESERVE,
+  deriveCoderWorkloadCostObservationsFromEvents,
   deriveWorkloadCostObservationsFromEvents,
   projectWorkloadCostProfiles,
+  type WorkloadCostObservationV1,
   type CostDistribution,
   type InteractiveReserve,
   type MachinePressure,
@@ -48,8 +50,20 @@ export interface HostResourceGovernorInput {
  * snapshot vivo + reserva. Puro dado os inputs injetados; a única impureza é a leitura
  * do host, isolada atrás de `readSnapshot`. Nunca atua — devolve só o read-model.
  */
+/**
+ * Custo histórico machine-wide de TODOS os workloads observados pelo host: gates
+ * (`durationMs` por gate) + coder (duração wall-clock de `backend.edit()`). Cada fonte é
+ * uma derivação pura do log; a chave de perfil `(kind, command, repo)` mantém gate e coder
+ * como perfis SEPARADOS — coexistem sem misturar workloads incompatíveis. Novas classes de
+ * workload entram aqui conforme ganham evidência host-observed própria.
+ */
+const deriveAllWorkloadObservations = (events: readonly WorkEvent[]): readonly WorkloadCostObservationV1[] => [
+  ...deriveWorkloadCostObservationsFromEvents(events),
+  ...deriveCoderWorkloadCostObservationsFromEvents(events),
+];
+
 export function composeHostResourceGovernorView(input: HostResourceGovernorInput): ResourceGovernorView {
-  const observations = deriveWorkloadCostObservationsFromEvents(input.events);
+  const observations = deriveAllWorkloadObservations(input.events);
   const snapshot = (input.readSnapshot ?? readMachineSnapshot)();
   return composeResourceGovernorView({
     observations,
@@ -105,7 +119,7 @@ export interface SupervisorResourceAdvisoryInput {
 export function composeSupervisorResourceAdvisory(
   input: SupervisorResourceAdvisoryInput,
 ): ResourceGovernorAdvisoryReport | null {
-  const observations = deriveWorkloadCostObservationsFromEvents(input.events);
+  const observations = deriveAllWorkloadObservations(input.events);
   if (observations.length === 0) return null;
   const reserve = input.reserve ?? DEFAULT_INTERACTIVE_RESERVE;
   const snapshot = (input.readSnapshot ?? readMachineSnapshot)();
@@ -156,6 +170,9 @@ export interface ItemGateAdvisoryInput {
  * `composeSupervisorResourceAdvisory`, NUNCA devolve null: sem histórico, cada gate
  * declarado vira `insufficient_evidence` — honesto e ainda útil (mostra o que o item roda). */
 export function composeItemGateAdvisory(input: ItemGateAdvisoryInput): ResourceGovernorAdvisoryReport {
+  // Gate-scoped de propósito: este advisory é sobre os GATES declarados do item. O coder não
+  // é um gate declarado, então nem o parecer nem a distribuição de referência o incluem —
+  // as classes de custo aqui significam "caro entre gates", não "entre todos os workloads".
   const observations = deriveWorkloadCostObservationsFromEvents(input.events);
   const reserve = input.reserve ?? DEFAULT_INTERACTIVE_RESERVE;
   const snapshot = (input.readSnapshot ?? readMachineSnapshot)();
