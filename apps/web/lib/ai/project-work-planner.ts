@@ -1,7 +1,7 @@
 import type { CreateWorkProposalCommand, RequestProposalRevisionCommand, WorkItem } from '@anima/core';
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
-import { parseProposal, type ProjectWorkPlanner } from './project-work-planner-shared';
+import { parseProposal, scopeTestCommandToWorkspace, type ProjectWorkPlanner } from './project-work-planner-shared';
 import { OpenAIProjectWorkPlanner } from './project-work-planner-openai';
 import { LocalOllamaProjectWorkPlanner } from './project-work-planner-local';
 
@@ -103,7 +103,13 @@ export async function planExecutableProjectWork(
           model: process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
           base_sha: baseSha,
           permissions: ['workspace_read', 'workspace_write_isolated'],
-          validation_criteria: [{ label: proposal.validation_label, command: proposal.validation_command }],
+          // Autoridade do host: escopa um `npm test -- <arquivo>` ao workspace do
+          // included_scope, senão o gate fana-out na raiz do monorepo e reprova por
+          // "No tests found" em workspaces sem o arquivo (não afrouxa; só precisa).
+          validation_criteria: [{
+            label: proposal.validation_label,
+            command: scopeTestCommandToWorkspace(proposal.validation_command, proposal.included_scope),
+          }],
           limits: { max_attempts: 3, max_duration_minutes: 30 },
         },
       },

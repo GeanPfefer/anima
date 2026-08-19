@@ -186,7 +186,42 @@ export function includedScopeAnchoredInProject(
   });
 }
 export const safeValidationCommand = (value: string): boolean =>
-  /^npm(?:\.cmd)? (?:run (?:typecheck|test|build)(?: -- [\w./()\\:-]+)*|test(?: -- [\w./()\\:*?-]+)*)$/i.test(value.trim());
+  /^npm(?:\.cmd)? (?:run (?:typecheck|test|build)(?: --workspace=[@a-z0-9._/-]+)?(?: -- [\w./()\\:-]+)*|test(?: --workspace=[@a-z0-9._/-]+)?(?: -- [\w./()\\:*?-]+)*)$/i.test(value.trim());
+
+/**
+ * Workspace do monorepo (root package.json: `apps/*`, `packages/*`) que contém TODO
+ * o included_scope, ou null quando os caminhos cruzam workspaces, estão na raiz, ou
+ * fora de `apps/`/`packages/`. O workspace de um caminho são seus dois primeiros
+ * segmentos.
+ */
+export function workspaceForScope(includedScope: readonly string[]): string | null {
+  const workspaces = new Set<string>();
+  for (const raw of includedScope) {
+    const parts = raw.replace(/\\/g, '/').replace(/^\.\//, '').split('/');
+    if (parts.length < 2 || (parts[0] !== 'apps' && parts[0] !== 'packages')) return null;
+    workspaces.add(`${parts[0]}/${parts[1]}`);
+  }
+  return workspaces.size === 1 ? [...workspaces][0]! : null;
+}
+
+/**
+ * Escopa um comando de TESTE filtrado ao workspace do included_scope. No monorepo,
+ * `npm test -- <arquivo>` na RAIZ faz fan-out para todos os workspaces com o mesmo
+ * filtro; um workspace sem o arquivo sai 1 ("No tests found"), reprovando o gate
+ * MESMO com o coder correto — foi a causa raiz de uma prova viva falha. Escopar
+ * torna o gate executável e PRECISO; não afrouxa nada (o jest do workspace ainda
+ * exige que o teste exista e passe). Já escopado, sem filtro, ou escopo ambíguo →
+ * inalterado (o host mantém a autoridade, mas não adivinha).
+ */
+export function scopeTestCommandToWorkspace(command: string, includedScope: readonly string[]): string {
+  const trimmed = command.trim();
+  if (/--workspace=/i.test(trimmed)) return trimmed;
+  const match = /^(npm(?:\.cmd)?) (?:run )?test (-- .+)$/i.exec(trimmed);
+  if (!match) return trimmed;
+  const workspace = workspaceForScope(includedScope);
+  if (!workspace) return trimmed;
+  return `${match[1]} test --workspace=${workspace} ${match[2]}`;
+}
 
 /** Valida e normaliza os argumentos BRUTOS do modelo — AUTORIDADE DO HOST. Rejeita
  * fail-closed qualquer coisa fora dos limites permitidos (escopo, path, comando). */

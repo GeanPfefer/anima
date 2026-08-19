@@ -10,6 +10,7 @@ import {
   LocalOllamaProjectWorkPlanner,
   type ProjectWorkPlanner,
 } from './project-work-planner';
+import { workspaceForScope, scopeTestCommandToWorkspace, safeValidationCommand } from './project-work-planner-shared';
 
 const base: CreateWorkProposalCommand = {
   sourceMessageId: 'message-1',
@@ -53,6 +54,53 @@ describe('resolveConfiguredProjectPlannerProvider — config de deploy', () => {
   test('a factory cria o tipo certo conforme a config', () => {
     expect(createConfiguredProjectPlanner({})).toBeInstanceOf(OpenAIProjectWorkPlanner);
     expect(createConfiguredProjectPlanner({ ANIMA_PROJECT_PLANNER_PROVIDER: 'local' })).toBeInstanceOf(LocalOllamaProjectWorkPlanner);
+  });
+});
+
+describe('escopo de gate no monorepo — causa raiz do fan-out', () => {
+  test('workspaceForScope: único workspace, cruzamento/raiz/fora → null', () => {
+    expect(workspaceForScope(['apps/web/a.ts', 'apps/web/b/c.ts'])).toBe('apps/web');
+    expect(workspaceForScope(['packages/core/x.ts'])).toBe('packages/core');
+    expect(workspaceForScope(['apps/web/a.ts', 'packages/core/b.ts'])).toBeNull();
+    expect(workspaceForScope(['README.md'])).toBeNull();
+    expect(workspaceForScope(['docs/x/y.ts'])).toBeNull();
+  });
+
+  test('scopeTestCommandToWorkspace: escopa test filtrado; preserva o resto', () => {
+    expect(scopeTestCommandToWorkspace('npm test -- coder-backend.test.ts', ['apps/web/lib/x.ts']))
+      .toBe('npm test --workspace=apps/web -- coder-backend.test.ts');
+    // já escopado → inalterado
+    expect(scopeTestCommandToWorkspace('npm test --workspace=apps/web -- x.test.ts', ['apps/web/x.ts']))
+      .toBe('npm test --workspace=apps/web -- x.test.ts');
+    // sem filtro → inalterado (bare test; não sofre fan-out por filtro ausente)
+    expect(scopeTestCommandToWorkspace('npm test', ['apps/web/x.ts'])).toBe('npm test');
+    // typecheck/build → inalterado
+    expect(scopeTestCommandToWorkspace('npm run typecheck', ['apps/web/x.ts'])).toBe('npm run typecheck');
+    // escopo ambíguo → inalterado (host não adivinha)
+    expect(scopeTestCommandToWorkspace('npm test -- x.test.ts', ['apps/web/a.ts', 'packages/core/b.ts']))
+      .toBe('npm test -- x.test.ts');
+  });
+
+  test('safeValidationCommand aceita a forma escopada por workspace', () => {
+    expect(safeValidationCommand('npm test --workspace=apps/web -- coder-backend.test.ts')).toBe(true);
+    expect(safeValidationCommand('npm run typecheck --workspace=apps/web')).toBe(true);
+  });
+
+  test('orquestrador: escopa a validação da proposta ao workspace do included_scope', async () => {
+    const result = await planExecutableProjectWork('faça', base, fakePlanner(validArgs()));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const spec = (result.command.intent as { execution_spec: { validation_criteria: Array<{ command: string }> } }).execution_spec;
+    expect(spec.validation_criteria[0]!.command).toBe('npm test --workspace=apps/web -- coder-backend.test.ts');
+  });
+
+  test('orquestrador: escopo ambíguo mantém o comando original (fail-safe, não adivinha)', async () => {
+    const args = validArgs({ included_scope: ['apps/web/a.ts', 'packages/core/b.ts'] });
+    const result = await planExecutableProjectWork('faça', base, fakePlanner(args));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const spec = (result.command.intent as { execution_spec: { validation_criteria: Array<{ command: string }> } }).execution_spec;
+    expect(spec.validation_criteria[0]!.command).toBe('npm test -- coder-backend.test.ts');
   });
 });
 
