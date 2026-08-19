@@ -88,6 +88,39 @@ describe('Node Harness runtime edge', () => {
     }
   });
 
+  test('spawner captura stderr limitado de um processo que falha (observabilidade)', async () => {
+    const spawner = createNodeHarnessSpawner();
+
+    const result = await spawner.run({
+      command: process.execPath,
+      args: ['-e', "process.stderr.write('boom-diagnostic'); process.exit(3)"],
+      cwd: process.cwd(),
+      env: { DSH_HOME: 'isolated-home' },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.exitCode).toBe(3);
+    expect(result.hostAborted).toBe(false);
+    expect(result.stderrTail).toContain('boom-diagnostic');
+    expect(result.spawnError).toBeUndefined();
+  });
+
+  test('spawner reporta spawnError quando o processo nem inicia (ENOENT)', async () => {
+    const spawner = createNodeHarnessSpawner();
+
+    const result = await spawner.run({
+      command: 'anima-inexistente-xyz',
+      args: [],
+      cwd: process.cwd(),
+      env: { DSH_HOME: 'isolated-home' },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.exitCode).toBe(-1);
+    expect(result.spawnError).toBeTruthy();
+    expect(String(result.spawnError)).toMatch(/ENOENT|spawn/i);
+  });
+
   test('spawner distingue cancelamento do host', async () => {
     const spawner = createNodeHarnessSpawner();
     const controller = new AbortController();

@@ -165,6 +165,13 @@ describe('DeepSeekHarnessCoderBackend — classificação do turn/end', () => {
     const backend = new DeepSeekHarnessCoderBackend({ runtime, model: 'm' });
     await expect(backend.edit(request, rootedWorkspace(), new AbortController().signal)).rejects.toThrow(/terminou em erro/);
   });
+
+  test('error com diagnóstico: a mensagem inclui o diagnóstico sanitizado antes da descrição do turno', async () => {
+    const runtime = fakeRuntime(completed({ turnEnd: { kind: 'error' }, diagnostic: 'exit 134: CSPRNG(nullptr, 0)' }));
+    const backend = new DeepSeekHarnessCoderBackend({ runtime, model: 'm' });
+    await expect(backend.edit(request, rootedWorkspace(), new AbortController().signal))
+      .rejects.toThrow(/exit 134: CSPRNG\(nullptr, 0\) — kind=error/);
+  });
 });
 
 describe('DeepSeekHarnessCoderBackend — não vaza caminho absoluto', () => {

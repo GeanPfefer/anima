@@ -125,8 +125,23 @@ export function createNodeHarnessSpawner(): HarnessSpawner {
         env: runtimeEnv as NodeJS.ProcessEnv,
         shell: false,
         windowsHide: true,
-        stdio: 'ignore',
+        // stdin/stdout ignorados; SÓ stderr é capturado — diagnóstico de falha. O
+        // stdout carrega a saída do modelo (objetivo/código) e não interessa aqui.
+        stdio: ['ignore', 'ignore', 'pipe'],
       });
+
+      // stderr é EVIDÊNCIA de host, efêmera e LIMITADA (drenamos o stream para o
+      // filho nunca bloquear, mas paramos de acumular no teto). Nunca persistido cru:
+      // o runtime o sanitiza e limita antes de qualquer mensagem observável.
+      const STDERR_CAP = 8192;
+      let stderr = '';
+      let spawnError: string | undefined;
+      if (child.stderr) {
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk: string) => {
+          if (stderr.length < STDERR_CAP) stderr += chunk;
+        });
+      }
 
       let settled = false;
       let hostAborted = false;
@@ -135,7 +150,12 @@ export function createNodeHarnessSpawner(): HarnessSpawner {
         if (settled) return;
         settled = true;
         input.signal.removeEventListener('abort', onAbort);
-        resolve({ exitCode, hostAborted });
+        resolve({
+          exitCode,
+          hostAborted,
+          ...(stderr.length > 0 ? { stderrTail: stderr.slice(-STDERR_CAP) } : {}),
+          ...(spawnError ? { spawnError } : {}),
+        });
       };
 
       const onAbort = (): void => {
@@ -149,7 +169,10 @@ export function createNodeHarnessSpawner(): HarnessSpawner {
         input.signal.addEventListener('abort', onAbort, { once: true });
       }
 
-      child.on('error', () => finish(-1));
+      child.on('error', error => {
+        spawnError = error instanceof Error ? error.message : String(error);
+        finish(-1);
+      });
       child.on('close', code => finish(code));
     }),
   };

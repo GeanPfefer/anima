@@ -106,6 +106,12 @@ export interface HarnessRunTurnResult {
   readonly sessionId: string;
   readonly turnEnd: HarnessTurnEnd;
   readonly steps?: number;
+  /**
+   * Diagnóstico de falha SANITIZADO e LIMITADO (só em turno de erro). Torna a
+   * falha antes opaca ("kind=error") acionável sem vazar segredo nem transcript.
+   * O host o inclui na mensagem de erro observável (que ainda é `clip`ada a jusante).
+   */
+  readonly diagnostic?: string;
 }
 
 /** Porta do runtime do Harness: a superfície pública mínima que o adaptador dirige.
@@ -175,7 +181,12 @@ export class DeepSeekHarnessCoderBackend implements CoderBackend {
     // significam "o turno terminou"; devolve normalmente e deixa o host observar o
     // git e rodar os gates. Sucesso é decisão do host, nunca deste adaptador.
     if (outcome === 'error') {
-      throw new Error(`O turno do DeepSeek Harness terminou em erro (${describeTurnEnd(result.turnEnd)}).`);
+      // O diagnóstico sanitizado (quando houver) precede a descrição do turno para
+      // sobreviver ao `clip` do executor — "exit 134: …" é mais útil que "kind=error".
+      const diag = typeof result.diagnostic === 'string' && result.diagnostic.length > 0
+        ? `${result.diagnostic} — `
+        : '';
+      throw new Error(`O turno do DeepSeek Harness terminou em erro (${diag}${describeTurnEnd(result.turnEnd)}).`);
     }
 
     return {

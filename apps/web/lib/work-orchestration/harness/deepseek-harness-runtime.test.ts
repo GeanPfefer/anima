@@ -7,6 +7,8 @@ import {
   deriveTurnEndFromProcess,
   extractTurnEndFromLog,
   mapTurnEndReason,
+  redactHarnessPaths,
+  summarizeHarnessFailure,
   type HarnessFileSystem,
   type HarnessProcessResult,
   type HarnessSpawner,
@@ -156,7 +158,62 @@ describe('deriveTurnEndFromProcess', () => {
   });
 });
 
+describe('redactHarnessPaths / summarizeHarnessFailure — observabilidade sanitizada', () => {
+  test('redige caminhos Windows e POSIX', () => {
+    expect(redactHarnessPaths('erro em C:\\Users\\Gean\\anima-wt\\tree\\x.js:1')).toBe('erro em <path>');
+    expect(redactHarnessPaths('open C:/tmp/anima/dsh-home falhou')).toBe('open <path> falhou');
+    expect(redactHarnessPaths('at /home/gean/anima/app.ts')).toBe('at <path>');
+  });
+
+  test('resume com exit + última linha significativa, sem caminho e limitado', () => {
+    const summary = summarizeHarnessFailure({
+      exitCode: 134,
+      stderrTail:
+        'boot C:\\Users\\Gean\\dsh-home\n' +
+        'Assertion failed: ncrypto::CSPRNG(nullptr, 0)',
+    });
+    expect(summary).toContain('exit 134');
+    expect(summary).toContain('CSPRNG');
+    expect(summary).not.toContain('Gean');
+    expect(summary).not.toContain('C:\\');
+    expect((summary ?? '').length).toBeLessThanOrEqual(180);
+  });
+
+  test('spawnError entra no resumo; sem sinal útil devolve null', () => {
+    expect(summarizeHarnessFailure({ exitCode: -1, spawnError: 'spawn node ENOENT' })).toContain('ENOENT');
+    expect(summarizeHarnessFailure({ exitCode: null })).toBeNull();
+  });
+
+  test('prefere a linha de erro ao ruído final do stack do Node', () => {
+    const summary = summarizeHarnessFailure({
+      exitCode: 1,
+      stderrTail: "Error: Cannot find module 'x'\n  code: 'MODULE_NOT_FOUND'\n}\n\nNode.js v24.16.0",
+    });
+    expect(summary).toContain('MODULE_NOT_FOUND');
+    expect(summary).not.toContain('Node.js v24');
+  });
+});
+
 describe('DeepSeekHarnessRuntime.runTurn — I/O injetado', () => {
+  test('turno de ERRO (exit≠0, sem log) anexa diagnóstico sanitizado; sucesso não', async () => {
+    const errFs = fakeFs({ log: null });
+    const errResult = await runtime(errFs, fakeSpawner({
+      exitCode: 134,
+      hostAborted: false,
+      stderrTail: 'boot C:\\Users\\Gean\\dsh\nAssertion failed: ncrypto::CSPRNG(nullptr, 0)',
+    })).runTurn(input());
+    expect(errResult.turnEnd).toEqual({ kind: 'error' });
+    expect(errResult.diagnostic).toContain('exit 134');
+    expect(errResult.diagnostic).toContain('CSPRNG');
+    expect(errResult.diagnostic).not.toContain('Gean');
+
+    // Sucesso não carrega diagnóstico mesmo com stderr presente.
+    const okFs = fakeFs({ log: zstd(jsonl({ type: 'turn/end', turn: 0, reason: { kind: 'completed' } })) });
+    const okResult = await runtime(okFs, fakeSpawner({ exitCode: 0, hostAborted: false, stderrTail: 'ruido' })).runTurn(input());
+    expect(okResult.turnEnd).toEqual({ kind: 'completed' });
+    expect(okResult.diagnostic).toBeUndefined();
+  });
+
   test('escreve o patch, cria o DSH_HOME e spawna node+dsh com cwd/env/args corretos', async () => {
     const log = zstd(jsonl({ type: 'turn/end', turn: 0, reason: { kind: 'completed' } }));
     const fs = fakeFs({ log });

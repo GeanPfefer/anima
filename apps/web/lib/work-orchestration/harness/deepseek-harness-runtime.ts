@@ -26,6 +26,14 @@ export interface HarnessProcessResult {
   readonly exitCode: number | null;
   /** true quando o host abortou (matou) o filho — cancelamento do host. */
   readonly hostAborted: boolean;
+  /**
+   * stderr do filho, LIMITADO pelo host e EFÊMERO — evidência de diagnóstico que
+   * NUNCA é persistida crua. Só existe quando o spawner real a captura; alimenta
+   * `summarizeHarnessFailure` para tornar uma falha (hoje opaca) diagnosticável.
+   */
+  readonly stderrTail?: string;
+  /** Mensagem do erro de spawn (ex.: ENOENT) quando o processo nem iniciou. */
+  readonly spawnError?: string;
 }
 
 /** Spawner injetável: roda um processo até terminar, matando-o se `signal` abortar. */
@@ -182,6 +190,42 @@ export function deriveTurnEndFromProcess(result: HarnessProcessResult): HarnessT
   return { kind: 'error' };
 }
 
+/** Redige caminhos absolutos (Windows `X:\…`/`X:/…` e POSIX com ≥2 segmentos) para
+ * `<path>`, para um diagnóstico observável não vazar caminhos locais sensíveis. */
+export function redactHarnessPaths(text: string): string {
+  return text
+    .replace(/[A-Za-z]:[\\/][^\s"'<>|]*/g, '<path>')
+    .replace(/(?:\/[A-Za-z0-9._@-]+){2,}/g, '<path>');
+}
+
+/**
+ * Resumo SANITIZADO e LIMITADO de uma falha de processo do Harness. Torna uma
+ * falha hoje OPACA ("kind=error, reason=error") diagnosticável SEM vazar segredo
+ * nem despejar transcript: redige caminhos e limita o tamanho (evidência ≠
+ * classificação ≠ decisão — o stderr bruto fica só no host, efêmero). Devolve
+ * null quando não há nada útil. Usa a ÚLTIMA linha significativa (onde o erro
+ * costuma estar) precedida do código de saída.
+ */
+const ERROR_LINE = /error|failed|assert|exception|fatal|cannot|not found|ENOENT|EACCES|code:/i;
+
+export function summarizeHarnessFailure(
+  result: Pick<HarnessProcessResult, 'exitCode' | 'stderrTail' | 'spawnError'>,
+): string | null {
+  const head = typeof result.exitCode === 'number' ? `exit ${result.exitCode}` : null;
+  const lines = `${result.spawnError ?? ''}\n${result.stderrTail ?? ''}`
+    .split(/\r?\n/)
+    .map(line => redactHarnessPaths(line).trim())
+    .filter(Boolean);
+  // A ÚLTIMA linha "de erro" costuma carregar a essência (ex.: "Assertion failed:
+  // …", "code: 'MODULE_NOT_FOUND'"); um stack do Node termina em ruído ("Node.js
+  // vX"). Preferimos a última linha que casa o padrão; senão, a última não vazia.
+  const errorLines = lines.filter(line => ERROR_LINE.test(line));
+  const picked = (errorLines.length > 0 ? errorLines[errorLines.length - 1] : lines[lines.length - 1]) ?? '';
+  const detail = picked.slice(0, 140);
+  const summary = [head, detail].filter(Boolean).join(': ').slice(0, 180);
+  return summary.length > 0 ? summary : null;
+}
+
 export class DeepSeekHarnessRuntime implements HarnessRuntime {
   private readonly decompress: (buf: Buffer) => Buffer;
   constructor(private readonly options: DeepSeekHarnessRuntimeOptions) {
@@ -225,7 +269,15 @@ export class DeepSeekHarnessRuntime implements HarnessRuntime {
     const fromLog = result.hostAborted ? null : await this.readTurnEndFromLog(dshHome, input.rootPath);
     const turnEnd = fromLog ?? deriveTurnEndFromProcess(result);
 
-    return { sessionId: sessionId ?? 'harness-session-unknown', turnEnd };
+    // Só um turno de ERRO carrega diagnóstico (sanitizado e limitado). Completed/
+    // aborted não vazam stderr — o desfecho já é observável pelo log/sinal.
+    const diagnostic = turnEnd.kind === 'error' ? summarizeHarnessFailure(result) : null;
+
+    return {
+      sessionId: sessionId ?? 'harness-session-unknown',
+      turnEnd,
+      ...(diagnostic ? { diagnostic } : {}),
+    };
   }
 
   private async latestSessionId(dshHome: string, cwd: string): Promise<string | null> {
