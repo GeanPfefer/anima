@@ -99,12 +99,30 @@ export function createNodeHarnessFileSystem(): HarnessFileSystem {
 export function createNodeHarnessSpawner(): HarnessSpawner {
   return {
     run: input => new Promise<HarnessProcessResult>(resolve => {
+      // O subprocesso do Harness recebe deliberadamente um ambiente MÍNIMO: assim o
+      // coder nunca herda credenciais do processo web (OPENAI_API_KEY,
+      // DEEPSEEK_API_KEY, segredos do Supabase etc.) — essa é a razão principal.
+      //
+      // Sobre o SystemRoot no Windows (medido, não suposto): node.exe ABORTA na
+      // inicialização (exit 134, assert CSPRNG) quando SystemRoot está presente como
+      // string VAZIA; o libuv só reabastece SystemRoot no filho quando a CHAVE está
+      // AUSENTE (chave presente e vazia é mantida vazia). Como o overlay do planejador
+      // OMITE SystemRoot, o caso normal já é seguro pelo reabastecimento do libuv — não
+      // é a causa da falha viva observada, que permanece não reproduzida. Ainda assim
+      // garantimos explicitamente um SystemRoot NÃO VAZIO para não depender desse
+      // comportamento não documentado do libuv e para blindar o único modo de crash
+      // reproduzível (vazio ⇒ 134). O overlay do Harness segue autoridade das demais.
+      const winSystemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+      const runtimeEnv: Record<string, string> = {
+        ...(process.platform === 'win32' ? { SystemRoot: winSystemRoot } : {}),
+        ...input.env,
+      };
+
       const child = spawn(input.command, [...input.args], {
         cwd: input.cwd,
-        // O planner fornece somente pares string/string. O Next estreita
-        // NodeJS.ProcessEnv exigindo NODE_ENV no tipo global, embora spawn aceite
-        // normalmente um mapa de ambiente parcial em runtime.
-        env: input.env as NodeJS.ProcessEnv,
+        // Node/Next estreita ProcessEnv exigindo NODE_ENV no tipo global, embora
+        // spawn aceite normalmente este mapa parcial em runtime.
+        env: runtimeEnv as NodeJS.ProcessEnv,
         shell: false,
         windowsHide: true,
         stdio: 'ignore',
