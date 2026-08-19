@@ -16,7 +16,7 @@ import {
 } from '@anima/core';
 import { runProcess } from './worktree';
 import { ScriptedCoderBackend, type CoderBackend, type CoderEditResult, type CoderWorkspace } from './coder-backend';
-import { WorktreeExecutorAdapter, type WorktreeTargetResolver } from './worktree-executor';
+import { WorktreeExecutorAdapter, summarizeGateFailureForRetry, type WorktreeTargetResolver } from './worktree-executor';
 
 // Operações git reais podem ficar lentas sob carga paralela; folga o timeout
 // para não flakar por contenção (o padrão de 5s do jest é curto demais aqui).
@@ -515,6 +515,7 @@ describe('WorktreeExecutorAdapter — retry interno dirigido por gate do host', 
         label: 'retry gate',
         exitCode: expect.any(Number),
       }),
+      diagnostic: expect.any(String),
     }));
 
     expect(observed).toHaveLength(2);
@@ -603,4 +604,32 @@ describe('WorktreeExecutorAdapter — retry interno dirigido por gate do host', 
     await git(ctx.repo, ['branch', '-D', branch]).catch(() => undefined);
   });
 
+});
+
+describe('summarizeGateFailureForRetry', () => {
+  test('preserva diagnostico util e redige credenciais e caminhos absolutos', () => {
+    const diagnostic = summarizeGateFailureForRetry(
+      [
+        'FAIL apps/web/lib/example.test.ts',
+        'Expected: true',
+        'Received: false',
+        'OPENAI_API_KEY=sk-live-secret-value',
+        'at C:/Users/Gean/anima/apps/web/lib/example.test.ts:42',
+      ].join('\n'),
+      'Authorization: Bearer abcdefghijklmnopqrstuvwxyz',
+    );
+
+    expect(diagnostic).toContain('Expected: true');
+    expect(diagnostic).toContain('Received: false');
+    expect(diagnostic).toContain('<redacted>');
+    expect(diagnostic).toContain('<path>');
+    expect(diagnostic).not.toContain('sk-live-secret-value');
+    expect(diagnostic).not.toContain('abcdefghijklmnopqrstuvwxyz');
+    expect(diagnostic).not.toContain('C:/Users/Gean');
+    expect((diagnostic ?? '').length).toBeLessThanOrEqual(700);
+  });
+
+  test('devolve undefined sem stdout ou stderr', () => {
+    expect(summarizeGateFailureForRetry('', '')).toBeUndefined();
+  });
 });

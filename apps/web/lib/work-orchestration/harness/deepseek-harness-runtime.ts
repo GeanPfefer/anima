@@ -132,6 +132,13 @@ export function composeHarnessTask(input: HarnessRunTurnInput): string {
       `  timedOut: ${gate.timedOut}`,
       `  cancelled: ${gate.cancelled}`,
     );
+
+    if (feedback.diagnostic) {
+      parts.push(
+        'Sanitized host gate diagnostic:',
+        feedback.diagnostic,
+      );
+    }
   }
 
   parts.push('', 'Make the change, then stop.');

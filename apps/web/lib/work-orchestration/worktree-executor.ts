@@ -77,6 +77,41 @@ const opaque = (value: string): boolean => value.length > 0 && !value.includes('
 const norm = (path: string): string => path.replace(/\\/g, '/');
 const clip = (value: string, max = 120): string => value.length <= max ? value : `${value.slice(0, max)}…`;
 
+const GATE_DIAGNOSTIC_MAX = 700;
+const GATE_DIAGNOSTIC_LINES = 8;
+const GATE_SECRET_ASSIGNMENT =
+  /\b([A-Za-z0-9_]*(?:password|passwd|secret|api[-_]?key|access[-_]?token)|authorization|cookie|set-cookie|x-api-key|proxy-authorization)\b\s*[:=]\s*.*$/gi;
+const GATE_BEARER = /\bbearer\s+[a-z0-9._~+/-]{8,}=*/gi;
+const GATE_JWT = /\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\b/gi;
+const GATE_WINDOWS_PATH = /[A-Za-z]:[\\/][^\s'"<>|]*/g;
+const GATE_POSIX_PATH = /(?:\/[A-Za-z0-9._@-]+){2,}/g;
+
+export function summarizeGateFailureForRetry(
+  stdout: string,
+  stderr: string,
+): string | undefined {
+  const rawLines = `${stderr}\n${stdout}`
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  if (rawLines.length === 0) return undefined;
+
+  const sanitized = rawLines
+    .slice(-GATE_DIAGNOSTIC_LINES)
+    .map(line => line
+      .replace(GATE_SECRET_ASSIGNMENT, (_match, key: string) => `${key}=<redacted>`)
+      .replace(GATE_BEARER, 'Bearer <redacted>')
+      .replace(GATE_JWT, '<redacted>')
+      .replace(GATE_WINDOWS_PATH, '<path>')
+      .replace(GATE_POSIX_PATH, '<path>'))
+    .join('\n')
+    .slice(0, GATE_DIAGNOSTIC_MAX)
+    .trim();
+
+  return sanitized.length > 0 ? sanitized : undefined;
+}
+
 type Attach = (sequence: number, value: WorkExecutorSignalInput) => WorkExecutorSignal;
 
 export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
@@ -142,6 +177,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         exitCode: number;
         timedOut: boolean;
         cancelled: boolean;
+        diagnostic?: string;
       } | null = null;
 
       while (true) {
@@ -180,6 +216,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
                       },
                       retryIndex,
                       retryLimit: gateRetryLimit,
+                  ...(failure.diagnostic ? { diagnostic: failure.diagnostic } : {}),
                     },
                   }
                 : {}),
@@ -367,6 +404,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
               exitCode: gate.exitCode,
               timedOut: gate.timedOut,
               cancelled: gate.cancelled,
+              diagnostic: summarizeGateFailureForRetry(gate.stdout, gate.stderr),
             };
             break;
           }

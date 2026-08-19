@@ -101,6 +101,7 @@ describe('composeHarnessTask', () => {
       },
       retryIndex: 1,
       retryLimit: 1,
+      diagnostic: 'Expected: true\nReceived: false',
     } as const;
 
     const task = composeHarnessTask(input({ hostValidationFeedback: feedback }));
@@ -111,6 +112,9 @@ describe('composeHarnessTask', () => {
     expect(task).toContain('npm test');
     expect(task).toContain('exitCode: 1');
     expect(task).toContain('retry 1 of 1');
+    expect(task).toContain('Sanitized host gate diagnostic');
+    expect(task).toContain('Expected: true');
+    expect(task).toContain('Received: false');
   });
 });
 

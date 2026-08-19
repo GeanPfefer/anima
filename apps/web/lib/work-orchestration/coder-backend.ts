@@ -16,6 +16,12 @@ export interface HostValidationFeedback {
   readonly retryIndex: number;
   /** Configured internal retry limit for this execution attempt. */
   readonly retryLimit: number;
+  /**
+   * Diagnostico curto e sanitizado derivado da saida do gate pelo host.
+   * Efemero: nao e evidencia persistida, nao amplia autoridade e serve
+   * apenas para orientar o coder no retry interno da tentativa corrente.
+   */
+  readonly diagnostic?: string;
 }
 
 export interface CoderEditRequest {
