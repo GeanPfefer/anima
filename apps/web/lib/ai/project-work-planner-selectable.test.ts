@@ -222,7 +222,10 @@ describe('replanejamento de correção de proposta', () => {
     if (!result.ok) return;
 
     expect(receivedMessage).toContain('adicione diagnóstico do planner');
-    expect(receivedMessage).toContain('arquivo-antigo.ts');
+    expect(receivedMessage).not.toContain('arquivo-antigo.ts');
+    expect(receivedMessage).toContain(
+      'Não reutilize fatos da proposta anterior: ela pode estar errada ou desatualizada.',
+    );
     expect(receivedMessage).toContain('use somente o menor escopo correto');
 
     expect(result.revision.requestedChanges).toBe(

@@ -155,16 +155,15 @@ export async function planExecutableProjectWorkRevision(
   }
 
   const planningMessage = [
-    'Revise semanticamente a proposta de trabalho existente.',
-    'Produza uma proposta COMPLETA substituta; não apenas anexe o feedback ao texto anterior.',
+    'Replaneje semanticamente o trabalho a partir das fontes autoritativas abaixo.',
+    'Produza uma proposta COMPLETA substituta.',
+    'Não reutilize fatos da proposta anterior: ela pode estar errada ou desatualizada.',
+    'Investigue novamente o repositório real antes de afirmar paths, defaults ou comportamento existente.',
     '',
     'Pedido original:',
     item.originalRequest,
     '',
-    'Proposta atual:',
-    JSON.stringify(item.proposal.data),
-    '',
-    'Correção solicitada pelo usuário:',
+    'Correção mais recente solicitada pelo usuário:',
     feedback,
   ].join('\n');
 
