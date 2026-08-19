@@ -2,7 +2,9 @@ import { executeProjectTool, OPENAI_PROJECT_TOOLS } from './project-tools';
 import {
   buildPlannerUserPrompt,
   FORCE_SUBMISSION_AFTER_EVIDENCE,
+  includedScopeAnchoredInProject,
   nonBlank,
+  parseProposal,
   PLANNER_SYSTEM_INSTRUCTIONS,
   PLANNER_TOOL_CALL_LIMIT,
   SUBMIT_TOOL_NAME,
@@ -26,6 +28,7 @@ type OutputItem = {
   content?: Array<{ type?: string; text?: string }>;
 };
 type OpenAIResponse = { output?: OutputItem[]; error?: { message?: string } };
+
 
 export interface OpenAIPlannerDeps {
   readonly fetchImpl?: typeof fetch;
@@ -87,15 +90,41 @@ export class OpenAIProjectWorkPlanner implements ProjectWorkPlanner {
 
       const submitted = calls.find(call => call.name === SUBMIT_TOOL_NAME);
       if (submitted && localEvidenceCalls > 0) {
-        return { ok: true, rawArguments: submitted.arguments };
+        const parsed = parseProposal(submitted.arguments);
+
+        if (parsed && includedScopeAnchoredInProject(parsed.included_scope)) {
+          return { ok: true, rawArguments: submitted.arguments };
+        }
       }
 
       const toolOutputs = await Promise.all(calls.map(async call => {
         if (call.name === SUBMIT_TOOL_NAME) {
-          return { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify({ ok: false, error: 'Investigue o repositório antes de enviar a proposta.' }) };
+          return {
+            type: 'function_call_output',
+            call_id: call.call_id,
+            output: JSON.stringify({
+              ok: false,
+              error: localEvidenceCalls > 0
+                ? 'O included_scope não está ancorado na topologia real do repositório. Investigue os caminhos e submeta novamente.'
+                : 'Investigue o repositório antes de enviar a proposta.',
+            }),
+          };
         }
-        localEvidenceCalls += 1;
-        return { type: 'function_call_output', call_id: call.call_id, output: await this.executeTool(call.name, call.arguments) };
+
+        const output = await this.executeTool(call.name, call.arguments);
+
+        try {
+          const parsedOutput = JSON.parse(output) as { ok?: unknown };
+          if (parsedOutput.ok === true) localEvidenceCalls += 1;
+        } catch {
+          // Saída inválida nunca conta como evidência.
+        }
+
+        return {
+          type: 'function_call_output',
+          call_id: call.call_id,
+          output,
+        };
       }));
       input = [...input, ...output, ...toolOutputs];
     }

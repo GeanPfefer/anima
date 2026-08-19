@@ -5,7 +5,8 @@ jest.mock('./project-tools', () => ({
 }));
 
 import type { CreateWorkProposalCommand } from '@anima/core';
-import { planExecutableProjectWork } from './project-work-planner';
+import { OpenAIProjectWorkPlanner, planExecutableProjectWork } from './project-work-planner';
+import { executeProjectTool } from './project-tools';
 
 const base: CreateWorkProposalCommand = {
   sourceMessageId: 'message-1',
@@ -71,4 +72,177 @@ describe('planejador executável do projeto', () => {
     expect(String(spec.base_sha)).toMatch(/^[a-f0-9]{40}$/);
     expect(typeof spec.model).toBe('string');
   });
-});
+
+  test('falha de tool nao libera evidencia no planner OpenAI', async () => {
+    (executeProjectTool as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify({ ok: false, error: 'arquivo nao encontrado' }),
+    );
+
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output: [{
+            type: 'function_call',
+            call_id: 'read-fail',
+            name: 'project_read_file',
+            arguments: '{}',
+          }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output: [{
+            type: 'function_call',
+            call_id: 'submit-too-early',
+            name: 'submit_project_work_proposal',
+            arguments: JSON.stringify({
+              summary: 's',
+              objective: 'o',
+              included_scope: ['apps/web/lib/ai/project-work-planner.test.ts'],
+              excluded_scope: ['packages/core'],
+              expected_effects: ['e'],
+              risks: ['r'],
+              validation_label: 'v',
+              validation_command: 'npm test -- project-work-planner.test.ts',
+            }),
+          }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ output: [] }),
+      });
+
+    const planner = new OpenAIProjectWorkPlanner({
+      apiKey: 'test-key',
+      model: 'gpt-test',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      executeTool: executeProjectTool as jest.Mock,
+    });
+
+    const result = await planner.proposeArguments('faca');
+
+    expect(result.ok).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  test('included_scope inventado e recusado antes de virar proposta terminal', async () => {
+    const valid = {
+      summary: 'Ajuste real',
+      objective: 'Usar arquivo real',
+      included_scope: ['apps/web/lib/ai/project-work-planner.test.ts'],
+      excluded_scope: ['packages/core'],
+      expected_effects: ['teste'],
+      risks: ['baixo'],
+      validation_label: 'teste',
+      validation_command: 'npm test -- project-work-planner.test.ts',
+    };
+
+    const invented = {
+      ...valid,
+      included_scope: ['src/components/NewFeature.js'],
+    };
+
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output: [{
+            type: 'function_call',
+            call_id: 'read-1',
+            name: 'project_read_file',
+            arguments: '{}',
+          }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output: [{
+            type: 'function_call',
+            call_id: 'submit-bad',
+            name: 'submit_project_work_proposal',
+            arguments: JSON.stringify(invented),
+          }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output: [{
+            type: 'function_call',
+            call_id: 'submit-good',
+            name: 'submit_project_work_proposal',
+            arguments: JSON.stringify(valid),
+          }],
+        }),
+      });
+
+    const planner = new OpenAIProjectWorkPlanner({
+      apiKey: 'test-key',
+      model: 'gpt-test',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      executeTool: executeProjectTool as jest.Mock,
+    });
+
+    const result = await planner.proposeArguments('faca');
+
+    expect(result).toEqual({
+      ok: true,
+      rawArguments: JSON.stringify(valid),
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  test('included_scope ancorado em arquivo real continua aceito', async () => {
+    const args = {
+      summary: 'Ajuste real',
+      objective: 'Usar arquivo real',
+      included_scope: ['apps/web/lib/ai/project-work-planner.test.ts'],
+      excluded_scope: ['packages/core'],
+      expected_effects: ['teste'],
+      risks: ['baixo'],
+      validation_label: 'teste',
+      validation_command: 'npm test -- project-work-planner.test.ts',
+    };
+
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output: [{
+            type: 'function_call',
+            call_id: 'read-ok',
+            name: 'project_read_file',
+            arguments: '{}',
+          }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output: [{
+            type: 'function_call',
+            call_id: 'submit-ok',
+            name: 'submit_project_work_proposal',
+            arguments: JSON.stringify(args),
+          }],
+        }),
+      });
+
+    const planner = new OpenAIProjectWorkPlanner({
+      apiKey: 'test-key',
+      model: 'gpt-test',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      executeTool: executeProjectTool as jest.Mock,
+    });
+
+    const result = await planner.proposeArguments('faca');
+
+    expect(result).toEqual({
+      ok: true,
+      rawArguments: JSON.stringify(args),
+    });
+  });});
