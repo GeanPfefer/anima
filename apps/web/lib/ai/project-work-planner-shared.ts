@@ -87,20 +87,45 @@ export function toChatTool(tool: { name: string; description?: string; parameter
   };
 }
 
+/** Tool de submit no formato chat (planejador local Ollama). */
+export const SUBMIT_CHAT_TOOL = toChatTool({ name: SUBMIT_TOOL_NAME, description: SUBMIT_DESCRIPTION, parameters: SUBMIT_PARAMETERS });
+
 /** Ferramentas read-only + submit no formato chat (planejador local Ollama). */
 export const PLANNER_CHAT_TOOLS = [
   ...OPENAI_PROJECT_TOOLS.map(tool => toChatTool(tool)),
-  toChatTool({ name: SUBMIT_TOOL_NAME, description: SUBMIT_DESCRIPTION, parameters: SUBMIT_PARAMETERS }),
+  SUBMIT_CHAT_TOOL,
 ];
 
 export const PLANNER_SYSTEM_INSTRUCTIONS =
-  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Quando houver evidência suficiente, chame submit_project_work_proposal.';
+  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS (arrays) de strings, cada uma com pelo menos um item — nunca uma string única; excluded_scope deve listar ao menos um caminho ou área que NÃO deve ser tocada. Quando houver evidência suficiente, chame submit_project_work_proposal.';
 
 export function buildPlannerUserPrompt(message: string): string {
   return `Prepare uma proposta executável para este pedido:\n\n${message}\n\nInvestigue primeiro o repositório com as ferramentas locais (project_search, project_read_file, project_list_files, project_git_status, project_git_diff). Leia AGENTS.md e os arquivos relevantes. Não altere nada. O alvo será fixado pelo servidor como anima. Escolha somente caminhos exatos de arquivos necessários. Quando houver informação suficiente, chame submit_project_work_proposal.`;
 }
 
 export const nonBlank = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+
+/**
+ * Normaliza um quirk CONHECIDO de modelos locais: emitir uma STRING única onde o
+ * schema pede uma LISTA de strings. Envolve o escalar em `[escalar]` para os campos
+ * de lista, PRESERVANDO o conteúdo do modelo — nunca inventa itens. Campos ausentes
+ * ou vazios continuam ausentes/vazios (o host valida estrito depois). NÃO afrouxa o
+ * contrato do host: é robustez do ADAPTADOR do provedor, não da validação.
+ */
+export function coercePlannerArrayFields(rawArguments: string): string {
+  let parsed: Record<string, unknown>;
+  try {
+    const value = JSON.parse(rawArguments) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return rawArguments;
+    parsed = value as Record<string, unknown>;
+  } catch {
+    return rawArguments;
+  }
+  for (const field of ['included_scope', 'excluded_scope', 'expected_effects', 'risks']) {
+    if (nonBlank(parsed[field])) parsed[field] = [parsed[field]];
+  }
+  return JSON.stringify(parsed);
+}
 const textList = (value: unknown): value is string[] => Array.isArray(value) && value.length > 0 && value.every(nonBlank);
 
 // ---- Validação HOST-SIDE (idêntica para todos os provedores) -----------------

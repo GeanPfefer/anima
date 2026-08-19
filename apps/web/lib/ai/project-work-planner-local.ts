@@ -1,10 +1,11 @@
 import { executeProjectTool } from './project-tools';
 import {
   buildPlannerUserPrompt,
-  FORCE_SUBMISSION_AFTER_EVIDENCE,
+  coercePlannerArrayFields,
   PLANNER_CHAT_TOOLS,
   PLANNER_SYSTEM_INSTRUCTIONS,
   PLANNER_TOOL_CALL_LIMIT,
+  SUBMIT_CHAT_TOOL,
   SUBMIT_TOOL_NAME,
   timeoutSignal,
   type ProjectWorkPlanner,
@@ -37,6 +38,9 @@ export interface LocalPlannerDeps {
   readonly model?: string;
   /** Limite de TURNOS (rodadas de chat) — barreira dura contra loop do modelo. */
   readonly maxTurns?: number;
+  /** Após N chamadas de evidência, força o submit (tools = só submit). O modelo
+   * local tende a sobre-investigar; forçar mais cedo é mais confiável e barato. */
+  readonly forceAfterEvidence?: number;
 }
 
 export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
@@ -46,6 +50,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
   private readonly baseUrl: string;
   private readonly model: string;
   private readonly maxTurns: number;
+  private readonly forceAfterEvidence: number;
 
   constructor(deps: LocalPlannerDeps = {}) {
     this.fetchImpl = deps.fetchImpl ?? fetch;
@@ -53,6 +58,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
     this.baseUrl = (deps.baseUrl ?? process.env.OLLAMA_URL ?? 'http://localhost:11434').replace(/\/+$/, '');
     this.model = deps.model ?? process.env.ANIMA_PROJECT_PLANNER_MODEL ?? 'qwen3-coder:latest';
     this.maxTurns = deps.maxTurns ?? 16;
+    this.forceAfterEvidence = deps.forceAfterEvidence ?? 4;
   }
 
   async proposeArguments(message: string): Promise<PlannerProposalResult> {
@@ -63,9 +69,20 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
     let evidenceCalls = 0;
     let totalCalls = 0;
     let noProgress = 0;
+    let directedToSubmit = false;
 
     for (let turn = 0; turn < this.maxTurns; turn += 1) {
-      const forceSubmit = evidenceCalls >= FORCE_SUBMISSION_AFTER_EVIDENCE;
+      const forceSubmit = evidenceCalls >= this.forceAfterEvidence;
+      // Ao forçar, RETIRAMOS as ferramentas de investigação: o modelo só pode chamar
+      // submit. Mais robusto que tool_choice (o Ollama nem sempre o honra) e evita o
+      // loop de investigação infinita observado ao vivo com o qwen3-coder.
+      if (forceSubmit && !directedToSubmit) {
+        messages.push({
+          role: 'user',
+          content: 'Você já reuniu evidência suficiente. Pare de investigar e chame AGORA submit_project_work_proposal com todos os campos exigidos (summary, objective, included_scope, excluded_scope, expected_effects, risks, validation_label, validation_command).',
+        });
+        directedToSubmit = true;
+      }
       const response = await this.fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
         method: 'POST',
         signal: timeoutSignal(90_000),
@@ -76,7 +93,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
           stream: false,
           temperature: 0,
           messages,
-          tools: PLANNER_CHAT_TOOLS,
+          tools: forceSubmit ? [SUBMIT_CHAT_TOOL] : PLANNER_CHAT_TOOLS,
           tool_choice: forceSubmit
             ? { type: 'function', function: { name: SUBMIT_TOOL_NAME } }
             : 'auto',
@@ -112,7 +129,9 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
 
       const submitted = toolCalls.find(call => call.function?.name === SUBMIT_TOOL_NAME);
       if (submitted && evidenceCalls > 0) {
-        return { ok: true, rawArguments: argString(submitted.function?.arguments) };
+        // Normaliza o quirk escalar→lista do modelo local antes de devolver ao host
+        // (que valida estrito). NÃO inventa conteúdo nem afrouxa a validação.
+        return { ok: true, rawArguments: coercePlannerArrayFields(argString(submitted.function?.arguments)) };
       }
 
       // Espelha o turno do assistente e responde CADA tool call (o protocolo exige

@@ -81,6 +81,45 @@ describe('LocalOllamaProjectWorkPlanner', () => {
     }
   });
 
+  test('após o limiar de evidência, força o submit restringindo as tools a só submit', async () => {
+    const { impl, calls } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_list_files', '{"path":null,"contains":null}', 'e1')] },
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md","start_line":1,"end_line":5}', 'e2')] },
+      // 3ª rodada é forçada (forceAfterEvidence=2): tools = só submit → modelo submete.
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', VALID_ARGS, 's1')] },
+    ]);
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool, forceAfterEvidence: 2 });
+    const result = await planner.proposeArguments('faça');
+    expect(result).toEqual({ ok: true, rawArguments: VALID_ARGS });
+    // A requisição forçada (3ª) oferece SOMENTE a tool de submit.
+    const forcedBody = JSON.parse(String(calls[2]!.init.body)) as { tools: Array<{ function: { name: string } }>; tool_choice: unknown };
+    expect(forcedBody.tools.map(t => t.function.name)).toEqual(['submit_project_work_proposal']);
+    expect(forcedBody.tool_choice).toEqual({ type: 'function', function: { name: 'submit_project_work_proposal' } });
+  });
+
+  test('normaliza o quirk escalar→lista do modelo local (sem inventar conteúdo)', async () => {
+    const scalarArgs = JSON.stringify({
+      summary: 's', objective: 'o',
+      included_scope: 'apps/web/x.ts', // string única
+      excluded_scope: 'não tocar banco', // string única
+      expected_effects: 'efeito único', risks: 'risco único',
+      validation_label: 'v', validation_command: 'npm test -- x.test.ts',
+    });
+    const { impl } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md","start_line":1,"end_line":3}')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', scalarArgs, 'c2')] },
+    ]);
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool });
+    const result = await planner.proposeArguments('faça');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = JSON.parse(result.rawArguments) as Record<string, unknown>;
+    expect(parsed.included_scope).toEqual(['apps/web/x.ts']);
+    expect(parsed.excluded_scope).toEqual(['não tocar banco']);
+    expect(parsed.expected_effects).toEqual(['efeito único']);
+    expect(parsed.risks).toEqual(['risco único']);
+  });
+
   test('fail-closed: só conversa (sem tool call) não vira proposta', async () => {
     const { impl } = scriptedFetch([
       { role: 'assistant', content: 'Claro, posso ajudar. O que você gostaria?' },
