@@ -76,6 +76,12 @@ describe('buildHarnessPatchYaml — formato verificado ao vivo', () => {
     expect(yaml).not.toContain('- id: tool-pwsh\n');
   });
 
+  test('catálogo focado: desabilita agent-instructions (injeção de AGENTS.md/CLAUDE.md derrapa o modelo local)', () => {
+    const yaml = buildHarnessPatchYaml(base());
+    expect(yaml).toContain('- id: agent-instructions');
+    expect(HARNESS_FOCUSED_DISABLED_PLUGINS).toContain('agent-instructions');
+  });
+
   test('tool-str-replace-editor é desabilitado só uma vez mesmo se também na lista (dedup)', () => {
     const yaml = buildHarnessPatchYaml(base({ disableStrReplaceEditor: true, disabledToolPlugins: ['tool-str-replace-editor', 'tool-web'] }));
     expect(yaml.match(/- id: tool-str-replace-editor/g)?.length).toBe(1);

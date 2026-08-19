@@ -29,21 +29,33 @@ export const HARNESS_OLLAMA_API_KEY_DUMMY = 'ollama-local-nokey';
 export type HarnessPermissionMode = 'workspace-write';
 
 /**
- * Plugins de FERRAMENTA distratores desabilitados por default — a correção com
- * PROVA VIVA da lacuna de tool-protocol. O profile headless oferece 24 ferramentas;
- * um modelo local (qwen3-coder) se DERRAPA com o catálogo inteiro: com as 24, ele
- * chamou `web_search`/`update_goal` alucinando tarefas alheias; com o catálogo
- * FOCADO (edit/glob/grep/pwsh/read/read_image/write) chamou `write` e concluiu a
- * tarefa. Não é o transporte (as `tool_calls` já vinham estruturadas do Ollama):
- * é a SELEÇÃO — reduzir o catálogo refoca o modelo. Espelha a config vencedora do
- * POC (só ferramentas de arquivo/shell). Configurável; NÃO é regra universal —
- * um modelo forte pode preferir o catálogo cheio.
+ * Plugins DISTRATORES desabilitados por default no perfil focado do coder local —
+ * cada um com PROVA VIVA de que derrapa o modelo local (qwen3-coder). Configurável;
+ * NÃO é regra universal — um modelo forte pode preferir o catálogo cheio.
+ *
+ * (1) Ferramentas distratoras (correção da lacuna de tool-protocol): o profile
+ * headless oferece 24 ferramentas; com as 24 o modelo chamou `web_search`/`update_goal`
+ * alucinando tarefas alheias; com o catálogo FOCADO (edit/glob/grep/pwsh/read/
+ * read_image/write) chamou `write` e concluiu a tarefa. Não é o transporte (as
+ * `tool_calls` já vinham estruturadas do Ollama): é a SELEÇÃO — reduzir o catálogo
+ * refoca o modelo. Espelha a config vencedora do POC (só ferramentas de arquivo/shell).
+ *
+ * (2) `agent-instructions` (injeção de contexto de repo): esse plugin do headless lê
+ * AGENTS.md/CLAUDE.md/README.md do workspace (até 64KB) e os injeta como instruções.
+ * O worktree do coder é um checkout do repo Anima inteiro, cujo AGENTS.md é um ROTEADOR
+ * humano ("Antes de qualquer tarefa, leia…"). PROVA VIVA (cwd idêntico, só a presença
+ * dos docs muda): com AGENTS.md/CLAUDE.md o qwen3-coder abandonou a tarefa e respondeu
+ * "identifiquei arquivos de documentação; o que você gostaria que eu fizesse?" (0 edições);
+ * desabilitando o plugin, criou o arquivo pedido e concluiu. O host já entrega objetivo,
+ * escopo e restrições EXPLICITAMENTE via composeHarnessTask — o coder focado não precisa
+ * dos docs de onboarding do repo, e um modelo pequeno se perde neles.
  */
 export const HARNESS_FOCUSED_DISABLED_PLUGINS: readonly string[] = [
   'tool-web', 'tool-goal', 'tool-ralph',
   'tool-subagent', 'tool-subagent-fork', 'tool-subagent-control',
   'tool-subagent-list-agents', 'tool-subagent-report',
   'tool-workflow', 'tool-todo', 'tool-skill', 'plan-mode', 'tool-jobs',
+  'agent-instructions',
 ];
 
 export interface HarnessInvocationInput {
