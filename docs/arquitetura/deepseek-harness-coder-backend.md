@@ -187,3 +187,52 @@ Contrato real (`coder_backend: deepseek-harness`, `executor: worktree`, `model: 
 - **Accounting do coder:** `durationMs` soma turns e `outcome` = último turn; um cancelamento final pode fazer o Resource Governor subcontar trabalho anterior. **Não** afirmar accounting exato enquanto isso existir.
 - **Env do subprocesso — `pwsh` PROVADO sob o env mínimo (2026-08-18 4ª):** investigação determinística refutou a suspeita anterior. O `dsh-pwsh-local` resolve o executável por **caminho absoluto** (`SystemRoot ?? "C:\\Windows"` → `...\System32\WindowsPowerShell\v1.0\powershell.exe`), então o PowerShell é encontrado mesmo sem `PATH`/`SystemRoot` no env. Prova viva: `dsh` headless spawnado EXATAMENTE como o spawner do Anima (env = só os 4 vars do planejador, `shell:false`) com tarefa que força a ferramenta `pwsh` → o modelo chamou `pwsh`, o PowerShell 5.1 rodou `Get-Location` e devolveu o cwd real, **exit 0**. Conclusão: o `pwsh` funciona para operações NATIVAS do PowerShell sob o env atual; **nenhuma mudança de env é necessária**. Resíduo honesto: um comando `pwsh` que invoque EXECUTÁVEIS EXTERNOS (git/npm/node) via `PATH` falharia (PATH vazio) — mas o coder não deve rodar gates (o host roda). Não mexer no env sem evidência de necessidade real.
 - **`child.kill()`** pode não matar toda a árvore de descendentes no Windows; investigar só se uma prova real mostrar processo órfão.
+
+---
+
+## Atualização 2026-08-19 — Causa raiz REAL do no-op no fluxo real: `agent-instructions`; correção honesta do "SystemRoot"
+
+Sessão de PROVA. Objetivo: repetir a prova viva do fluxo real após a falha viva pela UI (item `c6b9f1ab`, attempt `a29507f0`: `execution_failed`, `durationMs≈102`, sem sessão). O handoff atribuía a falha a `SystemRoot` ausente. **A investigação viva refutou essa causa e encontrou a verdadeira.**
+
+### Correção do diagnóstico do "SystemRoot" (hipótese ≠ causa raiz)
+
+Medido nesta máquina (Windows, Node 24, spawn `shell:false`):
+
+- **libuv reabastece `SystemRoot`** no filho a partir do processo pai **quando a CHAVE está AUSENTE** — o env mínimo do planejador (que **omite** `SystemRoot`) já produz um filho com `SystemRoot=C:\Windows`. `crypto.randomUUID()/randomBytes()` sob esse env → **exit 0**.
+- O crash `node exit 134` (assert `InitializeOncePerProcess`/CSPRNG) só ocorre com `SystemRoot` **presente e VAZIO** (a chave existe como string vazia; libuv não reabastece). O planejador nunca faz isso.
+- Logo, a correção `SystemRoot` do handoff, na forma original, era **no-op** para o caminho de produção. O commit foi **reescrito honestamente**: a borda passa a garantir explicitamente um `SystemRoot` **não vazio** (`process.env.SystemRoot || process.env.windir || 'C:\Windows'`) como blindagem defensiva do único modo de crash reproduzível — **não** como causa da falha viva observada (que **não reproduz**). O valor real do commit é o **isolamento de credenciais** (env mínimo; regressão injeta `OPENAI_API_KEY`/`DEEPSEEK_API_KEY` reais no pai e prova que o filho não as vê).
+
+### Causa raiz REAL do no-op: plugin `agent-instructions`
+
+O perfil `headless` do DSH habilita `@deepseek-ai/dsh-agent-instructions`, que lê **`AGENTS.md`/`CLAUDE.md`/`README.md`** do workspace (até 64KB) e os injeta como instruções do agente. O worktree do coder é um checkout do **repo Anima inteiro**, cujo `AGENTS.md` é um **roteador humano** ("Antes de qualquer tarefa, leia…").
+
+**Prova viva isolada** (mesmo cwd pequeno; só a presença dos docs muda):
+
+| cwd | `agent-instructions` | Resultado |
+|---|---|---|
+| só `README.md` | habilitado | **criou** o arquivo pedido, exit 0 |
+| `+ AGENTS.md + CLAUDE.md` | habilitado | **0 edições** — "identifiquei arquivos de documentação; o que você gostaria que eu fizesse?" |
+| `+ AGENTS.md + CLAUDE.md` | **desabilitado** | **criou** o arquivo pedido, exit 0 |
+
+Isso explica por que o coder **no-op no fluxo real** (worktree do repo inteiro) enquanto **agia num cwd vazio** — o `durationMs` real (7–55 s, nunca 102 ms) mostra que o crash instantâneo do handoff **não** é o modo de falha atual; o modo atual era o modelo **narrar sem agir**, derrapado pelos docs injetados.
+
+**Correção (versionada, só config):** `agent-instructions` entra em `HARNESS_FOCUSED_DISABLED_PLUGINS`, desabilitado via overlay `--patch` — o mesmo mecanismo dos plugins-distratores de ferramenta, **sem editar `node_modules`**. O host já entrega objetivo, escopo e restrições **explicitamente** via `composeHarnessTask`; o coder focado não precisa dos docs de onboarding do repo. **Configurável; não é regra universal** — um modelo forte pode se beneficiar dos docs.
+
+### Prova viva do fluxo REAL após a correção (scratch isolado, sem efeito externo)
+
+`WorktreeExecutorAdapter` (host) + worktree isolada do **repo Anima@HEAD** + `createNodeDeepSeekHarnessBackend` (DSH rc.7 + Ollama `qwen3-coder:latest`), `gateRetryLimit: 1`, `linkNodeModules`, `emitCheckpoint`:
+
+- coder REAL editou **dentro do escopo** (`durationMs` real, sessão criada);
+- host observou `changedFiles` (git) e o **coder** (`deepseek-harness:qwen3-coder:latest`, `succeeded`);
+- **gate `npm test` do host passou** (exit 0);
+- checkpoint + `result` com **handoff durável** (`status: succeeded`);
+- **Verifier = `verified`** (`correlation_verified`, `branch_ownership_verified`, `scope_respected`, `status_coherent`, `gates_independently_observed`, `criterion_covered`);
+- **nada aplicado/integrado** (worktree e branch descartáveis; original intacto).
+
+Também observado (rodada anterior, antes do fix estar no default): quando o modelo **não** produziu mudança, o executor rejeitou fail-closed ("nenhuma alteração para revisão") e o **retry interno disparou** (2 observações de coder) — o host permanece autoridade.
+
+### Limitações / resíduos honestos
+
+- A falha viva original (`durationMs≈102`, sem sessão) **não reproduz**; sua causa exata permanece não confirmada (possivelmente transitória). A blindagem `SystemRoot` cobre o único crash reproduzível, mas não é prova de que era a causa.
+- **Observabilidade ainda é o próximo recorte elegível:** o spawner usa `stdio:'ignore'` e `child.on('error', …)` — stderr/erro de spawn são descartados, o que tornou a falha viva opaca e levou a uma diagnose inicial errada. Capturar stderr **sanitizado e limitado** (sem despejar transcript/segredo em `work_events`; evidência ≠ classificação ≠ decisão) tornaria a próxima falha diagnosticável.
+- Retry **vivo** FAIL→PASS do LLM continua não exercido de ponta a ponta (o modelo, quando age, resolve em um turno); coberto pelas regressões de integração do `worktree-executor`/Verifier.
