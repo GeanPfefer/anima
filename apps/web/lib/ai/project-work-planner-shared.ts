@@ -1,3 +1,6 @@
+import { existsSync, statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { projectRoot } from '@/lib/work-orchestration/executor-selection';
 import { OPENAI_PROJECT_TOOLS } from './project-tools';
 
 // ============================================================
@@ -148,6 +151,40 @@ export const safePath = (value: string): boolean => {
 };
 
 /** Um único comando npm de test/typecheck/build da allowlist. */
+
+/**
+ * Ancora o included_scope na topologia REAL do checkout autorizado.
+ *
+ * - arquivo existente: permitido;
+ * - arquivo novo: permitido somente se o diretório-pai já existir;
+ * - diretório inexistente/inventado: rejeitado fail-closed.
+ *
+ * Segurança sintática continua em safePath; esta checagem é de realidade do repo.
+ */
+export function includedScopeAnchoredInProject(
+  paths: readonly string[],
+  repoRoot: string = projectRoot(),
+): boolean {
+  return paths.every(path => {
+    if (!safePath(path)) return false;
+
+    const target = resolve(repoRoot, path);
+
+    try {
+      if (existsSync(target)) return statSync(target).isFile();
+    } catch {
+      return false;
+    }
+
+    const parent = dirname(target);
+
+    try {
+      return existsSync(parent) && statSync(parent).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+}
 export const safeValidationCommand = (value: string): boolean =>
   /^npm(?:\.cmd)? (?:run (?:typecheck|test|build)(?: -- [\w./()\\:-]+)*|test(?: -- [\w./()\\:*?-]+)*)$/i.test(value.trim());
 

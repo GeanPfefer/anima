@@ -135,4 +135,103 @@ describe('LocalOllamaProjectWorkPlanner', () => {
     const result = await planner.proposeArguments('faça');
     expect(result).toEqual({ ok: false, message: 'ollama fora' });
   });
-});
+
+  test('timeout do modelo local é distinguido sem vazar detalhes da requisição', async () => {
+    const impl = (async () => {
+      const error = new Error('segredo-nao-deve-aparecer');
+      error.name = 'TimeoutError';
+      throw error;
+    }) as unknown as typeof fetch;
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool });
+    const result = await planner.proposeArguments('faça');
+    expect(result).toEqual({
+      ok: false,
+      message: 'O planejador local excedeu o tempo limite de 90 segundos em uma rodada do modelo.',
+    });
+    expect(JSON.stringify(result)).not.toContain('segredo-nao-deve-aparecer');
+  });
+
+  test('falha de transporte local permanece sanitizada', async () => {
+    const impl = (async () => {
+      throw new Error('http://usuario:senha@host-interno');
+    }) as unknown as typeof fetch;
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool });
+    const result = await planner.proposeArguments('faça');
+    expect(result).toEqual({
+      ok: false,
+      message: 'Não foi possível comunicar com o modelo local durante o planejamento.',
+    });
+    expect(JSON.stringify(result)).not.toContain('senha');
+  });
+
+  test('tool com falha nao conta como evidencia para liberar submit', async () => {
+    const failingEvidence = async () => JSON.stringify({ ok: false, error: 'nao encontrado' });
+
+    const { impl } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md","start_line":1,"end_line":5}')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', VALID_ARGS, 's2')] },
+    ]);
+
+    const planner = new LocalOllamaProjectWorkPlanner({
+      fetchImpl: impl,
+      executeTool: failingEvidence,
+      maxTurns: 2,
+    });
+
+    const result = await planner.proposeArguments('faça');
+    expect(result.ok).toBe(false);
+  });
+
+  test('rejeita included_scope inventado em diretorio inexistente', async () => {
+    const invented = JSON.stringify({
+      summary: 'Nova feature',
+      objective: 'Criar feature inventada',
+      included_scope: ['src/components/NewFeature.js'],
+      excluded_scope: ['src/components/SensitiveData.js'],
+      expected_effects: ['feature'],
+      risks: ['erro'],
+      validation_label: 'tests',
+      validation_command: 'npm run test',
+    });
+
+    const { impl } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md","start_line":1,"end_line":5}')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', invented, 's2')] },
+    ]);
+
+    const planner = new LocalOllamaProjectWorkPlanner({
+      fetchImpl: impl,
+      executeTool: evidenceTool,
+      maxTurns: 2,
+    });
+
+    const result = await planner.proposeArguments('faça');
+    expect(result.ok).toBe(false);
+  });
+
+  test('aceita arquivo novo quando o diretorio-pai real existe', async () => {
+    const newFile = JSON.stringify({
+      summary: 'Diagnostico',
+      objective: 'Adicionar diagnostico',
+      included_scope: ['apps/web/lib/ai/new-planner-diagnostic.ts'],
+      excluded_scope: ['apps/web/lib/ai/project-work-planner-openai.ts'],
+      expected_effects: ['diagnostico'],
+      risks: ['baixo'],
+      validation_label: 'tests',
+      validation_command: 'npm run test',
+    });
+
+    const { impl } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md","start_line":1,"end_line":5}')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', newFile, 's2')] },
+    ]);
+
+    const planner = new LocalOllamaProjectWorkPlanner({
+      fetchImpl: impl,
+      executeTool: evidenceTool,
+      maxTurns: 2,
+    });
+
+    const result = await planner.proposeArguments('faça');
+    expect(result.ok).toBe(true);
+  });});

@@ -2,6 +2,8 @@ import { executeProjectTool } from './project-tools';
 import {
   buildPlannerUserPrompt,
   coercePlannerArrayFields,
+  includedScopeAnchoredInProject,
+  parseProposal,
   PLANNER_CHAT_TOOLS,
   PLANNER_SYSTEM_INSTRUCTIONS,
   PLANNER_TOOL_CALL_LIMIT,
@@ -83,26 +85,42 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
         });
         directedToSubmit = true;
       }
-      const response = await this.fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
-        method: 'POST',
-        signal: timeoutSignal(90_000),
-        // SEM Authorization: o endpoint é o Ollama local; nenhum segredo é enviado.
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.model,
-          stream: false,
-          temperature: 0,
-          messages,
-          tools: forceSubmit ? [SUBMIT_CHAT_TOOL] : PLANNER_CHAT_TOOLS,
-          tool_choice: forceSubmit
-            ? { type: 'function', function: { name: SUBMIT_TOOL_NAME } }
-            : 'auto',
-        }),
-      }).catch(() => null);
+      let response: Response | null = null;
+      let transportFailure: unknown = null;
+      try {
+        response = await this.fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
+          method: 'POST',
+          signal: timeoutSignal(90_000),
+          // SEM Authorization: o endpoint é o Ollama local; nenhum segredo é enviado.
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: this.model,
+            stream: false,
+            temperature: 0,
+            messages,
+            tools: forceSubmit ? [SUBMIT_CHAT_TOOL] : PLANNER_CHAT_TOOLS,
+            tool_choice: forceSubmit
+              ? { type: 'function', function: { name: SUBMIT_TOOL_NAME } }
+              : 'auto',
+          }),
+        });
+      } catch (error) {
+        transportFailure = error;
+      }
 
       if (!response?.ok) {
+        if (transportFailure) {
+          const name = transportFailure instanceof Error ? transportFailure.name : '';
+          const timedOut = name === 'AbortError' || name === 'TimeoutError';
+          return {
+            ok: false,
+            message: timedOut
+              ? 'O planejador local excedeu o tempo limite de 90 segundos em uma rodada do modelo.'
+              : 'Não foi possível comunicar com o modelo local durante o planejamento.',
+          };
+        }
         const details = response ? await response.json().catch(() => null) as ChatResponse | null : null;
-        return { ok: false, message: details?.error?.message ?? 'Não foi possível planejar o trabalho com o modelo local.' };
+        return { ok: false, message: details?.error?.message ?? 'O modelo local recusou a requisição de planejamento sem fornecer detalhes.' };
       }
       const body = await response.json() as ChatResponse;
       const assistant = body.choices?.[0]?.message;
@@ -129,9 +147,39 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
 
       const submitted = toolCalls.find(call => call.function?.name === SUBMIT_TOOL_NAME);
       if (submitted && evidenceCalls > 0) {
-        // Normaliza o quirk escalar→lista do modelo local antes de devolver ao host
-        // (que valida estrito). NÃO inventa conteúdo nem afrouxa a validação.
-        return { ok: true, rawArguments: coercePlannerArrayFields(argString(submitted.function?.arguments)) };
+        // Normaliza o quirk escalar→lista e valida a proposta ainda no adapter local.
+        // O host autoritativo revalida depois em planExecutableProjectWork.
+        const rawArguments = coercePlannerArrayFields(argString(submitted.function?.arguments));
+        const parsed = parseProposal(rawArguments);
+
+        if (parsed && includedScopeAnchoredInProject(parsed.included_scope)) {
+          return { ok: true, rawArguments };
+        }
+
+        // Mantém a conversa viva: o modelo precisa investigar/corrigir o escopo
+        // em vez de transformar caminhos inventados em proposta executável.
+        messages.push({
+          role: 'assistant',
+          content: assistant.content ?? '',
+          tool_calls: toolCalls.map((call, index) => ({
+            id: call.id ?? `call_${turn}_${index}`,
+            type: 'function',
+            function: {
+              name: call.function?.name,
+              arguments: argString(call.function?.arguments),
+            },
+          })),
+        });
+        messages.push({
+          role: 'tool',
+          tool_call_id: submitted.id ?? `call_${turn}_submit`,
+          content: JSON.stringify({
+            ok: false,
+            error: 'O included_scope não está ancorado na topologia real do repositório. Investigue os caminhos e submeta novamente.',
+          }),
+        });
+        noProgress = 0;
+        continue;
       }
 
       // Espelha o turno do assistente e responde CADA tool call (o protocolo exige
@@ -150,8 +198,15 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
           messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ ok: false, error: 'Investigue o repositório antes de enviar a proposta.' }) });
           continue;
         }
-        evidenceCalls += 1;
         const output = await this.executeTool(name, argString(call.function?.arguments));
+
+        try {
+          const parsedOutput = JSON.parse(output) as { ok?: unknown };
+          if (parsedOutput.ok === true) evidenceCalls += 1;
+        } catch {
+          // Saída de tool inválida nunca conta como evidência.
+        }
+
         messages.push({ role: 'tool', tool_call_id: id, content: output });
       }
       noProgress = 0;
