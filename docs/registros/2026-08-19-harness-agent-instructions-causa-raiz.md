@@ -4,7 +4,7 @@
 
 **Objetivo:** repetir a prova viva do fluxo real do Harness após a falha viva pela UI (item `c6b9f1ab-4ee9-448d-b1b2-bde884297e76`, attempt `a29507f0-39f5-4467-824f-af06a425cb32`), validar a correção local pendente e continuar para o próximo gargalo real. Ver a [nota de design](../arquitetura/deepseek-harness-coder-backend.md) (seção 2026-08-19).
 
-**Branch:** `claude/integration-application-layer`. **HEAD inicial:** `da28c1d`. **HEAD final:** `f940a33`. **`main`:** `99bec54` = `origin/main`, **intacta, sem push**.
+**Branch:** `claude/integration-application-layer`. **HEAD inicial:** `da28c1d`. **HEAD final (código):** `ee63387` (+ commit de docs). **`main`:** `99bec54` = `origin/main`, **intacta, sem push**.
 
 ## Reconciliação inicial (estado REAL confirmado)
 
@@ -44,7 +44,7 @@ Antes de o fix estar no default, uma rodada mostrou o **fail-closed** correto ("
 
 ## Provas / gates
 
-- Suítes Harness/executor do `apps/web`: **98/98** (`harness-invocation` +1 novo; `node-harness-runtime` 4; `deepseek-harness-*`; `coder-backend`; `executor-selection`; `host-evidence`; `worktree-executor`).
+- Suítes Harness/executor do `apps/web`: **106/106** (após o recorte de observabilidade; 98 antes) — `harness-invocation`, `node-harness-runtime`, `deepseek-harness-*`, `coder-backend`, `executor-selection`, `host-evidence`, `worktree-executor`.
 - `typecheck` do `apps/web`: **limpo**.
 - Provas vivas (scratch, removidas, não commitadas): micro-prova de causa raiz (libuv/CSPRNG); diag `stderr` do turno real; diag wrapper×cru; diag contexto (docs) com A/B do fix; prova viva completa até `Verifier=verified`.
 
@@ -72,3 +72,14 @@ Decisão de integração continua humana (INT-05). Nenhuma nova fronteira cruzad
 1. **Observabilidade do subprocesso do Harness** (recorte elegível): capturar stderr/erro de spawn de forma **sanitizada e limitada** (redigir caminhos absolutos/segredos, limitar tamanho), classificar `error` do turno com uma razão útil em vez de `kind=error, reason=error`; preservar evidência ≠ classificação ≠ decisão; **não** despejar transcript bruto em `work_events`.
 2. Substituir/plugar **planner local** para reduzir custo (hoje o Dev usa GPT/OpenAI como planner; coder já roda Harness+Ollama local) — só depois da observabilidade, salvo bloqueio.
 3. Harness segue **candidato**, **não** default; sem afrouxar gates.
+
+## Atualização (mesma sessão) — observabilidade sanitizada do subprocesso ENTREGUE
+
+Commit `ee63387`. O recorte de observabilidade listado como "próximo ponto" foi implementado nesta mesma sessão (o `stdio:'ignore'` foi o que tornou a falha viva opaca e induziu a diagnose errada do SystemRoot):
+
+- Spawner captura SÓ stderr (stdout do modelo segue ignorado), LIMITADO a 8KB e drenado; e a mensagem de erro de spawn (ENOENT). stderr bruto = evidência de host efêmera, NUNCA persistida crua.
+- `summarizeHarnessFailure`/`redactHarnessPaths` (puros): resumem a falha redigindo caminhos absolutos e limitando o tamanho; preferem a última linha "de erro" ao ruído final do stack do Node. Só um turno de ERRO carrega `diagnostic` (completed/aborted não vazam). Backend inclui o diagnóstico antes da descrição do turno (sobrevive ao `clip` do executor): "exit 134: …" > "kind=error".
+- Fronteira respeitada: evidência ≠ classificação ≠ decisão; sem transcript/segredo em `work_events`.
+- Provas: `apps/web` harness/executor **106/106**; typecheck limpo. Verificado ao vivo (falha real do DSH: patch inexistente → exit 1 + stack `MODULE_NOT_FOUND` capturado e redigido). **Prova viva final** do fluxo real com TODAS as mudanças = `Verifier verified` (coder 29772ms, gate exit 0, nada aplicado).
+
+**Próximo ponto revisado:** planner local (reduzir custo do planner GPT/OpenAI; coder já roda Harness+Ollama local). Harness segue candidato, não default; gates não afrouxados. HEAD final da sessão: `ee63387`.
