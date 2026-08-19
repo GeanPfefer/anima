@@ -1,4 +1,4 @@
-import type { CreateWorkProposalCommand } from '@anima/core';
+import type { CreateWorkProposalCommand, RequestProposalRevisionCommand, WorkItem } from '@anima/core';
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
 import { parseProposal, type ProjectWorkPlanner } from './project-work-planner-shared';
@@ -118,6 +118,73 @@ export async function planExecutableProjectWork(
           risks: proposal.risks,
         },
       },
+    },
+  };
+}
+export type ProjectWorkRevisionPlanningResult =
+  | {
+      ok: true;
+      revision: Pick<
+        RequestProposalRevisionCommand,
+        'requestedChanges' | 'intent' | 'proposal'
+      >;
+    }
+  | { ok: false; message: string };
+
+/**
+ * Replaneja semanticamente uma proposta ainda não aprovada.
+ *
+ * O planner recebe o pedido original, a proposta vigente e o feedback humano,
+ * mas continua sem autoridade sobre execução: planExecutableProjectWork reaplica
+ * validação de paths/gates e reconstrói execution_spec/base_sha no host.
+ */
+export async function planExecutableProjectWorkRevision(
+  item: WorkItem,
+  requestedChanges: string,
+  planner: ProjectWorkPlanner = createConfiguredProjectPlanner(),
+): Promise<ProjectWorkRevisionPlanningResult> {
+  const feedback = requestedChanges.trim();
+  if (!feedback) {
+    return { ok: false, message: 'A correção solicitada está vazia.' };
+  }
+
+  const planningMessage = [
+    'Revise semanticamente a proposta de trabalho existente.',
+    'Produza uma proposta COMPLETA substituta; não apenas anexe o feedback ao texto anterior.',
+    '',
+    'Pedido original:',
+    item.originalRequest,
+    '',
+    'Proposta atual:',
+    JSON.stringify(item.proposal.data),
+    '',
+    'Correção solicitada pelo usuário:',
+    feedback,
+  ].join('\n');
+
+  const planned = await planExecutableProjectWork(
+    planningMessage,
+    {
+      sourceMessageId: item.sourceMessageId,
+      impactLevel: item.impactLevel,
+      capability: item.capability,
+      intent: item.intent,
+      proposal: item.proposal,
+    },
+    planner,
+  );
+
+  if (!planned.ok) return planned;
+
+  return {
+    ok: true,
+    revision: {
+      requestedChanges: feedback,
+      intent: {
+        ...planned.command.intent,
+        revision_feedback: feedback,
+      },
+      proposal: planned.command.proposal,
     },
   };
 }

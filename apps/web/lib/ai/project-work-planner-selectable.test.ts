@@ -1,7 +1,8 @@
 /** @jest-environment node */
-import type { CreateWorkProposalCommand } from '@anima/core';
+import type { CreateWorkProposalCommand, WorkItem } from '@anima/core';
 import {
   planExecutableProjectWork,
+  planExecutableProjectWorkRevision,
   resolveConfiguredProjectPlannerProvider,
   createConfiguredProjectPlanner,
   shouldRunProjectPlanner,
@@ -127,5 +128,104 @@ describe('planExecutableProjectWork — HOST é a autoridade, qualquer planejado
     const failing: ProjectWorkPlanner = { id: 'x', proposeArguments: async () => ({ ok: false, message: 'modelo indisponível' }) };
     const result = await planExecutableProjectWork('faça', base, failing);
     expect(result).toEqual({ ok: false, message: 'modelo indisponível' });
+  });
+});
+describe('replanejamento de correção de proposta', () => {
+  test('feedback humano gera proposta substituta em vez de ser anexado mecanicamente ao escopo', async () => {
+    let receivedMessage = '';
+
+    const planner: ProjectWorkPlanner = {
+      id: 'revision_fake_v1',
+      proposeArguments: async message => {
+        receivedMessage = message;
+        return { ok: true, rawArguments: validArgs() };
+      },
+    };
+
+    const item: WorkItem = {
+      id: 'item-1',
+      userId: 'user-1',
+      sourceMessageId: base.sourceMessageId,
+      state: 'proposed',
+      impactLevel: base.impactLevel,
+      capability: base.capability,
+      originalRequest: 'adicione diagnóstico do planner',
+      intent: base.intent,
+      proposal: {
+        schemaVersion: 1,
+        data: {
+          ...base.proposal.data,
+          includedScope: ['arquivo-antigo.ts'],
+          objective: 'objetivo antigo',
+        },
+      },
+      proposalVersion: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await planExecutableProjectWorkRevision(
+      item,
+      '  use somente o menor escopo correto  ',
+      planner,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(receivedMessage).toContain('adicione diagnóstico do planner');
+    expect(receivedMessage).toContain('arquivo-antigo.ts');
+    expect(receivedMessage).toContain('use somente o menor escopo correto');
+
+    expect(result.revision.requestedChanges).toBe(
+      'use somente o menor escopo correto',
+    );
+    expect(result.revision.proposal.data.objective).toBe('Objetivo claro');
+    expect(result.revision.proposal.data.includedScope).toEqual([
+      'apps/web/lib/ai/project-work-planner.ts',
+    ]);
+    expect(result.revision.proposal.data.includedScope).not.toContain(
+      'use somente o menor escopo correto',
+    );
+    expect(result.revision.intent).toMatchObject({
+      planner: 'revision_fake_v1',
+      revision_feedback: 'use somente o menor escopo correto',
+      execution_spec: {
+        target: { kind: 'project', reference: 'anima' },
+        executor: 'worktree',
+      },
+    });
+  });
+
+  test('feedback vazio falha antes de chamar o planner', async () => {
+    let called = false;
+
+    const planner: ProjectWorkPlanner = {
+      id: 'should_not_run',
+      proposeArguments: async () => {
+        called = true;
+        return { ok: true, rawArguments: validArgs() };
+      },
+    };
+
+    const item: WorkItem = {
+      id: 'item-1',
+      userId: 'user-1',
+      sourceMessageId: base.sourceMessageId,
+      state: 'proposed',
+      impactLevel: base.impactLevel,
+      capability: base.capability,
+      originalRequest: 'pedido',
+      intent: base.intent,
+      proposal: base.proposal,
+      proposalVersion: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await planExecutableProjectWorkRevision(item, '   ', planner);
+
+    expect(result.ok).toBe(false);
+    expect(called).toBe(false);
   });
 });
