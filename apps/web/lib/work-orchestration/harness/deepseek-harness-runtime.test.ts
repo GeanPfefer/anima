@@ -189,7 +189,8 @@ describe('redactHarnessPaths / summarizeHarnessFailure — observabilidade sanit
       exitCode: 1,
       stderrTail: "Error: Cannot find module 'x'\n  code: 'MODULE_NOT_FOUND'\n}\n\nNode.js v24.16.0",
     });
-    expect(summary).toContain('MODULE_NOT_FOUND');
+    expect(summary).toContain("Cannot find module 'x'");
+    expect(summary).not.toContain("code: 'MODULE_NOT_FOUND'");
     expect(summary).not.toContain('Node.js v24');
   });
 });

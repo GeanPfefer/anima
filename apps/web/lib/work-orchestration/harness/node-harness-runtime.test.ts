@@ -1,13 +1,27 @@
 /** @jest-environment node */
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   createNodeHarnessFileSystem,
   createNodeHarnessSpawner,
+  resolveDeepSeekHarnessBinPath,
 } from './node-harness-runtime';
 
 describe('Node Harness runtime edge', () => {
+  test('deriva o binario DSH diretamente do repoRoot sem resolucao de modulo', () => {
+    expect(resolveDeepSeekHarnessBinPath('G:/anima')).toBe(
+      resolve(
+        'G:/anima',
+        'node_modules',
+        '@deepseek-ai',
+        'dsh',
+        'lib',
+        'bin.js',
+      ),
+    );
+  });
+
   test('filesystem localiza sess?o no DSH_HOME isolado e l? o log zstd', async () => {
     const root = await mkdtemp(join(tmpdir(), 'anima-harness-edge-'));
 

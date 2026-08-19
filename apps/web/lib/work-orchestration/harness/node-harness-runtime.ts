@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DeepSeekHarnessCoderBackend } from '../deepseek-harness-coder';
 import { DeepSeekHarnessRuntime } from './deepseek-harness-runtime';
@@ -188,16 +188,30 @@ export interface NodeDeepSeekHarnessBackendOptions {
 }
 
 /**
- * Monta a borda real do CoderBackend DeepSeek Harness.
+ * Deriva o binário físico do DSH a partir da raiz do checkout host.
  *
- * `require.resolve` ? deliberadamente usado no lado servidor para resolver a
- * instala??o efetiva do pacote, em vez de fixar um caminho de node_modules.
+ * Evita `require.resolve`: em rotas Next/Webpack essa expressão pode ser
+ * transformada em um identificador interno do bundle, que não é um caminho
+ * de filesystem válido para o processo Node filho.
+ */
+export function resolveDeepSeekHarnessBinPath(repoRoot: string): string {
+  return resolve(
+    repoRoot,
+    'node_modules',
+    '@deepseek-ai',
+    'dsh',
+    'lib',
+    'bin.js',
+  );
+}
+
+/**
+ * Monta a borda real do CoderBackend DeepSeek Harness.
  */
 export function createNodeDeepSeekHarnessBackend(
   options: NodeDeepSeekHarnessBackendOptions,
 ): DeepSeekHarnessCoderBackend {
-  const packageJson = require.resolve('@deepseek-ai/dsh/package.json');
-  const dshBinPath = resolve(dirname(packageJson), 'lib', 'bin.js');
+  const dshBinPath = resolveDeepSeekHarnessBinPath(options.repoRoot);
   const pluginPath = resolve(
     options.repoRoot,
     'apps',

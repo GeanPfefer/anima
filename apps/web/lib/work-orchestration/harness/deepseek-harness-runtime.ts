@@ -207,6 +207,7 @@ export function redactHarnessPaths(text: string): string {
  * costuma estar) precedida do código de saída.
  */
 const ERROR_LINE = /error|failed|assert|exception|fatal|cannot|not found|ENOENT|EACCES|code:/i;
+const MODULE_DETAIL_LINE = /cannot find module|module not found/i;
 
 export function summarizeHarnessFailure(
   result: Pick<HarnessProcessResult, 'exitCode' | 'stderrTail' | 'spawnError'>,
@@ -216,11 +217,14 @@ export function summarizeHarnessFailure(
     .split(/\r?\n/)
     .map(line => redactHarnessPaths(line).trim())
     .filter(Boolean);
-  // A ÚLTIMA linha "de erro" costuma carregar a essência (ex.: "Assertion failed:
-  // …", "code: 'MODULE_NOT_FOUND'"); um stack do Node termina em ruído ("Node.js
-  // vX"). Preferimos a última linha que casa o padrão; senão, a última não vazia.
+  // Em MODULE_NOT_FOUND, a linha anterior ao `code:` carrega o nome do módulo;
+  // preserve esse detalhe diagnóstico. Para os demais erros, mantém a regra
+  // histórica de preferir a última linha significativa do stderr.
   const errorLines = lines.filter(line => ERROR_LINE.test(line));
-  const picked = (errorLines.length > 0 ? errorLines[errorLines.length - 1] : lines[lines.length - 1]) ?? '';
+  const moduleDetail = [...errorLines].reverse().find(line => MODULE_DETAIL_LINE.test(line));
+  const picked = moduleDetail
+    ?? (errorLines.length > 0 ? errorLines[errorLines.length - 1] : lines[lines.length - 1])
+    ?? '';
   const detail = picked.slice(0, 140);
   const summary = [head, detail].filter(Boolean).join(': ').slice(0, 180);
   return summary.length > 0 ? summary : null;
