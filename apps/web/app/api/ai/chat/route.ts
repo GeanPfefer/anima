@@ -29,7 +29,7 @@ import {
   parseChatProvider,
   streamChatProvider,
 } from '@/lib/ai/chat-provider';
-import { planExecutableProjectWork } from '@/lib/ai/project-work-planner';
+import { planExecutableProjectWork, shouldRunProjectPlanner } from '@/lib/ai/project-work-planner';
 import { isDevelopmentChatAuthorized, resolveChatDevelopmentMode } from '@/lib/ai/chat-surface';
 import { shouldReuseOrphanUserMessage } from '@/lib/ai/chat-turn';
 
@@ -569,8 +569,7 @@ ${contextBlock}`;
     : rawInterpretation;
   let projectPlanningError: string | null = null;
   if (
-    developmentMode
-    && provider === 'openai'
+    shouldRunProjectPlanner(developmentMode, provider)
     && rawInterpretation.kind === 'work_candidate'
     && interpretation.kind === 'work_candidate'
     && interpretation.command.intent['execution_spec'] === undefined
