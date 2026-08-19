@@ -116,7 +116,11 @@ test('proposta GPT aprovada e isolada recebe classificação antes do Supervisor
     p_work_item_id: 'work-gpt', p_expected_proposal_version: 1,
     p_classification: expect.objectContaining({
       risk: 'low',
-      provenance: expect.objectContaining({ kind: 'system_assessed', policyVersion: 'gpt-project-planner-v1' }),
+      provenance: expect.objectContaining({
+        kind: 'system_assessed',
+        classifierId: 'openai_project_tools_v1-bridge',
+        policyVersion: 'project-planner-v1',
+      }),
     }),
   }));
   expect(turn).toHaveBeenCalledTimes(1);
@@ -124,6 +128,73 @@ test('proposta GPT aprovada e isolada recebe classificação antes do Supervisor
   expect(turn.mock.calls[0][0].routes[0].adapter.id).toBe('worktree-v1');
 });
 
+test('proposta do planner local aprovada e isolada recebe classificação antes do Supervisor', async () => {
+  const maybeSingle = jest.fn().mockResolvedValue({
+    error: null,
+    data: {
+      state: 'approved', proposal_version: 1, impact_level: 'low', capability: 'programming',
+      intent: {
+        planner: 'local_ollama_project_tools_v1',
+        execution_spec: {
+          target: { kind: 'project', reference: 'anima' },
+          executor: 'worktree', coder_backend: 'deepseek-harness', model: 'qwen3-coder',
+          base_sha: 'a'.repeat(40),
+          permissions: ['workspace_read', 'workspace_write_isolated'],
+          validation_criteria: [{ label: 'Testes', command: 'npm run test' }],
+          limits: { max_attempts: 3, max_duration_minutes: 30 },
+        },
+      },
+    },
+  });
+
+  const rpc = jest.fn()
+    .mockResolvedValueOnce({ data: null, error: null })
+    .mockResolvedValueOnce({ data: { revision: 1 }, error: null });
+
+  const client = {
+    from: jest.fn(() => ({
+      select: () => ({
+        eq: () => ({ maybeSingle }),
+      }),
+    })),
+    rpc,
+  };
+
+  auth.mockResolvedValue({ client, userId: 'user-1' });
+
+  const res = await POST(request({
+    workItemId: 'work-local',
+    expectedProposalVersion: 1,
+  }));
+
+  expect(res.status).toBe(200);
+
+  expect(rpc).toHaveBeenNthCalledWith(
+    1,
+    'current_work_intelligence_classification',
+    { p_work_item_id: 'work-local' },
+  );
+
+  expect(rpc).toHaveBeenNthCalledWith(
+    2,
+    'record_work_intelligence_classification',
+    expect.objectContaining({
+      p_work_item_id: 'work-local',
+      p_expected_proposal_version: 1,
+      p_classification: expect.objectContaining({
+        risk: 'low',
+        provenance: expect.objectContaining({
+          kind: 'system_assessed',
+          classifierId: 'local_ollama_project_tools_v1-bridge',
+          policyVersion: 'project-planner-v1',
+        }),
+      }),
+    }),
+  );
+
+  expect(turn).toHaveBeenCalledTimes(1);
+  expect(turn.mock.calls[0][0].routes[0].adapter.id).toBe('worktree-v1');
+});
 test('proposta GPT fora do contrato isolado não recebe classificação', async () => {
   const maybeSingle = jest.fn().mockResolvedValue({
     error: null,

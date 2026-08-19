@@ -77,10 +77,12 @@ export async function POST(request: Request) {
       && process.env.ANIMA_UX02_DETERMINISTIC_PROOF === '1'
       && intent?.execution_spec?.target?.reference === 'ux02-deterministic-decision';
     const spec = intent?.execution_spec;
-    const gptProject = approvedVersion
+    const projectPlanner = intent?.planner === 'openai_project_tools_v1'
+      || intent?.planner === 'local_ollama_project_tools_v1';
+    const plannedProject = approvedVersion
       && item.data?.impact_level === 'low'
       && item.data?.capability === 'programming'
-      && intent?.planner === 'openai_project_tools_v1'
+      && projectPlanner
       && spec?.target?.kind === 'project'
       && spec.target.reference === 'anima'
       && Array.isArray(spec.permissions)
@@ -91,7 +93,7 @@ export async function POST(request: Request) {
       && spec.validation_criteria.length > 0
       && spec.limits?.max_attempts === 3
       && spec.limits.max_duration_minutes === 30;
-    if (deterministic || gptProject) {
+    if (deterministic || plannedProject) {
       const current = await client.rpc('current_work_intelligence_classification', {
         p_work_item_id: body!.workItemId as string,
       });
@@ -111,8 +113,8 @@ export async function POST(request: Request) {
             provenance: {
               kind: 'system_assessed',
               classifiedAt: new Date().toISOString(),
-              classifierId: gptProject ? 'gpt-project-planner-bridge' : 'ux02-deterministic-proof',
-              policyVersion: gptProject ? 'gpt-project-planner-v1' : 'ux02-deterministic-v1',
+              classifierId: plannedProject ? String(intent?.planner) + '-bridge' : 'ux02-deterministic-proof',
+              policyVersion: plannedProject ? 'project-planner-v1' : 'ux02-deterministic-v1',
             },
           },
         });
