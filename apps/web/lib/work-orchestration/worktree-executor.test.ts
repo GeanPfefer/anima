@@ -629,6 +629,51 @@ describe('summarizeGateFailureForRetry', () => {
     expect((diagnostic ?? '').length).toBeLessThanOrEqual(700);
   });
 
+  test('prefere causa do teste ao rodape do npm', () => {
+    const diagnostic = summarizeGateFailureForRetry(
+      [
+        'FAIL src/project-work-planner.test.ts',
+        '  project work planner',
+        '    x cria plano esperado',
+        '',
+        '  Expected: "approved"',
+        '  Received: "proposed"',
+        '',
+        'Test Suites: 1 failed, 1 total',
+        'Tests:       1 failed, 8 passed, 9 total',
+        'Snapshots:   0 total',
+        'Time:        2.4 s',
+        'Ran all test suites.',
+        'npm error Lifecycle script \`test\` failed with error:',
+        'npm error code 1',
+        'npm error workspace @anima/web@0.0.1',
+        'npm error command failed',
+        'npm error command jest --runInBand',
+      ].join('\n'),
+      '',
+    );
+
+    expect(diagnostic).toContain('Expected: "approved"');
+    expect(diagnostic).toContain('Received: "proposed"');
+    expect(diagnostic).not.toContain('npm error workspace');
+    expect(diagnostic).not.toContain('npm error command jest');
+  });
+
+  test('preserva algum diagnostico quando a saida contem somente rodape', () => {
+    const diagnostic = summarizeGateFailureForRetry(
+      [
+        'Test Suites: 1 failed, 1 total',
+        'Tests:       1 failed, 1 total',
+        'npm error code 1',
+        'npm error command failed',
+      ].join('\n'),
+      '',
+    );
+
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic).toContain('npm error code 1');
+  });
+
   test('devolve undefined sem stdout ou stderr', () => {
     expect(summarizeGateFailureForRetry('', '')).toBeUndefined();
   });

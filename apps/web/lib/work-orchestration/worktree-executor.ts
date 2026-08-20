@@ -79,6 +79,8 @@ const clip = (value: string, max = 120): string => value.length <= max ? value :
 
 const GATE_DIAGNOSTIC_MAX = 700;
 const GATE_DIAGNOSTIC_LINES = 8;
+const GATE_DIAGNOSTIC_FOOTER =
+  /^(?:Test Suites:|Tests:|Snapshots:|Time:|Ran all test suites\.?|Node\.js v\d+|npm (?:error|ERR!)\b)/i;
 const GATE_SECRET_ASSIGNMENT =
   /\b([A-Za-z0-9_]*(?:password|passwd|secret|api[-_]?key|access[-_]?token)|authorization|cookie|set-cookie|x-api-key|proxy-authorization)\b\s*[:=]\s*.*$/gi;
 const GATE_BEARER = /\bbearer\s+[a-z0-9._~+/-]{8,}=*/gi;
@@ -97,7 +99,16 @@ export function summarizeGateFailureForRetry(
 
   if (rawLines.length === 0) return undefined;
 
-  const sanitized = rawLines
+  // Rodapes de Jest/npm/Node descrevem o encerramento do comando, nao a causa.
+  // Removemos somente formatos conhecidos antes de aplicar o limite de linhas.
+  // Se tudo for rodape, usamos a saida original para nunca apagar o diagnostico.
+  const informativeLines = rawLines.filter(
+    line => !GATE_DIAGNOSTIC_FOOTER.test(line),
+  );
+  const selectedLines =
+    informativeLines.length > 0 ? informativeLines : rawLines;
+
+  const sanitized = selectedLines
     .slice(-GATE_DIAGNOSTIC_LINES)
     .map(line => line
       .replace(GATE_SECRET_ASSIGNMENT, (_match, key: string) => `${key}=<redacted>`)
