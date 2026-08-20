@@ -237,10 +237,61 @@ export function summarizeHarnessFailure(
   return summary.length > 0 ? summary : null;
 }
 
+/**
+ * Descompacta todos os frames zstd concatenados de session.jsonl.zstd.
+ *
+ * O Node 24 encerra zstdDecompressSync no primeiro frame. Com info:true,
+ * o engine informa quantos bytes comprimidos realmente consumiu; isso permite
+ * avancar frame a frame sem interpretar manualmente o formato binario zstd.
+ *
+ * @types/node 22 ainda nao modela o retorno de info:true para zstd, embora
+ * essa API exista no Node usado pelo runtime. O cast fica confinado aqui.
+ */
+type ZstdDecompressInfo = {
+  readonly buffer: Buffer;
+  readonly engine: {
+    readonly bytesWritten: number;
+  };
+};
+
+const zstdDecompressSyncWithInfo = zstdDecompressSync as unknown as (
+  buf: Buffer,
+  options: { readonly info: true },
+) => ZstdDecompressInfo;
+
+function decompressConcatenatedZstdFrames(raw: Buffer): Buffer {
+  const chunks: Buffer[] = [];
+  let offset = 0;
+
+  while (offset < raw.length) {
+    const remaining = raw.length - offset;
+    const result = zstdDecompressSyncWithInfo(
+      raw.subarray(offset),
+      { info: true },
+    );
+    const consumed = result.engine.bytesWritten;
+
+    if (
+      !Number.isSafeInteger(consumed)
+      || consumed <= 0
+      || consumed > remaining
+    ) {
+      throw new Error(
+        `zstd decoder made invalid progress at offset ${offset}: ${consumed}`,
+      );
+    }
+
+    chunks.push(result.buffer);
+    offset += consumed;
+  }
+
+  return Buffer.concat(chunks);
+}
+
 export class DeepSeekHarnessRuntime implements HarnessRuntime {
   private readonly decompress: (buf: Buffer) => Buffer;
   constructor(private readonly options: DeepSeekHarnessRuntimeOptions) {
-    this.decompress = options.decompress ?? (buf => zstdDecompressSync(buf));
+    this.decompress = options.decompress ?? decompressConcatenatedZstdFrames;
   }
 
   async runTurn(input: HarnessRunTurnInput): Promise<HarnessRunTurnResult> {

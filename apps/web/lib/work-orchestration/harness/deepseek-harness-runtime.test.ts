@@ -253,6 +253,45 @@ describe('DeepSeekHarnessRuntime.runTurn — I/O injetado', () => {
     expect(result.turnEnd).toEqual({ kind: 'aborted', reasonKind: 'hook', reasonReason: 'step-budget-exhausted:12' });
   });
 
+  test('turn/end em frame zstd posterior de session.jsonl.zstd concatenado', async () => {
+    // O DSH real pode persistir o JSONL em multiplos frames zstd concatenados.
+    // O primeiro frame pode nao conter turn/end; o desfecho chega depois.
+    const log = Buffer.concat([
+      zstd(jsonl(
+        { type: 'session', id: 'session-multiframe' },
+        { type: 'turn/start', turn: 0 },
+      )),
+      zstd(jsonl(
+        { type: 'message', role: 'assistant', text: 'working' },
+        {
+          type: 'turn/end',
+          turn: 0,
+          reason: {
+            kind: 'aborted',
+            reason: {
+              kind: 'hook',
+              reason: 'step-budget-exhausted:12',
+            },
+          },
+        },
+      )),
+    ]);
+
+    const fs = fakeFs({ log });
+    const result = await runtime(
+      fs,
+      fakeSpawner({ exitCode: 0, hostAborted: false }),
+    ).runTurn(input());
+
+    // Com descompressao one-shot, somente o primeiro frame e visto e
+    // exitCode=0 faz o fallback classificar incorretamente como completed.
+    expect(result.turnEnd).toEqual({
+      kind: 'aborted',
+      reasonKind: 'hook',
+      reasonReason: 'step-budget-exhausted:12',
+    });
+  });
+
   test('cancelamento do host: mata o filho, NÃO lê o log, desfecho aborted/signal', async () => {
     const fs = fakeFs({ log: zstd(jsonl({ type: 'turn/end', turn: 0, reason: { kind: 'completed' } })) });
     let readCalled = false;
