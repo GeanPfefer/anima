@@ -90,8 +90,25 @@ describe('composeHarnessTask', () => {
     expect(task).toContain('ajustar projector');
   });
 
+  test('hostValidationFeedback no-change exige edicao real', () => {
+    const task = composeHarnessTask(input({
+      hostValidationFeedback: {
+        kind: 'no-change',
+        retryIndex: 1,
+        retryLimit: 1,
+      },
+    }));
+
+    expect(task).toContain('host observed zero file changes');
+    expect(task).toContain('Internal retry 1 of 1.');
+    expect(task).toContain('not an implementation');
+    expect(task).toContain('edit/write');
+    expect(task).not.toContain('Host-observed failed gate');
+  });
+
   test('hostValidationFeedback is internal retry after real host gate failure', () => {
     const feedback = {
+      kind: 'gate-failure',
       failedGate: {
         label: 'unit',
         command: 'npm test',

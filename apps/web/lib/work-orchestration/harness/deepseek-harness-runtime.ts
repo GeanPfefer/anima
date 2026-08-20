@@ -118,7 +118,14 @@ export function composeHarnessTask(input: HarnessRunTurnInput): string {
   }
 
   const feedback = input.hostValidationFeedback;
-  if (feedback) {
+  if (feedback?.kind === 'no-change') {
+    parts.push(
+      '',
+      'This is an internal retry because the host observed zero file changes after your previous turn.',
+      `Internal retry ${feedback.retryIndex} of ${feedback.retryLimit}.`,
+      'The previous turn only describing or analyzing the code is not an implementation. Apply the requested change with edit/write before completing.',
+    );
+  } else if (feedback?.kind === 'gate-failure') {
     const gate = feedback.failedGate;
 
     parts.push(

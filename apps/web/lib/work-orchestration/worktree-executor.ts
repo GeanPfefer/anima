@@ -12,7 +12,7 @@ import {
   type WorkResultValidation,
   type WorktreeGateOutcome,
 } from '@anima/core';
-import type { CoderBackend, CoderWorkspace } from './coder-backend';
+import type { CoderBackend, CoderWorkspace, HostValidationFeedback } from './coder-backend';
 import { GitWorktree, parseGateCommand, runGate } from './worktree';
 
 // ============================================================
@@ -177,6 +177,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           : 0;
 
       let retryIndex = 0;
+      let retryFeedback: HostValidationFeedback | null = null;
       let editResult: Awaited<ReturnType<CoderBackend['edit']>>;
       let changed: readonly string[] = [];
       let diffFiles: Awaited<ReturnType<GitWorktree['diffNumstat']>> = [];
@@ -215,21 +216,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
               ...(request.carriedContext
                 ? { carriedContext: request.carriedContext }
                 : {}),
-              ...(retryIndex > 0 && failure
-                ? {
-                    hostValidationFeedback: {
-                      failedGate: {
-                        label: failure.label,
-                        command: failure.command,
-                        exitCode: failure.exitCode,
-                        timedOut: failure.timedOut,
-                        cancelled: failure.cancelled,
-                      },
-                      retryIndex,
-                      retryLimit: gateRetryLimit,
-                  ...(failure.diagnostic ? { diagnostic: failure.diagnostic } : {}),
-                    },
-                  }
+              ...(retryFeedback
+                ? { hostValidationFeedback: retryFeedback }
                 : {}),
             },
             workspace,
@@ -289,6 +277,18 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             handoffReference,
           });
           return;
+        }
+
+        // Zero diff e gate failure sao evidencias host-side distintas.
+        // Se existe or?amento interno, no-change recebe retry antes de qualquer gate.
+        if (noChanges && retryIndex < gateRetryLimit) {
+          retryIndex += 1;
+          retryFeedback = {
+            kind: 'no-change',
+            retryIndex,
+            retryLimit: gateRetryLimit,
+          };
+          continue;
         }
 
         if (!noChanges) {
@@ -457,6 +457,19 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         await worktree.unlinkNodeModules();
 
         retryIndex += 1;
+        retryFeedback = {
+          kind: 'gate-failure',
+          failedGate: {
+            label: failure!.label,
+            command: failure!.command,
+            exitCode: failure!.exitCode,
+            timedOut: failure!.timedOut,
+            cancelled: failure!.cancelled,
+          },
+          retryIndex,
+          retryLimit: gateRetryLimit,
+          ...(failure!.diagnostic ? { diagnostic: failure!.diagnostic } : {}),
+        };
       }
 
       // Nenhum gate intermediario falho cria commit. A branch recebe no maximo

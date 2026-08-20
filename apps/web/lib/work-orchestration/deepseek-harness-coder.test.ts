@@ -99,6 +99,7 @@ describe('DeepSeekHarnessCoderBackend — worktree enraizada', () => {
     expect(runtime.last?.excludedScope).toEqual(['node_modules']);
     expect(runtime.last?.carriedContext).toEqual(carried);
     const feedback = {
+      kind: 'gate-failure',
       failedGate: {
         label: 'unit',
         command: 'npm test',

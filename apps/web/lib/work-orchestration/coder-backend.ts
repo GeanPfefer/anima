@@ -9,20 +9,30 @@ import type { ObservedGateInput, WorkExecutorRequest } from '@anima/core';
 // que tocou. Trocar de inteligência é trocar a implementação, não o adaptador.
 // ============================================================
 
-export interface HostValidationFeedback {
-  /** Gate observed directly by the host; never inferred from model output. */
-  readonly failedGate: Pick<ObservedGateInput, 'label' | 'command' | 'exitCode' | 'timedOut' | 'cancelled'>;
-  /** 1 = first internal retry after the initial host gate failure. */
-  readonly retryIndex: number;
-  /** Configured internal retry limit for this execution attempt. */
-  readonly retryLimit: number;
-  /**
-   * Diagnostico curto e sanitizado derivado da saida do gate pelo host.
-   * Efemero: nao e evidencia persistida, nao amplia autoridade e serve
-   * apenas para orientar o coder no retry interno da tentativa corrente.
-   */
-  readonly diagnostic?: string;
-}
+export type HostValidationFeedback =
+  | {
+      /** Gate observed directly by the host; never inferred from model output. */
+      readonly kind: 'gate-failure';
+      readonly failedGate: Pick<ObservedGateInput, 'label' | 'command' | 'exitCode' | 'timedOut' | 'cancelled'>;
+      /** 1 = first internal retry after the initial coder turn. */
+      readonly retryIndex: number;
+      /** Configured internal retry limit for this execution attempt. */
+      readonly retryLimit: number;
+      /**
+       * Diagnostico curto e sanitizado derivado da saida do gate pelo host.
+       * Efemero: nao e evidencia persistida e nunca amplia autoridade.
+       */
+      readonly diagnostic?: string;
+    }
+  | {
+      /**
+       * O git do HOST observou zero arquivos alterados depois do turno do coder.
+       * Nao e falha de gate e nao e inferido da resposta textual do modelo.
+       */
+      readonly kind: 'no-change';
+      readonly retryIndex: number;
+      readonly retryLimit: number;
+    };
 
 export interface CoderEditRequest {
   readonly objective: string;

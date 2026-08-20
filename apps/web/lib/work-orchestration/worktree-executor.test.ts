@@ -511,6 +511,7 @@ describe('WorktreeExecutorAdapter — retry interno dirigido por gate do host', 
     expect(edits).toBe(2);
     expect(receivedFeedback[0]).toBeUndefined();
     expect(receivedFeedback[1]).toEqual(expect.objectContaining({
+      kind: 'gate-failure',
       failedGate: expect.objectContaining({
         label: 'retry gate',
         exitCode: expect.any(Number),
@@ -578,18 +579,16 @@ describe('WorktreeExecutorAdapter — retry interno dirigido por gate do host', 
     expect(edits).toBe(2);
 
     expect(receivedFeedback[0]).toBeUndefined();
-    expect(receivedFeedback[1]).toEqual(expect.objectContaining({
-      failedGate: expect.objectContaining({
-        label: 'retry gate',
-        exitCode: expect.any(Number),
-      }),
+    expect(receivedFeedback[1]).toEqual({
+      kind: 'no-change',
       retryIndex: 1,
       retryLimit: 1,
-    }));
+    });
 
-    expect(observed).toHaveLength(2);
-    expect(observed[0]!.exitCode).not.toBe(0);
-    expect(observed[1]!.exitCode).toBe(0);
+    // O primeiro turno sem diff nao roda gate apenas para criar motivo de retry.
+    // O unico gate observado acontece depois da edicao real do segundo turno.
+    expect(observed).toHaveLength(1);
+    expect(observed[0]!.exitCode).toBe(0);
 
     expect(signals.at(-1)?.kind).toBe('result');
 
