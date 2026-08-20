@@ -27,6 +27,8 @@ describe('planejador executável do projeto', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv, OPENAI_API_KEY: 'test-key', OPENAI_MODEL: 'gpt-test' };
+    // A fixture desta suite testa o default do coder, nao a configuracao do processo Jest.
+    delete process.env.ANIMA_WORKTREE_CODER_BACKEND;
     global.fetch = jest.fn()
       .mockResolvedValueOnce({
         ok: true,

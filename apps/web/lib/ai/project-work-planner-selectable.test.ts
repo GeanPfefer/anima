@@ -40,6 +40,20 @@ const fakePlanner = (rawArguments: string, id = 'fake_planner_v1'): ProjectWorkP
   proposeArguments: async () => ({ ok: true as const, rawArguments }),
 });
 
+const originalCoderBackend = process.env.ANIMA_WORKTREE_CODER_BACKEND;
+
+beforeEach(() => {
+  // Casos que verificam o default devem ser independentes do backend do processo host.
+  delete process.env.ANIMA_WORKTREE_CODER_BACKEND;
+});
+
+afterAll(() => {
+  if (originalCoderBackend === undefined) {
+    delete process.env.ANIMA_WORKTREE_CODER_BACKEND;
+  } else {
+    process.env.ANIMA_WORKTREE_CODER_BACKEND = originalCoderBackend;
+  }
+});
 describe('resolveConfiguredProjectPlannerProvider — config de deploy', () => {
   test('default é openai (local NÃO é default)', () => {
     expect(resolveConfiguredProjectPlannerProvider({})).toBe('openai');
