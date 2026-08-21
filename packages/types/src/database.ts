@@ -1321,6 +1321,13 @@ export type Database = {
           work_item_id: string
         }[]
       }
+      readmit_budget_blocked_work: {
+        Args: never
+        Returns: {
+          budget_reason: string
+          work_item_id: string
+        }[]
+      }
       reconcile_supervised_work: {
         Args: never
         Returns: {

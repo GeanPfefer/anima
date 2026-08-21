@@ -176,6 +176,20 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     finding: row.finding, action: row.action, itemState: row.item_state,
   }));
 
+  // ---------- (1b) Re-admissão por orçamento, antes da seleção ----------
+  //
+  // Um bloqueio por orçamento (INTEL-04) é temporal, não uma decisão humana: o
+  // item saiu da fila (`blocked`) quando a janela móvel esgotou e precisa voltar
+  // a `approved` quando ela libera. Esta reconciliação — derivada só de estado
+  // persistido, idempotente, sem afrouxar o teto nem falsificar entrada humana —
+  // re-admite exatamente esses itens. Sem ela, um item bloqueado por orçamento
+  // ficaria preso para sempre em `work_blocked_unresolved`. Como a reconciliação
+  // do SUP-04, roda a cada volta e não é scheduler.
+  const readmitted = await client.rpc('readmit_budget_blocked_work');
+  if (readmitted.error) {
+    return { ...base(reconciliation), outcome: 'selection_not_executable', refusal: refusalOf(readmitted.error), requiresAnotherTurn: true };
+  }
+
   // ---------- (2) Seleção pela fronteira canônica do SUP-02 ----------
   const selected = dependencies.requestedWork
     ? await client.rpc('select_autonomous_work', {

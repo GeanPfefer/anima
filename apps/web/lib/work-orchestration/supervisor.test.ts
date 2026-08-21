@@ -35,6 +35,7 @@ interface FakeOptions {
   /** Modela a leitura não bloqueante do SUP-02: a seleção ignora posse já adquirida. */
   readonly staleSelection?: boolean;
   readonly failReconcile?: boolean;
+  readonly failReadmit?: boolean;
   /** Corrida de alvo perdida entre a aquisição da posse e o início da tentativa. */
   readonly startRefusal?: { readonly code: string; readonly message: string };
   /** Simula falha de persistência de um checkpoint na sequência indicada. */
@@ -45,6 +46,8 @@ interface FakeOptions {
   readonly decisionResumptionSource?: Record<string, unknown>;
   readonly routingAdjustmentContext?: WorkRoutingAdjustmentContextV1;
   readonly budgetReason?: string;
+  /** Ids de itens `blocked` por orçamento cuja janela recuperou: a re-admissão os devolve a `approved`. */
+  readonly readmitBudgetBlocked?: readonly string[];
   readonly interruptBudgetAfterCheckpoint?: string;
   /** UX-01: modela um pedido de pausa/cancelamento pendente aplicável no checkpoint. */
   readonly controlAfterCheckpoint?: 'pause' | 'cancel';
@@ -146,6 +149,22 @@ class FakeDatabase {
           reason: this.options.budgetReason,
         });
         return ok({ blocked: true, reason: this.options.budgetReason });
+      }
+
+      case 'readmit_budget_blocked_work': {
+        if (this.options.failReadmit) return fail('55000', 're-admissão de orçamento indisponível');
+        // Reconciliação de orçamento: itens cuja janela móvel liberou voltam de
+        // `blocked` para `approved`, sem inventar entrada humana.
+        const readmitted: { work_item_id: string; budget_reason: string }[] = [];
+        for (const id of this.options.readmitBudgetBlocked ?? []) {
+          const item = this.items.get(id);
+          if (item && item.state === 'blocked') {
+            item.state = 'approved';
+            this.events.push({ itemId: id, type: 'work_approved', attemptId: null, reason: 'budget_window_recovered' });
+            readmitted.push({ work_item_id: id, budget_reason: 'user_attempt_budget_exhausted' });
+          }
+        }
+        return ok(readmitted);
       }
 
       case 'abandoned_work_resumption_source':
@@ -565,7 +584,7 @@ test('seleção explícita nunca substitui o cartão solicitado pela cabeça da 
     { workItemId: 'item-2', expectedProposalVersion: 1 },
   );
 
-  expect(database.calls[1]).toBe('select_autonomous_work');
+  expect(database.calls[2]).toBe('select_autonomous_work');
   expect(result.selection?.workItemId).toBe('item-2');
   expect(runner.calls[0]?.workItemId).toBe('item-2');
 });
@@ -583,7 +602,7 @@ test('seleção explícita obsoleta falha fechada sem cair para outro trabalho',
   );
 
   expect(result.outcome).toBe('no_eligible_work');
-  expect(database.calls).toEqual(['reconcile_supervised_work', 'select_autonomous_work']);
+  expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'select_autonomous_work']);
   expect(runner.calls).toHaveLength(0);
 });
 
@@ -602,7 +621,7 @@ test.each<FakeClassification>(['missing', 'incomplete'])(
     expect(runner.calls).toHaveLength(0);
     expect(database.claims.size).toBe(0);
     expect(database.events).toHaveLength(0);
-    expect(database.calls).toEqual(['reconcile_supervised_work', 'next_autonomous_work']);
+    expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'next_autonomous_work']);
   },
 );
 
@@ -627,7 +646,8 @@ test('reconcilia antes de selecionar e relata o que a reconciliação produziu',
   const result = await turn(database, executor().adapter, [], ['claim-1', 'attempt-1']);
 
   expect(database.calls[0]).toBe('reconcile_supervised_work');
-  expect(database.calls[1]).toBe('next_autonomous_work');
+  expect(database.calls[1]).toBe('readmit_budget_blocked_work');
+  expect(database.calls[2]).toBe('next_autonomous_work');
   expect(result.reconciliation).toEqual([
     { workItemId: 'item-x', attemptId: 'a-1', claimId: null, finding: 'attempt_abandoned', action: 'attempt_abandoned', itemState: 'approved' },
   ]);
@@ -662,7 +682,7 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
 
   // Ordem canônica das fronteiras, e nunca o início comandado.
   expect(database.calls).toEqual([
-    'reconcile_supervised_work', 'next_autonomous_work', 'autonomous_work_budget_status', 'human_decision_resumption_source','abandoned_work_resumption_source',
+    'reconcile_supervised_work', 'readmit_budget_blocked_work', 'next_autonomous_work', 'autonomous_work_budget_status', 'human_decision_resumption_source','abandoned_work_resumption_source',
     'current_work_intelligence_classification', 'work_routing_adjustment_context',
     'record_work_routing_adjustment', 'record_work_routing_decision', 'acquire_work_claim',
     'start_claimed_work_attempt', 'record_commanded_work_terminal', 'release_work_claim',
@@ -1124,6 +1144,46 @@ describe('INTEL-04 — orçamento no laço do Supervisor', () => {
     expect(database.events.map(event => event.type)).toContain('work_blocked');
     expect(database.events.map(event => event.type)).not.toContain('result_submitted');
     expect(database.calls).not.toContain('record_commanded_work_terminal');
+  });
+
+  test('item bloqueado por orçamento cuja janela recuperou é re-admitido antes da seleção e executa', async () => {
+    // Coerência V0: o bloqueio por orçamento é temporal. Uma nova volta do
+    // Supervisor re-admite (blocked -> approved) o item cuja janela liberou,
+    // sem entrada humana, e prossegue para executá-lo pelo caminho normal.
+    const database = new FakeDatabase({
+      items: [{ id: 'item-1', version: 1, state: 'blocked', target: 'alvo-1', approvalSeq: 1, classification: 'complete' }],
+      readmitBudgetBlocked: ['item-1'],
+    });
+    const { adapter, calls } = executor('result');
+    const result = await turn(
+      database, adapter, [workItem('item-1')], ['claim-1', 'attempt-1'], undefined,
+      { workItemId: 'item-1', expectedProposalVersion: 1 },
+    );
+
+    expect(result.outcome).toBe('execution_completed');
+    // A re-admissão roda ANTES da seleção; sem ela o item bloqueado nunca seria selecionável.
+    const readmitIndex = database.calls.indexOf('readmit_budget_blocked_work');
+    const selectIndex = database.calls.indexOf('select_autonomous_work');
+    expect(readmitIndex).toBeGreaterThanOrEqual(0);
+    expect(selectIndex).toBeGreaterThan(readmitIndex);
+    // Voltou a `approved` por evento tipado, nunca por decisão humana falsa.
+    expect(database.events.some(event => event.type === 'work_approved' && event.reason === 'budget_window_recovered')).toBe(true);
+    expect(database.items.get('item-1')!.state).toBe('review');
+    expect(calls).toHaveLength(1);
+  });
+
+  test('re-admissão recusada interrompe a volta antes da seleção', async () => {
+    const database = new FakeDatabase({
+      items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 1, classification: 'complete' }],
+      failReadmit: true,
+    });
+    const { adapter, calls } = executor('result');
+    const result = await turn(database, adapter, [workItem('item-1')], ['claim-1', 'attempt-1']);
+
+    expect(result.outcome).toBe('selection_not_executable');
+    expect(result.requiresAnotherTurn).toBe(true);
+    expect(calls).toHaveLength(0);
+    expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work']);
   });
 });
 

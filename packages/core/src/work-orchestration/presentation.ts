@@ -1,6 +1,7 @@
 import type { Json } from '@anima/types';
 import type { WorkEvent, WorkItem, WorkResultValidation, WorkResultValidationOutcome } from './types';
-import { HUMAN_INTERRUPTION_REASONS, type HumanInterruptionReason } from './human-interruption';
+import { HUMAN_INTERRUPTION_REASONS, type AutonomousLimitKind, type HumanInterruptionReason } from './human-interruption';
+import type { WorkBudgetReason } from './work-budget';
 import { projectIntegrationBoundary, type WorkIntegrationDecision } from './integration-decision';
 import {parseBranchPublicationReceipt,parseReviewRequestReceipt} from './protected-integration';
 import { projectWorktreeHandoff } from './worktree-handoff';
@@ -66,6 +67,15 @@ export interface WorkDecisionProjection {
   readonly options:readonly WorkDecisionOptionProjection[];
   readonly checkpointReference:string;
 }
+// INTEL-04 (coerência V0). Um item bloqueado por orçamento PRÉ-tentativa não é
+// uma decisão humana: é um estado TEMPORAL que volta a ser elegível quando a
+// janela móvel do orçamento libera. Esta projeção o declara honestamente para a
+// UI (nunca um cartão de decisão, que `projectPendingWorkDecision` corretamente
+// ignora). Read-only; não decide nem oferece override do teto.
+export interface WorkBudgetWaitProjection {
+  readonly reason: WorkBudgetReason;
+  readonly reachedLimit: AutonomousLimitKind;
+}
 export interface WorkIntegrationProjection {
   readonly status:'awaiting_decision'|'authorized'|'branch_published'|'review_request_created'|'refused';
   readonly acceptedResultEventId:string;
@@ -77,7 +87,7 @@ export interface WorkIntegrationProjection {
   // autorização; nunca afirma merge ou integração.
   readonly reviewRequest?:{readonly repositoryId:string;readonly remoteName:string;readonly reviewReference:string;readonly reviewId:string;readonly sourceBranch:string;readonly sourceCommitSha:string;readonly baseBranch:string}|null;
 }
-export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; /** Fase humana projetada dos fatos (presentWorkItem sempre a preenche; opcional para não quebrar projeções/fixtures antigas). */ readonly progress?:WorkProgressPhaseProjection; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
+export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; /** Fase humana projetada dos fatos (presentWorkItem sempre a preenche; opcional para não quebrar projeções/fixtures antigas). */ readonly progress?:WorkProgressPhaseProjection; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly pendingBudgetWait?:WorkBudgetWaitProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
   // Histórico append-only dos pareceres do Verifier persistidos (auditoria). Só
   // presente quando há ao menos um; read-only, nunca altera ações nem decide.
   readonly opinionHistory?:readonly VerifierOpinionV1[];
@@ -175,6 +185,26 @@ export function projectPendingWorkDecision(item:WorkItem,events:readonly WorkEve
     for(const value of data.options){const option=object(value),id=asString(option?.id),label=asString(option?.label),effect=asString(option?.effect);if(id===null||label===null||(effect!=='resume'&&effect!=='cancel')){options.length=0;break;}options.push({id,label,effect});}
     if(options.length<2||new Set(options.map(option=>option.id)).size!==options.length)continue;
     return{requestEventId:request.id,attemptId,proposalVersion:item.proposalVersion,reason:reason as HumanInterruptionReason,explanation,options,checkpointReference};
+  }
+  return null;
+}
+const budgetReasons:ReadonlySet<string>=new Set<WorkBudgetReason>(['item_attempt_budget_exhausted','user_attempt_budget_exhausted','user_runtime_budget_exhausted','interactive_reserve_protected']);
+const limitKinds:ReadonlySet<string>=new Set<AutonomousLimitKind>(['attempts','duration','resources']);
+// Item bloqueado aguardando a janela do orçamento: o ÚLTIMO `work_blocked` da
+// versão vigente é um bloqueio de orçamento PRÉ-tentativa (razão tipada, sem
+// `attempt_id`). Interrupções em tentativa (com `attempt_id`) e bloqueios de
+// decisão humana não caem aqui — a UI daqueles vem de outra projeção.
+export function projectPendingBudgetWait(item:WorkItem,events:readonly WorkEvent[]):WorkBudgetWaitProjection|null{
+  if(item.state!=='blocked')return null;
+  for(let index=events.length-1;index>=0;index--){
+    const event=events[index]!;
+    if(event.type!=='work_blocked'||event.proposalVersion!==item.proposalVersion)continue;
+    const data=eventData(event);
+    if(asString(data?.attempt_id)!==null)return null;
+    const reason=asString(data?.reason);
+    if(reason===null||!budgetReasons.has(reason))return null;
+    const reachedLimit=asString(data?.reached_limit);
+    return{reason:reason as WorkBudgetReason,reachedLimit:reachedLimit!==null&&limitKinds.has(reachedLimit)?reachedLimit as AutonomousLimitKind:'attempts'};
   }
   return null;
 }
@@ -306,7 +336,7 @@ export function deriveWorkProgressPhase(input:{readonly item:WorkItem;readonly e
   if(item.state==='approved')return progressPhase('approved');
   return progressPhase('proposal');
 }
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);const observedGit=projectHostObservedEvidence(events);const observedGates=projectHostObservedGateEvidence(events);const execution=projectAutonomousExecution(item,events);const integration=projectWorkIntegration(item,events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution,pendingDecision:projectPendingWorkDecision(item,events),integration,progress:deriveWorkProgressPhase({item,execution,integration}),
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);const observedGit=projectHostObservedEvidence(events);const observedGates=projectHostObservedGateEvidence(events);const execution=projectAutonomousExecution(item,events);const integration=projectWorkIntegration(item,events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution,pendingDecision:projectPendingWorkDecision(item,events),pendingBudgetWait:projectPendingBudgetWait(item,events),integration,progress:deriveWorkProgressPhase({item,execution,integration}),
   // Parecer advisory do Verifier — só quando há evidência git durável a conferir.
   // É projeção pura e read-only; nunca altera ações nem substitui a revisão humana.
   verification:projectWorktreeHandoff(events)?verifyPersistedWorkResult(item,events):null,

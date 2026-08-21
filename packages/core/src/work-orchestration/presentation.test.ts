@@ -1,4 +1,4 @@
-import { availableWorkActions, buildProposalRevision, deriveWorkProgressPhase, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingWorkDecision, projectWorkIntegration, projectWorkResourceCost, reconstructWorkPresentation, type AutonomousExecutionProjection, type WorkEvent, type WorkIntegrationProjection, type WorkItem } from '.';
+import { availableWorkActions, buildProposalRevision, deriveWorkProgressPhase, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingBudgetWait, projectPendingWorkDecision, projectWorkIntegration, projectWorkResourceCost, reconstructWorkPresentation, type AutonomousExecutionProjection, type WorkEvent, type WorkIntegrationProjection, type WorkItem } from '.';
 const item={id:'i',userId:'u',sourceMessageId:'m',state:'review',impactLevel:'low',capability:'planning',originalRequest:'x',intent:{},proposal:{schemaVersion:1,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:2,createdAt:new Date(),updatedAt:new Date()} satisfies WorkItem;
 const event={id:'r',workItemId:'i',type:'result_submitted',author:'executor',proposalVersion:2,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a']}},occurredAt:new Date()} satisfies WorkEvent;
 describe('projeção de apresentação do trabalho',()=>{
@@ -93,6 +93,17 @@ describe('projeção da decisão humana',()=>{
   });
   test('a resposta ao evento exato remove a decisão pendente',()=>{const pending=request('scope_change');const answered:WorkEvent={id:'answer',workItemId:'i',type:'input_provided',author:'user',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{input_requested_event_id:pending.id,option_id:'seguir'}}};expect(projectPendingWorkDecision({...item,state:'approved'},[pending,answered])).toBeNull();});
   test('alternativas malformadas não são inventadas pela apresentação',()=>expect(projectPendingWorkDecision({...item,state:'blocked'},[{...request('scope_change'),payload:{schema_version:1,data:{attempt_id:'attempt-1',reason:'scope_change',explanation:'x',checkpoint_reference:'cp',options:[{id:'única',label:'Única',effect:'resume'}]}}}])).toBeNull());
+});
+
+describe('projeção de espera por orçamento (INTEL-04 coerência V0)',()=>{
+  const blocked={...item,state:'blocked' as const};
+  const budgetBlock=(reason:string,reachedLimit:string,extra:Record<string,unknown>={}):WorkEvent=>({id:`b-${reason}`,workItemId:'i',type:'work_blocked',author:'anima',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{work_item_id:'i',approved_proposal_version:2,reason,reached_limit:reachedLimit,resolution:'awaits_budget_window',...extra}}});
+  test('projeta o bloqueio de orçamento pré-tentativa como espera temporal',()=>expect(projectPendingBudgetWait(blocked,[budgetBlock('user_attempt_budget_exhausted','attempts')])).toEqual({reason:'user_attempt_budget_exhausted',reachedLimit:'attempts'}));
+  test('não colide com a projeção de decisão humana (não é um cartão de decisão)',()=>{const events=[budgetBlock('user_runtime_budget_exhausted','duration')];expect(projectPendingWorkDecision(blocked,events)).toBeNull();expect(projectPendingBudgetWait(blocked,events)).toMatchObject({reason:'user_runtime_budget_exhausted',reachedLimit:'duration'});});
+  test('um bloqueio de decisão humana NÃO é espera de orçamento',()=>expect(projectPendingBudgetWait(blocked,[budgetBlock('human_input_required','attempts')])).toBeNull());
+  test('uma interrupção EM tentativa (com attempt_id) NÃO cai nesta projeção',()=>expect(projectPendingBudgetWait(blocked,[budgetBlock('interactive_reserve_protected','resources',{attempt_id:'a1'})])).toBeNull());
+  test('item não bloqueado nunca aguarda orçamento',()=>{expect(projectPendingBudgetWait({...item,state:'approved'},[budgetBlock('user_attempt_budget_exhausted','attempts')])).toBeNull();expect(projectPendingBudgetWait({...item,state:'review'},[])).toBeNull();});
+  test('presentWorkItem expõe pendingBudgetWait e mantém pendingDecision nulo',()=>expect(presentWorkItem(blocked,[budgetBlock('interactive_reserve_protected','resources')])).toMatchObject({pendingBudgetWait:{reason:'interactive_reserve_protected',reachedLimit:'resources'},pendingDecision:null}));
 });
 
 describe('histórico de pareceres do Verifier na apresentação',()=>{
