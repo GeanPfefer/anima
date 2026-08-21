@@ -682,3 +682,165 @@ describe('summarizeGateFailureForRetry', () => {
     expect(summarizeGateFailureForRetry('', '')).toBeUndefined();
   });
 });
+
+
+describe('WorktreeExecutorAdapter - validation preparation seam', () => {
+  let repo: string;
+  let sha: string;
+  let resolver: WorktreeTargetResolver;
+
+  beforeAll(async () => {
+    repo = await mkdtemp(join(tmpdir(), 'anima-validation-prep-'));
+
+    await git(repo, ['init', '-b', 'main']);
+    await git(repo, ['config', 'user.name', 'test']);
+    await git(repo, ['config', 'user.email', 'test@anima.local']);
+    await git(repo, ['config', 'commit.gpgsign', 'false']);
+
+    await mkdir(join(repo, 'src'), { recursive: true });
+
+    await writeFile(
+      join(repo, 'package.json'),
+      JSON.stringify({
+        name: 'validation-prep-fixture',
+        version: '0.0.0',
+        private: true,
+        scripts: {
+          typecheck: 'node typecheck-generated-gate.js',
+        },
+      }, null, 2),
+    );
+
+    await writeFile(
+      join(repo, 'typecheck-generated-gate.js'),
+      `const fs = require('fs');
+if (fs.existsSync('.generated/typecheck-ready')) process.exit(0);
+console.error('validation preparation artifact is required before the gate');
+process.exit(1);
+`,
+    );
+
+    await writeFile(
+      join(repo, 'src', 'existing.ts'),
+      'export const existing = true;\n',
+    );
+
+    await writeFile(
+      join(repo, '.gitignore'),
+      'node_modules/\n.generated/\n',
+    );
+
+    await git(repo, ['add', '-A']);
+    await git(repo, ['commit', '-m', 'initial validation preparation fixture']);
+
+    const head = await git(repo, ['rev-parse', 'HEAD']);
+    sha = head.stdout.trim();
+
+    resolver = {
+      resolve: reference =>
+        reference === 'anima'
+          ? { repoRoot: repo, sha }
+          : null,
+    };
+  });
+
+  afterAll(async () => {
+    await rm(repo, { recursive: true, force: true });
+  });
+
+  test('validation preparation artifact is required before the gate', async () => {
+    const req = request({
+      includedScope: ['src/added.ts'],
+      validationCriteria: [
+        { label: 'typecheck', command: 'npm run typecheck' },
+      ],
+    });
+
+    const signals = await collect(
+      new WorktreeExecutorAdapter({
+        targets: resolver,
+        backend: new ScriptedCoderBackend([
+          {
+            path: 'src/added.ts',
+            content: 'export const prepared = true;\n',
+          },
+        ]),
+        linkNodeModules: true,
+
+        prepareValidation: async ({ rootPath, signal }) => {
+          if (signal.aborted) throw new Error('cancelled');
+
+          await mkdir(join(rootPath, '.generated'), { recursive: true });
+          await writeFile(
+            join(rootPath, '.generated', 'typecheck-ready'),
+            'prepared\n',
+          );
+        },
+      }),
+      req,
+      new AbortController().signal,
+    );
+
+    expect(signals.at(-1)?.kind).toBe('result');
+  });
+
+  test('validation preparation failure is fail-closed', async () => {
+    const observed: ObservedGateInput[] = [];
+
+    const req = request({
+      includedScope: ['src/added.ts'],
+      validationCriteria: [
+        { label: 'typecheck', command: 'npm run typecheck' },
+      ],
+    });
+
+    const signals = await collect(
+      new WorktreeExecutorAdapter({
+        targets: resolver,
+        backend: new ScriptedCoderBackend([
+          {
+            path: 'src/added.ts',
+            content: 'export const prepared = false;\n',
+          },
+        ]),
+        linkNodeModules: true,
+        prepareValidation: async () => {
+          throw new Error('synthetic preparation failure');
+        },
+        onGateObserved: outcome => observed.push(outcome),
+      }),
+      req,
+      new AbortController().signal,
+    );
+
+    const terminal = signals.at(-1);
+
+    expect(terminal?.kind).toBe('error');
+
+    if (terminal?.kind === 'error') {
+      expect(terminal.code).toBe('execution_failed');
+      expect(terminal.message).toContain(
+        'Falha ao preparar o ambiente de validacao',
+      );
+      expect(terminal.message).toContain(
+        'synthetic preparation failure',
+      );
+    }
+
+    expect(observed).toHaveLength(0);
+    expect(signals.some(signal => signal.kind === 'result')).toBe(false);
+
+    const branch = `anima-work/${req.attemptId}`;
+
+    // A branch da tentativa nasce antes da validacao e e preservada por design,
+    // mas falha de preparacao jamais pode produzir commit de sucesso.
+    const branchExists = await git(repo, ['branch', '--list', branch]);
+    expect(branchExists.stdout).toContain(branch);
+
+    const branchHead = await git(repo, ['rev-parse', branch]);
+    expect(branchHead.stdout.trim()).toBe(sha);
+
+    await git(repo, ['branch', '-D', branch]).catch(() => undefined);
+  });
+
+});

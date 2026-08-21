@@ -1,5 +1,6 @@
-import { isAbsolute, resolve } from 'node:path';
-import type { ObservedCoderInput, ObservedGateInput, WorkRoutingCandidateV1 } from '@anima/core';
+import { createRequire } from 'node:module';
+import { isAbsolute, join, resolve } from 'node:path';
+import type { ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { GptCoderBackend } from './gpt-coder';
@@ -110,6 +111,82 @@ const backendFor = (
   return { error: `Backend de c?digo "${kind}" n?o ? permitido no fluxo real.` };
 };
 
+export function needsAnimaWebTypegen(
+  validationCriteria: WorkExecutorRequest['validationCriteria'],
+): boolean {
+  return validationCriteria.some(criterion => {
+    const command = criterion.command?.trim().toLowerCase();
+    if (!command) return false;
+
+    if (
+      command === 'npm run typecheck' ||
+      command === 'npm.cmd run typecheck'
+    ) {
+      return true;
+    }
+
+    return (
+      command === 'npm run typecheck --workspace=apps/web' ||
+      command === 'npm.cmd run typecheck --workspace=apps/web'
+    );
+  });
+}
+
+export interface AnimaValidationPreparationInput {
+  readonly rootPath: string;
+  readonly validationCriteria: WorkExecutorRequest['validationCriteria'];
+  readonly signal: AbortSignal;
+}
+
+export interface AnimaValidationPreparationDependencies {
+  readonly resolveNextCli: (webRoot: string) => string;
+  readonly run: typeof runProcess;
+}
+
+const defaultAnimaValidationPreparationDependencies: AnimaValidationPreparationDependencies = {
+  resolveNextCli: webRoot => {
+    const requireFromWeb = createRequire(join(webRoot, 'package.json'));
+    return requireFromWeb.resolve('next/dist/bin/next');
+  },
+  run: runProcess,
+};
+
+export async function prepareAnimaValidation(
+  input: AnimaValidationPreparationInput,
+  dependencies: AnimaValidationPreparationDependencies =
+    defaultAnimaValidationPreparationDependencies,
+): Promise<void> {
+  if (!needsAnimaWebTypegen(input.validationCriteria)) return;
+
+  if (input.signal.aborted) {
+    throw new Error('Preparacao de validacao cancelada antes do Next typegen.');
+  }
+
+  const webRoot = join(input.rootPath, 'apps', 'web');
+  const nextCli = dependencies.resolveNextCli(webRoot);
+
+  const result = await dependencies.run(
+    process.execPath,
+    [nextCli, 'typegen', '.'],
+    {
+      cwd: webRoot,
+      timeoutMs: 120_000,
+      signal: input.signal,
+    },
+  );
+
+  if (result.exitCode === 0 && !result.timedOut && !result.cancelled) return;
+
+  const diagnostic =
+    result.stderr.trim() ||
+    result.stdout.trim() ||
+    `exitCode=${result.exitCode}`;
+
+  throw new Error(
+    `Next typegen falhou: ${diagnostic}`,
+  );
+}
+
 export function gateRetryLimitForCoderBackend(kind: string | null): number {
   // Uma ?nica corre??o interna ap?s falha ordin?ria de gate observada pelo host,
   // no mesmo attempt/worktree. Outros backends preservam retry zero.
@@ -147,6 +224,7 @@ export function resolveExecutorRoute(
       backend,
       emitCheckpoint: true,
       linkNodeModules: true,
+      ...(isAnima ? { prepareValidation: prepareAnimaValidation } : {}),
       gateRetryLimit: gateRetryLimitForCoderBackend(contract.coderBackend),
       ...(options.gateObserver ? { onGateObserved: options.gateObserver } : {}),
       ...(options.coderObserver ? { onCoderObserved: options.coderObserver } : {}),

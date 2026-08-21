@@ -45,6 +45,19 @@ export interface WorktreeExecutorOptions {
   readonly branchPrefix?: string;
   /** Religa o node_modules real para o gate npm rodar sem instalar. */
   readonly linkNodeModules?: boolean;
+
+  /**
+   * Prepara artefatos derivados necessarios aos gates depois que o layout de
+   * dependencias foi religado. E chamado novamente em cada rodada de gates.
+   *
+   * Falha de preparacao encerra a tentativa de forma fail-closed e nao e
+   * classificada como falha do codigo produzido pelo backend.
+   */
+  readonly prepareValidation?: (input: {
+    readonly rootPath: string;
+    readonly validationCriteria: WorkExecutorRequest['validationCriteria'];
+    readonly signal: AbortSignal;
+  }) => Promise<void>;
   /** Emite um checkpoint mid-flight após a edição e antes do gate. */
   readonly emitCheckpoint?: boolean;
   /**
@@ -357,6 +370,27 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
 
         if (this.options.linkNodeModules) {
           await worktree.linkNodeModules(signal);
+        }
+
+        if (this.options.prepareValidation) {
+          try {
+            await this.options.prepareValidation({
+              rootPath: worktree.root,
+              validationCriteria: request.validationCriteria,
+              signal,
+            });
+          } catch (error) {
+            yield attach(++seq, {
+              kind: 'error',
+              code: 'execution_failed',
+              message: `Falha ao preparar o ambiente de validacao: ${clip(
+                error instanceof Error ? error.message : String(error),
+              )}.`,
+              retryable: false,
+              handoffReference,
+            });
+            return;
+          }
         }
 
         const timeoutMs =

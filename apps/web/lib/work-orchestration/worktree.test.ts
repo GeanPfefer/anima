@@ -126,6 +126,82 @@ describe('GitWorktree — ciclo de vida', () => {
     await rm(join(ctx.repo, 'node_modules'), { recursive: true, force: true });
   });
 
+  test('linkNodeModules religa tamb�m node_modules f�sicos dos workspaces e dispose preserva os alvos reais', async () => {
+    await mkdir(join(ctx.repo, 'node_modules', 'root-pkg'), { recursive: true });
+    await mkdir(join(ctx.repo, 'apps', 'web', 'node_modules', 'web-pkg'), { recursive: true });
+    await mkdir(join(ctx.repo, 'apps', 'mobile', 'node_modules', 'mobile-pkg'), { recursive: true });
+
+    await writeFile(
+      join(ctx.repo, 'node_modules', 'root-pkg', 'sentinel.txt'),
+      'ROOT-PRESERVAR',
+    );
+    await writeFile(
+      join(ctx.repo, 'apps', 'web', 'node_modules', 'web-pkg', 'sentinel.txt'),
+      'WEB-PRESERVAR',
+    );
+    await writeFile(
+      join(ctx.repo, 'apps', 'mobile', 'node_modules', 'mobile-pkg', 'sentinel.txt'),
+      'MOBILE-PRESERVAR',
+    );
+
+    const worktree = await GitWorktree.create({
+      repoRoot: ctx.repo,
+      sha: ctx.sha,
+      branch: `anima-work/nm-workspaces-${Date.now()}`,
+    });
+
+    try {
+      expect(await worktree.linkNodeModules()).toBe(true);
+
+      expect(
+        await readFile(
+          join(worktree.root, 'node_modules', 'root-pkg', 'sentinel.txt'),
+          'utf8',
+        ),
+      ).toBe('ROOT-PRESERVAR');
+
+      expect(
+        await readFile(
+          join(worktree.root, 'apps', 'web', 'node_modules', 'web-pkg', 'sentinel.txt'),
+          'utf8',
+        ),
+      ).toBe('WEB-PRESERVAR');
+
+      expect(
+        await readFile(
+          join(worktree.root, 'apps', 'mobile', 'node_modules', 'mobile-pkg', 'sentinel.txt'),
+          'utf8',
+        ),
+      ).toBe('MOBILE-PRESERVAR');
+    } finally {
+      await worktree.dispose({ deleteBranch: true });
+    }
+
+    expect(
+      await readFile(
+        join(ctx.repo, 'node_modules', 'root-pkg', 'sentinel.txt'),
+        'utf8',
+      ),
+    ).toBe('ROOT-PRESERVAR');
+
+    expect(
+      await readFile(
+        join(ctx.repo, 'apps', 'web', 'node_modules', 'web-pkg', 'sentinel.txt'),
+        'utf8',
+      ),
+    ).toBe('WEB-PRESERVAR');
+
+    expect(
+      await readFile(
+        join(ctx.repo, 'apps', 'mobile', 'node_modules', 'mobile-pkg', 'sentinel.txt'),
+        'utf8',
+      ),
+    ).toBe('MOBILE-PRESERVAR');
+
+    await rm(join(ctx.repo, 'node_modules'), { recursive: true, force: true });
+    await rm(join(ctx.repo, 'apps', 'web', 'node_modules'), { recursive: true, force: true });
+    await rm(join(ctx.repo, 'apps', 'mobile', 'node_modules'), { recursive: true, force: true });
+  });
   test('dispose preserva a branch por padrão como referência revisável', async () => {
     const branch = `anima-work/keep-${Date.now()}`;
     const worktree = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch });

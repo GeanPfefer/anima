@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, mkdir, readFile, rm, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, readdir, rm, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
@@ -116,7 +116,7 @@ const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promi
 /** Uma worktree git descartável ancorada num SHA. Cria uma branch nova e um
  * diretório temporário; o repositório e o workspace original nunca mudam. */
 export class GitWorktree {
-  private nodeModulesLink: string | null = null;
+  private nodeModulesLinks: string[] = [];
   private constructor(readonly repoRoot: string, readonly root: string, readonly branch: string, private readonly base: string, private readonly baseSha: string) {}
 
   static async create(input: { readonly repoRoot: string; readonly sha: string; readonly branch: string; readonly signal?: AbortSignal }): Promise<GitWorktree> {
@@ -149,32 +149,82 @@ export class GitWorktree {
     return true;
   }
 
-  /** Liga o `node_modules` real do repositório na worktree (junction no Windows,
-   * symlink fora), para o gate npm rodar com o toolchain real sem instalar. */
+  /**
+   * Religa os node_modules fisicos ja instalados no repositorio autorizado:
+   * a raiz e os node_modules proprios de workspaces sob apps/* e packages/*.
+   *
+   * Nao instala dependencias nem compartilha outputs derivados; apenas reproduz
+   * o layout de dependencias necessario para executar o toolchain na worktree.
+   */
   async linkNodeModules(signal?: AbortSignal): Promise<boolean> {
-    const source = join(this.repoRoot, 'node_modules');
-    if (!(await stat(source).then(s => s.isDirectory(), () => false))) return false;
-    const link = join(this.root, 'node_modules');
+    await this.unlinkNodeModules();
+
+    const candidates: Array<{ source: string; link: string }> = [];
+
+    const rootSource = join(this.repoRoot, 'node_modules');
+    if (await stat(rootSource).then(info => info.isDirectory(), () => false)) {
+      candidates.push({
+        source: rootSource,
+        link: join(this.root, 'node_modules'),
+      });
+    }
+
+    for (const group of ['apps', 'packages']) {
+      const groupRoot = join(this.repoRoot, group);
+      const entries = await readdir(groupRoot, { withFileTypes: true }).catch(() => []);
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+
+        const source = join(groupRoot, entry.name, 'node_modules');
+        const exists = await stat(source).then(info => info.isDirectory(), () => false);
+        if (!exists) continue;
+
+        candidates.push({
+          source,
+          link: join(this.root, group, entry.name, 'node_modules'),
+        });
+      }
+    }
+
+    if (candidates.length === 0) return false;
+
     try {
-      await symlink(source, link, 'junction');
-      this.nodeModulesLink = link;
+      for (const candidate of candidates) {
+        if (signal?.aborted) throw new Error('cancelled');
+
+        await mkdir(dirname(candidate.link), { recursive: true });
+        await symlink(candidate.source, candidate.link, 'junction');
+        this.nodeModulesLinks.push(candidate.link);
+      }
+
       return true;
-    } catch { return false; }
+    } catch {
+      await this.unlinkNodeModules();
+      return false;
+    }
   }
 
-  /** Remove SOMENTE a ligação de node_modules (junction no Windows, symlink fora),
-   * jamais o alvo. Em junction usa rmdir (apaga o reparse point); em symlink,
-   * unlink. Precisa vir ANTES do `git worktree remove`, senão o git poderia
-   * recursar pela ligação e apagar o node_modules real. */
+  /**
+   * Remove SOMENTE as ligacoes de node_modules criadas pelo host, nunca os alvos.
+   * A ordem reversa cobre primeiro os workspaces e por ultimo a raiz.
+   */
   async unlinkNodeModules(): Promise<void> {
-    const link = this.nodeModulesLink;
-    if (!link) return;
-    this.nodeModulesLink = null;
-    try {
-      const info = await lstat(link);
-      if (process.platform === 'win32' && info.isDirectory()) await rmdir(link).catch(() => unlink(link).catch(() => {}));
-      else await unlink(link).catch(() => rmdir(link).catch(() => {}));
-    } catch { /* ligação já ausente */ }
+    const links = [...this.nodeModulesLinks].reverse();
+    this.nodeModulesLinks = [];
+
+    for (const link of links) {
+      try {
+        const info = await lstat(link);
+        if (process.platform === 'win32' && info.isDirectory()) {
+          await rmdir(link).catch(() => unlink(link).catch(() => {}));
+        } else {
+          await unlink(link).catch(() => rmdir(link).catch(() => {}));
+        }
+      } catch {
+        // ligacao ja ausente
+      }
+    }
   }
 
   async stageAll(signal?: AbortSignal): Promise<void> { await git(this.root, ['add', '-A'], signal); }

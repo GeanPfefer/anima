@@ -1,7 +1,8 @@
 /** @jest-environment node */
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ScriptedCoderBackend } from './coder-backend';
-import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
+import { needsAnimaWebTypegen, prepareAnimaValidation, readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
 
 const SHA = 'a'.repeat(40);
 const base: ExecutionContract = { executor: null, coderBackend: null, model: null, baseSha: null, targetKind: null, targetReference: null };
@@ -93,5 +94,145 @@ describe('resolveExecutorRoute — seleção explícita', () => {
       expect(selection.route.adapter.id).toBe('worktree-v1');
       expect(selection.route.candidate.modelRef).toBe('openai:gpt-x');
     }
+  });
+});
+
+
+describe('needsAnimaWebTypegen', () => {
+  test('root typecheck alcanca apps/web', () => {
+    expect(needsAnimaWebTypegen([
+      { label: 'typecheck', command: 'npm run typecheck' },
+    ])).toBe(true);
+  });
+
+  test('typecheck explicitamente escopado para apps/web precisa de typegen', () => {
+    expect(needsAnimaWebTypegen([
+      { label: 'web', command: 'npm run typecheck --workspace=apps/web' },
+    ])).toBe(true);
+  });
+
+  test('typecheck de packages/core nao precisa de typegen web', () => {
+    expect(needsAnimaWebTypegen([
+      { label: 'core', command: 'npm run typecheck --workspace=packages/core' },
+    ])).toBe(false);
+  });
+
+  test('gates sem typecheck web nao precisam de typegen', () => {
+    expect(needsAnimaWebTypegen([
+      { label: 'tests', command: 'npm test' },
+      { label: 'build', command: 'npm run build' },
+      { label: 'declared-only' },
+    ])).toBe(false);
+  });
+
+  test('qualquer criterio que alcance o web e suficiente', () => {
+    expect(needsAnimaWebTypegen([
+      { label: 'core', command: 'npm run typecheck --workspace=packages/core' },
+      { label: 'web', command: 'npm run typecheck --workspace=apps/web' },
+    ])).toBe(true);
+  });
+});
+
+describe('prepareAnimaValidation', () => {
+  test('nao executa typegen quando os gates nao alcancam apps/web', async () => {
+    const calls: unknown[] = [];
+
+    await prepareAnimaValidation(
+      {
+        rootPath: 'C:/fake/worktree',
+        validationCriteria: [
+          { label: 'core', command: 'npm run typecheck --workspace=packages/core' },
+        ],
+        signal: new AbortController().signal,
+      },
+      {
+        resolveNextCli: () => {
+          throw new Error('nao deveria resolver Next');
+        },
+        run: async (...args) => {
+          calls.push(args);
+          throw new Error('nao deveria executar processo');
+        },
+      },
+    );
+
+    expect(calls).toHaveLength(0);
+  });
+
+  test('typecheck web resolve Next pelo apps/web da worktree e executa typegen', async () => {
+    const resolvedFrom: string[] = [];
+    const calls: Array<{
+      file: string;
+      args: readonly string[];
+      options: { cwd: string; timeoutMs: number; signal?: AbortSignal };
+    }> = [];
+
+    const signal = new AbortController().signal;
+
+    await prepareAnimaValidation(
+      {
+        rootPath: 'C:/fake/worktree',
+        validationCriteria: [
+          { label: 'web', command: 'npm run typecheck --workspace=apps/web' },
+        ],
+        signal,
+      },
+      {
+        resolveNextCli: webRoot => {
+          resolvedFrom.push(webRoot);
+          return 'C:/fake/next/dist/bin/next';
+        },
+        run: async (file, args, options) => {
+          calls.push({ file, args, options });
+          return {
+            command: [file, ...args].join(' '),
+            exitCode: 0,
+            stdout: 'ok',
+            stderr: '',
+            durationMs: 10,
+            timedOut: false,
+            cancelled: false,
+          };
+        },
+      },
+    );
+
+    expect(resolvedFrom).toEqual([join('C:/fake/worktree', 'apps', 'web')]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      file: process.execPath,
+      args: ['C:/fake/next/dist/bin/next', 'typegen', '.'],
+      options: {
+        cwd: join('C:/fake/worktree', 'apps', 'web'),
+        timeoutMs: 120000,
+        signal,
+      },
+    });
+  });
+
+  test('falha do next typegen rejeita a preparacao', async () => {
+    await expect(
+      prepareAnimaValidation(
+        {
+          rootPath: 'C:/fake/worktree',
+          validationCriteria: [
+            { label: 'typecheck', command: 'npm run typecheck' },
+          ],
+          signal: new AbortController().signal,
+        },
+        {
+          resolveNextCli: () => 'C:/fake/next/dist/bin/next',
+          run: async (file, args) => ({
+            command: [file, ...args].join(' '),
+            exitCode: 1,
+            stdout: '',
+            stderr: 'synthetic typegen failure',
+            durationMs: 20,
+            timedOut: false,
+            cancelled: false,
+          }),
+        },
+      ),
+    ).rejects.toThrow('synthetic typegen failure');
   });
 });
