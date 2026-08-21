@@ -42,10 +42,15 @@ async function makeNpmRepo(): Promise<{ repo: string; sha: string; resolver: Wor
   }, null, 2));
   await writeFile(
     join(repo, 'retry-gate.js'),
+    // Gate determinístico que EMITE um diagnóstico na falha (como jest/tsc reais):
+    // o host precisa de saída para sanitizar e realimentar; um gate mudo não produz
+    // diagnóstico algum (é o comportamento correto — não há o que diagnosticar).
     `const fs = require('fs');
 if (!process.argv.includes('retry')) process.exit(0);
 const p = 'src/added.ts';
-process.exit(fs.existsSync(p) && fs.readFileSync(p, 'utf8').includes('fixed') ? 0 : 1);
+if (fs.existsSync(p) && fs.readFileSync(p, 'utf8').includes('fixed')) process.exit(0);
+console.error('retry-gate: marcador "fixed" ausente em src added.ts');
+process.exit(1);
 `,
   );
   await mkdir(join(repo, 'src'), { recursive: true });
