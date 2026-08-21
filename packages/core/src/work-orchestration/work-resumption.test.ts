@@ -123,6 +123,53 @@ test('decisão humana respondida retoma do WorkHandoffV1 persistido com novas id
     carriedContext:{remainingSteps:['corrigir o operador de soma'],nextStep:'aplicar a correção mínima e reexecutar os testes'}}});
 });
 
+describe('retomada — interrupção de orçamento temporal (INTEL-04 coerência V0)',()=>{
+  // Handoff PAUSADO por limite temporal: espelha o do checkpoint da interrupção.
+  const budgetHandoff=()=>makeHandoff({},{stopReason:'time_limit_reached'});
+  const budgetSource=(handoff:WorkHandoffV1|null=budgetHandoff())=>({
+    kind:'budget_interruption_checkpoint' as const,handoff,interruptionEventSeq:50,budgetReason:'user_runtime_budget_exhausted',
+  });
+  test('interrupção temporal com checkpoint válido retoma com novas identidades, sem restart cego',()=>{
+    expect(planWorkResumption(makeInput({source:budgetSource()}))).toMatchObject({outcome:'resume',plan:{
+      sourceKind:'budget_interruption_checkpoint',resumeFromAttemptId:'attempt-1',resumeFromHandoffReference:HANDOFF_REF,
+      nextAttemptId:'attempt-2',nextClaimId:'claim-2',
+      carriedContext:{remainingSteps:['corrigir o operador de soma'],nextStep:'aplicar a correção mínima e reexecutar os testes',
+        previousFailures:['AssertionError: 2 + 2 != 5']}}});
+  });
+  test('o plano não fabrica cenário externo nem status/stopReason terminal',()=>{
+    const decision=planWorkResumption(makeInput({source:budgetSource()}));
+    if(decision.outcome!=='resume')throw new Error('esperava retomada');
+    expect(decision.plan).not.toHaveProperty('scenario');
+    expect(decision.plan).not.toHaveProperty('status');
+    expect(decision.plan).not.toHaveProperty('stopReason');
+  });
+  test('handoff pausado por razão NÃO temporal (decisão humana) é recusado nesta via',()=>
+    expect(planWorkResumption(makeInput({source:budgetSource(makeHandoff())})))
+      .toMatchObject({outcome:'refused',reason:'checkpoint_correlation_mismatch'}));
+  test('seq da interrupção inválida falha fechado',()=>
+    expect(planWorkResumption(makeInput({source:{...budgetSource(),interruptionEventSeq:0}})))
+      .toMatchObject({outcome:'refused',reason:'checkpoint_correlation_mismatch'}));
+  test('razão de orçamento em branco falha fechado',()=>
+    expect(planWorkResumption(makeInput({source:{...budgetSource(),budgetReason:'  '}})))
+      .toMatchObject({outcome:'refused',reason:'checkpoint_correlation_mismatch'}));
+  test('sem checkpoint não se retoma às cegas',()=>
+    expect(planWorkResumption(makeInput({source:budgetSource(null)})))
+      .toMatchObject({outcome:'refused',reason:'checkpoint_missing'}));
+  test('checkpoint de versão anterior não retoma sobre a proposta vigente',()=>
+    expect(planWorkResumption(makeInput({item:makeItem({proposalVersion:3}),source:budgetSource()})))
+      .toMatchObject({outcome:'refused',reason:'checkpoint_correlation_mismatch'}));
+  test('reaproveitar o claim anterior é recusado',()=>
+    expect(planWorkResumption(makeInput({source:budgetSource(),nextClaimId:'claim-1'})))
+      .toMatchObject({outcome:'refused',reason:'identifier_reused'}));
+  test('item bloqueado não retoma: precisa ser re-admitido a approved antes',()=>
+    expect(planWorkResumption(makeInput({item:makeItem({state:'blocked'}),source:budgetSource()})))
+      .toMatchObject({outcome:'refused',reason:'work_not_resumable'}));
+  test('atingir o limite de tentativas escala para decisão humana, não loop',()=>
+    expect(planWorkResumption(makeInput({item:makeItem({},{max_attempts:2}),
+      previousAttemptIds:['attempt-1','attempt-x'],nextAttemptId:'attempt-3',source:budgetSource()})))
+      .toMatchObject({outcome:'requires_human',reason:'persistent_inability_after_limits',reachedLimit:'attempts'}));
+});
+
 describe('retomada — parte do checkpoint, nunca da memória', () => {
   test('sem checkpoint não se retoma: exige reparação ou decisão humana', () =>
     expect(planWorkResumption(makeInput({ source: { kind: 'terminal_handoff', scenario: 'machine_restart', handoff: null } })))

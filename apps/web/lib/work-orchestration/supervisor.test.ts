@@ -48,6 +48,10 @@ interface FakeOptions {
   readonly budgetReason?: string;
   /** Ids de itens `blocked` por orçamento cuja janela recuperou: a re-admissão os devolve a `approved`. */
   readonly readmitBudgetBlocked?: readonly string[];
+  /** Ids de interrupções de orçamento EM tentativa cuja janela recuperou. */
+  readonly readmitBudgetInterrupted?: readonly string[];
+  /** Fonte de retomada por interrupção de orçamento devolvida ao Supervisor. */
+  readonly budgetInterruptionSource?: Record<string, unknown>;
   readonly interruptBudgetAfterCheckpoint?: string;
   /** UX-01: modela um pedido de pausa/cancelamento pendente aplicável no checkpoint. */
   readonly controlAfterCheckpoint?: 'pause' | 'cancel';
@@ -165,6 +169,34 @@ class FakeDatabase {
           }
         }
         return ok(readmitted);
+      }
+
+      case 'readmit_budget_interrupted_work': {
+        // Interrupção de orçamento EM tentativa cuja janela liberou volta a
+        // `approved`; a retomada do checkpoint é resolvida pela fonte abaixo.
+        const readmitted: { work_item_id: string; budget_reason: string }[] = [];
+        for (const id of this.options.readmitBudgetInterrupted ?? []) {
+          const item = this.items.get(id);
+          if (item && item.state === 'blocked') {
+            item.state = 'approved';
+            this.events.push({ itemId: id, type: 'work_approved', attemptId: null, reason: 'budget_window_recovered' });
+            readmitted.push({ work_item_id: id, budget_reason: 'user_runtime_budget_exhausted' });
+          }
+        }
+        return ok(readmitted);
+      }
+      case 'budget_interruption_resumption_source':
+        return ok(this.options.budgetInterruptionSource ?? null);
+      case 'begin_budget_interruption_resumed_attempt': {
+        const item = this.items.get(args['work_item_id'] as string)!;
+        const claim: FakeClaim = {
+          id: args['claim_id'] as string, itemId: item.id, target: item.target,
+          attemptId: args['attempt_id'] as string, released: false, reason: null,
+        };
+        this.claims.set(claim.id, claim);
+        item.state = 'in_progress';
+        this.events.push({ itemId: item.id, type: 'execution_started', attemptId: claim.attemptId, reason: 'budget_resumed' });
+        return ok(item);
       }
 
       case 'abandoned_work_resumption_source':
@@ -584,7 +616,7 @@ test('seleção explícita nunca substitui o cartão solicitado pela cabeça da 
     { workItemId: 'item-2', expectedProposalVersion: 1 },
   );
 
-  expect(database.calls[2]).toBe('select_autonomous_work');
+  expect(database.calls[3]).toBe('select_autonomous_work');
   expect(result.selection?.workItemId).toBe('item-2');
   expect(runner.calls[0]?.workItemId).toBe('item-2');
 });
@@ -602,7 +634,7 @@ test('seleção explícita obsoleta falha fechada sem cair para outro trabalho',
   );
 
   expect(result.outcome).toBe('no_eligible_work');
-  expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'select_autonomous_work']);
+  expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work', 'select_autonomous_work']);
   expect(runner.calls).toHaveLength(0);
 });
 
@@ -621,7 +653,7 @@ test.each<FakeClassification>(['missing', 'incomplete'])(
     expect(runner.calls).toHaveLength(0);
     expect(database.claims.size).toBe(0);
     expect(database.events).toHaveLength(0);
-    expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'next_autonomous_work']);
+    expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work', 'next_autonomous_work']);
   },
 );
 
@@ -647,7 +679,8 @@ test('reconcilia antes de selecionar e relata o que a reconciliação produziu',
 
   expect(database.calls[0]).toBe('reconcile_supervised_work');
   expect(database.calls[1]).toBe('readmit_budget_blocked_work');
-  expect(database.calls[2]).toBe('next_autonomous_work');
+  expect(database.calls[2]).toBe('readmit_budget_interrupted_work');
+  expect(database.calls[3]).toBe('next_autonomous_work');
   expect(result.reconciliation).toEqual([
     { workItemId: 'item-x', attemptId: 'a-1', claimId: null, finding: 'attempt_abandoned', action: 'attempt_abandoned', itemState: 'approved' },
   ]);
@@ -682,7 +715,7 @@ test('executa a cabeça FIFO e percorre claim, início supervisionado, terminal 
 
   // Ordem canônica das fronteiras, e nunca o início comandado.
   expect(database.calls).toEqual([
-    'reconcile_supervised_work', 'readmit_budget_blocked_work', 'next_autonomous_work', 'autonomous_work_budget_status', 'human_decision_resumption_source','abandoned_work_resumption_source',
+    'reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work', 'next_autonomous_work', 'autonomous_work_budget_status', 'human_decision_resumption_source','budget_interruption_resumption_source','abandoned_work_resumption_source',
     'current_work_intelligence_classification', 'work_routing_adjustment_context',
     'record_work_routing_adjustment', 'record_work_routing_decision', 'acquire_work_claim',
     'start_claimed_work_attempt', 'record_commanded_work_terminal', 'release_work_claim',
@@ -1170,6 +1203,46 @@ describe('INTEL-04 — orçamento no laço do Supervisor', () => {
     expect(database.events.some(event => event.type === 'work_approved' && event.reason === 'budget_window_recovered')).toBe(true);
     expect(database.items.get('item-1')!.state).toBe('review');
     expect(calls).toHaveLength(1);
+  });
+
+  test('interrupção de orçamento EM tentativa cuja janela recuperou retoma DO CHECKPOINT, não do zero', async () => {
+    // A tentativa foi interrompida por limite temporal com checkpoint válido; a
+    // recuperação re-admite e RESUME do checkpoint (novas identidades), jamais um
+    // restart cego e jamais o caminho de decisão humana ou de abandono.
+    const source = {
+      kind: 'budget_interruption_checkpoint', interruption_event_seq: 50, checkpoint_event_seq: 40,
+      budget_reason: 'user_runtime_budget_exhausted', previous_attempt_ids: ['attempt-antiga'],
+      handoff: {
+        schemaVersion: 1, workItemId: 'item-1', attemptId: 'attempt-antiga', approvedProposalVersion: 1,
+        claimId: 'claim-antigo', status: 'paused', stopReason: 'time_limit_reached',
+        handoffReference: 'worktree:alvo-1:anima-work/attempt-antiga', completedSteps: ['isolou a workspace'],
+        remainingSteps: ['reexecutar o gate'], decisions: [], risks: ['tempo excedido'], nextStep: 'reexecutar o gate',
+        touchedResources: ['calculator.py'], validations: [{ label: 'gate', outcome: 'failed' }],
+        failures: ['gate incompleto'], evidenceReferences: [],
+      },
+    };
+    const database = new FakeDatabase({
+      items: [{ id: 'item-1', version: 1, state: 'blocked', target: 'alvo-1', approvalSeq: 1, classification: 'complete' }],
+      readmitBudgetInterrupted: ['item-1'], budgetInterruptionSource: source,
+    });
+    const { adapter, calls } = executor('result');
+    const result = await turn(
+      database, adapter, [workItem('item-1', { target: 'alvo-1', limits: { max_attempts: 3, max_duration_minutes: 5 } })],
+      ['claim-novo', 'attempt-nova'],
+    );
+
+    expect(result.outcome).toBe('execution_completed');
+    // Re-admitido e retomado DO CHECKPOINT — nunca restart cego nem outra via.
+    expect(database.calls).toContain('readmit_budget_interrupted_work');
+    expect(database.calls).toContain('begin_budget_interruption_resumed_attempt');
+    expect(database.calls).not.toContain('acquire_work_claim');
+    expect(database.calls).not.toContain('begin_resumed_work_attempt');
+    expect(database.calls).not.toContain('begin_human_decision_resumed_attempt');
+    expect(database.events.some(event => event.type === 'work_approved' && event.reason === 'budget_window_recovered')).toBe(true);
+    // O contexto do checkpoint atravessa a interrupção, com nova identidade de tentativa.
+    expect(calls[0]).toMatchObject({ attemptId: 'attempt-nova', carriedContext: {
+      isNewAttempt: true, continueFromCheckpoint: true, remainingSteps: ['reexecutar o gate'],
+      nextStep: 'reexecutar o gate', previousFailures: ['gate incompleto'] } });
   });
 
   test('re-admissão recusada interrompe a volta antes da seleção', async () => {

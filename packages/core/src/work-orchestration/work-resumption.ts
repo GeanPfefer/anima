@@ -63,6 +63,19 @@ export type WorkResumptionSourceV1 =
       readonly inputProvidedEventId: string;
     }
   | {
+      // INTEL-04 (coerência V0). Uma tentativa interrompida NO MEIO por orçamento
+      // TEMPORAL (tempo global ou reserva interativa) deixou um checkpoint válido e
+      // uma claim liberada; quando a janela móvel recupera, a retomada parte desse
+      // checkpoint — nunca um restart cego e nunca uma decisão humana falsa. É o
+      // análogo temporal do `human_decision_checkpoint`, sem entrada humana.
+      readonly kind: 'budget_interruption_checkpoint';
+      readonly handoff: WorkHandoffV1 | null;
+      // Seq do evento `work_blocked` da interrupção — correlação append-only.
+      readonly interruptionEventSeq: number;
+      // Razão temporal recuperável (janela móvel), preservada para auditoria.
+      readonly budgetReason: string;
+    }
+  | {
       readonly kind: 'abandoned_checkpoint';
       readonly checkpoint: AbandonedCheckpointV1 | null;
       readonly sourceAttemptId: string;
@@ -171,6 +184,14 @@ export function planWorkResumption(input: WorkResumptionInput): WorkResumptionDe
     && (!nonBlank(source.inputRequestedEventId)||!nonBlank(source.inputProvidedEventId)
       || (source.handoff!==null&&(source.handoff.status!=='paused'||source.handoff.stopReason!=='human_input_required')))) {
     return refuse('checkpoint_correlation_mismatch','A retomada por decisão humana exige pedido, resposta e handoff pausado correlacionados.');
+  }
+  // A interrupção de orçamento retoma de um handoff PAUSADO por limite temporal
+  // (`time_limit_reached`); qualquer outro status/razão, ou correlação ausente,
+  // falha fechado — nunca vira restart cego nem se disfarça de decisão humana.
+  if (source.kind==='budget_interruption_checkpoint'
+    && (!Number.isInteger(source.interruptionEventSeq)||source.interruptionEventSeq<1||!nonBlank(source.budgetReason)
+      || (source.handoff!==null&&(source.handoff.status!=='paused'||source.handoff.stopReason!=='time_limit_reached')))) {
+    return refuse('checkpoint_correlation_mismatch','A retomada por interrupção de orçamento exige a interrupção, o checkpoint e o handoff temporal correlacionados.');
   }
   if (previousAttemptIds.includes(nextAttemptId)) {
     return refuse('identifier_reused', 'A retomada exige uma tentativa nova; reaproveitar o identificador duplicaria efeitos.');

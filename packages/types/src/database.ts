@@ -1197,6 +1197,10 @@ export type Database = {
         Returns: Json
       }
       block_work_on_budget: { Args: { p_work_item_id: string }; Returns: Json }
+      budget_interruption_resumption_source: {
+        Args: { p_work_item_id: string }
+        Returns: Json
+      }
       create_work_proposal: {
         Args: {
           capability: Database["public"]["Enums"]["work_capability"]
@@ -1322,6 +1326,13 @@ export type Database = {
         }[]
       }
       readmit_budget_blocked_work: {
+        Args: never
+        Returns: {
+          budget_reason: string
+          work_item_id: string
+        }[]
+      }
+      readmit_budget_interrupted_work: {
         Args: never
         Returns: {
           budget_reason: string
@@ -1569,6 +1580,39 @@ export type Database = {
       human_decision_resumption_source: {
         Args: { p_work_item_id: string }
         Returns: Json
+      }
+      begin_budget_interruption_resumed_attempt: {
+        Args: {
+          attempt_id: string
+          checkpoint_event_seq: number
+          claim_id: string
+          executor_id: string
+          expected_proposal_version: number
+          interruption_event_seq: number
+          lease_seconds: number
+          owner_instance_id: string
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       begin_human_decision_resumed_attempt: {
         Args: {

@@ -53,6 +53,8 @@ class HappyFake {
     switch (name) {
       case 'reconcile_supervised_work': return Promise.resolve(ok([]));
       case 'readmit_budget_blocked_work': return Promise.resolve(ok([]));
+      case 'readmit_budget_interrupted_work': return Promise.resolve(ok([]));
+      case 'budget_interruption_resumption_source': return Promise.resolve(ok(null));
       case 'next_autonomous_work': return Promise.resolve(ok(this.item.state === 'approved'
         ? [{ work_item_id: this.item.id, approved_proposal_version: this.item.version, approval_seq: 1, approved_at: new Date().toISOString(), capability: 'programming', target_reference: this.item.target, selection_policy: 'x', queue_size: 1, runner_up_approval_seq: null, skipped_occupied_targets: 0 }]
         : []));

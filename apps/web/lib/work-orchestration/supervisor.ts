@@ -189,6 +189,13 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   if (readmitted.error) {
     return { ...base(reconciliation), outcome: 'selection_not_executable', refusal: refusalOf(readmitted.error), requiresAnotherTurn: true };
   }
+  // Interrupções de orçamento EM tentativa (com checkpoint) cuja janela recuperou
+  // voltam a `approved` aqui; a retomada DO CHECKPOINT (não um restart cego) é
+  // resolvida abaixo pela fonte `budget_interruption_resumption_source`.
+  const readmittedInterrupted = await client.rpc('readmit_budget_interrupted_work');
+  if (readmittedInterrupted.error) {
+    return { ...base(reconciliation), outcome: 'selection_not_executable', refusal: refusalOf(readmittedInterrupted.error), requiresAnotherTurn: true };
+  }
 
   // ---------- (2) Seleção pela fronteira canônica do SUP-02 ----------
   const selected = dependencies.requestedWork
@@ -268,6 +275,13 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   const decisionSourceRead = await client.rpc('human_decision_resumption_source', { p_work_item_id: selection.workItemId });
   if (decisionSourceRead.error) return { ...started, outcome: 'selection_not_executable', refusal: refusalOf(decisionSourceRead.error) };
   let persistedSource = object(decisionSourceRead.data);
+  // Interrupção de orçamento EM tentativa: preferida ao caminho de tentativa nova,
+  // para retomar do checkpoint. (A fonte só existe para item já re-admitido.)
+  if (!persistedSource) {
+    const budgetSourceRead = await client.rpc('budget_interruption_resumption_source', { p_work_item_id: selection.workItemId });
+    if (budgetSourceRead.error) return { ...started, outcome: 'selection_not_executable', refusal: refusalOf(budgetSourceRead.error) };
+    persistedSource = object(budgetSourceRead.data);
+  }
   if (!persistedSource) {
     const abandonedSourceRead = await client.rpc('abandoned_work_resumption_source', { p_work_item_id: selection.workItemId });
     if (abandonedSourceRead.error) return { ...started, outcome: 'selection_not_executable', refusal: refusalOf(abandonedSourceRead.error) };
@@ -372,6 +386,33 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     attempt=await client.rpc('begin_human_decision_resumed_attempt',{
       work_item_id:selection.workItemId,expected_proposal_version:selection.approvedProposalVersion,
       input_requested_event_id:inputRequestedEventId,input_provided_event_id:inputProvidedEventId,
+      claim_id:claimId,attempt_id:attemptId,owner_instance_id:ownerInstanceId,
+      lease_seconds:leaseSeconds,executor_id:adapter.id,
+    });
+  } else if (persistedSource?.kind === 'budget_interruption_checkpoint') {
+    // Retomada de interrupção TEMPORAL de orçamento: parte do checkpoint da
+    // tentativa interrompida (novas identidades), nunca um restart cego. Conta
+    // como nova tentativa e revalida o orçamento na guarda de execution_started.
+    const handoff = object(persistedSource.handoff) as unknown as WorkHandoffV1 | null;
+    const interruptionEventSeq = Number(persistedSource.interruption_event_seq);
+    const checkpointEventSeq = Number(persistedSource.checkpoint_event_seq);
+    const budgetReason = String(persistedSource.budget_reason ?? '');
+    const decision = planWorkResumption({
+      item:item.value,
+      source:{kind:'budget_interruption_checkpoint',handoff,interruptionEventSeq,budgetReason},
+      openClaim:null,
+      previousAttemptIds:Array.isArray(persistedSource.previous_attempt_ids)
+        ? persistedSource.previous_attempt_ids.filter((id):id is string=>typeof id==='string'):[],
+      nextAttemptId:attemptId,nextClaimId:claimId,now:new Date(),
+    });
+    if(decision.outcome!=='resume'){
+      return{...routed,outcome:decision.outcome==='requires_human'?'resumption_requires_human':'attempt_start_refused',
+        refusal:{code:decision.reason,message:decision.explanation}};
+    }
+    carriedContext={isNewAttempt:true,continueFromCheckpoint:true,...decision.plan.carriedContext};
+    attempt=await client.rpc('begin_budget_interruption_resumed_attempt',{
+      work_item_id:selection.workItemId,expected_proposal_version:selection.approvedProposalVersion,
+      interruption_event_seq:interruptionEventSeq,checkpoint_event_seq:checkpointEventSeq,
       claim_id:claimId,attempt_id:attemptId,owner_instance_id:ownerInstanceId,
       lease_seconds:leaseSeconds,executor_id:adapter.id,
     });
