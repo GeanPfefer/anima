@@ -441,6 +441,18 @@ escalonamento e redução auditáveis; o INTEL-04 aplica orçamento por tentativ
 e tempo em janelas móveis, preserva capacidade interativa e interrompe com
 checkpoint e razão tipada. Tokens e custo financeiro permanecem fora do V0.
 
+**Estado vivo da prova de superfície (2026-08-21, HEAD `5896862`).** A prova
+restante `chat → proposta → aprovação → supervisor-turn → qwen3-coder → Next
+typegen → typecheck web → Verifier → review` foi consultada primeiro pela RPC
+canônica `autonomous_work_budget_status`, como o usuário autorizado. Ela segue
+legitimamente pendente: `admitted=false`, razão
+`user_attempt_budget_exhausted`, uso `6/6` tentativas do usuário em 24h e
+`remainingUserAttempts=0`. Runtime não é a barreira (`354/7200s` em 24h e
+`0/2700s` da reserva autônoma em 60 min). A primeira tentativa da janela expira
+após `2026-08-22 10:25:00 -03:00`; a prova deve ser retomada por nova consulta
+canônica, sem bypass. Ver o
+[registro da sessão](docs/registros/2026-08-21-prova-viva-pendente-janela-orcamento.md).
+
 Uma prova em 2026-08-11 (HEAD `1fa71a3`) exercitou o caminho autônomo em duas
 partes distintas — não uma prova ponta a ponta completa pela UI. **Pela UI normal:**
 um pedido de programação vira proposta `programming/low` **sem `execution_spec`**

@@ -1442,6 +1442,19 @@ ADR-002 e não tem o defeito.
 
 ## Dependências entre fases
 
+### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
+
+No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o
+usuário autorizado antes de qualquer nova proposta/aprovação, devolveu
+`admitted=false`, `reason=user_attempt_budget_exhausted`, uso `6/6` tentativas em
+24h e zero tentativas restantes. Os orçamentos de runtime não bloqueiam
+(`354/7200s` em 24h; `0/2700s` na reserva de 60min). A primeira tentativa contada
+sai da janela após `2026-08-22 10:25:00 -03:00`. A prova completa
+`chat → proposal → approval → supervisor-turn → qwen3-coder → Next typegen →
+typecheck web → Verifier → review` permanece o próximo ponto exato, sem bypass;
+nenhum novo item/tentativa foi criado nesta verificação. Registro:
+[`2026-08-21-prova-viva-pendente-janela-orcamento.md`](../registros/2026-08-21-prova-viva-pendente-janela-orcamento.md).
+
 ```text
 A (fechar fundação)
 └→ B (contrato de execução)
