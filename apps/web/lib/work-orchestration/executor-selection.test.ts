@@ -131,6 +131,34 @@ describe('needsAnimaWebTypegen', () => {
       { label: 'web', command: 'npm run typecheck --workspace=apps/web' },
     ])).toBe(true);
   });
+
+  test('typecheck escopado por NOME do pacote (@anima/web) tambem precisa de typegen', () => {
+    // safeValidationCommand admite e o npm resolve `--workspace=@anima/web` ao
+    // mesmo apps/web; sem detectar essa forma, o gate falharia na worktree.
+    expect(needsAnimaWebTypegen([
+      { label: 'web', command: 'npm run typecheck --workspace=@anima/web' },
+    ])).toBe(true);
+    expect(needsAnimaWebTypegen([
+      { label: 'web', command: 'npm.cmd run typecheck --workspace=@anima/web' },
+    ])).toBe(true);
+  });
+
+  test('variantes de normalizacao do seletor apps/web sao cobertas', () => {
+    expect(needsAnimaWebTypegen([{ label: 'web', command: 'npm.cmd run typecheck --workspace=apps/web' }])).toBe(true);
+    expect(needsAnimaWebTypegen([{ label: 'web', command: 'npm run typecheck --workspace=apps/web/' }])).toBe(true);
+    expect(needsAnimaWebTypegen([{ label: 'web', command: '  NPM RUN TYPECHECK --workspace=apps/web  ' }])).toBe(true);
+    expect(needsAnimaWebTypegen([{ label: 'web', command: 'npm run typecheck --workspace=apps/web -- --pretty' }])).toBe(true);
+  });
+
+  test('typecheck do core por caminho ou por nome NAO dispara typegen web', () => {
+    expect(needsAnimaWebTypegen([{ label: 'core', command: 'npm run typecheck --workspace=packages/core' }])).toBe(false);
+    expect(needsAnimaWebTypegen([{ label: 'core', command: 'npm run typecheck --workspace=@anima/core' }])).toBe(false);
+  });
+
+  test('gates de test/build do web nao dependem de .next/types (build gera os proprios tipos)', () => {
+    expect(needsAnimaWebTypegen([{ label: 'test', command: 'npm test --workspace=apps/web' }])).toBe(false);
+    expect(needsAnimaWebTypegen([{ label: 'build', command: 'npm run build --workspace=@anima/web' }])).toBe(false);
+  });
 });
 
 
@@ -226,6 +254,30 @@ describe('prepareAnimaValidation', () => {
         signal,
       },
     });
+  });
+
+  test('gate escopado por nome do pacote (@anima/web) TAMBEM executa o typegen', async () => {
+    // Fecha o loop do fix: a deteccao cobre @anima/web, entao a preparacao roda
+    // o typegen — sem isso o gate falharia na worktree (.next/types ausente).
+    const calls: Array<{ file: string; args: readonly string[] }> = [];
+    await prepareAnimaValidation(
+      {
+        rootPath: 'C:/fake/worktree',
+        validationCriteria: [
+          { label: 'web', command: 'npm run typecheck --workspace=@anima/web' },
+        ],
+        signal: new AbortController().signal,
+      },
+      {
+        resolveNextCli: () => 'C:/fake/next/dist/bin/next',
+        run: async (file, args) => {
+          calls.push({ file, args });
+          return { command: [file, ...args].join(' '), exitCode: 0, stdout: 'ok', stderr: '', durationMs: 10, timedOut: false, cancelled: false };
+        },
+      },
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ file: process.execPath, args: ['C:/fake/next/dist/bin/next', 'typegen', '.'] });
   });
 
   test('falha do next typegen rejeita a preparacao', async () => {

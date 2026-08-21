@@ -111,6 +111,13 @@ const backendFor = (
   return { error: `Backend de c?digo "${kind}" n?o ? permitido no fluxo real.` };
 };
 
+// Seletores `--workspace` que o npm resolve ao MESMO workspace apps/web: pelo
+// CAMINHO (`apps/web`) ou pelo NOME do pacote (`@anima/web`). `safeValidationCommand`
+// admite ambos; a detecção precisa cobrir os dois, senão um gate legítimo de
+// typecheck do apps/web (ex.: `--workspace=@anima/web`) roda sem o Next typegen e
+// falha na worktree (`.next/types` ausente) — item reprovado por engano.
+const ANIMA_WEB_WORKSPACE_SELECTORS: ReadonlySet<string> = new Set(['apps/web', '@anima/web']);
+
 export function needsAnimaWebTypegen(
   validationCriteria: WorkExecutorRequest['validationCriteria'],
 ): boolean {
@@ -118,17 +125,19 @@ export function needsAnimaWebTypegen(
     const command = criterion.command?.trim().toLowerCase();
     if (!command) return false;
 
-    if (
-      command === 'npm run typecheck' ||
-      command === 'npm.cmd run typecheck'
-    ) {
-      return true;
-    }
+    // Só `typecheck` depende de `.next/types`: `build` (`next build`) gera seus
+    // próprios tipos e `test` (jest) não checa tipos. Casa o comando de typecheck
+    // com ou sem seletor de workspace, tolerando `npm.cmd` e um sufixo `-- ...`.
+    const match = /^npm(?:\.cmd)? run typecheck(?: --workspace=([@a-z0-9._/-]+))?(?: -- .+)?$/.exec(command);
+    if (!match) return false;
 
-    return (
-      command === 'npm run typecheck --workspace=apps/web' ||
-      command === 'npm.cmd run typecheck --workspace=apps/web'
-    );
+    const selector = match[1];
+    // Sem `--workspace`: typecheck do monorepo inteiro, que inclui apps/web.
+    if (selector === undefined) return true;
+    // Com `--workspace`: só precisa de typegen quando o alvo é apps/web (por
+    // caminho ou por nome), tolerando barra final. Outros workspaces (ex.:
+    // packages/core) não dependem de artefatos gerados do Next.
+    return ANIMA_WEB_WORKSPACE_SELECTORS.has(selector.replace(/\/+$/, ''));
   });
 }
 
