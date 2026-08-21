@@ -46,9 +46,15 @@ describe('apresentação da execução autônoma no cartão mobile', () => {
     expect(content.pendingControl).toBe('Pedido de cancelamento registrado; será aplicado no próximo checkpoint seguro.');
   });
 
-  test('bloqueio por orçamento é projetado com razão e limite', () => {
-    const content = presentMobileWorkExecution(execution({ status: 'blocked', canRequestControl: false, budgetBlock: { reason: 'autonomous_time_budget_exhausted', reachedLimit: 'autonomous_window' } }));
-    expect(content).toMatchObject({ statusLabel: 'Bloqueada (orçamento)', budgetBlock: 'Orçamento atingido: autonomous_time_budget_exhausted (limite: autonomous_window).' });
+  test('bloqueio por orçamento recuperável declara a retomada temporal do checkpoint', () => {
+    const content = presentMobileWorkExecution(execution({ status: 'blocked', canRequestControl: false, budgetBlock: { reason: 'interactive_reserve_protected', reachedLimit: 'resources', recoverable: true } }));
+    expect(content.statusLabel).toBe('Bloqueada (orçamento)');
+    expect(content.budgetBlock).toContain('Orçamento atingido: interactive_reserve_protected (limite: resources).');
+    expect(content.budgetBlock).toContain('retomada do checkpoint quando a janela do orçamento liberar');
+  });
+  test('bloqueio não recuperável não promete retomada automática', () => {
+    const content = presentMobileWorkExecution(execution({ status: 'blocked', canRequestControl: false, budgetBlock: { reason: 'human_input_required', reachedLimit: null, recoverable: false } }));
+    expect(content.budgetBlock).toBe('Orçamento atingido: human_input_required.');
   });
 });
 

@@ -39,7 +39,11 @@ export type AutonomousExecutionStatus = 'running'|'paused'|'cancelled'|'abandone
 export interface ExecutionCheckpointProjection { readonly signalSequence:number; readonly completedSteps:number; readonly remainingSteps:number; readonly nextStep:string; }
 export interface ExecutionControlRequestProjection { readonly action:ExecutionControlAction; readonly requestedAt:string; }
 export interface ExecutionControlAppliedProjection { readonly action:ExecutionControlAction; readonly reason:string; readonly appliedAt:string; }
-export interface ExecutionBudgetBlockProjection { readonly reason:string; readonly reachedLimit:string|null; }
+// `recoverable`: o bloqueio é um limite TEMPORAL de janela móvel (INTEL-04) que
+// se recupera esperando — a tentativa é RETOMADA do checkpoint quando a janela
+// libera, sem decisão humana. Distingue-o de bloqueios não-orçamentários (ex.:
+// decisão humana), que exigem outra ação.
+export interface ExecutionBudgetBlockProjection { readonly reason:string; readonly reachedLimit:string|null; readonly recoverable:boolean; }
 export interface AutonomousExecutionProjection {
   readonly attemptId:string;
   readonly status:AutonomousExecutionStatus;
@@ -264,7 +268,7 @@ export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEve
 
   // Orçamento relevante: um work_blocked da tentativa registra a razão tipada.
   let budgetBlock:ExecutionBudgetBlockProjection|null=null;
-  for(const event of forAttempt){if(event.type!=='work_blocked')continue;const data=eventData(event);budgetBlock={reason:asString(data?.reason)??'work_blocked',reachedLimit:asString(data?.reached_limit)};}
+  for(const event of forAttempt){if(event.type!=='work_blocked')continue;const data=eventData(event);const reason=asString(data?.reason)??'work_blocked';budgetBlock={reason,reachedLimit:asString(data?.reached_limit),recoverable:budgetReasons.has(reason)};}
 
   const has=(type:WorkEvent['type']):boolean=>forAttempt.some(event=>event.type===type);
   let status:AutonomousExecutionStatus='running';

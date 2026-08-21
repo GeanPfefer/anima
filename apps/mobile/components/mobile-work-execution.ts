@@ -85,7 +85,7 @@ export function presentMobileWorkExecution(execution: AutonomousExecutionProject
       ? `Checkpoint #${latestCheckpoint.signalSequence}: ${latestCheckpoint.completedSteps} concluído(s), ${latestCheckpoint.remainingSteps} restante(s). Próximo: ${latestCheckpoint.nextStep || '—'}`
       : 'Última evidência persistida: execução iniciada. O primeiro checkpoint aparecerá após o planejamento local.',
     budgetBlock: budgetBlock
-      ? `Orçamento atingido: ${budgetBlock.reason}${budgetBlock.reachedLimit ? ` (limite: ${budgetBlock.reachedLimit})` : ''}.`
+      ? `Orçamento atingido: ${budgetBlock.reason}${budgetBlock.reachedLimit ? ` (limite: ${budgetBlock.reachedLimit})` : ''}.${budgetBlock.recoverable ? ' É um limite temporal: a execução é retomada do checkpoint quando a janela do orçamento liberar, sem decisão sua.' : ''}`
       : null,
     pendingControl: pendingControl
       ? `Pedido de ${pendingControl.action === 'pause' ? 'pausa' : 'cancelamento'} registrado; será aplicado no próximo checkpoint seguro.`

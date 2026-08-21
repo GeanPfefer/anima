@@ -122,7 +122,7 @@ export function WorkExecutionCard({ execution, workItemId, proposalVersion, onRe
       {latestCheckpoint
         ? <p>Checkpoint #{latestCheckpoint.signalSequence}: {latestCheckpoint.completedSteps} concluído(s), {latestCheckpoint.remainingSteps} restante(s). Próximo: {latestCheckpoint.nextStep || '—'}</p>
         : <p>Última evidência persistida: execução iniciada. O primeiro checkpoint aparecerá após o planejamento local.</p>}
-      {budgetBlock && <p>Orçamento atingido: {budgetBlock.reason}{budgetBlock.reachedLimit ? ` (limite: ${budgetBlock.reachedLimit})` : ''}.</p>}
+      {budgetBlock && <p>Orçamento atingido: {budgetBlock.reason}{budgetBlock.reachedLimit ? ` (limite: ${budgetBlock.reachedLimit})` : ''}.{budgetBlock.recoverable ? ' É um limite temporal: a execução é retomada do checkpoint quando a janela do orçamento liberar, sem decisão sua.' : ''}</p>}
       {pendingControl && <p role="status">Pedido de {pendingControl.action === 'pause' ? 'pausa' : 'cancelamento'} registrado; será aplicado no próximo checkpoint seguro.</p>}
       {appliedControl && <p>{CONTROL_APPLIED_LABEL[appliedControl.reason] ?? appliedControl.reason} em <time dateTime={appliedControl.appliedAt}>{instant(appliedControl.appliedAt)}</time>.</p>}
       {execution.canRequestControl && !confirmCancel && (

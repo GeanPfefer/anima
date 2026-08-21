@@ -94,9 +94,15 @@ describe('WorkExecutionCard', () => {
     expect(screen.queryByRole('button', { name: 'Pausar' })).not.toBeInTheDocument();
   });
 
-  test('bloqueio por orçamento é projetado com a razão', () => {
-    render(<WorkExecutionCard execution={projection({ status: 'blocked', canRequestControl: false, budgetBlock: { reason: 'interactive_reserve_protected', reachedLimit: 'resources' } })} workItemId="item-1" proposalVersion={1} onReload={jest.fn()} />);
+  test('bloqueio por orçamento recuperável declara a retomada temporal do checkpoint', () => {
+    render(<WorkExecutionCard execution={projection({ status: 'blocked', canRequestControl: false, budgetBlock: { reason: 'interactive_reserve_protected', reachedLimit: 'resources', recoverable: true } })} workItemId="item-1" proposalVersion={1} onReload={jest.fn()} />);
     expect(screen.getByText(/Orçamento atingido: interactive_reserve_protected/)).toBeInTheDocument();
+    expect(screen.getByText(/retomada do checkpoint quando a janela do orçamento liberar/)).toBeInTheDocument();
+  });
+
+  test('bloqueio não recuperável não promete retomada automática', () => {
+    render(<WorkExecutionCard execution={projection({ status: 'blocked', canRequestControl: false, budgetBlock: { reason: 'human_input_required', reachedLimit: null, recoverable: false } })} workItemId="item-1" proposalVersion={1} onReload={jest.fn()} />);
+    expect(screen.queryByText(/retomada do checkpoint/)).not.toBeInTheDocument();
   });
 
   test('resultado em revisão não oferece pausar/cancelar', () => {

@@ -91,8 +91,13 @@ describe('projeção do cartão de execução autônoma', () => {
   test('bloqueio por orçamento projeta status blocked e a razão tipada', () => {
     const projection = projectAutonomousExecution(item, [started(), checkpoint(1, 'p', ['a'], ['b']), ev('work_blocked', { attempt_id: 'att-1', reason: 'interactive_reserve_protected', reached_limit: 'resources' })]);
     expect(projection?.status).toBe('blocked');
-    expect(projection?.budgetBlock).toEqual({ reason: 'interactive_reserve_protected', reachedLimit: 'resources' });
+    expect(projection?.budgetBlock).toEqual({ reason: 'interactive_reserve_protected', reachedLimit: 'resources', recoverable: true });
     expect(projection?.canRequestControl).toBe(false);
+  });
+
+  test('bloqueio NÃO-orçamentário (decisão humana) não é marcado como recuperável', () => {
+    const projection = projectAutonomousExecution(item, [started(), checkpoint(1, 'p', ['a'], ['b']), ev('work_blocked', { attempt_id: 'att-1', reason: 'human_input_required' })]);
+    expect(projection?.budgetBlock).toEqual({ reason: 'human_input_required', reachedLimit: null, recoverable: false });
   });
 
   test('resultado submetido projeta status submitted_for_review', () => {
