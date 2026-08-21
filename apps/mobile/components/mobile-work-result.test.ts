@@ -1,5 +1,5 @@
 import type { WorkPresentation, WorkResultProjection, WorkState } from '@anima/core';
-import { describeMissingCompletedResult, presentMobileWorkResourceCost, presentMobileWorkResult, presentMobileWorkVerification } from './mobile-work-result';
+import { describeMissingCompletedResult, presentMobileWorkProgress, presentMobileWorkResourceCost, presentMobileWorkResult, presentMobileWorkVerification } from './mobile-work-result';
 
 const result: WorkResultProjection = {
   eventId: 'result-3', proposalVersion: 3, author: 'executor', summary: 'Correção entregue',
@@ -52,6 +52,28 @@ describe('apresentação do resultado no cartão mobile', () => {
 
   test('preserva a apresentação anterior no estado review', () => {
     expect(presentMobileWorkResult(presentation('review', { latestResult: result }))).toMatchObject({ accessibilityLabel: 'Resultado para revisão', title: 'Resultado · v3 · executor' });
+  });
+});
+
+describe('fase humana no cartão mobile (paridade web/mobile — Fase G)', () => {
+  test('surfa a fase projetada, ativa nos estágios de execução', () => {
+    expect(presentMobileWorkProgress(presentation('in_progress', { progress: { phase: 'implementing', label: 'Implementando', active: true, terminal: false } })))
+      .toEqual({ label: 'Implementando', active: true, terminal: false });
+    expect(presentMobileWorkProgress(presentation('in_progress', { progress: { phase: 'testing', label: 'Testando', active: true, terminal: false } })))
+      .toEqual({ label: 'Testando', active: true, terminal: false });
+  });
+  test('surfa fases de espera humana e integração sem marcá-las como ativas', () => {
+    expect(presentMobileWorkProgress(presentation('review', { progress: { phase: 'reviewing', label: 'Revisando', active: false, terminal: false } })))
+      .toEqual({ label: 'Revisando', active: false, terminal: false });
+    expect(presentMobileWorkProgress(presentation('completed', { progress: { phase: 'ready_to_integrate', label: 'Pronto para integrar', active: false, terminal: false } })))
+      .toEqual({ label: 'Pronto para integrar', active: false, terminal: false });
+  });
+  test('marca fases terminais como terminal', () => {
+    expect(presentMobileWorkProgress(presentation('completed', { progress: { phase: 'done', label: 'Concluído', active: false, terminal: true } })))
+      .toEqual({ label: 'Concluído', active: false, terminal: true });
+  });
+  test('projeção antiga sem fase não quebra o cartão (null)', () => {
+    expect(presentMobileWorkProgress(presentation('approved'))).toBeNull();
   });
 });
 

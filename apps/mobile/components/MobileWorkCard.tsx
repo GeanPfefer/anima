@@ -3,7 +3,7 @@ import { Text, TextInput, TouchableOpacity, View, StyleSheet } from 'react-nativ
 import { parseWorkResultValidations, type WorkPresentation } from '@anima/core';
 import { decideWork, decideWorkIntegration, reloadWork, requestHostSupervisorTurn, requestProposalCorrection, requestWorkControl, respondWorkDecision, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
-import { describeMissingCompletedResult, presentMobileWorkResult, presentMobileWorkResourceCost, presentMobileWorkVerification } from './mobile-work-result';
+import { describeMissingCompletedResult, presentMobileWorkProgress, presentMobileWorkResult, presentMobileWorkResourceCost, presentMobileWorkVerification } from './mobile-work-result';
 import { presentMobileWorkBudgetWait, presentMobileWorkExecution } from './mobile-work-execution';
 
 export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void;focused?:boolean;onFocus?:()=>void}) {
@@ -14,6 +14,7 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
   const missingCompletedResult=describeMissingCompletedResult(presentation);
   const execution=presentation.execution?presentMobileWorkExecution(presentation.execution):null;
   const budgetWait=presentation.pendingBudgetWait?presentMobileWorkBudgetWait(presentation.pendingBudgetWait):null;
+  const progress=presentMobileWorkProgress(presentation);
   const [confirmCancel,setConfirmCancel]=useState(false);
   const [detail,setDetail]=useState('');
   const [references,setReferences]=useState('');
@@ -37,6 +38,7 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
   const action=(label:string,onPress:()=>void)=><TouchableOpacity disabled={busy} onPress={onPress} style={styles.action}><Text style={styles.actionText}>{label}</Text></TouchableOpacity>;
   return <View style={styles.card}>
     <View style={styles.header}><Text style={styles.label}>{focused?'Trabalho em foco':'Trabalho'} · v{item.proposalVersion}</Text><Text style={styles.state}>{item.state}</Text></View>
+    {progress&&<Text style={progress.active?styles.phaseActive:styles.phase} accessibilityLabel={`Fase do trabalho: ${progress.label}`}>{progress.active?'● ':''}{progress.label}</Text>}
     {!focused&&onFocus&&!['completed','failed','rejected','cancelled'].includes(item.state)&&action('Usar como foco',onFocus)}
     <Text style={styles.title}>{item.proposal.data.summary}</Text><Text style={styles.body}>{item.proposal.data.objective}</Text>
     <Text style={styles.state}>Riscos: {item.proposal.data.risks.length?item.proposal.data.risks.join('; '):'nenhum risco declarado'}</Text>
@@ -108,4 +110,4 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
   </View>;
 }
 function Editor({value,onChange,label,onConfirm}:{value:string;onChange:(value:string)=>void;label:string;onConfirm:()=>void}){return <View><TextInput accessibilityLabel={label} value={value} onChangeText={onChange} placeholder={label} placeholderTextColor={colors.textMuted} style={styles.input} multiline/><TouchableOpacity disabled={!value.trim()} onPress={onConfirm} style={styles.action}><Text style={styles.actionText}>Confirmar</Text></TouchableOpacity></View>}
-const styles=StyleSheet.create({card:{marginTop:spacing.xs,padding:spacing.sm,borderWidth:1,borderColor:colors.border,borderRadius:radius.md,backgroundColor:colors.bgSurface,gap:spacing.xs,maxWidth:'92%'},header:{flexDirection:'row',justifyContent:'space-between'},label:{fontSize:12,fontWeight:'700',color:colors.accent},state:{fontSize:12,color:colors.textMuted},title:{fontSize:14,fontWeight:'700',color:colors.textPrimary},body:{fontSize:13,color:colors.textMuted},result:{borderWidth:1,borderColor:colors.border,borderRadius:radius.sm,padding:spacing.xs,gap:2},completed:{fontSize:12,fontWeight:'600',color:colors.textPrimary,marginTop:spacing.xs},actions:{flexDirection:'row',flexWrap:'wrap',gap:spacing.xs},action:{paddingVertical:6,paddingHorizontal:10,borderRadius:radius.sm,backgroundColor:colors.bgElevated,alignSelf:'flex-start'},actionText:{fontSize:12,color:colors.textPrimary},input:{borderWidth:1,borderColor:colors.border,borderRadius:radius.sm,color:colors.textPrimary,padding:8,minHeight:54,marginBottom:spacing.xs},error:{fontSize:12,color:'#e5484d'}});
+const styles=StyleSheet.create({card:{marginTop:spacing.xs,padding:spacing.sm,borderWidth:1,borderColor:colors.border,borderRadius:radius.md,backgroundColor:colors.bgSurface,gap:spacing.xs,maxWidth:'92%'},header:{flexDirection:'row',justifyContent:'space-between'},label:{fontSize:12,fontWeight:'700',color:colors.accent},state:{fontSize:12,color:colors.textMuted},phase:{fontSize:11,fontWeight:'600',color:colors.textMuted},phaseActive:{fontSize:11,fontWeight:'700',color:colors.accent},title:{fontSize:14,fontWeight:'700',color:colors.textPrimary},body:{fontSize:13,color:colors.textMuted},result:{borderWidth:1,borderColor:colors.border,borderRadius:radius.sm,padding:spacing.xs,gap:2},completed:{fontSize:12,fontWeight:'600',color:colors.textPrimary,marginTop:spacing.xs},actions:{flexDirection:'row',flexWrap:'wrap',gap:spacing.xs},action:{paddingVertical:6,paddingHorizontal:10,borderRadius:radius.sm,backgroundColor:colors.bgElevated,alignSelf:'flex-start'},actionText:{fontSize:12,color:colors.textPrimary},input:{borderWidth:1,borderColor:colors.border,borderRadius:radius.sm,color:colors.textPrimary,padding:8,minHeight:54,marginBottom:spacing.xs},error:{fontSize:12,color:'#e5484d'}});

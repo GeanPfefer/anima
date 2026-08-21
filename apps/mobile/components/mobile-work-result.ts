@@ -32,6 +32,24 @@ export function presentMobileWorkResult(presentation: WorkPresentation): MobileW
   };
 }
 
+// Paridade da FASE HUMANA do trabalho (mesma projeção pura da web,
+// `deriveWorkProgressPhase`): em que ponto do ciclo o trabalho está — Proposta →
+// Aprovado → Implementando → Testando → Revisando → Pronto para integrar →
+// Integrando → Concluído (ou Pausado/Bloqueado/Falhou/Rejeitado/Cancelado).
+// Read-only, derivado só de fatos persistidos; nunca narrativa do modelo. Ausente
+// (projeção antiga sem `progress`) ⇒ null, e o cartão só não mostra a fase.
+export interface MobileWorkProgressContent {
+  readonly label: string;
+  readonly active: boolean;
+  readonly terminal: boolean;
+}
+
+export function presentMobileWorkProgress(presentation: WorkPresentation): MobileWorkProgressContent | null {
+  const progress = presentation.progress;
+  if (!progress) return null;
+  return { label: progress.label, active: progress.active, terminal: progress.terminal };
+}
+
 export function describeMissingCompletedResult(presentation: WorkPresentation): string | null {
   return presentation.item.state === 'completed' && !presentation.acceptedResult
     ? 'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'
