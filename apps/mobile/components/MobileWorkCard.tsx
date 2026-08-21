@@ -4,7 +4,7 @@ import { parseWorkResultValidations, type WorkPresentation } from '@anima/core';
 import { decideWork, decideWorkIntegration, reloadWork, requestHostSupervisorTurn, requestProposalCorrection, requestWorkControl, respondWorkDecision, reviewWorkResult, startWork, submitWorkResult } from '@/lib/mobile-work';
 import { colors, radius, spacing } from '@/constants/theme';
 import { describeMissingCompletedResult, presentMobileWorkResult, presentMobileWorkResourceCost, presentMobileWorkVerification } from './mobile-work-result';
-import { presentMobileWorkExecution } from './mobile-work-execution';
+import { presentMobileWorkBudgetWait, presentMobileWorkExecution } from './mobile-work-execution';
 
 export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{presentation:WorkPresentation;onChange:(value:WorkPresentation)=>void;focused?:boolean;onFocus?:()=>void}) {
   const {item,latestResult,availableActions}=presentation;
@@ -13,6 +13,7 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
   const resourceCost=presentMobileWorkResourceCost(presentation);
   const missingCompletedResult=describeMissingCompletedResult(presentation);
   const execution=presentation.execution?presentMobileWorkExecution(presentation.execution):null;
+  const budgetWait=presentation.pendingBudgetWait?presentMobileWorkBudgetWait(presentation.pendingBudgetWait):null;
   const [confirmCancel,setConfirmCancel]=useState(false);
   const [detail,setDetail]=useState('');
   const [references,setReferences]=useState('');
@@ -78,6 +79,11 @@ export function MobileWorkCard({presentation,onChange,focused=false,onFocus}:{pr
       <Text style={styles.body}>{presentation.pendingDecision.explanation}</Text>
       <Text style={styles.state}>O trabalho está pausado em um checkpoint seguro.</Text>
       <View style={styles.actions}>{presentation.pendingDecision.options.map(option=><TouchableOpacity key={option.id} disabled={busy} onPress={()=>void onDecision(option.id)} style={styles.action}><Text style={styles.actionText}>{option.label}</Text></TouchableOpacity>)}</View>
+    </View>}
+    {budgetWait&&<View accessible accessibilityLabel="Aguardando janela de orçamento" style={styles.result}>
+      <Text style={styles.label}>{budgetWait.title}</Text>
+      <Text style={styles.body}>{budgetWait.message}</Text>
+      <View style={styles.actions}>{action('Reverificar orçamento e retomar',()=>void run(requestHostSupervisorTurn(presentation)))}</View>
     </View>}
     {presentation.integration&&<View accessible accessibilityLabel="Decisão de integração" style={styles.result}>
       <Text style={styles.label}>{presentation.integration.status==='awaiting_decision'?'Integração aguardando sua decisão':presentation.integration.status==='authorized'?'Integração autorizada':presentation.integration.status==='branch_published'?'Branch publicada':presentation.integration.status==='review_request_created'?'Review request criado':'Integração recusada'}</Text>

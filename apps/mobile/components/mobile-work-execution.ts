@@ -1,4 +1,4 @@
-import type { AutonomousExecutionProjection } from '@anima/core';
+import type { AutonomousExecutionProjection, WorkBudgetWaitProjection } from '@anima/core';
 
 // UX-01 (paridade mobile) — projeta o cartão de execução autônoma em strings de
 // exibição. É PURO e derivado exclusivamente da projeção persistida vinda de
@@ -37,6 +37,23 @@ export interface MobileWorkExecutionContent {
   readonly pendingControl: string | null;
   readonly appliedControl: string | null;
   readonly canRequestControl: boolean;
+}
+
+// INTEL-04 (coerência V0, paridade mobile). Um item bloqueado por orçamento
+// PRÉ-tentativa aguarda a janela móvel liberar — nunca uma decisão humana. Puro;
+// espelha o WorkBudgetWaitCard do web. Não oferece override do teto de segurança.
+const BUDGET_WAIT_REASON_LABEL: Record<WorkBudgetWaitProjection['reason'], string> = {
+  item_attempt_budget_exhausted: 'Limite de tentativas deste item nas últimas 24h',
+  user_attempt_budget_exhausted: 'Limite global de tentativas autônomas nas últimas 24h',
+  user_runtime_budget_exhausted: 'Limite global de tempo autônomo nas últimas 24h',
+  interactive_reserve_protected: 'Reserva interativa da janela de 60 minutos preservada',
+};
+export interface MobileWorkBudgetWaitContent { readonly title: string; readonly message: string; }
+export function presentMobileWorkBudgetWait(wait: WorkBudgetWaitProjection): MobileWorkBudgetWaitContent {
+  return {
+    title: 'Aguardando a janela do orçamento autônomo',
+    message: `${BUDGET_WAIT_REASON_LABEL[wait.reason]}. Este bloqueio é temporal e não exige nenhuma decisão sua: o trabalho volta a ficar elegível automaticamente quando a janela móvel do orçamento liberar. O teto de segurança do modo autônomo permanece inalterado.`,
+  };
 }
 
 export function presentMobileWorkExecution(execution: AutonomousExecutionProjection): MobileWorkExecutionContent {

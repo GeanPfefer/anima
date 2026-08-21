@@ -1,5 +1,5 @@
-import type { AutonomousExecutionProjection } from '@anima/core';
-import { presentMobileWorkExecution } from './mobile-work-execution';
+import type { AutonomousExecutionProjection, WorkBudgetWaitProjection } from '@anima/core';
+import { presentMobileWorkBudgetWait, presentMobileWorkExecution } from './mobile-work-execution';
 
 const base: AutonomousExecutionProjection = {
   attemptId: '12345678-90ab-cdef-1234-567890abcdef', status: 'running', startedAt: '2026-07-29T12:00:00Z',
@@ -49,5 +49,19 @@ describe('apresentação da execução autônoma no cartão mobile', () => {
   test('bloqueio por orçamento é projetado com razão e limite', () => {
     const content = presentMobileWorkExecution(execution({ status: 'blocked', canRequestControl: false, budgetBlock: { reason: 'autonomous_time_budget_exhausted', reachedLimit: 'autonomous_window' } }));
     expect(content).toMatchObject({ statusLabel: 'Bloqueada (orçamento)', budgetBlock: 'Orçamento atingido: autonomous_time_budget_exhausted (limite: autonomous_window).' });
+  });
+});
+
+describe('espera por janela de orçamento no cartão mobile (INTEL-04 coerência)', () => {
+  const wait = (reason: WorkBudgetWaitProjection['reason']): WorkBudgetWaitProjection => ({ reason, reachedLimit: 'attempts' });
+  test('declara a espera como temporal, sem afirmar decisão humana', () => {
+    const content = presentMobileWorkBudgetWait(wait('user_attempt_budget_exhausted'));
+    expect(content.title).toBe('Aguardando a janela do orçamento autônomo');
+    expect(content.message).toContain('não exige nenhuma decisão sua');
+    expect(content.message).toContain('teto de segurança do modo autônomo permanece inalterado');
+  });
+  test('cada motivo de orçamento tem rótulo tipado próprio', () => {
+    expect(presentMobileWorkBudgetWait(wait('interactive_reserve_protected')).message).toContain('Reserva interativa');
+    expect(presentMobileWorkBudgetWait(wait('user_runtime_budget_exhausted')).message).toContain('tempo autônomo');
   });
 });
