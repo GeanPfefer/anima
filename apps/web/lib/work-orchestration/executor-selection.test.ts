@@ -2,7 +2,7 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ScriptedCoderBackend } from './coder-backend';
-import { needsAnimaWebTypegen, prepareAnimaValidation, readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
+import { needsAnimaWebTypegen, prepareAnimaValidation, readExecutionContract, resolveExecutorRoute, type ExecutionContract, resolveAnimaNextCli } from './executor-selection';
 
 const SHA = 'a'.repeat(40);
 const base: ExecutionContract = { executor: null, coderBackend: null, model: null, baseSha: null, targetKind: null, targetReference: null };
@@ -130,6 +130,24 @@ describe('needsAnimaWebTypegen', () => {
       { label: 'core', command: 'npm run typecheck --workspace=packages/core' },
       { label: 'web', command: 'npm run typecheck --workspace=apps/web' },
     ])).toBe(true);
+  });
+});
+
+
+describe('resolveAnimaNextCli', () => {
+  test('resolve o CLI pelo node_modules fisico do workspace web', () => {
+    const webRoot = process.cwd();
+    const resolved = resolveAnimaNextCli(webRoot);
+
+    expect(resolved).toBe(
+      join(webRoot, 'node_modules', 'next', 'dist', 'bin', 'next'),
+    );
+  });
+
+  test('falha explicitamente quando o workspace nao possui Next', () => {
+    expect(() =>
+      resolveAnimaNextCli(join(process.cwd(), '__missing-web-workspace__')),
+    ).toThrow(/Next CLI nao encontrado no workspace web/);
   });
 });
 

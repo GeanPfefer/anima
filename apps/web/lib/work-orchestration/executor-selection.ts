@@ -1,4 +1,4 @@
-import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
@@ -143,11 +143,18 @@ export interface AnimaValidationPreparationDependencies {
   readonly run: typeof runProcess;
 }
 
+export function resolveAnimaNextCli(webRoot: string): string {
+  const nextCli = join(webRoot, 'node_modules', 'next', 'dist', 'bin', 'next');
+
+  if (!existsSync(nextCli)) {
+    throw new Error(`Next CLI nao encontrado no workspace web: ${nextCli}`);
+  }
+
+  return nextCli;
+}
+
 const defaultAnimaValidationPreparationDependencies: AnimaValidationPreparationDependencies = {
-  resolveNextCli: webRoot => {
-    const requireFromWeb = createRequire(join(webRoot, 'package.json'));
-    return requireFromWeb.resolve('next/dist/bin/next');
-  },
+  resolveNextCli: resolveAnimaNextCli,
   run: runProcess,
 };
 
