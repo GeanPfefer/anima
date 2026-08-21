@@ -5,7 +5,13 @@ import type {
   HarnessRunTurnResult,
   HarnessRuntime,
 } from '../deepseek-harness-coder';
-import { HARNESS_FOCUSED_DISABLED_PLUGINS, planHarnessInvocation, type HarnessInvocationInput } from './harness-invocation';
+import {
+  HARNESS_DEFAULT_RETRYABLE_LLM_CODES,
+  HARNESS_DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  HARNESS_FOCUSED_DISABLED_PLUGINS,
+  planHarnessInvocation,
+  type HarnessInvocationInput,
+} from './harness-invocation';
 
 // ============================================================
 // Driver REAL do `HarnessRuntime` (ligação viva, recorte experimental — ver
@@ -68,6 +74,17 @@ export interface DeepSeekHarnessRuntimeOptions {
   readonly ollamaBaseUrl: string;
   /** Modelo Ollama (ex.: qwen3-coder:latest). */
   readonly model: string;
+  /**
+   * Teto de ociosidade do stream do LLM (ms) que o host impõe à rota pi-ai. Default
+   * `HARNESS_DEFAULT_STREAM_IDLE_TIMEOUT_MS` — delimita o stall provado do Ollama
+   * (stream sem `finish_reason`) num estado terminal limpo em vez de pendura de 300s.
+   */
+  readonly streamIdleTimeoutMs?: number;
+  /**
+   * Códigos retentáveis do dsh-llm-retry na rota. Default
+   * `HARNESS_DEFAULT_RETRYABLE_LLM_CODES` (sem `TIMEOUT`) — o stall não é retentado.
+   */
+  readonly llmRetryableCodes?: readonly string[];
   /** Fábrica de um `$DSH_HOME` isolado por execução (diretório absoluto). */
   readonly dshHomeFactory: () => string;
   readonly spawner: HarnessSpawner;
@@ -148,7 +165,18 @@ export function composeHarnessTask(input: HarnessRunTurnInput): string {
     }
   }
 
-  parts.push('', 'Make the change, then stop.');
+  // Protocolo de tool-call (prova de fio dsh↔Ollama): o endpoint openai-completions
+  // do Ollama, para certas gerações com MÚLTIPLAS tool calls num mesmo passo, não
+  // envia o chunk terminador do stream (`finish_reason`), pendurando o turno. Guiar
+  // o modelo a UMA tool call por passo, esperando o resultado, evita esse gatilho e
+  // impõe a ordem correta ler→(resultado)→editar. É orientação de host, não afrouxa
+  // nenhum gate; o desfecho segue decidido pelos gates e observado pelo host.
+  parts.push(
+    '',
+    'Tool-call protocol: issue exactly one tool call per step and wait for its result before the next. Read a file before you edit it, and build the edit from the returned contents. Do not place more than one tool call in a single message.',
+    '',
+    'Make the change, then stop.',
+  );
   return parts.join('\n');
 }
 
@@ -220,7 +248,7 @@ export function redactHarnessPaths(text: string): string {
  * null quando não há nada útil. Usa a ÚLTIMA linha significativa (onde o erro
  * costuma estar) precedida do código de saída.
  */
-const ERROR_LINE = /error|failed|assert|exception|fatal|cannot|not found|ENOENT|EACCES|code:/i;
+const ERROR_LINE = /error|failed|assert|exception|fatal|cannot|not found|timed? ?out|ENOENT|EACCES|code:/i;
 const MODULE_DETAIL_LINE = /cannot find module|module not found/i;
 
 export function summarizeHarnessFailure(
@@ -313,6 +341,8 @@ export class DeepSeekHarnessRuntime implements HarnessRuntime {
       model: this.options.model,
       ollamaBaseUrl: this.options.ollamaBaseUrl,
       temperature: input.temperature,
+      streamIdleTimeoutMs: this.options.streamIdleTimeoutMs ?? HARNESS_DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+      llmRetryableCodes: this.options.llmRetryableCodes ?? HARNESS_DEFAULT_RETRYABLE_LLM_CODES,
       stepBudget: input.stepBudget,
       permissionMode: 'workspace-write',
       disableStrReplaceEditor: input.tools.disabled.includes('str_replace_editor'),

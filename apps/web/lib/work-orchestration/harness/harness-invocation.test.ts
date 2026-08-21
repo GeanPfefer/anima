@@ -97,6 +97,34 @@ describe('buildHarnessPatchYaml — formato verificado ao vivo', () => {
     expect(yaml).toContain('stepBudget: 6');
     expect(yaml).toContain('temperature: 0.2');
   });
+
+  test('streamIdleTimeoutMs entra sob a rota pi-ai quando presente (delimita o stall do Ollama)', () => {
+    const yaml = buildHarnessPatchYaml(base({ streamIdleTimeoutMs: 180000 }));
+    expect(yaml).toContain('streamIdleTimeoutMs: 180000');
+    // Fica no perfil da rota (indentado como sibling de baseURL/models), antes de models.
+    expect(yaml).toContain('        streamIdleTimeoutMs: 180000');
+    expect(yaml.indexOf('streamIdleTimeoutMs')).toBeLessThan(yaml.indexOf('        models:'));
+  });
+
+  test('streamIdleTimeoutMs ausente NÃO é emitido (rota herda o default do pi-ai)', () => {
+    const yaml = buildHarnessPatchYaml(base());
+    expect(yaml).not.toContain('streamIdleTimeoutMs');
+  });
+
+  test('retryPolicy (mode normal + códigos) entra na rota; TIMEOUT fora ⇒ stall não é retentado', () => {
+    const yaml = buildHarnessPatchYaml(base({ llmRetryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TRANSPORT'] }));
+    expect(yaml).toContain('        retryPolicy:');
+    expect(yaml).toContain('          mode: normal');
+    expect(yaml).toContain('          retryableCodes:');
+    expect(yaml).toContain('            - TRANSPORT');
+    // O ponto do fix: TIMEOUT NÃO está na lista (não retenta o stall determinístico).
+    expect(yaml).not.toContain('- TIMEOUT');
+  });
+
+  test('llmRetryableCodes ausente NÃO emite retryPolicy (rota herda o default do dsh)', () => {
+    const yaml = buildHarnessPatchYaml(base());
+    expect(yaml).not.toContain('retryPolicy');
+  });
 });
 
 describe('planHarnessInvocation — args e env', () => {
@@ -135,5 +163,20 @@ describe('planHarnessInvocation — envelope fail-closed', () => {
     expect(() => planHarnessInvocation(base({ model: '' }))).toThrow(/modelo/);
     expect(() => planHarnessInvocation(base({ ollamaBaseUrl: 'ftp://x' }))).toThrow(/baseURL/);
     expect(() => planHarnessInvocation(base({ stepBudget: 0 }))).toThrow(/orçamento/);
+  });
+
+  test('recusa streamIdleTimeoutMs inválido (0/negativo/não-inteiro); aceita ausente e positivo', () => {
+    expect(() => planHarnessInvocation(base({ streamIdleTimeoutMs: 0 }))).toThrow(/streamIdleTimeoutMs/);
+    expect(() => planHarnessInvocation(base({ streamIdleTimeoutMs: -5 }))).toThrow(/streamIdleTimeoutMs/);
+    expect(() => planHarnessInvocation(base({ streamIdleTimeoutMs: 1.5 }))).toThrow(/streamIdleTimeoutMs/);
+    expect(() => planHarnessInvocation(base())).not.toThrow();
+    expect(() => planHarnessInvocation(base({ streamIdleTimeoutMs: 180000 }))).not.toThrow();
+  });
+
+  test('recusa llmRetryableCodes com item em branco ou multilinha (injeção de YAML)', () => {
+    expect(() => planHarnessInvocation(base({ llmRetryableCodes: ['SERVER', '  '] }))).toThrow(/llmRetryableCodes/);
+    expect(() => planHarnessInvocation(base({ llmRetryableCodes: ['SERVER\n          - INJECTED'] }))).toThrow(/llmRetryableCodes/);
+    expect(() => planHarnessInvocation(base({ llmRetryableCodes: ['SERVER', 'TRANSPORT'] }))).not.toThrow();
+    expect(() => planHarnessInvocation(base({ llmRetryableCodes: [] }))).not.toThrow();
   });
 });

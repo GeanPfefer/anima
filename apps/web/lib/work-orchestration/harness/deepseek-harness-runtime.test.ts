@@ -71,6 +71,15 @@ describe('composeHarnessTask', () => {
     expect(task).toContain('Make the change, then stop.');
   });
 
+  test('inclui o protocolo de tool-call (uma por passo; ler antes de editar) — mitiga o stall do Ollama', () => {
+    const task = composeHarnessTask(input());
+    expect(task).toContain('Tool-call protocol');
+    expect(task).toContain('one tool call per step');
+    expect(task).toContain('Read a file before you edit it');
+    // A orientação vem ANTES do encerramento.
+    expect(task.indexOf('Tool-call protocol')).toBeLessThan(task.indexOf('Make the change, then stop.'));
+  });
+
   test('carriedContext is prior-attempt resumption, not internal gate retry', () => {
     const carried = {
       isNewAttempt: true,
@@ -200,6 +209,15 @@ describe('redactHarnessPaths / summarizeHarnessFailure — observabilidade sanit
     expect((summary ?? '').length).toBeLessThanOrEqual(180);
   });
 
+  test('o stream idle timeout do pi-ai é surfado como diagnóstico determinante', () => {
+    const summary = summarizeHarnessFailure({
+      exitCode: 1,
+      stderrTail: 'dsh: TIMEOUT: pi-ai stream idle timeout after 180000ms',
+    });
+    expect(summary).toContain('exit 1');
+    expect(summary).toContain('stream idle timeout');
+  });
+
   test('spawnError entra no resumo; sem sinal útil devolve null', () => {
     expect(summarizeHarnessFailure({ exitCode: -1, spawnError: 'spawn node ENOENT' })).toContain('ENOENT');
     expect(summarizeHarnessFailure({ exitCode: null })).toBeNull();
@@ -247,6 +265,14 @@ describe('DeepSeekHarnessRuntime.runTurn — I/O injetado', () => {
     expect(patch).toContain('provider: ollama');
     expect(patch).toContain("model: 'qwen3-coder:latest'");
     expect(patch).toContain('anima-harness-budget');
+    // Teto de ociosidade do stream imposto pelo host por default (delimita o stall
+    // provado do Ollama sem finish_reason; sob a rota pi-ai, sibling de baseURL).
+    expect(patch).toContain('streamIdleTimeoutMs: 180000');
+    // Política de retry por default: mode normal sem TIMEOUT (não retenta o stall).
+    expect(patch).toContain('retryPolicy:');
+    expect(patch).toContain('mode: normal');
+    expect(patch).toContain('- TRANSPORT');
+    expect(patch).not.toContain('- TIMEOUT');
     // Catálogo focado por default (correção do tool-protocol, prova viva).
     expect(patch).toContain('- id: tool-web');
     expect(patch).toContain('- id: tool-goal');
@@ -261,6 +287,25 @@ describe('DeepSeekHarnessRuntime.runTurn — I/O injetado', () => {
     // turn/end do log + sessionId do diretório.
     expect(result.turnEnd).toEqual({ kind: 'completed' });
     expect(result.sessionId).toBe('session-abc123');
+  });
+
+  test('streamIdleTimeoutMs é configurável por deploy e sobrescreve o default no patch', async () => {
+    const log = zstd(jsonl({ type: 'turn/end', turn: 0, reason: { kind: 'completed' } }));
+    const fs = fakeFs({ log });
+    const custom = new DeepSeekHarnessRuntime({
+      nodeExecPath: 'C:/node/node.exe',
+      dshBinPath: 'C:/anima/node_modules/@deepseek-ai/dsh/lib/bin.js',
+      pluginPath: 'G:/anima/apps/web/lib/work-orchestration/harness/anima-harness-plugin.mjs',
+      ollamaBaseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'qwen3-coder:latest',
+      streamIdleTimeoutMs: 45000,
+      dshHomeFactory: () => 'C:/tmp/anima-wt/dsh-home',
+      fs, spawner: fakeSpawner({ exitCode: 0, hostAborted: false }),
+    });
+    await custom.runTurn(input());
+    const patch = [...fs.writes.values()][0] ?? '';
+    expect(patch).toContain('streamIdleTimeoutMs: 45000');
+    expect(patch).not.toContain('streamIdleTimeoutMs: 180000');
   });
 
   test('turn/end aborted pelo step budget é lido do log (evidência de runaway contido)', async () => {

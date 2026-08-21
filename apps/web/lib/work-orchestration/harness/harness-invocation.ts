@@ -29,6 +29,40 @@ export const HARNESS_OLLAMA_API_KEY_DUMMY = 'ollama-local-nokey';
 export type HarnessPermissionMode = 'workspace-write';
 
 /**
+ * Timeout de OCIOSIDADE do stream do LLM (ms) que o HOST impõe à rota pi-ai.
+ *
+ * Prova de fio (proxy dsh↔Ollama, evidência viva): quando o modelo local emite
+ * tool calls e o endpoint openai-completions do Ollama NÃO envia o chunk
+ * terminador (`finish_reason`/`[DONE]`), o `idleWatchdog` do pi-ai só aborta no
+ * default de 300000ms — o turno fica pendurado sem estado terminal observável. O
+ * host reduz esse teto para um valor CONSERVADOR: acima de qualquer geração
+ * legítima (inclusive a espera do PRIMEIRO chunk, que na prática inclui o load a
+ * frio do modelo — o `idleWatchdog` arma o timer antes de aguardar o 1º chunk),
+ * porém bem abaixo dos 300s. Assim um stream travado vira uma FALHA TERMINAL
+ * LIMPA e diagnosticável (`LlmError TIMEOUT` ⇒ saída não-zero ⇒ o runtime
+ * classifica `error` com diagnóstico), nunca um pendura silencioso. Não afrouxa
+ * gate algum nem acelera um protocolo que já funciona: só delimita o stall.
+ */
+export const HARNESS_DEFAULT_STREAM_IDLE_TIMEOUT_MS = 180_000;
+
+/**
+ * Códigos de erro do LLM que o `dsh-llm-retry` deve RETENTAR na rota do coder.
+ *
+ * O default do dsh inclui `TIMEOUT` — e o retry re-emite a MESMA request. Prova
+ * viva: o stall do Ollama (stream sem `finish_reason`) é DETERMINÍSTICO por prompt
+ * (temperature 0); retentá-lo só multiplica o atraso por `(maxRetries+1)` e adia a
+ * captura do desfecho, sem nunca convergir (o retry interno NÃO perturba o prompt —
+ * quem reprocessa com contexto novo é o HOST). Removemos `TIMEOUT` do conjunto: um
+ * stream ocioso vira falha terminal LIMPA e imediata (o host observa `error` +
+ * diagnóstico), enquanto erros genuinamente transitórios (transporte/servidor/rate
+ * limit/resposta vazia) seguem sendo retentados. Confirmado ao vivo: com esta lista
+ * o `dsh` sai com código 1 em ~idle e stderr `TIMEOUT: pi-ai stream idle timeout`.
+ */
+export const HARNESS_DEFAULT_RETRYABLE_LLM_CODES: readonly string[] = [
+  'EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TRANSPORT',
+];
+
+/**
  * Plugins DISTRATORES desabilitados por default no perfil focado do coder local —
  * cada um com PROVA VIVA de que derrapa o modelo local (qwen3-coder). Configurável;
  * NÃO é regra universal — um modelo forte pode preferir o catálogo cheio.
@@ -75,6 +109,19 @@ export interface HarnessInvocationInput {
   readonly ollamaBaseUrl: string;
   /** temperature host-controlada (POC: 0 estabiliza tool calls). */
   readonly temperature: number;
+  /**
+   * Timeout de ociosidade do stream (ms) escrito na rota pi-ai. Opcional: quando
+   * ausente, a rota herda o default do pi-ai (300000ms). O runtime sempre injeta
+   * `HARNESS_DEFAULT_STREAM_IDLE_TIMEOUT_MS` para não depender desse default.
+   */
+  readonly streamIdleTimeoutMs?: number;
+  /**
+   * Conjunto de códigos retentáveis do `dsh-llm-retry` na rota (mode `normal`).
+   * Substitui o default do dsh — o runtime injeta `HARNESS_DEFAULT_RETRYABLE_LLM_CODES`
+   * (sem `TIMEOUT`) para o stall determinístico virar falha terminal imediata. Ausente
+   * ⇒ o retry usa o default do dsh (que retenta TIMEOUT). Lista vazia ⇒ não retenta nada.
+   */
+  readonly llmRetryableCodes?: readonly string[];
   /** Orçamento de passos aplicado pelo plugin no hook `agent/pre-step`. */
   readonly stepBudget: number;
   /** Envelope: só `workspace-write`. Qualquer outro valor falha fechada. */
@@ -129,6 +176,24 @@ export function buildHarnessPatchYaml(input: HarnessInvocationInput): string {
     `        apiKeyEnv: ${HARNESS_OLLAMA_API_KEY_ENV}`,
     `        api: openai-completions`,
     `        baseURL: ${yamlSingle(input.ollamaBaseUrl)}`,
+  ];
+  // Teto de ociosidade do stream imposto pelo host (prova de fio: stall do Ollama
+  // sem finish_reason). Sibling de `models`/`baseURL` no perfil da rota pi-ai.
+  if (input.streamIdleTimeoutMs !== undefined) {
+    lines.push(`        streamIdleTimeoutMs: ${input.streamIdleTimeoutMs}`);
+  }
+  // Política de retry do dsh-llm-retry na rota (schema validado ao vivo): mode
+  // `normal` + a lista de códigos retentáveis do host. Removendo `TIMEOUT`, o stall
+  // determinístico do Ollama NÃO é retentado internamente e falha terminal na hora.
+  if (input.llmRetryableCodes !== undefined) {
+    lines.push(
+      `        retryPolicy:`,
+      `          mode: normal`,
+      `          retryableCodes:`,
+      ...input.llmRetryableCodes.map(code => `            - ${code}`),
+    );
+  }
+  lines.push(
     `        models:`,
     `          - id: ${yamlSingle(input.model)}`,
     `            name: Harness Coder`,
@@ -138,7 +203,7 @@ export function buildHarnessPatchYaml(input: HarnessInvocationInput): string {
     `  config:`,
     `    provider: ${HARNESS_OLLAMA_ROUTE}`,
     `    model: ${yamlSingle(input.model)}`,
-  ];
+  );
   // Catálogo FOCADO (correção com prova viva): desabilita os plugins de ferramenta
   // distratores para o modelo local não se derrapar. `tool-str-replace-editor` é
   // desabilitado só uma vez (dedup) quando também presente na lista.
@@ -181,6 +246,15 @@ export function planHarnessInvocation(input: HarnessInvocationInput): HarnessInv
   if (!/^https?:\/\//.test(input.ollamaBaseUrl)) throw new Error('A baseURL do Ollama precisa ser http(s).');
   if (!Number.isInteger(input.stepBudget) || input.stepBudget < 1) throw new Error('O orçamento de passos precisa ser um inteiro >= 1.');
   if (typeof input.temperature !== 'number' || !Number.isFinite(input.temperature)) throw new Error('temperature precisa ser um número finito.');
+  if (input.streamIdleTimeoutMs !== undefined
+    && (!Number.isInteger(input.streamIdleTimeoutMs) || input.streamIdleTimeoutMs < 1)) {
+    throw new Error('streamIdleTimeoutMs precisa ser um inteiro de milissegundos >= 1.');
+  }
+  if (input.llmRetryableCodes !== undefined
+    && (!Array.isArray(input.llmRetryableCodes)
+      || input.llmRetryableCodes.some(code => !nonBlank(code) || /[\r\n]/.test(code)))) {
+    throw new Error('llmRetryableCodes precisa ser uma lista de códigos não vazios de uma linha.');
+  }
 
   const args: string[] = ['--profile', 'headless', '--patch', input.patchPath, input.objective];
 

@@ -185,6 +185,16 @@ export interface NodeDeepSeekHarnessBackendOptions {
   readonly repoRoot: string;
   readonly ollamaBaseUrl?: string;
   readonly gateStepBudget?: number;
+  /**
+   * Teto de ociosidade do stream do LLM (ms) por deploy. Ausente ⇒ o runtime
+   * aplica `HARNESS_DEFAULT_STREAM_IDLE_TIMEOUT_MS`. Delimita o stall do Ollama.
+   */
+  readonly streamIdleTimeoutMs?: number;
+  /**
+   * Códigos retentáveis do dsh-llm-retry por deploy. Ausente ⇒ o runtime aplica
+   * `HARNESS_DEFAULT_RETRYABLE_LLM_CODES` (sem `TIMEOUT`).
+   */
+  readonly llmRetryableCodes?: readonly string[];
 }
 
 /**
@@ -228,6 +238,12 @@ export function createNodeDeepSeekHarnessBackend(
     pluginPath,
     ollamaBaseUrl: options.ollamaBaseUrl ?? 'http://127.0.0.1:11434/v1',
     model: options.model,
+    ...(options.streamIdleTimeoutMs !== undefined
+      ? { streamIdleTimeoutMs: options.streamIdleTimeoutMs }
+      : {}),
+    ...(options.llmRetryableCodes !== undefined
+      ? { llmRetryableCodes: options.llmRetryableCodes }
+      : {}),
     dshHomeFactory: () => {
       // DeepSeekHarnessRuntime espera uma f?brica s?ncrona. O diret?rio-base ?
       // ?nico por processo/turno; mkdirp materializa o caminho depois.
