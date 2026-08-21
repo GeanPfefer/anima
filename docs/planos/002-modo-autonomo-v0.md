@@ -112,7 +112,7 @@ Documentos base: [arquitetura da Orquestração de Trabalho](../arquitetura/orqu
 | D | **Aceita (2026-07-20)** | INT-04 ratificado na revisão humana (resultado tecnicamente aceito); handoff produzido, sem aplicação/merge — ver "Aceite formal da Fase D" |
 | E | **Concluída (2026-07-28)** | SUP-01 a SUP-05, laço operacional, Etapas 2A, 2B.1 e 2B.2 e a capacidade **“Checkpoint real pós-planejamento e retomada informada por contexto.”** implementados, comprovados e ratificados. A decisão humana de 2026-07-28 encerrou formalmente a fase; ver "Ratificação da produção e do consumo reais de checkpoints e conclusão da Fase E". |
 | F | **Concluída (2026-07-28)** | INTEL-01 a INTEL-04 concluídos; política de orçamento ratificada e aplicada |
-| G | Em andamento | UX-01, UX-02 e **UX-03 ratificados**; UX-04 (histórico e retomada pelo chat) **ratificado por Gean (2026-08-03)**; paridade mobile segue |
+| G | Em andamento (software-complete no web) | UX-01, UX-02 e **UX-03 ratificados**; UX-04 (histórico e retomada pelo chat) **ratificado por Gean (2026-08-03)**. **Segunda triagem 2026-08-21** (matriz de cobertura core→web→mobile, registro `docs/registros/2026-08-21-fase-g-triagem-e-paridade-fase-humana-mobile.md`): paridade da **fase humana no mobile FECHADA** (`fbf1e87`, `presentMobileWorkProgress`); assimetria remanescente = **guarda de proveniência no mobile** (web usa `reconstructWorkPresentation`; mobile usa `presentWorkItem`) — adiada por risco de regressão, exige decisão. Blockers restantes: **prova física Expo Go** (device/Gean), **prova viva de superfície** (orçamento `admitted=false`) e **fase pós-review/PR** (decisão humana). |
 
 ## Fase A — Fechar a orquestração atual
 
