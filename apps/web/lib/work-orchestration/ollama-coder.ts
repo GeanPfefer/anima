@@ -60,6 +60,7 @@ const SYSTEM = [
   'LER: {"action":"read","reads":[{"path":"<do escopo>","search":"<termo opcional>","lineRange":[inicio,fim],"contextBefore":3,"contextAfter":3,"maxLines":60}]}',
   'EDITAR: {"action":"edit","operations":[{"kind":"replace_exact","path":"<do escopo>","expected_file_sha256":"<sha do arquivo como lido>","before":"<texto EXATO e ÚNICO do arquivo atual>","after":"<novo texto>","expected_occurrences":1}]}',
   'Também é permitido {"kind":"create_file","path":"<do escopo>","content":"<conteúdo>"} para arquivo NOVO. Exclusão não é permitida.',
+  'Acrescentar ao FIM de arquivo existente: {"kind":"append","path":"<escopo>","expected_file_sha256":"<sha lido>","content":"<texto>"}. Não invente "before" para o fim.',
   'Regras: só caminhos do escopo; "before" deve ser copiado EXATAMENTE de um trecho lido e ocorrer uma única vez; use o sha256 do arquivo como lido; peça leituras antes de editar; não explique.',
 ].join('\n');
 

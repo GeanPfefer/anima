@@ -261,6 +261,49 @@ describe('ollama-protocol — Commit 3: edições exatas', () => {
     catch (e) { expect((e as { code?: string }).code).toBe('ollama_stale_file_hash'); }
   });
 
+  const append = (content: string, s = sha): unknown =>
+    ({ kind: 'append', path: FILE, expected_file_sha256: s, content });
+
+  test('append: parse aceita válido; recusa sha inválido, content vazio e fora do escopo', () => {
+    const ops = parseEditOperations([append('\nnova linha final\n')], new Set([FILE]));
+    expect(ops).toHaveLength(1);
+    expect(ops[0]!.kind).toBe('append');
+    const bad: [unknown, string][] = [
+      [{ kind: 'append', path: FILE, expected_file_sha256: 'nope', content: 'x' }, 'ollama_invalid_response_schema'],
+      [{ kind: 'append', path: FILE, expected_file_sha256: sha, content: '' }, 'ollama_invalid_response_schema'],
+      [{ kind: 'append', path: 'fora/y.md', expected_file_sha256: sha, content: 'x' }, 'ollama_edit_outside_scope'],
+    ];
+    for (const [op, code] of bad) {
+      try { parseEditOperations([op], new Set([FILE])); throw new Error('deveria lançar'); }
+      catch (e) { expect((e as { code?: string }).code).toBe(code); }
+    }
+  });
+
+  test('append: concatena ao FIM preservando o resto byte a byte; sha desatualizado e arquivo inexistente são recusados', () => {
+    const ops = parseEditOperations([append('// marcador-final\n')], new Set([FILE]));
+    const changes = applyEditOperations(ops, contentOf({ [FILE]: original }));
+    expect(changes).toHaveLength(1);
+    expect(changes[0]!.newContent).toBe(original + '// marcador-final\n');
+    expect(changes[0]!.kind).toBe('replace');
+    // sha desatualizado
+    const stale = parseEditOperations([append('x', sha256('outro'))], new Set([FILE]));
+    try { applyEditOperations(stale, contentOf({ [FILE]: original })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_stale_file_hash'); }
+    // arquivo inexistente
+    try { applyEditOperations(ops, contentOf({})); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_stale_file_hash'); }
+  });
+
+  test('append + replace no MESMO arquivo combinam numa única mudança (replace no meio, append no fim)', () => {
+    const ops = parseEditOperations([
+      replace('cria PR', 'é fronteira pura'),
+      append('APENDICE\n'),
+    ], new Set([FILE]));
+    const changes = applyEditOperations(ops, contentOf({ [FILE]: original }));
+    expect(changes).toHaveLength(1);
+    expect(changes[0]!.newContent).toBe('# Doc\nINT-03 é a ponte de aplicação e é fronteira pura.\nfim.\n' + 'APENDICE\n');
+  });
+
   test('zero ocorrências e múltiplas ocorrências são ambíguas', () => {
     const zero = parseEditOperations([replace('NÃO EXISTE', 'x')], new Set([FILE]));
     try { applyEditOperations(zero, contentOf({ [FILE]: original })); throw new Error('deveria lançar'); }

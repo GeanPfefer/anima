@@ -181,7 +181,7 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     // reparo além do teto, enquanto a volta original ainda cabe. Antes da correção
     // o reparo reavaliava o prompt original e passava — mandando um payload maior
     // que o Ollama truncaria em silêncio.
-    const objective = 'reconciliar '.repeat(20); // ~240 chars
+    const objective = 'reconciliar '.repeat(6); // padding p/ deixar o prompt original perto do teto (o SYSTEM inclui a op append)
     const bigInvalid = `{"lixo":"${'x'.repeat(700)}"}`; // schema inválido e grande (eco clip=500)
     const { fetchImpl, sentBodies } = scriptedFetch([bigInvalid, editReq(sha256('linha única'))]);
     await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, operationalContextCap: 1024 })

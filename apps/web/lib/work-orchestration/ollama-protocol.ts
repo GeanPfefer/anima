@@ -438,10 +438,19 @@ const MAX_AFTER_CHARS = 40_000;
 const MAX_CREATE_CHARS = 200_000;
 
 /** Operação estruturada de edição. Sem diff ambíguo: substituição EXATA
- * verificável, ou criação de arquivo novo. Exclusão não existe neste recorte. */
+ * verificável, criação de arquivo novo, ou APÊNDICE ao fim de arquivo existente.
+ * Exclusão não existe neste recorte.
+ *
+ * `append` fecha um gap ergonômico PROVADO por eval (arquivo grande, mesmo modelo):
+ * `replace_exact` exige um `before` ÚNICO, e "o fim do arquivo" não tem texto único
+ * — o modelo tentava um `before` vazio/inexistente e a operação falhava
+ * (`ollama_invalid_response_schema`/`ollama_ambiguous_replacement`). Adicionar
+ * export/função/caso de teste ao fim é operação real; `append` a torna inequívoca
+ * sem afrouxar nada (segue exigindo escopo + sha do arquivo como lido). */
 export type EditOperation =
   | { readonly kind: 'replace_exact'; readonly path: string; readonly expectedFileSha256: string; readonly before: string; readonly after: string }
-  | { readonly kind: 'create_file'; readonly path: string; readonly content: string };
+  | { readonly kind: 'create_file'; readonly path: string; readonly content: string }
+  | { readonly kind: 'append'; readonly path: string; readonly expectedFileSha256: string; readonly content: string };
 
 /** Parseia o lote de operações, fail-closed com limites de quantidade e tamanho.
  * Caminho fora do escopo é `ollama_edit_outside_scope`; qualquer outra violação
@@ -468,6 +477,13 @@ export function parseEditOperations(operations: readonly unknown[], allowed: Rea
       if (!path) throw new OllamaProtocolError('ollama_edit_outside_scope', `criação fora do escopo: ${clipStr(op.path)}`);
       if (typeof op.content !== 'string' || op.content.length === 0 || op.content.length > MAX_CREATE_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'create_file exige "content" string não vazio dentro do limite.');
       out.push({ kind: 'create_file', path, content: op.content });
+    } else if (op.kind === 'append') {
+      if (typeof op.path !== 'string') throw new OllamaProtocolError('ollama_invalid_response_schema', 'append exige "path" string.');
+      const path = resolveScopedPath(op.path, allowed);
+      if (!path) throw new OllamaProtocolError('ollama_edit_outside_scope', `apêndice fora do escopo: ${clipStr(op.path)}`);
+      if (typeof op.expected_file_sha256 !== 'string' || !SHA_HEX.test(op.expected_file_sha256)) throw new OllamaProtocolError('ollama_invalid_response_schema', 'append exige "expected_file_sha256" (64 hex).');
+      if (typeof op.content !== 'string' || op.content.length === 0 || op.content.length > MAX_AFTER_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'append exige "content" string não vazio dentro do limite.');
+      out.push({ kind: 'append', path, expectedFileSha256: op.expected_file_sha256, content: op.content });
     } else {
       throw new OllamaProtocolError('ollama_invalid_response_schema', `operação não suportada: ${clipStr(op.kind)} (exclusão não é permitida neste recorte).`);
     }
@@ -498,10 +514,15 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
   if (operations.length === 0) throw new OllamaProtocolError('ollama_no_effective_edits', 'nenhuma operação de edição foi fornecida.');
   const creates: AppliedChange[] = [];
   const replaceByPath = new Map<string, { before: string; after: string; sha: string }[]>();
+  const appendByPath = new Map<string, { content: string; sha: string }[]>();
   for (const op of operations) {
     if (op.kind === 'create_file') {
       if (contentOf(op.path) !== null) throw new OllamaProtocolError('ollama_invalid_response_schema', `create_file exige caminho inexistente: ${op.path}.`);
       creates.push({ path: op.path, newContent: op.content, kind: 'create' });
+    } else if (op.kind === 'append') {
+      const list = appendByPath.get(op.path) ?? [];
+      list.push({ content: op.content, sha: op.expectedFileSha256 });
+      appendByPath.set(op.path, list);
     } else {
       const list = replaceByPath.get(op.path) ?? [];
       list.push({ before: op.before, after: op.after, sha: op.expectedFileSha256 });
@@ -509,12 +530,17 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
     }
   }
   const changes: AppliedChange[] = [];
-  for (const [path, ops] of replaceByPath) {
+  // Um arquivo pode combinar replaces + appends: aplica os replaces sobre o
+  // original (offsets do original) e então concatena os appends no fim, numa
+  // ÚNICA mudança por caminho. O sha de CADA operação precisa bater com o arquivo
+  // como lido — append não afrouxa a verificação de staleness.
+  const editedPaths = new Set<string>([...replaceByPath.keys(), ...appendByPath.keys()]);
+  for (const path of editedPaths) {
     const original = contentOf(path);
     if (original === null) throw new OllamaProtocolError('ollama_stale_file_hash', `arquivo do escopo não encontrado para edição: ${path}.`);
     const currentSha = sha256(original);
     const ranges: { start: number; end: number; after: string }[] = [];
-    for (const op of ops) {
+    for (const op of replaceByPath.get(path) ?? []) {
       if (op.sha !== currentSha) throw new OllamaProtocolError('ollama_stale_file_hash', `hash divergente para ${path}: o arquivo mudou desde a leitura.`);
       const { count, first } = countOccurrences(original, op.before);
       if (count !== 1) throw new OllamaProtocolError('ollama_ambiguous_replacement', `"before" ocorre ${count} vez(es) em ${path}; esperado exatamente 1.`);
@@ -527,6 +553,10 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
     let next = original;
     for (const range of [...sorted].sort((a, b) => b.start - a.start)) {
       next = next.slice(0, range.start) + range.after + next.slice(range.end);
+    }
+    for (const ap of appendByPath.get(path) ?? []) {
+      if (ap.sha !== currentSha) throw new OllamaProtocolError('ollama_stale_file_hash', `hash divergente para ${path}: o arquivo mudou desde a leitura.`);
+      next = next + ap.content;
     }
     if (next !== original) changes.push({ path, newContent: next, kind: 'replace' });
   }
