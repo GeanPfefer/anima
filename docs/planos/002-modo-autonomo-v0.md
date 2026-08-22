@@ -1,5 +1,36 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — driver do backlog autônomo + prova viva `verified` (2026-08-22)
+
+O laço de backlog ganhou seu DRIVER e foi provado ao vivo, fechando a lacuna que o
+SUP-05 deixou de propósito ("quem decide invocar de novo é quem chama"). Três recortes:
+
+- `0842d70` — política PURA `planAutonomousBacklogTurn` (core): executar-vs-parar +
+  razão tipada sobre `projectAutonomousQueue`; item bloqueado nunca congela a fila.
+- `7af0735` — DRIVER `runAutonomousBacklogCycle` (apps/web): iteração com efeito que
+  consome a política, executa UMA volta do Supervisor por iteração, classifica o
+  desfecho e para sem spin; limitado por `maxTurns` (estrutural, não quota), cancelável.
+  33 provas por doubles cobrindo as 10 regressões exigidas.
+- `e339136` — fiação viva: projeção real do backlog do banco
+  (`readAutonomousBacklogCandidates`), observação host-side EXTRAÍDA e COMPARTILHADA
+  com a rota supervisor-turn (`persistPostTurnHostObservations`, 11/11 daquela rota
+  intactas), e a rota explícita `POST /api/work-orchestration/backlog-cycle`.
+
+**Prova viva (2026-08-22, registro `docs/registros/2026-08-22-prova-viva-do-driver-de-backlog-cycle-verified.md`):**
+UMA invocação da rota (`maxTurns=1`) atravessou, sem scheduler humano, `readBacklog →
+execute_next → Supervisor → routing → claim → attempt → worktree qwen3-coder → gate →
+result_submitted → review`, com evidência host-observed persistida (gate+coder+git:
+`filesChanged 1/insertions 1`) e **parecer do Verifier `verified`** (7 checks, 0
+violations). Resultado tipado `{turnsExecuted:1, itemsTouched:1, lastOutcome:
+execution_completed, stopReason:max_turns_reached}`. Orçamento V2 admitiu ao vivo
+(`admitted=true, costClass=local`). Repositório byte-intacto (`HEAD e339136`), worktree
+descartada, `origin/main` intacta, nada aceito/integrado/aplicado.
+
+**Restrição que permanece (maturidade):** o gatilho de CONTINUIDADE (re-invocar o
+driver enquanto houver trabalho elegível) ainda não existe — deliberadamente não-daemon.
+É a última milha do laço `while` governado; candidatos: host-turn manual, `requiresAnotherTurn`
+consumindo a decisão de backlog, gate real do Resource Governor no porto `hostPermitsAutonomousWork`.
+
 ## Continuação — correção da classificação da política de segurança (2026-08-12)
 
 O [Marco 006 — Política de Segurança como Maturidade Máxima](../marcos/006-politica-de-seguranca-como-maturidade-maxima.md)
