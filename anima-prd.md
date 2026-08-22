@@ -498,11 +498,16 @@ o kill-switch (control-plane local, fail-closed), adquire identidade user-scoped
 o Governor, invoca o host-turn bounded por HTTP, classifica e quiesce/backoff/acorda —
 sem cron, sem daemon, sem always-on ainda. Engine agnóstica de transporte (portos
 injetados); `tools/local-agent` (Python) permanece EXECUTOR, não orquestrador.
-Provado: resident-host **57/57**, typecheck 5 workspaces, e **duas provas vivas de
-governança com o processo real** (kill-switch off → quiesce; identidade indisponível →
-fail-closed, `hostTurns=0`). **Falta a prova viva do HAPPY PATH** (exige o stack de
-trabalho completo, hoje frio) e o **disparo automático** do wake (event-driven; hoje
-poll lento provisório + wake explícito). Registro
+Provado: resident-host **57/57**, typecheck 5 workspaces, duas provas vivas de governança,
+e — **PROVA VIVA DO HAPPY PATH: PASS** — com o stack completo (Supabase + Ollama
+`qwen3-coder` + Next), o processo assinou como o usuário (Bearer, sem service_role),
+reconciliou, o Governor permitiu, invocou o host-turn bounded → worktree isolada → gate
+PASS → evidência host-observed → **Verifier `verified`** → item em **`review`** → voltou a
+**idle**, **sem nenhuma chamada manual à rota** (item `fdba6c78`; bonus: a 2ª iteração foi
+a `waiting_resource` — Governor deferindo admissão ao vivo). Repo byte-intacto,
+`origin/main` intacta. Resta o **disparo automático event-driven** do wake
+(`AUTO_EVENT_WAKE=PENDING`; hoje poll lento provisório + wake explícito) e o transporte
+in-process. Registro
 [`docs/registros/2026-08-22-resident-local-host-v0.md`](docs/registros/2026-08-22-resident-local-host-v0.md).
 
 O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou que a programação autônoma **não tem teto artificial**: o ciclo completo (`entender → investigar → planejar → propor → implementar → testar → revisar → corrigir → commit → publicar → PR → integrar → merge → deploy → observar → reparar`) é destino, e **cada estágio recebe autonomia conforme sua própria maturidade e evidência** — as maturidades não são acopladas. O estado atual, classificando cada barreira como **restrição de maturidade** (promovível por evidência) ou **restrição fundamental** (exige decisão humana por não estar definida):

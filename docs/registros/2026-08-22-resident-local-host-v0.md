@@ -141,11 +141,66 @@ vivas de governança + o happy-path da rota já provado em `af240cb`). Parada ho
    manualmente (o runner é quem invoca).
 5. Registrar. **Wake automático event-driven permanece a próxima fronteira.**
 
+## Atualização — Prova viva do HAPPY PATH V0: **PASS** (2026-08-22)
+
+`RESIDENT_HOST_V0=PASS` · `AUTO_EVENT_WAKE=PENDING`
+
+O stack de trabalho foi levantado (Docker + Supabase local + Ollama `qwen3-coder:latest`
++ Next dev) e a prova viva mais estreita do resident host foi executada **de ponta a
+ponta pelo laço do próprio processo — sem nenhuma chamada manual à rota**.
+
+**Setup (fixture descartável):** usuário residente descartável `resident-proof-…@test.invalid`
+(`973d543e-…`) criado pela Admin API (único uso de service_role, para CRIAR o usuário — o
+runner nunca a usa); allowlist + mensagem de origem semeadas; item
+`fdba6c78-081c-42c9-a049-7d4f44ebd0a0` criado→aprovado→classificado
+(`create_work_proposal`/`resolve_approval`/`record_work_intelligence_classification`),
+`execution_spec` de worktree (`executor=worktree`, `coder_backend=ollama`,
+`model=qwen3-coder:latest`, `base_sha=db1b0d7`, gate `npm run typecheck --workspace=@anima/web`,
+escopo = 1 arquivo markdown de rascunho). Pré-condições pela RPC canônica:
+`autonomous_work_queue` → `queue_position 1`, `target_occupied=false`; budget
+`admitted=true, costClass=local`.
+
+**Execução (`node apps/web/scripts/resident-host.ts`, autonomy=enabled, `maxTurnsPerCycle=1
+maxCycles=1 maxIterations=2 idleMs=6000`):** o processo assinou no GoTrue como o usuário
+(**Bearer/`auth.uid()`/RLS — sem service_role**), reconciliou, o Governor permitiu, e
+invocou o host-turn bounded. Telemetria real:
+
+```
+starting → reconcile → running → idle(host_turn_idle: stop/max_cycles_reached,
+  moreWorkAvailable=false, cyclesExecuted=1) → [wake por poll 6s] → reconcile →
+  running → waiting_resource(host_turn_resource_pressure) → stopping → stopped
+  (summary: hostTurns=2, stopReason=max_iterations)
+```
+
+**Desfecho persistido do item `fdba6c78`:** `state=review` (desfecho máximo autônomo).
+Cadeia completa `work_proposed → … → work_claimed → work_started → execution_started →
+checkpoint_recorded → result_submitted → work_claim_released → host_observed_gate_evidence_recorded
+→ host_observed_coder_evidence_recorded → host_observed_evidence_recorded → verifier_opinion_recorded`.
+- **Verifier `verdict=verified`** — 7 checks, 0 gaps, 0 violations (3 attested + 4 independent).
+- **Git observado pelo host:** `insertions:1, deletions:0` (o coder criou exatamente o
+  arquivo do escopo na branch descartável `anima-work/1de27c29-…`, `observedCommitSha e568973…`).
+- **Gate:** `npm.cmd run typecheck --workspace=@anima/web` → `passed`, exit 0, 9806ms.
+- **Coder:** `ollama:qwen3-coder:latest`, 35714ms.
+
+**Bonus — Governor gate ao vivo como ADMISSÃO:** na 2ª iteração, sob carga real da máquina
+(logo após o coder), o gate por-ciclo do host-turn devolveu `resource_pressure` e o resident
+host foi a `waiting_resource` **sem executar novo trabalho** — o gate do `8d78d90` agindo
+como autoridade real de admissão, ao vivo, não só por testes.
+
+**Integridade:** repositório principal **byte-intacto** (`HEAD=db1b0d7`, árvore limpa
+exceto `.worktrees/`); a worktree de execução foi **descartada** (branch `anima-work/1de27c29`
+ausente de `git worktree list`); o arquivo de rascunho **não existe** no repo principal
+(viveu só na worktree descartada). `origin/main`=`99bec54` intacta; sem PR/merge/deploy/apply.
+Fixture descartável PRESERVADA como evidência (padrão do repo). O wake usado foi o **poll
+provisório** — o wake automático **event-driven permanece PENDENTE**.
+
 ## Próximo ponto exato de retomada
 
-1. Prova viva do HAPPY PATH V0 (receita acima), quando o stack de trabalho estiver de pé.
-2. Wake automático event-driven (hoje poll lento provisório) — próxima fronteira do wake.
-3. Transporte in-process (compor `buildProjectBacklogCycleDeps` + `runAutonomousBacklogHostTurn`
+1. **Wake automático event-driven** (`AUTO_EVENT_WAKE=PENDING`; hoje poll lento provisório) —
+   a próxima fronteira do wake, para "acorda quando necessário" sem nudge de relógio.
+2. Transporte in-process (compor `buildProjectBacklogCycleDeps` + `runAutonomousBacklogHostTurn`
    atrás de `createBearerClient`) para mover a maquinaria para dentro do processo residente
    — sem tocar a engine (portos injetados).
-4. Persistência/telemetria durável do resultado (seam de observabilidade, sem daemon) + UI.
+3. Persistência/telemetria durável do resultado (seam de observabilidade, sem daemon) + UI.
+4. (Frente adjacente, só depois) backlog canônico/documental → descoberta → candidato tipado
+   → materialização em `work_item` → resident host executa.

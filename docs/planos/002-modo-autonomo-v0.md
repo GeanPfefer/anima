@@ -23,13 +23,18 @@ real com Supabase fora → `waiting_human_or_recovery`, `hostTurns=0`, backoff (
 retry), parada determinística. Detalhe em
 [`docs/registros/2026-08-22-resident-local-host-v0.md`](../registros/2026-08-22-resident-local-host-v0.md).
 
-**FRONTEIRA (parada deliberada):** a prova viva do HAPPY PATH end-to-end (runner idle →
-wake → item descartável → Governor permite → qwen3-coder → gate → host-observed →
-Verifier `verified` → `review` → idle) exige o stack de trabalho COMPLETO, hoje frio
-(Docker Desktop fora → Supabase depende dele; Ollama e Next parados). Receita exata da
-retomada no registro. O **wake automático event-driven** (hoje poll lento) permanece a
-próxima fronteira do wake; o **transporte in-process** é a evolução seguinte, sem tocar a
-engine.
+**PROVA VIVA DO HAPPY PATH: PASS (`RESIDENT_HOST_V0=PASS`, `AUTO_EVENT_WAKE=PENDING`).**
+Stack levantado (Docker + Supabase + Ollama `qwen3-coder` + Next dev); item descartável
+`fdba6c78` (worktree/project:anima) criado→aprovado→classificado e pronto na fila. O
+processo `node apps/web/scripts/resident-host.ts` (autonomy=enabled) assinou no GoTrue como
+o usuário (Bearer, **sem service_role**), reconciliou, o Governor permitiu, invocou o
+host-turn bounded → `qwen3-coder` na worktree isolada → gate `typecheck` PASS → evidência
+host-observed (git `insertions:1`) → **Verifier `verified`** (7/0/0) → item em **`review`**
+→ runner voltou a **idle**. **Sem nenhuma chamada manual à rota.** Bonus: a 2ª iteração, sob
+carga real, foi a `waiting_resource` — o **Governor gate deferindo admissão AO VIVO**. Repo
+byte-intacto, worktree descartada, `origin/main` intacta. Detalhe no registro. **FRONTEIRA
+restante:** o **wake automático event-driven** (hoje poll lento provisório) e o **transporte
+in-process** (sem tocar a engine).
 
 ## Continuação — Resource Governor como gate real de admissão (2026-08-22)
 
