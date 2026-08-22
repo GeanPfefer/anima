@@ -31,9 +31,10 @@ CREATE FUNCTION pg_temp.proposal(label text) RETURNS jsonb LANGUAGE sql IMMUTABL
     'excluded_scope',jsonb_build_array('deploy'),'expected_effects',jsonb_build_array('prova'),
     'risks',jsonb_build_array()))
 $$;
-CREATE FUNCTION pg_temp.intent(target text, attempts integer DEFAULT 10) RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$
+CREATE FUNCTION pg_temp.intent(target text, attempts integer DEFAULT 10, backend text DEFAULT 'ollama') RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$
   SELECT jsonb_build_object('execution_spec',jsonb_build_object(
     'schema_version',1,'target',jsonb_build_object('kind','project','reference',target),
+    'coder_backend',backend,
     'permissions',jsonb_build_array(),'validation_criteria',jsonb_build_array(jsonb_build_object('label','teste')),
     'limits',jsonb_build_object('max_attempts',attempts,'max_duration_minutes',120)))
 $$;
@@ -51,8 +52,10 @@ SELECT label,w.id FROM (VALUES
   ('global-b','83000000-0000-0000-0000-000000000013'::uuid),
   ('global-c','83000000-0000-0000-0000-000000000014'::uuid)
 ) source(label,message_id)
+-- Cenário do teto GLOBAL de custo: itens EXTERNOS (coder_backend openai), pois a
+-- quota de custo (6/24h) na política V2 conta e se aplica só a execução externa.
 CROSS JOIN LATERAL public.create_work_proposal(
-  source.message_id,'low','programming',pg_temp.intent(source.label),pg_temp.proposal(source.label)) w;
+  source.message_id,'low','programming',pg_temp.intent(source.label,10,'openai'),pg_temp.proposal(source.label)) w;
 SELECT public.resolve_approval(id,1,'approve','{}') FROM budget_items WHERE label LIKE 'global-%';
 
 SELECT set_config('request.jwt.claim.sub','83000000-0000-0000-0000-000000000003',true);
@@ -124,9 +127,9 @@ RESET ROLE;
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','83000000-0000-0000-0000-000000000002',true);
 SELECT is(public.autonomous_work_budget_status((SELECT id FROM budget_items WHERE label='global-c'))->>'reason',
-  'user_attempt_budget_exhausted','seis tentativas em 24h esgotam o teto global');
-SELECT is((public.autonomous_work_budget_status((SELECT id FROM budget_items WHERE label='global-c'))#>>'{usage,userAttempts24Hours}')::integer,
-  6,'consumo global é consultável entre itens');
+  'user_attempt_budget_exhausted','seis tentativas EXTERNAS em 24h esgotam o teto global de custo');
+SELECT is((public.autonomous_work_budget_status((SELECT id FROM budget_items WHERE label='global-c'))#>>'{usage,externalAttempts24Hours}')::integer,
+  6,'consumo EXTERNO é consultável entre itens');
 RESET ROLE;
 
 -- Uma tentativa aberta há 46 minutos aciona a reserva depois do checkpoint.

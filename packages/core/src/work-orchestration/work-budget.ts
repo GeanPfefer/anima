@@ -1,7 +1,16 @@
-// INTEL-04 — orçamento V0 de execução autônoma.
+// INTEL-04 — orçamento V0 de execução autônoma (referência de valores V0).
 //
 // O V0 mede somente tentativas e tempo. Tokens e dinheiro permanecem fora do
 // contrato até existir telemetria confiável para essas unidades.
+//
+// AUTORIDADE VIVA: a decisão de admissão em produção é a RPC SQL
+// `private.autonomous_work_budget_decision` (migration
+// `20260821000002_local_vs_external_work_budget.sql`, policyVersion
+// `autonomous-work-budget-v2-local-external`), que é **consciente de custo**: as
+// quotas globais (`user_attempt`/`user_runtime`) contam e se aplicam SÓ a execução
+// EXTERNA (coder_backend externo). `evaluateWorkBudgetAdmission` abaixo é a
+// referência V0 (não consciente de custo) usada por seus próprios testes; NÃO é o
+// caminho vivo. Ao evoluir a régua, o SQL é a fonte da verdade.
 export const DEFAULT_AUTONOMOUS_WORK_BUDGET_V1 = {
   schemaVersion: 1,
   policyVersion: 'autonomous-work-budget-v1',

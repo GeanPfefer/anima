@@ -27,9 +27,13 @@ CREATE FUNCTION pg_temp.proposal(label text) RETURNS jsonb LANGUAGE sql IMMUTABL
     'excluded_scope',jsonb_build_array('deploy'),'expected_effects',jsonb_build_array('prova'),
     'risks',jsonb_build_array()))
 $$;
+-- Itens EXTERNOS (coder_backend openai): a re-admissão pré-tentativa é provada
+-- contra a quota de CUSTO (user_attempt_budget_exhausted 6/24h), que na política V2
+-- se aplica só a execução externa. A mecânica de re-admissão independe da razão.
 CREATE FUNCTION pg_temp.intent(target text) RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$
   SELECT jsonb_build_object('execution_spec',jsonb_build_object(
     'schema_version',1,'target',jsonb_build_object('kind','project','reference',target),
+    'coder_backend','openai',
     'permissions',jsonb_build_array(),'validation_criteria',jsonb_build_array(jsonb_build_object('label','teste')),
     'limits',jsonb_build_object('max_attempts',3,'max_duration_minutes',120)))
 $$;
