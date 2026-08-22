@@ -18,6 +18,7 @@ export * from './protected-integration';
 export * from './integration-decision';
 export * from './work-claim';
 export * from './autonomous-queue';
+export * from './autonomous-backlog';
 export * from './autonomous-selection';
 export * from './work-handoff';
 export * from './worktree-handoff';
