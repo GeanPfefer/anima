@@ -7,6 +7,7 @@ jest.mock('@/lib/work-orchestration/autonomous-backlog-driver', () => ({ runAuto
 jest.mock('@/lib/work-orchestration/executor-selection', () => ({ readExecutionContract: jest.fn(), resolveExecutorRoute: jest.fn() }));
 jest.mock('@/lib/work-orchestration/post-turn-observation', () => ({ persistPostTurnHostObservations: jest.fn() }));
 jest.mock('@/lib/work-orchestration/supervisor', () => ({ runSupervisorTurn: jest.fn() }));
+jest.mock('@/lib/work-orchestration/resource-governor', () => ({ readResourceAdmission: jest.fn() }));
 
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/supabase/request-auth';
@@ -15,6 +16,7 @@ import { runAutonomousBacklogCycle } from '@/lib/work-orchestration/autonomous-b
 import { readExecutionContract, resolveExecutorRoute } from '@/lib/work-orchestration/executor-selection';
 import { persistPostTurnHostObservations } from '@/lib/work-orchestration/post-turn-observation';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
+import { readResourceAdmission } from '@/lib/work-orchestration/resource-governor';
 
 const auth = authenticateRequest as jest.Mock;
 const readBacklog = readAutonomousBacklogCandidates as jest.Mock;
@@ -23,6 +25,7 @@ const readContract = readExecutionContract as jest.Mock;
 const resolveRoute = resolveExecutorRoute as jest.Mock;
 const observe = persistPostTurnHostObservations as jest.Mock;
 const turn = runSupervisorTurn as jest.Mock;
+const admission = readResourceAdmission as jest.Mock;
 
 const request = (body: unknown): Request => ({
   json: async () => body, signal: new AbortController().signal,
@@ -35,6 +38,7 @@ const cycleResult = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  admission.mockReturnValue({ verdict: 'permit', pressure: 'low', reason: 'host_ready' });
   cycle.mockResolvedValue(cycleResult);
 });
 
@@ -74,6 +78,20 @@ test('maxTurns é limitado ao teto estrutural', async () => {
   auth.mockResolvedValue({ client: {}, userId: 'u' });
   await POST(request({ maxTurns: 999 }));
   expect(cycle.mock.calls[0][0].maxTurns).toBe(10);
+});
+
+test('porto consulta o Resource Governor a cada admissao e bloqueia defer/fail-closed', async () => {
+  auth.mockResolvedValue({ client: {}, userId: 'u' });
+  await POST(request({ maxTurns: 2 }));
+  const permits = cycle.mock.calls[0][0].hostPermitsAutonomousWork;
+  admission
+    .mockReturnValueOnce({ verdict: 'permit', pressure: 'low', reason: 'host_ready' })
+    .mockReturnValueOnce({ verdict: 'defer', pressure: 'high', reason: 'resource_pressure' })
+    .mockReturnValueOnce({ verdict: 'fail_closed', pressure: 'unknown', reason: 'resource_authority_unavailable' });
+  expect(permits()).toBe(true);
+  expect(permits()).toBe(false);
+  expect(permits()).toBe(false);
+  expect(admission).toHaveBeenCalledTimes(3);
 });
 
 test('o runTurn injetado resolve o executor de worktree, chama o Supervisor e observa a volta', async () => {

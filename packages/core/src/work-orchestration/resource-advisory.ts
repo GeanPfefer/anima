@@ -237,6 +237,26 @@ export interface ResourceGovernorView {
   readonly advisory: ResourceAdvisory | null;
 }
 
+/** Autoridade de admissao de NOVO trabalho autonomo. Nao interrompe uma tentativa
+ * ja iniciada: o host a consulta novamente antes de cada nova volta. */
+export type ResourceAdmissionVerdict = 'permit' | 'defer' | 'fail_closed';
+
+export interface ResourceAdmissionDecision {
+  readonly verdict: ResourceAdmissionVerdict;
+  readonly pressure: MachinePressure;
+  readonly reason: 'host_ready' | 'resource_pressure' | 'resource_authority_unavailable';
+}
+
+/** Promove a pressao observada de advisory para gate de admissao. Somente pressao
+ * baixa permite iniciar trabalho novo; telemetria indeterminada falha fechada. */
+export function decideResourceAdmission(pressure: MachinePressure): ResourceAdmissionDecision {
+  if (pressure === 'low') return { verdict: 'permit', pressure, reason: 'host_ready' };
+  if (pressure === 'unknown') {
+    return { verdict: 'fail_closed', pressure, reason: 'resource_authority_unavailable' };
+  }
+  return { verdict: 'defer', pressure, reason: 'resource_pressure' };
+}
+
 export interface ComposeResourceGovernorViewInput {
   readonly observations: readonly WorkloadCostObservationV1[];
   readonly snapshot: MachineSnapshotV1 | null;

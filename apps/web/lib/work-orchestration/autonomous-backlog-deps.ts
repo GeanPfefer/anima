@@ -5,6 +5,7 @@ import { readExecutionContract, resolveExecutorRoute } from './executor-selectio
 import { persistPostTurnHostObservations } from './post-turn-observation';
 import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
+import { readResourceAdmission } from './resource-governor';
 
 // ============================================================
 // Dependências do driver de backlog para o PROJETO real (worktree/qwen3-coder),
@@ -45,10 +46,9 @@ export function buildProjectBacklogCycleDeps(
 
   return {
     readBacklog: () => readAutonomousBacklogCandidates(client),
-    // Resource Governor: hoje advisory (read-only), sem gate canônico de execução.
-    // O porto está pronto para recebê-lo; até lá o host permite (a proteção real
-    // vem das guardas atômicas e da reserva interativa no orçamento).
-    hostPermitsAutonomousWork: () => true,
+    // Snapshot NOVO por consulta, antes de cada volta. Somente `permit` inicia;
+    // defer e indisponibilidade da autoridade falham fechados.
+    hostPermitsAutonomousWork: () => readResourceAdmission().verdict === 'permit',
     runTurn: async (entry, signal) => {
       // Contrato persistido do item escolhido → executor de worktree (project:anima).
       const item = await client.from('work_items').select('intent').eq('id', entry.workItemId).maybeSingle();

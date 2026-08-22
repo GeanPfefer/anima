@@ -1,5 +1,15 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — Resource Governor como gate real de admissão (2026-08-22)
+
+O porto `hostPermitsAutonomousWork` deixou de ser constante: antes de **cada nova
+volta**, `readResourceAdmission` captura um snapshot pontual do host e a política
+pura `decideResourceAdmission` decide `permit | defer | fail_closed`. Somente pressão
+`low` permite; `moderate/high` produz parada tipada `resource_pressure`; telemetria
+`unknown` ou erro falha fechada. O gate não mata tentativa iniciada e não substitui
+budget V2, claim/exclusão, anti-loop ou cancelamento. Sem polling/retry: uma invocação
+para em `resource_pressure`; outra, após recuperação, reamostra e pode prosseguir.
+
 ## Continuação — gatilho de continuidade (host-turn) + prova viva 2 ciclos (2026-08-22)
 
 Reduzida mais uma camada de scheduler humano: a continuação ENTRE ciclos. `b8cac08`:

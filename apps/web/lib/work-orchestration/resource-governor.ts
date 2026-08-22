@@ -6,6 +6,7 @@ import {
   classifyMachinePressure,
   composeResourceGovernorView,
   DEFAULT_INTERACTIVE_RESERVE,
+  decideResourceAdmission,
   deriveCoderWorkloadCostObservationsFromEvents,
   deriveWorkloadCostObservationsFromEvents,
   projectWorkloadCostProfiles,
@@ -15,6 +16,7 @@ import {
   type MachinePressure,
   type MachineSnapshotV1,
   type ResourceGovernorView,
+  type ResourceAdmissionDecision,
   type WorkEvent,
   type WorkItem,
   type WorkloadAdvisory,
@@ -73,6 +75,20 @@ export function composeHostResourceGovernorView(input: HostResourceGovernorInput
     reserve: input.reserve ?? DEFAULT_INTERACTIVE_RESERVE,
     target: input.target ?? null,
   });
+}
+
+/** Gate real e pontual consultado antes de cada novo trabalho autonomo. Budget/custo
+ * e pressao do host continuam autoridades independentes; erro de observacao falha
+ * fechado em vez de liberar execucao unattended. */
+export function readResourceAdmission(
+  readSnapshot: () => MachineSnapshotV1 = readMachineSnapshot,
+  reserve: InteractiveReserve = DEFAULT_INTERACTIVE_RESERVE,
+): ResourceAdmissionDecision {
+  try {
+    return decideResourceAdmission(classifyMachinePressure(readSnapshot(), reserve));
+  } catch {
+    return decideResourceAdmission('unknown');
+  }
 }
 
 // ---------------------------------------------------------------------------

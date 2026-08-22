@@ -7,12 +7,24 @@ import {
   composeResourceGovernorView,
   describeExecutionAdvisory,
   describeMachinePressure,
+  decideResourceAdmission,
   type CostClass,
   type InteractiveReserve,
   type MachineSnapshotV1,
   type WorkloadCostObservationV1,
   type WorkloadCostProfile,
 } from './index';
+
+describe('decideResourceAdmission (gate de novo trabalho)', () => {
+  test.each([
+    ['low', 'permit', 'host_ready'],
+    ['moderate', 'defer', 'resource_pressure'],
+    ['high', 'defer', 'resource_pressure'],
+    ['unknown', 'fail_closed', 'resource_authority_unavailable'],
+  ] as const)('%s -> %s', (pressure, verdict, reason) => {
+    expect(decideResourceAdmission(pressure)).toEqual({ pressure, verdict, reason });
+  });
+});
 
 const profile = (predominantClass: CostClass, count = 5): WorkloadCostProfile => ({
   key: { workloadKind: 'gate', command: 'npm test', repo: null },

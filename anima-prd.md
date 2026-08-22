@@ -485,6 +485,13 @@ prompt e tarefa. Detalhes no [novo registro](docs/registros/2026-08-11-investiga
 
 ### Mapa de maturidade do ciclo de programação (ratificação 2026-08-12)
 
+**Estado tático do host autônomo (2026-08-22):** o Resource Governor agora é
+gate real para admissão de cada novo ciclo/turno do backlog: pressão baixa permite,
+moderada/alta adia com `resource_pressure`, e telemetria indeterminada/erro falha
+fechada. O gate não interrompe execução já iniciada e permanece independente do
+budget V2, claims, cancelamento e limites anti-loop. O resident local host/always-on
+continua não implementado; próximo ponto é construí-lo sobre este gate.
+
 O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou que a programação autônoma **não tem teto artificial**: o ciclo completo (`entender → investigar → planejar → propor → implementar → testar → revisar → corrigir → commit → publicar → PR → integrar → merge → deploy → observar → reparar`) é destino, e **cada estágio recebe autonomia conforme sua própria maturidade e evidência** — as maturidades não são acopladas. O estado atual, classificando cada barreira como **restrição de maturidade** (promovível por evidência) ou **restrição fundamental** (exige decisão humana por não estar definida):
 
 | Estágio | Estado atual | Classificação da barreira |

@@ -720,10 +720,21 @@ economia é de **quando/como** executar, nunca de remover prova.
 
 ### Resource Governor V0 implementado
 
+**Gate de admissão de novo trabalho (2026-08-22).** O eixo observacional continua
+intacto para histórico/UI, mas a pressão atual do host passou a ter autoridade no
+caminho unattended do backlog. `decideResourceAdmission` (core, puro) produz
+`permit | defer | fail_closed`; `readResourceAdmission` (host) captura uma amostra
+barata antes de cada volta. Somente `low` permite iniciar; `moderate/high` adiam com
+`resource_pressure`; snapshot indeterminado ou falha da autoridade fecha o gate.
+O gate governa apenas **admissão de trabalho novo**: não mata tentativa em curso,
+não relaxa gates e não substitui budget, concorrência/claim, cancelamento ou bounds.
+Não há retry/polling: pressão aquieta o ciclo/host-turn com parada tipada.
+
 O V0 realiza o eixo `observação real → evidência durável → classificação/advisory → histórico`
-**antes** de `previsão → controle automático`. É **observacional e advisory**: sensor + histórico
-+ classificação + parecer, **sem autoridade nova** — não mata processo, não para Docker/Supabase,
-não descarrega modelo, não agenda, não produz nenhum efeito externo. Preserva a separação canônica
+**antes** de `previsão → controle automático`. Histórico e UI permanecem
+**observacionais/advisory**; a única autoridade promovida é a admissão conservadora
+de **novo** trabalho descrita acima. Não mata processo, não para Docker/Supabase,
+não descarrega modelo, não agenda, não produz efeito externo. Preserva a separação canônica
 do Verifier: **EVIDÊNCIA ≠ CLASSIFICAÇÃO ≠ ADVISORY/DECISÃO**.
 
 Camadas puras e determináveis (`packages/core`, sem LLM, sem schema novo):

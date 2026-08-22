@@ -142,6 +142,21 @@ describe('driver do backlog autônomo — runAutonomousBacklogCycle', () => {
     expect(turns.calls.count).toBe(0);
   });
 
+  test('primeira volta permitida e pressao antes da segunda: nao inicia novo trabalho', async () => {
+    const backlog = backlogScript([[ready('A', 10)], [ready('B', 20)]]);
+    const turns = turnScript([turn('execution_completed', 'A'), turn('execution_completed', 'B')]);
+    let checks = 0;
+    const result = await runAutonomousBacklogCycle(cycle({
+      readBacklog: backlog.read,
+      runTurn: turns.run,
+      hostPermitsAutonomousWork: () => checks++ === 0,
+    }));
+    expect(result.turns.map(entry => entry.workItemId)).toEqual(['A']);
+    expect(result.stopReason).toBe('resource_pressure');
+    expect(turns.calls.count).toBe(1);
+    expect(checks).toBe(2); // uma amostra por tentativa de iniciar; sem retry apertado
+  });
+
   // (5) item já running → não inicia concorrência ilegal.
   test('item em execução: não inicia nova volta, para em work_in_progress', async () => {
     const backlog = backlogScript([[inState('A', 'in_progress')]]);

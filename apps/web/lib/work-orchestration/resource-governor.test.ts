@@ -8,7 +8,7 @@ import {
   type WorkItem,
 } from '@anima/core';
 import type { Json } from '@anima/types';
-import { composeHostResourceGovernorView, composeItemGateAdvisory, composeSupervisorResourceAdvisory, declaredCoderBackendId, declaredGateCommands } from './resource-governor';
+import { composeHostResourceGovernorView, composeItemGateAdvisory, composeSupervisorResourceAdvisory, declaredCoderBackendId, declaredGateCommands, readResourceAdmission } from './resource-governor';
 import { OllamaCoderBackend } from './ollama-coder';
 import { GptCoderBackend } from './gpt-coder';
 
@@ -47,6 +47,28 @@ const events: WorkEvent[] = [
   ...Array.from({ length: 9 }, (_, i) => gateEvidenceEvent(`cheap-${i}`, [gate('npm run typecheck', 300)])),
   ...Array.from({ length: 3 }, (_, i) => gateEvidenceEvent(`heavy-${i}`, [gate('npm run test:e2e', 90_000)])),
 ];
+
+describe('readResourceAdmission (autoridade real de admissao)', () => {
+  test('host saudavel permite; pressao moderada/alta adia', () => {
+    expect(readResourceAdmission(() => snapshot(8_000)).verdict).toBe('permit');
+    expect(readResourceAdmission(() => snapshot(2_000)).verdict).toBe('defer');
+    expect(readResourceAdmission(() => snapshot(400)).verdict).toBe('defer');
+  });
+
+  test('telemetria incompleta ou erro falha fechado', () => {
+    const partial: MachineSnapshotV1 = { schemaVersion: 1, capturedAt: '2026-08-17T12:00:00.000Z', observer: 'host' };
+    expect(readResourceAdmission(() => partial)).toMatchObject({ verdict: 'fail_closed', pressure: 'unknown' });
+    expect(readResourceAdmission(() => { throw new Error('sensor indisponivel'); })).toMatchObject({ verdict: 'fail_closed', pressure: 'unknown' });
+  });
+
+  test('nova consulta apos recuperacao volta a permitir', () => {
+    let free = 400;
+    const read = () => snapshot(free);
+    expect(readResourceAdmission(read).verdict).toBe('defer');
+    free = 8_000;
+    expect(readResourceAdmission(read).verdict).toBe('permit');
+  });
+});
 
 describe('composeHostResourceGovernorView (seam central, ponta a ponta)', () => {
   test('deriva o histórico dos eventos de gate já persistidos e projeta perfis por comando', () => {
