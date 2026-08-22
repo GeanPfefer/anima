@@ -1,6 +1,7 @@
 import {
   planAutonomousBacklogTurn,
   type AutonomousQueueCandidate,
+  type AutonomousQueueEntry,
   type BacklogPending,
 } from '@anima/core';
 import type { SupervisorTurnOutcome, SupervisorTurnResult } from './supervisor';
@@ -86,8 +87,14 @@ export interface BacklogCycleDependencies {
    * decide — o driver apenas a RESPEITA, sem reimplementar governor.
    */
   readonly hostPermitsAutonomousWork: () => boolean | Promise<boolean>;
-  /** Executa EXATAMENTE uma volta do Supervisor. Em produção envolve `runSupervisorTurn`. */
-  readonly runTurn: (signal: AbortSignal) => Promise<SupervisorTurnResult>;
+  /**
+   * Executa EXATAMENTE uma volta do Supervisor para o item que a política escolheu.
+   * Em produção envolve `runSupervisorTurn` com `requestedWork = entry` — a SELEÇÃO
+   * server-side (`select_autonomous_work`) revalida elegibilidade/versão/alvo e
+   * devolve vazio se a corrida foi perdida, então passar a entrada é só uma DICA:
+   * o banco continua sendo a autoridade da execução.
+   */
+  readonly runTurn: (entry: AutonomousQueueEntry, signal: AbortSignal) => Promise<SupervisorTurnResult>;
   /** Limite estrutural por invocação (anti-spin). NÃO é quota diária. */
   readonly maxTurns: number;
   /** Cancelamento cooperativo: checado no topo do laço e imediatamente antes de cada efeito. */
@@ -203,7 +210,7 @@ export async function runAutonomousBacklogCycle(deps: BacklogCycleDependencies):
     // do efeito, para nunca iniciar execução após um pedido de parada.
     if (deps.signal.aborted) return stop('cancelled');
 
-    const result = await deps.runTurn(deps.signal);
+    const result = await deps.runTurn(decision.entry, deps.signal);
     lastOutcome = result.outcome;
     turns.push({ workItemId: result.selection?.workItemId ?? null, outcome: result.outcome });
 

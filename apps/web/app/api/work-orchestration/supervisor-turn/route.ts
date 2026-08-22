@@ -2,14 +2,10 @@ import type { ObservedCoderInput, ObservedGateInput } from '@anima/core';
 import { authenticateRequest } from '@/lib/supabase/request-auth';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from '@/lib/work-orchestration/execution';
-import { projectRoot, readExecutionContract, resolveExecutorRoute, type ExecutionContract } from '@/lib/work-orchestration/executor-selection';
-import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from '@/lib/work-orchestration/gate-evidence';
-import { coderEvidenceSinkFor, persistHostObservedCoderEvidence } from '@/lib/work-orchestration/coder-evidence';
-import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from '@/lib/work-orchestration/host-evidence';
+import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from '@/lib/work-orchestration/executor-selection';
 import { composeSupervisorResourceAdvisory, type ResourceGovernorAdvisoryReport } from '@/lib/work-orchestration/resource-governor';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
-import { computeAndPersistVerifierOpinion, verifierOpinionSinkFor } from '@/lib/work-orchestration/verifier-opinion';
-import { worktreeBranchFor } from '@/lib/work-orchestration/worktree-executor';
+import { persistPostTurnHostObservations } from '@/lib/work-orchestration/post-turn-observation';
 
 export const runtime = 'nodejs';
 export const maxDuration = 1800;
@@ -163,64 +159,15 @@ export async function POST(request: Request) {
   });
 
   // Pós-terminal, quando a volta iniciou uma tentativa: o host persiste sua evidência
-  // observada e o Verifier registra seu parecer. Tudo FAIL-OPEN — nunca altera o
-  // desfecho da tentativa nem a resposta.
-  if (result.attemptId && result.selection) {
-    const correlation = {
-      workItemId: result.selection.workItemId,
-      attemptId: result.attemptId,
-      approvedProposalVersion: result.selection.approvedProposalVersion,
-    };
-
-    // (0) Evidência de GATE observada pelo host. Persiste os fatos que o host mediu ao
-    // rodar cada gate — INCLUSIVE em terminal de erro (um gate falho é a evidência mais
-    // valiosa: é o que contradiz um executor que minta que passou).
-    if (gateObservations.length > 0) {
-      await persistHostObservedGateEvidence(correlation, gateObservations, gateEvidenceSinkFor(client)).catch(() => undefined);
-    }
-
-    // (0b) Evidência do CODER observada pelo host. Persiste UMA evidência por tentativa,
-    // agregando a duração wall-clock de todas as chamadas `backend.edit()` observadas.
-    // O desfecho final qualifica o custo total. Continua FAIL-OPEN: persistir a
-    // evidência nunca altera o desfecho da tentativa nem a resposta.
-    if (coderObservations.length > 0) {
-      await persistHostObservedCoderEvidence(correlation, coderObservations, coderEvidenceSinkFor(client)).catch(() => undefined);
-    }
-
-    if (result.terminalKind === 'result') {
-      // (1) Evidência de GIT observada pelo host. Só o caminho worktree deixa uma branch
-      // git no repositório real; o host inspeciona `anima-work/<attempt>` contra o SHA-base
-      // do contrato e persiste o que o git de fato registrou — nunca o que o executor
-      // atestou. Falha aqui só significa "sem evidência de git independente nesta volta".
-      if (executionContract?.executor === 'worktree' && executionContract.baseSha) {
-        await observeAndPersistHostGitEvidence(
-          {
-            repoRoot: projectRoot(),
-            baseSha: executionContract.baseSha,
-            branch: worktreeBranchFor(result.attemptId),
-            ...correlation,
-          },
-          hostEvidenceSinkFor(client),
-        ).catch(() => undefined);
-      }
-
-      // (2) PARECER do Verifier. Lê o estado FRESCO — inclui as evidências observadas
-      // (git e gate) recém-persistidas — e registra o parecer sobre elas. Advisory e
-      // recomputável: sem handoff durável não há parecer (skipped); persistir é
-      // auditoria, não decisão. NÃO aceita resultado, não autoriza, não remove o humano.
-      const service = createWorkOrchestrationService(client);
-      const [freshItem, freshEvents] = await Promise.all([
-        service.getItem(correlation.workItemId),
-        service.listEvents(correlation.workItemId),
-      ]);
-      if (freshItem.ok && freshEvents.ok) {
-        await computeAndPersistVerifierOpinion(
-          { item: freshItem.value, events: freshEvents.value },
-          verifierOpinionSinkFor(client),
-        ).catch(() => undefined);
-      }
-    }
-  }
+  // observada e o Verifier registra seu parecer. Mesma observação usada pelo driver do
+  // backlog. Tudo FAIL-OPEN — nunca altera o desfecho da tentativa nem a resposta.
+  await persistPostTurnHostObservations({
+    client,
+    result,
+    contract: executionContract,
+    gateObservations,
+    coderObservations,
+  });
 
   // (3) ADVISORY do Resource Governor (read-only), anexado ao read-model da resposta.
   // Bloco INDEPENDENTE e TOTALMENTE fail-open: deriva o custo dos workloads observados de

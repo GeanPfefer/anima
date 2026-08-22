@@ -6,6 +6,7 @@ import {
 import type { SupervisorTurnOutcome, SupervisorTurnResult } from './supervisor';
 import type {
   AutonomousQueueCandidate,
+  AutonomousQueueEntry,
   WorkIntelligenceClassificationV1,
   WorkItem,
   WorkState,
@@ -74,12 +75,12 @@ const backlogScript = (snaps: readonly Snapshot[]) => {
   return { read, calls };
 };
 
-// Roteiriza os desfechos das voltas; conta as chamadas e captura o sinal recebido.
+// Roteiriza os desfechos das voltas; conta as chamadas e captura entrada/sinal.
 const turnScript = (results: readonly SupervisorTurnResult[]) => {
-  const calls = { count: 0, signals: [] as AbortSignal[] };
-  const run = async (signal: AbortSignal): Promise<SupervisorTurnResult> => {
+  const calls = { count: 0, entries: [] as string[], signals: [] as AbortSignal[] };
+  const run = async (entry: AutonomousQueueEntry, signal: AbortSignal): Promise<SupervisorTurnResult> => {
     const r = results[Math.min(calls.count, results.length - 1)] ?? turn('no_eligible_work', null);
-    calls.count++; calls.signals.push(signal);
+    calls.count++; calls.entries.push(entry.workItemId); calls.signals.push(signal);
     return r;
   };
   return { run, calls };
@@ -221,9 +222,9 @@ describe('driver do backlog autônomo — runAutonomousBacklogCycle', () => {
     const controller = new AbortController();
     const backlog = backlogScript([[ready('A', 10), ready('B', 20)]]); // nunca esvazia
     const turns = turnScript([turn('execution_completed', 'A')]);
-    const runTurn = async (signal: AbortSignal): Promise<SupervisorTurnResult> => {
+    const runTurn = async (entry: AutonomousQueueEntry, signal: AbortSignal): Promise<SupervisorTurnResult> => {
       controller.abort(); // o cancelamento chega DURANTE a volta
-      return turns.run(signal);
+      return turns.run(entry, signal);
     };
     const result = await runAutonomousBacklogCycle(cycle({
       readBacklog: backlog.read, runTurn, signal: controller.signal, maxTurns: 50,
