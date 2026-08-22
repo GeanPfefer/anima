@@ -92,6 +92,11 @@ async function main(): Promise<void> {
     resourceMs: positiveInt(process.env.ANIMA_RESIDENT_RESOURCE_MS, DEFAULT_BACKOFF.resourceMs),
   };
 
+  // Teto opcional de voltas do laço — para provas vivas BOUNDED que se encerram sozinhas
+  // (sem depender da entrega de sinal). Ausente ⇒ roda até o cancelamento (produção).
+  const maxIterationsEnv = Number(process.env.ANIMA_RESIDENT_MAX_ITERATIONS);
+  const maxIterations = Number.isInteger(maxIterationsEnv) && maxIterationsEnv > 0 ? maxIterationsEnv : undefined;
+
   if (!process.env.ANIMA_RESIDENT_EMAIL || !process.env.ANIMA_RESIDENT_PASSWORD) {
     log('warn', { message: 'ANIMA_RESIDENT_EMAIL/PASSWORD ausentes — identidade fail-closed; o runner ficará em waiting_human_or_recovery.' });
   }
@@ -137,6 +142,7 @@ async function main(): Promise<void> {
     }),
     backoff,
     signal: controller.signal,
+    maxIterations,
   });
 
   log('summary', {
