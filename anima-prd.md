@@ -489,8 +489,21 @@ prompt e tarefa. Detalhes no [novo registro](docs/registros/2026-08-11-investiga
 gate real para admissão de cada novo ciclo/turno do backlog: pressão baixa permite,
 moderada/alta adia com `resource_pressure`, e telemetria indeterminada/erro falha
 fechada. O gate não interrompe execução já iniciada e permanece independente do
-budget V2, claims, cancelamento e limites anti-loop. O resident local host/always-on
-continua não implementado; próximo ponto é construí-lo sobre este gate.
+budget V2, claims, cancelamento e limites anti-loop. O **Resident Local Host V0**
+foi desenhado ([ADR-003](docs/arquitetura/adr-003-resident-local-host.md)) e sua
+**engine + portos + superfície** implementados: `runResidentHost` (processo Node
+iniciado por Gean via `npm run local-host`, Node 24 TS nativo) reconcilia, consulta
+o kill-switch (control-plane local, fail-closed), adquire identidade user-scoped
+(**Bearer/`auth.uid()`/RLS, sem `service_role`**, fail-closed sem identidade), respeita
+o Governor, invoca o host-turn bounded por HTTP, classifica e quiesce/backoff/acorda —
+sem cron, sem daemon, sem always-on ainda. Engine agnóstica de transporte (portos
+injetados); `tools/local-agent` (Python) permanece EXECUTOR, não orquestrador.
+Provado: resident-host **57/57**, typecheck 5 workspaces, e **duas provas vivas de
+governança com o processo real** (kill-switch off → quiesce; identidade indisponível →
+fail-closed, `hostTurns=0`). **Falta a prova viva do HAPPY PATH** (exige o stack de
+trabalho completo, hoje frio) e o **disparo automático** do wake (event-driven; hoje
+poll lento provisório + wake explícito). Registro
+[`docs/registros/2026-08-22-resident-local-host-v0.md`](docs/registros/2026-08-22-resident-local-host-v0.md).
 
 O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou que a programação autônoma **não tem teto artificial**: o ciclo completo (`entender → investigar → planejar → propor → implementar → testar → revisar → corrigir → commit → publicar → PR → integrar → merge → deploy → observar → reparar`) é destino, e **cada estágio recebe autonomia conforme sua própria maturidade e evidência** — as maturidades não são acopladas. O estado atual, classificando cada barreira como **restrição de maturidade** (promovível por evidência) ou **restrição fundamental** (exige decisão humana por não estar definida):
 

@@ -1,5 +1,36 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — Resident Local Host V0: ADR + engine + superfície (2026-08-22)
+
+A última camada de scheduler humano — o **disparo** da invocação do host-turn — ganhou
+sua arquitetura e sua engine. [ADR-003](../arquitetura/adr-003-resident-local-host.md)
+fixa, sobre o código real, o **processo Node residente** iniciado por Gean (`anima
+local-host start`): identidade user-scoped via Bearer/`auth.uid()`/RLS (**sem
+`service_role`**, com auth/session provider port fail-closed), kill-switch de
+control-plane local fail-closed, wake por poll-lento-provisório + explícito (elegibilidade
+do domínio), backoff puro, crash recovery pelos contratos existentes (banco = autoridade),
+concorrência protegida pelo claim server-side, Governor como única autoridade em dois
+sítios fail-closed, transporte V0 = HTTP à rota provada. `tools/local-agent` (Python)
+permanece EXECUTOR, não orquestrador — sem runtime paralelo.
+
+Implementado (`ed7fd6f`/`b646ee4`/`5dc905b`): `runResidentHost` (engine agnóstica de
+transporte, portos injetados) + classificadores puros + portos reais (GoTrue/kill-switch/
+HTTP host-turn) + superfície `npm run local-host` (Node 24, TS nativo, sem bundler).
+Provas: resident-host **57/57** (as 15 regressões + núcleos puros), typecheck 5 workspaces,
+`git diff --check` limpo. **Duas provas vivas de GOVERNANÇA com o processo real**:
+(1) kill-switch off → `disabled`/quiesce sem tocar identidade/rede; (2) enabled + GoTrue
+real com Supabase fora → `waiting_human_or_recovery`, `hostTurns=0`, backoff (não tight
+retry), parada determinística. Detalhe em
+[`docs/registros/2026-08-22-resident-local-host-v0.md`](../registros/2026-08-22-resident-local-host-v0.md).
+
+**FRONTEIRA (parada deliberada):** a prova viva do HAPPY PATH end-to-end (runner idle →
+wake → item descartável → Governor permite → qwen3-coder → gate → host-observed →
+Verifier `verified` → `review` → idle) exige o stack de trabalho COMPLETO, hoje frio
+(Docker Desktop fora → Supabase depende dele; Ollama e Next parados). Receita exata da
+retomada no registro. O **wake automático event-driven** (hoje poll lento) permanece a
+próxima fronteira do wake; o **transporte in-process** é a evolução seguinte, sem tocar a
+engine.
+
 ## Continuação — Resource Governor como gate real de admissão (2026-08-22)
 
 O porto `hostPermitsAutonomousWork` deixou de ser constante: antes de **cada nova
