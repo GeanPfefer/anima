@@ -1,5 +1,32 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — gatilho de continuidade (host-turn) + prova viva 2 ciclos (2026-08-22)
+
+Reduzida mais uma camada de scheduler humano: a continuação ENTRE ciclos. `b8cac08`:
+`runAutonomousBacklogHostTurn` roda até `maxCycles` ciclos bounded, continuando sozinho
+enquanto um ciclo termina em `max_turns_reached` (bound atingido, pode haver mais) e
+parando com veredito TIPADO (`continue|wait|stop` + `moreWorkAvailable`); dois bounds
+estruturais (`maxTurnsPerCycle × maxCycles`) = defesa em profundidade. `classifyCycleContinuation`
+puro. Rota `POST /api/work-orchestration/backlog-host-turn`. `buildProjectBacklogCycleDeps`
+extrai a maquinaria real de uma volta, compartilhada com `backlog-cycle` (6/6 intactas).
+Achado: `requiresAnotherTurn` é o análogo por-volta (era do turno único), sem consumidor
+de produção, superado pelo driver; a continuação de CICLO é conceito novo, promovido.
+host-turn 26/26 + rotas 12/12 + 602 verdes.
+
+**Prova viva (registro `docs/registros/2026-08-22-prova-viva-do-host-turn-dois-ciclos-verified.md`):**
+UMA invocação (`maxTurnsPerCycle=1, maxCycles=2`) rodou 2 ciclos sozinha → item A → `review`
+→ continuou → item B → `review` → parou tipado (`max_cycles_reached, continuation=stop,
+moreWorkAvailable=false`); ambos `verified` (7 checks, 0 violations), evidência host-observed
+persistida. No ciclo 2, `pending.awaitingHuman=1` prova AO VIVO que A→review não congelou a
+fila (B seguiu). ~70s, repo byte-intacto, worktrees descartadas, `origin/main` intacta.
+
+**FRONTEIRA ARQUITETÔNICA (parada deliberada):** resta só o disparo AUTOMÁTICO da
+invocação (runner always-on) — camada 3 do norte, com consequências arquitetônicas
+(natureza do disparo, credencial de serviço, **gate real do Resource Governor**, backoff,
+observabilidade durável, idempotência sob concorrência). É ADR/decisão humana, não daemon
+improvisado. O passo de maturidade mais barato antes dele: promover o Governor de advisory
+a gate no porto `hostPermitsAutonomousWork`. Detalhe no registro.
+
 ## Continuação — driver do backlog autônomo + prova viva `verified` (2026-08-22)
 
 O laço de backlog ganhou seu DRIVER e foi provado ao vivo, fechando a lacuna que o
