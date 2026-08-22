@@ -1075,6 +1075,24 @@ Registro **factual** de ratificação do UX-02 funcional com base nas Camadas 1 
 
 **Pendência nomeada:** a **prova física em Expo Go** (dispositivo, padrão da Fase A/ORQ-04) depende do Gean; o ambiente, a conta descartável e o estado bloqueado ficam preparados. Não substituída por afirmação. **Fora:** executor/Supervisor no mobile, push, offline, dashboard, timeline, busca avançada, reabertura geral de conversas arquivadas, cartão completo de execução do UX-01.
 
+#### Checklist de prova física mobile da Fase G (2026-08-21, para o Gean)
+
+Software-complete no dispositivo (paridade de apresentação); falta só a prova
+física. Pré-requisitos: Expo Go no dispositivo na mesma rede, Supabase local
+acessível, conta descartável allowlistada, `EXPO_PUBLIC_ANIMA_WEB_URL` para o host.
+Passos (não marcar como concluído sem executá-los):
+
+1. Reencontrar pelo chat um trabalho aberto de outra conversa (`findResumableWorkItems`) → cartão renderiza com foco e ações.
+2. Conferir a **fase humana** no topo do cartão (novo, `fbf1e87`): `Implementando`/`Testando` com ponto `●` durante execução; `Revisando`/`Pronto para integrar`/`Concluído` conforme o estado — deve casar com o web.
+3. Cartão de **execução** (executor/modelo/limites/checkpoint) e, se interrompido por orçamento, a linha de **espera temporal** ("retomada do checkpoint quando a janela liberar").
+4. **Decisão necessária** (`pendingDecision`): responder `continuar` → retomada pelo host (canal Bearer) sem 2º `input_provided`; `encerrar` → `cancelled`.
+5. **Resultado** para revisão + parecer do **Verifier** (advisory) + **integração** disponível após aceite (sem afirmar merge).
+6. Recarregar/fechar-e-abrir o app: todos os cartões reconstruídos idênticos do estado persistido.
+7. Registrar capturas + `SELECT event_type, proposal_version FROM work_events WHERE work_item_id='<item>' ORDER BY seq;` sem duplicatas.
+
+Assimetria conhecida (não bloqueia a prova, decisão pendente): o mobile usa
+`presentWorkItem` (sem a guarda de proveniência do web `reconstructWorkPresentation`).
+
 ### Integração do GPT e do runner ao monorepo (2026-08-03) — pronto para revisão
 
 **Implementado e pronto para revisão (não ratificado).** Branch `claude/ux-04-mobile-parity`, quatro commits acima da paridade mobile: `2dec60c` (integração do GPT), `7fd4ad4`+`c7d5a0f` (runner trazido por `git subtree`) e `56854e8` (fiação do runner ao monorepo). A branch **tem push** (`origin/claude/ux-04-mobile-parity` em dia); **`origin/main` permanece intacta**, sem PR nem merge.
