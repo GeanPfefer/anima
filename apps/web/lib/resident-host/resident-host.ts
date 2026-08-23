@@ -43,9 +43,12 @@ export type ResidentHostState =
  * do core). Só `permit` inicia trabalho novo; `defer`/`fail_closed` adiam. */
 export type AdmissionVerdict = 'permit' | 'defer' | 'fail_closed';
 
-/** Por que o `waitForWake` resolveu. `poll` = intervalo lento (nudge de reavaliação);
- * `explicit` = sinal manual; `recovery` = condição de recuperação; `cancelled` = shutdown. */
-export type WakeReason = 'poll' | 'explicit' | 'recovery' | 'cancelled';
+/** Por que o `waitForWake` resolveu. `event` = sinal event-driven (mudança elegível
+ * observada, ex.: Realtime de `work_events`); `poll` = intervalo lento (fallback/safety
+ * net); `explicit` = sinal manual (stdin); `recovery` = condição de recuperação;
+ * `cancelled` = shutdown. A fonte do wake NÃO é a fonte da decisão: após acordar, o
+ * runner reconcilia e a política pura decide — evento perdido/duplicado é seguro. */
+export type WakeReason = 'event' | 'poll' | 'explicit' | 'recovery' | 'cancelled';
 
 /**
  * Identidade user-scoped adquirida pelo provider (ADR-003 §11). O `accessToken` é

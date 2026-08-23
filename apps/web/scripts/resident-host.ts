@@ -12,6 +12,7 @@ import {
   createHttpHostTurnPort,
   createKillSwitch,
 } from '../lib/resident-host/ports.ts';
+import { createWakeCoordinator } from '../lib/resident-host/wake.ts';
 
 // ============================================================
 // `anima local-host start` — a primeira superfície do Resident Local Host V0 (ADR-003).
@@ -47,39 +48,27 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => { log('signal', { signal: sig }); controller.abort(); });
 }
 
-// --- Wake: intervalo de poll (nudge) OU wake explícito (linha "wake" no stdin) OU
-//     cancelamento. A elegibilidade vem do domínio na próxima volta, não do relógio.
-//     O wake por stdin é OPCIONAL: se o stdin não for legível (redirecionado/ausente),
-//     poll + sinais continuam funcionando. ---
-const wakeBus = new EventTarget();
+// --- Wake: EVENT-DRIVEN primário (Realtime de work_events, fiado em main()) + wake
+//     explícito (linha "wake" no stdin) + fallback de poll (safety net) + cancelamento.
+//     O coordenador COALESCE sinais e a elegibilidade vem do domínio na próxima volta —
+//     evento perdido/duplicado é seguro. O wake por stdin é OPCIONAL. ---
+const wake = createWakeCoordinator();
 try {
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk: string) => {
-    if (chunk.toLowerCase().includes('wake')) wakeBus.dispatchEvent(new Event('wake'));
+    if (chunk.toLowerCase().includes('wake')) wake.signal('explicit');
   });
   if (typeof process.stdin.unref === 'function') process.stdin.unref(); // não segura o processo no encerramento.
 } catch {
-  // stdin indisponível: wake explícito por stdin fica desabilitado; poll/sinais bastam.
+  // stdin indisponível: wake explícito por stdin fica desabilitado; evento/poll bastam.
 }
-
-const waitForWake = ({ backoffMs, signal }: { backoffMs: number; signal: AbortSignal }): Promise<WakeReason> =>
-  new Promise<WakeReason>((resolve) => {
-    if (signal.aborted) return resolve('cancelled');
-    let settled = false;
-    const settle = (reason: WakeReason): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      wakeBus.removeEventListener('wake', onWake);
-      resolve(reason);
-    };
-    const timer = setTimeout(() => settle('poll'), backoffMs);
-    const onAbort = (): void => settle('cancelled');
-    const onWake = (): void => settle('explicit');
-    signal.addEventListener('abort', onAbort, { once: true });
-    wakeBus.addEventListener('wake', onWake, { once: true });
-  });
+// Telemetria de wakeSource: envolve o coordenador para logar POR QUE acordou (event|poll|
+// explicit|cancelled), distinguindo o evento real do timer de fallback.
+const waitForWake = async (input: { backoffMs: number; signal: AbortSignal }): Promise<WakeReason> => {
+  const reason = await wake.wait(input);
+  if (reason !== 'cancelled') log('wake', { wakeSource: reason });
+  return reason;
+};
 
 async function main(): Promise<void> {
   const baseUrl = process.env.ANIMA_RESIDENT_ROUTE_BASE ?? 'http://localhost:3000';
@@ -111,7 +100,8 @@ async function main(): Promise<void> {
     ...(transport === 'http' ? { baseUrl } : {}),
     maxTurnsPerCycle, maxCycles, idleMs: backoff.idleMs,
     killSwitch: killFile ? { source: 'file', filePath: killFile } : { source: 'env', var: 'ANIMA_AUTONOMY_ENABLED' },
-    note: 'wake: envie a linha "wake" no stdin; pare com Ctrl+C (SIGINT).',
+    wake: 'event-driven (Realtime work_events) + poll fallback + stdin "wake"',
+    note: 'pare com Ctrl+C (SIGINT).',
   });
 
   const acquireIdentity = createGoTrueIdentityProvider({
@@ -144,6 +134,32 @@ async function main(): Promise<void> {
   // Pré-gate do Governor no transporte HTTP: `permit` (autoridade real por-ciclo na rota).
   const admitNewWork = (): AdmissionVerdict => 'permit';
 
+  // Wake EVENT-DRIVEN (primário): assina o Realtime de `work_events` com uma identidade
+  // inicial. Fonte do wake ≠ decisão — só sinaliza "acorde"; a engine reconcilia e a
+  // política decide. Best-effort: se identidade/assinatura falhar, o fallback de poll do
+  // coordenador cobre (safety net). Usa o token do usuário (RLS por assinante), sem service_role.
+  let realtimeWakeDispose: (() => void) | null = null;
+  try {
+    const initialIdentity = await acquireIdentity();
+    if (initialIdentity) {
+      const { createBearerClient } = await import('../lib/supabase/bearer.ts');
+      const { subscribeWorkEventsWake } = await import('../lib/resident-host/realtime-wake.ts');
+      const realtimeClient = createBearerClient(initialIdentity.accessToken);
+      const handle = subscribeWorkEventsWake({
+        client: realtimeClient,
+        accessToken: initialIdentity.accessToken,
+        onWake: () => wake.signal('event'),
+        onStatus: (status) => log('realtime', { status }),
+      });
+      realtimeWakeDispose = handle.dispose;
+      log('wake-source', { mode: 'event_driven_realtime', table: 'work_events', fallback: 'poll' });
+    } else {
+      log('wake-source', { mode: 'poll_fallback_only', reason: 'identity_unavailable_at_startup' });
+    }
+  } catch (error) {
+    log('wake-source', { mode: 'poll_fallback_only', reason: error instanceof Error ? error.message : 'realtime_setup_failed' });
+  }
+
   const summary = await runResidentHost({
     reconcile,
     checkAutonomyEnabled,
@@ -161,6 +177,10 @@ async function main(): Promise<void> {
     signal: controller.signal,
     maxIterations,
   });
+
+  // Shutdown determinístico das fontes de wake (assinatura Realtime + coordenador).
+  realtimeWakeDispose?.();
+  wake.dispose();
 
   log('summary', {
     hostTurns: summary.hostTurns,
