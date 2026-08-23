@@ -1,5 +1,23 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — Materializer canônico V1 (Level 6) (2026-08-23)
+
+`CANONICAL_MATERIALIZATION = PASS`. Um candidato canônico já escolhido pelo domínio vira UM
+work_item `proposed` executável, SEM humano no materializer. `17d55f4`+`a28dbab`: contrato
+puro de proveniência (`intent.canonical_provenance`, correlação por sourceId ESTÁVEL) +
+driver `materializeNextCanonicalCandidate` (seleção determinística gate o planner; fail-closed;
+idempotente; desfecho `proposed`) + PLANNING BOUNDARY = `planExecutableProjectWork` (reuso, o
+host valida escopo/paths/execution_spec) + rota `POST /api/work-orchestration/canonical-materialize`
++ campo `**Status:**` machine-explicit no parser. Reusa `create_work_proposal` com mensagem de
+origem legítima (sob a identidade do usuário) — SEM schema change, SEM tocar a guarda de
+proveniência ratificada. 8/8+27/27+16/16 + typecheck 5 workspaces. **PROVA VIVA por fixture
+controlada (planner LOCAL qwen2.5:14b): FIX-01 → work_item `proposed` com provenance estável,
+exatamente 1, cadeia `work_proposed,context_attached` (SEM execução); replay idempotente
+(`no_candidate:all_settled`); backlog REAL → `none/status_unresolved` (honesto). Repo intacto,
+sem service_role.** Registro `docs/registros/2026-08-23-materializer-canonico-v1.md`.
+**Próximo:** reconciliar os 13 `unknown` reais; projeção operacional; resident host consome
+o item + auto-approval; avaliação de conclusão de objetivo por slice.
+
 ## Continuação — Backlog canônico: descoberta + elegibilidade (2026-08-23)
 
 `CANONICAL_BACKLOG_DISCOVERY = PASS`, `NEXT_CANONICAL_CANDIDATE = PASS`. Primeiro passo da
