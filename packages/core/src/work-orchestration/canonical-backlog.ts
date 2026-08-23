@@ -47,9 +47,27 @@ export interface ParseCanonicalBacklogInput {
 const HEADING_RE = /^###\s+([A-Z]{2,6}-\d{2})\s+—\s+(.+?)\s*$/;
 const H2_RE = /^##\s+/;
 const H3_RE = /^###\s+/;
+// Campo EXPLÍCITO de estado (machine-readable + human-readable), preferido sobre a
+// heurística de prosa. Ex.: `**Status:** not_started` ou `**Status:** concluído`.
+const STATUS_RE = /^\s*[-*]?\s*\*\*Status:\*\*\s*(.+?)\s*$/;
 const STATE_RE = /^\s*\*\*(?:Estado|Atualiza[^:]*)[^:]*:\*\*\s*(.+?)\s*$/;
 const DEP_RE = /\*\*Depend[^:]*:\*\*\s*([^*]*)/;
 const ID_RE = /\b[A-Z]{2,6}-\d{2}\b/g;
+
+// Tokens diretos aceitos no campo `**Status:**` (além das palavras-chave em prosa).
+const EXPLICIT_STATUS_TOKENS: Readonly<Record<string, CanonicalBacklogStatus>> = {
+  done: 'done', not_started: 'not_started', awaiting_review: 'awaiting_review', unknown: 'unknown',
+};
+
+/**
+ * Classifica o valor de um campo `**Status:**` EXPLÍCITO — aceita tokens diretos
+ * (`done`/`not_started`/`awaiting_review`/`unknown`) e cai na heurística de palavra-chave
+ * (concluído/aceito/…) caso contrário. Determinística.
+ */
+export function classifyExplicitStatus(value: string): CanonicalBacklogStatus {
+  const token = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return EXPLICIT_STATUS_TOKENS[token] ?? classifyCanonicalBacklogStatus(value);
+}
 
 // Marcadores de estado ordenados por PRIORIDADE de posição: a linha de estado é prosa e
 // pode citar o estado de OUTROS itens ("...ratificou... Próxima fase: Fase F, não iniciada").
@@ -101,6 +119,7 @@ interface Building {
   title: string;
   heading: string;
   line: number;
+  explicitStatus: string | null;
   stateText: string | null;
   dependencies: string[];
 }
@@ -124,8 +143,9 @@ export function parseCanonicalBacklog(input: ParseCanonicalBacklogInput): readon
     candidates.push({
       sourceId: b.sourceId,
       title: b.title,
-      status: classifyCanonicalBacklogStatus(b.stateText),
-      statusEvidence: b.stateText,
+      // Campo `**Status:**` explícito PREFERIDO; senão, a heurística de prosa (Estado/Atualização).
+      status: b.explicitStatus !== null ? classifyExplicitStatus(b.explicitStatus) : classifyCanonicalBacklogStatus(b.stateText),
+      statusEvidence: b.explicitStatus ?? b.stateText,
       dependencies: b.dependencies.filter(id => id !== b.sourceId),
       sourceRef: { document: input.document, heading: b.heading, line: b.line },
     });
@@ -141,6 +161,7 @@ export function parseCanonicalBacklog(input: ParseCanonicalBacklogInput): readon
         title: heading[2]!.trim(),
         heading: `${heading[1]} — ${heading[2]!.trim()}`,
         line: i + 1,
+        explicitStatus: null,
         stateText: null,
         dependencies: [],
       };
@@ -153,6 +174,10 @@ export function parseCanonicalBacklog(input: ParseCanonicalBacklogInput): readon
       continue;
     }
     if (!current) continue;
+    if (current.explicitStatus === null) {
+      const explicit = STATUS_RE.exec(line);
+      if (explicit) current.explicitStatus = explicit[1]!.trim();
+    }
     if (current.stateText === null) {
       const state = STATE_RE.exec(line);
       if (state) current.stateText = state[1]!.trim();

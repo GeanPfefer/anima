@@ -213,3 +213,41 @@ describe('planCanonicalBacklogMaterialization (puro, conservador)', () => {
     expect(classifyCandidateForMaterialization(cand('X', 'not_started'), status, new Set(['X']))).toBe('already_materialized');
   });
 });
+
+import { classifyExplicitStatus } from './canonical-backlog';
+
+describe('campo **Status:** explícito (machine-readable)', () => {
+  test('classifyExplicitStatus: tokens diretos + fallback keyword', () => {
+    expect(classifyExplicitStatus('not_started')).toBe('not_started');
+    expect(classifyExplicitStatus('done')).toBe('done');
+    expect(classifyExplicitStatus('awaiting_review')).toBe('awaiting_review');
+    expect(classifyExplicitStatus('unknown')).toBe('unknown');
+    expect(classifyExplicitStatus('not started')).toBe('not_started'); // normaliza espaço
+    expect(classifyExplicitStatus('concluído')).toBe('done');          // fallback keyword
+  });
+
+  test('**Status:** explícito é PREFERIDO sobre a prosa (Estado/Atualização)', () => {
+    const md = [
+      '### XX-01 — Item com status explicito',
+      '',
+      '**Status:** not_started',
+      '**Atualização (2026-01-01):** foi concluído e ratificado.', // prosa diria done
+      '- **Dependências:** (nenhuma)',
+    ].join('\n');
+    const [c] = parseCanonicalBacklog({ document: 'd.md', markdown: md });
+    expect(c!.status).toBe('not_started');            // o campo explícito venceu
+    expect(c!.statusEvidence).toBe('not_started');
+  });
+
+  test('sem **Status:**, cai na heurística de prosa', () => {
+    const md = '### XX-02 — So prosa\n\n**Estado:** concluído.\n';
+    const [c] = parseCanonicalBacklog({ document: 'd.md', markdown: md });
+    expect(c!.status).toBe('done');
+  });
+
+  test('**Status:** em item de lista (- **Status:** done) também é reconhecido', () => {
+    const md = '### XX-03 — Status em lista\n\n- **Status:** done\n';
+    const [c] = parseCanonicalBacklog({ document: 'd.md', markdown: md });
+    expect(c!.status).toBe('done');
+  });
+});
