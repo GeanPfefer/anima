@@ -1,5 +1,22 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — Backlog canônico: descoberta + elegibilidade (2026-08-23)
+
+`CANONICAL_BACKLOG_DISCOVERY = PASS`, `NEXT_CANONICAL_CANDIDATE = PASS`. Primeiro passo da
+ponte docs → work_item, PURO e DETERMINÍSTICO (sem LLM, sem criar nada). `8925b2f`+`213ccfb`
+em `packages/core/canonical-backlog.ts`: `parseCanonicalBacklog` projeta cada `### <ID> —
+<Título>` em candidato tipado (id estável, título, status, dependências, localização);
+`classifyCanonicalBacklogStatus` (marcador MAIS CEDO, negação-aware — corrige o achado ao
+vivo de AUTO-05 falso-not_started por citar "Fase F não iniciada"); `planCanonicalBacklog\
+Materialization` escolhe o próximo `ready` conservadoramente (done/awaiting não reaparecem,
+já-ligado não duplica, `unknown` não materializa, dep não satisfeita → blocked sem congelar).
+23/23 + typecheck 5 workspaces. **DESCOBERTA + ELEGIBILIDADE VIVAS no doc real: 28 candidatos,
+15 done/13 unknown; decisão `none/status_unresolved` — NÃO re-materializa trabalho concluído
+(seguro/honesto).** Registro `docs/registros/2026-08-23-backlog-canonico-descoberta-e-elegibilidade.md`.
+**FRONTEIRA — Level 6 (materialização):** exige decisão de produto (granularidade fase→tarefa;
+derivação de proposal/execution_spec) e nada é materializável agora (tudo done/unknown). Parada
+deliberada.
+
 ## Continuação — Resident Local Host: AUTO_EVENT_WAKE (2026-08-23)
 
 `AUTO_EVENT_WAKE = PASS`. Eliminado o polling como wake PRIMÁRIO. `0b24573`: migration

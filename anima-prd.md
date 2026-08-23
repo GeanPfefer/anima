@@ -516,11 +516,18 @@ primário: o resident host assina o Realtime de `work_events` (RLS por assinante
 service_role) e acorda por EVENTO; o poll vira safety net. Fonte do wake ≠ fonte da decisão
 (reconcile + política decidem; perdido/duplicado é seguro). Provado AO VIVO com Next DOWN:
 runner idle → item criado por processo separado → `wakeSource=event` em 31s (poll=600s não
-podia disparar) → `verified` → `review`. Falta: telemetria durável mínima; depois backlog
-canônico/documental. Registros
+podia disparar) → `verified` → `review`. Telemetria durável mínima: FEITA (`bfe6876` — log JSONL append-only
+`ANIMA_RESIDENT_LOG_FILE`; HostTurnOutcome ganha workItemIds). **Backlog canônico/documental:
+descoberta + elegibilidade FEITAS** (`8925b2f`+`213ccfb`, `CANONICAL_BACKLOG_DISCOVERY=PASS`,
+`NEXT_CANONICAL_CANDIDATE=PASS`): core puro lê o backlog documental (28 candidatos, IDs
+estáveis, deps, estado por keyword) e decide conservadoramente o próximo materializável — no
+doc real, `none` (tudo done/unknown; NÃO re-materializa concluído). **Frente aberta — Level 6
+(materialização fase→work_item proposed): decisão de produto (granularidade + derivação de
+spec).** Registros
 [V0](docs/registros/2026-08-22-resident-local-host-v0.md) ·
 [in-process](docs/registros/2026-08-23-resident-host-transporte-in-process.md) ·
-[auto-wake](docs/registros/2026-08-23-resident-host-auto-event-wake.md).
+[auto-wake](docs/registros/2026-08-23-resident-host-auto-event-wake.md) ·
+[backlog-canônico](docs/registros/2026-08-23-backlog-canonico-descoberta-e-elegibilidade.md).
 
 O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou que a programação autônoma **não tem teto artificial**: o ciclo completo (`entender → investigar → planejar → propor → implementar → testar → revisar → corrigir → commit → publicar → PR → integrar → merge → deploy → observar → reparar`) é destino, e **cada estágio recebe autonomia conforme sua própria maturidade e evidência** — as maturidades não são acopladas. O estado atual, classificando cada barreira como **restrição de maturidade** (promovível por evidência) ou **restrição fundamental** (exige decisão humana por não estar definida):
 
