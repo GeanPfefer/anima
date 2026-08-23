@@ -534,6 +534,11 @@ diagnóstica produziu proposta válida em 2 rodadas, mas três execuções pelo 
 falharam antes do item. Um bug protocolar real foi corrigido (`fe5180a`): tools emitidas fora
 do catálogo forçado não são mais executadas. A repetição continuou esgotando 16 rodadas;
 fronteira local permanece não resolvida e OpenAI não foi chamado.** Registros
+**Diferencial OpenAI autorizado em 2026-08-23, ainda não executado:** duas instâncias
+bounded pararam antes da planning boundary (a primeira por daemon Docker indisponível;
+a efetiva por 60 reavaliações `resource_pressure`). O Governor mediu ~2,21 GiB livres de
+15,87 GiB (13,9%, `moderate/defer`) mesmo após parar apenas containers Supabase auxiliares;
+zero itens tocados, zero egress, zero tokens/custo OpenAI.** Registros
 [V0](docs/registros/2026-08-22-resident-local-host-v0.md) ·
 [in-process](docs/registros/2026-08-23-resident-host-transporte-in-process.md) ·
 [auto-wake](docs/registros/2026-08-23-resident-host-auto-event-wake.md) ·

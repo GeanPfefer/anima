@@ -1,5 +1,17 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — diferencial OpenAI autorizado, bloqueado antes do planner (2026-08-23)
+
+Gean autorizou explicitamente uma única prova diferencial estreita com egress minimizado
+apenas no planner OpenAI (`gpt-5.6-terra`); coder/worktree/gates/Verifier permanecem locais.
+A primeira inicialização encontrou o daemon Docker indisponível e parou em identidade; após
+restaurar Supabase e confirmar autenticação, a instância efetiva fez 60 reavaliações bounded,
+todas `resource_pressure`, zero itens. Medição: ~2,21/15,87 GiB livres (13,9%),
+`moderate/defer`; Studio/pg_meta/Vector/Analytics foram parados reversivelmente por não serem
+necessários, sem recuperar a reserva de 25%. Resultado: **nenhuma chamada OpenAI, zero
+tokens/custo; diferencial ainda não executado**. Retomar quando Governor=`permit`, sem
+reduzir a reserva nem encerrar processos do usuário.
+
 ## Continuação — diferencial qwen3-coder pós-reboot (2026-08-23)
 
 `qwen3-coder:latest` foi comparado com a mesma fixture/planning boundary/validators, sem
