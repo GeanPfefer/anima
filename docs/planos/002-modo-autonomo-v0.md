@@ -1,5 +1,26 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — autorização autônoma canônica V1 (2026-08-23, prova viva bloqueada no planner local)
+
+Implementação no working tree: evaluator determinístico/fail-closed no core; RPC
+`auto_approve_autonomous_work` append-only e idempotente, com `work_approved`
+`author=system`/`authority=autonomous_policy`; tipos Supabase regenerados; adapter web que
+decide sobre o item persistido e só chama a RPC após `Resource Governor=permit`; resident
+host encadeia materialização → autorização e deixa a execução para o Supervisor existente.
+Verde: core 23/23, adapter+resident 41/41, pgTAP 17/17, typecheck dos 5 workspaces; suíte
+geral 1.936 testes verdes e um timeout de infraestrutura isolado que passou sozinho.
+
+`CANONICAL_AUTO_EXECUTION` permanece **NÃO PROVADO**. A prova chegou a materializar e
+auto-aprovar honestamente um item (`author=system`), revelando que faltava a classificação de
+inteligência exigida pela fila; o adapter agora a deriva do envelope antes da aprovação.
+Após limpar somente a fixture, duas tentativas com planner local falharam antes de criar item
+(`não chegou a proposta terminal` / `não produziu proposta estruturada`). O Governor foi
+respeitado e recuperou para `permit` após descarregar modelos. Planner externo não foi usado:
+egress exige autorização explícita. Retomada exata: tornar o planner local terminal ou obter
+autorização humana explícita para o provider configurado; repetir uma única instância bounded.
+Registro:
+`docs/registros/2026-08-23-auto-approval-canonico-bloqueado-por-recurso.md`.
+
 ## Continuação — Resident host materializa o backlog canônico (2026-08-23)
 
 O resident host, no seu PRÓPRIO laço, quando a fila OPERACIONAL esvazia

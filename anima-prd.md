@@ -522,8 +522,13 @@ descoberta + elegibilidade FEITAS** (`8925b2f`+`213ccfb`, `CANONICAL_BACKLOG_DIS
 `NEXT_CANONICAL_CANDIDATE=PASS`): core puro lê o backlog documental (28 candidatos, IDs
 estáveis, deps, estado por keyword) e decide conservadoramente o próximo materializável — no
 doc real, `none` (tudo done/unknown; NÃO re-materializa concluído). **Frente aberta — Level 6
-(materialização fase→work_item proposed): decisão de produto (granularidade + derivação de
-spec).** Registros
+(materialização fase→work_item proposed): materializer e costura de autorização autônoma V1
+estão implementados no working tree de 2026-08-23, mas `CANONICAL_AUTO_EXECUTION` permanece
+NÃO PROVADO. Uma execução materializou+auto-aprovou com autoria sistêmica e revelou a
+classificação de inteligência ausente; a costura passou a persistir essa classificação
+determinística antes da aprovação. Na repetição limpa, o planner local falhou duas vezes em
+produzir proposta terminal/estruturada; o Governor foi respeitado e recuperado sem reduzir a
+reserva. Provider externo não foi usado por exigir autorização explícita de egress.** Registros
 [V0](docs/registros/2026-08-22-resident-local-host-v0.md) ·
 [in-process](docs/registros/2026-08-23-resident-host-transporte-in-process.md) ·
 [auto-wake](docs/registros/2026-08-23-resident-host-auto-event-wake.md) ·
