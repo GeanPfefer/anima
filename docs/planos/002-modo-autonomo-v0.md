@@ -1,5 +1,20 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — Resident host materializa o backlog canônico (2026-08-23)
+
+O resident host, no seu PRÓPRIO laço, quando a fila OPERACIONAL esvazia
+(`no_eligible_work`), descobre o backlog canônico e materializa UM candidato em `proposed`
+SOZINHO — e para na fronteira de aprovação humana. Engine: porto opcional
+`materializeWhenIdle` (só na fila vazia, sob a identidade/kill-switch já vigentes, desfecho
+`proposed`, nunca lança). Entry: fiado por `ANIMA_RESIDENT_MATERIALIZE_DOCUMENT`. Loader
+`ts-resolve.mjs` passou a resolver o alias `@/`. resident-host 82/82 + typecheck 5 workspaces.
+**META-PROVA (in_process, planner LOCAL, sem chamada manual): usuário fresco → fila vazia →
+`materialization={materialized:true, FIX-01}` → work_item `f71f157f` `proposed` (provenance
+estável, cadeia work_proposed+context_attached, SEM execução, sem duplicata) → 2ª iteração
+`waiting_human_or_recovery` (o proposed é fronteira humana) → para.** Auto-approval NÃO existe
+(investigado) e é fronteira de autonomia progressiva (ratificação) — NÃO burlada. Registro
+`docs/registros/2026-08-23-resident-host-materializa-quando-idle.md`.
+
 ## Continuação — Materializer canônico V1 (Level 6) (2026-08-23)
 
 `CANONICAL_MATERIALIZATION = PASS`. Um candidato canônico já escolhido pelo domínio vira UM

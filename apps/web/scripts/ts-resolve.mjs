@@ -11,12 +11,32 @@
 // SOB DEMANDA (só no transporte in-process) por `enableTsResolution()`.
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { registerHooks } from 'node:module';
 
 const CANDIDATE_SUFFIXES = ['.ts', '.tsx', '.mts', '/index.ts', '/index.tsx'];
 const JS_TO_TS = [['.js', '.ts'], ['.jsx', '.tsx'], ['.mjs', '.mts']];
 
+// Raiz de `apps/web` (este loader vive em apps/web/scripts/ts-resolve.mjs).
+const APPS_WEB_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/** Resolve um caminho base tentando os candidatos TS (`.ts`/`.tsx`/`/index.ts`). */
+function resolveTsCandidates(basePath) {
+  for (const suffix of ['', ...CANDIDATE_SUFFIXES]) {
+    const candidate = basePath + suffix;
+    if (existsSync(candidate)) return { url: pathToFileURL(candidate).href, shortCircuit: true };
+  }
+  return null;
+}
+
 export function resolve(specifier, context, nextResolve) {
+  // Alias `@/…` do tsconfig do apps/web → raiz de apps/web (o resolvedor nativo não o conhece).
+  if (specifier.startsWith('@/')) {
+    const hit = resolveTsCandidates(resolvePath(APPS_WEB_ROOT, specifier.slice(2)));
+    if (hit) return hit;
+    return nextResolve(specifier, context);
+  }
+
   const isRelative = specifier.startsWith('./') || specifier.startsWith('../');
   if (!isRelative) return nextResolve(specifier, context);
 

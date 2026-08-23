@@ -127,11 +127,21 @@ export function errorBackoffMs(consecutiveErrors: number, policy: BackoffPolicy)
   return Math.min(raw, policy.maxMs);
 }
 
+/** Resultado de uma tentativa de MATERIALIZAÇÃO canônica quando a fila operacional esvazia.
+ * Desfecho máximo `proposed` — NUNCA aprova/executa (aprovação é fronteira humana). */
+export interface MaterializationAttempt {
+  readonly materialized: boolean;
+  /** sourceId canônico materializado, ou a razão de `none`. */
+  readonly detail: string;
+  readonly workItemId?: string;
+}
+
 export interface ResidentStateDetail {
   readonly reason?: string;
   readonly outcome?: HostTurnOutcome;
   readonly backoffMs?: number;
   readonly wake?: WakeReason;
+  readonly materialization?: MaterializationAttempt;
 }
 
 export interface ResidentHostDependencies {
@@ -156,6 +166,14 @@ export interface ResidentHostDependencies {
    * vem do domínio na próxima volta — o poll é só o nudge de "reavaliar".
    */
   readonly waitForWake: (input: { readonly backoffMs: number; readonly signal: AbortSignal }) => Promise<WakeReason>;
+  /**
+   * OPCIONAL: quando a fila OPERACIONAL esvazia (host-turn `no_eligible_work`), tenta
+   * materializar UM candidato do backlog CANÔNICO em um work_item `proposed` — sob a mesma
+   * identidade user-scoped, desfecho máximo `proposed` (NUNCA aprova/executa). Ausente ⇒
+   * comportamento inalterado (só executa a fila operacional). Nunca lança: erros viram
+   * `{materialized:false}`.
+   */
+  readonly materializeWhenIdle?: (identity: ResidentIdentity, signal: AbortSignal) => Promise<MaterializationAttempt>;
   /** Telemetria: chamado a cada transição de estado (ADR-003 §14). Sem UI no V0. */
   readonly onState?: (state: ResidentHostState, detail?: ResidentStateDetail) => void;
   readonly backoff?: BackoffPolicy;
@@ -281,8 +299,20 @@ export async function runResidentHost(deps: ResidentHostDependencies): Promise<R
       if ((await waitAndContinue(policy.idleMs)) === 'cancelled') return finish('cancelled');
       continue;
     }
-    // action === 'idle': fila drenada / parada definitiva — quiescer.
-    enter('idle', { reason: 'host_turn_idle', outcome });
+    // action === 'idle': fila operacional drenada / parada definitiva. Se a fila operacional
+    // está VAZIA (`no_eligible_work`) e há um materializer, tenta materializar UM candidato
+    // canônico em `proposed` (desfecho máximo `proposed`; NUNCA aprova/executa) antes de
+    // quiescer — sob a MESMA identidade já adquirida e o mesmo kill-switch (só chega aqui
+    // com autonomia habilitada).
+    let materialization: MaterializationAttempt | undefined;
+    if (deps.materializeWhenIdle && outcome.stopReason === 'no_eligible_work') {
+      try {
+        materialization = await deps.materializeWhenIdle(identity, deps.signal);
+      } catch (error) {
+        materialization = { materialized: false, detail: error instanceof Error ? error.message : 'materialize_threw' };
+      }
+    }
+    enter('idle', { reason: 'host_turn_idle', outcome, materialization });
     if ((await waitAndContinue(policy.idleMs)) === 'cancelled') return finish('cancelled');
   }
 }

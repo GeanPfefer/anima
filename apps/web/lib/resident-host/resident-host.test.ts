@@ -376,3 +376,67 @@ describe('runResidentHost — laço governado', () => {
 const _policy: BackoffPolicy = DEFAULT_BACKOFF;
 const _verdict: AdmissionVerdict = 'permit';
 void _policy; void _verdict;
+
+describe('materializeWhenIdle — materializar quando a fila operacional esvazia', () => {
+  const controlStop = { ok: true, continuation: 'stop', stopReason: 'control_applied', moreWorkAvailable: false, cyclesExecuted: 0, itemsTouched: 0, workItemIds: [] } as const;
+
+  test('idle por no_eligible_work + porto presente → materializer chamado; resultado na telemetria', async () => {
+    const c = new AbortController();
+    const ht = hostTurnScript([OUT.drained]); // stopReason = no_eligible_work
+    let matCalls = 0;
+    const seen: { state: string; mat?: unknown }[] = [];
+    await runResidentHost(deps({
+      signal: c.signal, runHostTurn: ht.run,
+      materializeWhenIdle: async () => { matCalls++; return { materialized: true, detail: 'FIX-01', workItemId: 'wi-1' }; },
+      onState: (state, detail) => seen.push({ state, mat: detail?.materialization }),
+      waitForWake: wakeScript(['cancelled'], c).wait,
+    }));
+    expect(matCalls).toBe(1);
+    const idle = seen.find(s => s.state === 'idle');
+    expect(idle?.mat).toEqual({ materialized: true, detail: 'FIX-01', workItemId: 'wi-1' });
+  });
+
+  test('sem o porto → comportamento inalterado (não materializa)', async () => {
+    const c = new AbortController();
+    const ht = hostTurnScript([OUT.drained]);
+    const summary = await runResidentHost(deps({ signal: c.signal, runHostTurn: ht.run, waitForWake: wakeScript(['cancelled'], c).wait }));
+    expect(summary.states).toContain('idle'); // idle normal, sem materialização.
+  });
+
+  test('idle por OUTRA razão (control_applied) → materializer NÃO chamado', async () => {
+    const c = new AbortController();
+    const ht = hostTurnScript([controlStop]);
+    let matCalls = 0;
+    await runResidentHost(deps({
+      signal: c.signal, runHostTurn: ht.run,
+      materializeWhenIdle: async () => { matCalls++; return { materialized: false, detail: 'x' }; },
+      waitForWake: wakeScript(['cancelled'], c).wait,
+    }));
+    expect(matCalls).toBe(0); // só na fila VAZIA (no_eligible_work).
+  });
+
+  test('ação wait_human/resource/run_again → materializer NÃO chamado', async () => {
+    const c = new AbortController();
+    const ht = hostTurnScript([OUT.humanWait]);
+    let matCalls = 0;
+    await runResidentHost(deps({
+      signal: c.signal, runHostTurn: ht.run,
+      materializeWhenIdle: async () => { matCalls++; return { materialized: false, detail: 'x' }; },
+      waitForWake: wakeScript(['cancelled'], c).wait,
+    }));
+    expect(matCalls).toBe(0);
+  });
+
+  test('materializeWhenIdle lança → capturado, {materialized:false} na telemetria', async () => {
+    const c = new AbortController();
+    const ht = hostTurnScript([OUT.drained]);
+    const seen: unknown[] = [];
+    await runResidentHost(deps({
+      signal: c.signal, runHostTurn: ht.run,
+      materializeWhenIdle: async () => { throw new Error('boom'); },
+      onState: (state, detail) => { if (state === 'idle') seen.push(detail?.materialization); },
+      waitForWake: wakeScript(['cancelled'], c).wait,
+    }));
+    expect(seen[0]).toEqual({ materialized: false, detail: 'boom' });
+  });
+});

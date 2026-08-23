@@ -5,6 +5,7 @@ import {
   type AdmissionVerdict,
   type BackoffPolicy,
   type HostTurnOutcome,
+  type MaterializationAttempt,
   type ResidentIdentity,
   type WakeReason,
 } from '../lib/resident-host/resident-host.ts';
@@ -142,6 +143,37 @@ async function main(): Promise<void> {
     log('reconcile', { note: 'recuperação SUP-04/SUP-05 ocorre dentro da volta do host-turn' });
   };
 
+  // OPCIONAL: quando a fila operacional esvazia, materializar UM candidato do backlog
+  // CANÔNICO em `proposed` (desfecho máximo `proposed`; NUNCA aprova/executa). Gated por
+  // `ANIMA_RESIDENT_MATERIALIZE_DOCUMENT` (docs/….md sob a raiz). Composição in-process
+  // (loader ativo); sob a identidade do usuário (Bearer/RLS), sem service_role.
+  const materializeDocument = process.env.ANIMA_RESIDENT_MATERIALIZE_DOCUMENT ?? null;
+  let materializeWhenIdle: ((identity: ResidentIdentity, signal: AbortSignal) => Promise<MaterializationAttempt>) | undefined;
+  if (materializeDocument && /^docs\/[A-Za-z0-9_./-]+\.md$/.test(materializeDocument) && !materializeDocument.includes('..')) {
+    const { readFile } = await import('node:fs/promises');
+    const { resolve } = await import('node:path');
+    const { parseCanonicalBacklog } = await import('@anima/core');
+    const { projectRoot } = await import('../lib/work-orchestration/executor-selection.ts');
+    const { createBearerClient } = await import('../lib/supabase/bearer.ts');
+    const { buildCanonicalMaterializerDeps } = await import('../lib/work-orchestration/canonical-materializer-deps.ts');
+    const { materializeNextCanonicalCandidate } = await import('../lib/work-orchestration/canonical-materializer.ts');
+    log('materialize-source', { document: materializeDocument });
+    materializeWhenIdle = async (identity) => {
+      try {
+        const markdown = await readFile(resolve(projectRoot(), materializeDocument), 'utf8');
+        const allCandidates = parseCanonicalBacklog({ document: materializeDocument, markdown });
+        const client = createBearerClient(identity.accessToken);
+        const deps = buildCanonicalMaterializerDeps(client, identity.userId);
+        const r = await materializeNextCanonicalCandidate({ allCandidates }, deps);
+        return r.ok
+          ? { materialized: true, detail: r.sourceId, workItemId: r.workItemId }
+          : { materialized: false, detail: r.reason };
+      } catch (error) {
+        return { materialized: false, detail: error instanceof Error ? error.message : 'materialize_failed' };
+      }
+    };
+  }
+
   // Pré-gate do Governor no transporte HTTP: `permit` (autoridade real por-ciclo na rota).
   const admitNewWork = (): AdmissionVerdict => 'permit';
 
@@ -178,6 +210,7 @@ async function main(): Promise<void> {
     admitNewWork,
     runHostTurn,
     waitForWake,
+    ...(materializeWhenIdle ? { materializeWhenIdle } : {}),
     onState: (state, detail) => log('state', {
       state,
       reason: detail?.reason,
@@ -185,6 +218,7 @@ async function main(): Promise<void> {
       backoffMs: detail?.backoffMs,
       // "qual work item?" no topo do log durável (além de dentro de `outcome`).
       workItems: detail?.outcome && detail.outcome.ok ? detail.outcome.workItemIds : undefined,
+      materialization: detail?.materialization,
     }),
     backoff,
     signal: controller.signal,
