@@ -511,10 +511,16 @@ compartilhada `runProjectBacklogHostTurn`; `createBearerClient` isolado de `next
 loader zero-dep + `--experimental-transform-types` para rodar o grafo `@anima` standalone),
 provado AO VIVO com o **Next DERRUBADO** (item `ff2a8f99` → `review`, Verifier `verified`,
 worktree descartada). A rota HTTP continua para web/API/provas mas não é mais requisito.
-Resta o **disparo automático event-driven** do wake (`AUTO_EVENT_WAKE=PENDING`; hoje poll
-provisório + wake explícito). Registros
-[V0](docs/registros/2026-08-22-resident-local-host-v0.md) +
-[in-process](docs/registros/2026-08-23-resident-host-transporte-in-process.md).
+**AUTO_EVENT_WAKE: PASS (2026-08-23, `0b24573`)** — o polling deixou de ser o wake
+primário: o resident host assina o Realtime de `work_events` (RLS por assinante, sem
+service_role) e acorda por EVENTO; o poll vira safety net. Fonte do wake ≠ fonte da decisão
+(reconcile + política decidem; perdido/duplicado é seguro). Provado AO VIVO com Next DOWN:
+runner idle → item criado por processo separado → `wakeSource=event` em 31s (poll=600s não
+podia disparar) → `verified` → `review`. Falta: telemetria durável mínima; depois backlog
+canônico/documental. Registros
+[V0](docs/registros/2026-08-22-resident-local-host-v0.md) ·
+[in-process](docs/registros/2026-08-23-resident-host-transporte-in-process.md) ·
+[auto-wake](docs/registros/2026-08-23-resident-host-auto-event-wake.md).
 
 O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou que a programação autônoma **não tem teto artificial**: o ciclo completo (`entender → investigar → planejar → propor → implementar → testar → revisar → corrigir → commit → publicar → PR → integrar → merge → deploy → observar → reparar`) é destino, e **cada estágio recebe autonomia conforme sua própria maturidade e evidência** — as maturidades não são acopladas. O estado atual, classificando cada barreira como **restrição de maturidade** (promovível por evidência) ou **restrição fundamental** (exige decisão humana por não estar definida):
 

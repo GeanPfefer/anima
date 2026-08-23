@@ -1,5 +1,21 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — Resident Local Host: AUTO_EVENT_WAKE (2026-08-23)
+
+`AUTO_EVENT_WAKE = PASS`. Eliminado o polling como wake PRIMÁRIO. `0b24573`: migration
+`20260823000000` adiciona `work_events` à publicação `supabase_realtime` (aditivo; RLS por
+assinante é a autoridade, **sem service_role**); `WakeCoordinator` (coalesce sinais, fallback
+de poll como safety net — 9/9); `subscribeWorkEventsWake` (assina INSERT via Realtime
+autenticado com o Bearer do usuário — 4/4); engine `WakeReason+='event'`; entry com
+coordenador + assinatura + `wakeSource` na telemetria. **Fonte do wake ≠ fonte da decisão**:
+o evento só diz "acorde"; a engine reconcilia e a política decide (perdido/duplicado é
+seguro). resident-host **76/76** + typecheck 5 workspaces. **PROVA VIVA (Next DOWN, poll=600s):
+runner idle → item `d4f8b6ac` criado por PROCESSO SEPARADO → `wakeSource=event` em 31s (poll
+não podia disparar) → reconcile → in-process → gate PASS → **Verifier `verified`** 7/0/0 →
+`review` → idle → assinatura disposta.** Registro
+`docs/registros/2026-08-23-resident-host-auto-event-wake.md`. **Próximo: telemetria durável
+mínima; depois, backlog canônico/documental.**
+
 ## Continuação — Resident Local Host: transporte IN-PROCESS (2026-08-23)
 
 `RESIDENT_IN_PROCESS = PASS`, `NEXT_SERVER_REQUIRED = NO`. O resident host deixou de
