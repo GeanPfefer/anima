@@ -1,5 +1,17 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — diferencial qwen3-coder pós-reboot (2026-08-23)
+
+`qwen3-coder:latest` foi comparado com a mesma fixture/planning boundary/validators, sem
+OpenAI. Uma execução diagnóstica produziu proposta integralmente válida em 2 rodadas
+(5 tools read-only + submit; parser e ancoragem passaram), mas três execuções pelo resident
+host falharam antes de criar item (`structured proposal`/exaustão de 16 rodadas). A captura
+revelou tools de investigação emitidas fora do catálogo quando a rodada oferecia somente
+submit; o host as executava. Correção fail-closed + regressão em `fe5180a` (13/13, typecheck
+web), mas a repetição viva ainda esgotou 16 rodadas. Portanto
+`CANONICAL_AUTO_EXECUTION_LOCAL = NOT_PROVEN`; OpenAI não foi chamado. Próxima fronteira:
+prova diferencial OpenAI somente após nova autorização explícita.
+
 ## Continuação — autorização autônoma canônica V1 (2026-08-23, prova viva bloqueada no planner local)
 
 Implementação no working tree: evaluator determinístico/fail-closed no core; RPC

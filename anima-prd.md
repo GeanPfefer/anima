@@ -528,7 +528,12 @@ NÃO PROVADO. Uma execução materializou+auto-aprovou com autoria sistêmica e 
 classificação de inteligência ausente; a costura passou a persistir essa classificação
 determinística antes da aprovação. Na repetição limpa, o planner local falhou duas vezes em
 produzir proposta terminal/estruturada; o Governor foi respeitado e recuperado sem reduzir a
-reserva. Provider externo não foi usado por exigir autorização explícita de egress.** Registros
+reserva. Provider externo não foi usado por exigir autorização explícita de egress.
+**Pós-reboot:** `qwen3-coder:latest` também não tornou a meta-prova terminal. Uma execução
+diagnóstica produziu proposta válida em 2 rodadas, mas três execuções pelo resident host
+falharam antes do item. Um bug protocolar real foi corrigido (`fe5180a`): tools emitidas fora
+do catálogo forçado não são mais executadas. A repetição continuou esgotando 16 rodadas;
+fronteira local permanece não resolvida e OpenAI não foi chamado.** Registros
 [V0](docs/registros/2026-08-22-resident-local-host-v0.md) ·
 [in-process](docs/registros/2026-08-23-resident-host-transporte-in-process.md) ·
 [auto-wake](docs/registros/2026-08-23-resident-host-auto-event-wake.md) ·
