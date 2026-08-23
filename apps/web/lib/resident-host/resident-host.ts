@@ -134,6 +134,9 @@ export interface MaterializationAttempt {
   /** sourceId canônico materializado, ou a razão de `none`. */
   readonly detail: string;
   readonly workItemId?: string;
+  /** Resultado causal da autorização autônoma do item recém-materializado. */
+  readonly authorization?: 'approved' | 'replayed' | 'already_approved' | 'human_required';
+  readonly authorizationDetail?: string;
 }
 
 export interface ResidentStateDetail {
@@ -168,10 +171,9 @@ export interface ResidentHostDependencies {
   readonly waitForWake: (input: { readonly backoffMs: number; readonly signal: AbortSignal }) => Promise<WakeReason>;
   /**
    * OPCIONAL: quando a fila OPERACIONAL esvazia (host-turn `no_eligible_work`), tenta
-   * materializar UM candidato do backlog CANÔNICO em um work_item `proposed` — sob a mesma
-   * identidade user-scoped, desfecho máximo `proposed` (NUNCA aprova/executa). Ausente ⇒
-   * comportamento inalterado (só executa a fila operacional). Nunca lança: erros viram
-   * `{materialized:false}`.
+   * materializar UM candidato do backlog CANÔNICO e aplicar a policy de autorização
+   * autônoma estreita. A execução permanece no host-turn/Supervisor existente. Ausente ⇒
+   * comportamento inalterado. Nunca lança: erros viram `{materialized:false}`.
    */
   readonly materializeWhenIdle?: (identity: ResidentIdentity, signal: AbortSignal) => Promise<MaterializationAttempt>;
   /** Telemetria: chamado a cada transição de estado (ADR-003 §14). Sem UI no V0. */

@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -1116,6 +1116,14 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      apply_work_control_at_checkpoint: {
+        Args: {
+          p_attempt_id: string
+          p_expected_proposal_version: number
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
       archive_current_conversation: { Args: never; Returns: string }
       attach_work_context: {
         Args: {
@@ -1137,6 +1145,14 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      auto_approve_autonomous_work: {
+        Args: {
+          envelope: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
       autonomous_work_budget_status: {
         Args: { p_work_item_id: string }
         Returns: Json
@@ -1153,6 +1169,72 @@ export type Database = {
           target_reference: string
           work_item_id: string
         }[]
+      }
+      begin_budget_interruption_resumed_attempt: {
+        Args: {
+          attempt_id: string
+          checkpoint_event_seq: number
+          claim_id: string
+          executor_id: string
+          expected_proposal_version: number
+          interruption_event_seq: number
+          lease_seconds: number
+          owner_instance_id: string
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      begin_human_decision_resumed_attempt: {
+        Args: {
+          attempt_id: string
+          claim_id: string
+          executor_id: string
+          expected_proposal_version: number
+          input_provided_event_id: string
+          input_requested_event_id: string
+          lease_seconds: number
+          owner_instance_id: string
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       begin_resumed_work_attempt: {
         Args: {
@@ -1187,14 +1269,6 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
-      }
-      apply_work_control_at_checkpoint: {
-        Args: {
-          p_attempt_id: string
-          p_expected_proposal_version: number
-          p_work_item_id: string
-        }
-        Returns: Json
       }
       block_work_on_budget: { Args: { p_work_item_id: string }; Returns: Json }
       budget_interruption_resumption_source: {
@@ -1234,6 +1308,16 @@ export type Database = {
         Args: { p_work_item_id: string }
         Returns: Json
       }
+      decide_integration: {
+        Args: {
+          accepted_result_event_id: string
+          decision: Database["public"]["Enums"]["work_integration_decision"]
+          decision_id: string
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
       finish_work_execution: {
         Args: {
           execution_id: string
@@ -1261,6 +1345,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      human_decision_resumption_source: {
+        Args: { p_work_item_id: string }
+        Returns: Json
       }
       interrupt_work_on_budget: {
         Args: {
@@ -1307,24 +1395,6 @@ export type Database = {
           work_item_id: string
         }[]
       }
-      select_autonomous_work: {
-        Args: {
-          p_expected_proposal_version: number
-          p_work_item_id: string
-        }
-        Returns: {
-          approval_seq: number
-          approved_at: string
-          approved_proposal_version: number
-          capability: Database["public"]["Enums"]["work_capability"]
-          queue_size: number
-          runner_up_approval_seq: number | null
-          selection_policy: string
-          skipped_occupied_targets: number
-          target_reference: string
-          work_item_id: string
-        }[]
-      }
       readmit_budget_blocked_work: {
         Args: never
         Returns: {
@@ -1351,12 +1421,11 @@ export type Database = {
           work_item_id: string
         }[]
       }
-      decide_integration: {
+      record_branch_published: {
         Args: {
-          accepted_result_event_id: string
-          decision: Database["public"]["Enums"]["work_integration_decision"]
-          decision_id: string
+          authorization_decision_id: string
           expected_proposal_version: number
+          receipt: Json
           work_item_id: string
         }
         Returns: Json
@@ -1389,12 +1458,66 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_host_observed_coder_evidence: {
+        Args: {
+          attempt_id: string
+          evidence: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
+      record_host_observed_evidence: {
+        Args: {
+          attempt_id: string
+          evidence: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
+      record_host_observed_gate_evidence: {
+        Args: {
+          attempt_id: string
+          evidence: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
+      record_review_request_created: {
+        Args: {
+          authorization_decision_id: string
+          expected_proposal_version: number
+          receipt: Json
+          work_item_id: string
+        }
+        Returns: Json
+      }
+      record_verifier_opinion: {
+        Args: {
+          attempt_id: string
+          expected_proposal_version: number
+          opinion: Json
+          work_item_id: string
+        }
+        Returns: Json
+      }
       record_work_checkpoint: {
         Args: {
           attempt_id: string
           expected_proposal_version: number
           signal: Json
           work_item_id: string
+        }
+        Returns: Json
+      }
+      record_work_decision_required: {
+        Args: {
+          p_attempt_id: string
+          p_expected_proposal_version: number
+          p_signal: Json
+          p_work_item_id: string
         }
         Returns: Json
       }
@@ -1491,139 +1614,6 @@ export type Database = {
           decision: Database["public"]["Enums"]["work_approval_decision"]
           decision_context?: Json
           expected_proposal_version: number
-          work_item_id: string
-        }
-        Returns: {
-          capability: Database["public"]["Enums"]["work_capability"]
-          created_at: string
-          id: string
-          impact_level: Database["public"]["Enums"]["work_impact_level"]
-          intent: Json
-          original_request: string
-          proposal: Json
-          proposal_version: number
-          source_message_id: string
-          state: Database["public"]["Enums"]["work_state"]
-          updated_at: string
-          user_id: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "work_items"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
-      record_work_decision_required: {
-        Args: {
-          p_attempt_id: string
-          p_expected_proposal_version: number
-          p_signal: Json
-          p_work_item_id: string
-        }
-        Returns: Json
-      }
-      record_branch_published: {
-        Args: {
-          authorization_decision_id: string
-          expected_proposal_version: number
-          receipt: Json
-          work_item_id: string
-        }
-        Returns: Json
-      }
-      record_host_observed_evidence: {
-        Args: {
-          attempt_id: string
-          evidence: Json
-          expected_proposal_version: number
-          work_item_id: string
-        }
-        Returns: Json
-      }
-      record_host_observed_gate_evidence: {
-        Args: {
-          attempt_id: string
-          evidence: Json
-          expected_proposal_version: number
-          work_item_id: string
-        }
-        Returns: Json
-      }
-      record_host_observed_coder_evidence: {
-        Args: {
-          attempt_id: string
-          evidence: Json
-          expected_proposal_version: number
-          work_item_id: string
-        }
-        Returns: Json
-      }
-      record_review_request_created: {
-        Args: {
-          authorization_decision_id: string
-          expected_proposal_version: number
-          receipt: Json
-          work_item_id: string
-        }
-        Returns: Json
-      }
-      record_verifier_opinion: {
-        Args: {
-          attempt_id: string
-          expected_proposal_version: number
-          opinion: Json
-          work_item_id: string
-        }
-        Returns: Json
-      }
-      human_decision_resumption_source: {
-        Args: { p_work_item_id: string }
-        Returns: Json
-      }
-      begin_budget_interruption_resumed_attempt: {
-        Args: {
-          attempt_id: string
-          checkpoint_event_seq: number
-          claim_id: string
-          executor_id: string
-          expected_proposal_version: number
-          interruption_event_seq: number
-          lease_seconds: number
-          owner_instance_id: string
-          work_item_id: string
-        }
-        Returns: {
-          capability: Database["public"]["Enums"]["work_capability"]
-          created_at: string
-          id: string
-          impact_level: Database["public"]["Enums"]["work_impact_level"]
-          intent: Json
-          original_request: string
-          proposal: Json
-          proposal_version: number
-          source_message_id: string
-          state: Database["public"]["Enums"]["work_state"]
-          updated_at: string
-          user_id: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "work_items"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
-      begin_human_decision_resumed_attempt: {
-        Args: {
-          attempt_id: string
-          claim_id: string
-          executor_id: string
-          expected_proposal_version: number
-          input_provided_event_id: string
-          input_requested_event_id: string
-          lease_seconds: number
-          owner_instance_id: string
           work_item_id: string
         }
         Returns: {
@@ -1759,6 +1749,21 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      select_autonomous_work: {
+        Args: { p_expected_proposal_version: number; p_work_item_id: string }
+        Returns: {
+          approval_seq: number
+          approved_at: string
+          approved_proposal_version: number
+          capability: Database["public"]["Enums"]["work_capability"]
+          queue_size: number
+          runner_up_approval_seq: number
+          selection_policy: string
+          skipped_occupied_targets: number
+          target_reference: string
+          work_item_id: string
+        }[]
       }
       set_work_focus: {
         Args: { work_item_id: string }

@@ -144,7 +144,8 @@ async function main(): Promise<void> {
   };
 
   // OPCIONAL: quando a fila operacional esvazia, materializar UM candidato do backlog
-  // CANÔNICO em `proposed` (desfecho máximo `proposed`; NUNCA aprova/executa). Gated por
+  // CANÔNICO em `proposed` e, causalmente, avaliar/persistir a autorização autônoma estreita.
+  // A execução continua exclusivamente no próximo host-turn/Supervisor existente. Gated por
   // `ANIMA_RESIDENT_MATERIALIZE_DOCUMENT` (docs/….md sob a raiz). Composição in-process
   // (loader ativo); sob a identidade do usuário (Bearer/RLS), sem service_role.
   const materializeDocument = process.env.ANIMA_RESIDENT_MATERIALIZE_DOCUMENT ?? null;
@@ -157,6 +158,8 @@ async function main(): Promise<void> {
     const { createBearerClient } = await import('../lib/supabase/bearer.ts');
     const { buildCanonicalMaterializerDeps } = await import('../lib/work-orchestration/canonical-materializer-deps.ts');
     const { materializeNextCanonicalCandidate } = await import('../lib/work-orchestration/canonical-materializer.ts');
+    const { autoApproveAutonomousWork } = await import('../lib/work-orchestration/auto-approval.ts');
+    const { readResourceAdmission } = await import('../lib/work-orchestration/resource-governor.ts');
     log('materialize-source', { document: materializeDocument });
     materializeWhenIdle = async (identity) => {
       try {
@@ -165,9 +168,21 @@ async function main(): Promise<void> {
         const client = createBearerClient(identity.accessToken);
         const deps = buildCanonicalMaterializerDeps(client, identity.userId);
         const r = await materializeNextCanonicalCandidate({ allCandidates }, deps);
-        return r.ok
-          ? { materialized: true, detail: r.sourceId, workItemId: r.workItemId }
-          : { materialized: false, detail: r.reason };
+        if (!r.ok) return { materialized: false, detail: r.reason };
+        const authorization = await autoApproveAutonomousWork({
+          client,
+          workItemId: r.workItemId,
+          readGovernorVerdict: () => readResourceAdmission().verdict,
+        });
+        return {
+          materialized: true,
+          detail: r.sourceId,
+          workItemId: r.workItemId,
+          authorization: authorization.action,
+          authorizationDetail: authorization.action === 'human_required'
+            ? authorization.reason
+            : authorization.action === 'already_approved' ? 'no_op' : String(authorization.eventSeq),
+        };
       } catch (error) {
         return { materialized: false, detail: error instanceof Error ? error.message : 'materialize_failed' };
       }
