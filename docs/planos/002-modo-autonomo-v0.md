@@ -1,5 +1,20 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — Resident Local Host: transporte IN-PROCESS (2026-08-23)
+
+`RESIDENT_IN_PROCESS = PASS`, `NEXT_SERVER_REQUIRED = NO`. O resident host deixou de
+depender do Next server: agora compõe a aplicação DIRETAMENTE. `3a0018a`: composition root
+compartilhada `runProjectBacklogHostTurn` (extraída da rota, que passa a delegar — 6/6
+idêntico); `createBearerClient` isolado de `next/headers` em `bearer.ts`; adapter
+`createInProcessHostTurnPort` (cliente user-scoped do token, **sem service_role**, fail-closed);
+loader `ts-resolve.mjs` (zero-dep, `registerHooks`) + `--experimental-transform-types` para
+rodar o grafo `@anima` por `node` puro sem bundler; transporte por `ANIMA_RESIDENT_TRANSPORT`
+(default `in_process`). Provas: in-process 6/6 + 95/95 + typecheck 5 workspaces. **PROVA VIVA
+com Next DERRUBADO** (porta 3000=000): item `ff2a8f99` → `review`, **Verifier `verified`**
+(7/0/0), gate PASS, worktree descartada, repo intacto, `origin/main` intacta. Detalhe no
+registro `docs/registros/2026-08-23-resident-host-transporte-in-process.md`. **Próximo:
+AUTO_EVENT_WAKE** (eliminar o polling como wake primário).
+
 ## Continuação — Resident Local Host V0: ADR + engine + superfície (2026-08-22)
 
 A última camada de scheduler humano — o **disparo** da invocação do host-turn — ganhou

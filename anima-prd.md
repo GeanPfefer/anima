@@ -505,10 +505,16 @@ reconciliou, o Governor permitiu, invocou o host-turn bounded → worktree isola
 PASS → evidência host-observed → **Verifier `verified`** → item em **`review`** → voltou a
 **idle**, **sem nenhuma chamada manual à rota** (item `fdba6c78`; bonus: a 2ª iteração foi
 a `waiting_resource` — Governor deferindo admissão ao vivo). Repo byte-intacto,
-`origin/main` intacta. Resta o **disparo automático event-driven** do wake
-(`AUTO_EVENT_WAKE=PENDING`; hoje poll lento provisório + wake explícito) e o transporte
-in-process. Registro
-[`docs/registros/2026-08-22-resident-local-host-v0.md`](docs/registros/2026-08-22-resident-local-host-v0.md).
+`origin/main` intacta. **Transporte IN-PROCESS: PASS (2026-08-23, `3a0018a`)** — `RESIDENT_IN_PROCESS=PASS`,
+`NEXT_SERVER_REQUIRED=NO`: o resident host compõe a aplicação diretamente (composition root
+compartilhada `runProjectBacklogHostTurn`; `createBearerClient` isolado de `next/headers`;
+loader zero-dep + `--experimental-transform-types` para rodar o grafo `@anima` standalone),
+provado AO VIVO com o **Next DERRUBADO** (item `ff2a8f99` → `review`, Verifier `verified`,
+worktree descartada). A rota HTTP continua para web/API/provas mas não é mais requisito.
+Resta o **disparo automático event-driven** do wake (`AUTO_EVENT_WAKE=PENDING`; hoje poll
+provisório + wake explícito). Registros
+[V0](docs/registros/2026-08-22-resident-local-host-v0.md) +
+[in-process](docs/registros/2026-08-23-resident-host-transporte-in-process.md).
 
 O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou que a programação autônoma **não tem teto artificial**: o ciclo completo (`entender → investigar → planejar → propor → implementar → testar → revisar → corrigir → commit → publicar → PR → integrar → merge → deploy → observar → reparar`) é destino, e **cada estágio recebe autonomia conforme sua própria maturidade e evidência** — as maturidades não são acopladas. O estado atual, classificando cada barreira como **restrição de maturidade** (promovível por evidência) ou **restrição fundamental** (exige decisão humana por não estar definida):
 
