@@ -7,11 +7,15 @@ import {
 // de markdown (estrutura real do 002-backlog.md) sem tocar arquivo/rede/banco.
 
 describe('classifyCanonicalBacklogStatus (puro)', () => {
-  test('done: concluído / aceito / ratificado / implementado', () => {
+  test('done: concluído / aceito / ratificado', () => {
     expect(classifyCanonicalBacklogStatus('concluído.')).toBe('done');
     expect(classifyCanonicalBacklogStatus('aceito')).toBe('done');
     expect(classifyCanonicalBacklogStatus('a revisão humana ratificou o item')).toBe('done');
-    expect(classifyCanonicalBacklogStatus('implementado e provado')).toBe('done');
+  });
+  test('conservador: "implementado" SOZINHO não é done (pode estar aguardando ratificação)', () => {
+    // Evita falso-done em "implementado, aguardando ratificação". Só conclu/ratific/aceit contam.
+    expect(classifyCanonicalBacklogStatus('implementado e provado')).toBe('unknown');
+    expect(classifyCanonicalBacklogStatus('implementado, aguardando ratificação')).toBe('awaiting_review');
   });
   test('awaiting_review: pronto para revisão / aguardando / NÃO ratificado (negação antes do positivo)', () => {
     expect(classifyCanonicalBacklogStatus('pronto para revisão')).toBe('awaiting_review');
@@ -24,6 +28,16 @@ describe('classifyCanonicalBacklogStatus (puro)', () => {
   test('unknown: sem linha de estado ou texto neutro', () => {
     expect(classifyCanonicalBacklogStatus(null)).toBe('unknown');
     expect(classifyCanonicalBacklogStatus('descrição sem estado')).toBe('unknown');
+  });
+  test('marcador MAIS CEDO vence: prosa que cita OUTRO item não confunde (regressão AUTO-05)', () => {
+    // "ratificou" (do próprio item) vem ANTES de "não iniciada" (que se refere à Fase F).
+    expect(classifyCanonicalBacklogStatus(
+      'o usuário ratificou a capacidade X. Próxima fase elegível: Fase F, não iniciada.',
+    )).toBe('done');
+    // "não ratificado" cedo → awaiting, mesmo com "concluído" citado depois.
+    expect(classifyCanonicalBacklogStatus(
+      'ainda não ratificado; parte concluída em outro item.',
+    )).toBe('awaiting_review');
   });
 });
 
@@ -101,5 +115,101 @@ describe('parseCanonicalBacklog', () => {
 
   test('documento vazio / sem itens → lista vazia', () => {
     expect(parseCanonicalBacklog({ document: 'd.md', markdown: '# Só título\n\ntexto\n' })).toEqual([]);
+  });
+});
+
+import {
+  planCanonicalBacklogMaterialization,
+  classifyCandidateForMaterialization,
+  type CanonicalBacklogCandidate,
+  type CanonicalBacklogStatus,
+} from './canonical-backlog';
+
+const cand = (
+  sourceId: string,
+  status: CanonicalBacklogStatus,
+  dependencies: readonly string[] = [],
+): CanonicalBacklogCandidate => ({
+  sourceId, title: sourceId, status, statusEvidence: null, dependencies,
+  sourceRef: { document: 'd.md', heading: sourceId, line: 1 },
+});
+
+describe('planCanonicalBacklogMaterialization (puro, conservador)', () => {
+  test('not_started com todas as deps done → materialize (ordem canônica)', () => {
+    const d = planCanonicalBacklogMaterialization({
+      candidates: [cand('A-01', 'done'), cand('A-02', 'not_started', ['A-01'])],
+    });
+    expect(d).toEqual({ action: 'materialize', candidate: expect.objectContaining({ sourceId: 'A-02' }) });
+  });
+
+  test('item done NUNCA reaparece (settled)', () => {
+    const d = planCanonicalBacklogMaterialization({ candidates: [cand('A-01', 'done'), cand('A-02', 'done')] });
+    expect(d).toEqual({ action: 'none', reason: 'all_settled', pending: expect.objectContaining({ settled: 2, ready: 0 }) });
+  });
+
+  test('awaiting_review também é settled (não materializa)', () => {
+    const d = planCanonicalBacklogMaterialization({ candidates: [cand('A-01', 'awaiting_review')] });
+    expect(d.action).toBe('none');
+  });
+
+  test('dependência não resolvida NÃO materializa (blocked)', () => {
+    const d = planCanonicalBacklogMaterialization({
+      candidates: [cand('A-01', 'not_started'), cand('A-02', 'not_started', ['A-01'])],
+    });
+    // A-01 tem status not_started (não é dep de ninguém pendente) → A-01 é ready e escolhido;
+    // mas A-02 depende de A-01 (not done) → blocked. Verificamos que A-01 (ready) é escolhido.
+    expect(d).toEqual({ action: 'materialize', candidate: expect.objectContaining({ sourceId: 'A-01' }) });
+  });
+
+  test('item bloqueado NÃO congela um pronto POSTERIOR na ordem', () => {
+    // B-01 bloqueado (dep unknown/ausente satisfeita? não); B-02 pronto (dep done).
+    const d = planCanonicalBacklogMaterialization({
+      candidates: [
+        cand('DONE-00', 'done'),
+        cand('B-01', 'not_started', ['MISSING-99']), // dep ausente → não done → blocked
+        cand('B-02', 'not_started', ['DONE-00']),     // dep done → ready
+      ],
+    });
+    expect(d).toEqual({ action: 'materialize', candidate: expect.objectContaining({ sourceId: 'B-02' }) });
+  });
+
+  test('item já ligado a work_item NÃO duplica', () => {
+    const d = planCanonicalBacklogMaterialization({
+      candidates: [cand('A-01', 'not_started')],
+      materializedSourceIds: new Set(['A-01']),
+    });
+    expect(d).toEqual({ action: 'none', reason: 'all_settled', pending: expect.objectContaining({ alreadyMaterialized: 1, ready: 0 }) });
+  });
+
+  test('unknown NÃO materializa (poderia estar concluído) → status_unresolved', () => {
+    const d = planCanonicalBacklogMaterialization({ candidates: [cand('A-01', 'unknown')] });
+    expect(d).toEqual({ action: 'none', reason: 'status_unresolved', pending: expect.objectContaining({ statusUnknown: 1 }) });
+  });
+
+  test('só bloqueados → awaiting_dependencies (blocked tem precedência sobre unknown na razão)', () => {
+    const d = planCanonicalBacklogMaterialization({
+      candidates: [cand('A-01', 'not_started', ['X-99']), cand('A-02', 'unknown')],
+    });
+    expect(d).toEqual({ action: 'none', reason: 'awaiting_dependencies', pending: expect.objectContaining({ blocked: 1, statusUnknown: 1 }) });
+  });
+
+  test('sem candidatos → no_candidates', () => {
+    expect(planCanonicalBacklogMaterialization({ candidates: [] })).toEqual({ action: 'none', reason: 'no_candidates', pending: expect.anything() });
+  });
+
+  test('FIFO/ordem canônica: o PRIMEIRO ready vence', () => {
+    const d = planCanonicalBacklogMaterialization({
+      candidates: [cand('A-01', 'not_started'), cand('A-02', 'not_started')],
+    });
+    expect(d).toEqual({ action: 'materialize', candidate: expect.objectContaining({ sourceId: 'A-01' }) });
+  });
+
+  test('classifyCandidateForMaterialization: casos', () => {
+    const status = new Map<string, CanonicalBacklogStatus>([['D', 'done']]);
+    expect(classifyCandidateForMaterialization(cand('X', 'done'), status, new Set())).toBe('settled');
+    expect(classifyCandidateForMaterialization(cand('X', 'unknown'), status, new Set())).toBe('status_unknown');
+    expect(classifyCandidateForMaterialization(cand('X', 'not_started', ['D']), status, new Set())).toBe('ready');
+    expect(classifyCandidateForMaterialization(cand('X', 'not_started', ['E']), status, new Set())).toBe('dependency_unresolved');
+    expect(classifyCandidateForMaterialization(cand('X', 'not_started'), status, new Set(['X']))).toBe('already_materialized');
   });
 });

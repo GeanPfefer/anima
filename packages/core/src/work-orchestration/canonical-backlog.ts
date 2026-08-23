@@ -51,20 +51,42 @@ const STATE_RE = /^\s*\*\*(?:Estado|Atualiza[^:]*)[^:]*:\*\*\s*(.+?)\s*$/;
 const DEP_RE = /\*\*Depend[^:]*:\*\*\s*([^*]*)/;
 const ID_RE = /\b[A-Z]{2,6}-\d{2}\b/g;
 
+// Marcadores de estado ordenados por PRIORIDADE de posição: a linha de estado é prosa e
+// pode citar o estado de OUTROS itens ("...ratificou... Próxima fase: Fase F, não iniciada").
+// O estado do PRÓPRIO item costuma vir PRIMEIRO, então classificamos pelo marcador que
+// aparece MAIS CEDO no texto — não por prioridade de categoria (que confundiria a citação
+// tardia com o estado do item). Negação de ratificação é tratada no ponto de match.
+const STATUS_MARKERS: readonly { readonly needle: string; readonly status: CanonicalBacklogStatus }[] = [
+  { needle: 'não iniciad', status: 'not_started' },
+  { needle: 'nao iniciad', status: 'not_started' },
+  { needle: 'pronto para revis', status: 'awaiting_review' },
+  { needle: 'aguardando', status: 'awaiting_review' },
+  { needle: 'conclu', status: 'done' },
+  { needle: 'ratific', status: 'done' }, // negação ("não ratificad") tratada abaixo
+  { needle: 'aceit', status: 'done' },
+];
+
 /**
  * Classifica o estado do item a partir do texto da linha de estado — PURA e determinística.
- * Ordem cuidadosa: negações ("não ratificado", "não iniciado") ANTES do positivo homônimo,
- * para não classificar "não ratificado" como `done` por conter "ratificad".
+ * Usa o marcador de estado que aparece MAIS CEDO no texto (o estado do próprio item costuma
+ * ser declarado antes de citações a outros itens). `ratific` precedido de "não " → awaiting.
  */
 export function classifyCanonicalBacklogStatus(stateText: string | null): CanonicalBacklogStatus {
   if (stateText === null) return 'unknown';
   const t = stateText.toLowerCase();
-  const negRatified = t.includes('não ratificad') || t.includes('nao ratificad');
-  if (negRatified) return 'awaiting_review';
-  if (t.includes('não iniciad') || t.includes('nao iniciad') || t.includes('not started')) return 'not_started';
-  if (t.includes('pronto para revis') || t.includes('aguardando')) return 'awaiting_review';
-  if (t.includes('conclu') || t.includes('ratific') || t.includes('aceit') || t.includes('implementad')) return 'done';
-  return 'unknown';
+  let best: { index: number; status: CanonicalBacklogStatus } | null = null;
+  for (const marker of STATUS_MARKERS) {
+    const index = t.indexOf(marker.needle);
+    if (index < 0) continue;
+    let status = marker.status;
+    // "não ratificado" / "nao ratificado" logo antes de um match de `ratific` → awaiting.
+    if (marker.needle === 'ratific') {
+      const prefix = t.slice(Math.max(0, index - 5), index);
+      if (prefix.includes('não ') || prefix.includes('nao ')) status = 'awaiting_review';
+    }
+    if (best === null || index < best.index) best = { index, status };
+  }
+  return best?.status ?? 'unknown';
 }
 
 /** Extrai IDs canônicos distintos de um texto (ex.: da linha de dependências). Puro. */
@@ -142,4 +164,106 @@ export function parseCanonicalBacklog(input: ParseCanonicalBacklogInput): readon
   }
   if (current) finalize(current);
   return candidates;
+}
+
+// ============================================================
+// Elegibilidade DETERMINÍSTICA → próximo candidato materializável (segundo recorte).
+//
+// Ainda NÃO executa e NÃO cria nada: decide, de forma PURA e conservadora, qual candidato
+// canônico poderia virar um `work_item proposed` a seguir. Conservador de propósito:
+// - `done`/`awaiting_review` NÃO reaparecem (já resolvidos);
+// - já ligado a um work_item NÃO duplica;
+// - `unknown` NÃO materializa (poderia estar concluído — o doc não auto-declarou; exige
+//   resolução de estado antes, não um palpite);
+// - `not_started` só materializa com TODAS as dependências `done` (satisfeitas);
+// - dependência não satisfeita → BLOQUEADO, mas NÃO congela os outros (um pronto depois
+//   na ordem canônica ainda é escolhido).
+// A ordem é a DO DOCUMENTO (FIFO/canônica). Materialização ≠ aprovação: mesmo o escolhido
+// só viraria uma PROPOSTA, sujeita às fronteiras humanas existentes.
+// ============================================================
+
+/** Por que um candidato NÃO é materializável agora (auditoria). */
+export type CanonicalCandidateBlock =
+  | 'settled'            // done / awaiting_review
+  | 'already_materialized'
+  | 'status_unknown'
+  | 'dependency_unresolved'
+  | 'ready';
+
+export interface CanonicalMaterializationPending {
+  readonly settled: number;
+  readonly alreadyMaterialized: number;
+  readonly statusUnknown: number;
+  readonly blocked: number;
+  readonly ready: number;
+}
+
+export type CanonicalMaterializationStop =
+  | 'no_candidates'
+  | 'all_settled'
+  | 'awaiting_dependencies'
+  | 'status_unresolved';
+
+export type CanonicalMaterializationDecision =
+  | { readonly action: 'materialize'; readonly candidate: CanonicalBacklogCandidate }
+  | { readonly action: 'none'; readonly reason: CanonicalMaterializationStop; readonly pending: CanonicalMaterializationPending };
+
+export interface PlanCanonicalMaterializationInput {
+  /** Candidatos em ORDEM CANÔNICA (do documento). */
+  readonly candidates: readonly CanonicalBacklogCandidate[];
+  /** IDs canônicos já ligados a um work_item (não duplicar). */
+  readonly materializedSourceIds?: ReadonlySet<string>;
+}
+
+/** Classifica um candidato quanto à materializabilidade — puro. Uma dependência é
+ * satisfeita apenas quando seu status é `done` (conservador). */
+export function classifyCandidateForMaterialization(
+  candidate: CanonicalBacklogCandidate,
+  statusById: ReadonlyMap<string, CanonicalBacklogStatus>,
+  materialized: ReadonlySet<string>,
+): CanonicalCandidateBlock {
+  if (materialized.has(candidate.sourceId)) return 'already_materialized';
+  if (candidate.status === 'done' || candidate.status === 'awaiting_review') return 'settled';
+  if (candidate.status === 'unknown') return 'status_unknown';
+  // status === 'not_started': materializável só com todas as dependências `done`.
+  for (const dep of candidate.dependencies) {
+    if (statusById.get(dep) !== 'done') return 'dependency_unresolved';
+  }
+  return 'ready';
+}
+
+/**
+ * Decide o PRÓXIMO candidato materializável — puro e determinístico. Escolhe o PRIMEIRO
+ * `ready` na ordem canônica; se nenhum, devolve `none` com a razão e o detalhamento. Um
+ * item bloqueado/unknown NUNCA congela um pronto posterior.
+ */
+export function planCanonicalBacklogMaterialization(
+  input: PlanCanonicalMaterializationInput,
+): CanonicalMaterializationDecision {
+  const materialized = input.materializedSourceIds ?? new Set<string>();
+  const statusById = new Map<string, CanonicalBacklogStatus>(input.candidates.map(c => [c.sourceId, c.status]));
+
+  // Acumulador mutável; o resultado tipado (readonly) é estruturalmente compatível.
+  const pending = { settled: 0, alreadyMaterialized: 0, statusUnknown: 0, blocked: 0, ready: 0 };
+  let chosen: CanonicalBacklogCandidate | null = null;
+
+  for (const candidate of input.candidates) {
+    const block = classifyCandidateForMaterialization(candidate, statusById, materialized);
+    switch (block) {
+      case 'settled': pending.settled++; break;
+      case 'already_materialized': pending.alreadyMaterialized++; break;
+      case 'status_unknown': pending.statusUnknown++; break;
+      case 'dependency_unresolved': pending.blocked++; break;
+      case 'ready':
+        pending.ready++;
+        if (chosen === null) chosen = candidate; // primeiro pronto na ordem canônica
+        break;
+    }
+  }
+
+  if (chosen !== null) return { action: 'materialize', candidate: chosen };
+  if (input.candidates.length === 0) return { action: 'none', reason: 'no_candidates', pending };
+  if (pending.blocked > 0) return { action: 'none', reason: 'awaiting_dependencies', pending };
+  if (pending.statusUnknown > 0) return { action: 'none', reason: 'status_unresolved', pending };
+  return { action: 'none', reason: 'all_settled', pending };
 }
