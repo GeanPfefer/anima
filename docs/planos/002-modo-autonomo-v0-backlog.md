@@ -4,6 +4,17 @@
 
 Legenda dos campos compactos: **Tamanho** P/M/G · **Raciocínio** leve/médio/alto · **Checkpoint humano** = exige decisão do usuário dentro do item · **Braço isolado** = executável de ponta a ponta por um único braço com este documento como contexto.
 
+> **Estado machine-readable (`**Status:**`).** Cada item pode declarar um campo explícito
+> `- **Status:** done | not_started | awaiting_review | unknown` (ou palavra-chave em
+> português), consumido deterministicamente pela descoberta canônica
+> (`parseCanonicalBacklog`, prova viva 2026-08-23). Ele é PREFERIDO sobre a heurística de
+> prosa e evita ambiguidade. **Precedência de reconciliação:** o `**Status:**` explícito é o
+> estado operacional; na sua ausência, vale a evidência mais RECENTE (linha de estado do
+> item, depois o [Plano 002](002-modo-autonomo-v0.md) e registros). Reconciliação
+> 2026-08-23: os 13 itens antes `unknown` ganharam `**Status:**` por evidência — resultado:
+> **27 `done` + 1 `awaiting_review` (UX-00), 0 `unknown`**; o backlog V0 está completo (a
+> descoberta materializável rende `none/all_settled`).
+
 ## Priorização
 
 ### Agora — fechar a fundação e permitir a primeira execução manual segura
@@ -37,6 +48,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### ORQ-01 — Resultado e evidências visíveis
 
+- **Status:** done — reconciliado por evidência: Fase A aceita (2026-07-20).
+
 - **Problema:** o resultado com evidências tipadas existe no domínio e nos testes, mas o ciclo nunca foi comprovado ao vivo; o usuário ainda não vê, na conversa real, validações e limitações antes de aceitar.
 - **Resultado esperado:** em uma sessão real, o resultado de um trabalho aparece no chat com resumo, referências, validações (`passed/failed/declared`) e limitações, e o aceite só é possível sobre a versão apresentada.
 - **Dependências:** F5 do Plano 001 (implementada). **Escopo:** comprovação ao vivo web; correções pontuais do fluxo existente. **Fora do escopo:** novos tipos de evidência; UI nova.
@@ -47,6 +60,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### ORQ-02 — Foco operacional real
 
+- **Status:** done — reconciliado por evidência: Fase A aceita (2026-07-20).
+
 - **Problema:** foco compartilhado e resposta à ambiguidade estão implementados e testados, mas não comprovados em uso real com vários trabalhos ativos.
 - **Resultado esperado:** com dois ou mais itens ativos, a conversa mantém um item em foco, troca de foco sem duplicar trabalho e pede confirmação curta quando a referência é ambígua — em web e mobile.
 - **Dependências:** ORQ-01; F7 do Plano 001. **Escopo:** comprovação ao vivo; correções do fluxo existente. **Fora do escopo:** heurísticas novas de inferência de foco.
@@ -56,6 +71,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 - **Tamanho:** P · **Capacidade:** programação + verificação ao vivo · **Raciocínio:** leve · **Checkpoint humano:** não · **Braço isolado:** sim
 
 ### ORQ-03 — Revisão transacional de propostas
+
+- **Status:** done — reconciliado por evidência: Fase A aceita (2026-07-20).
 
 - **Problema:** correções de proposta são atômicas no domínio, mas o comportamento sob decisões concorrentes/tardias precisa de comprovação ao vivo (conflitos de versão retornam erro tipado, sem retry-loop do PostgREST).
 - **Resultado esperado:** revisar/corrigir uma proposta gera nova versão; decisões sobre versões antigas são recusadas com resposta clara na conversa.
@@ -201,6 +218,8 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 ### INT-04 — Primeira execução sob comando
 
+- **Status:** done — reconciliado por evidência: Fase D ratificada (INT-04 aceito na revisão humana).
+
 **Correção interna (2026-08-14): `taskFor()` deixou de nomear o escopo excluído no prompt.** Defeito conhecido e antes deferido (risco sobrevivente registrado na ratificação de 2026-07-28): `taskFor()` costurava `Fora do escopo: <arquivos>` na task e nomear um arquivo real ali induzia o modelo local a editá-lo (`iteration_limit`). Classificado como **bug de implementação, não do contrato** — a segurança do escopo é a allow-list `producedPaths ⊆ includedScope` (host), e a string da task não é payload de sinal (byte-estabilidade do INT-04 intacta). A task passou a comunicar o limite pela allow-list do escopo incluído, sem nomear o excluído. Reproduzido por teste primeiro; local-runner 13/13. Ver [registro](../registros/2026-08-14-taskfor-escopo-excluido.md). O **mesmo anti-padrão** em `ollama-coder.ts` (worktree/ADR-001) foi então **investigado sob autorização própria e concluído NEUTRO** (prova A/B controlada, 12 execuções, efeito zero): o coder só expõe o includedScope no manifesto, então o modelo não tem alça sobre o excluído — sem correção. Ver [registro](../registros/2026-08-14-ollama-coder-escopo-excluido-neutro.md).
 
 **Estado (2026-07-20): resultado produzido; checkpoint de revisão humana pendente.** O endpoint autenticado comandou o `work_item` `507af5ef-a72f-4451-8ddb-0747f5e4e856`, tentativa `e65d1de1-ef9c-4e13-8dd5-55d784642e87`, por um adaptador local com alvo resolvido apenas no nó. O runner `qwen2.5-coder:7b` produziu em isolamento o handoff `20260720T205121334287Z-result.zip`, SHA-256 `fbe7d1acf5a6017ea0eef7344d95882380be59122c8699ebbd481e8997c00e44`, contendo somente `calculator.py`; `python -m unittest` passou (1 teste) e o item entrou em `review`. A reentrega da mesma tentativa foi idempotente. O arquivo original permaneceu com SHA-256 `9445c47952abb8a7fc5d4a905d55b5be05771df1d69362ec597f9a50f7ede40d` e a árvore do piloto permaneceu limpa. `apply.status=not_attempted`; nenhuma aplicação, merge, push ou deploy ocorreu. A conclusão formal aguarda a decisão humana sobre o resultado.
@@ -297,6 +316,8 @@ Detalhamento, limitações e confirmações de segurança em "Laço operacional 
 
 ### INTEL-01 — Classificação de trabalho
 
+- **Status:** done — reconciliado por evidência: implementado, ratificado e encerrado.
+
 **Estado (2026-07-28): implementado, ratificado e encerrado.** O primeiro incremento definiu em
 `packages/core` o contrato puro V1 com cinco eixos obrigatórios, `unknown`
 explícito, proveniência humana ou sistêmica e readiness separada da validade.
@@ -331,6 +352,8 @@ INTEL-01" no [Plano 002](002-modo-autonomo-v0.md).
 
 ### INTEL-02 — Seleção de provedor e esforço
 
+- **Status:** done — reconciliado por evidência: concluído e ratificado.
+
 **Estado (2026-07-28): concluído e ratificado.** A política V1 aprovada mapeia
 os cinco eixos do INTEL-01 para `light`, `standard` ou `strong`, escolhe a
 menor rota disponível que satisfaça capacidade e esforço mínimo e usa urgência
@@ -350,6 +373,8 @@ testes pgTAP, além de 609 testes Jest, `typecheck` e build de produção.
 - **Tamanho:** M · **Capacidade:** design de política + programação · **Raciocínio:** alto · **Checkpoint humano:** sim (aprovar a política inicial) · **Braço isolado:** sim
 
 ### INTEL-03 — Escalonamento e redução
+
+- **Status:** done — reconciliado por evidência: concluído (Fase F).
 
 **Estado (2026-07-28): concluído.** Duas falhas consecutivas elevam exatamente
 um nível, sem ultrapassar `strong`; resultado ou cancelamento quebra a
@@ -371,6 +396,8 @@ do Supervisor, prova SQL de duas falhas seguida de escalonamento, regressão de
 - **Tamanho:** M · **Capacidade:** programação + política · **Raciocínio:** alto · **Checkpoint humano:** não · **Braço isolado:** sim
 
 ### INTEL-04 — Orçamento e reserva de capacidade
+
+- **Status:** done — reconciliado por evidência: concluído e ratificado.
 
 **Estado (2026-07-28): concluído e ratificado.** O orçamento V0 limita cada
 item a 3 tentativas autônomas em 24 horas (ou ao menor limite declarado), cada
@@ -395,6 +422,8 @@ Fase F está concluída.
 
 ### UX-00 — Intenção natural para proposta persistida
 
+- **Status:** awaiting_review — reconciliado por evidência: pronto para revisão, não ratificado (2026-07-29).
+
 **Estado (2026-07-29): pronto para revisão, não ratificado.** Pedidos naturais
 de análise, síntese, documentação e organização de trabalho passam a criar
 proposta versionada real em vez de cair em conversa livre. A proposta inicial é
@@ -415,6 +444,8 @@ nós locais e de refinamento posterior.
 
 ### UX-01 — Cartão de execução
 
+- **Status:** done — reconciliado por evidência: ratificada.
+
 **Atualização (2026-08-14): paridade mobile implementada — pronta para revisão, não ratificada.** O cartão de execução autônoma passou a existir no mobile (`MobileWorkCard` + helper puro `presentMobileWorkExecution`), espelhando os rótulos do `WorkExecutionCard` web: status, executor/provedor/modelo/esforço, início, limites, atividade, checkpoint, bloqueio de orçamento e controle pendente/aplicado, todos como **projeção pura** de `presentation.execution`. Pausar/cancelar são cooperativos por `requestWorkControl` (RPC `request_work_control`, RLS), como no web; cancelar em dois passos. As firulas web-only (timer de decorrido, polling do runtime Ollama) foram omitidas por não serem essenciais à paridade. Sem efeito externo nem ampliação de permissão. Provas: mobile 5 suítes/39 testes (novo `mobile-work-execution.test.ts`), typecheck 5 workspaces. A **prova física em dispositivo (Expo Go)** permanece fronteira humana, como nas demais entregas mobile. Definição e histórico web abaixo.
 
 **Estado (2026-07-29): ratificado (web).** Cartão conversacional que é **exclusivamente projeção do estado persistido** (`projectAutonomousExecution` em `packages/core`, integrado ao `WorkPresentation`): estado da tentativa, executor/provedor/modelo/esforço, início, limites, checkpoint mais recente, pedido de controle pendente, resultado aplicado e bloqueio por orçamento. Pausa/cancelamento são **cooperativos**: `request_work_control` persiste a intenção sem mudar estado; o laço aplica via `apply_work_control_at_checkpoint` num checkpoint seguro (espelhando o `interrupt_work_on_budget` do INTEL-04), movendo o item para `blocked`/`cancelled`, gravando `work_paused`/`work_cancelled` e liberando o claim com `attempt_finished`; o orçamento para de contar em `work_paused`. Terminal tardio já é recusado pela guarda de estado do RPC ratificado; execução comandada (INT-04) fica fora do controle. Os três rascunhos de migration foram auditados e finalizados (removido `current_work_control_request`; guardas de allowlist/versão; ordem de aplicação). **Evidências verdes:** core 551, web 107, mobile 12, supabase 7 (2 integrações ignoradas), pgTAP `work_control` 20/20 + regressão 22 arquivos sem falha no Supabase local, typecheck 5 workspaces e build web. **Prova interativa:** na conta local descartável, o cartão iniciou o trabalho explicitamente selecionado, persistiu o pedido de pausa durante uma execução Ollama, aplicou-o no checkpoint #1 e reconstruiu após reload o estado `blocked`, “Pausada por você” e os quatro passos restantes. O alvo original permaneceu intacto; a execução ocorreu em workspace isolada. Detalhes em "UX-01 pronto para revisão" no [Plano 002](002-modo-autonomo-v0.md).
@@ -429,6 +460,8 @@ nós locais e de refinamento posterior.
 
 ### UX-02 — Cartão de decisão necessária
 
+- **Status:** done — reconciliado por evidência: ratificado (2026-07-30).
+
 **Estado (2026-07-30): ratificado — funcional completo (Camadas 1 e 2).** Camada 1 (domínio/banco) ratificada e automatizada; Camada 2 (chat/interface) ratificada por prova integrada assistida no navegador real (fluxo "continuar" até `review`; "encerrar" até `cancelled`; reload reconstrói o cartão). Detalhes, IDs e limitações em "UX-02 ratificado — funcional completo (2026-07-30)" no [Plano 002](002-modo-autonomo-v0.md); commit funcional `8d3ba73`. A classificação INTEL-01 foi provisionada pela RPC real por não haver caminho no chat/UI que a produza — limitação externa documentada, não defeito do UX-02. Fora da ratificação: `review → completed`, concorrência multi-sessão e execução estocástica. Histórico da implementação abaixo. A revisão do incremento anterior encontrou duas lacunas: o pedido persistido ainda não continha o `InputRequestedPayloadV1`/`WorkHandoffV1` completo e a opção de retomada apenas devolvia o item a `approved`, sem iniciar uma nova tentativa pelo checkpoint. O cenário determinístico `ux02-deterministic-decision` agora produz progresso, checkpoint e `decision_required` sem depender de inferência do modelo. `record_work_decision_required` persiste o pedido e o handoff pausado; a projeção reconstrói o cartão desses eventos após refresh; `human_decision_resumption_source` e `begin_human_decision_resumed_attempt` consomem uma resposta `resume` uma única vez e abrem nova tentativa com o contexto do checkpoint. A interface web encadeia “Continuar” ao Supervisor somente depois da aprovação persistida; `cancel` termina em `cancelled`. Repetição idêntica é idempotente e alternativa divergente, resposta tardia ou tentativa terminal falham fechadas. Evidências verdes: core 563, web 123, mobile 12, pgTAP UX-02 26/26, typecheck dos cinco workspaces e build web.
 
 - **Problema:** interrupções humanas (AUTO-06) precisam chegar como decisão estruturada, não como texto solto perdido na conversa.
@@ -441,6 +474,8 @@ nós locais e de refinamento posterior.
 
 ### UX-03 — Cartão de resultado para revisão
 
+- **Status:** done — reconciliado por evidência: ratificado na triagem da Fase G (2026-08-21; corpo antigo dizia não-ratificado).
+
 **Estado (2026-07-31): implementado e pronto para revisão (não ratificado).** O fluxo de revisão de resultado já existia genérico desde o ciclo manual F5 (projeção pura, `review_work_result_versioned`, rota `/api/work-orchestration/reviews`, UI no `WorkProposalCard`) e é origin-agnóstico. O UX-03 o **estendeu** para a tentativa autônoma sem duplicá-lo: a projeção passou a expor a **referência de handoff** (persistida pelo terminal do executor, antes não projetada) e o cartão passou a exibi-la. Camada 1: pgTAP `ux03_autonomous_result_review` 41/41 (item a `review` pelo terminal real do executor; aceitar → `completed` referenciando o resultado exato, `completed ≠ integrated`; pedir alterações → `changes_requested` com texto obrigatório e histórico preservado; isolamento, idempotência, versão; contas `@test.invalid`, BEGIN/ROLLBACK); suíte pgTAP 26/670; web 130, core 567, mobile 12; typecheck limpo. Camada 2: prova integrada no navegador real com conta descartável — **aprovação e classificação INTEL-01 foram etapas de provisionamento por RPC**, enquanto a **superfície específica do UX-03 (exibição do cartão de resultado incl. handoff, aceite e pedido de alterações) foi exercitada pela interface real**; dados descartáveis verificados e removidos por identificação exata; **os registros, contagens e dados protegidos verificados retornaram ao baseline observado** (sem comparação binária do banco); `tecopfefer@gmail.com` intacto. A menção a "rejeitar" na definição original abaixo fica **superada** pelo contrato vigente `work_review_decision = {accept, request_changes}` (decisão humana 2026-07-31): `accept` = item pode ir a `completed`; `request_changes` = item permanece aberto para novo ciclo; rejeitar definitivamente ou cancelar um trabalho é decisão distinta da revisão de resultado e não entra no UX-03. Detalhes em "UX-03 pronto para revisão (2026-07-31)" no [Plano 002](002-modo-autonomo-v0.md). Fora: UX-04 e paridade mobile do cartão. Definição original abaixo.
 
 - **Problema:** o resultado autônomo precisa da mesma revisão rigorosa do fluxo manual — com evidências, diff/handoff e decisão versionada.
@@ -452,6 +487,8 @@ nós locais e de refinamento posterior.
 - **Tamanho:** M · **Capacidade:** programação de UI · **Raciocínio:** médio · **Checkpoint humano:** sim (é a revisão) · **Braço isolado:** sim
 
 ### UX-04 — Histórico e retomada pelo chat
+
+- **Status:** done — reconciliado por evidência: RATIFICADO por Gean (2026-08-03).
 
 **Estado (2026-08-03): RATIFICADO por Gean.** Reencontro e retomada de trabalhos pelo histórico do chat. A ratificação considera aceita a prova complementar do commit `e680d89` (registrada em "UX-04 — prova complementar de retomada real pelo checkpoint (2026-08-03)" no [Plano 002](002-modo-autonomo-v0.md)): trabalho realmente bloqueado por `decision_required`, checkpoint persistido, abandono da conversa original, reencontro em conversa nova por `work_history`, resposta à decisão na conversa nova e retomada real por nova tentativa correlacionada à original e ao mesmo checkpoint (`human_decision_resumed`), sem reinício do zero, com persistência após reload, idempotência, isolamento entre usuários, ausência de integração externa real e limpeza guardada. Registro append-only: o estado e as provas anteriores (inclusive a limitação da prova de 2026-07-31) permanecem íntegros abaixo; o significado normativo do UX-04 não muda.
 
