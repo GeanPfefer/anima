@@ -1,8 +1,5 @@
-import { planAutonomousBacklogTurn } from '@anima/core';
 import { authenticateRequest } from '@/lib/supabase/request-auth';
-import { buildProjectBacklogCycleDeps } from '@/lib/work-orchestration/autonomous-backlog-deps';
-import { runAutonomousBacklogCycle } from '@/lib/work-orchestration/autonomous-backlog-driver';
-import { runAutonomousBacklogHostTurn } from '@/lib/work-orchestration/autonomous-backlog-host-turn';
+import { runProjectBacklogHostTurn } from '@/lib/work-orchestration/backlog-host-turn-run';
 
 export const runtime = 'nodejs';
 export const maxDuration = 1800;
@@ -45,25 +42,15 @@ export async function POST(request: Request) {
   const maxCycles = Math.min(mc.value ?? DEFAULT_MAX_CYCLES, MAX_CYCLES_CEILING);
 
   const ownerInstanceId = process.env.ANIMA_SUPERVISOR_INSTANCE_ID ?? 'supervisor-v0';
-  const deps = buildProjectBacklogCycleDeps(client, ownerInstanceId);
 
   // Execução do host-turn NÃO herda o lifetime do transporte HTTP; os bounds
-  // estruturais e as fronteiras humanas são as paradas.
+  // estruturais e as fronteiras humanas são as paradas. A composição real é a MESMA
+  // que o resident host in-process usa (nenhuma duplicação).
   const driverSignal = new AbortController().signal;
-
-  const result = await runAutonomousBacklogHostTurn({
-    // Um ciclo bounded = o driver já provado, com `maxTurns = maxTurnsPerCycle`.
-    runCycle: signal => runAutonomousBacklogCycle({ ...deps, maxTurns: maxTurnsPerCycle, signal }),
-    // Peek read-only usado só no bound de host: sobrou `execute_next` por fazer?
-    peekMoreWork: async () => {
-      const candidates = await deps.readBacklog();
-      const decision = planAutonomousBacklogTurn({
-        candidates,
-        now: new Date(),
-        hostPermitsAutonomousWork: deps.hostPermitsAutonomousWork(),
-      });
-      return decision.action === 'execute_next';
-    },
+  const result = await runProjectBacklogHostTurn({
+    client,
+    ownerInstanceId,
+    maxTurnsPerCycle,
     maxCycles,
     signal: driverSignal,
   });

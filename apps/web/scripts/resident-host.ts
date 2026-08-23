@@ -3,6 +3,7 @@ import {
   DEFAULT_BACKOFF,
   type AdmissionVerdict,
   type BackoffPolicy,
+  type HostTurnOutcome,
   type ResidentIdentity,
   type WakeReason,
 } from '../lib/resident-host/resident-host.ts';
@@ -85,6 +86,10 @@ async function main(): Promise<void> {
   const maxTurnsPerCycle = positiveInt(process.env.ANIMA_RESIDENT_MAX_TURNS_PER_CYCLE, 1);
   const maxCycles = positiveInt(process.env.ANIMA_RESIDENT_MAX_CYCLES, 2);
   const killFile = process.env.ANIMA_AUTONOMY_FILE ?? null;
+  // Transporte do host-turn: `in_process` (default — compõe a aplicação diretamente, SEM
+  // depender do Next server) ou `http` (POST à rota provada; requer localhost:3000 vivo).
+  const transport = (process.env.ANIMA_RESIDENT_TRANSPORT ?? 'in_process').toLowerCase() === 'http' ? 'http' : 'in_process';
+  const ownerInstanceId = process.env.ANIMA_SUPERVISOR_INSTANCE_ID ?? 'supervisor-v0';
 
   const backoff: BackoffPolicy = {
     ...DEFAULT_BACKOFF,
@@ -102,7 +107,9 @@ async function main(): Promise<void> {
   }
 
   log('starting', {
-    baseUrl, maxTurnsPerCycle, maxCycles, idleMs: backoff.idleMs,
+    transport,
+    ...(transport === 'http' ? { baseUrl } : {}),
+    maxTurnsPerCycle, maxCycles, idleMs: backoff.idleMs,
     killSwitch: killFile ? { source: 'file', filePath: killFile } : { source: 'env', var: 'ANIMA_AUTONOMY_ENABLED' },
     note: 'wake: envie a linha "wake" no stdin; pare com Ctrl+C (SIGINT).',
   });
@@ -114,14 +121,24 @@ async function main(): Promise<void> {
     password: process.env.ANIMA_RESIDENT_PASSWORD,
   });
   const checkAutonomyEnabled = createKillSwitch({ filePath: killFile, envValue: process.env.ANIMA_AUTONOMY_ENABLED });
-  const runHostTurn = createHttpHostTurnPort({ baseUrl, maxTurnsPerCycle, maxCycles });
 
-  // Reconciliação: no V0 (transporte HTTP) a recuperação SUP-04/SUP-05 acontece dentro
-  // da primeira volta do Supervisor do host-turn. O porto existe como seam (a engine o
-  // chama no arranque e após cada wake) e será substituído por uma chamada de recuperação
-  // dedicada quando o transporte virar in-process.
+  // Porto do host-turn conforme o transporte. IN-PROCESS compõe a aplicação diretamente
+  // (sem Next server), via import dinâmico — o grafo @anima é resolvido pelo loader
+  // `--import ./scripts/ts-resolve.mjs` + `--experimental-transform-types`. HTTP mantém a
+  // rota provada. Ambos user-scoped por Bearer; NUNCA service_role.
+  let runHostTurn: (identity: ResidentIdentity, signal: AbortSignal) => Promise<HostTurnOutcome>;
+  if (transport === 'in_process') {
+    const { createInProcessHostTurnPort } = await import('../lib/resident-host/in-process-host-turn.ts');
+    runHostTurn = createInProcessHostTurnPort({ ownerInstanceId, maxTurnsPerCycle, maxCycles });
+  } else {
+    runHostTurn = createHttpHostTurnPort({ baseUrl, maxTurnsPerCycle, maxCycles });
+  }
+
+  // Reconciliação: a recuperação SUP-04/SUP-05 acontece dentro da primeira volta do
+  // Supervisor do host-turn. O porto existe como seam (a engine o chama no arranque e
+  // após cada wake); uma chamada de recuperação dedicada é recorte futuro.
   const reconcile = async (_identity: ResidentIdentity): Promise<void> => {
-    log('reconcile', { note: 'recuperação SUP-04/SUP-05 ocorre dentro da volta do host-turn (V0 HTTP)' });
+    log('reconcile', { note: 'recuperação SUP-04/SUP-05 ocorre dentro da volta do host-turn' });
   };
 
   // Pré-gate do Governor no transporte HTTP: `permit` (autoridade real por-ciclo na rota).
