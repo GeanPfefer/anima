@@ -198,6 +198,21 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
           messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ ok: false, error: 'Investigue o repositório antes de enviar a proposta.' }) });
           continue;
         }
+        // O catálogo da rodada forçada contém SOMENTE submit. Alguns providers locais
+        // ainda emitem uma tool antiga fora do catálogo; o host não pode executá-la, pois
+        // tools oferecidas são a fronteira de capacidade desta rodada. Responde ao
+        // tool_call_id para manter o protocolo coerente, mas falha fechado no efeito.
+        if (forceSubmit) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: id,
+            content: JSON.stringify({
+              ok: false,
+              error: 'Esta ferramenta não está disponível nesta rodada. Chame submit_project_work_proposal.',
+            }),
+          });
+          continue;
+        }
         const output = await this.executeTool(name, argString(call.function?.arguments));
 
         try {

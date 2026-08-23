@@ -97,6 +97,26 @@ describe('LocalOllamaProjectWorkPlanner', () => {
     expect(forcedBody.tool_choice).toEqual({ type: 'function', function: { name: 'submit_project_work_proposal' } });
   });
 
+  test('não executa tool de investigação emitida fora do catálogo da rodada forçada', async () => {
+    const executeTool = jest.fn(evidenceTool);
+    const { impl } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md","start_line":1,"end_line":5}', 'e1')] },
+      // A partir daqui só submit foi oferecida. O provider viola o catálogo.
+      { role: 'assistant', tool_calls: [toolCall('project_list_files', '{"path":"docs"}', 'bad1')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', VALID_ARGS, 's1')] },
+    ]);
+    const planner = new LocalOllamaProjectWorkPlanner({
+      fetchImpl: impl,
+      executeTool,
+      forceAfterEvidence: 1,
+      maxTurns: 3,
+    });
+
+    await expect(planner.proposeArguments('faça')).resolves.toEqual({ ok: true, rawArguments: VALID_ARGS });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(executeTool).toHaveBeenCalledWith('project_read_file', expect.any(String));
+  });
+
   test('normaliza o quirk escalar→lista do modelo local (sem inventar conteúdo)', async () => {
     const scalarArgs = JSON.stringify({
       summary: 's', objective: 'o',
