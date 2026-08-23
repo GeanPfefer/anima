@@ -16,21 +16,41 @@ const RESULT: BacklogHostTurnResult = {
   continuation: 'stop',
   moreWorkAvailable: false,
   lastOutcome: 'execution_completed',
-  cycles: [],
+  cycles: [
+    {
+      turnsExecuted: 1,
+      itemsTouched: 1,
+      stopReason: 'max_turns_reached',
+      pending: { readyOccupied: 0, running: 0, awaitingHuman: 0, blocked: 0 },
+      lastOutcome: 'execution_completed',
+      turns: [{ workItemId: 'w1', outcome: 'execution_completed' }],
+    },
+  ],
 };
+
+const MAPPED = {
+  ok: true, continuation: 'stop', stopReason: 'max_cycles_reached',
+  moreWorkAvailable: false, cyclesExecuted: 1, itemsTouched: 1, workItemIds: ['w1'],
+} as const;
 
 // Sentinela de cliente — o adapter nunca o inspeciona, só o repassa à composition root.
 const SENTINEL_CLIENT = { __brand: 'user-scoped' } as unknown as SupabaseClient<Database>;
 
 describe('mapHostTurnResult (puro)', () => {
-  test('mapeia o resultado tipado do host-turn no desfecho da engine', () => {
-    expect(mapHostTurnResult(RESULT)).toEqual({
-      ok: true,
-      continuation: 'stop',
-      stopReason: 'max_cycles_reached',
-      moreWorkAvailable: false,
-      cyclesExecuted: 1,
-    });
+  test('mapeia o resultado + extrai os IDs distintos de work_items tocados', () => {
+    expect(mapHostTurnResult(RESULT)).toEqual(MAPPED);
+  });
+  test('dedupe de workItemIds através de ciclos/voltas', () => {
+    const dup: BacklogHostTurnResult = {
+      ...RESULT, itemsTouched: 2,
+      cycles: [
+        { turnsExecuted: 1, itemsTouched: 1, stopReason: 'max_turns_reached', pending: { readyOccupied: 0, running: 0, awaitingHuman: 0, blocked: 0 }, lastOutcome: 'execution_completed', turns: [{ workItemId: 'a', outcome: 'execution_completed' }, { workItemId: null, outcome: 'selection_not_executable' }] },
+        { turnsExecuted: 1, itemsTouched: 1, stopReason: 'max_turns_reached', pending: { readyOccupied: 0, running: 0, awaitingHuman: 0, blocked: 0 }, lastOutcome: 'execution_completed', turns: [{ workItemId: 'a', outcome: 'execution_completed' }, { workItemId: 'b', outcome: 'execution_completed' }] },
+      ],
+    };
+    const out = mapHostTurnResult(dup);
+    expect(out.ok).toBe(true);
+    if (out.ok) expect([...out.workItemIds].sort()).toEqual(['a', 'b']);
   });
 });
 
@@ -46,7 +66,7 @@ describe('createInProcessHostTurnPort', () => {
     });
     const out = await port({ userId: 'u1', accessToken: 'user-token' }, new AbortController().signal);
 
-    expect(out).toEqual({ ok: true, continuation: 'stop', stopReason: 'max_cycles_reached', moreWorkAvailable: false, cyclesExecuted: 1 });
+    expect(out).toEqual(MAPPED);
     // A ÚNICA construção de cliente veio do token do usuário — nenhum outro caminho.
     expect(built).toEqual(['user-token']);
     const input = seen[0] as { client: unknown; ownerInstanceId: string; maxTurnsPerCycle: number; maxCycles: number };

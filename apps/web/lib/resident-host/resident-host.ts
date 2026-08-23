@@ -60,7 +60,8 @@ export interface ResidentIdentity {
   readonly accessToken: string;
 }
 
-/** Desfecho tipado de uma invocação do host-turn, decoplado do transporte. */
+/** Desfecho tipado de uma invocação do host-turn, decoplado do transporte. Carrega os
+ * itens tocados para a telemetria durável responder "qual work item?". */
 export type HostTurnOutcome =
   | {
       readonly ok: true;
@@ -68,6 +69,10 @@ export type HostTurnOutcome =
       readonly stopReason: BacklogHostStopReason;
       readonly moreWorkAvailable: boolean;
       readonly cyclesExecuted: number;
+      /** Itens distintos que uma tentativa/decisão de fato tocou nesta invocação. */
+      readonly itemsTouched: number;
+      /** IDs dos work_items tocados (distintos), para telemetria/auditoria. */
+      readonly workItemIds: readonly string[];
     }
   | { readonly ok: false; readonly error: string };
 

@@ -157,6 +157,7 @@ export function mapHostTurnResponse(status: number, json: unknown): HostTurnOutc
   }
   const v = body.value as {
     continuation?: unknown; stopReason?: unknown; moreWorkAvailable?: unknown; cyclesExecuted?: unknown;
+    itemsTouched?: unknown; cycles?: unknown;
   } | null;
   if (!v || typeof v.continuation !== 'string' || typeof v.stopReason !== 'string') {
     return { ok: false, error: 'invalid_response' };
@@ -169,7 +170,25 @@ export function mapHostTurnResponse(status: number, json: unknown): HostTurnOutc
     stopReason: v.stopReason as BacklogHostStopReason,
     moreWorkAvailable: v.moreWorkAvailable === true,
     cyclesExecuted: typeof v.cyclesExecuted === 'number' ? v.cyclesExecuted : 0,
+    itemsTouched: typeof v.itemsTouched === 'number' ? v.itemsTouched : 0,
+    workItemIds: extractWorkItemIds(v.cycles),
   };
+}
+
+/** Extrai IDs distintos de work_items das voltas do resultado da rota — lenient (a resposta
+ * é JSON não tipado; entradas inválidas são ignoradas). */
+function extractWorkItemIds(cycles: unknown): readonly string[] {
+  if (!Array.isArray(cycles)) return [];
+  const ids = new Set<string>();
+  for (const cycle of cycles) {
+    const turns = (cycle as { turns?: unknown } | null)?.turns;
+    if (!Array.isArray(turns)) continue;
+    for (const turn of turns) {
+      const id = (turn as { workItemId?: unknown } | null)?.workItemId;
+      if (typeof id === 'string' && id.length > 0) ids.add(id);
+    }
+  }
+  return [...ids];
 }
 
 export interface HttpHostTurnConfig {

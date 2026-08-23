@@ -22,10 +22,10 @@ import {
 const IDENTITY: ResidentIdentity = { userId: 'user-1', accessToken: 'opaque-token' };
 
 const OUT = {
-  drained: { ok: true, continuation: 'stop', stopReason: 'no_eligible_work', moreWorkAvailable: false, cyclesExecuted: 1 } as const,
-  moreWork: { ok: true, continuation: 'continue', stopReason: 'max_cycles_reached', moreWorkAvailable: true, cyclesExecuted: 2 } as const,
-  humanWait: { ok: true, continuation: 'wait', stopReason: 'awaiting_human_or_recovery', moreWorkAvailable: false, cyclesExecuted: 1 } as const,
-  resource: { ok: true, continuation: 'wait', stopReason: 'resource_pressure', moreWorkAvailable: false, cyclesExecuted: 0 } as const,
+  drained: { ok: true, continuation: 'stop', stopReason: 'no_eligible_work', moreWorkAvailable: false, cyclesExecuted: 1, itemsTouched: 1, workItemIds: ['item-a'] } as const,
+  moreWork: { ok: true, continuation: 'continue', stopReason: 'max_cycles_reached', moreWorkAvailable: true, cyclesExecuted: 2, itemsTouched: 2, workItemIds: ['item-a', 'item-b'] } as const,
+  humanWait: { ok: true, continuation: 'wait', stopReason: 'awaiting_human_or_recovery', moreWorkAvailable: false, cyclesExecuted: 1, itemsTouched: 0, workItemIds: [] } as const,
+  resource: { ok: true, continuation: 'wait', stopReason: 'resource_pressure', moreWorkAvailable: false, cyclesExecuted: 0, itemsTouched: 0, workItemIds: [] } as const,
   error: { ok: false, error: 'boom' } as const,
 } satisfies Record<string, HostTurnOutcome>;
 

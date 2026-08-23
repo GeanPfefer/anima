@@ -114,9 +114,12 @@ describe('mapHostTurnResponse (puro)', () => {
   test('200 ok:true → desfecho mapeado', () => {
     const out = mapHostTurnResponse(200, {
       ok: true,
-      value: { continuation: 'continue', stopReason: 'max_cycles_reached', moreWorkAvailable: true, cyclesExecuted: 2 },
+      value: {
+        continuation: 'continue', stopReason: 'max_cycles_reached', moreWorkAvailable: true, cyclesExecuted: 2, itemsTouched: 2,
+        cycles: [{ turns: [{ workItemId: 'x1' }, { workItemId: null }] }, { turns: [{ workItemId: 'x1' }, { workItemId: 'x2' }] }],
+      },
     });
-    expect(out).toEqual({ ok: true, continuation: 'continue', stopReason: 'max_cycles_reached', moreWorkAvailable: true, cyclesExecuted: 2 });
+    expect(out).toEqual({ ok: true, continuation: 'continue', stopReason: 'max_cycles_reached', moreWorkAvailable: true, cyclesExecuted: 2, itemsTouched: 2, workItemIds: ['x1', 'x2'] });
   });
   test('200 ok:false → erro com código', () => {
     expect(mapHostTurnResponse(200, { ok: false, error: { code: 'authentication_required' } })).toEqual({ ok: false, error: 'authentication_required' });
@@ -134,10 +137,10 @@ describe('mapHostTurnResponse (puro)', () => {
 describe('createHttpHostTurnPort', () => {
   const identity = { userId: 'u1', accessToken: 'TKN' };
   test('POST com Bearer + bounds; resposta mapeada', async () => {
-    const f = fakeFetch([{ status: 200, body: { ok: true, value: { continuation: 'stop', stopReason: 'no_eligible_work', moreWorkAvailable: false, cyclesExecuted: 1 } } }]);
+    const f = fakeFetch([{ status: 200, body: { ok: true, value: { continuation: 'stop', stopReason: 'no_eligible_work', moreWorkAvailable: false, cyclesExecuted: 1, itemsTouched: 0, cycles: [] } } }]);
     const port = createHttpHostTurnPort({ baseUrl: 'http://local:3000', maxTurnsPerCycle: 1, maxCycles: 2 }, { fetchImpl: f.impl });
     const out = await port(identity, new AbortController().signal);
-    expect(out).toEqual({ ok: true, continuation: 'stop', stopReason: 'no_eligible_work', moreWorkAvailable: false, cyclesExecuted: 1 });
+    expect(out).toEqual({ ok: true, continuation: 'stop', stopReason: 'no_eligible_work', moreWorkAvailable: false, cyclesExecuted: 1, itemsTouched: 0, workItemIds: [] });
     expect(f.calls[0]!.url).toBe('http://local:3000/api/work-orchestration/backlog-host-turn');
     expect((f.calls[0]!.init!.headers as Record<string, string>).Authorization).toBe('Bearer TKN');
     expect(JSON.parse(f.calls[0]!.init!.body as string)).toEqual({ maxTurnsPerCycle: 1, maxCycles: 2 });

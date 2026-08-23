@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs';
 import {
   runResidentHost,
   DEFAULT_BACKOFF,
@@ -32,9 +33,18 @@ import { createWakeCoordinator } from '../lib/resident-host/wake.ts';
 // in-process futuro). Ver ADR-003 §13.
 // ============================================================
 
+// Telemetria durável mínima (ADR-003 §14): além do stdout, um LOG APPEND-ONLY local
+// (JSONL) quando `ANIMA_RESIDENT_LOG_FILE` está setado — para não depender só do stdout
+// do processo. Eventos do HOST não pertencem a um work_item específico, então NÃO vão para
+// `work_events`; um host log local é a menor arquitetura coerente. Best-effort: falha de
+// escrita não derruba o runner. NUNCA inclui o accessToken.
+const LOG_FILE = process.env.ANIMA_RESIDENT_LOG_FILE ?? null;
 const log = (event: string, data: Record<string, unknown> = {}): void => {
-  // Log estruturado (ADR-003 §14). NUNCA inclui o accessToken.
-  process.stdout.write(`${JSON.stringify({ ts: new Date().toISOString(), event, ...data })}\n`);
+  const line = JSON.stringify({ ts: new Date().toISOString(), event, ...data });
+  process.stdout.write(`${line}\n`);
+  if (LOG_FILE) {
+    try { appendFileSync(LOG_FILE, `${line}\n`); } catch { /* durabilidade best-effort */ }
+  }
 };
 
 const positiveInt = (value: string | undefined, fallback: number): number => {
@@ -101,6 +111,7 @@ async function main(): Promise<void> {
     maxTurnsPerCycle, maxCycles, idleMs: backoff.idleMs,
     killSwitch: killFile ? { source: 'file', filePath: killFile } : { source: 'env', var: 'ANIMA_AUTONOMY_ENABLED' },
     wake: 'event-driven (Realtime work_events) + poll fallback + stdin "wake"',
+    durableLog: LOG_FILE ?? 'stdout-only (set ANIMA_RESIDENT_LOG_FILE to persist)',
     note: 'pare com Ctrl+C (SIGINT).',
   });
 
@@ -172,6 +183,8 @@ async function main(): Promise<void> {
       reason: detail?.reason,
       outcome: detail?.outcome,
       backoffMs: detail?.backoffMs,
+      // "qual work item?" no topo do log durável (além de dentro de `outcome`).
+      workItems: detail?.outcome && detail.outcome.ok ? detail.outcome.workItemIds : undefined,
     }),
     backoff,
     signal: controller.signal,

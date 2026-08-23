@@ -39,6 +39,17 @@ export interface InProcessHostTurnSeams {
   }) => Promise<BacklogHostTurnResult>;
 }
 
+/** IDs distintos dos work_items tocados nas voltas do host-turn — puro. */
+function touchedWorkItemIds(result: BacklogHostTurnResult): readonly string[] {
+  const ids = new Set<string>();
+  for (const cycle of result.cycles) {
+    for (const turn of cycle.turns) {
+      if (turn.workItemId) ids.add(turn.workItemId);
+    }
+  }
+  return [...ids];
+}
+
 /** Mapeia o resultado tipado do host-turn no desfecho da engine — puro. */
 export function mapHostTurnResult(result: BacklogHostTurnResult): HostTurnOutcome {
   return {
@@ -47,6 +58,8 @@ export function mapHostTurnResult(result: BacklogHostTurnResult): HostTurnOutcom
     stopReason: result.stopReason,
     moreWorkAvailable: result.moreWorkAvailable,
     cyclesExecuted: result.cyclesExecuted,
+    itemsTouched: result.itemsTouched,
+    workItemIds: touchedWorkItemIds(result),
   };
 }
 
