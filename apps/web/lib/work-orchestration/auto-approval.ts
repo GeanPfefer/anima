@@ -68,9 +68,46 @@ export async function autoApproveAutonomousWork(
   }
   if (!decision.authorized) return { action: 'human_required', reason: decision.failClosedReason };
 
-  // A fila autônoma exige a classificação persistida que o fluxo humano normalmente
-  // grava na borda `/supervisor-turn`. Aqui ela é derivada deterministicamente do MESMO
-  // envelope estreito (não do planner) antes da aprovação, pela RPC/evento existentes.
+  const envelope = {
+    schema_version: 1,
+    authority: 'autonomous_policy',
+    envelope_version: AUTONOMOUS_AUTHORIZATION_ENVELOPE_VERSION,
+    source_id: decision.sourceId,
+    decision_reason: 'canonical_local_slice_within_authorized_envelope',
+    execution_class: 'canonical_local_isolated_worktree',
+    checks: [...decision.checks],
+  } satisfies Json;
+
+  // Ordem CAUSAL (INTEL-01): a classificação de inteligência é um FATO POST-APROVAÇÃO —
+  // `record_work_intelligence_classification` exige que a versão da proposta já carregue um
+  // `work_approved` (é gravada "contra a versão de proposta já aprovada"). Por isso
+  // APROVAMOS primeiro (autoridade `system`/`autonomous_policy`) e só então derivamos e
+  // persistimos a classificação que a fila autônoma exige (`autonomous_work_queue` + gate de
+  // inteligência). A classificação vem do MESMO envelope estreito (não do planner). Se ela
+  // falhar após a aprovação, o item fica aprovado-mas-não-classificado: seguro (o gate de
+  // inteligência barra claim/execução) e recuperável na borda humana — nunca executa sem
+  // classificação vigente.
+  let approvalAction: 'approved' | 'replayed';
+  let approvalSeq: number;
+  try {
+    const { data, error } = await input.client.rpc('auto_approve_autonomous_work', {
+      work_item_id: input.workItemId,
+      expected_proposal_version: item.proposal_version,
+      envelope,
+    });
+    if (error) return { action: 'human_required', reason: `approval_persist_failed:${error.message}` };
+    const value = data as { action?: unknown; event_seq?: unknown } | null;
+    if ((value?.action !== 'approved' && value?.action !== 'replayed') || typeof value.event_seq !== 'number') {
+      return { action: 'human_required', reason: 'approval_persist_ambiguous' };
+    }
+    approvalAction = value.action;
+    approvalSeq = value.event_seq;
+  } catch (error) {
+    return { action: 'human_required', reason: `approval_persist_threw:${errorText(error)}` };
+  }
+
+  // Classificação exigida pela fila autônoma, agora que a versão está aprovada. Idempotente:
+  // só grava se ainda não existir (replay/reentrada não duplica).
   try {
     const current = await input.client.rpc('current_work_intelligence_classification', {
       p_work_item_id: input.workItemId,
@@ -103,31 +140,7 @@ export async function autoApproveAutonomousWork(
     return { action: 'human_required', reason: `classification_threw:${errorText(error)}` };
   }
 
-  const envelope = {
-    schema_version: 1,
-    authority: 'autonomous_policy',
-    envelope_version: AUTONOMOUS_AUTHORIZATION_ENVELOPE_VERSION,
-    source_id: decision.sourceId,
-    decision_reason: 'canonical_local_slice_within_authorized_envelope',
-    execution_class: 'canonical_local_isolated_worktree',
-    checks: [...decision.checks],
-  } satisfies Json;
-
-  try {
-    const { data, error } = await input.client.rpc('auto_approve_autonomous_work', {
-      work_item_id: input.workItemId,
-      expected_proposal_version: item.proposal_version,
-      envelope,
-    });
-    if (error) return { action: 'human_required', reason: `approval_persist_failed:${error.message}` };
-    const value = data as { action?: unknown; event_seq?: unknown } | null;
-    if ((value?.action !== 'approved' && value?.action !== 'replayed') || typeof value.event_seq !== 'number') {
-      return { action: 'human_required', reason: 'approval_persist_ambiguous' };
-    }
-    return { action: value.action, eventSeq: value.event_seq, sourceId: decision.sourceId };
-  } catch (error) {
-    return { action: 'human_required', reason: `approval_persist_threw:${errorText(error)}` };
-  }
+  return { action: approvalAction, eventSeq: approvalSeq, sourceId: decision.sourceId };
 }
 
 const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error);

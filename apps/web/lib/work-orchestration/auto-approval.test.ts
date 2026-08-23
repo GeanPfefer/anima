@@ -72,6 +72,33 @@ describe('autoApproveAutonomousWork', () => {
       .resolves.toEqual({ action: 'replayed', eventSeq: 7, sourceId: 'FIX-01' });
   });
 
+  test('aprova ANTES de classificar — classificação exige versão aprovada (INTEL-01)', async () => {
+    // Double que ESPELHA a invariante INTEL-01: `record_work_intelligence_classification`
+    // falha enquanto a versão da proposta não tiver um `work_approved`. Com a ordem correta
+    // (aprovar → classificar) o fluxo termina em `approved`; a ordem invertida (bug) falharia
+    // fechado em `classification_persist_failed:proposal version is not approved`.
+    const calls: string[] = [];
+    let approved = false;
+    const rpc = jest.fn(async (name: string) => {
+      calls.push(name);
+      if (name === 'current_work_intelligence_classification') return { data: { classification: null }, error: null };
+      if (name === 'auto_approve_autonomous_work') { approved = true; return { data: { action: 'approved', event_seq: 7 }, error: null }; }
+      if (name === 'record_work_intelligence_classification') {
+        return approved
+          ? { data: { action: 'recorded' }, error: null }
+          : { data: null, error: { message: 'proposal version is not approved' } };
+      }
+      return { data: null, error: null };
+    });
+    const single = jest.fn(async () => ({ data: validItem, error: null }));
+    const value = { from: jest.fn(() => ({ select: () => ({ eq: () => ({ single }) }) })), rpc };
+    const result = await autoApproveAutonomousWork({ client: value as never, workItemId: 'wi-1', readGovernorVerdict: () => 'permit' });
+    expect(result).toEqual({ action: 'approved', eventSeq: 7, sourceId: 'FIX-01' });
+    expect(calls).toContain('auto_approve_autonomous_work');
+    expect(calls).toContain('record_work_intelligence_classification');
+    expect(calls.indexOf('auto_approve_autonomous_work')).toBeLessThan(calls.indexOf('record_work_intelligence_classification'));
+  });
+
   test('classificação existente não é duplicada', async () => {
     const c = client();
     c.rpc.mockImplementation(async (name: string) => name === 'current_work_intelligence_classification'
