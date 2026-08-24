@@ -1,8 +1,8 @@
-import { interpretProjectConversationGovernance, presentProjectDecisionProposal, type PendingProjectDecision } from '@anima/core';
+import { interpretProjectConversationGovernance, isProjectDecisionConfirmation, presentProjectDecisionProposal, type PendingProjectDecision } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-type Result = { readonly text: string; readonly sourceMessageId: string; readonly kind: 'proposal' | 'ratified' | 'rejected' | 'changes_requested' | 'clarification' };
+type Result = { readonly text: string; readonly sourceMessageId: string; readonly kind: 'proposal' | 'ratified' | 'already_ratified' | 'rejected' | 'changes_requested' | 'clarification' };
 
 const resultObject = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
@@ -28,7 +28,21 @@ export async function processProjectConversationGovernance(input: {
   const pending: PendingProjectDecision[] = (pendingRead.data ?? []).flatMap(row => row.id && row.version && row.statement
     ? [{ id: row.id, version: row.version, statement: row.statement }] : []);
   const intent = interpretProjectConversationGovernance({ message: input.message, pending });
-  if (intent.kind === 'conversation') return null;
+  if (intent.kind === 'conversation') {
+    if (pending.length > 0 || !isProjectDecisionConfirmation(input.message)) return null;
+    const [latestConversation, latestRatification] = await Promise.all([
+      input.client.from('ai_conversations').select('id').eq('user_id', input.userId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      input.client.from('project_decision_events').select('provenance').eq('event_type', 'ratified').order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    if (latestConversation.error || latestRatification.error) throw new Error('project_governance_replay_read_failed');
+    const ratificationSource = resultObject(latestRatification.data?.provenance).source_message_id;
+    if (!latestConversation.data || ratificationSource !== latestConversation.data.id) return null;
+    const sourceId = await sourceMessage(input.client, input.userId, input.message, input.retryMessageId);
+    return {
+      kind: 'already_ratified', sourceMessageId: sourceId,
+      text: 'Essa decisão já foi ratificada. Nenhuma nova decisão ou ação operacional foi criada.',
+    };
+  }
   const sourceId = await sourceMessage(input.client, input.userId, input.message, input.retryMessageId);
   if (intent.kind === 'clarification_required') return {
     kind: 'clarification', sourceMessageId: sourceId,

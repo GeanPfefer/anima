@@ -25,6 +25,8 @@ const preference = /^(?:eu prefiro|prefiro|quero manter|acho melhor|decidi que|v
 
 const onePending = (pending: readonly PendingProjectDecision[]): PendingProjectDecision | null => pending.length === 1 ? pending[0]! : null;
 
+export const isProjectDecisionConfirmation = (message: string): boolean => confirmation.test(lower(message));
+
 export function interpretProjectConversationGovernance(input: {
   readonly message: string;
   readonly pending: readonly PendingProjectDecision[];

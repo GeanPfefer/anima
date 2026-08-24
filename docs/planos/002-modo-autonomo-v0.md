@@ -1929,6 +1929,17 @@ Prova local: 24 casos puros, campanha relevante core 93/93, web 34/34, pgTAP
 [arquitetura](../arquitetura/governanca-conversacional-de-projeto.md) e
 [registro](../registros/2026-08-24-project-conversation-governance-v0.md).
 
+**PROJECT_CONVERSATION_GOVERNANCE_V0_E2E = PASS (2026-08-24).** A UI real
+percorreu T1 exploração → T2 preferência humana/proposta `awaiting_confirmation`
+→ T3 confirmação humana/ratificação → T4 replay idempotente. Somente T1 usou
+OpenAI; T2–T4 foram resolvidos no host. A prova persistiu uma proposta e os
+eventos `proposal_created` + `ratified`, com actor humano e provenance vinculada
+às mensagens exatas. `work_items/work_events/work_focus` permaneceram
+`60/601/2`, Git permaneceu no baseline e nenhum coder/Supervisor foi acionado.
+Antes da prova, uma regressão estreita garantiu que o replay imediato de “Sim.”
+não caia no provider nem crie outra ratificação. Ver o
+[registro E2E](../registros/2026-08-24-project-conversation-governance-v0-e2e.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

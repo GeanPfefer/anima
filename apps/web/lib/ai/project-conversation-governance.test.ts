@@ -2,12 +2,29 @@ import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { processProjectConversationGovernance } from './project-conversation-governance';
 
-const client = (pending: { id: string; version: number; statement: string }[] = []) => {
+const client = (
+  pending: { id: string; version: number; statement: string }[] = [],
+  replay?: { readonly latestMessageId: string; readonly ratificationSourceId: string },
+) => {
   const rpc = jest.fn();
   const insert = jest.fn(() => ({ select: () => ({ single: async () => ({ data: { id: 'message-1' }, error: null }) }) }));
-  const from = jest.fn((table: string) => table === 'project_decision_proposal_state' ? {
-    select: () => ({ eq: () => ({ order: () => ({ limit: async () => ({ data: pending, error: null }) }) }) }),
-  } : { insert, select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null }) }) }) }) }) });
+  const from = jest.fn((table: string) => {
+    if (table === 'project_decision_proposal_state') return {
+      select: () => ({ eq: () => ({ order: () => ({ limit: async () => ({ data: pending, error: null }) }) }) }),
+    };
+    if (table === 'project_decision_events') return {
+      select: () => ({ eq: () => ({ order: () => ({ limit: () => ({ maybeSingle: async () => ({
+        data: replay ? { provenance: { source_message_id: replay.ratificationSourceId } } : null, error: null,
+      }) }) }) }) }),
+    };
+    return {
+      insert,
+      select: () => ({ eq: () => ({
+        order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: replay ? { id: replay.latestMessageId } : null, error: null }) }) }),
+        eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null }) }) }),
+      }) }),
+    };
+  });
   return { value: { from, rpc } as unknown as SupabaseClient<Database>, rpc, insert, from };
 };
 
@@ -31,6 +48,18 @@ describe('boundary web da governança conversacional', () => {
     const result = await processProjectConversationGovernance({ client: c.value, userId: 'u', message: 'Sim.' });
     expect(c.rpc).toHaveBeenCalledWith('resolve_project_decision_proposal', expect.objectContaining({ proposal_id: 'p1', expected_version: 2, outcome: 'ratified', provenance: expect.objectContaining({ actor: 'user' }) }));
     expect(result?.text).toContain('Nenhuma ação operacional');
+  });
+  test('repetição imediata da confirmação ratificada fica no host e não duplica evento', async () => {
+    const c = client([], { latestMessageId: 'ratification-message', ratificationSourceId: 'ratification-message' });
+    const result = await processProjectConversationGovernance({ client: c.value, userId: 'u', message: 'Sim.' });
+    expect(result).toMatchObject({ kind: 'already_ratified' });
+    expect(result?.text).toContain('já foi ratificada');
+    expect(c.rpc).not.toHaveBeenCalled();
+  });
+  test('confirmação solta sem vínculo com a última mensagem permanece conversa', async () => {
+    const c = client([], { latestMessageId: 'other-message', ratificationSourceId: 'ratification-message' });
+    expect(await processProjectConversationGovernance({ client: c.value, userId: 'u', message: 'Sim.' })).toBeNull();
+    expect(c.rpc).not.toHaveBeenCalled();
   });
   test('duas pendentes pedem esclarecimento sem RPC de decisão', async () => {
     const c = client([{ id: 'p1', version: 1, statement: 'A' }, { id: 'p2', version: 1, statement: 'B' }]);

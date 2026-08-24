@@ -1,4 +1,4 @@
-import { interpretProjectConversationGovernance, presentProjectDecisionProposal, type PendingProjectDecision } from './project-conversation-governance';
+import { interpretProjectConversationGovernance, isProjectDecisionConfirmation, presentProjectDecisionProposal, type PendingProjectDecision } from './project-conversation-governance';
 
 const A: PendingProjectDecision = { id: 'a', version: 1, statement: 'Execução local primeiro; cloud só quando necessário.' };
 const B: PendingProjectDecision = { id: 'b', version: 1, statement: 'Priorizar mobile.' };
@@ -11,6 +11,10 @@ describe('governança de conversa de projeto', () => {
   test('preferência vaga continua conversa', () => expect(run('Prefiro local.')).toMatchObject({ kind: 'conversation' }));
   test.each(['Sim.', 'Isso.', 'Pode registrar.', 'É exatamente isso.', 'Concordo.'])('%s confirma a única proposta pendente', message => expect(run(message, [A])).toEqual({ kind: 'ratify', proposal: A }));
   test('sim sem proposta não ratifica', () => expect(run('Sim.')).toMatchObject({ kind: 'conversation' }));
+  test('confirmação pode ser reconhecida sem conceder autoridade de ratificação', () => {
+    expect(isProjectDecisionConfirmation('Sim.')).toBe(true);
+    expect(isProjectDecisionConfirmation('Talvez.')).toBe(false);
+  });
   test('sim com duas propostas pede esclarecimento', () => expect(run('Sim.', [A, B])).toEqual({ kind: 'clarification_required', proposals: [A, B] }));
   test.each(['Não.', 'Não é isso.', 'Prefiro não decidir isso agora.', 'Descarta essa ideia.'])('%s rejeita somente a pendente inequívoca', message => expect(run(message, [A])).toEqual({ kind: 'reject', proposal: A }));
   test.each(['Quase, mas cloud só se não couber localmente.', 'Não foi isso que eu quis dizer. Troca a condição.', 'Troca essa parte: custo precisa de limite.'])('%s pede revisão sem ratificar', message => expect(run(message, [A])).toMatchObject({ kind: 'request_changes', proposal: A }));
