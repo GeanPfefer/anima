@@ -6,6 +6,8 @@ import ReactMarkdown from 'react-markdown';
 import styles from './chat.module.css';
 import { WorkProposalCard, type WorkPresentationView } from './WorkProposalCard';
 import { WorkFocusChoice } from './WorkFocusChoice';
+import { ProjectWorkPanel } from './ProjectWorkPanel';
+import { groupWorkPresentationsBySource, replaceWorkPresentation } from './work-item-presentation';
 import { findInterruptedTurn, type InterruptedTurn } from '@/lib/ai/chat-turn';
 
 type Message = { id?: string; role: 'user' | 'assistant'; content: string };
@@ -41,7 +43,8 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
   // é uma ação humana consciente por sessão. Só tem efeito para usuário autorizado.
   const [devMode, setDevMode]           = useState(false);
   const [pendingLinks, setPendingLinks] = useState<ProposedLink[]>([]);
-  const [workItems, setWorkItems] = useState<Record<string, WorkPresentationView>>({});
+  const [workItems, setWorkItems] = useState<Record<string, WorkPresentationView[]>>({});
+  const [projectWorkItems,setProjectWorkItems]=useState<WorkPresentationView[]>([]);
   // UX-04 — cartões reencontrados por uma consulta de histórico, indexados pela
   // mensagem-gatilho. É uma projeção viva da consulta (reperguntar re-lista),
   // distinta do cartão criado por uma mensagem (workItems).
@@ -111,12 +114,13 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
             if (!response.ok) return [] as WorkPresentationView[];
             const body = await response.json(); return body.ok ? body.value as WorkPresentationView[] : [];
           }));
-          setWorkItems(Object.fromEntries(results.flat().map(value => [value.item.sourceMessageId, value])));
+          setWorkItems(groupWorkPresentationsBySource(results.flat()));
         }
       })
       .catch(() => {setContinuityError(true);setError('Não foi possível reconstruir a conversa persistida. Recarregue antes de enviar uma nova mensagem.');})
       .finally(()=>setHydrating(false));
     fetch('/api/work-orchestration/focus').then(response=>response.ok?response.json():null).then(body=>{if(body?.ok)setFocusedWorkItemId(body.value)}).catch(()=>{});
+    fetch('/api/work-orchestration/items').then(response=>response.ok?response.json():null).then(body=>{if(body?.ok&&Array.isArray(body.value))setProjectWorkItems(body.value as WorkPresentationView[])}).catch(()=>{});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -272,7 +276,7 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
     if (orchestrationHeader) {
       try {
         const metadata = JSON.parse(decodeURIComponent(orchestrationHeader)) as { kind: string; sourceMessageId: string; workItemId?:string; presentation?: WorkPresentationView; presentations?: WorkPresentationView[]; candidates?:{id:string;summary:string}[]; question?: { question: string }; error?: { code: string; message: string }; reason?: string };
-        if (metadata.presentation) {setWorkItems(previous => ({ ...previous, [metadata.sourceMessageId]: metadata.presentation! }));setFocusedWorkItemId(metadata.presentation.item.id);}
+        if (metadata.presentation) {setWorkItems(previous => ({ ...previous, [metadata.sourceMessageId]: replaceWorkPresentation(previous[metadata.sourceMessageId]??[],metadata.presentation!) }));setProjectWorkItems(previous=>replaceWorkPresentation(previous,metadata.presentation!));setFocusedWorkItemId(metadata.presentation.item.id);}
         // UX-04 — a consulta de histórico devolve a lista reconstruída; renderiza
         // os cartões abaixo da mensagem-gatilho, cada um com as ações reais.
         if (metadata.kind === 'work_history' && metadata.presentations) setHistoryCards(previous => ({ ...previous, [metadata.sourceMessageId]: metadata.presentations! }));
@@ -418,6 +422,7 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
       )}
 
       <div className={styles.messages}>
+        <ProjectWorkPanel items={projectWorkItems} focusedWorkItemId={focusedWorkItemId} onFocus={focusWork} onChange={updated=>setProjectWorkItems(previous=>replaceWorkPresentation(previous,updated))}/>
         {messages.length === 0 && !isOnboarding && (
           <div className={styles.empty}>
             <p className={styles.emptyIcon}>🧠</p>
@@ -451,7 +456,7 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
                   : m.content
               }
             </div>
-            {m.role === 'user' && m.id && workItems[m.id] && <WorkProposalCard presentation={workItems[m.id]!} focused={focusedWorkItemId===workItems[m.id]!.item.id} onFocus={()=>focusWork(workItems[m.id!]!.item.id)} onChange={presentation => setWorkItems(previous => ({ ...previous, [m.id!]: presentation }))} />}
+            {m.role === 'user' && m.id && workItems[m.id]?.map(view => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={presentation => setWorkItems(previous => ({ ...previous, [m.id!]: replaceWorkPresentation(previous[m.id!]??[],presentation) }))} />)}
             {m.role === 'user' && m.id && historyCards[m.id]?.length ? historyCards[m.id]!.map((view, index) => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={updated => setHistoryCards(previous => ({ ...previous, [m.id!]: previous[m.id!]!.map((existing, position) => position === index ? updated : existing) }))} />) : null}
           </div>
         ))}

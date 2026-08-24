@@ -8,7 +8,7 @@ import { WorkBudgetWaitCard } from './WorkBudgetWaitCard';
 
 type WorkItemView=Omit<WorkItem,'createdAt'|'updatedAt'>&{createdAt:string;updatedAt:string};
 export type WorkPresentationView=Omit<WorkPresentation,'item'>&{item:WorkItemView};
-type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void};
+type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void;autonomousExecutionAllowed?:boolean;autonomousBlockReason?:string|null};
 
 // Rótulos do parecer advisory do Verifier. Read-only: informa a revisão humana,
 // nunca a substitui nem altera as ações disponíveis (que vêm da projeção).
@@ -19,7 +19,7 @@ const VERDICT_LABEL:Record<WorkVerificationVerdict,string>={
 };
 
 
-export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:Props){
+export function WorkProposalCard({presentation,onChange,focused=false,onFocus,autonomousExecutionAllowed,autonomousBlockReason}:Props){
   const {item,latestResult,acceptedResult,availableActions}=presentation;
   const executionSpec=item.intent['execution_spec'] as {
     target?:{kind?:string;reference?:string};permissions?:string[];
@@ -34,7 +34,8 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
   const [mode,setMode]=useState<'none'|'defer'|'correct'|'result'|'review_changes'>('none');
   const [detail,setDetail]=useState('');const[customDeferReason,setCustomDeferReason]=useState('');const[references,setReferences]=useState('');const[validations,setValidations]=useState('');const[limitations,setLimitations]=useState('');
   const allowed=(action:WorkPresentation['availableActions'][number])=>availableActions.includes(action);
-  const autonomousEligible=evaluateAutonomousEligibility(item as unknown as WorkItem).eligible;
+  const autonomousEligible=evaluateAutonomousEligibility(item as unknown as WorkItem).eligible
+    && autonomousExecutionAllowed!==false;
   // Consulta read-only do parecer de recursos ANTES de rodar: para os gates declarados
   // no contrato, o parecer relativo ao histórico machine-wide + a pressão atual. Silencioso
   // em falha (a ausência do painel é o fallback honesto); nunca decide nem bloqueia.
@@ -166,7 +167,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus}:P
     {mode==='none'&&allowed('approve')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>decide({type:'approve'})}>Aprovar</button><button disabled={busy} onClick={()=>setMode('correct')}>Pedir correção</button><button disabled={busy} onClick={()=>setMode('defer')}>Adiar</button><button disabled={busy} onClick={()=>decide({type:'reject'})}>Rejeitar</button></div>}
     {mode==='defer'&&<div className={styles.workDecision}><label>Motivo<select value={detail} onChange={event=>setDetail(event.target.value)}><option value="">Selecione</option><option>Quero decidir depois</option><option>Falta contexto</option><option>Não é prioridade agora</option><option value="other">Outro</option></select></label>{detail==='other'&&<input aria-label="Outro motivo" value={customDeferReason} onChange={event=>setCustomDeferReason(event.target.value)}/>}<button disabled={busy||!(detail==='other'?customDeferReason:detail).trim()} onClick={()=>decide({type:'defer',reason:detail==='other'?customDeferReason:detail})}>Confirmar adiamento</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
     {mode==='correct'&&<div className={styles.workDecision}><label>O que deve mudar?<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>mutate('/api/work-orchestration/proposal-corrections',{requestedChanges:detail.trim()})}>Criar nova versão coerente</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
-    {mode==='none'&&!presentation.pendingDecision&&allowed('start')&&<><p className={styles.workNotice}>No modo manual, você executa o trabalho e registra o resultado aqui. O Supervisor não assumirá esse ciclo depois de iniciado.</p><div className={styles.workActions}><button disabled={busy} onClick={()=>mutate('/api/work-orchestration/start',{})}>{item.state==='approved'?'Iniciar execução manual':'Retomar trabalho manual'}</button>{item.state==='approved'&&autonomousEligible&&<><button disabled={busy} onClick={()=>void loadResourceAdvisory()}>Consultar parecer de recursos</button><button disabled={busy} onClick={startAutonomous}>Executar autonomamente</button></>}</div></>}
+    {mode==='none'&&!presentation.pendingDecision&&allowed('start')&&<><p className={styles.workNotice}>No modo manual, você executa o trabalho e registra o resultado aqui. O Supervisor não assumirá esse ciclo depois de iniciado.</p>{autonomousBlockReason&&<p className={styles.workNotice}>Execução autônoma indisponível: {autonomousBlockReason}</p>}<div className={styles.workActions}><button disabled={busy} onClick={()=>mutate('/api/work-orchestration/start',{})}>{item.state==='approved'?'Iniciar execução manual':'Retomar trabalho manual'}</button>{item.state==='approved'&&autonomousEligible&&<><button disabled={busy} onClick={()=>void loadResourceAdvisory()}>Consultar parecer de recursos</button><button disabled={busy} onClick={startAutonomous}>Executar autonomamente</button></>}</div></>}
     {mode==='none'&&allowed('submit_result')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>setMode('result')}>Registrar resultado</button></div>}
     {mode==='result'&&<div className={styles.workDecision}><label>Resumo do resultado<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><label>Referências, uma por linha<textarea value={references} onChange={event=>setReferences(event.target.value)}/></label><label>Validações executadas, uma por linha (prefixe com ok: ou falha:)<textarea value={validations} onChange={event=>setValidations(event.target.value)}/></label><label>Limitações conhecidas, uma por linha<textarea value={limitations} onChange={event=>setLimitations(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>mutate('/api/work-orchestration/results',{result:{summary:detail.trim(),resultReferences:references.split('\n').map(value=>value.trim()).filter(Boolean),validations:parseWorkResultValidations(validations),limitations:limitations.split('\n').map(value=>value.trim()).filter(Boolean)}})}>Enviar para revisão</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
     {mode==='none'&&allowed('accept_result')&&latestResult&&<div className={styles.workActions}><button disabled={busy} onClick={()=>review({type:'accept'})}>Aceitar resultado v{latestResult.proposalVersion}</button><button disabled={busy} onClick={()=>setMode('review_changes')}>Pedir correções no resultado</button></div>}

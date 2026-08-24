@@ -403,6 +403,15 @@
 }
 
 .workCard { box-sizing: border-box; width: min(100%, 620px); min-width: 0; overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 14px; padding: 16px; color: var(--text-primary); text-align: left; }
+.projectWorkPanel { width: min(100%, 720px); align-self: center; margin-bottom: 18px; padding: 16px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+.projectWorkPanel h2 { margin: 0 0 4px; font-size: 1rem; }
+.projectWorkPanel > p { margin: 0 0 12px; color: var(--text-muted); font-size: .82rem; }
+.projectWorkRow { padding: 12px 0; border-top: 1px solid var(--border); }
+.projectWorkRow > div:first-child { display: flex; justify-content: space-between; gap: 12px; }
+.projectWorkRow span { color: var(--accent); font-size: .78rem; text-transform: uppercase; }
+.projectWorkRow p { margin: 6px 0; }
+.projectWorkRow > button { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: transparent; color: var(--text-primary); cursor: pointer; }
+.projectWorkRow .workCard { margin-top: 10px; }
 .workCardHeader { display: flex; justify-content: space-between; gap: 12px; color: var(--accent); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
 .workPhase { display: inline-flex; align-items: center; gap: 6px; width: fit-content; margin: 10px 0 2px; padding: 3px 11px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); font-size: .74rem; font-weight: 600; }
 .workPhase[data-terminal="true"] { opacity: .6; }
