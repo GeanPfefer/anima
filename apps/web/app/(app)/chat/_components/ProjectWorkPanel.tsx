@@ -16,7 +16,7 @@ export function ProjectWorkPanel({items,focusedWorkItemId,onFocus,onChange}:Prop
       <p>{readinessLabel}</p>
       <p className={styles.workNotice}>Classificação: {autonomousEligible||blockingDependencyIds.length>0?'contrato válido':'pendente'} · Dependências: {dependencyIds.length?dependencyIds.join(', '):'nenhuma'} · fonte {presentation.item.sourceMessageId}</p>
       <button type="button" onClick={()=>setExpanded(expanded===presentation.item.id?null:presentation.item.id)}>{expanded===presentation.item.id?'Ocultar detalhes':'Ver detalhes'}</button>
-      {expanded===presentation.item.id&&<WorkProposalCard presentation={presentation} focused={focusedWorkItemId===presentation.item.id} onFocus={()=>onFocus(presentation.item.id)} onChange={onChange} autonomousExecutionAllowed={autonomousEligible} autonomousBlockReason={blockingDependencyIds.length?readinessLabel:null}/>} 
+      {expanded===presentation.item.id&&<WorkProposalCard presentation={presentation} focused={focusedWorkItemId===presentation.item.id} onFocus={()=>onFocus(presentation.item.id)} onChange={onChange} autonomousExecutionAllowed={autonomousEligible} autonomousBlockReason={blockingDependencyIds.length?readinessLabel:null}/>}
     </div>)}
   </section>;
 }
