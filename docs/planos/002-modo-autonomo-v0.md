@@ -1976,6 +1976,13 @@ materializado. Banco real: V2 ainda `awaiting_confirmation`, zero links e
 foi adicionada ao classificador com regressão; não houve retry. Nova prova pela
 UI exige autorização independente. [Registro](../registros/2026-08-24-backlog-proposal-materializacao-e2e-not-proven.md).
 
+**BACKLOG_PROPOSAL_V0_E2E = PASS (2026-08-24).** Após publicar a correção, a
+confirmação única pela UI real materializou atomicamente a V2 em três itens
+`proposed`, com dependências e cadeia decisão → proposta → confirmação → item.
+O replay autenticado devolveu os mesmos IDs sem duplicar. Não houve provider,
+approval, attempt, execution, mudança de foco, Supervisor ou coder. Os três itens
+permanecem na próxima fronteira humana. [Registro](../registros/2026-08-24-backlog-proposal-v0-e2e-pass.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-24 (sessão: materialização E2E do Backlog Proposal V0 ainda não comprovada — a confirmação canônica caiu no chat comum; correção determinística está verde localmente e a V2 continua `awaiting_confirmation`, sem materialização, approval ou execução; ver [arquitetura](docs/arquitetura/backlog-proposal-v0.md), [registro](docs/registros/2026-08-24-backlog-proposal-materializacao-e2e-not-proven.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-24 (sessão: Backlog Proposal V0 comprovado E2E — confirmação humana materializou atomicamente três work items `proposed`; replay devolveu os mesmos IDs sem duplicar, aprovar ou executar; ver [arquitetura](docs/arquitetura/backlog-proposal-v0.md), [registro](docs/registros/2026-08-24-backlog-proposal-v0-e2e-pass.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
