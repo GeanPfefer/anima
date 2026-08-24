@@ -494,6 +494,15 @@ Assim, o item 1 está executavelmente pronto; itens 2 e 3 aguardam a ordem 1→2
 Nenhum foi aprovado ou executado. Ver o
 [registro](docs/registros/2026-08-24-ratified-backlog-technical-review.md).
 
+**Aprovação humana do backlog ratificado (2026-08-24):** o usuário aprovou
+explicitamente as três propostas v2 pelo boundary autenticado; cada evento
+`work_approved` tem `author=user` e versão 2. Replay pelo mesmo boundary foi
+recusado sem duplicar. Os três itens estão `approved`, mas nenhum entrou na fila:
+o item 1 tem spec e dependências satisfeitas e aguarda a classificação de
+inteligência; itens 2 e 3 também permanecem bloqueados por 1→2→3. Não houve claim,
+attempt, start, mudança de foco, coder, provider ou autorização financeira. Ver o
+[registro](docs/registros/2026-08-24-ratified-backlog-human-approval.md).
+
 **Estado tático do host autônomo (2026-08-22):** o Resource Governor agora é
 gate real para admissão de cada novo ciclo/turno do backlog: pressão baixa permite,
 moderada/alta adia com `resource_pressure`, e telemetria indeterminada/erro falha

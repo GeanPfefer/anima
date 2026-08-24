@@ -1995,6 +1995,16 @@ Resultado: item 1 com execution readiness `READY`; itens 2 e 3
 claim, attempt, start, focus ou efeito externo de compute foi criado.
 [Registro](../registros/2026-08-24-ratified-backlog-technical-review.md).
 
+**RATIFIED_BACKLOG_TO_EXECUTION_V0_HUMAN_APPROVAL = PASS (2026-08-24).** A
+decisão humana explícita aprovou, separadamente e pelo boundary autenticado, as
+três WorkProposals v2. Foram persistidos exatamente três `work_approved`
+`author=user`; replay foi recusado sem duplicação. Os itens ficaram `approved` e
+nenhuma execução começou. A fila permanece vazia por barreira real adicional:
+falta classificação de inteligência nos três. Sob a dimensão causal, o item 1
+está liberado e 2/3 permanecem bloqueados pelos predecessores. Approval não criou
+autorização financeira, claim, attempt, start, foco ou efeito externo.
+[Registro](../registros/2026-08-24-ratified-backlog-human-approval.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o
