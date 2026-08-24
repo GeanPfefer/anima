@@ -13,7 +13,7 @@ type GovernedSource = {
 const MAX_SOURCE_CHARS = 2_500;
 const MAX_TOTAL_CHARS = 28_000;
 const SECRET_VALUE = /\b(?:sk-[A-Za-z0-9_-]{12,}|(?:api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+)/gi;
-const BLOCKED_STATUS_PATH = /(?:^|[\\/])(?:\.claude|\.worktrees|\.git)(?:[\\/]|$)|(?:^|[\\/])\.env(?:\.|$)/i;
+const BLOCKED_STATUS_PATH = /(?:^|[\\/\s])(?:\.claude|\.worktrees|\.git)(?:[\\/]|$)|(?:^|[\\/\s])\.env(?:\.|$)/i;
 
 const GOVERNED_SOURCES: readonly GovernedSource[] = [
   { id: 'manifesto', path: 'anima-manifesto.md', authority: 'canonical', terms: ['decisão', 'proatividade', 'interface', 'capacidade'] },
@@ -42,6 +42,10 @@ function selectLines(content: string, terms: readonly string[]): string {
 
 export function sanitizeProjectContext(value: string): string {
   return value.replace(SECRET_VALUE, '[REDACTED]');
+}
+
+export function sanitizeProjectGitStatus(value: string): string {
+  return value.split(/\r?\n/).filter(line => !BLOCKED_STATUS_PATH.test(line)).join('\n');
 }
 
 function git(args: readonly string[]): Promise<string> {
@@ -84,7 +88,7 @@ export async function buildProjectAdvisorContext(
     authority: 'evidence',
     provenance: 'git read-only observation',
     observedAt: new Date().toISOString(),
-    content: `branch=${branch}\nhead=${head}\nstatus=${status.split(/\r?\n/).filter(line => !BLOCKED_STATUS_PATH.test(line)).join('\n') || '(clean)'}`,
+    content: `branch=${branch}\nhead=${head}\nstatus=${sanitizeProjectGitStatus(status) || '(clean)'}`,
   });
   sources.push(...liveSources.map(source => ({ ...source, content: sanitizeProjectContext(source.content).slice(0, MAX_SOURCE_CHARS) })));
   if (records) sources.push(records);

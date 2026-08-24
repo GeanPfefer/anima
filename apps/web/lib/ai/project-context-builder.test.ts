@@ -1,5 +1,5 @@
 import { validateProjectAdvisorContext } from '@anima/core';
-import { buildProjectAdvisorContext, PROJECT_ADVISOR_SOURCE_PATHS, sanitizeProjectContext } from './project-context-builder';
+import { buildProjectAdvisorContext, PROJECT_ADVISOR_SOURCE_PATHS, sanitizeProjectContext, sanitizeProjectGitStatus } from './project-context-builder';
 
 describe('Project Context Builder governado', () => {
   const originalRoot = process.env.ANIMA_PROJECT_ROOT;
@@ -34,5 +34,10 @@ describe('Project Context Builder governado', () => {
     const live = context.sources.find(source => source.id === 'live-test');
     expect(live?.content).toBe('[REDACTED] state=review');
     expect(live?.authority).toBe('observed_state');
+  });
+
+  test('remove caminhos locais sensíveis mesmo com prefixo porcelain do Git', () => {
+    expect(sanitizeProjectGitStatus(' M apps/web/page.tsx\n?? .worktrees/\n?? .claude/settings.local.json\n?? apps/web/.env.local'))
+      .toBe(' M apps/web/page.tsx');
   });
 });

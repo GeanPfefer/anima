@@ -1786,6 +1786,14 @@ remove somente a keyword comprovadamente incompatível. Ollama permanece com o
 schema integral. Duplicações seguem recusadas por códigos host. Regressões de
 payload/projeção/host verdes; sem novo egress; estado continua NOT_PROVEN.
 
+**PROJECT_ADVISOR_V0 = PASS (2026-08-24).** Prova pela UI real atravessou
+backend→contexto governado (11 fontes/quatro classes)→OpenAI
+`gpt-5.6-terra`→schema→parser→semântica (20 claims)→apresentação HTTP 200. A
+resposta separou corretamente fatos, prova, fronteiras, canonical e advisory.
+Banco/Git permaneceram idênticos e nenhum workflow/coder iniciou. O único achado
+pós-prova foi o nome não sensível `.worktrees/` no status Git; o prefixo porcelain
+foi corrigido e coberto sem novo egress. Detalhes no registro da sessão.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

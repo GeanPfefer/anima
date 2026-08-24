@@ -211,3 +211,29 @@ Estado permanece `PROJECT_ADVISOR_V0 = NOT_PROVEN`. Condição objetiva para nov
 E2E: projeção OpenAI sem keywords comprovadamente incompatíveis, testes de
 boundary/host verdes e uma resposta sintética passando estrutura+semântica —
 condição local satisfeita, ainda dependente de autorização externa futura.
+
+## Meta-prova E2E final: PASS
+
+Com a projeção OpenAI em `1f62852`, a UI real enviou a pergunta canônica uma vez.
+A trilha local comprovou: backend recebeu; builder produziu 11 fontes/quatro
+classes/20.897 caracteres; OpenAI `gpt-5.6-terra` aceitou o schema; retornou
+6.873 caracteres; parser estrutural e validador semântico aprovaram 20 claims;
+advisory foi apresentado; rota HTTP 200 em 20.025 ms. Sem retry.
+
+A resposta distinguiu estado observado, capacidades comprovadas, fronteiras,
+direções canônicas, recomendação, racional e limites. Claims de capacidade
+usaram evidência; direções usaram canonical; recomendação foi advisory com
+racional e reconheceu defasagem dos snapshots. Não houve alucinação material.
+
+Ausência de mutação: `work_items=60`, `work_events=601`, `work_focus=2`,
+`ai_conversations=189`; HEAD/dev/origin-dev `1f62852`, origin/main `99bec54` e
+diff rastreado vazio antes/depois; nenhum coder/workflow foi acionado.
+
+A resposta revelou uma borda não sensível de minimização: `?? .worktrees/`
+atravessou o filtro porque o prefixo porcelain contém espaço. Nenhum conteúdo da
+worktree foi enviado. Corrigido depois da prova ampliando o filtro e com regressão
+para `.worktrees`, `.claude` e `.env` sob prefixos Git. Gates finais: core 16/16;
+web pertinente 35/35; typecheck cinco workspaces; build web com dev parado;
+`diff --check`, PASS.
+
+`PROJECT_ADVISOR_V0 = PASS`.
