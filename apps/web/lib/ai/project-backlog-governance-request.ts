@@ -1,11 +1,10 @@
-import { isProjectBacklogMaterializationConfirmation, presentProjectBacklogProposal, validateProjectBacklogProposalDraft, type ProjectBacklogProposalDraft } from '@anima/core';
+import { classifyPendingProjectBacklogMessage, isProjectBacklogMaterializationConfirmation, presentProjectBacklogProposal, validateProjectBacklogProposalDraft, type ProjectBacklogProposalDraft } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type Client = SupabaseClient<Database>;
-type Result = { readonly text: string; readonly sourceMessageId?: string; readonly kind: 'proposal'|'revised'|'materialized'|'already_materialized' };
+type Result = { readonly text: string; readonly sourceMessageId?: string; readonly kind: 'proposal'|'revised'|'materialized'|'already_materialized'|'clarification' };
 const requestPattern = /(?:agora que decidimos|transformar essa decisao|colocar essa decisao em pratica|que trabalhos)/i;
-const revisionPattern = /^(?:tira|remove|divide|inclui|nao quero|não quero|isso nao e prioridade|isso não é prioridade)\b/i;
 const object = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
 
 export const buildLocalFirstBacklogDraft = (revision?: string): ProjectBacklogProposalDraft => ({
@@ -13,7 +12,11 @@ export const buildLocalFirstBacklogDraft = (revision?: string): ProjectBacklogPr
   rationale: revision ? `Decomposição revisada sob a restrição humana: ${revision}` : 'Separar observação de capacidade, decisão de roteamento e prova controlada reduz acoplamento e mantém cada recorte validável.',
   exclusions: ['Auto-provisioning de cloud', 'Criação automática de Pod ou recurso pago', 'Auto-approval e execução automática'],
   uncertainties: ['Limiares finais de capacidade e custo precisam ser calibrados com evidência operacional.'],
-  slices: [
+  slices: revision ? [
+    {sliceKey:'local-first-capacity-cost-policy',summary:'Registrar a política local-first de capacidade e custo',objective:'Representar a decisão de executar localmente por padrão e avaliar remoto por capacidade/custo, sem provisionar.',impactLevel:'structural',capability:'programming',dependencies:[],intent:{kind:'project_work'},proposal:{schemaVersion:1,data:{summary:'Registrar política local-first de capacidade e custo',objective:'Criar regra pura de admissão local/remota.',includedScope:['packages/core/src/work-orchestration/work-routing.ts'],excludedScope:['apps/web/lib/resident-host/'],expectedEffects:['Política tipada local-first'],risks:['Limiares exigirem calibração']}}},
+    {sliceKey:'paid-compute-human-gate',summary:'Exigir autorização humana antes de compute pago',objective:'Interromper antes de compute pago e apresentar tarefa, motivo, recurso e estimativa de custo.',impactLevel:'financial',capability:'programming',dependencies:['local-first-capacity-cost-policy'],intent:{kind:'project_work'},proposal:{schemaVersion:1,data:{summary:'Exigir autorização antes de compute pago',objective:'Adicionar fronteira humana fail-closed para compute pago.',includedScope:['packages/core/src/work-orchestration/integration-decision.ts'],excludedScope:['supabase/migrations/'],expectedEffects:['Compute pago nunca inicia sem autorização'],risks:['Classificação incorreta de custo']}}},
+    {sliceKey:'paid-compute-audit',summary:'Registrar autorização e custo efetivo',objective:'Preservar provenance da autorização e custo observado para auditoria de cada execução paga.',impactLevel:'financial',capability:'programming',dependencies:['paid-compute-human-gate'],intent:{kind:'project_work'},proposal:{schemaVersion:1,data:{summary:'Auditar autorização e custo de compute pago',objective:'Tornar uso pago rastreável por execução.',includedScope:['packages/core/src/work-orchestration/work-budget.ts'],excludedScope:['apps/web/lib/resident-host/'],expectedEffects:['Trilha auditável de autorização e custo'],risks:['Custo final indisponível no provider']}}},
+  ] : [
     { sliceKey:'compute-node-inventory',summary:'Representar nós e capacidade disponíveis',objective:'Criar um contrato provider-neutral para capacidade local/remota observada, sem provisionar recursos.',impactLevel:'structural',capability:'programming',dependencies:[],intent:{kind:'project_work'},proposal:{schemaVersion:1,data:{summary:'Representar nós e capacidade disponíveis',objective:'Modelar capacidade observada de compute sem provisioning.',includedScope:['packages/core/src/work-orchestration/resource-observation.ts'],excludedScope:['apps/web/lib/resident-host/'],expectedEffects:['Inventário tipado e testável de capacidade'],risks:['Modelar cedo demais atributos específicos de provider']}}},
     { sliceKey:'local-first-routing-policy',summary:'Definir política local-first por capacidade',objective:'Decidir local versus remoto por capacidade, custo e restrições, sem iniciar infraestrutura.',impactLevel:'structural',capability:'programming',dependencies:['compute-node-inventory'],intent:{kind:'project_work'},proposal:{schemaVersion:1,data:{summary:'Definir política local-first por capacidade',objective:'Produzir decisão pura e fail-closed de roteamento.',includedScope:['packages/core/src/work-orchestration/work-routing.ts'],excludedScope:['apps/web/lib/resident-host/'],expectedEffects:['Política determinística local-first'],risks:['Thresholds sem evidência suficiente']}}},
     { sliceKey:'controlled-routing-proof',summary:'Provar o roteamento sem auto-provisioning',objective:'Validar seleção local/remota com fixtures controladas e zero criação de infraestrutura.',impactLevel:'significant',capability:'programming',dependencies:['local-first-routing-policy'],intent:{kind:'project_work'},proposal:{schemaVersion:1,data:{summary:'Provar o roteamento sem auto-provisioning',objective:'Cobrir decisões e fronteiras com testes determinísticos.',includedScope:['packages/core/src/work-orchestration/work-routing.test.ts'],excludedScope:['supabase/migrations/'],expectedEffects:['Prova local de roteamento sem efeito externo'],risks:['Fixture não representar pressão real']}}},
@@ -33,11 +36,14 @@ async function persist(client: Client,userId:string,message:string): Promise<str
 export async function processProjectBacklogGovernanceRequest(input:{client:Client;userId:string;message:string}):Promise<Result|null>{
   const pending=await input.client.from('project_backlog_proposal_state').select('*').eq('status','awaiting_confirmation').order('created_at',{ascending:false}).limit(2);
   if(pending.error) throw new Error('backlog_pending_read_failed');
-  if((pending.data?.length??0)>1) return null;
+  if((pending.data?.length??0)>1) return {kind:'clarification',text:'Há mais de uma proposta de backlog aguardando confirmação. Diga qual delas deseja revisar.'};
   const current=pending.data?.[0];
   if(current){
     if(!current.id || !current.version || !current.source_decision_id || !current.source_decision_version) throw new Error('backlog_pending_invalid');
-    if(revisionPattern.test(input.message.trim())){
+    const classified=classifyPendingProjectBacklogMessage(input.message);
+    if(classified.kind==='clarification_required') return {kind:'revised',text:'Você quer revisar apenas os trabalhos propostos, mantendo intacta a decisão ratificada?'};
+    if(classified.kind==='reject') return {kind:'revised',text:'Entendi. Não materializarei esta proposta. Se quiser, posso encerrá-la explicitamente em um próximo passo.'};
+    if(classified.kind==='request_changes'){
       const source=await persist(input.client,input.userId,input.message); const key=`backlog-change:${source}`;
       const changed=await input.client.rpc('request_project_backlog_proposal_changes',{proposal_id:current.id,expected_version:current.version,source_message_id:source,idempotency_key:key,requested_changes:input.message});
       if(changed.error) throw new Error('backlog_revision_failed');
@@ -45,7 +51,7 @@ export async function processProjectBacklogGovernanceRequest(input:{client:Clien
       if(created.error) throw new Error('backlog_revision_create_failed'); const v=object(created.data);
       return {kind:'revised',sourceMessageId:source,text:`Revisei a proposta (versão ${v.version}).\n\n${presentProjectBacklogProposal(draft)}`};
     }
-    if(!isProjectBacklogMaterializationConfirmation(input.message)) return null;
+    if(classified.kind!=='materialize') return null;
     const source=await persist(input.client,input.userId,input.message);
     const materialized=await input.client.rpc('materialize_project_backlog_proposal',{proposal_id:current.id,expected_version:current.version,confirmation_message_id:source,idempotency_key:`backlog-materialize:${current.id}:v${current.version}`,provenance:{source:'human_confirmation',actor:'user'}});
     if(materialized.error) throw new Error('backlog_materialization_failed'); const ids=object(materialized.data).work_item_ids as unknown[]|undefined;

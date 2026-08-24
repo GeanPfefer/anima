@@ -16,6 +16,7 @@ export type ProjectBacklogGovernanceResult =
   | { readonly kind: 'no_work_required'; readonly text: string }
   | { readonly kind: 'proposal'; readonly proposalId: string; readonly version: number; readonly text: string }
   | { readonly kind: 'changes_requested'; readonly text: string }
+  | { readonly kind: 'rejected' | 'clarification'; readonly text: string }
   | { readonly kind: 'materialized'; readonly workItemIds: readonly string[]; readonly text: string };
 
 export async function processProjectBacklogGovernance(input: {
@@ -29,6 +30,8 @@ export async function processProjectBacklogGovernance(input: {
   if (pending) {
     const intent = interpretProjectBacklogConversation(input.message, true);
     if (intent.kind === 'conversation') return { kind: 'conversation' };
+    if(intent.kind==='clarification_required') return {kind:'clarification',text:'Você quer revisar apenas os trabalhos propostos, sem alterar a decisão ratificada?'};
+    if(intent.kind==='reject') return {kind:'rejected',text:'Entendi. Não vou registrar nem materializar essa proposta de backlog.'};
     const sourceMessageId = await deps.persistHumanMessage(input.message);
     if (intent.kind === 'request_changes') {
       await deps.requestChanges({ proposal: pending, sourceMessageId, requestedChanges: intent.requestedChanges });

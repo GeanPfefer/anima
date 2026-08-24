@@ -1952,6 +1952,14 @@ core/chat/materializer verdes e pgTAP 31/31; nenhum provider externo, approval,
 Supervisor ou execução. Ver [arquitetura](../arquitetura/backlog-proposal-v0.md)
 e [registro](../registros/2026-08-24-backlog-proposal-v0.md).
 
+**BACKLOG_PROPOSAL_NATURAL_REVISION_ROUTING_V0_LOCAL = PASS (2026-08-24).** A
+primeira E2E parou porque uma reformulação longa caiu no chat comum; V1 e todos
+os invariantes permaneceram intactos. O roteamento agora classifica intenção no
+contexto de uma proposta pendente, preserva perguntas/conversa, pede
+esclarecimento para mudança de autoridade ou múltiplas propostas e encaminha
+reformulações estruturadas ao lifecycle de revisão. A futura V2 exclui expansões
+do texto não autoritativo. [Registro](../registros/2026-08-24-backlog-proposal-revisao-natural.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o
