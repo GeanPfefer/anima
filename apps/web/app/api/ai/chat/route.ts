@@ -132,9 +132,9 @@ export async function POST(req: NextRequest) {
         });
       }
       if (resolution.kind === 'not_found') {
-        return new Response('Não encontrei um item inequívoco para essa referência. Informe o ID exato do item.', {
+        return Response.json({ error: 'Não encontrei um item visível e inequívoco para essa referência. Informe o ID exato de um item acessível nesta conta.' }, {
           status: 404,
-          headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Anima-Capability': 'project-advisor-item-drilldown-v0', 'X-Anima-Mutation': 'none' },
+          headers: { 'X-Anima-Capability': 'project-advisor-item-drilldown-v0', 'X-Anima-Mutation': 'none' },
         });
       }
       const [{ data: itemRow }, { data: eventRows }] = await Promise.all([

@@ -1843,6 +1843,20 @@ A bifurcação ocorre antes dos detectores/gravadores do chat e declara mutation
 incluindo adversariais, passaram localmente sem provider. E2E pela UI real não foi
 executada nem autorizada neste recorte.
 
+**PROJECT_ADVISOR_ITEM_DRILLDOWN_V0_E2E = NOT_PROVEN (2026-08-24).** A pergunta
+autorizada chegou à rota real, mas o item `d3890a38…` havia sido criado pela
+identidade descartável da execução remota e não era visível para a conta
+autenticada no navegador. A consulta RLS retornou zero candidatos compatíveis e
+a resolução terminou HTTP 404 em 758 ms, antes da projeção e de qualquer log de
+request do provider; portanto a chamada OpenAI autorizada não foi consumida. Os
+quatro contadores de banco, HEAD/origens e diff permaneceram no baseline. A UI
+mostrou “Erro desconhecido” porque esse 404 era texto, embora o cliente leia JSON
+em respostas não-2xx. Correção local estreita: `not_found` agora retorna JSON com
+mensagem segura sobre visibilidade/acesso, preservando 404, RLS e fail-closed;
+regressão, typecheck dos cinco workspaces e build com dev parado passaram. Não
+houve retry. Nova E2E precisa de item pertencente à mesma identidade da UI ou de
+login explícito na identidade-fixture, além de nova autorização de egress.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

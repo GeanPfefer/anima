@@ -26,4 +26,9 @@ describe('fronteira read-only do item drill-down', () => {
     expect(branch).toContain('projectItemDrilldownEvidenceForContext(projection)');
     expect(branch).not.toMatch(/content:\s*(?:eventRows|itemRow|projection\.timeline)/);
   });
+
+  test('item invisível ou inexistente devolve erro JSON compreensível para a UI', () => {
+    expect(branch).toContain("return Response.json({ error: 'Não encontrei um item visível e inequívoco");
+    expect(branch).toContain('status: 404');
+  });
 });
