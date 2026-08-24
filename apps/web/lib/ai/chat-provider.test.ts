@@ -116,4 +116,31 @@ describe('chat provider', () => {
     expect(body.tool_choice).toBe('auto');
     expect(body.instructions).toMatch(/repositório Anima/i);
   });
+
+  test('propaga o mesmo contrato estruturado para OpenAI sem habilitar ferramentas', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ output_text: '{}', output: [] }) });
+    const schema = { type: 'object', properties: {}, additionalProperties: false };
+    await streamChatProvider({
+      provider: 'openai', systemPrompt: 'sistema', messages: [],
+      structuredOutput: { name: 'proof', schema },
+    });
+    const body = JSON.parse(((global.fetch as jest.Mock).mock.calls[0][1] as RequestInit).body as string) as {
+      text?: { format?: { type?: string; name?: string; strict?: boolean; schema?: unknown } };
+      tools?: unknown;
+    };
+    expect(body.text?.format).toEqual({ type: 'json_schema', name: 'proof', strict: true, schema });
+    expect(body.tools).toBeUndefined();
+  });
+
+  test('propaga o mesmo contrato estruturado para Ollama', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: true, body: bodyFrom(['{"done":true}\n']) });
+    const schema = { type: 'object', properties: {}, additionalProperties: false };
+    await streamChatProvider({
+      provider: 'ollama', systemPrompt: 'sistema', messages: [],
+      structuredOutput: { name: 'proof', schema },
+    });
+    const body = JSON.parse(((global.fetch as jest.Mock).mock.calls[0][1] as RequestInit).body as string) as { format?: unknown };
+    expect(body.format).toEqual(schema);
+  });
 });

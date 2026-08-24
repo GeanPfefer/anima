@@ -1710,6 +1710,75 @@ ADR-002 e não tem o defeito.
 
 ## Dependências entre fases
 
+### SELF_UNDERSTANDING / PROJECT_ADVISOR_V0 (2026-08-24)
+
+Implementado no chat web, ainda **não declarado PASS**. A rota reconhece somente
+perguntas explícitas sobre o estado/próximo passo do projeto e bifurca antes dos
+detectores que poderiam gravar XP, notas, quests ou trabalho. O builder local usa
+uma allowlist de manifesto, PRD, plano/backlog, arquitetura, prova e registros;
+acrescenta apenas metadados RLS de `work_items`/`work_events` e observação Git
+read-only. Cada fonte carrega autoridade e proveniência, com orçamento total,
+remoção de caminhos locais sensíveis e redação defensiva de tokens.
+
+O `ProjectAdvisor` é uma porta provider-agnostic. OpenAI e Ollama recebem o mesmo
+contrato estruturado, sem as ferramentas genéricas de repositório. Validação do
+host exige fontes canônicas, estado observado e evidência; exige evidência para
+"comprovado" e fonte canônica para "direção"; resposta insuficiente ou sem
+proveniência falha fechada. O resultado é advisory: não escreve classificação,
+decisão, backlog, `work_item`, evento ou ação.
+
+Gates da implementação: typecheck dos cinco workspaces; 72/72 suítes web
+(887 testes), 46/46 core (1014), mobile 5/5 (51), Supabase 1 suíte/8 testes
+(1 suíte e 2 testes já skipados); build Next 56 páginas. Warnings preexistentes
+de `act(...)` e acesso ao ignore Git global não são regressões. Próximo ponto
+exato: prova pela UI real. O Ollama local estava indisponível e a autorização
+OpenAI da meta-prova anterior não se transfere; portanto, qualquer egress exige
+novo checkpoint humano explícito. Até lá, `PROJECT_ADVISOR_V0 = PASS` não pode
+ser declarado.
+
+**Primeira meta-prova real — NOT_PROVEN (2026-08-24).** Uma única chamada OpenAI
+autorizada foi consumida. O contexto foi reconstruído localmente após a prova:
+20.544 caracteres, nove fontes de arquivo/Git, quatro classes presentes e zero
+problemas de suficiência. A mensagem fail-closed genérica só é usada para erros
+que não são `ChatProviderError`; como o contexto passou e o provider retornaria
+erro próprio em falha HTTP/configuração, a resposta OpenAI chegou ao host e a
+falha ocorreu no parse/validação posterior. O subtipo exato não foi preservado
+pela instrumentação anterior. Causa determinística: o boundary pedia JSON apenas
+por prompt, sem schema nativo; causa adicional de observabilidade: o catch
+apagava a classe local. Correção sem novo egress: `structuredOutput` comum aos
+providers (JSON Schema estrito em OpenAI Responses; `format` schema no Ollama),
+regressões para ambos e log somente do código local, sem conteúdo/contexto. O
+gate semântico permanece igual e fail-closed. Nova prova externa é necessária e
+exige nova autorização; não há retry coberto por esta sessão.
+
+**Segunda tentativa — inconclusiva por ambiente (2026-08-24).** A pergunta foi
+submetida uma vez, mas `next build` e `next dev` haviam compartilhado `.next`: o
+HTML passou a apontar para CSS/chunks dev que respondiam 404. O dev não crashou
+nem reiniciou. Sem stdout recuperável e sem persistência do advisory read-only,
+não há prova de que o POST/provider foi alcançado; consumação da chamada fica
+indeterminada. Banco e Git permaneceram no baseline. `.next` foi removido com o
+dev parado, o servidor reiniciado e seis assets CSS/JS confirmados em HTTP 200.
+Terceira prova externa/autorização necessária; gates futuros devem parar o dev
+antes de `next build` e reiniciar sobre artefato limpo.
+
+**Terceira tentativa — NOT_PROVEN sem novo retry (2026-08-24).** A trilha local
+provou UI→backend→contexto (11 fontes/quatro classes/21.409 chars)→OpenAI
+`gpt-5.6-terra`→resposta estruturada de 5.194 chars; o host recusou com
+`project_advisor_answer_invalid` antes da apresentação. Schema/parse estruturais
+passaram, semântica falhou; a versão ainda não registrava a lista segura de
+códigos, e conteúdo não foi persistido. Gate preservado. Pós-prova, o JSON Schema
+passou a restringir dinamicamente IDs por autoridade/seção e a observabilidade
+passou a guardar apenas códigos semânticos; regressão + typecheck verdes. Banco e
+Git ficaram no baseline. Estado final: NOT_PROVEN, sem quarta chamada/commit/push.
+
+**Consolidação local do contrato (2026-08-24).** Sem novo egress, claim ganhou
+classes de autoridade declaradas e verificadas contra as fontes; prompt, schema
+dinâmico e host foram alinhados à mesma matriz. Onze respostas adversariais e
+três positivas (incluindo resposta mínima sintética por estrutura+semântica)
+estão verdes, com 13 códigos seguros e sem log de conteúdo. Build final ocorreu
+com dev parado/`.next` limpo. O recorte é versionável e útil, mas permanece
+`PROJECT_ADVISOR_V0 = NOT_PROVEN` até futura E2E explicitamente autorizada.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

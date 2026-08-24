@@ -19,6 +19,10 @@ export type ChatProviderRequest = {
   // No chat pessoal (default) NENHUMA ferramenta de repositório é anexada e o
   // modelo não recebe instrução para investigar o código.
   developmentMode?: boolean;
+  structuredOutput?: {
+    readonly name: string;
+    readonly schema: Record<string, unknown>;
+  };
 };
 
 // Instrução de desenvolvimento — anexada SOMENTE no modo de desenvolvimento.
@@ -109,6 +113,7 @@ async function streamOllama(request: ChatProviderRequest): Promise<ChatProviderS
         ...request.messages,
       ],
       options: { num_ctx: 8192 },
+      ...(request.structuredOutput ? { format: request.structuredOutput.schema } : {}),
     }),
   }).catch(() => null);
 
@@ -180,6 +185,16 @@ async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderS
         store: false,
         instructions,
         input,
+        ...(request.structuredOutput ? {
+          text: {
+            format: {
+              type: 'json_schema',
+              name: request.structuredOutput.name,
+              strict: true,
+              schema: request.structuredOutput.schema,
+            },
+          },
+        } : {}),
         // Ferramentas SÓ no modo de desenvolvimento e ENQUANTO abaixo do limite.
         // Na resposta final forçada, nenhuma ferramenta é oferecida.
         ...(developmentMode && !forceFinal ? { tools: OPENAI_PROJECT_TOOLS, tool_choice: 'auto' } : {}),

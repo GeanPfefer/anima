@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-24 (sessão: execução autônoma canônica comprovada até `review` com planner OpenAI limitado à planning boundary e `qwen3-coder:latest` remoto em RunPod A40 por túnel SSH; worktree, gates, evidência e Verifier permaneceram locais; ver [registro](docs/registros/2026-08-24-execucao-canonica-no-remoto.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-24 (sessão: Project Advisor V0 implementado no chat web com contexto governado read-only, autoridade/proveniência e boundary de provider; prova viva aguarda autorização específica de egress ou runtime local proporcional; ver [registro](docs/registros/2026-08-24-project-advisor-v0.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -1237,6 +1237,7 @@ anima/
 - [x] **Extração de entidades corrigida** — `lib/extract-entities.ts` chamado direto no chat route (antes fazia `fetch` interno sem cookies → 401); `format:json` removido do prompt (o qwen retornava 1 objeto só, perdendo entidades — agora força array); `scripts/backfill-entities.mjs` reprocessa histórico
 - [x] **Grafo de vida** — `/graph`; Three.js + física force-directed; nós de pilares (tamanho por nível) + nós de entidades (toggle on/off); arestas de correlação por co-ocorrência temporal entre pilares + arestas entidade↔pilar via `entity_mentions`; viewport anchored (bounds clampados)
 - [x] **Dedup de atividades e quests no chat** — pilar+data+nota e título de quest deduplicados antes de persistir no route do chat; evita duplicatas quando detecção roda em mensagens similares
+- [ ] **Project Advisor V0 (implementado e consolidado localmente; E2E NOT_PROVEN)** — a pergunta sobre estado e próximo passo do Anima desvia antes de qualquer detector/mutação para um `Project Context Builder` allowlisted. O contexto distingue `canonical`, `observed_state`, `evidence` e `historical_record`, inclui observação RLS reduzida de `work_items`/`work_events`, aplica orçamento e redação de segredos e atravessa um boundary OpenAI/Ollama sem ferramentas de repositório. A resposta estruturada separa fatos, capacidades comprovadas, fronteiras, direções canônicas e recomendação; claims sem proveniência/autoridade falham fechados. Após a tentativa final recusar semântica, prompt/schema/host foram alinhados, `authorityClasses` passaram a ser conferidas contra fontes e 11 casos adversariais + 3 positivos ficaram verdes, inclusive resposta mínima por estrutura+semântica. Nenhum conteúdo bruto é logado. Sem quarta chamada, `PROJECT_ADVISOR_V0 = PASS` permanece proibido.
 
 ---
 

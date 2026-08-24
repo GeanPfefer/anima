@@ -32,6 +32,9 @@ import {
 import { planExecutableProjectWork, shouldRunProjectPlanner } from '@/lib/ai/project-work-planner';
 import { isDevelopmentChatAuthorized, resolveChatDevelopmentMode } from '@/lib/ai/chat-surface';
 import { shouldReuseOrphanUserMessage } from '@/lib/ai/chat-turn';
+import { isProjectAdvisorQuestion } from '@anima/core';
+import { buildProjectAdvisorContext } from '@/lib/ai/project-context-builder';
+import { createProjectAdvisor, renderProjectAdvisory } from '@/lib/ai/project-advisor';
 
 function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -90,6 +93,84 @@ export async function POST(req: NextRequest) {
     requested: requestedDevelopmentMode === true,
     authorized: isDevelopmentChatAuthorized(user.id),
   });
+
+  // SELF_UNDERSTANDING / PROJECT_ADVISOR_V0. Esta bifurcação acontece antes de
+  // todos os detectores e gravadores do chat: consultar o estado do projeto não
+  // pode criar nota, XP, quest, work_item, classificação, decisão ou ação.
+  // O único insumo do provider é o contexto governado e allowlisted construído
+  // no host; as ferramentas genéricas de repositório permanecem desligadas.
+  if (isProjectAdvisorQuestion(message)) {
+    try {
+      console.info('[project-advisor] request received', { provider, userScoped: true });
+      // Observação viva, isolada pela sessão/RLS e reduzida a metadados não
+      // pessoais. Payloads, pedidos originais e contexto de execução não saem.
+      const { data: projectItems } = await supabase.from('work_items')
+        .select('id, state, capability, updated_at')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+        .limit(20);
+      const itemIds = (projectItems ?? []).map(item => item.id);
+      const { data: projectEvents } = itemIds.length > 0
+        ? await supabase.from('work_events')
+          .select('work_item_id, event_type, author, created_at')
+          .in('work_item_id', itemIds)
+          .order('created_at', { ascending: false })
+          .limit(80)
+        : { data: [] };
+      const stateCounts = Object.entries((projectItems ?? []).reduce<Record<string, number>>((counts, item) => {
+        const key = `${item.capability}:${item.state}`;
+        counts[key] = (counts[key] ?? 0) + 1;
+        return counts;
+      }, {})).sort(([left], [right]) => left.localeCompare(right));
+      const eventCounts = Object.entries((projectEvents ?? []).reduce<Record<string, number>>((counts, event) => {
+        const key = `${event.event_type}:${event.author}`;
+        counts[key] = (counts[key] ?? 0) + 1;
+        return counts;
+      }, {})).sort(([left], [right]) => left.localeCompare(right));
+      const context = await buildProjectAdvisorContext(message, [
+        {
+          id: 'live-work-state',
+          authority: 'observed_state',
+          provenance: 'Supabase RLS: work_items metadata read-only',
+          observedAt: new Date().toISOString(),
+          content: JSON.stringify({ counts: stateCounts, latestObservedAt: projectItems?.[0]?.updated_at ?? null }),
+        },
+        {
+          id: 'live-work-evidence',
+          authority: 'evidence',
+          provenance: 'Supabase RLS: work_events metadata read-only',
+          observedAt: new Date().toISOString(),
+          content: JSON.stringify({ counts: eventCounts, latestObservedAt: projectEvents?.[0]?.created_at ?? null }),
+        },
+      ]);
+      console.info('[project-advisor] governed context ready', {
+        sources: context.sources.length,
+        authorities: [...new Set(context.sources.map(source => source.authority))].sort(),
+        characters: context.sources.reduce((total, source) => total + source.content.length, 0),
+      });
+      const answer = await createProjectAdvisor(provider).advise(context);
+      console.info('[project-advisor] advisory presented', { sections: 6, mutation: 'none' });
+      return new Response(renderProjectAdvisory(answer), {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-AI-Provider': provider,
+          'X-AI-Model': 'project-advisor-v0',
+          'X-Anima-Capability': 'project-advisor-v0',
+          'X-Anima-Mutation': 'none',
+        },
+      });
+    } catch (error) {
+      // Não registra conteúdo nem contexto: somente a classe/código local que
+      // permite distinguir contexto, parse e validação numa prova posterior.
+      console.warn('[project-advisor] fail-closed', {
+        code: error instanceof Error ? error.message.split(':', 1)[0] : 'unknown_error',
+      });
+      const providerError = error instanceof ChatProviderError
+        ? error
+        : new ChatProviderError('Não há evidência governada suficiente para responder com segurança agora.', 503);
+      return Response.json({ error: providerError.message }, { status: providerError.status });
+    }
+  }
 
   // ── Contexto do usuário ────────────────────────────────────────
   const [profileRes, pillarsRes, recentRes, questsRes, entitiesRes, identityRes] = await Promise.all([
