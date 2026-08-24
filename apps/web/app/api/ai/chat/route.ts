@@ -22,6 +22,7 @@ import {
   type WorkOrchestrationChatKind,
 } from '@/lib/work-orchestration/chat-guidance';
 import { isWorkContinuation, isWorkHistoryQuery, resolveWorkFocus } from '@anima/core';
+import { mapWorkEvent, mapWorkItem } from '@anima/supabase';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { serializeReconstructedWorkPresentation, serializeWorkPresentation } from '@/lib/work-orchestration/serialize';
 import {
@@ -34,10 +35,15 @@ import { isDevelopmentChatAuthorized, resolveChatDevelopmentMode } from '@/lib/a
 import { shouldReuseOrphanUserMessage } from '@/lib/ai/chat-turn';
 import {
   buildOperationalProjectSnapshot,
+  buildProjectItemDrilldownProjection,
   isProjectAdvisorQuestion,
+  isProjectItemDrilldownQuestion,
   operationalEvidenceForContext,
   operationalProjectSnapshotAudit,
   operationalStateForContext,
+  projectItemDrilldownEvidenceForContext,
+  projectItemDrilldownStateForContext,
+  resolveProjectItemReference,
 } from '@anima/core';
 import { buildProjectAdvisorContext } from '@/lib/ai/project-context-builder';
 import { createProjectAdvisor, renderProjectAdvisory } from '@/lib/ai/project-advisor';
@@ -99,6 +105,74 @@ export async function POST(req: NextRequest) {
     requested: requestedDevelopmentMode === true,
     authorized: isDevelopmentChatAuthorized(user.id),
   });
+
+  // Drill-down operacional read-only: resolve uma única referência antes de ler
+  // payloads e só deixa a projeção tipada/minimizada atravessar para o Advisor.
+  // Ambiguidade falha fechado sem chamar provider e sem criar memória paralela.
+  if (isProjectItemDrilldownQuestion(message)) {
+    try {
+      const observedAt = new Date().toISOString();
+      const [{ data: candidates }, { data: focus }] = await Promise.all([
+        supabase.from('work_items').select('id, state, capability, updated_at')
+          .eq('user_id', user.id).order('updated_at', { ascending: false }).limit(100),
+        supabase.from('work_focus').select('work_item_id').eq('user_id', user.id).maybeSingle(),
+      ]);
+      const resolution = resolveProjectItemReference({
+        message,
+        candidates: (candidates ?? []).map(candidate => ({
+          id: candidate.id, state: candidate.state, capability: candidate.capability, updatedAt: candidate.updated_at,
+        })),
+        currentFocusId: focus?.work_item_id ?? null,
+      });
+      if (resolution.kind === 'clarification_required') {
+        const choices = resolution.candidates.map(candidate =>
+          `- ${candidate.itemRef} — ${candidate.capability}, estado ${candidate.state}`).join('\n');
+        return new Response(`Há mais de um item compatível. Indique o ID exato:\n${choices}`, {
+          headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Anima-Capability': 'project-advisor-item-drilldown-v0', 'X-Anima-Mutation': 'none' },
+        });
+      }
+      if (resolution.kind === 'not_found') {
+        return new Response('Não encontrei um item inequívoco para essa referência. Informe o ID exato do item.', {
+          status: 404,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Anima-Capability': 'project-advisor-item-drilldown-v0', 'X-Anima-Mutation': 'none' },
+        });
+      }
+      const [{ data: itemRow }, { data: eventRows }] = await Promise.all([
+        supabase.from('work_items').select('*').eq('user_id', user.id).eq('id', resolution.itemId).single(),
+        supabase.from('work_events').select('*').eq('work_item_id', resolution.itemId)
+          .order('created_at', { ascending: false }).limit(200),
+      ]);
+      if (!itemRow) throw new Error('project_item_drilldown_item_unavailable');
+      const projection = buildProjectItemDrilldownProjection({
+        item: mapWorkItem(itemRow), events: (eventRows ?? []).map(mapWorkEvent), observedAt,
+      });
+      const context = await buildProjectAdvisorContext(message, [
+        {
+          id: 'item-operational-state', authority: 'observed_state', temporalRole: 'current_projection',
+          provenance: 'Supabase RLS read-only projection: one resolved work_item; personal fields omitted',
+          observedAt, content: projectItemDrilldownStateForContext(projection),
+        },
+        {
+          id: 'item-operational-evidence', authority: 'evidence', temporalRole: 'event_sequence',
+          provenance: 'Supabase RLS read-only projection: typed summaries for one item; raw payload omitted',
+          observedAt, content: projectItemDrilldownEvidenceForContext(projection),
+        },
+      ]);
+      const answer = await createProjectAdvisor(provider).advise(context);
+      return new Response(renderProjectAdvisory(answer), {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8', 'X-AI-Provider': provider,
+          'X-AI-Model': 'project-advisor-item-drilldown-v0',
+          'X-Anima-Capability': 'project-advisor-item-drilldown-v0', 'X-Anima-Mutation': 'none',
+        },
+      });
+    } catch (error) {
+      console.warn('[project-advisor-item-drilldown] fail-closed', {
+        code: error instanceof Error ? error.message.split(':', 1)[0] : 'unknown_error',
+      });
+      return Response.json({ error: 'Não há evidência governada suficiente para detalhar esse item com segurança agora.' }, { status: 503 });
+    }
+  }
 
   // SELF_UNDERSTANDING / PROJECT_ADVISOR_V0. Esta bifurcação acontece antes de
   // todos os detectores e gravadores do chat: consultar o estado do projeto não

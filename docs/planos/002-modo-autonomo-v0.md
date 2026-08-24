@@ -1828,6 +1828,21 @@ cabiam no contexto e não concluiu ausência global a partir da cobertura bounde
 Histórico apareceu como trajetória/prova específica, nunca como estado atual.
 Banco e Git permaneceram nos baselines e nenhum workflow/coder foi acionado.
 
+**PROJECT_ADVISOR_ITEM_DRILLDOWN_V0_LOCAL = PASS (2026-08-24).** O Advisor agora
+possui um recorte explícito para compreender um único item operacional sem ampliar
+o snapshot global. A resolução prefere UUID estável, aceita prefixo único,
+ordinal determinístico e foco atual apenas para referência dêitica; múltiplos
+candidatos produzem esclarecimento, nunca escolha silenciosa. Depois da resolução,
+uma projeção pura resume estado atual, timeline de até 20 eventos, tentativa,
+falha, resultado, parecer do Verifier e evidências tipadas observadas. Códigos e
+mensagens de erro só atravessam quando bounded e sem marcadores sensíveis; do
+contrário a causa permanece explicitamente desconhecida. Payloads crus, pedido,
+proposta, prompt/output, comandos, logs, caminhos e diffs não entram no contexto.
+A bifurcação ocorre antes dos detectores/gravadores do chat e declara mutation
+`none`. Fixtures de falha conhecida, falha desconhecida e review verificado,
+incluindo adversariais, passaram localmente sem provider. E2E pela UI real não foi
+executada nem autorizada neste recorte.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

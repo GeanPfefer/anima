@@ -5,3 +5,4 @@ export * from './onboarding';
 export * from './work-orchestration';
 export * from './project-advisor';
 export * from './project-operational-snapshot';
+export * from './project-item-drilldown';
