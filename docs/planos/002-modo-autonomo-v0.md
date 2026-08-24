@@ -1940,6 +1940,18 @@ Antes da prova, uma regressão estreita garantiu que o replay imediato de “Sim
 não caia no provider nem crie outra ratificação. Ver o
 [registro E2E](../registros/2026-08-24-project-conversation-governance-v0-e2e.md).
 
+**BACKLOG_PROPOSAL_V0_LOCAL = PASS (2026-08-24).** Decisão ratificada e backlog
+foram separados por uma proposta própria, versionada e append-only. O sistema
+pode formular 1–12 slices ou concluir honestamente `no_work_required`; modelo e
+planner permanecem advisory. Revisão supersede a versão anterior. Uma segunda
+confirmação humana materializa todos os slices em uma única RPC atômica e
+idempotente, criando somente `work_items.proposed`, com cadeia de IDs decisão →
+backlog proposal → confirmação → item e dependências preservadas. RLS, ownership,
+allowlist e validação de execution spec falham fechados. Prova determinística:
+core/chat/materializer verdes e pgTAP 31/31; nenhum provider externo, approval,
+Supervisor ou execução. Ver [arquitetura](../arquitetura/backlog-proposal-v0.md)
+e [registro](../registros/2026-08-24-backlog-proposal-v0.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

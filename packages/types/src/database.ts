@@ -564,6 +564,206 @@ export type Database = {
         }
         Relationships: []
       }
+      project_backlog_events: {
+        Row: {
+          actor: string
+          created_at: string
+          event_type: Database["public"]["Enums"]["project_backlog_event_type"]
+          id: string
+          idempotency_key: string
+          proposal_id: string
+          proposal_version: number
+          provenance: Json
+          seq: number
+          user_id: string
+        }
+        Insert: {
+          actor: string
+          created_at?: string
+          event_type: Database["public"]["Enums"]["project_backlog_event_type"]
+          id?: string
+          idempotency_key: string
+          proposal_id: string
+          proposal_version: number
+          provenance: Json
+          seq?: never
+          user_id: string
+        }
+        Update: {
+          actor?: string
+          created_at?: string
+          event_type?: Database["public"]["Enums"]["project_backlog_event_type"]
+          id?: string
+          idempotency_key?: string
+          proposal_id?: string
+          proposal_version?: number
+          provenance?: Json
+          seq?: never
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_backlog_events_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposal_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_events_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_events_user_id_proposal_id_proposal_versio_fkey"
+            columns: ["user_id", "proposal_id", "proposal_version"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposal_state"
+            referencedColumns: ["user_id", "id", "version"]
+          },
+          {
+            foreignKeyName: "project_backlog_events_user_id_proposal_id_proposal_versio_fkey"
+            columns: ["user_id", "proposal_id", "proposal_version"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposals"
+            referencedColumns: ["user_id", "id", "version"]
+          },
+        ]
+      }
+      project_backlog_materialized_items: {
+        Row: {
+          created_at: string
+          dependencies: Json
+          position: number
+          proposal_id: string
+          proposal_version: number
+          slice_key: string
+          work_item_id: string
+        }
+        Insert: {
+          created_at?: string
+          dependencies?: Json
+          position: number
+          proposal_id: string
+          proposal_version: number
+          slice_key: string
+          work_item_id: string
+        }
+        Update: {
+          created_at?: string
+          dependencies?: Json
+          position?: number
+          proposal_id?: string
+          proposal_version?: number
+          slice_key?: string
+          work_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_backlog_materialized_items_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposal_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_materialized_items_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_materialized_items_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: true
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_backlog_proposals: {
+        Row: {
+          created_at: string
+          exclusions: Json
+          id: string
+          idempotency_key: string
+          objective: string
+          provenance: Json
+          rationale: string
+          slices: Json
+          source_decision_id: string
+          source_decision_version: number
+          supersedes_id: string | null
+          uncertainties: Json
+          user_id: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          exclusions?: Json
+          id?: string
+          idempotency_key: string
+          objective: string
+          provenance: Json
+          rationale?: string
+          slices: Json
+          source_decision_id: string
+          source_decision_version: number
+          supersedes_id?: string | null
+          uncertainties?: Json
+          user_id: string
+          version: number
+        }
+        Update: {
+          created_at?: string
+          exclusions?: Json
+          id?: string
+          idempotency_key?: string
+          objective?: string
+          provenance?: Json
+          rationale?: string
+          slices?: Json
+          source_decision_id?: string
+          source_decision_version?: number
+          supersedes_id?: string | null
+          uncertainties?: Json
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_backlog_proposals_source_decision_id_fkey"
+            columns: ["source_decision_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposal_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_proposals_source_decision_id_fkey"
+            columns: ["source_decision_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_proposals_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposal_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_proposals_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_decision_events: {
         Row: {
           actor: string
@@ -1212,6 +1412,89 @@ export type Database = {
           },
         ]
       }
+      project_backlog_proposal_state: {
+        Row: {
+          created_at: string | null
+          exclusions: Json | null
+          id: string | null
+          idempotency_key: string | null
+          objective: string | null
+          provenance: Json | null
+          rationale: string | null
+          slices: Json | null
+          source_decision_id: string | null
+          source_decision_version: number | null
+          status: string | null
+          supersedes_id: string | null
+          uncertainties: Json | null
+          user_id: string | null
+          version: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          exclusions?: Json | null
+          id?: string | null
+          idempotency_key?: string | null
+          objective?: string | null
+          provenance?: Json | null
+          rationale?: string | null
+          slices?: Json | null
+          source_decision_id?: string | null
+          source_decision_version?: number | null
+          status?: never
+          supersedes_id?: string | null
+          uncertainties?: Json | null
+          user_id?: string | null
+          version?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          exclusions?: Json | null
+          id?: string | null
+          idempotency_key?: string | null
+          objective?: string | null
+          provenance?: Json | null
+          rationale?: string | null
+          slices?: Json | null
+          source_decision_id?: string | null
+          source_decision_version?: number | null
+          status?: never
+          supersedes_id?: string | null
+          uncertainties?: Json | null
+          user_id?: string | null
+          version?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_backlog_proposals_source_decision_id_fkey"
+            columns: ["source_decision_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposal_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_proposals_source_decision_id_fkey"
+            columns: ["source_decision_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_proposals_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposal_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_backlog_proposals_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "project_backlog_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_decision_proposal_state: {
         Row: {
           alternatives: Json | null
@@ -1472,6 +1755,21 @@ export type Database = {
         Args: { p_work_item_id: string }
         Returns: Json
       }
+      create_project_backlog_proposal: {
+        Args: {
+          exclusions: Json
+          idempotency_key: string
+          objective: string
+          provenance: Json
+          rationale: string
+          slices: Json
+          source_decision_id: string
+          source_decision_version: number
+          supersedes_id?: string
+          uncertainties: Json
+        }
+        Returns: Json
+      }
       create_project_decision_proposal: {
         Args: {
           alternatives: Json
@@ -1590,6 +1888,16 @@ export type Database = {
           similarity: number
           xp_record_id: string
         }[]
+      }
+      materialize_project_backlog_proposal: {
+        Args: {
+          confirmation_message_id: string
+          expected_version: number
+          idempotency_key: string
+          proposal_id: string
+          provenance: Json
+        }
+        Returns: Json
       }
       next_autonomous_work: {
         Args: never
@@ -1782,6 +2090,16 @@ export type Database = {
         }
       }
       reopen_latest_conversation: { Args: never; Returns: string }
+      request_project_backlog_proposal_changes: {
+        Args: {
+          expected_version: number
+          idempotency_key: string
+          proposal_id: string
+          requested_changes: string
+          source_message_id: string
+        }
+        Returns: Json
+      }
       request_work_control: {
         Args: {
           p_action: string
@@ -2155,6 +2473,11 @@ export type Database = {
         | "physical_achievement"
         | "meaningful_connection"
       event_type: "quest_milestone" | "context_event" | "state_change"
+      project_backlog_event_type:
+        | "proposal_created"
+        | "changes_requested"
+        | "materialization_confirmed"
+        | "materialized"
       project_decision_event_type:
         | "proposal_created"
         | "ratified"
@@ -2491,6 +2814,12 @@ export const Constants = {
         "meaningful_connection",
       ],
       event_type: ["quest_milestone", "context_event", "state_change"],
+      project_backlog_event_type: [
+        "proposal_created",
+        "changes_requested",
+        "materialization_confirmed",
+        "materialized",
+      ],
       project_decision_event_type: [
         "proposal_created",
         "ratified",
