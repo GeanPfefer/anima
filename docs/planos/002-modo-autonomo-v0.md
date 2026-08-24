@@ -1960,6 +1960,14 @@ esclarecimento para mudança de autoridade ou múltiplas propostas e encaminha
 reformulações estruturadas ao lifecycle de revisão. A futura V2 exclui expansões
 do texto não autoritativo. [Registro](../registros/2026-08-24-backlog-proposal-revisao-natural.md).
 
+**BACKLOG_PROPOSAL_NATURAL_REVISION_V0_E2E = PASS (2026-08-24).** Pela UI real,
+a reformulação estruturada foi classificada host-side como revisão da V1, que
+recebeu `changes_requested`; a V2 foi criada sob a mesma decisão, ligada por
+`supersedes_id` e permaneceu `awaiting_confirmation`. A mensagem humana e a
+derivação técnica têm proveniência separada. Não houve provider, materialização,
+novo trabalho, approval ou execução. O próximo checkpoint é a revisão humana da
+V2. [Registro](../registros/2026-08-24-backlog-proposal-revisao-natural-e2e.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

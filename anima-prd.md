@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-24 (sessão: Backlog Proposal V0 comprovado localmente — decisão ratificada pode originar proposta versionada; somente nova confirmação humana materializa atomicamente work items `proposed`, sem approval ou execução; ver [arquitetura](docs/arquitetura/backlog-proposal-v0.md), [registro](docs/registros/2026-08-24-backlog-proposal-v0.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-24 (sessão: revisão natural do Backlog Proposal V0 comprovada pela UI real — V1 recebeu `changes_requested` e V2 permaneceu `awaiting_confirmation`, sem materialização, approval ou execução; ver [arquitetura](docs/arquitetura/backlog-proposal-v0.md), [registro](docs/registros/2026-08-24-backlog-proposal-revisao-natural-e2e.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
