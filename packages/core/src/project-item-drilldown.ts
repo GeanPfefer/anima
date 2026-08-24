@@ -177,6 +177,11 @@ export function projectItemDrilldownForContext(projection: ProjectItemDrilldownP
   return JSON.stringify(projection);
 }
 
+export function projectResolvedItemQuestion(itemRef: string): string {
+  if (!new RegExp(`^${UUID.source}$`, 'i').test(itemRef)) throw new Error('project_item_ref_invalid');
+  return `Explique diretamente o estado e as evidências do item operacional ${itemRef}. A identidade deste item já foi resolvida deterministicamente pelo host e é definitiva para esta resposta. Não reinterprete a referência original, ordinais, anáforas ou outros candidatos.`;
+}
+
 export function projectItemDrilldownStateForContext(projection: ProjectItemDrilldownProjection): string {
   return JSON.stringify({
     itemRef: projection.itemRef,

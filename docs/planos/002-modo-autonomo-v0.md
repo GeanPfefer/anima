@@ -1907,6 +1907,17 @@ T1/T2/T3; schema, parser e semântica passaram em todos. Banco permaneceu
 `60/601/2/191`, Git permaneceu no baseline e nenhum workflow/coder foi acionado.
 Detalhes no [registro E2E](../registros/2026-08-24-project-advisor-conversational-item-reference-e2e-pass.md).
 
+**PROJECT_ADVISOR_CONVERSATIONAL_REFERENCE_CLARITY_V0_LOCAL = PASS
+(2026-08-24).** O host já resolvia corretamente a identidade, mas ainda enviava
+a anáfora original como `context.question`, permitindo ressalvas textuais do
+provider sobre “primeiro/segundo”. Agora o boundary substitui essa pergunta por
+uma instrução governada contendo apenas o UUID definitivo e declara que a
+identidade já foi resolvida pelo host e não deve ser reinterpretada. As duas
+fontes fresh do item permanecem idênticas; conversa, ordinal e candidatos não
+atravessam. Ambiguidade continua terminando antes do provider. Prova local sem
+egress: 69 testes core, 29 web, typecheck dos cinco workspaces e build de 56
+páginas. [Registro](../registros/2026-08-24-project-advisor-conversational-reference-clarity-v0.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

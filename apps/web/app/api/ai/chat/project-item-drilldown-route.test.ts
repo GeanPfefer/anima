@@ -22,6 +22,8 @@ describe('fronteira read-only do item drill-down', () => {
   });
 
   test('payload bruto nunca é adicionado diretamente ao contexto do provider', () => {
+    expect(branch).toContain('buildProjectAdvisorContext(projectResolvedItemQuestion(projection.itemRef)');
+    expect(branch).not.toContain('buildProjectAdvisorContext(message');
     expect(branch).toContain('projectItemDrilldownStateForContext(projection)');
     expect(branch).toContain('projectItemDrilldownEvidenceForContext(projection)');
     expect(branch).not.toMatch(/content:\s*(?:eventRows|itemRow|projection\.timeline)/);

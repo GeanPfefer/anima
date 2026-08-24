@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-24 (sessão: referências conversacionais do Project Advisor comprovadas E2E pela UI real, com overview → primeiro/segundo → RLS/projeção fresh e ambiguidade local sem provider; ver [registro](docs/registros/2026-08-24-project-advisor-conversational-item-reference-e2e-pass.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-24 (sessão: clareza local das referências conversacionais do Advisor — após resolução host-side, o provider recebe somente a pergunta governada sobre o UUID definitivo, sem anáfora original ou candidatos; ver [registro](docs/registros/2026-08-24-project-advisor-conversational-reference-clarity-v0.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---

@@ -44,6 +44,7 @@ import {
   operationalProjectSnapshotAudit,
   operationalStateForContext,
   projectItemDrilldownEvidenceForContext,
+  projectResolvedItemQuestion,
   projectItemDrilldownStateForContext,
   parsePresentedItemReferences,
   resolveConversationalItemReference,
@@ -166,7 +167,7 @@ export async function POST(req: NextRequest) {
       const projection = buildProjectItemDrilldownProjection({
         item: mapWorkItem(itemRead.data), events: (eventRead.data ?? []).map(mapWorkEvent), observedAt,
       });
-      const context = await buildProjectAdvisorContext(message, [
+      const context = await buildProjectAdvisorContext(projectResolvedItemQuestion(projection.itemRef), [
         {
           id: 'item-operational-state', authority: 'observed_state', temporalRole: 'current_projection',
           provenance: 'Supabase RLS read-only projection: one resolved work_item; personal fields omitted',

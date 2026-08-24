@@ -10,6 +10,7 @@ import {
   buildProjectItemDrilldownProjection,
   isProjectItemDrilldownQuestion,
   projectItemDrilldownEvidenceForContext,
+  projectResolvedItemQuestion,
   projectItemDrilldownStateForContext,
   resolveProjectItemReference,
 } from './project-item-drilldown';
@@ -58,6 +59,18 @@ describe('resolução conservadora do drill-down', () => {
 });
 
 describe('projeção operacional por item', () => {
+  test.each(['o primeiro', 'o segundo'])('pergunta ao provider recebe identidade definitiva sem a anáfora %s', original => {
+    const question = projectResolvedItemQuestion(ID);
+    expect(question).toContain(ID);
+    expect(question).toContain('resolvida deterministicamente pelo host');
+    expect(question).toContain('definitiva');
+    expect(question).not.toContain(original);
+    expect(question).not.toContain(OTHER);
+    expect(question).not.toContain('lista de candidatos');
+  });
+  test('recusa referência inválida na pergunta governada', () => {
+    expect(() => projectResolvedItemQuestion('primeiro')).toThrow('project_item_ref_invalid');
+  });
   test('ordena timeline, limita a 20 e preserva temporalidade', () => {
     const events = Array.from({ length: 22 }, (_, index) => event('checkpoint_recorded', `2026-08-${String(index + 1).padStart(2, '0')}T10:00:00Z`, {}, `e-${index}`)).reverse();
     const value = project(events);
