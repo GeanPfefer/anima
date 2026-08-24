@@ -1,5 +1,25 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — execução canônica autônoma no nó remoto (2026-08-24)
+
+`CANONICAL_AUTO_EXECUTION_REMOTE_NODE = PASS`. Uma identidade-fixture allowlisted, sem
+`service_role` no runtime, partiu de fila vazia e percorreu a cadeia real: `FIX-01` → planner
+OpenAI restrito à planning boundary → materialização → `work_approved author=system` →
+classificação/roteamento/claim → `execution_started` → coder
+`ollama:remote/runpod-a40:qwen3-coder:latest` → worktree e gate locais → evidências
+host-observed → Verifier `verified` (7 checks, 0 gaps, 0 violações) → `review`.
+
+O transporte V0 é um túnel SSH loopback `127.0.0.1:21434` → A40
+`127.0.0.1:11434`; não há fallback silencioso nem endpoint público. O recorte dedicado
+`ANIMA_WORKTREE_OLLAMA_*` preserva o default local e exige localidade/identidade explícitas,
+URL loopback sem credenciais e falha fechada. A execução levou ~41 s (`coder=10,272 ms`,
+gate typecheck=21,462 ms); branch/worktree de execução foi descartada e a árvore principal
+não recebeu o arquivo-fixture. Detalhes e métricas no registro
+`docs/registros/2026-08-24-execucao-canonica-no-remoto.md`.
+
+Próxima fronteira: decisão humana sobre manter/parar o Pod. Não implementar ainda Node
+Registry, Capacity Router, auto-provision/auto-stop, integração, PR, merge ou deploy.
+
 ## Continuação — diferencial OpenAI autorizado, bloqueado antes do planner (2026-08-23)
 
 Gean autorizou explicitamente uma única prova diferencial estreita com egress minimizado

@@ -23,6 +23,7 @@ import {
   type WorkloadCostProfileKey,
 } from '@anima/core';
 import { WORKTREE_CODER_BACKENDS, coderBackendId, type CoderProvider } from './coder-backend';
+import { resolveOllamaCoderRuntimeConfig } from './ollama-coder-config';
 import { readMachineSnapshot } from './machine-telemetry';
 
 // Seam central host-side do Resource Governor V0 (leitura). Em vez de espalhar
@@ -183,7 +184,7 @@ export function declaredGateCommands(item: WorkItem): readonly string[] {
  * de ambiente (o backendId divergiria), então preferimos omitir o parecer a arriscar aconselhar
  * sobre um coder que talvez nem seja o executado. Provider desconhecido também ⇒ `null`.
  */
-export function declaredCoderBackendId(item: WorkItem): string | null {
+export function declaredCoderBackendId(item: WorkItem, env: Record<string, string | undefined> = process.env): string | null {
   const spec = (item.intent as { execution_spec?: { coder_backend?: unknown; model?: unknown } } | null | undefined)?.execution_spec;
   if (!spec) return null;
   const model = typeof spec.model === 'string' && spec.model.trim().length > 0 ? spec.model : null;
@@ -192,6 +193,10 @@ export function declaredCoderBackendId(item: WorkItem): string | null {
   // Só backends do fluxo real (`backendFor`) são previsíveis — inclui deepseek-harness,
   // agora selecionável por deploy. Provider fora do conjunto ⇒ não previsível.
   if (!(WORKTREE_CODER_BACKENDS as readonly string[]).includes(kind)) return null;
+  if (kind === 'ollama') {
+    const runtime = resolveOllamaCoderRuntimeConfig(model, env);
+    return runtime.ok ? runtime.value.backendId : null;
+  }
   return coderBackendId(kind as CoderProvider, model);
 }
 

@@ -170,7 +170,7 @@ export async function callOllamaChat(input: OllamaChatInput): Promise<OllamaChat
     });
   } catch (error) {
     if (controller.signal.aborted && (!input.signal || !input.signal.aborted)) {
-      throw new OllamaProtocolError('ollama_timeout', `o modelo local não respondeu em ${input.timeoutMs} ms.`);
+      throw new OllamaProtocolError('ollama_timeout', `o modelo Ollama não respondeu em ${input.timeoutMs} ms.`);
     }
     throw new OllamaProtocolError('ollama_transport_error', error instanceof Error ? error.message : String(error));
   } finally {
@@ -178,7 +178,7 @@ export async function callOllamaChat(input: OllamaChatInput): Promise<OllamaChat
     if (input.signal) input.signal.removeEventListener('abort', onAbort);
   }
   if (!response || !response.ok) {
-    throw new OllamaProtocolError('ollama_transport_error', `o modelo local respondeu ${response ? response.status : 'sem conexão'}.`);
+    throw new OllamaProtocolError('ollama_transport_error', `o modelo Ollama respondeu ${response ? response.status : 'sem conexão'}.`);
   }
   const body = await response.json().catch(() => null) as {
     message?: { content?: unknown };

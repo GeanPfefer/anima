@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-12 (sessão: proveniência do cancelamento do executor corrigida — `author=executor` no `work_cancelled` do executor, separado do cancelamento humano; migration `20260812000000`, pgTAP 29/730 — e clareza de prompt do coder na volta final; hardening determinístico do coder/executor (orçamento e truncamento do reparo medidos no payload real; cobertura do desfecho de zero alterações); e o desacople do transporte estendido à execução comandada (`/execute-commanded`, mesma classe do `3c9ac70`); ver [registro](docs/registros/2026-08-12-proveniencia-cancelamento-executor.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-24 (sessão: execução autônoma canônica comprovada até `review` com planner OpenAI limitado à planning boundary e `qwen3-coder:latest` remoto em RunPod A40 por túnel SSH; worktree, gates, evidência e Verifier permaneceram locais; ver [registro](docs/registros/2026-08-24-execucao-canonica-no-remoto.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
@@ -24,7 +24,7 @@
 
 **Nome provisório:** Anima  
 **Plataformas:** Desktop, Web, Mobile (todas)  
-**Estágio atual:** Em desenvolvimento ativo — produto pessoal funcional em web e mobile; Modo Construção comprovado; Modo Autônomo V0 concluído até a Fase F; Fase G (experiência no chat) em andamento — UX-01 a UX-04 ratificados; paridade mobile, integração GPT (provedor selecionável) e runner trazido para `tools/local-agent` prontos para revisão (não ratificados)
+**Estágio atual:** Em desenvolvimento ativo — produto pessoal funcional em web e mobile; Modo Construção comprovado; Modo Autônomo V0 concluiu uma execução canônica autônoma real até `review`, inclusive com inferência remota substituível e plano de controle local; Fase G (experiência no chat) em andamento — UX-01 a UX-04 ratificados; paridade mobile, integração GPT (provedor selecionável) e runner trazido para `tools/local-agent` prontos para revisão (não ratificados)
 **Repositório:** https://github.com/GeanPfefer/anima  
 **Público inicial:** O próprio criador (uso pessoal para validar o sistema)  
 **Público futuro:** Aberto ao público após o sistema estar bem estruturado e funcional

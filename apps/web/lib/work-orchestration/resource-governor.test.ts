@@ -255,6 +255,17 @@ describe('declaredGateCommands + composeItemGateAdvisory (pré-execução)', () 
       .toBe(new GptCoderBackend({ model: 'gpt-5.6-terra', fetchImpl }).id);
   });
 
+  test('identidade prevista distingue coder remoto atrás do túnel', () => {
+    expect(declaredCoderBackendId(
+      itemWithSpec({ coder_backend: 'ollama', model: 'qwen3-coder:latest' }),
+      {
+        ANIMA_WORKTREE_OLLAMA_URL: 'http://127.0.0.1:21434',
+        ANIMA_WORKTREE_OLLAMA_LOCALITY: 'remote',
+        ANIMA_WORKTREE_OLLAMA_NODE_ID: 'runpod-a40',
+      },
+    )).toBe('ollama:remote/runpod-a40:qwen3-coder:latest');
+  });
+
   test('o coder declarado ganha parecer AO LADO dos gates, com referência de custo própria', () => {
     // Histórico machine-wide: gates + coder com SPREAD (um caro 84s, um barato 2s) para que
     // "caro" emerja entre coders — a distribuição do coder é relativa ao próprio coder.

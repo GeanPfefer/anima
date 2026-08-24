@@ -27,6 +27,38 @@ describe('resolveExecutorRoute — seleção explícita', () => {
     if (selection.ok) expect(selection.route.adapter.id).toBe('worktree-v1');
   });
 
+  test('config remota explícita identifica o node no candidato sem hardcode de URL', () => {
+    const saved = {
+      url: process.env.ANIMA_WORKTREE_OLLAMA_URL,
+      locality: process.env.ANIMA_WORKTREE_OLLAMA_LOCALITY,
+      node: process.env.ANIMA_WORKTREE_OLLAMA_NODE_ID,
+    };
+    process.env.ANIMA_WORKTREE_OLLAMA_URL = 'http://127.0.0.1:21434';
+    process.env.ANIMA_WORKTREE_OLLAMA_LOCALITY = 'remote';
+    process.env.ANIMA_WORKTREE_OLLAMA_NODE_ID = 'runpod-a40';
+    try {
+      const selection = resolveExecutorRoute(anima, { repoRoot: tmpdir() });
+      expect(selection.ok).toBe(true);
+      if (selection.ok) expect(selection.route.candidate.modelRef).toBe('ollama:remote/runpod-a40:qwen3-coder:latest');
+    } finally {
+      if (saved.url === undefined) delete process.env.ANIMA_WORKTREE_OLLAMA_URL; else process.env.ANIMA_WORKTREE_OLLAMA_URL = saved.url;
+      if (saved.locality === undefined) delete process.env.ANIMA_WORKTREE_OLLAMA_LOCALITY; else process.env.ANIMA_WORKTREE_OLLAMA_LOCALITY = saved.locality;
+      if (saved.node === undefined) delete process.env.ANIMA_WORKTREE_OLLAMA_NODE_ID; else process.env.ANIMA_WORKTREE_OLLAMA_NODE_ID = saved.node;
+    }
+  });
+
+  test('config remota inválida falha fechado sem fallback local', () => {
+    const saved = process.env.ANIMA_WORKTREE_OLLAMA_URL;
+    process.env.ANIMA_WORKTREE_OLLAMA_URL = 'https://gpu.example:11434';
+    try {
+      const selection = resolveExecutorRoute(anima, { repoRoot: tmpdir() });
+      expect(selection.ok).toBe(false);
+      if (!selection.ok) expect(selection.error.code).toBe('coder_backend_invalid');
+    } finally {
+      if (saved === undefined) delete process.env.ANIMA_WORKTREE_OLLAMA_URL; else process.env.ANIMA_WORKTREE_OLLAMA_URL = saved;
+    }
+  });
+
   test('backend determinístico só entra por injeção (teste)', () => {
     const selection = resolveExecutorRoute(anima, { repoRoot: tmpdir(), backendOverride: new ScriptedCoderBackend([]) });
     expect(selection.ok).toBe(true);

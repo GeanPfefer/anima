@@ -45,6 +45,11 @@ const editReq = (sha: string) => JSON.stringify({
 });
 
 describe('OllamaCoderBackend — protocolo limitado', () => {
+  test('preserva identidade local e aceita identidade remota explícita', () => {
+    expect(new OllamaCoderBackend({ model: 'x' }).id).toBe('ollama:x');
+    expect(new OllamaCoderBackend({ model: 'x', backendId: 'ollama:remote/runpod-a40:x' }).id)
+      .toBe('ollama:remote/runpod-a40:x');
+  });
   test('fluxo leitura → edição aplica a mudança e o backend id é preservado', async () => {
     const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
     const { fetchImpl } = scriptedFetch([readReq, editReq(bigSha)]);

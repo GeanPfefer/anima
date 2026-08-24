@@ -3,6 +3,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import type { ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
+import { resolveOllamaCoderRuntimeConfig } from './ollama-coder-config';
 import { GptCoderBackend } from './gpt-coder';
 import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from './execution';
@@ -89,8 +90,13 @@ const backendFor = (
   // Intelig?ncias selecion?veis atr?s da mesma seam CoderBackend.
   // O Supervisor continua sem conhecer detalhes de provider.
   if (kind === 'ollama') {
+    const model = contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
+    const runtime = resolveOllamaCoderRuntimeConfig(model);
+    if (!runtime.ok) return { error: runtime.error };
     return new OllamaCoderBackend({
-      model: contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
+      model,
+      url: runtime.value.url,
+      backendId: runtime.value.backendId,
     });
   }
 

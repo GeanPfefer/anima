@@ -39,6 +39,8 @@ import {
 export interface OllamaCoderOptions {
   readonly model: string;
   readonly url?: string;
+  /** Identidade observada; ausente preserva `ollama:<model>`. */
+  readonly backendId?: string;
   readonly timeoutMs?: number;
   /** Injeção para teste; por padrão o fetch global. */
   readonly fetchImpl?: typeof fetch;
@@ -75,7 +77,7 @@ export class OllamaCoderBackend implements CoderBackend {
   private readonly budget: ContextBudget;
 
   constructor(private readonly options: OllamaCoderOptions) {
-    this.id = coderBackendId('ollama', options.model);
+    this.id = options.backendId ?? coderBackendId('ollama', options.model);
     this.url = options.url ?? process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 120_000;
@@ -143,7 +145,7 @@ export class OllamaCoderBackend implements CoderBackend {
           signal,
         );
         return {
-          summary: `Modelo local ${this.options.model} aplicou ${touched.length} edição(ões) estruturada(s) por protocolo limitado, para revisão.`,
+          summary: `Modelo Ollama ${this.options.model} aplicou ${touched.length} edição(ões) estruturada(s) por protocolo limitado, para revisão.`,
           touchedResources: touched,
         };
       }
