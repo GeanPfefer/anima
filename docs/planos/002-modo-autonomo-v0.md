@@ -1816,6 +1816,18 @@ presente. O host agora exige ao menos `current_projection` ou `event_sequence`
 nessa categoria; histórico puro continua permitido no racional como trajetória.
 Banco e Git ficaram no baseline. Nova E2E requer autorização independente.
 
+**PROJECT_ADVISOR_FRESH_OPERATIONAL_STATE_V1_E2E = PASS (2026-08-24).** Antes do
+reteste, o snapshot ganhou auditoria segura de `generatedAt`, cobertura e
+contagens, sem conteúdo/payload. A única chamada autorizada atravessou UI real,
+snapshot `2026-08-24T19:42:30.960Z`, contexto governado (11 fontes/quatro
+autoridades), OpenAI `gpt-5.6-terra`, schema, parser, semantic validator (15
+claims) e apresentação HTTP 200. O snapshot tinha 2 ativos, 13 falhas não
+superadas, 0 bloqueios, 0 review e nenhum foco; a resposta não inventou os estados
+ausentes, explicitou que somente 4 falhas
+cabiam no contexto e não concluiu ausência global a partir da cobertura bounded.
+Histórico apareceu como trajetória/prova específica, nunca como estado atual.
+Banco e Git permaneceram nos baselines e nenhum workflow/coder foi acionado.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o
