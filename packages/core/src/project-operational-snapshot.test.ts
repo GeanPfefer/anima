@@ -1,4 +1,4 @@
-import { buildOperationalProjectSnapshot, operationalEvidenceForContext, operationalStateForContext } from './project-operational-snapshot';
+import { buildOperationalProjectSnapshot, operationalEvidenceForContext, operationalProjectSnapshotAudit, operationalStateForContext } from './project-operational-snapshot';
 
 const snapshot = () => buildOperationalProjectSnapshot({
   generatedAt: '2026-08-24T16:00:00.000Z',
@@ -75,4 +75,21 @@ test('limite atingido é exposto como incerteza e não como cobertura total', ()
     expect.stringContaining('item projection reached its bound'),
     expect.stringContaining('event projection reached its bound'),
   ]));
+});
+
+test('auditoria contém somente horário e contagens seguras', () => {
+  const audit = operationalProjectSnapshotAudit(snapshot());
+  expect(audit).toEqual({
+    generatedAt: '2026-08-24T16:00:00.000Z',
+    itemCount: 5,
+    eventCount: 6,
+    activeWork: 5,
+    recentlyFailed: 1,
+    awaitingReview: 2,
+    blocked: 1,
+    currentFocusPresent: true,
+    verifiedEvidence: 1,
+    uncertainties: 0,
+  });
+  expect(JSON.stringify(audit)).not.toMatch(/itemRef|payload|content|request|prompt|secret|user/i);
 });

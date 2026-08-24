@@ -56,6 +56,19 @@ export type OperationalProjectSnapshot = {
   readonly uncertainties: readonly string[];
 };
 
+export type OperationalProjectSnapshotAudit = {
+  readonly generatedAt: string;
+  readonly itemCount: number;
+  readonly eventCount: number;
+  readonly activeWork: number;
+  readonly recentlyFailed: number;
+  readonly awaitingReview: number;
+  readonly blocked: number;
+  readonly currentFocusPresent: boolean;
+  readonly verifiedEvidence: number;
+  readonly uncertainties: number;
+};
+
 const ACTIVE_STATES = new Set<Enums<'work_state'>>(['approved', 'in_progress', 'blocked', 'review', 'changes_requested']);
 const VERIFIED_EVENT_TYPES = new Set<OperationalProjectSnapshot['recentVerifiedEvidence'][number]['type']>([
   'host_observed_evidence_recorded',
@@ -177,4 +190,19 @@ export function operationalEvidenceForContext(snapshot: OperationalProjectSnapsh
     value = encode(visible, snapshot.recentVerifiedEvidence.length - visible.length);
   }
   return value;
+}
+
+export function operationalProjectSnapshotAudit(snapshot: OperationalProjectSnapshot): OperationalProjectSnapshotAudit {
+  return {
+    generatedAt: snapshot.generatedAt,
+    itemCount: snapshot.coverage.itemCount,
+    eventCount: snapshot.coverage.eventCount,
+    activeWork: snapshot.activeWork.length,
+    recentlyFailed: snapshot.recentlyFailed.length,
+    awaitingReview: snapshot.awaitingReview.length,
+    blocked: snapshot.blocked.length,
+    currentFocusPresent: snapshot.currentFocus !== null,
+    verifiedEvidence: snapshot.recentVerifiedEvidence.length,
+    uncertainties: snapshot.uncertainties.length,
+  };
 }

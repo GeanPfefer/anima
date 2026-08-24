@@ -36,6 +36,7 @@ import {
   buildOperationalProjectSnapshot,
   isProjectAdvisorQuestion,
   operationalEvidenceForContext,
+  operationalProjectSnapshotAudit,
   operationalStateForContext,
 } from '@anima/core';
 import { buildProjectAdvisorContext } from '@/lib/ai/project-context-builder';
@@ -142,6 +143,7 @@ export async function POST(req: NextRequest) {
         itemsTruncated: (projectItems?.length ?? 0) === 50,
         eventsTruncated: (projectEvents?.length ?? 0) === 200,
       });
+      console.info('[project-advisor] operational snapshot ready', operationalProjectSnapshotAudit(snapshot));
       const context = await buildProjectAdvisorContext(message, [
         {
           id: 'live-operational-state',
@@ -162,6 +164,7 @@ export async function POST(req: NextRequest) {
       ]);
       console.info('[project-advisor] governed context ready', {
         sources: context.sources.length,
+        sourceIds: context.sources.map(source => source.id).sort(),
         authorities: [...new Set(context.sources.map(source => source.authority))].sort(),
         characters: context.sources.reduce((total, source) => total + source.content.length, 0),
       });
