@@ -24,7 +24,7 @@ export type ProjectItemReferenceCandidate = {
 };
 
 export type ProjectItemResolution =
-  | { readonly kind: 'resolved'; readonly itemId: string; readonly basis: 'stable_id' | 'unique_prefix' | 'ordinal' | 'current_focus' | 'unique_candidate' }
+  | { readonly kind: 'resolved'; readonly itemId: string; readonly basis: 'stable_id' | 'unique_prefix' | 'ordinal' | 'current_focus' | 'unique_candidate' | 'conversational_reference' }
   | { readonly kind: 'clarification_required'; readonly candidates: readonly { readonly itemRef: string; readonly state: WorkItem['state']; readonly capability: WorkItem['capability'] }[] }
   | { readonly kind: 'not_found' };
 

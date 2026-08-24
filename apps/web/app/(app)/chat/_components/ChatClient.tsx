@@ -10,6 +10,7 @@ import { findInterruptedTurn, type InterruptedTurn } from '@/lib/ai/chat-turn';
 
 type Message = { id?: string; role: 'user' | 'assistant'; content: string };
 type ChatProvider = 'openai' | 'ollama';
+type PresentedItemReference = { workItemId: string; ordinal: number; role: 'active_item' | 'unresolved_failure' | 'review_item' | 'blocked_item' };
 
 type ProposedLink = {
   childId:    string;
@@ -54,6 +55,9 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Id persistido da mensagem do usuário do turno em andamento (para retry idempotente).
   const lastSourceId = useRef<string | undefined>(undefined);
+  // Proveniência conversacional efêmera: somente refs estruturadas do último
+  // turno do Advisor, nunca texto/payload nem autorização em cache.
+  const presentedItemReferences = useRef<readonly PresentedItemReference[]>([]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -234,7 +238,7 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
     const res = await fetch('/api/ai/chat', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ message: text, provider: devActive ? 'openai' : provider, ...(devActive ? { developmentMode: true } : {}), ...(retryMessageId ? { retryMessageId } : {}) }),
+      body:    JSON.stringify({ message: text, provider: devActive ? 'openai' : provider, ...(presentedItemReferences.current.length > 0 ? { presentedItemReferences: presentedItemReferences.current } : {}), ...(devActive ? { developmentMode: true } : {}), ...(retryMessageId ? { retryMessageId } : {}) }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
@@ -244,6 +248,13 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
     const linksHeader    = res.headers.get('X-Pillar-Links');
     const sourceMessageId = res.headers.get('X-Source-Message-Id');
     const orchestrationHeader = res.headers.get('X-Work-Orchestration');
+    const presentedItemsHeader = res.headers.get('X-Anima-Presented-Items');
+    if (presentedItemsHeader) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(presentedItemsHeader)) as unknown;
+        if (Array.isArray(parsed)) presentedItemReferences.current = parsed as PresentedItemReference[];
+      } catch { /* metadado opcional inválido não substitui o último conjunto válido */ }
+    }
     // Guarda o id persistido para um eventual retry idempotente deste turno.
     if (sourceMessageId) lastSourceId.current = sourceMessageId;
     if (sourceMessageId) setMessages(previous => previous.map((message, index) => index === previous.length - 2 && message.role === 'user' ? { ...message, id: sourceMessageId } : message));

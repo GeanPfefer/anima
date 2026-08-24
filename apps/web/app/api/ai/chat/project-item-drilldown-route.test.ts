@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 describe('fronteira read-only do item drill-down', () => {
   const source = readFileSync(resolve(__dirname, 'route.ts'), 'utf8');
-  const start = source.indexOf('if (isProjectItemDrilldownQuestion(message))');
+  const start = source.indexOf('if (isProjectItemDrilldownQuestion(message) || isConversationalItemReferenceQuestion(message))');
   const end = source.indexOf('// SELF_UNDERSTANDING / PROJECT_ADVISOR_V0');
   const branch = source.slice(start, end);
 
@@ -30,5 +30,14 @@ describe('fronteira read-only do item drill-down', () => {
   test('item invisível ou inexistente devolve erro JSON compreensível para a UI', () => {
     expect(branch).toContain("return Response.json({ error: 'Não encontrei um item visível e inequívoco");
     expect(branch).toContain('status: 404');
+  });
+
+  test('referência contextual é validada antes da leitura e RLS continua na leitura fresh', () => {
+    expect(branch).toContain('parsePresentedItemReferences(requestedPresentedItemReferences)');
+    expect(branch).toContain('resolveConversationalItemReference(message, presented)');
+    expect(branch).toContain(".eq('user_id', user.id).eq('id', resolution.itemId).single()");
+    expect(branch).toContain("itemRead.error?.code === 'PGRST116'");
+    expect(branch).toContain('não está mais visível para esta conta');
+    expect(branch).toContain("resolution.basis === 'conversational_reference'");
   });
 });

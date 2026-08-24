@@ -179,3 +179,68 @@ describe('superfície de autodesenvolvimento do Anima', () => {
     expect(bodies[0]?.developmentMode).toBeUndefined();
   });
 });
+
+describe('proveniência conversacional de itens do Advisor', () => {
+  beforeEach(() => { global.fetch = jest.fn(); Element.prototype.scrollIntoView = jest.fn(); });
+  afterEach(() => jest.restoreAllMocks());
+
+  test('retém somente refs estruturadas do último Advisor e as envia no turno seguinte', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const refs = [{ workItemId: '11111111-1111-4111-8111-111111111111', ordinal: 1, role: 'active_item' }];
+    let chatCalls = 0;
+    (global.fetch as jest.Mock).mockImplementation((input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/ai/history') return Promise.resolve({ ok: true, json: async () => [] });
+      if (url === '/api/work-orchestration/focus') return Promise.resolve({ ok: true, json: async () => ({ ok: true, value: null }) });
+      if (url === '/api/ai/chat') {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        const headers = chatCalls++ === 0 ? { 'X-Anima-Presented-Items': encodeURIComponent(JSON.stringify(refs)) } : {};
+        let sent = false;
+        return Promise.resolve({ ok: true, headers: { get: (key: string) => headers[key as keyof typeof headers] ?? null },
+          body: { getReader: () => ({ read: async () => sent ? { done: true } : (sent = true, { done: false, value: new TextEncoder().encode('ok') }) }) } } as unknown as Response);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, value: null }) });
+    });
+    render(<ChatClient isFirstTime={false} userName="Ana" />);
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Como está o projeto?' } });
+    fireEvent.click(screen.getByRole('button', { name: '↑' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'E o primeiro?' } });
+    fireEvent.click(screen.getByRole('button', { name: '↑' }));
+    await waitFor(() => expect(bodies).toHaveLength(2));
+    expect(bodies[0]?.presentedItemReferences).toBeUndefined();
+    expect(bodies[1]?.presentedItemReferences).toEqual(refs);
+    expect(JSON.stringify(bodies[1])).not.toContain('payload');
+  });
+
+  test('apresentação mais recente vazia limpa referências antigas', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const refs = [{ workItemId: '11111111-1111-4111-8111-111111111111', ordinal: 1, role: 'active_item' }];
+    let calls = 0;
+    (global.fetch as jest.Mock).mockImplementation((input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/ai/history') return Promise.resolve({ ok: true, json: async () => [] });
+      if (url === '/api/work-orchestration/focus') return Promise.resolve({ ok: true, json: async () => ({ ok: true, value: null }) });
+      if (url === '/api/ai/chat') {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        const value = calls++ === 0 ? refs : calls === 2 ? [] : null;
+        let sent = false;
+        return Promise.resolve({ ok: true, headers: { get: (key: string) => key === 'X-Anima-Presented-Items' && value !== null ? encodeURIComponent(JSON.stringify(value)) : null },
+          body: { getReader: () => ({ read: async () => sent ? { done: true } : (sent = true, { done: false, value: new TextEncoder().encode('ok') }) }) } } as unknown as Response);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, value: null }) });
+    });
+    render(<ChatClient isFirstTime={false} userName="Ana" />);
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    for (const message of ['overview com item', 'overview sem item', 'o primeiro']) {
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: message } });
+      fireEvent.click(screen.getByRole('button', { name: '↑' }));
+      await waitFor(() => expect(bodies).toHaveLength(['overview com item', 'overview sem item', 'o primeiro'].indexOf(message) + 1));
+      await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    }
+    expect(bodies[1]?.presentedItemReferences).toEqual(refs);
+    expect(bodies[2]?.presentedItemReferences).toBeUndefined();
+  });
+});

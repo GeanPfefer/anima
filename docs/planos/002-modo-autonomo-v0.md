@@ -1871,6 +1871,19 @@ ausências e não inferiu atividade, interrupção, falha ou diagnóstico depois
 permaneceu `60/601/2/189`; HEAD, origens e diff permaneceram idênticos. Nenhum
 retry, coder, workflow ou mutação foi acionado.
 
+**PROJECT_ADVISOR_CONVERSATIONAL_ITEM_REFERENCE_V0_LOCAL = PASS (2026-08-24).**
+O substrate reutilizado é o próprio turno em memória do `ChatClient` e o canal de
+headers estruturados já usado pela superfície: depois de validar a resposta, o
+host extrai somente UUIDs exatos realmente mencionados, cruza com o snapshot e
+emite até 20 tuplas `{workItemId, ordinal, role}`. O cliente retém apenas o
+conjunto da apresentação mais recente; header vazio limpa refs stale e respostas
+não-Advisor não criam memória nova. No turno seguinte, ordinais e anáforas simples
+são resolvidos antes do provider. Ambiguidade produz esclarecimento, nunca escolha
+global. UUID/prefixo e foco anteriores continuam funcionando. A referência só
+identifica: item e eventos são relidos sob RLS, e perda de visibilidade retorna
+404 governado. Testes controlam A/B→primeiro/segundo e A+B→“esse?” ambíguo,
+incluindo payload adversarial, stale, RLS e chat normal. Nenhum egress ou mutação.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

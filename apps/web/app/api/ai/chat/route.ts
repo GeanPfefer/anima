@@ -36,6 +36,8 @@ import { shouldReuseOrphanUserMessage } from '@/lib/ai/chat-turn';
 import {
   buildOperationalProjectSnapshot,
   buildProjectItemDrilldownProjection,
+  derivePresentedItemReferences,
+  isConversationalItemReferenceQuestion,
   isProjectAdvisorQuestion,
   isProjectItemDrilldownQuestion,
   operationalEvidenceForContext,
@@ -43,6 +45,8 @@ import {
   operationalStateForContext,
   projectItemDrilldownEvidenceForContext,
   projectItemDrilldownStateForContext,
+  parsePresentedItemReferences,
+  resolveConversationalItemReference,
   resolveProjectItemReference,
 } from '@anima/core';
 import { buildProjectAdvisorContext } from '@/lib/ai/project-context-builder';
@@ -89,11 +93,12 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return new Response('Não autorizado', { status: 401 });
 
-  const { message, provider: requestedProvider, developmentMode: requestedDevelopmentMode, retryMessageId: requestedRetryMessageId } = await req.json() as {
+  const { message, provider: requestedProvider, developmentMode: requestedDevelopmentMode, retryMessageId: requestedRetryMessageId, presentedItemReferences: requestedPresentedItemReferences } = await req.json() as {
     message: string;
     provider?: unknown;
     developmentMode?: unknown;
     retryMessageId?: unknown;
+    presentedItemReferences?: unknown;
   };
   if (!message?.trim()) return new Response('Mensagem vazia', { status: 400 });
   const provider = parseChatProvider(requestedProvider);
@@ -109,7 +114,7 @@ export async function POST(req: NextRequest) {
   // Drill-down operacional read-only: resolve uma única referência antes de ler
   // payloads e só deixa a projeção tipada/minimizada atravessar para o Advisor.
   // Ambiguidade falha fechado sem chamar provider e sem criar memória paralela.
-  if (isProjectItemDrilldownQuestion(message)) {
+  if (isProjectItemDrilldownQuestion(message) || isConversationalItemReferenceQuestion(message)) {
     try {
       const observedAt = new Date().toISOString();
       const [{ data: candidates }, { data: focus }] = await Promise.all([
@@ -117,13 +122,23 @@ export async function POST(req: NextRequest) {
           .eq('user_id', user.id).order('updated_at', { ascending: false }).limit(100),
         supabase.from('work_focus').select('work_item_id').eq('user_id', user.id).maybeSingle(),
       ]);
-      const resolution = resolveProjectItemReference({
-        message,
-        candidates: (candidates ?? []).map(candidate => ({
+      const candidateProjection = (candidates ?? []).map(candidate => ({
           id: candidate.id, state: candidate.state, capability: candidate.capability, updatedAt: candidate.updated_at,
-        })),
-        currentFocusId: focus?.work_item_id ?? null,
-      });
+        }));
+      const presented = parsePresentedItemReferences(requestedPresentedItemReferences);
+      const contextual = resolveConversationalItemReference(message, presented);
+      if (contextual.kind === 'clarification_required') {
+        const choices = contextual.references.map(reference => {
+          const current = candidateProjection.find(candidate => candidate.id === reference.workItemId);
+          return `- ${reference.ordinal}º: ${reference.workItemId}${current ? ` — ${current.capability}, estado ${current.state}` : ''}`;
+        }).join('\n');
+        return new Response(`Não consigo determinar com segurança qual item você quis dizer. Escolha um dos itens apresentados:\n${choices}`, {
+          headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Anima-Capability': 'project-advisor-conversational-item-reference-v0', 'X-Anima-Mutation': 'none' },
+        });
+      }
+      const resolution = contextual.kind === 'resolved'
+        ? { kind: 'resolved' as const, itemId: contextual.itemId, basis: 'conversational_reference' as const }
+        : resolveProjectItemReference({ message, candidates: candidateProjection, currentFocusId: focus?.work_item_id ?? null });
       if (resolution.kind === 'clarification_required') {
         const choices = resolution.candidates.map(candidate =>
           `- ${candidate.itemRef} — ${candidate.capability}, estado ${candidate.state}`).join('\n');
@@ -137,14 +152,19 @@ export async function POST(req: NextRequest) {
           headers: { 'X-Anima-Capability': 'project-advisor-item-drilldown-v0', 'X-Anima-Mutation': 'none' },
         });
       }
-      const [{ data: itemRow }, { data: eventRows }] = await Promise.all([
+      const [itemRead, eventRead] = await Promise.all([
         supabase.from('work_items').select('*').eq('user_id', user.id).eq('id', resolution.itemId).single(),
         supabase.from('work_events').select('*').eq('work_item_id', resolution.itemId)
           .order('created_at', { ascending: false }).limit(200),
       ]);
-      if (!itemRow) throw new Error('project_item_drilldown_item_unavailable');
+      if (!itemRead.data && itemRead.error?.code === 'PGRST116') {
+        return Response.json({ error: 'O item referenciado não está mais visível para esta conta.' }, {
+          status: 404, headers: { 'X-Anima-Capability': 'project-advisor-conversational-item-reference-v0', 'X-Anima-Mutation': 'none' },
+        });
+      }
+      if (!itemRead.data || eventRead.error) throw new Error('project_item_drilldown_item_unavailable');
       const projection = buildProjectItemDrilldownProjection({
-        item: mapWorkItem(itemRow), events: (eventRows ?? []).map(mapWorkEvent), observedAt,
+        item: mapWorkItem(itemRead.data), events: (eventRead.data ?? []).map(mapWorkEvent), observedAt,
       });
       const context = await buildProjectAdvisorContext(message, [
         {
@@ -159,11 +179,17 @@ export async function POST(req: NextRequest) {
         },
       ]);
       const answer = await createProjectAdvisor(provider).advise(context);
+      const role = projection.latestFailure?.unresolved ? 'unresolved_failure'
+        : projection.currentState === 'review' ? 'review_item'
+        : projection.currentState === 'blocked' ? 'blocked_item' : 'active_item';
+      const continuingReferences = resolution.basis === 'conversational_reference' && presented.length > 0
+        ? presented : [{ workItemId: projection.itemRef, ordinal: 1, role }];
       return new Response(renderProjectAdvisory(answer), {
         headers: {
           'Content-Type': 'text/plain; charset=utf-8', 'X-AI-Provider': provider,
           'X-AI-Model': 'project-advisor-item-drilldown-v0',
           'X-Anima-Capability': 'project-advisor-item-drilldown-v0', 'X-Anima-Mutation': 'none',
+          'X-Anima-Presented-Items': encodeURIComponent(JSON.stringify(continuingReferences)),
         },
       });
     } catch (error) {
@@ -243,6 +269,7 @@ export async function POST(req: NextRequest) {
         characters: context.sources.reduce((total, source) => total + source.content.length, 0),
       });
       const answer = await createProjectAdvisor(provider).advise(context);
+      const presentedItems = derivePresentedItemReferences(answer, snapshot);
       console.info('[project-advisor] advisory presented', { sections: 6, mutation: 'none' });
       return new Response(renderProjectAdvisory(answer), {
         headers: {
@@ -251,6 +278,7 @@ export async function POST(req: NextRequest) {
           'X-AI-Model': 'project-advisor-v0',
           'X-Anima-Capability': 'project-advisor-v0',
           'X-Anima-Mutation': 'none',
+          'X-Anima-Presented-Items': encodeURIComponent(JSON.stringify(presentedItems)),
         },
       });
     } catch (error) {
