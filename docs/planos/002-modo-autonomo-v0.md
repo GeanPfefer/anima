@@ -1983,6 +1983,18 @@ O replay autenticado devolveu os mesmos IDs sem duplicar. Não houve provider,
 approval, attempt, execution, mudança de foco, Supervisor ou coder. Os três itens
 permanecem na próxima fronteira humana. [Registro](../registros/2026-08-24-backlog-proposal-v0-e2e-pass.md).
 
+**RATIFIED_BACKLOG_TO_EXECUTION_V0_TECHNICAL_REVIEW = PASS (2026-08-24).** Os
+três itens materializados da política local-first foram revisados pelo lifecycle
+imutável `proposal_changes_requested → proposal_revised`, permanecendo
+`proposed` na versão 2. Cada um recebeu `execution_spec` local/isolada, gates,
+limites e escopo ancorado no repo. A lacuna entre dependência narrativa e
+dependência executável foi fechada no menor ponto: IDs causais no spec e gate da
+fila por predecessor `completed`, sem bloquear approval e sem criar DAG engine.
+Resultado: item 1 com execution readiness `READY`; itens 2 e 3
+`BLOCKED_BY_DEPENDENCY`; os três com approval readiness `READY`. Nenhum approval,
+claim, attempt, start, focus ou efeito externo de compute foi criado.
+[Registro](../registros/2026-08-24-ratified-backlog-technical-review.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

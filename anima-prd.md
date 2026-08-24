@@ -485,6 +485,15 @@ prompt e tarefa. Detalhes no [novo registro](docs/registros/2026-08-11-investiga
 
 ### Mapa de maturidade do ciclo de programação (ratificação 2026-08-12)
 
+**Readiness técnica do backlog ratificado (2026-08-24):** os três itens da
+política local-first seguem `proposed`, agora na proposta v2 e com
+`execution_spec` local/isolada, escopo ancorado, gates e limites. Dependências
+causais pequenas vivem em `depends_on_work_item_ids`: não impedem approval, mas a
+fila falha fechado e só libera execução após cada predecessor estar `completed`.
+Assim, o item 1 está executavelmente pronto; itens 2 e 3 aguardam a ordem 1→2→3.
+Nenhum foi aprovado ou executado. Ver o
+[registro](docs/registros/2026-08-24-ratified-backlog-technical-review.md).
+
 **Estado tático do host autônomo (2026-08-22):** o Resource Governor agora é
 gate real para admissão de cada novo ciclo/turno do backlog: pressão baixa permite,
 moderada/alta adia com `resource_pressure`, e telemetria indeterminada/erro falha
