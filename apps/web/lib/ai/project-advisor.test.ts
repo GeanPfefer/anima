@@ -61,3 +61,30 @@ test('o schema restringe comprovado a evidência e direção a fonte canônica',
   expect(schema.properties.provenCapabilities!.items?.properties.authorityClasses.items.enum).toEqual(['evidence']);
   expect(schema.properties.recommendation!.anyOf).toHaveLength(2);
 });
+
+test('fixture temporal mantém presente vivo e histórico apenas como trajetória', async () => {
+  const temporalContext: ProjectAdvisorContext = {
+    question: 'Como está o desenvolvimento do Anima agora?',
+    sources: [
+      { id: 'canon', authority: 'canonical', temporalRole: 'canonical', provenance: 'manifesto', content: 'recomendação não é decisão' },
+      { id: 'live', authority: 'observed_state', temporalRole: 'current_projection', observedAt: '2026-08-24T16:00:00Z', provenance: 'read-only fixture', content: '{"triage":[{"itemRef":"active","state":"in_progress"},{"itemRef":"review","state":"review"}]}' },
+      { id: 'proof', authority: 'evidence', temporalRole: 'event_sequence', observedAt: '2026-08-24T16:00:00Z', provenance: 'typed events fixture', content: '{"recentVerifiedEvidence":[{"itemRef":"review"}]}' },
+      { id: 'old', authority: 'historical_record', temporalRole: 'historical_snapshot', provenance: 'old record', content: 'active estava failed' },
+    ],
+  };
+  const temporalAnswer: ProjectAdvisoryAnswer = {
+    facts: [{ statement: 'O item active está em andamento agora.', sourceIds: ['live'], authorityClasses: ['observed_state'] }],
+    provenCapabilities: [{ statement: 'Há evidência verificada para review.', sourceIds: ['proof'], authorityClasses: ['evidence'] }],
+    unprovenFrontiers: [{ statement: 'O registro anterior documentava falha, mas não descreve o presente.', sourceIds: ['old'], authorityClasses: ['historical_record'] }],
+    canonicalDirections: [{ statement: 'A triagem não decide.', sourceIds: ['canon'], authorityClasses: ['canonical'] }],
+    recommendation: { statement: 'Recomenda-se revisar o item review.', sourceIds: ['live', 'proof'], authorityClasses: ['observed_state', 'evidence'] },
+    rationale: [{ statement: 'O estado atual e a evidência sustentam atenção.', sourceIds: ['live', 'proof'], authorityClasses: ['observed_state', 'evidence'] }],
+    insufficiencies: [],
+  };
+  const advisor = createProjectAdvisorFromModel(async received => {
+    expect(received).toEqual(temporalContext);
+    return JSON.stringify(temporalAnswer);
+  });
+  await expect(advisor.advise(temporalContext)).resolves.toEqual(temporalAnswer);
+  expect(renderProjectAdvisory(temporalAnswer)).toContain('Recomendação');
+});

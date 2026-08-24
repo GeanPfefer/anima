@@ -7,10 +7,10 @@ import {
 const context: ProjectAdvisorContext = {
   question: 'Como está o desenvolvimento do Anima e qual deveria ser nosso próximo passo?',
   sources: [
-    { id: 'canon', authority: 'canonical', provenance: 'manifesto', content: 'direção' },
-    { id: 'state', authority: 'observed_state', provenance: 'prd', content: 'estado' },
-    { id: 'proof', authority: 'evidence', provenance: 'git', content: 'prova' },
-    { id: 'history', authority: 'historical_record', provenance: 'registro', content: 'histórico' },
+    { id: 'canon', authority: 'canonical', temporalRole: 'canonical', provenance: 'manifesto', content: 'direção' },
+    { id: 'state', authority: 'observed_state', temporalRole: 'current_projection', observedAt: '2026-08-24T16:00:00Z', provenance: 'prd', content: 'estado' },
+    { id: 'proof', authority: 'evidence', temporalRole: 'event_sequence', provenance: 'git', content: 'prova' },
+    { id: 'history', authority: 'historical_record', temporalRole: 'historical_snapshot', provenance: 'registro', content: 'histórico' },
   ],
 };
 const authorityById = new Map(context.sources.map(source => [source.id, source.authority]));
@@ -57,6 +57,22 @@ test.each([
 
 test('claim válido aceita múltiplas fontes compatíveis', () => {
   expect(problems({ facts: [claim('Observado e provado.', ['state', 'proof'])] })).toEqual([]);
+});
+
+test('registro histórico não pode sozinho afirmar o presente, mas continua válido como trajetória', () => {
+  expect(problems({ unprovenFrontiers: [claim('A fronteira está aberta agora.', ['history'])] }))
+    .toContain('current_claim_without_live_source');
+  expect(problems({ unprovenFrontiers: [claim('A fronteira estava aberta no registro anterior.', ['history'])] }))
+    .not.toContain('current_claim_without_live_source');
+  expect(problems({ unprovenFrontiers: [claim('A fronteira está aberta agora.', ['state', 'history'])] }))
+    .not.toContain('current_claim_without_live_source');
+});
+
+test('projeção atual exige timestamp auditável', () => {
+  expect(validateProjectAdvisorContext({
+    question: context.question,
+    sources: context.sources.map(source => source.id === 'state' ? { ...source, observedAt: undefined } : source),
+  })).toContain('current_projection_timestamp_missing:state');
 });
 
 test('recomendação baseada em evidência e canônico é válida', () => {

@@ -18,6 +18,8 @@ describe('Project Context Builder governado', () => {
     ]));
     expect(context.sources.reduce((sum, source) => sum + source.content.length, 0)).toBeLessThanOrEqual(28_000);
     expect(context.sources.every(source => source.provenance.length > 0)).toBe(true);
+    expect(context.sources.find(source => source.id === 'git-observation')?.temporalRole).toBe('current_projection');
+    expect(context.sources.find(source => source.id === 'latest-records')?.temporalRole).toBe('historical_snapshot');
   });
 
   test('usa allowlist explícita e nunca inclui configuração ou segredo', () => {

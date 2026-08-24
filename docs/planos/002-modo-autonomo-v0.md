@@ -1794,6 +1794,18 @@ Banco/Git permaneceram idênticos e nenhum workflow/coder iniciou. O único acha
 pós-prova foi o nome não sensível `.worktrees/` no status Git; o prefixo porcelain
 foi corrigido e coberto sem novo egress. Detalhes no registro da sessão.
 
+**PROJECT_ADVISOR_FRESH_OPERATIONAL_STATE_V1_LOCAL = PASS (2026-08-24).** A
+observação viva foi promovida de contagens para uma projeção host determinística
+e bounded de metadados RLS: `work_items` fornece o estado corrente,
+`work_events` fornece sequência/evidência tipada e `work_focus` fornece foco.
+O snapshot identifica ativos, review, bloqueio e falha ainda não superada por um
+resultado posterior, sem TTL arbitrário. Fontes agora declaram papel temporal;
+claims sobre o presente sustentados apenas por snapshot histórico falham
+fechado. A serialização de contexto consolida triagem por item e omite payloads,
+pedidos originais e conteúdo pessoal. Fixture conflitante e casos adversariais
+passam localmente sem provider/egress e sem mutação. Prova externa pela UI não
+foi realizada nem autorizada neste recorte.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

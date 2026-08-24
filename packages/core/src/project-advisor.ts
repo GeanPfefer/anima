@@ -6,6 +6,7 @@ export const PROJECT_AUTHORITY_LEVELS = [
 ] as const;
 
 export type ProjectAuthorityLevel = typeof PROJECT_AUTHORITY_LEVELS[number];
+export type ProjectTemporalRole = 'canonical' | 'current_projection' | 'event_sequence' | 'historical_snapshot' | 'undated';
 
 export type ProjectContextSource = {
   readonly id: string;
@@ -13,6 +14,7 @@ export type ProjectContextSource = {
   readonly provenance: string;
   readonly content: string;
   readonly observedAt?: string;
+  readonly temporalRole?: ProjectTemporalRole;
 };
 
 export type ProjectAdvisorContext = {
@@ -42,6 +44,10 @@ export interface ProjectAdvisor {
 
 const PROJECT_ADVISOR_PATTERNS = [
   /como (?:est[aá]|anda|vai) (?:o )?desenvolvimento do anima/i,
+  /o que (?:est[aá] em andamento|falhou recentemente|est[aá] bloqueado|aguarda(?:ndo)? review)/i,
+  /existe algo aguardando review/i,
+  /fronteiras abertas.{0,30}(?:agora|importante)/i,
+  /o que (?:voc[eê] )?recomenda.{0,30}(?:investigar|seguida)/i,
   /(?:qual|quais).{0,30}pr[oó]ximo(?:s)? passo(?:s)?.{0,30}(?:anima|projeto)/i,
   /estado (?:atual|real).{0,20}(?:anima|projeto)/i,
   /(?:anima|projeto).{0,30}(?:fronteira|capacidade comprovada|dire[cç][aã]o can[oô]nica)/i,
@@ -61,6 +67,8 @@ export function validateProjectAdvisorContext(context: ProjectAdvisorContext): s
     ids.add(source.id);
     if (!source.provenance.trim()) problems.push(`provenance_missing:${source.id}`);
     if (!source.content.trim()) problems.push(`content_missing:${source.id}`);
+    if (source.observedAt && Number.isNaN(Date.parse(source.observedAt))) problems.push(`observed_at_invalid:${source.id}`);
+    if (source.temporalRole === 'current_projection' && !source.observedAt) problems.push(`current_projection_timestamp_missing:${source.id}`);
   }
   if (!context.sources.some(source => source.authority === 'canonical')) problems.push('canonical_source_missing');
   if (!context.sources.some(source => source.authority === 'observed_state')) problems.push('observed_state_missing');
@@ -74,6 +82,7 @@ export function validateProjectAdvisoryAnswer(
 ): string[] {
   const allowed = new Set(context.sources.map(source => source.id));
   const authorityById = new Map(context.sources.map(source => [source.id, source.authority]));
+  const temporalById = new Map(context.sources.map(source => [source.id, source.temporalRole ?? 'undated']));
   const problems = new Set<string>();
   const claims = [
     ...answer.facts,
@@ -104,6 +113,13 @@ export function validateProjectAdvisoryAnswer(
   requireOnlyAuthority('missing_evidence_for_proven_capability', answer.provenCapabilities, ['evidence']);
   requireOnlyAuthority('invalid_open_frontier_authority', answer.unprovenFrontiers, ['observed_state', 'evidence', 'historical_record']);
   requireOnlyAuthority('invalid_canonical_direction_source', answer.canonicalDirections, ['canonical']);
+  const presentLanguage = /\b(?:agora|atual(?:mente)?|est[aá]|continua|em andamento|aguardando|bloquead[oa])\b/i;
+  for (const claim of [...answer.facts, ...answer.unprovenFrontiers]) {
+    if (presentLanguage.test(claim.statement)
+      && claim.sourceIds.every(id => temporalById.get(id) === 'historical_snapshot')) {
+      problems.add('current_claim_without_live_source');
+    }
+  }
   if (answer.rationale.length === 0) problems.add('missing_recommendation_rationale');
   return [...problems];
 }

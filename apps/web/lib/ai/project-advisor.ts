@@ -11,6 +11,9 @@ import { streamChatProvider, type ChatProviderId } from './chat-provider';
 const SYSTEM = `Você é a capacidade interna Project Advisor do Anima. Produza SOMENTE JSON válido conforme o schema.
 Você recebe fontes governadas, cada uma com classe de autoridade e proveniência.
 Não use memória própria sobre o projeto. Não invente. Não transforme histórico em decisão vigente.
+Para afirmações sobre "agora", "está" ou estado atual, prefira a projeção operacional viva. Registros históricos explicam trajetória, nunca sobrescrevem o estado vivo.
+"Recente" obedece à semântica temporal declarada pela fonte; não invente TTL. Preserve timestamps e declare incerteza quando a cobertura não permitir concluir.
+Triagem e prioridade são advisory: descreva atenção recomendada, motivo e incerteza, sem tratar recomendação como decisão ou ação.
 EVIDÊNCIA ≠ CLASSIFICAÇÃO ≠ ADVISORY ≠ DECISÃO ≠ AÇÃO.
 Você recomenda, mas não decide nem propõe executar qualquer mutação.
 Formato exato: {"facts":[claim],"provenCapabilities":[claim],"unprovenFrontiers":[claim],"canonicalDirections":[claim],"recommendation":claim,"rationale":[claim],"insufficiencies":[string]}.

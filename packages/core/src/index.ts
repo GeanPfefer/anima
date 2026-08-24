@@ -4,3 +4,4 @@ export * from './quests';
 export * from './onboarding';
 export * from './work-orchestration';
 export * from './project-advisor';
+export * from './project-operational-snapshot';

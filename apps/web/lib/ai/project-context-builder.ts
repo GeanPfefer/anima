@@ -8,6 +8,7 @@ type GovernedSource = {
   readonly path: string;
   readonly authority: ProjectAuthorityLevel;
   readonly terms: readonly string[];
+  readonly temporalRole: ProjectContextSource['temporalRole'];
 };
 
 const MAX_SOURCE_CHARS = 2_500;
@@ -16,13 +17,13 @@ const SECRET_VALUE = /\b(?:sk-[A-Za-z0-9_-]{12,}|(?:api[_-]?key|token|secret|pas
 const BLOCKED_STATUS_PATH = /(?:^|[\\/\s])(?:\.claude|\.worktrees|\.git)(?:[\\/]|$)|(?:^|[\\/\s])\.env(?:\.|$)/i;
 
 const GOVERNED_SOURCES: readonly GovernedSource[] = [
-  { id: 'manifesto', path: 'anima-manifesto.md', authority: 'canonical', terms: ['decisão', 'proatividade', 'interface', 'capacidade'] },
-  { id: 'prd-live', path: 'anima-prd.md', authority: 'observed_state', terms: ['Estágio atual', 'estado atual', 'Fase G', 'maturidade', 'próximo'] },
-  { id: 'autonomy-plan', path: 'docs/planos/002-modo-autonomo-v0.md', authority: 'observed_state', terms: ['Estado atual', 'ratificado', 'próximo', 'pendente', 'Fase G'] },
-  { id: 'autonomy-backlog', path: 'docs/planos/002-modo-autonomo-v0-backlog.md', authority: 'observed_state', terms: ['Status:', 'done', 'awaiting_review', 'Fase G', 'UX-'] },
-  { id: 'work-architecture', path: 'docs/arquitetura/orquestracao-de-trabalho.md', authority: 'canonical', terms: ['evidência', 'classificação', 'advisory', 'decisão', 'autoridade'] },
-  { id: 'identity-compute', path: 'docs/arquitetura/visao-identidade-compute-distribuido.md', authority: 'canonical', terms: ['proveniência', 'advisory', 'identidade', 'provider', 'decisão'] },
-  { id: 'canonical-remote-proof', path: 'docs/registros/2026-08-24-execucao-canonica-no-remoto.md', authority: 'evidence', terms: ['PASS', 'Meta-prova viva', 'Verifier', 'estado final', 'gates'] },
+  { id: 'manifesto', path: 'anima-manifesto.md', authority: 'canonical', temporalRole: 'canonical', terms: ['decisão', 'proatividade', 'interface', 'capacidade'] },
+  { id: 'prd-live', path: 'anima-prd.md', authority: 'observed_state', temporalRole: 'historical_snapshot', terms: ['Estágio atual', 'estado atual', 'Fase G', 'maturidade', 'próximo'] },
+  { id: 'autonomy-plan', path: 'docs/planos/002-modo-autonomo-v0.md', authority: 'observed_state', temporalRole: 'historical_snapshot', terms: ['Estado atual', 'ratificado', 'próximo', 'pendente', 'Fase G'] },
+  { id: 'autonomy-backlog', path: 'docs/planos/002-modo-autonomo-v0-backlog.md', authority: 'observed_state', temporalRole: 'historical_snapshot', terms: ['Status:', 'done', 'awaiting_review', 'Fase G', 'UX-'] },
+  { id: 'work-architecture', path: 'docs/arquitetura/orquestracao-de-trabalho.md', authority: 'canonical', temporalRole: 'canonical', terms: ['evidência', 'classificação', 'advisory', 'decisão', 'autoridade'] },
+  { id: 'identity-compute', path: 'docs/arquitetura/visao-identidade-compute-distribuido.md', authority: 'canonical', temporalRole: 'canonical', terms: ['proveniência', 'advisory', 'identidade', 'provider', 'decisão'] },
+  { id: 'canonical-remote-proof', path: 'docs/registros/2026-08-24-execucao-canonica-no-remoto.md', authority: 'evidence', temporalRole: 'historical_snapshot', terms: ['PASS', 'Meta-prova viva', 'Verifier', 'estado final', 'gates'] },
 ] as const;
 
 function projectRoot(): string {
@@ -64,7 +65,7 @@ async function latestRecords(): Promise<ProjectContextSource | null> {
     return `# ${name}\n${selectLines(content, ['objetivo', 'resultado', 'prova', 'gate', 'estado final', 'próximo'])}`;
   }));
   if (parts.length === 0) return null;
-  return { id: 'latest-records', authority: 'historical_record', provenance: `docs/registros/{${names.join(',')}}`, content: parts.join('\n\n').slice(0, MAX_SOURCE_CHARS) };
+  return { id: 'latest-records', authority: 'historical_record', temporalRole: 'historical_snapshot', provenance: `docs/registros/{${names.join(',')}}`, content: parts.join('\n\n').slice(0, MAX_SOURCE_CHARS) };
 }
 
 export async function buildProjectAdvisorContext(
@@ -74,6 +75,7 @@ export async function buildProjectAdvisorContext(
   const sources: ProjectContextSource[] = await Promise.all(GOVERNED_SOURCES.map(async source => ({
     id: source.id,
     authority: source.authority,
+    temporalRole: source.temporalRole,
     provenance: source.path,
     content: selectLines(await readFile(resolve(projectRoot(), source.path), 'utf8'), source.terms),
   } satisfies ProjectContextSource)));
@@ -88,6 +90,7 @@ export async function buildProjectAdvisorContext(
     authority: 'evidence',
     provenance: 'git read-only observation',
     observedAt: new Date().toISOString(),
+    temporalRole: 'current_projection',
     content: `branch=${branch}\nhead=${head}\nstatus=${sanitizeProjectGitStatus(status) || '(clean)'}`,
   });
   sources.push(...liveSources.map(source => ({ ...source, content: sanitizeProjectContext(source.content).slice(0, MAX_SOURCE_CHARS) })));

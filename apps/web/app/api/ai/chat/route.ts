@@ -32,7 +32,12 @@ import {
 import { planExecutableProjectWork, shouldRunProjectPlanner } from '@/lib/ai/project-work-planner';
 import { isDevelopmentChatAuthorized, resolveChatDevelopmentMode } from '@/lib/ai/chat-surface';
 import { shouldReuseOrphanUserMessage } from '@/lib/ai/chat-turn';
-import { isProjectAdvisorQuestion } from '@anima/core';
+import {
+  buildOperationalProjectSnapshot,
+  isProjectAdvisorQuestion,
+  operationalEvidenceForContext,
+  operationalStateForContext,
+} from '@anima/core';
 import { buildProjectAdvisorContext } from '@/lib/ai/project-context-builder';
 import { createProjectAdvisor, renderProjectAdvisory } from '@/lib/ai/project-advisor';
 
@@ -104,43 +109,55 @@ export async function POST(req: NextRequest) {
       console.info('[project-advisor] request received', { provider, userScoped: true });
       // Observação viva, isolada pela sessão/RLS e reduzida a metadados não
       // pessoais. Payloads, pedidos originais e contexto de execução não saem.
+      const generatedAt = new Date().toISOString();
       const { data: projectItems } = await supabase.from('work_items')
         .select('id, state, capability, updated_at')
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
-        .limit(20);
+        .limit(50);
       const itemIds = (projectItems ?? []).map(item => item.id);
       const { data: projectEvents } = itemIds.length > 0
         ? await supabase.from('work_events')
           .select('work_item_id, event_type, author, created_at')
           .in('work_item_id', itemIds)
           .order('created_at', { ascending: false })
-          .limit(80)
+          .limit(200)
         : { data: [] };
-      const stateCounts = Object.entries((projectItems ?? []).reduce<Record<string, number>>((counts, item) => {
-        const key = `${item.capability}:${item.state}`;
-        counts[key] = (counts[key] ?? 0) + 1;
-        return counts;
-      }, {})).sort(([left], [right]) => left.localeCompare(right));
-      const eventCounts = Object.entries((projectEvents ?? []).reduce<Record<string, number>>((counts, event) => {
-        const key = `${event.event_type}:${event.author}`;
-        counts[key] = (counts[key] ?? 0) + 1;
-        return counts;
-      }, {})).sort(([left], [right]) => left.localeCompare(right));
+      const { data: projectFocus } = await supabase.from('work_focus')
+        .select('work_item_id, updated_at')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      const snapshot = buildOperationalProjectSnapshot({
+        generatedAt,
+        items: (projectItems ?? []).map(item => ({
+          id: item.id, state: item.state, capability: item.capability, updatedAt: item.updated_at,
+        })),
+        events: (projectEvents ?? []).map(event => ({
+          workItemId: event.work_item_id,
+          eventType: event.event_type,
+          author: event.author,
+          occurredAt: event.created_at,
+        })),
+        focus: projectFocus ? { workItemId: projectFocus.work_item_id, updatedAt: projectFocus.updated_at } : null,
+        itemsTruncated: (projectItems?.length ?? 0) === 50,
+        eventsTruncated: (projectEvents?.length ?? 0) === 200,
+      });
       const context = await buildProjectAdvisorContext(message, [
         {
-          id: 'live-work-state',
+          id: 'live-operational-state',
           authority: 'observed_state',
-          provenance: 'Supabase RLS: work_items metadata read-only',
-          observedAt: new Date().toISOString(),
-          content: JSON.stringify({ counts: stateCounts, latestObservedAt: projectItems?.[0]?.updated_at ?? null }),
+          provenance: 'Supabase RLS read-only projection: work_items + work_focus; bounded host synthesis',
+          observedAt: generatedAt,
+          temporalRole: 'current_projection',
+          content: operationalStateForContext(snapshot),
         },
         {
-          id: 'live-work-evidence',
+          id: 'live-operational-evidence',
           authority: 'evidence',
-          provenance: 'Supabase RLS: work_events metadata read-only',
-          observedAt: new Date().toISOString(),
-          content: JSON.stringify({ counts: eventCounts, latestObservedAt: projectEvents?.[0]?.created_at ?? null }),
+          provenance: 'Supabase RLS read-only projection: typed work_events metadata; payload omitted',
+          observedAt: generatedAt,
+          temporalRole: 'event_sequence',
+          content: operationalEvidenceForContext(snapshot),
         },
       ]);
       console.info('[project-advisor] governed context ready', {
