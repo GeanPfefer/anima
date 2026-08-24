@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-24 (sessão: clareza local das referências conversacionais do Advisor — após resolução host-side, o provider recebe somente a pergunta governada sobre o UUID definitivo, sem anáfora original ou candidatos; ver [registro](docs/registros/2026-08-24-project-advisor-conversational-reference-clarity-v0.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-24 (sessão: Project Conversation Governance V0 comprovado localmente — conversa natural pode produzir proposta, mas ratificação exige confirmação humana inequívoca e não cria backlog nem execução; ver [arquitetura](docs/arquitetura/governanca-conversacional-de-projeto.md), [registro](docs/registros/2026-08-24-project-conversation-governance-v0.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---

@@ -564,6 +564,137 @@ export type Database = {
         }
         Relationships: []
       }
+      project_decision_events: {
+        Row: {
+          actor: string
+          created_at: string
+          event_type: Database["public"]["Enums"]["project_decision_event_type"]
+          id: string
+          idempotency_key: string
+          proposal_id: string
+          proposal_version: number
+          provenance: Json
+          seq: number
+          user_id: string
+        }
+        Insert: {
+          actor: string
+          created_at?: string
+          event_type: Database["public"]["Enums"]["project_decision_event_type"]
+          id?: string
+          idempotency_key: string
+          proposal_id: string
+          proposal_version: number
+          provenance: Json
+          seq?: never
+          user_id: string
+        }
+        Update: {
+          actor?: string
+          created_at?: string
+          event_type?: Database["public"]["Enums"]["project_decision_event_type"]
+          id?: string
+          idempotency_key?: string
+          proposal_id?: string
+          proposal_version?: number
+          provenance?: Json
+          seq?: never
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_decision_events_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposal_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_decision_events_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_decision_events_user_id_proposal_id_proposal_versi_fkey"
+            columns: ["user_id", "proposal_id", "proposal_version"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposal_state"
+            referencedColumns: ["user_id", "id", "version"]
+          },
+          {
+            foreignKeyName: "project_decision_events_user_id_proposal_id_proposal_versi_fkey"
+            columns: ["user_id", "proposal_id", "proposal_version"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposals"
+            referencedColumns: ["user_id", "id", "version"]
+          },
+        ]
+      }
+      project_decision_proposals: {
+        Row: {
+          alternatives: Json
+          constraints: Json
+          created_at: string
+          id: string
+          idempotency_key: string
+          implications: Json
+          provenance: Json
+          rationale: string
+          statement: string
+          supersedes_id: string | null
+          uncertainties: Json
+          user_id: string
+          version: number
+        }
+        Insert: {
+          alternatives?: Json
+          constraints?: Json
+          created_at?: string
+          id?: string
+          idempotency_key: string
+          implications?: Json
+          provenance: Json
+          rationale?: string
+          statement: string
+          supersedes_id?: string | null
+          uncertainties?: Json
+          user_id: string
+          version: number
+        }
+        Update: {
+          alternatives?: Json
+          constraints?: Json
+          created_at?: string
+          id?: string
+          idempotency_key?: string
+          implications?: Json
+          provenance?: Json
+          rationale?: string
+          statement?: string
+          supersedes_id?: string | null
+          uncertainties?: Json
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_decision_proposals_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposal_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_decision_proposals_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quest_missions: {
         Row: {
           completed_at: string | null
@@ -1081,6 +1212,72 @@ export type Database = {
           },
         ]
       }
+      project_decision_proposal_state: {
+        Row: {
+          alternatives: Json | null
+          constraints: Json | null
+          created_at: string | null
+          id: string | null
+          idempotency_key: string | null
+          implications: Json | null
+          provenance: Json | null
+          rationale: string | null
+          statement: string | null
+          status: string | null
+          supersedes_id: string | null
+          uncertainties: Json | null
+          user_id: string | null
+          version: number | null
+        }
+        Insert: {
+          alternatives?: Json | null
+          constraints?: Json | null
+          created_at?: string | null
+          id?: string | null
+          idempotency_key?: string | null
+          implications?: Json | null
+          provenance?: Json | null
+          rationale?: string | null
+          statement?: string | null
+          status?: never
+          supersedes_id?: string | null
+          uncertainties?: Json | null
+          user_id?: string | null
+          version?: number | null
+        }
+        Update: {
+          alternatives?: Json | null
+          constraints?: Json | null
+          created_at?: string | null
+          id?: string | null
+          idempotency_key?: string | null
+          implications?: Json | null
+          provenance?: Json | null
+          rationale?: string | null
+          statement?: string | null
+          status?: never
+          supersedes_id?: string | null
+          uncertainties?: Json | null
+          user_id?: string | null
+          version?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_decision_proposals_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposal_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_decision_proposals_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "project_decision_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       abandon_current_conversation_turn: { Args: never; Returns: undefined }
@@ -1273,6 +1470,20 @@ export type Database = {
       block_work_on_budget: { Args: { p_work_item_id: string }; Returns: Json }
       budget_interruption_resumption_source: {
         Args: { p_work_item_id: string }
+        Returns: Json
+      }
+      create_project_decision_proposal: {
+        Args: {
+          alternatives: Json
+          constraints: Json
+          idempotency_key: string
+          implications: Json
+          provenance: Json
+          rationale: string
+          statement: string
+          supersedes_id?: string
+          uncertainties: Json
+        }
         Returns: Json
       }
       create_work_proposal: {
@@ -1637,6 +1848,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      resolve_project_decision_proposal: {
+        Args: {
+          expected_version: number
+          idempotency_key: string
+          outcome: Database["public"]["Enums"]["project_decision_event_type"]
+          proposal_id: string
+          provenance: Json
+        }
+        Returns: Json
+      }
       respond_to_work_decision: {
         Args: {
           p_expected_proposal_version: number
@@ -1934,6 +2155,11 @@ export type Database = {
         | "physical_achievement"
         | "meaningful_connection"
       event_type: "quest_milestone" | "context_event" | "state_change"
+      project_decision_event_type:
+        | "proposal_created"
+        | "ratified"
+        | "rejected"
+        | "changes_requested"
       quest_status: "open" | "in_progress" | "completed" | "abandoned"
       quest_type: "main" | "habit" | "learning" | "challenge"
       work_approval_decision: "approve" | "reject" | "request_changes" | "defer"
@@ -2265,6 +2491,12 @@ export const Constants = {
         "meaningful_connection",
       ],
       event_type: ["quest_milestone", "context_event", "state_change"],
+      project_decision_event_type: [
+        "proposal_created",
+        "ratified",
+        "rejected",
+        "changes_requested",
+      ],
       quest_status: ["open", "in_progress", "completed", "abandoned"],
       quest_type: ["main", "habit", "learning", "challenge"],
       work_approval_decision: ["approve", "reject", "request_changes", "defer"],

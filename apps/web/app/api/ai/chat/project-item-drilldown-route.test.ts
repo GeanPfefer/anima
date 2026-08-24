@@ -67,3 +67,20 @@ describe('fronteira read-only do Project Advisor global', () => {
     expect(branch).toContain("'X-Anima-Mutation': 'none'");
   });
 });
+
+describe('governança conversacional precede providers sem virar execução', () => {
+  const source = readFileSync(resolve(__dirname, 'route.ts'), 'utf8');
+  const governance = source.indexOf('const governedDecision = await processProjectConversationGovernance');
+  test('boundary vem antes de drill-down, Advisor e chat pessoal', () => {
+    expect(governance).toBeGreaterThan(0);
+    expect(governance).toBeLessThan(source.indexOf('if (isProjectItemDrilldownQuestion'));
+    expect(governance).toBeLessThan(source.indexOf('if (isProjectAdvisorQuestion'));
+    expect(governance).toBeLessThan(source.indexOf('detectActivities(message'));
+  });
+  test('resposta governada retorna sem work item, foco, coder ou supervisor', () => {
+    const end = source.indexOf('// Drill-down operacional read-only');
+    const branch = source.slice(governance, end);
+    expect(branch).toContain("'X-Anima-Mutation': 'project-decision-only'");
+    expect(branch).not.toMatch(/work_items|work_focus|coder|supervisor|resolve_approval/i);
+  });
+});

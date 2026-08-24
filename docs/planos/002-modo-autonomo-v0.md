@@ -1918,6 +1918,17 @@ atravessam. Ambiguidade continua terminando antes do provider. Prova local sem
 egress: 69 testes core, 29 web, typecheck dos cinco workspaces e build de 56
 páginas. [Registro](../registros/2026-08-24-project-advisor-conversational-reference-clarity-v0.md).
 
+**PROJECT_CONVERSATION_GOVERNANCE_V0_LOCAL = PASS (2026-08-24).** O chat
+principal agora distingue exploração/hipótese/preferência de proposta aguardando
+confirmação e resolve confirmação, rejeição, revisão ou ambiguidade no host. O
+domínio usa propostas imutáveis e eventos append-only sob RLS; RPCs transacionais
+vinculam identidade, versão, actor humano e idempotência. Ratificação registra
+somente decisão: não cria backlog/work item/foco/approval e não aciona execução.
+Prova local: 24 casos puros, campanha relevante core 93/93, web 34/34, pgTAP
+31/31, typecheck dos cinco workspaces e build 56 páginas. Ver
+[arquitetura](../arquitetura/governanca-conversacional-de-projeto.md) e
+[registro](../registros/2026-08-24-project-conversation-governance-v0.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

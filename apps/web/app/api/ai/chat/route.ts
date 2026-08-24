@@ -52,6 +52,7 @@ import {
 } from '@anima/core';
 import { buildProjectAdvisorContext } from '@/lib/ai/project-context-builder';
 import { createProjectAdvisor, renderProjectAdvisory } from '@/lib/ai/project-advisor';
+import { processProjectConversationGovernance } from '@/lib/ai/project-conversation-governance';
 
 function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -111,6 +112,14 @@ export async function POST(req: NextRequest) {
     requested: requestedDevelopmentMode === true,
     authorized: isDevelopmentChatAuthorized(user.id),
   });
+
+  const governedDecision = await processProjectConversationGovernance({
+    client: supabase, userId: user.id, message, retryMessageId: typeof requestedRetryMessageId === 'string' ? requestedRetryMessageId : undefined,
+  });
+  if (governedDecision) return new Response(governedDecision.text, { headers: {
+    'Content-Type': 'text/plain; charset=utf-8', 'X-Anima-Capability': 'project-conversation-governance-v0',
+    'X-Anima-Mutation': 'project-decision-only', 'X-Source-Message-Id': governedDecision.sourceMessageId,
+  } });
 
   // Drill-down operacional read-only: resolve uma única referência antes de ler
   // payloads e só deixa a projeção tipada/minimizada atravessar para o Advisor.

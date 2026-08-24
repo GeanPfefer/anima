@@ -7,3 +7,4 @@ export * from './project-advisor';
 export * from './project-operational-snapshot';
 export * from './project-item-drilldown';
 export * from './project-conversational-item-reference';
+export * from './project-conversation-governance';
