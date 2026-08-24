@@ -1968,6 +1968,14 @@ derivação técnica têm proveniência separada. Não houve provider, materiali
 novo trabalho, approval ou execução. O próximo checkpoint é a revisão humana da
 V2. [Registro](../registros/2026-08-24-backlog-proposal-revisao-natural-e2e.md).
 
+**BACKLOG_PROPOSAL_V0_E2E = NOT_PROVEN (2026-08-24).** A confirmação canônica
+“Pode registrar esses trabalhos no backlog.” não estava no conjunto estrito do
+host e caiu no chat comum, que respondeu incorretamente como se tivesse
+materializado. Banco real: V2 ainda `awaiting_confirmation`, zero links e
+`work_items/work_events/work_focus` inalterados em `60/601/2`. A forma canônica
+foi adicionada ao classificador com regressão; não houve retry. Nova prova pela
+UI exige autorização independente. [Registro](../registros/2026-08-24-backlog-proposal-materializacao-e2e-not-proven.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

@@ -39,7 +39,7 @@ export function validateProjectBacklogProposalDraft(value: ProjectBacklogProposa
 }
 
 const normalize = (value: string): string => value.trim().toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
-const confirmation = /^(?:pode registrar isso no backlog|pode criar esses trabalhos|sim,? coloca no backlog|pode registrar|assim esta bom,? pode registrar)[.!]?$/;
+const confirmation = /^(?:pode registrar (?:isso|esses trabalhos) no backlog|pode criar esses trabalhos|sim,? coloca no backlog|pode registrar|assim esta bom,? pode registrar)[.!]?$/;
 
 export const isProjectBacklogMaterializationConfirmation = (message: string): boolean => confirmation.test(normalize(message));
 
