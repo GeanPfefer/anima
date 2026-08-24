@@ -1779,6 +1779,13 @@ estão verdes, com 13 códigos seguros e sem log de conteúdo. Build final ocorr
 com dev parado/`.next` limpo. O recorte é versionável e útil, mas permanece
 `PROJECT_ADVISOR_V0 = NOT_PROVEN` até futura E2E explicitamente autorizada.
 
+**Provider-schema boundary (2026-08-24).** E2E seguinte foi recusada pela OpenAI
+antes de geração (`uniqueItems is not permitted`). O host mantém o schema completo
+e toda autoridade semântica; uma projeção recursiva exclusiva do request OpenAI
+remove somente a keyword comprovadamente incompatível. Ollama permanece com o
+schema integral. Duplicações seguem recusadas por códigos host. Regressões de
+payload/projeção/host verdes; sem novo egress; estado continua NOT_PROVEN.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

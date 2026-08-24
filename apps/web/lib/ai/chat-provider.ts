@@ -37,6 +37,20 @@ export type ChatProviderStream = {
   stream: ReadableStream<Uint8Array>;
 };
 
+// OpenAI Structured Outputs aceita um subconjunto de JSON Schema. A API provou
+// explicitamente que `uniqueItems` é rejeitado. O contrato completo continua no
+// host (e no Ollama); só a projeção enviada à OpenAI remove essa keyword. Não
+// mantemos aqui uma lista especulativa de outras limitações não observadas.
+const OPENAI_UNSUPPORTED_SCHEMA_KEYWORDS = new Set(['uniqueItems']);
+
+export function openAIStructuredOutputSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(openAIStructuredOutputSchema);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !OPENAI_UNSUPPORTED_SCHEMA_KEYWORDS.has(key))
+    .map(([key, child]) => [key, openAIStructuredOutputSchema(child)]));
+}
+
 export class ChatProviderError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -191,7 +205,7 @@ async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderS
               type: 'json_schema',
               name: request.structuredOutput.name,
               strict: true,
-              schema: request.structuredOutput.schema,
+              schema: openAIStructuredOutputSchema(request.structuredOutput.schema),
             },
           },
         } : {}),

@@ -1,4 +1,4 @@
-import { parseChatProvider, streamChatProvider } from './chat-provider';
+import { openAIStructuredOutputSchema, parseChatProvider, streamChatProvider } from './chat-provider';
 import { ReadableStream as NodeReadableStream } from 'node:stream/web';
 
 function bodyFrom(chunks: string[]): ReadableStream<Uint8Array> {
@@ -120,7 +120,7 @@ describe('chat provider', () => {
   test('propaga o mesmo contrato estruturado para OpenAI sem habilitar ferramentas', async () => {
     process.env.OPENAI_API_KEY = 'test-key';
     (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ output_text: '{}', output: [] }) });
-    const schema = { type: 'object', properties: {}, additionalProperties: false };
+    const schema = { type: 'object', properties: { ids: { type: 'array', uniqueItems: true, items: { type: 'string' } } }, additionalProperties: false };
     await streamChatProvider({
       provider: 'openai', systemPrompt: 'sistema', messages: [],
       structuredOutput: { name: 'proof', schema },
@@ -129,8 +129,32 @@ describe('chat provider', () => {
       text?: { format?: { type?: string; name?: string; strict?: boolean; schema?: unknown } };
       tools?: unknown;
     };
-    expect(body.text?.format).toEqual({ type: 'json_schema', name: 'proof', strict: true, schema });
+    expect(body.text?.format).toEqual({
+      type: 'json_schema', name: 'proof', strict: true,
+      schema: { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } } }, additionalProperties: false },
+    });
     expect(body.tools).toBeUndefined();
+  });
+
+  test('projeta schema OpenAI sem uniqueItems e preserva as demais restrições', () => {
+    const hostSchema = {
+      type: 'object',
+      properties: {
+        sourceIds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['proof'] } },
+        nested: { anyOf: [{ type: 'array', uniqueItems: true, items: { type: 'string' } }] },
+      },
+      required: ['sourceIds', 'nested'],
+      additionalProperties: false,
+    };
+    const projected = openAIStructuredOutputSchema(hostSchema);
+    expect(JSON.stringify(projected)).not.toContain('uniqueItems');
+    expect(projected).toMatchObject({
+      type: 'object',
+      properties: { sourceIds: { type: 'array', minItems: 1, items: { enum: ['proof'] } } },
+      required: ['sourceIds', 'nested'],
+      additionalProperties: false,
+    });
+    expect(hostSchema.properties.sourceIds.uniqueItems).toBe(true);
   });
 
   test('propaga o mesmo contrato estruturado para Ollama', async () => {
@@ -140,6 +164,14 @@ describe('chat provider', () => {
       provider: 'ollama', systemPrompt: 'sistema', messages: [],
       structuredOutput: { name: 'proof', schema },
     });
+    const body = JSON.parse(((global.fetch as jest.Mock).mock.calls[0][1] as RequestInit).body as string) as { format?: unknown };
+    expect(body.format).toEqual(schema);
+  });
+
+  test('Ollama recebe uniqueItems do contrato completo sem a projeção OpenAI', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: true, body: bodyFrom(['{"done":true}\n']) });
+    const schema = { type: 'array', uniqueItems: true, items: { type: 'string' } };
+    await streamChatProvider({ provider: 'ollama', systemPrompt: 'sistema', messages: [], structuredOutput: { name: 'proof', schema } });
     const body = JSON.parse(((global.fetch as jest.Mock).mock.calls[0][1] as RequestInit).body as string) as { format?: unknown };
     expect(body.format).toEqual(schema);
   });

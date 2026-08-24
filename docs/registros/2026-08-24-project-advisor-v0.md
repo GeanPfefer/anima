@@ -186,3 +186,28 @@ cinco workspaces; build web 56 páginas com `next dev` parado e `.next` limpo;
 `diff --check`, PASS. A condição local mínima para futura E2E está satisfeita,
 mas o estado continua honestamente `PROJECT_ADVISOR_V0 = NOT_PROVEN` até prova
 externa separadamente autorizada.
+
+## Projeção do schema para o dialeto OpenAI
+
+Uma E2E posterior alcançou a OpenAI, mas foi recusada antes de geração com HTTP
+400: `uniqueItems is not permitted`. O contexto e o fail-closed funcionaram;
+parser/semântica não foram alcançados. Banco e Git permaneceram no baseline.
+
+Correção determinística sem novo egress: o host continua construindo um único
+schema autoritativo completo; `openAIStructuredOutputSchema` cria uma projeção
+recursiva pequena que remove somente `uniqueItems` antes do request OpenAI. O
+Ollama recebe o contrato completo. Nenhuma outra keyword foi removida sem
+evidência local de incompatibilidade. Unicidade não é delegada ao provider:
+`duplicate_source_reference` e `duplicate_authority_class` continuam sendo
+decididos pelo validador semântico do host.
+
+Regressões provam projeção aninhada sem `uniqueItems`, preservação das demais
+restrições suportadas, imutabilidade do schema host, payload OpenAI projetado,
+payload Ollama completo, duplicações recusadas pelo host, matriz de autoridade e
+resposta sintética válida. Gates: core Advisor 16/16; web focado 20/20; typecheck
+dos cinco workspaces; build web com dev parado; `diff --check`, PASS.
+
+Estado permanece `PROJECT_ADVISOR_V0 = NOT_PROVEN`. Condição objetiva para nova
+E2E: projeção OpenAI sem keywords comprovadamente incompatíveis, testes de
+boundary/host verdes e uma resposta sintética passando estrutura+semântica —
+condição local satisfeita, ainda dependente de autorização externa futura.
