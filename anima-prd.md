@@ -503,6 +503,15 @@ inteligência; itens 2 e 3 também permanecem bloqueados por 1→2→3. Não hou
 attempt, start, mudança de foco, coder, provider ou autorização financeira. Ver o
 [registro](docs/registros/2026-08-24-ratified-backlog-human-approval.md).
 
+**Classificação do backlog ratificado (2026-08-24):** as três propostas v2
+aprovadas receberam classificação INTEL-01 local `system_assessed`, completa e
+versionada. Replay idêntico reutilizou os mesmos eventos; divergência contra a
+mesma revisão falhou fechado. A fila autenticada passou a conter somente o item
+1 (`target_occupied=false`); itens 2 e 3 são elegíveis no eixo de inteligência,
+mas continuam fora pela cadeia causal 1→2→3. Nenhum claim, attempt, start, foco,
+coder, provider ou autorização financeira foi criado. Ver o
+[registro](docs/registros/2026-08-24-ratified-backlog-classification.md).
+
 **Estado tático do host autônomo (2026-08-22):** o Resource Governor agora é
 gate real para admissão de cada novo ciclo/turno do backlog: pressão baixa permite,
 moderada/alta adia com `resource_pressure`, e telemetria indeterminada/erro falha

@@ -2005,6 +2005,15 @@ está liberado e 2/3 permanecem bloqueados pelos predecessores. Approval não cr
 autorização financeira, claim, attempt, start, foco ou efeito externo.
 [Registro](../registros/2026-08-24-ratified-backlog-human-approval.md).
 
+**RATIFIED_BACKLOG_TO_EXECUTION_V0_CLASSIFICATION = PASS (2026-08-24).** A RPC
+INTEL-01 autenticada registrou uma classificação `system_assessed` completa para
+cada proposta v2, derivada apenas dos envelopes governados. Replay idêntico não
+duplicou e uma divergência na mesma revisão foi recusada. A fila contém somente
+o item 1; os itens 2 e 3 passaram no gate de inteligência, mas falham no gate de
+dependência até seus predecessores estarem `completed`. Nenhum claim, attempt,
+start, foco, coder, provider ou autorização financeira ocorreu.
+[Registro](../registros/2026-08-24-ratified-backlog-classification.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o
