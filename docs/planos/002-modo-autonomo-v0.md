@@ -1884,6 +1884,17 @@ identifica: item e eventos são relidos sob RLS, e perda de visibilidade retorna
 404 governado. Testes controlam A/B→primeiro/segundo e A+B→“esse?” ambíguo,
 incluindo payload adversarial, stale, RLS e chat normal. Nenhum egress ou mutação.
 
+**PROJECT_ADVISOR_CONVERSATIONAL_ITEM_REFERENCE_V0_E2E = NOT_PROVEN
+(2026-08-24).** A primeira prova parou em T1: a frase exata “Como está o
+projeto?” não casava com o detector conservador do Advisor e caiu no chat pessoal
+comum. Houve uma chamada OpenAI normal e as duas mensagens foram legitimamente
+persistidas em `ai_conversations` (`189 → 191`); T2/T3/T4 não foram executados.
+Isso não demonstra mutação do Advisor, pois a sua bifurcação nunca foi alcançada.
+A correção local reconhece consultas ancoradas ao próprio projeto/Anima antes do
+chat persistente, sem capturar conversa genérica sobre projetos; regressões puras
+e da fronteira read-only da rota passaram. As duas linhas foram preservadas como
+evidência. Não houve novo egress após a falha e uma nova E2E exige autorização.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o

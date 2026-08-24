@@ -41,3 +41,27 @@ describe('fronteira read-only do item drill-down', () => {
     expect(branch).toContain("resolution.basis === 'conversational_reference'");
   });
 });
+
+describe('fronteira read-only do Project Advisor global', () => {
+  const source = readFileSync(resolve(__dirname, 'route.ts'), 'utf8');
+  const start = source.indexOf('if (isProjectAdvisorQuestion(message))');
+  const end = source.indexOf('// ── Contexto do usuário');
+  const branch = source.slice(start, end);
+
+  test('bifurca antes do provider pessoal, detectores e persistência do chat', () => {
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    expect(start).toBeLessThan(source.indexOf('detectActivities(message'));
+    expect(start).toBeLessThan(source.indexOf(".from('ai_conversations')"));
+  });
+
+  test('usa somente projeções read-only e não aciona backlog, foco ou coder', () => {
+    expect(branch).toContain(".from('work_items')");
+    expect(branch).toContain(".from('work_events')");
+    expect(branch).toContain(".from('work_focus')");
+    expect(branch).not.toMatch(/\.(?:insert|update|upsert|delete|rpc)\s*\(/);
+    expect(branch).not.toContain(".from('ai_conversations')");
+    expect(branch).not.toMatch(/coder|supervisor|backlog/i);
+    expect(branch).toContain("'X-Anima-Mutation': 'none'");
+  });
+});

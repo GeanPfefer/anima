@@ -29,9 +29,22 @@ const valid: ProjectAdvisoryAnswer = {
 };
 const problems = (patch: Partial<ProjectAdvisoryAnswer>) => validateProjectAdvisoryAnswer({ ...valid, ...patch }, context);
 
-test('reconhece a pergunta canônica sem transformar conversa comum em advisory', () => {
-  expect(isProjectAdvisorQuestion(context.question)).toBe(true);
-  expect(isProjectAdvisorQuestion('Hoje eu corri por quarenta minutos.')).toBe(false);
+test.each([
+  'Como está o projeto?',
+  'Como está o Anima?',
+  'Como está o desenvolvimento do Anima agora?',
+  'Como está o projeto Anima?',
+  context.question,
+])('reconhece consulta conservadora ao próprio projeto: %s', message => {
+  expect(isProjectAdvisorQuestion(message)).toBe(true);
+});
+
+test.each([
+  'Estou pensando em começar um projeto novo.',
+  'Quero conversar sobre uma ideia para um projeto meu.',
+  'Hoje eu corri por quarenta minutos.',
+])('preserva chat comum fora do estado do Anima: %s', message => {
+  expect(isProjectAdvisorQuestion(message)).toBe(false);
 });
 
 test('falha fechado quando faltam classes mínimas de contexto', () => {

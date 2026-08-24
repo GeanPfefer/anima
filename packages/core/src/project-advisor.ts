@@ -43,6 +43,7 @@ export interface ProjectAdvisor {
 }
 
 const PROJECT_ADVISOR_PATTERNS = [
+  /^como (?:est[aá]|anda|vai) (?:(?:o )?projeto(?: anima)?|(?:o )?anima)\??$/i,
   /como (?:est[aá]|anda|vai) (?:o )?desenvolvimento do anima/i,
   /o que (?:est[aá] em andamento|falhou recentemente|est[aá] bloqueado|aguarda(?:ndo)? review)/i,
   /existe algo aguardando review/i,
