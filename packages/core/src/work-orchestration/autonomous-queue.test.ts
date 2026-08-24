@@ -121,4 +121,26 @@ describe('fila autônoma — checkpoints humanos e inelegibilidade (fail-closed)
 
   test.each([0, -1, 1.5])('sequência de aprovação inválida (%s) exclui o item', seq =>
     expect(ids([candidate('i1', 10, { approval: { seq, approvedAt: T0, proposalVersion: 1 } })])).toEqual([]));
+
+  test('dependência ainda não concluída mantém o item fora da fila', () => {
+    const dependencyId = '11111111-1111-4111-8111-111111111111';
+    const itemId = '22222222-2222-4222-8222-222222222222';
+    const dependent = candidate(itemId, 20, { item: makeItem(itemId, { intent: { execution_spec: { ...(spec as object), depends_on_work_item_ids: [dependencyId] } as Json } }) });
+    expect(ids([candidate(dependencyId, 10), dependent])).toEqual([dependencyId]);
+  });
+
+  test('dependência completed libera o dependente sem reordenar approvals', () => {
+    const dependencyId = '11111111-1111-4111-8111-111111111111';
+    const itemId = '22222222-2222-4222-8222-222222222222';
+    const dependency = candidate(dependencyId, 10, { item: makeItem(dependencyId, { state: 'completed' }) });
+    const dependent = candidate(itemId, 20, { item: makeItem(itemId, { intent: { execution_spec: { ...(spec as object), depends_on_work_item_ids: [dependencyId] } as Json } }) });
+    expect(ids([dependency, dependent])).toEqual([itemId]);
+  });
+
+  test('dependência ausente ou própria falha fechado', () => {
+    const itemId = '22222222-2222-4222-8222-222222222222';
+    const withDependency = (dependencyId: string) => candidate(itemId, 20, { item: makeItem(itemId, { intent: { execution_spec: { ...(spec as object), depends_on_work_item_ids: [dependencyId] } as Json } }) });
+    expect(ids([withDependency('11111111-1111-4111-8111-111111111111')])).toEqual([]);
+    expect(ids([withDependency(itemId)])).toEqual([]);
+  });
 });

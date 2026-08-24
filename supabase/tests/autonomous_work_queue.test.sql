@@ -2,7 +2,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 \ir helpers/routing.inc
-SELECT plan(28);
+SELECT plan(31);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('93000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','fila@test.invalid','',now(),'{}','{}',now(),now());
@@ -115,6 +115,36 @@ SELECT is((SELECT approved_proposal_version FROM public.autonomous_work_queue() 
   'a fila referencia a versão aprovada vigente');
 SELECT is((SELECT work_item_id FROM public.autonomous_work_queue() ORDER BY queue_position DESC LIMIT 1),(SELECT id FROM i4),
   'a aprovação mais recente ocupa o fim da fila');
+
+-- ---------- dependências bloqueiam execução, não approval ----------
+CREATE TEMP TABLE i5 AS SELECT (public.create_work_proposal('93000000-0000-0000-0000-000000000005','low','programming',
+  jsonb_build_object('execution_spec',:'spec'::jsonb),:'prop'::jsonb)).id;
+CREATE TEMP TABLE i6 AS SELECT (public.create_work_proposal('93000000-0000-0000-0000-000000000006','low','programming',
+  jsonb_build_object('execution_spec',(:'spec'::jsonb || jsonb_build_object('depends_on_work_item_ids',jsonb_build_array((SELECT id FROM i5))))),:'prop'::jsonb)).id;
+SELECT public.resolve_approval((SELECT id FROM i5),1,'approve','{}');
+SELECT public.resolve_approval((SELECT id FROM i6),1,'approve','{}');
+SELECT public.record_work_intelligence_classification((SELECT id FROM i5),1,0,:'intel'::jsonb);
+SELECT public.record_work_intelligence_classification((SELECT id FROM i6),1,0,:'intel'::jsonb);
+SELECT is((SELECT count(*) FROM public.autonomous_work_queue() WHERE work_item_id=(SELECT id FROM i6)),0::bigint,
+  'dependente aprovado espera enquanto predecessor não está completed');
+SELECT set_config('anima.dep_i5',(SELECT id::text FROM i5),true);
+SELECT set_config('anima.dep_i6',(SELECT id::text FROM i6),true);
+SET LOCAL ROLE service_role;
+UPDATE public.work_items SET state='completed' WHERE id=current_setting('anima.dep_i5')::uuid;
+RESET ROLE;
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub','93000000-0000-0000-0000-000000000000',true);
+SELECT is((SELECT count(*) FROM public.autonomous_work_queue() WHERE work_item_id=(SELECT id FROM i6)),1::bigint,
+  'dependente entra na fila quando predecessor fica completed');
+RESET ROLE;
+SET LOCAL ROLE service_role;
+SELECT ok(NOT private.autonomous_work_dependencies_satisfied(
+  '93000000-0000-0000-0000-000000000000',current_setting('anima.dep_i6')::uuid,
+  jsonb_build_object('execution_spec',jsonb_build_object('depends_on_work_item_ids',jsonb_build_array(current_setting('anima.dep_i6'))))),
+  'autodependência falha fechado');
+RESET ROLE;
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub','93000000-0000-0000-0000-000000000000',true);
 
 -- ---------- a fila é derivada, não armazenada ----------
 SELECT is((SELECT count(*) FROM pg_tables WHERE schemaname IN ('public','private') AND tablename LIKE '%queue%'),0::bigint,

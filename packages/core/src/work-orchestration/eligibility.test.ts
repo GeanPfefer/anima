@@ -43,6 +43,8 @@ describe('elegibilidade autônoma — especificação de execução (fail-closed
   test('sem especificação, cada requisito ausente vira lacuna própria', () => expect(codes(makeItem({}, 'sem-especificacao'))).toEqual(['target_missing', 'permissions_not_declared', 'validation_criteria_missing', 'limits_missing']));
   test('especificação com versão desconhecida é inválida', () => expect(codes(makeItem({}, { schema_version: 2 }))).toEqual(['execution_spec_invalid']));
   test('especificação que não é objeto é inválida', () => expect(codes(makeItem({}, 'tudo liberado'))).toEqual(['execution_spec_invalid']));
+  test('dependências válidas são projetadas no spec', () => expect(evaluateAutonomousEligibility(makeItem({}, { ...(fullSpec as object), depends_on_work_item_ids: ['11111111-1111-4111-8111-111111111111'] } as Json))).toMatchObject({ eligible: true, spec: { dependsOnWorkItemIds: ['11111111-1111-4111-8111-111111111111'] } }));
+  test('dependências malformadas falham fechado', () => expect(codes(makeItem({}, { ...(fullSpec as object), depends_on_work_item_ids: ['não-é-uuid'] } as Json))).toEqual(['execution_spec_invalid']));
   const withSpec = (spec: Record<string, Json>): WorkItem => makeItem({}, { ...(fullSpec as object), ...spec } as Json);
   test('alvo com kind desconhecido falta', () => expect(codes(withSpec({ target: { kind: 'planeta', reference: 'x' } }))).toEqual(['target_missing']));
   test('alvo com referência em branco falta', () => expect(codes(withSpec({ target: { kind: 'project', reference: ' ' } }))).toEqual(['target_missing']));

@@ -342,6 +342,14 @@ O banco enforça autoridade e posse (usuário, allowlist, estado, versão, prese
 
 A fila **não tem tabela própria**. Ela é projeção de `work_items`, do evento de aprovação vigente e de `work_claims`, exposta por `public.autonomous_work_queue()`. Por ser derivada, sobrevive a reinícios sem persistência adicional e não pode divergir do estado real: um item que deixa de ser elegível sai dela sozinho, sem intervenção nem rotina de limpeza.
 
+Dependências causais pequenas também vivem no contrato vigente, em
+`intent.execution_spec.depends_on_work_item_ids`. Elas **não impedem approval**: aprovação
+continua sendo a decisão humana sobre cada escopo. A fila, porém, só oferece o item quando
+todos os IDs declarados pertencem ao mesmo usuário e estão em `completed`. ID ausente,
+duplicado, malformado, autorreferência ou predecessor ainda aberto falha fechado. Esse gate
+mínimo implementa cadeias delimitadas sem introduzir um scheduler/DAG paralelo; a mesma
+régua é espelhada pelo parser puro e pelo cálculo read-only de readiness técnica.
+
 Um item entra na fila quando é elegível pela régua completa do AUTO-01 e não pertence a ninguém. Item com claim ativo sai da fila; claim expirado ou liberado o devolve para retomada. Itens aguardando decisão humana, em execução ou encerrados nunca entram — o checkpoint humano continua soberano por construção, não por verificação adicional.
 
 A régua de elegibilidade ganhou uma implementação SQL única e reutilizável (`private.is_autonomously_eligible`), espelhando `evaluateAutonomousEligibility`. Os predicados usam `CASE` com guarda explícita de NULL e de tipo, porque o `AND` do SQL não garante curto-circuito e `jsonb_array_elements` sobre escalar levanta exceção: entrada malformada resulta em `false`, nunca em NULL nem em erro. O predicado do core permanece a especificação do domínio, e os testes provam que as duas concordam caso a caso.

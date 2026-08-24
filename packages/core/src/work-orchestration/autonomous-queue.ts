@@ -121,6 +121,7 @@ export function projectAutonomousQueue(
   now: Date,
 ): readonly AutonomousQueueEntry[] {
   const occupiedTargets = deriveOccupiedTargets(candidates, now);
+  const itemsById = new Map(candidates.map(candidate => [candidate.item.id, candidate.item]));
   const eligible: Omit<AutonomousQueueEntry, 'queuePosition'>[] = [];
 
   for (const candidate of candidates) {
@@ -139,6 +140,8 @@ export function projectAutonomousQueue(
         : evaluateClassificationReadiness(candidate.currentClassification),
     });
     if (!evaluation.eligible) continue;
+    if (evaluation.spec.dependsOnWorkItemIds.some(dependencyId =>
+      dependencyId === candidate.item.id || itemsById.get(dependencyId)?.state !== 'completed')) continue;
 
     const targetReference = evaluation.spec.target.reference.trim();
     eligible.push({

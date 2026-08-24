@@ -22,6 +22,9 @@ export interface AutonomousExecutionSpecV1 {
   readonly permissions: readonly string[];
   readonly validationCriteria: readonly AutonomousValidationCriterion[];
   readonly limits: AutonomousExecutionLimits;
+  /** Dependências causais entre work items. Approval pode ocorrer antes; execução
+   * autônoma só fica elegível quando todas estiverem `completed`. */
+  readonly dependsOnWorkItemIds: readonly string[];
 }
 
 export type AutonomousEligibilityGapCode =
@@ -161,6 +164,14 @@ const parseLimits = (raw: Readonly<Record<string, Json>>): AutonomousExecutionLi
   return limits;
 };
 
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const parseDependencies = (raw: Readonly<Record<string, Json>>): readonly string[] | null => {
+  const value = raw['depends_on_work_item_ids'];
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || !value.every(entry => typeof entry === 'string' && uuid.test(entry))) return null;
+  return new Set(value).size === value.length ? value as readonly string[] : null;
+};
+
 export function evaluateAutonomousEligibility(item: WorkItem): AutonomousEligibilityEvaluation {
   const gaps: AutonomousEligibilityGap[] = [...stateGaps(item.state)];
 
@@ -191,12 +202,14 @@ export function evaluateAutonomousEligibility(item: WorkItem): AutonomousEligibi
     const permissions = parsePermissions(spec.raw);
     const validationCriteria = parseValidationCriteria(spec.raw);
     const limits = parseLimits(spec.raw);
+    const dependsOnWorkItemIds = parseDependencies(spec.raw);
     if (target === null) gaps.push(gap('target_missing', REQUIREMENT.target, 'O alvo de execução declarado é ausente ou inválido (kind e reference são obrigatórios).'));
     if (permissions === null) gaps.push(gap('permissions_not_declared', REQUIREMENT.permissions, 'As permissões precisam ser uma lista explícita (vazia significa "nenhuma adicional").'));
     if (validationCriteria === null) gaps.push(gap('validation_criteria_missing', REQUIREMENT.validation, 'Os critérios de validação precisam de pelo menos uma entrada verificável com rótulo.'));
     if (limits === null) gaps.push(gap('limits_missing', REQUIREMENT.limits, 'Declare ao menos um limite positivo de tentativas, tempo ou recurso.'));
-    if (target !== null && permissions !== null && validationCriteria !== null && limits !== null) {
-      parsedSpec = { schemaVersion: 1, target, permissions, validationCriteria, limits };
+    if (dependsOnWorkItemIds === null) gaps.push(gap('execution_spec_invalid', REQUIREMENT.target, 'As dependências precisam ser UUIDs únicos de work items.'));
+    if (target !== null && permissions !== null && validationCriteria !== null && limits !== null && dependsOnWorkItemIds !== null) {
+      parsedSpec = { schemaVersion: 1, target, permissions, validationCriteria, limits, dependsOnWorkItemIds };
     }
   }
 
@@ -224,6 +237,13 @@ export function readAutonomousExecutionSpec(intent: WorkIntent): AutonomousExecu
   const permissions = parsePermissions(spec.raw);
   const validationCriteria = parseValidationCriteria(spec.raw);
   const limits = parseLimits(spec.raw);
-  if (target === null || permissions === null || validationCriteria === null || limits === null) return null;
-  return { schemaVersion: 1, target, permissions, validationCriteria, limits };
+  const dependsOnWorkItemIds = parseDependencies(spec.raw);
+  if (target === null || permissions === null || validationCriteria === null || limits === null || dependsOnWorkItemIds === null) return null;
+  return { schemaVersion: 1, target, permissions, validationCriteria, limits, dependsOnWorkItemIds };
+}
+
+/** Readiness técnica ANTES da decisão humana: reutiliza a régua AUTO-01 com um
+ * estado aprovado hipotético, sem persistir approval nem executar efeito. */
+export function evaluateTechnicalApprovalReadiness(item: WorkItem): AutonomousEligibilityEvaluation {
+  return evaluateAutonomousEligibility({ ...item, state: 'approved' });
 }
