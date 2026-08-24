@@ -543,6 +543,22 @@ zero itens tocados, zero egress, zero tokens/custo OpenAI.** Registros
 [in-process](docs/registros/2026-08-23-resident-host-transporte-in-process.md) ·
 [auto-wake](docs/registros/2026-08-23-resident-host-auto-event-wake.md) ·
 [backlog-canônico](docs/registros/2026-08-23-backlog-canonico-descoberta-e-elegibilidade.md).
+**Barreira do coder local RATIFICADA como HARDWARE (2026-08-23, caracterização medida):** a
+cadeia canônica local até `review` não é sustentável na Goma atual (16 GB RAM single-channel /
+RTX 5060 Ti 16 GB). Medido em baseline quase limpo: `qwen3-coder:latest` (30B-A3B MoE, ~19 GB de
+runtime) consome **~14.2 GiB VRAM + ~5.5 GiB RAM** (num_ctx 8192, split 25% CPU / 75% GPU, load a
+frio ~27 s, ~30 tok/s); o runtime não cabe nos 16 GiB de VRAM → 25% derrama para a RAM. Somado a
+Docker+Supabase essenciais (**Δ ~4.0 GiB medido**) + a interface do usuário, o stack ultrapassa os
+16.25 GiB físicos → swap → o load a frio estoura os 120 s (`ollama_timeout`). Diagnóstico: **RAM-bound**
+(VRAM pequena demais é a razão do derrame; concorrência é o gatilho; config já é conservadora). Fix
+imediato = **32 GB dual-channel**; conforto/futuro (Computer Interaction, paralelismo, GPU sem
+derrame) = **64 GB + GPU ≥24 GB VRAM**. **Lacuna do Resource Governor CONFIRMADA (não bug):** a
+admissão (`decideResourceAdmission`) usa só a pressão de RAM do instante e **não reserva o footprint
+esperado do próprio workload**; `MachineSnapshotV1` não tem VRAM/pagefile e o histórico de custo é
+`durationMs`, não memória — o slot `WorkloadResourceSample` existe mas fica vazio. Direção canônica:
+**Host Inventory + Telemetry + Workload Profile → Capacity Planner** (e depois Procurement Advisor),
+sobre o substrato do Governor. Meta-prova **não** executada por honestidade (sem janela sustentável).
+Registro [caracterização-capacidade](docs/registros/2026-08-23-caracterizacao-capacidade-goma-qwen3-coder.md).
 
 O [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md) fixou que a programação autônoma **não tem teto artificial**: o ciclo completo (`entender → investigar → planejar → propor → implementar → testar → revisar → corrigir → commit → publicar → PR → integrar → merge → deploy → observar → reparar`) é destino, e **cada estágio recebe autonomia conforme sua própria maturidade e evidência** — as maturidades não são acopladas. O estado atual, classificando cada barreira como **restrição de maturidade** (promovível por evidência) ou **restrição fundamental** (exige decisão humana por não estar definida):
 
