@@ -1857,6 +1857,20 @@ regressão, typecheck dos cinco workspaces e build com dev parado passaram. Não
 houve retry. Nova E2E precisa de item pertencente à mesma identidade da UI ou de
 login explícito na identidade-fixture, além de nova autorização de egress.
 
+**PROJECT_ADVISOR_ITEM_DRILLDOWN_V0_E2E = PASS (2026-08-24).** O reteste
+selecionou pelo próprio RLS da conta do navegador o item `58159655…`, único item
+visível em `in_progress`. Sua projeção bounded continha integralmente quatro
+eventos (`work_proposed`, `context_attached`, `work_approved`, `work_started`) e
+nenhuma tentativa, falha, resultado, opinião do Verifier ou evidência
+coder/gate/Git. Uma única chamada autorizada chegou à OpenAI
+`gpt-5.6-terra`, retornou structured output de 4.201 caracteres, passou parser e
+semantic validator (12 claims) e foi apresentada HTTP 200 em 15.634 ms. A
+resposta afirmou o estado e a timeline, preservou explicitamente todas as
+ausências e não inferiu atividade, interrupção, falha ou diagnóstico depois de
+`work_started`. Banco `work_items/work_events/work_focus/ai_conversations`
+permaneceu `60/601/2/189`; HEAD, origens e diff permaneceram idênticos. Nenhum
+retry, coder, workflow ou mutação foi acionado.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o
