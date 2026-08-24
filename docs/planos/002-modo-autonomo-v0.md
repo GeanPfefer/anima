@@ -1895,6 +1895,18 @@ chat persistente, sem capturar conversa genérica sobre projetos; regressões pu
 e da fronteira read-only da rota passaram. As duas linhas foram preservadas como
 evidência. Não houve novo egress após a falha e uma nova E2E exige autorização.
 
+**PROJECT_ADVISOR_CONVERSATIONAL_ITEM_REFERENCE_V0_E2E = PASS (2026-08-24).**
+Após o bugfix de roteamento, a UI real executou uma conversa única sem UUID nos
+follow-ups. T1 entrou no Advisor, apresentou seis referências estruturadas e não
+persistiu chat pessoal. T2 resolveu “o primeiro” para `58159655…`, reaplicou RLS
+e reconstruiu fresh o item `in_progress` com quatro eventos. T3 resolveu “o
+segundo” para `418b7a23…`, reaplicou RLS e reconstruiu fresh o item `approved`
+com três eventos. T4, com seis candidatos preservados, pediu esclarecimento em
+104 ms antes do provider. OpenAI `gpt-5.6-terra` foi chamada exatamente em
+T1/T2/T3; schema, parser e semântica passaram em todos. Banco permaneceu
+`60/601/2/191`, Git permaneceu no baseline e nenhum workflow/coder foi acionado.
+Detalhes no [registro E2E](../registros/2026-08-24-project-advisor-conversational-item-reference-e2e-pass.md).
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o
