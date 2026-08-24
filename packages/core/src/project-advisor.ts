@@ -113,6 +113,14 @@ export function validateProjectAdvisoryAnswer(
   requireOnlyAuthority('missing_evidence_for_proven_capability', answer.provenCapabilities, ['evidence']);
   requireOnlyAuthority('invalid_open_frontier_authority', answer.unprovenFrontiers, ['observed_state', 'evidence', 'historical_record']);
   requireOnlyAuthority('invalid_canonical_direction_source', answer.canonicalDirections, ['canonical']);
+  const hasExplicitTemporalContract = context.sources.some(source => source.temporalRole && source.temporalRole !== 'undated');
+  if (hasExplicitTemporalContract) {
+    for (const claim of answer.unprovenFrontiers) {
+      if (!claim.sourceIds.some(id => ['current_projection', 'event_sequence'].includes(temporalById.get(id) ?? 'undated'))) {
+        problems.add('open_frontier_without_current_support');
+      }
+    }
+  }
   const presentLanguage = /\b(?:agora|atual(?:mente)?|est[aá]|continua|em andamento|aguardando|bloquead[oa])\b/i;
   for (const claim of [...answer.facts, ...answer.unprovenFrontiers]) {
     if (presentLanguage.test(claim.statement)

@@ -75,7 +75,7 @@ test('fixture temporal mantém presente vivo e histórico apenas como trajetóri
   const temporalAnswer: ProjectAdvisoryAnswer = {
     facts: [{ statement: 'O item active está em andamento agora.', sourceIds: ['live'], authorityClasses: ['observed_state'] }],
     provenCapabilities: [{ statement: 'Há evidência verificada para review.', sourceIds: ['proof'], authorityClasses: ['evidence'] }],
-    unprovenFrontiers: [{ statement: 'O registro anterior documentava falha, mas não descreve o presente.', sourceIds: ['old'], authorityClasses: ['historical_record'] }],
+    unprovenFrontiers: [{ statement: 'O registro anterior documentava falha, mas o estado vivo não a confirma no presente.', sourceIds: ['live', 'old'], authorityClasses: ['observed_state', 'historical_record'] }],
     canonicalDirections: [{ statement: 'A triagem não decide.', sourceIds: ['canon'], authorityClasses: ['canonical'] }],
     recommendation: { statement: 'Recomenda-se revisar o item review.', sourceIds: ['live', 'proof'], authorityClasses: ['observed_state', 'evidence'] },
     rationale: [{ statement: 'O estado atual e a evidência sustentam atenção.', sourceIds: ['live', 'proof'], authorityClasses: ['observed_state', 'evidence'] }],

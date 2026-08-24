@@ -59,13 +59,15 @@ test('claim válido aceita múltiplas fontes compatíveis', () => {
   expect(problems({ facts: [claim('Observado e provado.', ['state', 'proof'])] })).toEqual([]);
 });
 
-test('registro histórico não pode sozinho afirmar o presente, mas continua válido como trajetória', () => {
+test('fronteira atual exige apoio vivo e histórico continua válido como trajetória no racional', () => {
   expect(problems({ unprovenFrontiers: [claim('A fronteira está aberta agora.', ['history'])] }))
     .toContain('current_claim_without_live_source');
   expect(problems({ unprovenFrontiers: [claim('A fronteira estava aberta no registro anterior.', ['history'])] }))
-    .not.toContain('current_claim_without_live_source');
+    .toContain('open_frontier_without_current_support');
   expect(problems({ unprovenFrontiers: [claim('A fronteira está aberta agora.', ['state', 'history'])] }))
-    .not.toContain('current_claim_without_live_source');
+    .toEqual(expect.not.arrayContaining(['current_claim_without_live_source', 'open_frontier_without_current_support']));
+  expect(problems({ rationale: [claim('O registro documenta a trajetória anterior.', ['history'])] }))
+    .toEqual([]);
 });
 
 test('projeção atual exige timestamp auditável', () => {

@@ -1806,6 +1806,16 @@ pedidos originais e conteúdo pessoal. Fixture conflitante e casos adversariais
 passam localmente sem provider/egress e sem mutação. Prova externa pela UI não
 foi realizada nem autorizada neste recorte.
 
+**E2E V1 — NOT_PROVEN (2026-08-24).** A única chamada autorizada chegou ao
+provider: UI→backend→contexto de 11 fontes/quatro autoridades/24.068 caracteres
+→OpenAI `gpt-5.6-terra`→structured output de 7.226 caracteres. O host recusou
+antes da apresentação com `current_claim_without_live_source`; nenhuma segunda
+chamada ocorreu. A causa contratual estreita era `unprovenFrontiers` ainda
+admitir histórico puro, apesar de a categoria descrever fronteira aberta no
+presente. O host agora exige ao menos `current_projection` ou `event_sequence`
+nessa categoria; histórico puro continua permitido no racional como trajetória.
+Banco e Git ficaram no baseline. Nova E2E requer autorização independente.
+
 ### Prova viva de superfície pendente pela janela de orçamento (2026-08-21)
 
 No HEAD `5896862`, a RPC canônica `autonomous_work_budget_status`, chamada como o
