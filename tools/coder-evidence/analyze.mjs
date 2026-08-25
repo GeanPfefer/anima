@@ -15,28 +15,32 @@ const meta = JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf8'));
 
 const models = meta.config.models;
 const classes = meta.config.classes;
-const cell = (m, c) => rows.filter(r => r.model === m && r.class === c);
+const protocols = meta.config.protocols ?? ['current'];
+const protocolOf = r => r.protocol ?? 'current';
+const cell = (m, p, c) => rows.filter(r => r.model === m && protocolOf(r) === p && r.class === c);
 
 const pct = (n, d) => d ? `${Math.round((100 * n) / d)}%` : '—';
 const hist = arr => arr.reduce((a, x) => (a[x] = (a[x] ?? 0) + 1, a), {});
 
 console.log(`# Análise — ${dir}`);
-console.log(`Modelos: ${models.join(', ')} | Classes: ${classes.length} | reps: ${meta.config.reps} | seed: ${meta.config.seed}`);
+console.log(`Modelos: ${models.join(', ')} | Protocolos: ${protocols.join(', ')} | Classes: ${classes.length} | reps: ${meta.config.reps} | seed: ${meta.config.seed}`);
 console.log(`Config: ${meta.config.productionConfig}\n`);
 
 // ---- Matriz host-aceito/total + achieved/total + códigos ----
-console.log('## Por célula (host-aceito/total · achieved/total · [códigos] · determinismo)');
+console.log('## Por célula (modelo × protocolo × classe)');
 for (const c of classes) {
   console.log(`\n### ${c}`);
   for (const m of models) {
-    const rs = cell(m, c);
-    const acc = rs.filter(r => r.outcome === 'accepted').length;
-    const ach = rs.filter(r => r.achieved).length;
-    const codes = hist(rs.filter(r => r.failureCode).map(r => r.failureCode));
-    const outcomes = new Set(rs.map(r => r.outcome === 'accepted' ? 'A' : (r.failureCode ?? 'F')));
-    const deterministic = outcomes.size <= 1;
-    const codesStr = Object.entries(codes).map(([k, v]) => `${k}×${v}`).join(', ') || '—';
-    console.log(`  ${m.padEnd(20)} aceito ${acc}/${rs.length} (${pct(acc, rs.length)}) · achieved ${ach}/${rs.length} · [${codesStr}] · ${deterministic ? 'determinístico' : 'ESTOCÁSTICO'}`);
+    for (const p of protocols) {
+      const rs = cell(m, p, c);
+      const acc = rs.filter(r => r.outcome === 'accepted').length;
+      const ach = rs.filter(r => r.achieved).length;
+      const codes = hist(rs.filter(r => r.failureCode).map(r => r.failureCode));
+      const outcomes = new Set(rs.map(r => r.outcome === 'accepted' ? 'A' : (r.failureCode ?? 'F')));
+      const deterministic = outcomes.size <= 1;
+      const codesStr = Object.entries(codes).map(([k, v]) => `${k}×${v}`).join(', ') || '—';
+      console.log(`  ${m.padEnd(20)} ${p.padEnd(7)} aceito ${acc}/${rs.length} (${pct(acc, rs.length)}) · achieved ${ach}/${rs.length} · [${codesStr}] · ${deterministic ? 'determinístico' : 'ESTOCÁSTICO'}`);
+    }
   }
 }
 
@@ -45,7 +49,7 @@ console.log('\n## Monotonicidade de capacidade (taxa de aceite por classe, na or
 console.log('(monotônico = taxa não-decrescente 7b→14b→30b; caso contrário, capacidade NÃO é monotônica no tamanho)');
 let anyNonMono = false;
 for (const c of classes) {
-  const rates = models.map(m => { const rs = cell(m, c); return rs.length ? rs.filter(r => r.outcome === 'accepted').length / rs.length : null; });
+  const rates = models.map(m => { const rs = cell(m, protocols[0] ?? 'current', c); return rs.length ? rs.filter(r => r.outcome === 'accepted').length / rs.length : null; });
   let mono = true;
   for (let i = 1; i < rates.length; i++) if (rates[i - 1] !== null && rates[i] !== null && rates[i] < rates[i - 1] - 1e-9) mono = false;
   if (!mono) anyNonMono = true;
@@ -57,7 +61,7 @@ console.log(`\n→ Capacidade ${anyNonMono ? 'NÃO é' : 'é'} monotônica no ta
 console.log('\n## Estocasticidade (células cujos reps discordam a temperature=0)');
 let stoch = 0, total = 0;
 for (const c of classes) for (const m of models) {
-  const rs = cell(m, c); if (!rs.length) continue; total++;
+  const rs = cell(m, protocols[0] ?? 'current', c); if (!rs.length) continue; total++;
   const outcomes = new Set(rs.map(r => r.outcome === 'accepted' ? 'A' : (r.failureCode ?? 'F')));
   if (outcomes.size > 1) { stoch++; console.log(`  ${m} / ${c}: ${[...outcomes].join(' | ')}`); }
 }
@@ -71,14 +75,18 @@ console.log(`  distribuição global de ocorrências: ${JSON.stringify(hist(occA
 // ---- Rodada da edição / read-stalling ----
 console.log('\n## Rodada em que a edição ocorreu (orçamento restante) — read-stalling');
 for (const m of models) {
-  const rs = rows.filter(r => r.model === m && r.editRound !== null);
-  const rl = hist(rs.map(r => r.roundsLeftAtEdit));
-  console.log(`  ${m.padEnd(20)} roundsLeftAtEdit: ${JSON.stringify(rl)} (0 = só editou na rodada final forçada)`);
+  for (const p of protocols) {
+    const rs = rows.filter(r => r.model === m && protocolOf(r) === p && r.editRound !== null);
+    const rl = hist(rs.map(r => r.roundsLeftAtEdit));
+    console.log(`  ${m.padEnd(20)} ${p.padEnd(7)} roundsLeftAtEdit: ${JSON.stringify(rl)} (0 = só editou na rodada final forçada)`);
+  }
 }
 
 // ---- Totais brutos por modelo (comparar por célula, não por total) ----
 console.log('\n## Totais brutos por modelo (⚠ comparar por célula, não por total)');
 for (const m of models) {
-  const rs = rows.filter(r => r.model === m);
-  console.log(`  ${m.padEnd(20)} ${rs.filter(r => r.outcome === 'accepted').length}/${rs.length} aceito · ${rs.filter(r => r.achieved).length}/${rs.length} achieved`);
+  for (const p of protocols) {
+    const rs = rows.filter(r => r.model === m && protocolOf(r) === p);
+    console.log(`  ${m.padEnd(20)} ${p.padEnd(7)} ${rs.filter(r => r.outcome === 'accepted').length}/${rs.length} aceito · ${rs.filter(r => r.achieved).length}/${rs.length} achieved`);
+  }
 }

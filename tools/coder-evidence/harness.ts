@@ -29,6 +29,11 @@ const REPS = Math.max(1, parseInt(arg('reps', '5'), 10) || 5);
 const MODELS = arg('models', 'qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3-coder:30b').split(',').map(s => s.trim()).filter(Boolean);
 const CLASSES = arg('classes', FIXTURE_IDS.join(',')).split(',').map(s => s.trim()).filter(Boolean);
 const SEED = parseInt(arg('seed', '20260813'), 10) || 20260813;
+const PROTOCOLS = arg('protocols', 'current')
+  .split(',')
+  .map(s => s.trim())
+  .filter((s): s is 'current' | 'r2' => s === 'current' || s === 'r2');
+if (PROTOCOLS.length === 0) throw new Error('--protocols precisa conter current e/ou r2');
 const URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-');
 const OUT_DIR = arg('out', join('tools', 'coder-evidence', 'runs', STAMP));
@@ -114,7 +119,7 @@ const countOcc = (hay: string, needle: string): number => {
 };
 
 interface RunResult {
-  model: string; class: string; rep: number; order: number;
+  model: string; protocol: 'current' | 'r2'; class: string; rep: number; order: number;
   outcome: 'accepted' | 'failed';
   failureCode: string | null;
   achieved: boolean;
@@ -140,11 +145,30 @@ function memoryWorkspace(initial: Record<string, string>) {
   };
 }
 
-async function runOne(model: string, fixture: Fixture, rep: number, order: number): Promise<RunResult> {
+async function runOne(
+  model: string,
+  protocol: 'current' | 'r2',
+  fixture: Fixture,
+  rep: number,
+  order: number,
+): Promise<RunResult> {
   const { fetchImpl, records } = makeObserver();
   const workspace = memoryWorkspace({ ...fixture.files });
-  // Config de produção = DEFAULTS do construtor. Só passamos model + observador.
-  const backend = new OllamaCoderBackend({ model, fetchImpl });
+
+  // A = defaults vigentes. B = MESMOS defaults + unico opt-in experimental R2.
+  // Nenhum outro parametro de modelo/contexto/rounds/temperatura e variado.
+  const backend = new OllamaCoderBackend({
+    model,
+    fetchImpl,
+    ...(protocol === 'r2'
+      ? {
+          experimentalAnchorMode: {
+            kind: 'r2-host-mediated-v1' as const,
+            cycleId: `r2-c-${model}-${fixture.id}-${rep}`,
+          },
+        }
+      : {}),
+  });
   let outcome: 'accepted' | 'failed' = 'failed';
   let failureCode: string | null = null;
   let touched: string[] = [];
@@ -186,7 +210,7 @@ async function runOne(model: string, fixture: Fixture, rep: number, order: numbe
   const achieved = outcome === 'accepted' && fixture.achieved(workspace.files);
 
   return {
-    model, class: fixture.id, rep, order,
+    model, protocol, class: fixture.id, rep, order,
     outcome, failureCode, achieved,
     calls: records.length,
     readResponses,
@@ -216,12 +240,12 @@ async function main() {
   const config = {
     startedAt: new Date().toISOString(),
     node: process.version, ollamaUrl: URL, ollamaVersion: meta.ollamaVersion,
-    models: MODELS, classes: selected.map(f => f.id), reps: REPS, seed: SEED,
-    productionConfig: 'defaults do construtor (maxReadRounds=3, num_ctx=8192, num_predict=1536, temperature=0)',
-    note: 'ordem randomizada por seed DENTRO de cada bloco de modelo (blocos contíguos para não recarregar a VRAM); fixtures são proxies sintéticos.',
+    models: MODELS, protocols: PROTOCOLS, classes: selected.map(f => f.id), reps: REPS, seed: SEED,
+    productionConfig: 'A=current: defaults do construtor. B=r2: mesmos defaults + experimentalAnchorMode opt-in (maxReadRounds=3, num_ctx=8192, num_predict=1536, temperature=0)',
+    note: 'A/B pareado: a ordem fixture×rep é randomizada uma vez por modelo/seed e reutilizada IDENTICA para cada protocolo; blocos de protocolo ficam dentro do mesmo bloco de modelo para preservar hardware/modelo carregado. Fixtures são proxies sintéticos.',
   };
   writeFileSync(join(OUT_DIR, 'meta.json'), JSON.stringify({ config, tags: meta.tags }, null, 2));
-  console.log(`[harness] out=${OUT_DIR} models=${MODELS.join(',')} classes=${selected.length} reps=${REPS} seed=${SEED}`);
+  console.log(`[harness] out=${OUT_DIR} models=${MODELS.join(',')} protocols=${PROTOCOLS.join(',')} classes=${selected.length} reps=${REPS} seed=${SEED}`);
 
   const results: RunResult[] = [];
   let modelIdx = 0;
@@ -231,24 +255,28 @@ async function main() {
     const plan: { fixture: Fixture; rep: number }[] = [];
     for (const fixture of selected) for (let r = 0; r < REPS; r++) plan.push({ fixture, rep: r });
     const order = shuffle(plan, rng);
-    console.log(`\n[${model}] ${order.length} execuções (bloco contíguo)`);
-    let n = 0;
-    for (const { fixture, rep } of order) {
-      const res = await runOne(model, fixture, rep, n);
-      results.push(res);
-      appendFileSync(rawPath, JSON.stringify(res) + '\n');
-      const tag = res.outcome === 'accepted' ? (res.achieved ? 'OK' : 'ACEITA/semânt≠') : (res.failureCode ?? 'FAIL');
-      console.log(`  [${model}] #${String(n).padStart(2, '0')} ${fixture.id.padEnd(16)} → ${tag} (${res.totalMs}ms, ${res.calls} chamadas)`);
-      n++;
+    console.log(`\n[${model}] ${order.length} pares-base × ${PROTOCOLS.length} protocolo(s)`);
+
+    for (const protocol of PROTOCOLS) {
+      console.log(`  tratamento=${protocol}`);
+      let n = 0;
+      for (const { fixture, rep } of order) {
+        const res = await runOne(model, protocol, fixture, rep, n);
+        results.push(res);
+        appendFileSync(rawPath, JSON.stringify(res) + '\n');
+        const tag = res.outcome === 'accepted' ? (res.achieved ? 'OK' : 'ACEITA/semânt≠') : (res.failureCode ?? 'FAIL');
+        console.log(`    [${protocol}] #${String(n).padStart(2, '0')} ${fixture.id.padEnd(16)} → ${tag} (${res.totalMs}ms, ${res.calls} chamadas; ops=${res.editOpKinds.join(',') || '-'})`);
+        n++;
+      }
     }
     modelIdx++;
   }
 
   // ---- Agregação: matriz sucesso(host-aceito)/total e achieved/total por célula ----
-  const cellKey = (m: string, c: string) => `${m}|${c}`;
+  const cellKey = (m: string, p: string, c: string) => `${m}|${p}|${c}`;
   const cells = new Map<string, { total: number; accepted: number; achieved: number; codes: Record<string, number> }>();
   for (const r of results) {
-    const k = cellKey(r.model, r.class);
+    const k = cellKey(r.model, r.protocol, r.class);
     const cell = cells.get(k) ?? { total: 0, accepted: 0, achieved: 0, codes: {} };
     cell.total++;
     if (r.outcome === 'accepted') cell.accepted++;
@@ -260,46 +288,39 @@ async function main() {
     config,
     finishedAt: new Date().toISOString(),
     cells: [...cells.entries()].map(([k, v]) => {
-      const [model, cls] = k.split('|');
-      return { model, class: cls, ...v };
+      const [model, protocol, cls] = k.split('|');
+      return { model, protocol, class: cls, ...v };
     }),
   };
   writeFileSync(join(OUT_DIR, 'matrix.json'), JSON.stringify(matrix, null, 2));
 
-  // Matriz em markdown (host-aceito): linhas = classes, colunas = modelos.
-  const modelsOrdered = MODELS;
-  const header = `| Classe | ${modelsOrdered.join(' | ')} |`;
-  const sep = `|---|${modelsOrdered.map(() => '---').join('|')}|`;
-  const rows = selected.map(f => {
-    const cols = modelsOrdered.map(m => {
-      const cell = cells.get(cellKey(m, f.id));
-      if (!cell) return '—';
-      const codes = Object.entries(cell.codes).map(([c, n]) => `${c.replace('ollama_', '')}×${n}`).join(', ');
-      return `${cell.accepted}/${cell.total}${codes ? ` (${codes})` : ''}`;
-    });
-    return `| \`${f.id}\` | ${cols.join(' | ')} |`;
-  });
-  const achievedRows = selected.map(f => {
-    const cols = modelsOrdered.map(m => {
-      const cell = cells.get(cellKey(m, f.id));
-      return cell ? `${cell.achieved}/${cell.total}` : '—';
-    });
-    return `| \`${f.id}\` | ${cols.join(' | ')} |`;
-  });
+  // Matriz A/B: uma linha por classe × modelo × protocolo.
+  const mdRows: string[] = [];
+  for (const fixture of selected) {
+    for (const model of MODELS) {
+      for (const protocol of PROTOCOLS) {
+        const cell = cells.get(cellKey(model, protocol, fixture.id));
+        if (!cell) continue;
+        const codes = Object.entries(cell.codes)
+          .map(([code, n]) => `${code.replace('ollama_', '')}×${n}`)
+          .join(', ');
+        mdRows.push(
+          `| \`${fixture.id}\` | \`${model}\` | \`${protocol}\` | ${cell.accepted}/${cell.total} | ${cell.achieved}/${cell.total} | ${codes || '—'} |`,
+        );
+      }
+    }
+  }
+
   const md = [
-    `# Matriz da campanha — ${config.startedAt}`,
-    ``,
+    `# Matriz da campanha A/B — ${config.startedAt}`,
+    '',
     `Config: ${config.productionConfig}. Node ${config.node}, Ollama ${config.ollamaVersion ?? '?'}. Seed ${SEED}, reps ${REPS}.`,
     `${config.note}`,
-    ``,
-    `## Host-aceito / total (desfecho primário; códigos de falha entre parênteses)`,
-    ``,
-    header, sep, ...rows,
-    ``,
-    `## Semanticamente correto / total (métrica secundária; \`achieved\`)`,
-    ``,
-    header, sep, ...achievedRows,
-    ``,
+    '',
+    '| Classe | Modelo | Protocolo | Host-aceito | Achieved | Falhas |',
+    '|---|---|---|---:|---:|---|',
+    ...mdRows,
+    '',
   ].join('\n');
   writeFileSync(join(OUT_DIR, 'matrix.md'), md);
   console.log(`\n[harness] concluído. matrix.md, matrix.json, raw.jsonl e meta.json em ${OUT_DIR}`);

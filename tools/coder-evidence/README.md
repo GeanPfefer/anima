@@ -74,3 +74,23 @@ linha de métricas por execução), `matrix.json` e `matrix.md` (agregado por c�
 Enquanto a evidência não for reconstruída com N estatístico em alvo realista,
 **não se promove piso de modelo nem se altera a âncora/protocolo** — decisão
 humana, conforme o registro.
+
+
+## Comparação experimental R2 (Plano 003)
+
+O harness aceita `--protocols current,r2`.
+
+- `current`: protocolo vigente, sem opt-in experimental;
+- `r2`: mesmos defaults do `OllamaCoderBackend`, acrescentando somente
+  `experimentalAnchorMode: { kind: 'r2-host-mediated-v1', cycleId }`.
+
+A ordem `fixture × rep` é randomizada uma vez por modelo/seed e reutilizada
+identicamente nos tratamentos, permitindo A/B pareado. O `raw.jsonl` registra
+`protocol`, além das métricas históricas (resultado, código, reads, rodada,
+operações, tokens e duração).
+
+Exemplo:
+
+```powershell
+node --experimental-transform-types --import ./tools/coder-evidence/register.mjs tools/coder-evidence/harness.ts --models qwen3-coder:latest --classes multiline_before,structural_add,cleanup --reps 5 --seed 20260825 --protocols current,r2 --out tools/coder-evidence/runs/2026-08-25-r2-ab
+```
