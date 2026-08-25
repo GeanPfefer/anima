@@ -22,6 +22,23 @@ const cell = (m, p, c) => rows.filter(r => r.model === m && protocolOf(r) === p 
 const pct = (n, d) => d ? `${Math.round((100 * n) / d)}%` : '—';
 const hist = arr => arr.reduce((a, x) => (a[x] = (a[x] ?? 0) + 1, a), {});
 
+/**
+ * Assinatura observacional de um rep.
+ *
+ * "accepted" sozinho nao prova equivalencia entre reps: uma edicao pode ser
+ * aceita pelo host e ainda falhar a semantica da fixture.
+ *
+ * A+ACH = host aceitou e achieved=true
+ * A+SEM = host aceitou e achieved=false
+ * A     = run historico sem campo achieved
+ * F:x   = falha tipada
+ */
+const resultSignature = r => {
+  if (r.outcome !== 'accepted') return `F:${r.failureCode ?? 'unknown'}`;
+  if (typeof r.achieved !== 'boolean') return 'A';
+  return r.achieved ? 'A+ACH' : 'A+SEM';
+};
+
 console.log(`# Análise — ${dir}`);
 console.log(`Modelos: ${models.join(', ')} | Protocolos: ${protocols.join(', ')} | Classes: ${classes.length} | reps: ${meta.config.reps} | seed: ${meta.config.seed}`);
 console.log(`Config: ${meta.config.productionConfig}\n`);
@@ -36,35 +53,86 @@ for (const c of classes) {
       const acc = rs.filter(r => r.outcome === 'accepted').length;
       const ach = rs.filter(r => r.achieved).length;
       const codes = hist(rs.filter(r => r.failureCode).map(r => r.failureCode));
-      const outcomes = new Set(rs.map(r => r.outcome === 'accepted' ? 'A' : (r.failureCode ?? 'F')));
-      const deterministic = outcomes.size <= 1;
+      const signatures = [...new Set(rs.map(resultSignature))].sort();
+      const deterministic = signatures.length <= 1;
       const codesStr = Object.entries(codes).map(([k, v]) => `${k}×${v}`).join(', ') || '—';
-      console.log(`  ${m.padEnd(20)} ${p.padEnd(7)} aceito ${acc}/${rs.length} (${pct(acc, rs.length)}) · achieved ${ach}/${rs.length} · [${codesStr}] · ${deterministic ? 'determinístico' : 'ESTOCÁSTICO'}`);
+      console.log(
+        `  ${m.padEnd(20)} ${p.padEnd(9)} aceito ${acc}/${rs.length} (${pct(acc, rs.length)}) · achieved ${ach}/${rs.length} · [${codesStr}] · ${deterministic ? 'determinístico' : `ESTOCÁSTICO (${signatures.join(' | ')})`}`
+      );
     }
   }
 }
 
-// ---- Monotonicidade de capacidade entre modelos, por classe ----
-console.log('\n## Monotonicidade de capacidade (taxa de aceite por classe, na ordem dos modelos)');
-console.log('(monotônico = taxa não-decrescente 7b→14b→30b; caso contrário, capacidade NÃO é monotônica no tamanho)');
+// ---- Monotonicidade de capacidade entre modelos, por protocolo e classe ----
+console.log('\n## Monotonicidade de capacidade (taxa de aceite por protocolo × classe, na ordem dos modelos)');
+console.log('(monotônico = taxa não-decrescente entre os modelos fornecidos; caso contrário, capacidade NÃO é monotônica no tamanho)');
+
 let anyNonMono = false;
-for (const c of classes) {
-  const rates = models.map(m => { const rs = cell(m, protocols[0] ?? 'current', c); return rs.length ? rs.filter(r => r.outcome === 'accepted').length / rs.length : null; });
-  let mono = true;
-  for (let i = 1; i < rates.length; i++) if (rates[i - 1] !== null && rates[i] !== null && rates[i] < rates[i - 1] - 1e-9) mono = false;
-  if (!mono) anyNonMono = true;
-  console.log(`  ${c.padEnd(18)} ${rates.map(r => r === null ? '—' : (r * 100).toFixed(0).padStart(3) + '%').join(' → ')}  ${mono ? '' : '⟵ NÃO-monotônico'}`);
+
+for (const p of protocols) {
+  for (const c of classes) {
+    const rates = models.map(m => {
+      const rs = cell(m, p, c);
+
+      return rs.length
+        ? rs.filter(r => r.outcome === 'accepted').length / rs.length
+        : null;
+    });
+
+    let mono = true;
+
+    for (let i = 1; i < rates.length; i++) {
+      if (
+        rates[i - 1] !== null &&
+        rates[i] !== null &&
+        rates[i] < rates[i - 1] - 1e-9
+      ) {
+        mono = false;
+      }
+    }
+
+    if (!mono) anyNonMono = true;
+
+    console.log(
+      `  ${p.padEnd(9)} / ${c.padEnd(18)} ${rates
+        .map(r => r === null ? '—' : (r * 100).toFixed(0).padStart(3) + '%')
+        .join(' → ')}  ${mono ? '' : '⟵ NÃO-monotônico'}`
+    );
+  }
 }
-console.log(`\n→ Capacidade ${anyNonMono ? 'NÃO é' : 'é'} monotônica no tamanho neste conjunto.`);
+
+console.log(
+  `\n→ Capacidade ${anyNonMono ? 'NÃO é' : 'é'} monotônica no tamanho neste conjunto.`
+);
 
 // ---- Estocasticidade global ----
-console.log('\n## Estocasticidade (células cujos reps discordam a temperature=0)');
-let stoch = 0, total = 0;
-for (const c of classes) for (const m of models) {
-  const rs = cell(m, protocols[0] ?? 'current', c); if (!rs.length) continue; total++;
-  const outcomes = new Set(rs.map(r => r.outcome === 'accepted' ? 'A' : (r.failureCode ?? 'F')));
-  if (outcomes.size > 1) { stoch++; console.log(`  ${m} / ${c}: ${[...outcomes].join(' | ')}`); }
+console.log('\n## Estocasticidade (modelo × protocolo × classe cujos reps discordam a temperature=0)');
+
+let stoch = 0;
+let total = 0;
+
+for (const p of protocols) {
+  for (const c of classes) {
+    for (const m of models) {
+      const rs = cell(m, p, c);
+
+      if (!rs.length) continue;
+
+      total++;
+
+      const signatures = [...new Set(rs.map(resultSignature))].sort();
+
+      if (signatures.length > 1) {
+        stoch++;
+
+        console.log(
+          `  ${m} / ${p} / ${c}: ${signatures.join(' | ')}`
+        );
+      }
+    }
+  }
 }
+
 console.log(`\n→ ${stoch}/${total} células estocásticas.`);
 
 // ---- Assinaturas de falha por ocorrência do `before` ----
