@@ -2047,3 +2047,16 @@ Resident Host in-process, com identidade user-scoped e Resource Governor. A prov
 controlada de worktree passou e foi limpa. Item 1 continua `failed`, sem evento de
 retry e sem attempt 2; Itens 2/3 continuam dependentes. Próximo checkpoint: o
 humano atualizar `/chat` e clicar uma vez em “Tentar novamente autonomamente”.
+
+### Reconciliação de classificação antes da execução (2026-08-25)
+
+O item ServedRead v3 provou um impasse seguro introduzido pela transferência da
+execução explícita ao Resident Host: o bridge que registrava a classificação
+ficou depois do retorno `resident_host_required`, enquanto o card dependia da
+fila — que exige essa classificação — para oferecer o pedido autônomo. A
+correção separa preparação de execução: readiness expõe ausência/incompletude e
+um comando autenticado pode registrar somente a classificação determinística do
+envelope planejado. Ele não cria claim, attempt, pedido de execução nem coder.
+O item real permanece `approved`, v3, sem classificação e sem execução; próximo
+ponto exato: o usuário correto aciona “Preparar elegibilidade autônoma” e revisa
+a fila relida. [Registro](../registros/2026-08-25-readiness-classification-reconciliation.md).
