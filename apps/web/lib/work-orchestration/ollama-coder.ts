@@ -66,6 +66,11 @@ export interface OllamaCoderOptions {
   readonly experimentalAnchorMode?: {
     readonly kind: 'r2-host-mediated-v1';
     readonly cycleId: string;
+    /**
+     * Ergonomia experimental adicional.
+     * Ausente preserva exatamente o comportamento R2 original.
+     */
+    readonly readGuidance?: 'narrow-target-v1';
   };
 }
 
@@ -85,6 +90,13 @@ const EXPERIMENTAL_ANCHOR_SYSTEM = [
   'Quando uma ancora adequada estiver disponivel, voce PODE editar com {"action":"edit","operations":[{"kind":"replace_anchor","anchor_id":"<id anunciado pelo host>","after":"<novo conteudo>"}]}.',
   'Em replace_anchor, forneca SOMENTE kind, anchor_id e after. Nunca forneca path, SHA, range ou conteudo original como autoridade alternativa.',
   'A regra de copiar before byte-exato continua valendo para replace_exact; replace_anchor referencia apenas uma ancora anunciada nesta mesma execucao.',
+].join('\n');
+
+const EXPERIMENTAL_ANCHOR_NARROW_READ_GUIDANCE = [
+  'R2 NARROW TARGET OPT-IN: cada anchor cobre EXATAMENTE o intervalo servido pela leitura que o originou.',
+  'Se uma leitura ampla serviu apenas para localizar o alvo, antes de editar faca uma nova leitura usando o MENOR lineRange que contenha somente o texto que realmente sera substituido.',
+  'Prefira o anchor estreito dessa leitura. O campo after substitui TODO o intervalo desse anchor; nao reescreva linhas vizinhas que nao precisam mudar.',
+  'Nao forneca path, SHA ou range no replace_anchor: essa autoridade continua exclusivamente no host.',
 ].join('\n');
 
 const clip = (value: string, max: number): string => (value.length <= max ? value : `${value.slice(0, max)}…`);
@@ -248,7 +260,13 @@ export class OllamaCoderBackend implements CoderBackend {
    * reforçando o formato, sem reapresentar conteúdo algum. */
   private async callProtocol(prompt: string, signal: AbortSignal) {
     const system = this.options.experimentalAnchorMode
-      ? `${SYSTEM}\n${EXPERIMENTAL_ANCHOR_SYSTEM}`
+      ? [
+          SYSTEM,
+          EXPERIMENTAL_ANCHOR_SYSTEM,
+          ...(this.options.experimentalAnchorMode.readGuidance === 'narrow-target-v1'
+            ? [EXPERIMENTAL_ANCHOR_NARROW_READ_GUIDANCE]
+            : []),
+        ].join('\n')
       : SYSTEM;
     const messages = [{ role: 'system' as const, content: system }, { role: 'user' as const, content: prompt }];
     assertPromptWithinBudget(system + prompt, this.budget);

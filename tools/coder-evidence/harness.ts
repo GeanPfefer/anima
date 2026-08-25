@@ -29,11 +29,18 @@ const REPS = Math.max(1, parseInt(arg('reps', '5'), 10) || 5);
 const MODELS = arg('models', 'qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3-coder:30b').split(',').map(s => s.trim()).filter(Boolean);
 const CLASSES = arg('classes', FIXTURE_IDS.join(',')).split(',').map(s => s.trim()).filter(Boolean);
 const SEED = parseInt(arg('seed', '20260813'), 10) || 20260813;
+type ProtocolVariant = 'current' | 'r2' | 'r2-narrow';
+
 const PROTOCOLS = arg('protocols', 'current')
   .split(',')
   .map(s => s.trim())
-  .filter((s): s is 'current' | 'r2' => s === 'current' || s === 'r2');
-if (PROTOCOLS.length === 0) throw new Error('--protocols precisa conter current e/ou r2');
+  .filter((s): s is ProtocolVariant =>
+    s === 'current' || s === 'r2' || s === 'r2-narrow'
+  );
+
+if (PROTOCOLS.length === 0) {
+  throw new Error('--protocols precisa conter current, r2 e/ou r2-narrow');
+}
 const URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-');
 const OUT_DIR = arg('out', join('tools', 'coder-evidence', 'runs', STAMP));
@@ -119,7 +126,7 @@ const countOcc = (hay: string, needle: string): number => {
 };
 
 interface RunResult {
-  model: string; protocol: 'current' | 'r2'; class: string; rep: number; order: number;
+  model: string; protocol: ProtocolVariant; class: string; rep: number; order: number;
   outcome: 'accepted' | 'failed';
   failureCode: string | null;
   achieved: boolean;
@@ -152,7 +159,7 @@ function memoryWorkspace(initial: Record<string, string>) {
 
 async function runOne(
   model: string,
-  protocol: 'current' | 'r2',
+  protocol: ProtocolVariant,
   fixture: Fixture,
   rep: number,
   order: number,
@@ -165,11 +172,14 @@ async function runOne(
   const backend = new OllamaCoderBackend({
     model,
     fetchImpl,
-    ...(protocol === 'r2'
+    ...(protocol === 'r2' || protocol === 'r2-narrow'
       ? {
           experimentalAnchorMode: {
             kind: 'r2-host-mediated-v1' as const,
-            cycleId: `r2-c-${model}-${fixture.id}-${rep}`,
+            cycleId: `r2-c-${protocol}-${model}-${fixture.id}-${rep}`,
+            ...(protocol === 'r2-narrow'
+              ? { readGuidance: 'narrow-target-v1' as const }
+              : {}),
           },
         }
       : {}),
@@ -251,7 +261,7 @@ async function main() {
     startedAt: new Date().toISOString(),
     node: process.version, ollamaUrl: URL, ollamaVersion: meta.ollamaVersion,
     models: MODELS, protocols: PROTOCOLS, classes: selected.map(f => f.id), reps: REPS, seed: SEED,
-    productionConfig: 'A=current: defaults do construtor. B=r2: mesmos defaults + experimentalAnchorMode opt-in (maxReadRounds=3, num_ctx=8192, num_predict=1536, temperature=0)',
+    productionConfig: 'current=defaults; r2=mesmos defaults + experimentalAnchorMode; r2-narrow=r2 + readGuidance narrow-target-v1. Todos preservam maxReadRounds=3, num_ctx=8192, num_predict=1536, temperature=0',
     note: 'A/B pareado: a ordem fixture×rep é randomizada uma vez por modelo/seed e reutilizada IDENTICA para cada protocolo; blocos de protocolo ficam dentro do mesmo bloco de modelo para preservar hardware/modelo carregado. Fixtures são proxies sintéticos.',
   };
   writeFileSync(join(OUT_DIR, 'meta.json'), JSON.stringify({ config, tags: meta.tags }, null, 2));

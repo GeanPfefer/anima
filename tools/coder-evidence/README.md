@@ -112,3 +112,33 @@ o analyzer existente.
 
 O observador continua sendo passivo: ele não altera payload, prompt, resposta,
 backend, contexto, temperatura, rounds ou decisão do host.
+
+
+### Variante C2: r2-narrow
+
+A investigação forense de `multiline_before` isolou uma regressão do R2:
+todos os oito runs usaram corretamente o mesmo intervalo servido
+`decls.ts [1,7]`, mas em 2/8 o modelo gerou um `after` semanticamente
+incorreto ao repetir `const`.
+
+`r2-narrow` é uma variante experimental adicional, não um novo default.
+
+Ela preserva integralmente:
+
+- `replace_anchor`;
+- binding efêmero por ciclo;
+- path, SHA e range definidos somente pelo host;
+- validações de stale file, conteúdo, overlap, scope e no-op;
+- configuração de modelo/contexto/rounds/temperatura.
+
+A única diferença é uma orientação adicional: após localizar o alvo com uma
+leitura ampla, o modelo deve solicitar o menor `lineRange` que contenha
+somente o texto que será substituído e preferir o anchor dessa leitura.
+
+Exemplo de comparação:
+
+```text
+--protocols current,r2,r2-narrow
+```
+
+A variante continua experimental e não promove R2 para produção.
