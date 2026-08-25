@@ -5,6 +5,14 @@ describe('projeção de apresentação do trabalho',()=>{
   test('expõe evidência e ações da versão revisada',()=>expect(presentWorkItem(item,[event])).toMatchObject({latestResult:{eventId:'r',proposalVersion:2,author:'executor',summary:'feito',references:['commit:a']},availableActions:['accept_result','request_result_changes']}));
   test('não permite aceite sem resultado correspondente',()=>expect(availableWorkActions(item,null)).toEqual([]));
   test('não permite aceite de resultado de versão anterior',()=>expect(presentWorkItem(item,[{...event,proposalVersion:1,payload:{schema_version:1,data:{summary:'antigo',result_references:[]}}}]).availableActions).toEqual([]));
+  test('oferece liberação somente para start manual vigente sem attempt posterior',()=>{
+    const manualItem={...item,state:'in_progress'} satisfies WorkItem;
+    const started={...event,id:'start',type:'work_started',author:'user',payload:{schema_version:1,data:{}}} satisfies WorkEvent;
+    expect(presentWorkItem(manualItem,[started]).manualReleaseAvailable).toBe(true);
+    expect(presentWorkItem(manualItem,[started,{...event,id:'attempt',type:'execution_started',author:'system'}]).manualReleaseAvailable).toBe(false);
+    expect(presentWorkItem(manualItem,[{...started,proposalVersion:1}]).manualReleaseAvailable).toBe(false);
+    expect(presentWorkItem({...manualItem,state:'approved'},[started]).manualReleaseAvailable).toBe(false);
+  });
   test('marca validações e limitações ausentes como não informadas',()=>expect(projectLatestWorkResult([event])).toMatchObject({validations:null,limitations:null}));
   test('projeta validações e limitações tipadas',()=>expect(projectLatestWorkResult([{...event,payload:{schema_version:1,data:{summary:'feito',result_references:[],validations:[{label:'npm test',outcome:'passed'}],limitations:['sem teste e2e']}}}])).toMatchObject({validations:[{label:'npm test',outcome:'passed'}],limitations:['sem teste e2e']}));
   test('validações malformadas não viram evidência',()=>expect(projectLatestWorkResult([{...event,payload:{schema_version:1,data:{summary:'feito',result_references:[],validations:[{label:'x',outcome:'inventado'}],limitations:['ok',42]}}}])).toMatchObject({validations:null,limitations:null}));

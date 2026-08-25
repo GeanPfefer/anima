@@ -1,4 +1,4 @@
-import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, RequestProposalRevisionCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand } from './commands';
+import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, ReleaseManualWorkCommand, RequestProposalRevisionCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand } from './commands';
 import { failure, type WorkOperationResult } from './errors';
 import type { DecideIntegrationCommand, IntegrationDecisionOutcome } from './integration-decision';
 import type { WorkOrchestrationRepository } from './repository';
@@ -22,6 +22,10 @@ export class WorkOrchestrationService {
   startWork(command: StartWorkCommand): Promise<WorkOperationResult<WorkItem>> {
     if (!this.validVersion(command.expectedProposalVersion)) return Promise.resolve(invalid('Versão inválida.'));
     return this.repository.startWork(command);
+  }
+  releaseManualWork(command: ReleaseManualWorkCommand): Promise<WorkOperationResult<WorkItem>> {
+    if (!this.validVersion(command.expectedProposalVersion)) return Promise.resolve(invalid('Versão inválida.'));
+    return this.repository.releaseManualWork(command);
   }
   submitResult(command: SubmitWorkResultCommand): Promise<WorkOperationResult<WorkItem>> {
     if (!this.validVersion(command.expectedProposalVersion) || !isValidWorkResult(command.result)) return Promise.resolve(invalid('Resultado inválido.'));

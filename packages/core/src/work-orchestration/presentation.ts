@@ -91,7 +91,7 @@ export interface WorkIntegrationProjection {
   // autorização; nunca afirma merge ou integração.
   readonly reviewRequest?:{readonly repositoryId:string;readonly remoteName:string;readonly reviewReference:string;readonly reviewId:string;readonly sourceBranch:string;readonly sourceCommitSha:string;readonly baseBranch:string}|null;
 }
-export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; /** Fase humana projetada dos fatos (presentWorkItem sempre a preenche; opcional para não quebrar projeções/fixtures antigas). */ readonly progress?:WorkProgressPhaseProjection; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly pendingBudgetWait?:WorkBudgetWaitProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
+export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; /** Oferta read-only; a RPC autoritativa ainda valida claims e concorrência. */ readonly manualReleaseAvailable:boolean; /** Fase humana projetada dos fatos (presentWorkItem sempre a preenche; opcional para não quebrar projeções/fixtures antigas). */ readonly progress?:WorkProgressPhaseProjection; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly pendingBudgetWait?:WorkBudgetWaitProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
   // Histórico append-only dos pareceres do Verifier persistidos (auditoria). Só
   // presente quando há ao menos um; read-only, nunca altera ações nem decide.
   readonly opinionHistory?:readonly VerifierOpinionV1[];
@@ -340,7 +340,16 @@ export function deriveWorkProgressPhase(input:{readonly item:WorkItem;readonly e
   if(item.state==='approved')return progressPhase('approved');
   return progressPhase('proposal');
 }
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);const observedGit=projectHostObservedEvidence(events);const observedGates=projectHostObservedGateEvidence(events);const execution=projectAutonomousExecution(item,events);const integration=projectWorkIntegration(item,events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),execution,pendingDecision:projectPendingWorkDecision(item,events),pendingBudgetWait:projectPendingBudgetWait(item,events),integration,progress:deriveWorkProgressPhase({item,execution,integration}),
+export function projectManualReleaseAvailable(item:WorkItem,events:readonly WorkEvent[]):boolean{
+  if(item.state!=='in_progress')return false;
+  let manualStartIndex=-1;
+  for(let index=events.length-1;index>=0;index--){const event=events[index];if(event?.type==='work_started'&&event.author==='user'&&event.proposalVersion===item.proposalVersion){manualStartIndex=index;break;}}
+  if(manualStartIndex<0)return false;
+  const disqualifying=new Set<WorkEvent['type']>(['execution_started','result_submitted','execution_failed','work_cancelled','attempt_abandoned']);
+  return !events.slice(manualStartIndex+1).some(event=>disqualifying.has(event.type));
+}
+
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);const observedGit=projectHostObservedEvidence(events);const observedGates=projectHostObservedGateEvidence(events);const execution=projectAutonomousExecution(item,events);const integration=projectWorkIntegration(item,events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),manualReleaseAvailable:projectManualReleaseAvailable(item,events),execution,pendingDecision:projectPendingWorkDecision(item,events),pendingBudgetWait:projectPendingBudgetWait(item,events),integration,progress:deriveWorkProgressPhase({item,execution,integration}),
   // Parecer advisory do Verifier — só quando há evidência git durável a conferir.
   // É projeção pura e read-only; nunca altera ações nem substitui a revisão humana.
   verification:projectWorktreeHandoff(events)?verifyPersistedWorkResult(item,events):null,

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { WorkPresentationView } from './WorkProposalCard';
 import { WorkProposalCard } from './WorkProposalCard';
 const item = { id:'item',userId:'user',sourceMessageId:'message',state:'proposed',impactLevel:'significant',capability:'programming',originalRequest:'pedido',intent:{},proposal:{schemaVersion:1,data:{summary:'Construir tela',objective:'Criar uma tela segura',includedScope:['Tela'],excludedScope:['Execução'],expectedEffects:['Proposta'],risks:['Escopo']}},proposalVersion:2,createdAt:'2026-07-14T00:00:00Z',updatedAt:'2026-07-14T00:00:00Z' } as const;
-const presentation = (overrides: Partial<WorkPresentationView> = {}): WorkPresentationView => ({ item, latestResult:null, acceptedResult:null, latestEventType:null, availableActions:['approve','reject','defer','revise_proposal'], progress:{phase:'proposal',label:'Proposta',active:false,terminal:false}, ...overrides });
+const presentation = (overrides: Partial<WorkPresentationView> = {}): WorkPresentationView => ({ item, latestResult:null, acceptedResult:null, latestEventType:null, availableActions:['approve','reject','defer','revise_proposal'], manualReleaseAvailable:false, progress:{phase:'proposal',label:'Proposta',active:false,terminal:false}, ...overrides });
 const result = { eventId:'e1', proposalVersion:2, author:'user' as const, summary:'Resumo apresentado', references:['docs/prova.md'], validations:null, limitations:null, handoffReference:null };
 describe('WorkProposalCard', () => {
   beforeEach(() => { global.fetch = jest.fn().mockResolvedValue({ ok:true, json:async()=>({ok:true,value:{presentation:presentation()}}) }) as jest.Mock; });
@@ -30,6 +30,12 @@ describe('WorkProposalCard', () => {
     expect(screen.getByText(/Execução manual em andamento/)).toHaveTextContent('registre o resultado abaixo');
     expect(screen.getByRole('button',{name:'Registrar resultado'})).toBeInTheDocument();
     expect(screen.queryByRole('button',{name:'Executar autonomamente'})).not.toBeInTheDocument();
+  });
+  test('libera apenas quando a projeção read-only oferece a recuperação manual', async () => {
+    const view=presentation({item:{...item,state:'in_progress'},availableActions:['submit_result'],manualReleaseAvailable:true});
+    render(<WorkProposalCard presentation={view} onChange={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button',{name:'Liberar execução manual'}));
+    await waitFor(()=>expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/release-manual',expect.objectContaining({method:'POST'})));
   });
   test('inicia somente o trabalho e a versão explícitos no modo autônomo', async () => {
     const autonomousItem={...item,state:'approved' as const,intent:{execution_spec:{schema_version:1,target:{kind:'project',reference:'sup04-live'},permissions:['workspace_read','workspace_write_isolated'],validation_criteria:[{label:'npm test',command:'npm test'}],limits:{max_attempts:1,max_duration_minutes:5}}}};

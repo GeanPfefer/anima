@@ -3,6 +3,7 @@ export interface CreateWorkProposalCommand { sourceMessageId: SourceMessageId; i
 export interface ReviseWorkProposalCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; intent: WorkIntent; proposal: WorkProposal; }
 export interface ResolveWorkApprovalCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; decision: ApprovalDecision; }
 export interface StartWorkCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; }
+export interface ReleaseManualWorkCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; }
 export interface SubmitWorkResultCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; result: WorkResultInput; }
 export interface ReviewWorkResultCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; reviewedResultEventId:string; decision: ResultReviewDecision; }
 export interface AttachWorkContextCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; references: readonly WorkContextReference[]; }

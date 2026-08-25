@@ -1,4 +1,4 @@
-import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, RequestProposalRevisionCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand } from './commands';
+import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, ReleaseManualWorkCommand, RequestProposalRevisionCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand } from './commands';
 import type { WorkOperationResult } from './errors';
 import type { DecideIntegrationCommand, IntegrationDecisionOutcome } from './integration-decision';
 import type { ApprovalDecision, WorkContextSnapshot, WorkEvent, WorkItem, WorkItemId } from './types';
@@ -9,6 +9,7 @@ export interface WorkOrchestrationRepository {
   requestProposalRevision(command:RequestProposalRevisionCommand):Promise<WorkOperationResult<WorkItem>>;
   resolveApproval(command: ResolveApprovalInput): Promise<WorkOperationResult<WorkItem>>;
   startWork(command: StartWorkCommand): Promise<WorkOperationResult<WorkItem>>;
+  releaseManualWork(command: ReleaseManualWorkCommand): Promise<WorkOperationResult<WorkItem>>;
   submitResult(command: SubmitWorkResultCommand): Promise<WorkOperationResult<WorkItem>>;
   startExecution(command: StartWorkExecutionCommand): Promise<WorkOperationResult<WorkItem>>;
   finishExecution(command: FinishWorkExecutionCommand): Promise<WorkOperationResult<WorkItem>>;
