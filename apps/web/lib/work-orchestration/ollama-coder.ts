@@ -70,7 +70,7 @@ export interface OllamaCoderOptions {
      * Ergonomia experimental adicional.
      * Ausente preserva exatamente o comportamento R2 original.
      */
-    readonly readGuidance?: 'narrow-target-v1';
+    readonly readGuidance?: 'narrow-target-v1' | 'after-scope-v1';
   };
 }
 
@@ -97,6 +97,11 @@ const EXPERIMENTAL_ANCHOR_NARROW_READ_GUIDANCE = [
   'Se uma leitura ampla serviu apenas para localizar o alvo, antes de editar faca uma nova leitura usando o MENOR lineRange que contenha somente o texto que realmente sera substituido.',
   'Prefira o anchor estreito dessa leitura. O campo after substitui TODO o intervalo desse anchor; nao reescreva linhas vizinhas que nao precisam mudar.',
   'Nao forneca path, SHA ou range no replace_anchor: essa autoridade continua exclusivamente no host.',
+].join('\n');
+
+const EXPERIMENTAL_ANCHOR_AFTER_SCOPE_GUIDANCE = [
+  'R2 AFTER SCOPE OPT-IN: o campo after substitui TODO o intervalo do anchor escolhido.',
+  'Gere no after somente o conteudo final correto desse intervalo; nao reescreva linhas vizinhas fora do anchor.',
 ].join('\n');
 
 const clip = (value: string, max: number): string => (value.length <= max ? value : `${value.slice(0, max)}…`);
@@ -265,7 +270,9 @@ export class OllamaCoderBackend implements CoderBackend {
           EXPERIMENTAL_ANCHOR_SYSTEM,
           ...(this.options.experimentalAnchorMode.readGuidance === 'narrow-target-v1'
             ? [EXPERIMENTAL_ANCHOR_NARROW_READ_GUIDANCE]
-            : []),
+            : this.options.experimentalAnchorMode.readGuidance === 'after-scope-v1'
+              ? [EXPERIMENTAL_ANCHOR_AFTER_SCOPE_GUIDANCE]
+              : []),
         ].join('\n')
       : SYSTEM;
     const messages = [{ role: 'system' as const, content: system }, { role: 'user' as const, content: prompt }];

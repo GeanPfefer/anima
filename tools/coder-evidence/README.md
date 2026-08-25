@@ -142,3 +142,33 @@ Exemplo de comparação:
 ```
 
 A variante continua experimental e não promove R2 para produção.
+
+
+### Variante C3: r2-after-scope
+
+A campanha C2 mostrou:
+
+- `current`: 8/8 achieved;
+- `r2`: 6/8 achieved;
+- `r2-narrow`: 8/8 achieved;
+- porém `r2-narrow` continuou fazendo três leituras `[1,7]` e editando o
+  anchor `[1,7]` em todos os oito runs.
+
+Portanto, a hipótese de que o ganho veio de um anchor mais estreito **não foi
+demonstrada**.
+
+`r2-after-scope` é uma ablação destinada a isolar a parte textual do guidance
+que explica que `after` substitui todo o intervalo do anchor e deve conter
+somente o conteúdo final correto desse intervalo.
+
+Ela **não** instrui o modelo a pedir um `lineRange` menor.
+
+Comparação prevista:
+
+```text
+--protocols r2,r2-after-scope,r2-narrow
+```
+
+Se `r2-after-scope` reproduzir o ganho de `r2-narrow` sem alterar a sequência
+de reads/anchors, isso será evidência de que o efeito observado decorre da
+explicitação semântica de `after`, e não da redução do range.
