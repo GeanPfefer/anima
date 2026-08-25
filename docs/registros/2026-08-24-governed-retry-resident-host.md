@@ -71,3 +71,38 @@
   card mostra razão estruturada; WorkProposalCard + by-source 50/50; typecheck 5
   workspaces; build web; `git diff --check` limpo. Nenhuma attempt/claim/retry
   real. Aguarda nova inspeção visual humana em http://localhost:3000/chat.
+
+## Prova viva da attempt 2 real (2026-08-25, dirigida pelo Resident Host)
+
+- **Ato humano:** Gean confirmou a superfície de retry no /chat e clicou UMA vez em
+  "Tentar novamente autonomamente". A UI só persistiu `request_work_retry`
+  (`work_approved`/authority=retry_authorization, seq 34713, 01:28:17) → Item 1 → `approved`.
+- **Driver:** Resident Host (`npm run local-host`, in_process, identidade Bearer do
+  usuário) iniciado por Gean. 1º start SEM credenciais parou fail-closed em
+  `waiting_human_or_recovery` (identity_unavailable) — invariante de identidade honrado;
+  reiniciado com credenciais. Realtime deu `CHANNEL_ERROR` → **poll fallback** acordou o
+  host ~11s após o clique. `materializeWhenIdle` desligado (sem doc), Governor por ciclo.
+- **Attempt 2 (`e2e790bb-8ea4-49c8-a9c1-d0f1c8658d3c`):** routing → claim → `execution_started`
+  (seq 34718, 01:28:28) → **worktree isolada criada** (`worktree:anima:anima-work/e2e790bb`,
+  contagem 37→38). **PASSOU do `worktree-create`** — exatamente o checkpoint que matou a
+  attempt 1 no processo `next dev`. A correção de autoridade (execução saiu do web para o
+  Resident Host) fica PROVADA ao vivo.
+- **Desfecho terminal:** `execution_failed` (seq 34719, 01:30:08), reason
+  **`ollama_read_round_limit`** — o qwen3-coder esgotou as 3 rodadas de leitura sem propor
+  edições (~98s, `durationMs 98276`). Barreira de CAPACIDADE do modelo (editor fraco),
+  cortada por guard bounded (falha limpa, sem hang) — não é o `worktree-create-failed` da
+  attempt 1 nem o `ollama_timeout` de RAM. Evidência host-observed persistida
+  (`host_observed_coder_evidence_recorded`, outcome failed). Claim liberado, **worktree
+  limpa (37, sem residual)**.
+- **Estado final:** Item 1 `failed`; retry readiness `BLOCKED`/`attempt_budget_exhausted`
+  (2/2, remaining 0) → **terceira attempt impossível**. Nenhum gate rodou, nenhum Verifier
+  (o coder falhou antes de qualquer edição). O card mostra a razão estruturada e esconde o botão.
+- **Invariantes:** Itens 2/3 `approved`/bloqueados; 27 work_items (zero materialização);
+  autorização financeira = 0; compute pago = 0; egress externo = 0; `origin/main` `99bec54`
+  intacta; nenhuma integração/completion do Item 1. Após a falha o Resident Host ficou em
+  `waiting_resource` (Governor adiando por pressão de memória), `itemsTouched=0` — não tocou
+  mais nada.
+- **Conclusão:** `GOVERNED_RETRY_RESIDENT_HOST_V0` provado fim-a-fim até o coder; a barreira
+  restante coder→`review` é CAPACIDADE do qwen3-coder como editor (ortogonal ao retry
+  governado e à autoridade de execução, ambos verdes). Próximo: avaliar melhor editor local
+  ou hardware.
