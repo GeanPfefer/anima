@@ -56,6 +56,47 @@ describe('interpretWorkRequest — classificação de capability', () => {
   });
 });
 
+describe('interpretWorkRequest — precedência lifeRecord × sinal de trabalho', () => {
+  const kindOf = (message: string) => interpretWorkRequest(message, 'src').kind;
+
+  // Registro de vida PURO (sem verbo operacional + objeto de trabalho) continua
+  // sendo conversa — o marcador cotidiano veta corretamente quando não há
+  // intenção operacional explícita.
+  test.each([
+    'Hoje corri por 30 minutos.',
+    'Hoje corri por 30 minutos e tive uma ideia interessante.',
+    'Ontem estudei por uma hora.',
+  ] as const)('registro de vida puro continua conversa: “%s”', message =>
+    expect(kindOf(message)).toBe('conversation'));
+
+  // Um marcador cotidiano incidental ("hoje"/"ontem") NÃO pode vetar uma intenção
+  // operacional explícita. Antes, a simples presença de "hoje" na frase derrubava
+  // o mandato para conversation (bug de precedência).
+  test.each([
+    'Implemente um teste para a API mantendo o comportamento que existe hoje.',
+    'Preservar o arquivo e os testes sem alterar o comportamento de produção que existe hoje.',
+  ] as const)('intenção operacional com "hoje" incidental vira work_candidate: “%s”', message =>
+    expect(kindOf(message)).toBe('work_candidate'));
+
+  test('mandato ServedRead com "mesmo slice efetivo que hoje" vira work_candidate', () => {
+    // Reprodução fiel do mandato real: contém a comparação "mesmo slice efetivo
+    // que hoje", onde a palavra "hoje" é incidental à intenção operacional de
+    // preservar a proveniência da leitura.
+    const message = [
+      'ServedRead Provenance V1',
+      'Objetivo: Preservar no resultado de serveReadRequests a proveniência normalizada da leitura.',
+      'Escopo funcional: preservar search, lineRange e parâmetros efetivos em ServedRead, mantendo os testes atuais.',
+      'Prova mínima: request híbrida com search + lineRange continua servindo exatamente o mesmo slice efetivo que hoje, mas a provenance preserva search e lineRange.',
+    ].join(' ');
+
+    const result = interpretWorkRequest(message, 'served-read-precedence');
+
+    expect(result.kind).toBe('work_candidate');
+    if (result.kind !== 'work_candidate') return;
+    expect(result.command.sourceMessageId).toBe('served-read-precedence');
+  });
+});
+
 describe('UX-04 — consulta conversacional de histórico de trabalho', () => {
   const positivos = [
     'quais trabalhos tenho em aberto?',

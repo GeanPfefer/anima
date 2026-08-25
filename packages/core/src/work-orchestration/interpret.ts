@@ -51,10 +51,21 @@ const impactFor = (message: string): WorkImpactLevel => /\b(?:apagar|excluir|mig
 
 export function interpretWorkRequest(message: string, sourceMessageId: string): WorkIntentInterpretation {
   const text = normalize(message);
-  if (!text || /\?\s*$/.test(text) || lifeRecord.test(text)) return { kind: 'conversation' };
+  // Vazio ou pergunta explícita nunca é trabalho — veto legítimo e independente
+  // do conteúdo. O marcador cotidiano (`lifeRecord`) NÃO entra aqui: veta apenas
+  // registro de vida PURO, o que só se decide depois de calcular o sinal de
+  // trabalho (ver abaixo). Antes o `lifeRecord` vetava nesta linha, então a
+  // palavra "hoje" incidental dentro de um mandato operacional
+  // (ex.: "...o comportamento que existe hoje") derrubava a intenção real.
+  if (!text || /\?\s*$/.test(text)) return { kind: 'conversation' };
   if (/^(?:eu\s+)?(?:quero|gostaria|tenho vontade)\s+(?:de\s+)?(?:algo|melhorar|mudar|criar|fazer)\.?$/i.test(text)) return { kind: 'clarification_required', question: { id: 'objective', question: 'O que você quer construir ou alterar exatamente?', options: [{ value: 'plan', label: 'Planejar primeiro', recommended: true }, { value: 'change', label: 'Alterar algo existente' }, { value: 'investigate', label: 'Investigar um problema' }] } };
   // Candidato a trabalho por par verbo+objeto OU por frase forte de intenção.
   const isWork = (operationalVerb.test(text) && explicitObject.test(text)) || workIntentPhrase.test(text);
+  // Precedência corrigida: o marcador cotidiano só devolve conversa quando é um
+  // registro de vida PURO — isto é, quando NÃO há sinal de trabalho explícito.
+  // Assim "Hoje corri por 30 minutos" continua conversa, mas "...que existe hoje"
+  // dentro de um mandato operacional deixa de ser vetado pela palavra "hoje".
+  if (lifeRecord.test(text) && !isWork) return { kind: 'conversation' };
   if (!isWork) return { kind: 'conversation' };
   const requestKind: ConstructionIntentV1['request_kind'] = /\b(?:investig|an[aá]lis|diagn[oó]stic)/i.test(text) ? 'investigate' : /\b(?:alter|corrig|refator|implement)\b/i.test(text) ? 'change' : 'plan';
   const intent: ConstructionIntentV1 = { schema_version: 1, mode: 'construction', request_kind: requestKind, confidence: 'high' };
