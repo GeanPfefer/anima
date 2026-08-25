@@ -94,3 +94,21 @@ Exemplo:
 ```powershell
 node --experimental-transform-types --import ./tools/coder-evidence/register.mjs tools/coder-evidence/harness.ts --models qwen3-coder:latest --classes multiline_before,structural_add,cleanup --reps 5 --seed 20260825 --protocols current,r2 --out tools/coder-evidence/runs/2026-08-25-r2-ab
 ```
+
+
+### Evidência forense por execução
+
+Runs novos também preservam no `raw.jsonl`:
+
+- `callsRaw`: cada chamada observada ao Ollama, incluindo o prompt de usuário,
+  resposta textual, duração, `prompt_eval_count`, `eval_count` e
+  `done_reason`;
+- `finalFiles`: conteúdo final do workspace sintético da fixture.
+
+Esses campos existem para explicar divergências entre `host-accepted` e
+`achieved` sem precisar inferir a causa a partir de métricas agregadas.
+Eles são aditivos: runs históricos sem esses campos continuam compatíveis com
+o analyzer existente.
+
+O observador continua sendo passivo: ele não altera payload, prompt, resposta,
+backend, contexto, temperatura, rounds ou decisão do host.

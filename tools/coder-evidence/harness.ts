@@ -134,6 +134,11 @@ interface RunResult {
   perCallMs: number[];
   promptEvalCounts: (number | null)[];
   evalCounts: (number | null)[];
+
+  // Evidência forense auditável. Esses campos são adicionais e retrocompatíveis:
+  // runs históricos que não os possuem continuam válidos.
+  callsRaw: CallRecord[];
+  finalFiles: Record<string, string>;
 }
 
 function memoryWorkspace(initial: Record<string, string>) {
@@ -221,6 +226,11 @@ async function runOne(
     perCallMs: records.map(c => Math.round(c.ms)),
     promptEvalCounts: records.map(c => c.promptEvalCount),
     evalCounts: records.map(c => c.evalCount),
+
+    // Preserva exatamente o que o observador viu e o estado semântico final
+    // da fixture. Não altera payload, prompt, backend nem decisão do host.
+    callsRaw: records.map(record => ({ ...record })),
+    finalFiles: Object.fromEntries(workspace.files.entries()),
   };
 }
 
