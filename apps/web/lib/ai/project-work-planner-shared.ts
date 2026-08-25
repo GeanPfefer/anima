@@ -28,6 +28,16 @@ export type PlannerArguments = {
   risks: string[];
   validation_label: string;
   validation_command: string;
+  /**
+   * Provas ADICIONAIS além da principal (validation_label/validation_command),
+   * quando o trabalho exige múltiplas verificações independentes (ex.: um teste
+   * direcionado, uma regressão de compatibilidade e um typecheck). Cada entrada é
+   * UM único comando npm da allowlist; o host valida e escopa cada uma como um
+   * gate FORMAL separado. Ausente/vazio ⇒ exatamente uma prova — compatível com
+   * propostas antigas de gate único. NUNCA é comando composto (`A && B`): são N
+   * critérios, não uma concatenação de shell.
+   */
+  additional_validations?: { label: string; command: string }[];
 };
 
 /** Resultado do PLANEJADOR (parte provider-específica): a string JSON dos
@@ -60,8 +70,22 @@ export const SUBMIT_PARAMETERS = {
     risks: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 8 },
     validation_label: { type: 'string' },
     validation_command: { type: 'string', description: 'Um único comando npm de teste, typecheck ou build.' },
+    additional_validations: {
+      type: 'array',
+      description: 'Provas ADICIONAIS além da principal, SÓ quando múltiplas verificações independentes são realmente necessárias. Cada item é UM único comando npm (test/typecheck/build); nunca encadeie comandos com &&. Use [] quando uma única prova basta.',
+      items: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          command: { type: 'string', description: 'Um único comando npm de teste, typecheck ou build.' },
+        },
+        required: ['label', 'command'],
+        additionalProperties: false,
+      },
+      maxItems: 6,
+    },
   },
-  required: ['summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command'],
+  required: ['summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command', 'additional_validations'],
   additionalProperties: false,
 } as const;
 
@@ -100,7 +124,7 @@ export const PLANNER_CHAT_TOOLS = [
 ];
 
 export const PLANNER_SYSTEM_INSTRUCTIONS =
-  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS (arrays) de strings, cada uma com pelo menos um item — nunca uma string única; excluded_scope deve listar ao menos um caminho ou área que NÃO deve ser tocada. Quando houver evidência suficiente, chame submit_project_work_proposal.';
+  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Quando o trabalho exigir MAIS DE UMA prova independente (por exemplo, um teste direcionado, uma regressão de compatibilidade e um typecheck), registre a primeira em validation_label/validation_command e as demais em additional_validations, cada uma com seu label e um ÚNICO comando npm — nunca encadeie comandos com && nem componha vários num só. Use additional_validations = [] quando uma única prova basta. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS (arrays) de strings, cada uma com pelo menos um item — nunca uma string única; excluded_scope deve listar ao menos um caminho ou área que NÃO deve ser tocada. Executar um teste NÃO concede permissão de editar o arquivo testado: só o included_scope autoriza escrita. Quando houver evidência suficiente, chame submit_project_work_proposal.';
 
 export function buildPlannerUserPrompt(message: string): string {
   return `Prepare uma proposta executável para este pedido:\n\n${message}\n\nInvestigue primeiro o repositório com as ferramentas locais (project_search, project_read_file, project_list_files, project_git_status, project_git_diff). Leia AGENTS.md e os arquivos relevantes. Não altere nada. O alvo será fixado pelo servidor como anima. Escolha somente caminhos exatos de arquivos necessários. Quando houver informação suficiente, chame submit_project_work_proposal.`;
@@ -223,6 +247,36 @@ export function scopeTestCommandToWorkspace(command: string, includedScope: read
   return `${match[1]} test --workspace=${workspace} ${match[2]}`;
 }
 
+/** Máximo de provas ADICIONAIS além da principal (espelha `maxItems` do schema). */
+export const MAX_ADDITIONAL_VALIDATIONS = 6;
+
+/**
+ * Valida as provas ADICIONAIS (AUTORIDADE DO HOST, fail-closed).
+ *
+ * - ausente/null/`[]` ⇒ `undefined` (sem extras; compat com gate único);
+ * - array de `{label, command}` onde CADA `command` é um comando único da
+ *   allowlist (`safeValidationCommand` já recusa shell arbitrário e `&&`);
+ * - qualquer entrada malformada/insegura, não-array, ou acima do teto ⇒ `null`
+ *   (rejeita a proposta inteira). Nunca deriva obrigação de prosa nem aceita
+ *   comando composto — são N critérios FORMAIS, não um `A && B`.
+ */
+export function parseAdditionalValidations(
+  value: unknown,
+): { label: string; command: string }[] | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return null;
+  if (value.length === 0) return undefined;
+  if (value.length > MAX_ADDITIONAL_VALIDATIONS) return null;
+  const out: { label: string; command: string }[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const candidate = entry as { label?: unknown; command?: unknown };
+    if (!nonBlank(candidate.label) || !nonBlank(candidate.command) || !safeValidationCommand(candidate.command)) return null;
+    out.push({ label: candidate.label, command: candidate.command });
+  }
+  return out;
+}
+
 /** Valida e normaliza os argumentos BRUTOS do modelo — AUTORIDADE DO HOST. Rejeita
  * fail-closed qualquer coisa fora dos limites permitidos (escopo, path, comando). */
 export function parseProposal(raw: string): PlannerArguments | null {
@@ -232,7 +286,9 @@ export function parseProposal(raw: string): PlannerArguments | null {
       || !textList(value.excluded_scope) || !textList(value.expected_effects) || !textList(value.risks)
       || !nonBlank(value.validation_label) || !nonBlank(value.validation_command)) return null;
     if (value.included_scope.length > 12 || !value.included_scope.every(safePath) || !safeValidationCommand(value.validation_command)) return null;
-    return value as PlannerArguments;
+    const additionalValidations = parseAdditionalValidations(value.additional_validations);
+    if (additionalValidations === null) return null;
+    return { ...(value as PlannerArguments), additional_validations: additionalValidations };
   } catch {
     return null;
   }

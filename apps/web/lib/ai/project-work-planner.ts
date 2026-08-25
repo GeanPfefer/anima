@@ -106,10 +106,21 @@ export async function planExecutableProjectWork(
           // Autoridade do host: escopa um `npm test -- <arquivo>` ao workspace do
           // included_scope, senão o gate fana-out na raiz do monorepo e reprova por
           // "No tests found" em workspaces sem o arquivo (não afrouxa; só precisa).
-          validation_criteria: [{
-            label: proposal.validation_label,
-            command: scopeTestCommandToWorkspace(proposal.validation_command, proposal.included_scope),
-          }],
+          // O gate PRINCIPAL sempre existe; provas ADICIONAIS (quando o trabalho
+          // exige múltiplas verificações independentes) viram critérios FORMAIS
+          // separados — cada comando já foi validado na allowlist por parseProposal
+          // e é escopado aqui igual ao principal. São N gates, nunca um `A && B`.
+          // Sem additional_validations ⇒ exatamente um critério, como antes.
+          validation_criteria: [
+            {
+              label: proposal.validation_label,
+              command: scopeTestCommandToWorkspace(proposal.validation_command, proposal.included_scope),
+            },
+            ...(proposal.additional_validations ?? []).map(validation => ({
+              label: validation.label,
+              command: scopeTestCommandToWorkspace(validation.command, proposal.included_scope),
+            })),
+          ],
           limits: { max_attempts: 3, max_duration_minutes: 30 },
         },
       },
