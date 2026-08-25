@@ -20,6 +20,25 @@ const VERDICT_LABEL:Record<WorkVerificationVerdict,string>={
   rejected:'evidência de violação ou incoerência com o contrato aprovado',
 };
 const newRequestId=()=>typeof crypto.randomUUID==='function'?crypto.randomUUID():`00000000-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12,'0').slice(0,12)}`;
+// Motivos estruturados de bloqueio do retry (espelham a RPC autoritativa
+// `work_retry_readiness`). Quando há um motivo conhecido, a UI o mostra em vez da
+// mensagem genérica — sem inventar razão nem afrouxar qualquer gate.
+const RETRY_BLOCK_LABEL:Record<string,string>={
+  latest_terminal_not_retryable_failure:'a última evidência terminal não é uma falha recuperável',
+  failure_not_retryable:'a falha registrada não foi marcada como recuperável',
+  proposal_changed:'a proposta mudou desde a falha',
+  failure_attempt_missing:'a falha não referencia uma tentativa',
+  attempt_budget_exhausted:'as tentativas do orçamento se esgotaram',
+  approval_missing:'não há aprovação vigente para esta versão',
+  classification_invalid:'a classificação vigente não habilita execução autônoma',
+  dependencies_unsatisfied:'dependências ainda não foram concluídas',
+  open_claim:'há um claim aberto para este trabalho',
+  active_attempt:'há uma tentativa ativa em andamento',
+  target_or_envelope_invalid:'o alvo ou o envelope de execução é inválido',
+  read_failed:'não foi possível reler a elegibilidade de nova tentativa',
+};
+const describeRetryBlock=(readiness?:WorkRetryReadiness):string|null=>
+  readiness?.status==='BLOCKED'&&readiness.reason?RETRY_BLOCK_LABEL[readiness.reason]??null:null;
 
 
 export function WorkProposalCard({presentation,onChange,focused=false,onFocus,autonomousExecutionAllowed,autonomousBlockReason}:Props){
@@ -152,7 +171,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,au
       <p>Pressão da máquina agora: {describeMachinePressure(resourceAdvisory.pressure)}. Parecer consultivo por workload, relativo ao histórico de custo de toda a máquina. Read-only: informa a decisão de rodar, não decide, não bloqueia e não muda a elegibilidade.</p>
       <ul>{resourceAdvisory.advisories.map(entry=><li key={`${entry.key.workloadKind}-${entry.key.command}`}>{entry.key.command} — custo {describeCostClass(entry.advisory.basis.workloadClass)}: {describeExecutionAdvisory(entry.advisory.recommendation)}</li>)}</ul>
     </section>}
-    <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento; quando terminar, registre o resultado abaixo. O Supervisor não assume um ciclo manual já iniciado.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?(presentation.integration?.status==='awaiting_decision'?'Resultado aceito; a decisão de integração está pendente abaixo. Nada foi publicado, enviado ou mergeado.':'Resultado aceito e trabalho concluído; evidências preservadas acima.'):'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?(presentation.retryReadiness?.status==='RETRY_READY'?`A tentativa ${presentation.retryReadiness.attemptsUsed} de ${presentation.retryReadiness.maxAttempts} falhou. O histórico foi preservado e há uma nova tentativa disponível.`:'A execução falhou; nenhuma nova tentativa está autorizável no estado atual.'):`Estado atual: ${item.state}.`}</p>
+    <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento; quando terminar, registre o resultado abaixo. O Supervisor não assume um ciclo manual já iniciado.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?(presentation.integration?.status==='awaiting_decision'?'Resultado aceito; a decisão de integração está pendente abaixo. Nada foi publicado, enviado ou mergeado.':'Resultado aceito e trabalho concluído; evidências preservadas acima.'):'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?(presentation.retryReadiness?.status==='RETRY_READY'?`A tentativa ${presentation.retryReadiness.attemptsUsed} de ${presentation.retryReadiness.maxAttempts} falhou. O histórico foi preservado e há uma nova tentativa disponível.`:describeRetryBlock(presentation.retryReadiness)?`A execução falhou; nova tentativa indisponível: ${describeRetryBlock(presentation.retryReadiness)}.`:'A execução falhou; nenhuma nova tentativa está autorizável no estado atual.'):`Estado atual: ${item.state}.`}</p>
     {presentation.execution&&<WorkExecutionCard execution={presentation.execution} workItemId={item.id} proposalVersion={item.proposalVersion} onReload={reload} />}
     {presentation.pendingDecision&&<WorkDecisionCard decision={presentation.pendingDecision} workItemId={item.id} onReload={reload} />}
     {presentation.pendingBudgetWait&&<WorkBudgetWaitCard wait={presentation.pendingBudgetWait} workItemId={item.id} expectedProposalVersion={item.proposalVersion} onReload={reload} />}
