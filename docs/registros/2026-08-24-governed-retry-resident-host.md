@@ -47,3 +47,27 @@
   intacta.
 - **Invariante mantido:** nenhuma attempt 2 real criada; `request_work_retry` só exercitado
   sob ROLLBACK em fixture. Aguarda o clique humano.
+
+## Correção da divergência backend×UI no reencontro do chat (2026-08-24, `cd85c21`)
+
+- **Sintoma (inspeção humana autenticada em /chat):** o cartão INLINE do Item 1
+  mostrava "nenhuma nova tentativa está autorizável no estado atual" e escondia
+  "Tentar novamente autonomamente", enquanto a RPC autoritativa continuava
+  `RETRY_READY`.
+- **Diagnóstico READ-ONLY:** o estado real seguia intacto (Item 1 `failed` v2,
+  RETRY_READY, attemptsUsed 1/2, `execution_started`=1, `retry_authorization`=0,
+  `autonomous_execution_request`=0, `open_claim`=0; a única attempt é
+  `937d402a…`; a "execução iniciada 00:09 UTC" da UI É essa attempt original, não
+  uma segunda). Itens 2/3 `approved` bloqueados.
+- **Causa (camada de projeção, não backend):** o chat hidrata os cartões da
+  conversa por `GET items/by-source/[sourceMessageId]` (ChatClient linha ~113),
+  e esse endpoint NÃO projetava `retryReadiness` — diferente de `items` e
+  `items/[id]`. Logo `presentation.retryReadiness` chegava `undefined` ao card.
+- **Correção (sem afrouxar gate):** `by-source` passa a anexar a MESMA
+  `readWorkRetryReadiness` por apresentação. O card passa a exibir a razão
+  ESTRUTURADA de bloqueio (espelho da RPC) quando há motivo conhecido, em vez da
+  mensagem genérica (que fica só para readiness ausente/desconhecida).
+- **Provas:** regressão de rota `by-source` (readiness acompanha o reencontro);
+  card mostra razão estruturada; WorkProposalCard + by-source 50/50; typecheck 5
+  workspaces; build web; `git diff --check` limpo. Nenhuma attempt/claim/retry
+  real. Aguarda nova inspeção visual humana em http://localhost:3000/chat.
