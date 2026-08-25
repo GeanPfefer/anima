@@ -2071,6 +2071,29 @@ export type Database = {
         }
         Returns: Json
       }
+      release_manual_work: {
+        Args: { p_expected_proposal_version: number; p_work_item_id: string }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       release_work_claim: {
         Args: { claim_id: string; reason: string }
         Returns: {
@@ -2542,6 +2565,7 @@ export type Database = {
         | "verifier_opinion_recorded"
         | "host_observed_gate_evidence_recorded"
         | "host_observed_coder_evidence_recorded"
+        | "manual_work_released"
       work_impact_level:
         | "low"
         | "significant"
@@ -2886,6 +2910,7 @@ export const Constants = {
         "verifier_opinion_recorded",
         "host_observed_gate_evidence_recorded",
         "host_observed_coder_evidence_recorded",
+        "manual_work_released",
       ],
       work_impact_level: [
         "low",
