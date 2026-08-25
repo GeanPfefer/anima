@@ -1,0 +1,41 @@
+{
+  "config": {
+    "startedAt": "2026-08-25T13:34:38.982Z",
+    "node": "v24.16.0",
+    "ollamaUrl": "http://127.0.0.1:11434",
+    "ollamaVersion": "0.32.15",
+    "models": [
+      "qwen3-coder:latest"
+    ],
+    "protocols": [
+      "r2"
+    ],
+    "classes": [
+      "multi_locate"
+    ],
+    "reps": 8,
+    "seed": 20260825,
+    "productionConfig": "current=defaults; r2=mesmos defaults + experimentalAnchorMode; r2-narrow=r2 + narrow-target-v1; r2-after-scope=r2 + after-scope-v1. Todos preservam maxReadRounds=3, num_ctx=8192, num_predict=1536, temperature=0",
+    "r2CyclePolicy": "per-protocol",
+    "note": "A/B pareado: a ordem fixture×rep é randomizada uma vez por modelo/seed e reutilizada IDENTICA para cada protocolo; blocos de protocolo ficam dentro do mesmo bloco de modelo para preservar hardware/modelo carregado. Fixtures são proxies sintéticos."
+  },
+  "finishedAt": "2026-08-25T13:36:02.560Z",
+  "cells": [
+    {
+      "model": "qwen3-coder:latest",
+      "protocol": "r2",
+      "class": "multi_locate",
+      "total": 8,
+      "accepted": 8,
+      "achieved": 8,
+      "codes": {},
+      "readRequestShapes": {
+        "search+lineRange": 24
+      },
+      "effectiveReadModes": {
+        "search": 24
+      },
+      "hybridReadRequests": 24
+    }
+  ]
+}
