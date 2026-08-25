@@ -54,6 +54,12 @@ describe('WorkProposalCard', () => {
     expect(screen.getByRole('button',{name:'Preparar elegibilidade autônoma'})).toBeInTheDocument();
     expect(screen.queryByRole('button',{name:'Executar autonomamente'})).not.toBeInTheDocument();
   });
+  test('mostra o diagnóstico devolvido pela preparação', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({ok:false,json:async()=>({ok:false,error:{code:'classification_policy_not_applicable',message:'Envelope persistido não suportado.'}})});
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'approved'},availableActions:['start'],autonomousReadiness:{eligible:false,blockingDependencyIds:[],reason:'work_intelligence_classification_missing'}})} onChange={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button',{name:'Preparar elegibilidade autônoma'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Envelope persistido não suportado.');
+  });
   test('exibe resumo, autoria, referências e versão do resultado antes do aceite', () => { render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes']})} onChange={jest.fn()} />); expect(screen.getByText('Resumo apresentado')).toBeInTheDocument(); expect(screen.getByText('user')).toBeInTheDocument(); expect(screen.getByText('docs/prova.md')).toBeInTheDocument(); expect(screen.getByRole('button',{name:'Aceitar resultado v2'})).toBeInTheDocument(); });
   test('aceite referencia o evento exato do resultado revisado', async () => { render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes']})} onChange={jest.fn()} />); fireEvent.click(screen.getByRole('button',{name:'Aceitar resultado v2'})); await waitFor(()=>expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/reviews',expect.objectContaining({method:'POST',body:expect.stringContaining('"reviewedResultEventId":"e1"')}))); });
   test('exibe a referência de handoff do resultado autônomo em revisão (UX-03)', () => { render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:{...result,author:'executor' as const,handoffReference:'runner-bundle:ux03'},availableActions:['accept_result','request_result_changes']})} onChange={jest.fn()} />); expect(screen.getByText('Handoff')).toBeInTheDocument(); expect(screen.getByText('runner-bundle:ux03')).toBeInTheDocument(); });

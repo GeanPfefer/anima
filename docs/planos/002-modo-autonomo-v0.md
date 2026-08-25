@@ -2060,3 +2060,14 @@ envelope planejado. Ele não cria claim, attempt, pedido de execução nem coder
 O item real permanece `approved`, v3, sem classificação e sem execução; próximo
 ponto exato: o usuário correto aciona “Preparar elegibilidade autônoma” e revisa
 a fila relida. [Registro](../registros/2026-08-25-readiness-classification-reconciliation.md).
+
+**Correção do primeiro clique (2026-08-25).** A reconciliação read-only provou
+zero efeitos: a ponte recusou o item antes da RPC porque o impacto persistido é
+`structural`, não `low`, e a rota omitia a mensagem do erro. Propostas planejadas
+estruturais já aprovadas pelo humano passam a usar a classificação conservadora
+já provada no backlog ratificado (`bounded/moderate/conditionally_reversible/
+clear/normal`); isso não amplia autoaprovação, não inicia execução e mantém todos
+os demais checks do envelope. Após erro de escrita, a preparação relê o fato
+corrente para resolver corrida/resultado ambíguo como replay sem duplicação.
+Próximo ponto: novo clique único pelo humano na UI correta.
+[Registro](../registros/2026-08-25-preparacao-classificacao-estrutural.md).

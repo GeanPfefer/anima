@@ -8,5 +8,5 @@ export async function POST(request:Request){
   const body=await request.json().catch(()=>null) as {workItemId?:unknown;expectedProposalVersion?:unknown}|null;
   if(typeof body?.workItemId!=='string'||!Number.isInteger(body.expectedProposalVersion)||Number(body.expectedProposalVersion)<1)return Response.json({ok:false,error:{code:'invalid_request'}},{status:400});
   const result=await ensurePlannedProjectClassification(client,body.workItemId,Number(body.expectedProposalVersion));
-  return result.ok?Response.json({ok:true,value:result}):Response.json({ok:false,error:{code:result.code}},{status:409});
+  return result.ok?Response.json({ok:true,value:result}):Response.json({ok:false,error:{code:result.code,message:result.message,...(result.postgresCode?{postgresCode:result.postgresCode}:{})}},{status:result.code==='work_item_not_found'?404:409});
 }
