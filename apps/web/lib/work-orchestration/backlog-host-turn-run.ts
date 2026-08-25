@@ -31,6 +31,8 @@ export interface RunProjectBacklogHostTurnInput {
   readonly maxCycles: number;
   /** Cancelamento cooperativo do chamador. */
   readonly signal: AbortSignal;
+  /** Quando veio de um ato explícito, limita ESTA invocação ao item solicitado. */
+  readonly requestedWorkItemId?: string;
 }
 
 /**
@@ -39,7 +41,11 @@ export interface RunProjectBacklogHostTurnInput {
  * resultado tipado do host-turn (continuation | wait | stop + moreWorkAvailable).
  */
 export function runProjectBacklogHostTurn(input: RunProjectBacklogHostTurnInput): Promise<BacklogHostTurnResult> {
-  const deps = buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId);
+  const baseDeps = buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId);
+  const deps = input.requestedWorkItemId ? {
+    ...baseDeps,
+    readBacklog: async () => (await baseDeps.readBacklog()).filter(candidate=>candidate.item.id===input.requestedWorkItemId),
+  } : baseDeps;
   return runAutonomousBacklogHostTurn({
     // Um ciclo bounded = o driver já provado, com `maxTurns = maxTurnsPerCycle`.
     runCycle: signal => runAutonomousBacklogCycle({ ...deps, maxTurns: input.maxTurnsPerCycle, signal }),

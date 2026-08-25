@@ -1650,6 +1650,10 @@ export type Database = {
           work_item_id: string
         }[]
       }
+      current_work_retry_readiness: {
+        Args: { p_work_item_id: string }
+        Returns: Json
+      }
       begin_budget_interruption_resumed_attempt: {
         Args: {
           attempt_id: string
@@ -2107,6 +2111,14 @@ export type Database = {
           p_expected_proposal_version: number
           p_work_item_id: string
         }
+        Returns: Json
+      }
+      request_autonomous_execution: {
+        Args: { p_expected_proposal_version: number; p_request_id: string; p_work_item_id: string }
+        Returns: Json
+      }
+      request_work_retry: {
+        Args: { p_expected_proposal_version: number; p_failure_event_id: string; p_retry_request_id: string; p_work_item_id: string }
         Returns: Json
       }
       request_work_proposal_revision: {

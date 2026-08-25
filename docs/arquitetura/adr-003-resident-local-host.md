@@ -309,3 +309,19 @@ Implementar a **engine V0** sobre este ADR: engine agnóstica de transporte + po
 local-host start` + as 15 regressões por doubles. Depois, a prova viva V0 (runner idle →
 wake → um item descartável → governor permite → qwen3-coder → gate → evidência
 host-observed → Verifier `verified` → item em `review` → runner volta a idle).
+
+## Adendo 2026-08-24 — autoridade de execução e retry governado
+
+A rota web de uma volta havia permanecido como seam legado e aceitava um item
+explícito; por isso a primeira execução do backlog conversacional tentou `git
+worktree add` dentro do processo `next dev`. Esse caminho foi fechado: a UI grava
+somente um sinal autenticado/idempotente e a rota explícita recusa com
+`resident_host_required`. A composição efetiva de worktree, coder, gates e
+observações permanece em `runProjectBacklogHostTurn`, chamada pelo adapter
+**in-process** do Resident Host com cliente Bearer user-scoped e Governor por ciclo.
+
+Falhas técnicas `retryable` não são apagadas nem editadas. `RETRY_READY` é uma
+projeção fail-closed; o ato humano usa o evento existente `work_approved` com
+`authority=retry_authorization`, distinguindo retry de aprovação de escopo e de
+autorização financeira. Esse evento apenas reabre a elegibilidade; claim e attempt
+novos continuam pertencendo ao Resident Host e recebem identidades novas.

@@ -1,5 +1,6 @@
 export * from './types';
 export * from './commands';
+export * from './governed-retry';
 export * from './errors';
 export * from './validation';
 export * from './repository';

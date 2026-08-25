@@ -34,7 +34,9 @@ const MAPPED = {
 } as const;
 
 // Sentinela de cliente — o adapter nunca o inspeciona, só o repassa à composition root.
-const SENTINEL_CLIENT = { __brand: 'user-scoped' } as unknown as SupabaseClient<Database>;
+interface QueryDouble{select:()=>QueryDouble;eq:()=>QueryDouble;order:()=>QueryDouble;gt:()=>QueryDouble;limit:()=>Promise<{data:unknown[];error:null}>}
+const query=(data:unknown[]):QueryDouble=>{const q={} as QueryDouble;q.select=()=>q;q.eq=()=>q;q.order=()=>q;q.gt=()=>q;q.limit=()=>Promise.resolve({data,error:null});return q;};
+const SENTINEL_CLIENT = { __brand: 'user-scoped',from:()=>query([]) } as unknown as SupabaseClient<Database>;
 
 describe('mapHostTurnResult (puro)', () => {
   test('mapeia o resultado + extrai os IDs distintos de work_items tocados', () => {
@@ -117,5 +119,13 @@ describe('createInProcessHostTurnPort', () => {
     });
     await port({ userId: 'u1', accessToken: 't' }, controller.signal);
     expect(received).toBe(controller.signal);
+  });
+  test('amarra um sinal pendente ao workItem governado e não entrega comando arbitrário',async()=>{
+    const signal={work_item_id:'work-requested',proposal_version:2,seq:10,payload:{data:{authority:'retry_authorization'}}};
+    let reads=0;const client={from:jest.fn(()=>query(reads++===0?[signal]:[]))} as unknown as SupabaseClient<Database>;
+    let requested:string|undefined;
+    const port=createInProcessHostTurnPort(config,{buildClient:()=>client,runHostTurn:async input=>{requested=input.requestedWorkItemId;return RESULT;}});
+    await port({userId:'u1',accessToken:'t'},new AbortController().signal);
+    expect(requested).toBe('work-requested');
   });
 });

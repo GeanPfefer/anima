@@ -2036,3 +2036,14 @@ A (fechar fundação)
          │  └→ F (inteligência sustentável)
          └→ G (experiência no chat — subconjunto de D; completa com E)
 ```
+
+### Governed Retry + Resident Host Execution Authority V0 (2026-08-24)
+
+A primeira tentativa real do Item 1 falhou antes do coder porque a ação explícita
+da UI compunha `git worktree add` no processo `next dev`. O retry local agora é
+derivado e fail-closed (`RETRY_READY`), preserva 1/2 tentativas e exige um ato
+humano idempotente. O web apenas persiste o sinal; execução local pertence ao
+Resident Host in-process, com identidade user-scoped e Resource Governor. A prova
+controlada de worktree passou e foi limpa. Item 1 continua `failed`, sem evento de
+retry e sem attempt 2; Itens 2/3 continuam dependentes. Próximo checkpoint: o
+humano atualizar `/chat` e clicar uma vez em “Tentar novamente autonomamente”.

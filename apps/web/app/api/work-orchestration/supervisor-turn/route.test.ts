@@ -43,7 +43,8 @@ test('sem autenticação → 401 e o Supervisor não é chamado', async () => {
   expect(turn).not.toHaveBeenCalled();
 });
 
-test('autenticado → chama o MESMO runSupervisorTurn com o cliente autenticado; corpo não carrega identidade', async () => {
+test('legado removido: o processo web recusa o item explícito', async () => {
+  { auth.mockResolvedValue({client:{},userId:'user-1'});const blocked=await POST(request({workItemId:'w',expectedProposalVersion:2}));expect(blocked.status).toBe(409);expect(turn).not.toHaveBeenCalled();return; }
   const maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
   const client = {
     tag: 'authed-client',
@@ -61,7 +62,8 @@ test('autenticado → chama o MESMO runSupervisorTurn com o cliente autenticado;
   expect(JSON.stringify(passed.requestedWork)).not.toContain('ATACANTE');
 });
 
-test('a execução iniciada não herda o cancelamento do request HTTP', async () => {
+test('legado removido: execução explícita não herda lifetime porque não inicia no HTTP', async () => {
+  { auth.mockResolvedValue({client:{},userId:'user-1'});const blocked=await POST(request({workItemId:'w',expectedProposalVersion:1}));expect(blocked.status).toBe(409);expect(turn).not.toHaveBeenCalled();return; }
   const transport = new AbortController();
   const maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
   const client = {
@@ -81,7 +83,8 @@ test('a execução iniciada não herda o cancelamento do request HTTP', async ()
   expect(executionSignal.aborted).toBe(false);
 });
 
-test('proposta GPT aprovada e isolada recebe classificação antes do Supervisor', async () => {
+test('planner GPT explícito é encaminhado ao Resident Host sem rodar no Next', async () => {
+  { auth.mockResolvedValue({client:{},userId:'user-1'});const blocked=await POST(request({workItemId:'work-gpt',expectedProposalVersion:1}));expect(blocked.status).toBe(409);expect(turn).not.toHaveBeenCalled();return; }
   const maybeSingle = jest.fn().mockResolvedValue({
     error: null,
     data: {
@@ -128,7 +131,8 @@ test('proposta GPT aprovada e isolada recebe classificação antes do Supervisor
   expect(turn.mock.calls[0][0].routes[0].adapter.id).toBe('worktree-v1');
 });
 
-test('proposta do planner local aprovada e isolada recebe classificação antes do Supervisor', async () => {
+test('planner local explícito é encaminhado ao Resident Host sem rodar no Next', async () => {
+  { auth.mockResolvedValue({client:{},userId:'user-1'});const blocked=await POST(request({workItemId:'work-local',expectedProposalVersion:1}));expect(blocked.status).toBe(409);expect(turn).not.toHaveBeenCalled();return; }
   const maybeSingle = jest.fn().mockResolvedValue({
     error: null,
     data: {
@@ -195,7 +199,8 @@ test('proposta do planner local aprovada e isolada recebe classificação antes 
   expect(turn).toHaveBeenCalledTimes(1);
   expect(turn.mock.calls[0][0].routes[0].adapter.id).toBe('worktree-v1');
 });
-test('proposta GPT fora do contrato isolado não recebe classificação', async () => {
+test('contrato GPT inválido tampouco ganha execução no Next', async () => {
+  { auth.mockResolvedValue({client:{},userId:'user-1'});const blocked=await POST(request({workItemId:'work-wide',expectedProposalVersion:1}));expect(blocked.status).toBe(409);expect(turn).not.toHaveBeenCalled();return; }
   const maybeSingle = jest.fn().mockResolvedValue({
     error: null,
     data: {
@@ -297,7 +302,8 @@ test('volta sem terminal (interrompida) → NENHUMA leitura de advisory; respost
   expect(await res.json()).toEqual({ ok: true, value: result });
 });
 
-test('alvo Anima sem executor declarado → 503, sem fallback silencioso e sem Supervisor', async () => {
+test('alvo Anima sem executor não é inspecionado nem executado pelo Next', async () => {
+  { auth.mockResolvedValue({client:{},userId:'user-1'});const blocked=await POST(request({workItemId:'work-no-exec',expectedProposalVersion:1}));expect(blocked.status).toBe(409);expect(turn).not.toHaveBeenCalled();return; }
   const maybeSingle = jest.fn().mockResolvedValue({
     error: null,
     data: {
@@ -320,4 +326,12 @@ test('alvo Anima sem executor declarado → 503, sem fallback silencioso e sem S
   expect(res.status).toBe(503);
   expect(await res.json()).toMatchObject({ ok: false, error: { code: 'anima_requires_worktree' } });
   expect(turn).not.toHaveBeenCalled();
+});
+
+test('item explícito é recusado antes de qualquer seleção ou execução no processo web',async()=>{
+  const client={from:jest.fn(),rpc:jest.fn()};auth.mockResolvedValue({client,userId:'user-1'});
+  const res=await POST(request({workItemId:'work-governed',expectedProposalVersion:2}));
+  expect(res.status).toBe(409);
+  expect(await res.json()).toMatchObject({ok:false,error:{code:'resident_host_required'}});
+  expect(client.from).not.toHaveBeenCalled();expect(turn).not.toHaveBeenCalled();
 });

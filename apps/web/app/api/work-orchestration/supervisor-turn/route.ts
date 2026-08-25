@@ -41,6 +41,9 @@ export async function POST(request: Request) {
       error: { code: 'invalid_autonomous_selection', message: 'O trabalho e a versão precisam ser informados.' },
     }, { status: 400 });
   }
+  if(explicit){
+    return Response.json({ok:false,error:{code:'resident_host_required',message:'A UI apenas sinaliza trabalho governado; a execução local pertence ao Resident Host.'}},{status:409});
+  }
 
   let route: ConfiguredWorkRoute | null;
   // Contrato do executor selecionado nesta volta. Guardado para, DEPOIS do

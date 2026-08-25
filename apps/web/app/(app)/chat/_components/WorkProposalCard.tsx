@@ -6,9 +6,10 @@ import { WorkExecutionCard } from './WorkExecutionCard';
 import { WorkDecisionCard } from './WorkDecisionCard';
 import { WorkBudgetWaitCard } from './WorkBudgetWaitCard';
 import type { AutonomousReadinessView } from '@/lib/work-orchestration/autonomous-readiness';
+import type { WorkRetryReadiness } from '@/lib/work-orchestration/retry-readiness';
 
 type WorkItemView=Omit<WorkItem,'createdAt'|'updatedAt'>&{createdAt:string;updatedAt:string};
-export type WorkPresentationView=Omit<WorkPresentation,'item'>&{item:WorkItemView;autonomousReadiness?:AutonomousReadinessView};
+export type WorkPresentationView=Omit<WorkPresentation,'item'>&{item:WorkItemView;autonomousReadiness?:AutonomousReadinessView;retryReadiness?:WorkRetryReadiness};
 type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void;autonomousExecutionAllowed?:boolean;autonomousBlockReason?:string|null};
 
 // Rótulos do parecer advisory do Verifier. Read-only: informa a revisão humana,
@@ -18,6 +19,7 @@ const VERDICT_LABEL:Record<WorkVerificationVerdict,string>={
   inconclusive:'evidência insuficiente para concluir automaticamente',
   rejected:'evidência de violação ou incoerência com o contrato aprovado',
 };
+const newRequestId=()=>typeof crypto.randomUUID==='function'?crypto.randomUUID():`00000000-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12,'0').slice(0,12)}`;
 
 
 export function WorkProposalCard({presentation,onChange,focused=false,onFocus,autonomousExecutionAllowed,autonomousBlockReason}:Props){
@@ -55,35 +57,29 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,au
     if(status!=='idle')return;
     setStatus('submitting');setError('');
     try{
-      let finished=false;
-      const executionRequest=fetch('/api/work-orchestration/supervisor-turn',{
+      const executionRequest=fetch('/api/work-orchestration/execution-requests',{
         method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion}),
-      }).finally(()=>{finished=true;});
-      while(!finished){
-        await new Promise(resolve=>setTimeout(resolve,500));
-        if(finished)break;
-        const snapshot=await fetch(`/api/work-orchestration/items/${item.id}`).catch(()=>null);
-        if(snapshot?.ok){
-          const body=await snapshot.json().catch(()=>null);
-          if(body?.ok)onChange(body.value.presentation as WorkPresentationView);
-        }
-      }
+        body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion,requestId:newRequestId()}),
+      });
       const response=await executionRequest;
       const body=await response.json().catch(()=>({}));
-      // Read-only: o advisory viaja AO LADO de value; ausente quando sem histórico. Nunca
-      // interferiu nesta execução — só informa o parecer do governor após o desfecho.
-      const governor=body.resourceGovernor as {pressure:MachinePressure;advisories:readonly WorkloadAdvisory[]}|undefined;
-      setResourceAdvisory(governor&&governor.advisories.length>0?{pressure:governor.pressure,advisories:governor.advisories}:null);
-      const outcome=body.value?.outcome as string|undefined;
-      if(!response.ok||!body.ok)setError(body.error?.message??body.value?.refusal?.message??'Não foi possível executar este trabalho autonomamente.');
-      else if(outcome==='no_eligible_work')setError('Este trabalho ainda não está apto para entrar na fila autônoma.');
-      else if(body.value?.refusal?.message)setError(body.value.refusal.message);
+      if(!response.ok||!body.ok)setError(body.error?.message??'Não foi possível sinalizar este trabalho ao Resident Host.');
     }catch{
-      setError('A conexão com o executor falhou antes de iniciar o trabalho.');
+      setError('A conexão falhou; nenhuma execução foi presumida.');
     }finally{
       await reload(true).catch(()=>setStatus('idle'));
     }
+  }
+  async function retryAutonomous(){
+    const retry=presentation.retryReadiness;
+    if(status!=='idle'||retry?.status!=='RETRY_READY'||!retry.failureEventId)return;
+    setStatus('submitting');setError('');
+    try{
+      const response=await fetch('/api/work-orchestration/retries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion,failureEventId:retry.failureEventId,retryRequestId:newRequestId()})});
+      const body=await response.json().catch(()=>({}));
+      if(!response.ok||!body.ok)setError(body.error?.message??'A nova tentativa não pôde ser autorizada.');
+      await reload(!response.ok||!body.ok);
+    }catch{setError('A conexão falhou; nenhuma nova tentativa foi presumida.');await reload(true).catch(()=>setStatus('idle'));}
   }
   const decide=(decision:ApprovalDecision)=>mutate('/api/work-orchestration/decisions',{decision});
   const review=(decision:ResultReviewDecision)=>mutate('/api/work-orchestration/reviews',{decision,reviewedResultEventId:latestResult?.eventId});
@@ -156,7 +152,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,au
       <p>Pressão da máquina agora: {describeMachinePressure(resourceAdvisory.pressure)}. Parecer consultivo por workload, relativo ao histórico de custo de toda a máquina. Read-only: informa a decisão de rodar, não decide, não bloqueia e não muda a elegibilidade.</p>
       <ul>{resourceAdvisory.advisories.map(entry=><li key={`${entry.key.workloadKind}-${entry.key.command}`}>{entry.key.command} — custo {describeCostClass(entry.advisory.basis.workloadClass)}: {describeExecutionAdvisory(entry.advisory.recommendation)}</li>)}</ul>
     </section>}
-    <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento; quando terminar, registre o resultado abaixo. O Supervisor não assume um ciclo manual já iniciado.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?(presentation.integration?.status==='awaiting_decision'?'Resultado aceito; a decisão de integração está pendente abaixo. Nada foi publicado, enviado ou mergeado.':'Resultado aceito e trabalho concluído; evidências preservadas acima.'):'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?'A execução falhou; nenhum resultado foi aceito.':`Estado atual: ${item.state}.`}</p>
+    <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento; quando terminar, registre o resultado abaixo. O Supervisor não assume um ciclo manual já iniciado.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?(presentation.integration?.status==='awaiting_decision'?'Resultado aceito; a decisão de integração está pendente abaixo. Nada foi publicado, enviado ou mergeado.':'Resultado aceito e trabalho concluído; evidências preservadas acima.'):'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?(presentation.retryReadiness?.status==='RETRY_READY'?`A tentativa ${presentation.retryReadiness.attemptsUsed} de ${presentation.retryReadiness.maxAttempts} falhou. O histórico foi preservado e há uma nova tentativa disponível.`:'A execução falhou; nenhuma nova tentativa está autorizável no estado atual.'):`Estado atual: ${item.state}.`}</p>
     {presentation.execution&&<WorkExecutionCard execution={presentation.execution} workItemId={item.id} proposalVersion={item.proposalVersion} onReload={reload} />}
     {presentation.pendingDecision&&<WorkDecisionCard decision={presentation.pendingDecision} workItemId={item.id} onReload={reload} />}
     {presentation.pendingBudgetWait&&<WorkBudgetWaitCard wait={presentation.pendingBudgetWait} workItemId={item.id} expectedProposalVersion={item.proposalVersion} onReload={reload} />}
@@ -171,6 +167,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,au
     {mode==='correct'&&<div className={styles.workDecision}><label>O que deve mudar?<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>mutate('/api/work-orchestration/proposal-corrections',{requestedChanges:detail.trim()})}>Criar nova versão coerente</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
     {mode==='none'&&!presentation.pendingDecision&&allowed('start')&&<><p className={styles.workNotice}>No modo manual, você executa o trabalho e registra o resultado aqui. O Supervisor não assumirá esse ciclo depois de iniciado.</p>{projectedBlockReason&&<p className={styles.workNotice}>Execução autônoma indisponível: {projectedBlockReason}</p>}<div className={styles.workActions}><button disabled={busy} onClick={()=>mutate('/api/work-orchestration/start',{})}>{item.state==='approved'?'Iniciar execução manual':'Retomar trabalho manual'}</button>{item.state==='approved'&&autonomousEligible&&<><button disabled={busy} onClick={()=>void loadResourceAdvisory()}>Consultar parecer de recursos</button><button disabled={busy} onClick={startAutonomous}>Executar autonomamente</button></>}</div></>}
     {mode==='none'&&allowed('submit_result')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>setMode('result')}>Registrar resultado</button></div>}
+    {mode==='none'&&item.state==='failed'&&presentation.retryReadiness?.status==='RETRY_READY'&&<section className={styles.workNotice} aria-label="Nova tentativa governada"><strong>Falha recuperável</strong><p>{presentation.retryReadiness.attemptsUsed} de {presentation.retryReadiness.maxAttempts} tentativas utilizada. O Resource Governor será reavaliado pelo Resident Host antes de qualquer nova execução.</p><div className={styles.workActions}><button disabled={busy} onClick={()=>void retryAutonomous()}>Tentar novamente autonomamente</button></div></section>}
     {mode==='result'&&<div className={styles.workDecision}><label>Resumo do resultado<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><label>Referências, uma por linha<textarea value={references} onChange={event=>setReferences(event.target.value)}/></label><label>Validações executadas, uma por linha (prefixe com ok: ou falha:)<textarea value={validations} onChange={event=>setValidations(event.target.value)}/></label><label>Limitações conhecidas, uma por linha<textarea value={limitations} onChange={event=>setLimitations(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>mutate('/api/work-orchestration/results',{result:{summary:detail.trim(),resultReferences:references.split('\n').map(value=>value.trim()).filter(Boolean),validations:parseWorkResultValidations(validations),limitations:limitations.split('\n').map(value=>value.trim()).filter(Boolean)}})}>Enviar para revisão</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
     {mode==='none'&&allowed('accept_result')&&latestResult&&<div className={styles.workActions}><button disabled={busy} onClick={()=>review({type:'accept'})}>Aceitar resultado v{latestResult.proposalVersion}</button><button disabled={busy} onClick={()=>setMode('review_changes')}>Pedir correções no resultado</button></div>}
     {mode==='review_changes'&&<div className={styles.workDecision}><label>Correções necessárias<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>review({type:'request_changes',requestedChanges:detail.trim()})}>Confirmar correções</button><button onClick={()=>setMode('none')}>Voltar</button></div>}

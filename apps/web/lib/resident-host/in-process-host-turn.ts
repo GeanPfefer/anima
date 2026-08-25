@@ -36,6 +36,7 @@ export interface InProcessHostTurnSeams {
     readonly maxTurnsPerCycle: number;
     readonly maxCycles: number;
     readonly signal: AbortSignal;
+    readonly requestedWorkItemId?: string;
   }) => Promise<BacklogHostTurnResult>;
 }
 
@@ -80,12 +81,23 @@ export function createInProcessHostTurnPort(
     if (!identity.accessToken) return { ok: false, error: 'identity_missing' };
     try {
       const client = buildClient(identity.accessToken);
+      const requestEvents=await client.from('work_events').select('work_item_id,proposal_version,seq,payload').eq('event_type','work_approved').order('seq',{ascending:false}).limit(100);
+      if(requestEvents.error)return{ok:false,error:'execution_request_read_failed'};
+      let requestedWorkItemId:string|undefined;
+      for(const event of requestEvents.data??[]){
+        const payload=event.payload as {data?:{authority?:unknown}}|null;
+        if(!['autonomous_execution_request','retry_authorization'].includes(String(payload?.data?.authority)))continue;
+        if(event.proposal_version===null)continue;
+        const starts=await client.from('work_events').select('seq').eq('work_item_id',event.work_item_id).eq('event_type','execution_started').eq('proposal_version',event.proposal_version).gt('seq',event.seq).limit(1);
+        if(!starts.error&&(starts.data?.length??0)===0){requestedWorkItemId=event.work_item_id;break;}
+      }
       const result = await runHostTurn({
         client,
         ownerInstanceId: config.ownerInstanceId,
         maxTurnsPerCycle: config.maxTurnsPerCycle,
         maxCycles: config.maxCycles,
         signal,
+        ...(requestedWorkItemId?{requestedWorkItemId}:{}),
       });
       return mapHostTurnResult(result);
     } catch (error) {
