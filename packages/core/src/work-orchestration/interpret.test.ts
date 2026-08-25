@@ -29,6 +29,21 @@ describe('interpretWorkRequest — classificação de capability', () => {
     ['Crie um plano de migração de dados.', 'planning'],
   ] as const)('“%s” → %s', (message, expected) => expect(cap(message)).toBe(expected));
 
+  test('regressão do dogfooding: mandato técnico para preservar estado vira work_candidate', () => {
+    const message = [
+      'ServedRead Provenance V1',
+      'Objetivo: Preservar no resultado de serveReadRequests a proveniência normalizada da leitura.',
+      'Escopo funcional: preservar search, lineRange e parâmetros efetivos em ServedRead.',
+      'Invariantes: não alterar parseReadRequests, extractSlice, prompts, anchors ou comportamento do R2.',
+      'Provas mínimas: adicionar testes do protocolo e manter o typecheck verde.',
+    ].join(' ');
+
+    const result = interpretWorkRequest(message, 'served-read-message');
+
+    expect(result.kind).toBe('work_candidate');
+    if (result.kind !== 'work_candidate') return;
+    expect(result.command.sourceMessageId).toBe('served-read-message');
+  });
   test('regressão do operador: implementar/refatorar que menciona diagnóstico/banco é programming, não research', () => {
     // Cenário exato observado na prova manual (endpoint de readiness que checa o banco).
     expect(cap('Implemente uma função que analisa a prontidão do projeto e checa o banco.')).toBe('programming');

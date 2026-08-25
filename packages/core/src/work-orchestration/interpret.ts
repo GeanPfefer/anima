@@ -15,7 +15,7 @@ const normalize = (value: string) => value.trim().replace(/\s+/g, ' ');
 // "corrija"/"corrige" — um pedido de correção de código virava conversa sem
 // proposta (fallback silencioso). A grafia g→j do imperativo de -gir exige
 // `corrij(?:a|o)` além de `corrig(?:ir|e|indo)`.
-const operationalVerb = /\b(?:planej(?:ar|e)|constru(?:ir|a)|implement(?:ar|e)|alter(?:ar|e)|corrig(?:ir|e|indo)|corrij(?:a|o)|investig(?:ar|ue)|cri(?:ar|e)|refator(?:ar|e)|an[aá]lis(?:ar|e)|prepar(?:ar|e)|organiz(?:ar|e)|revis(?:ar|e)|document(?:ar|e)|redij(?:a|o)|escrev(?:er|a)|elabor(?:ar|e)|sintetiz(?:ar|e)|compil(?:ar|e)|resum(?:ir|a)|mape(?:ar|ie)|avali(?:ar|e)|atualiz(?:ar|e)|esbo[cç](?:ar|e)|levant(?:ar|e))\b/i;
+const operationalVerb = /\b(?:planej(?:ar|e)|constru(?:ir|a)|implement(?:ar|e)|alter(?:ar|e)|corrig(?:ir|e|indo)|corrij(?:a|o)|investig(?:ar|ue)|cri(?:ar|e)|refator(?:ar|e)|an[aá]lis(?:ar|e)|prepar(?:ar|e)|organiz(?:ar|e)|revis(?:ar|e)|document(?:ar|e)|redij(?:a|o)|escrev(?:er|a)|elabor(?:ar|e)|sintetiz(?:ar|e)|compil(?:ar|e)|resum(?:ir|a)|mape(?:ar|ie)|avali(?:ar|e)|atualiz(?:ar|e)|esbo[cç](?:ar|e)|levant(?:ar|e)|preserv(?:ar|e))\b/i;
 // Objetos de trabalho: artefatos de software E de projeto/documento.
 const explicitObject = /\b(?:anima|aplicativo|app|site|sistema|c[oó]digo|tela|fluxo|funcionalidade|recurso|bug|arquitetura|banco|api|chat|projeto|plano|planos|documento|documentos|arquivo|arquivos|relat[oó]rio|resumo|texto|reposit[oó]rio|roadmap|backlog|prd|especifica[cç][aã]o|migration|migra[cç][aã]o|teste|testes|marco|marcos|proposta)\b/i;
 // Sinal forte de intenção de trabalho: frases que pedem uma proposta/estruturação
