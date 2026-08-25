@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { operationResponse } from '@/lib/work-orchestration/http';
 import { serializeReconstructedWorkPresentation } from '@/lib/work-orchestration/serialize';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
+import { projectAutonomousReadiness } from '@/lib/work-orchestration/autonomous-readiness';
 
 // UX-04 — lista os trabalhos NÃO terminais do usuário autenticado, cada um como
 // a mesma projeção reconstruída dos cartões (fonte persistida e autoritativa),
@@ -15,11 +16,12 @@ export async function GET() {
   const service = createWorkOrchestrationService(client);
   const items = await service.findResumableWorkItems();
   if (!items.ok) return operationResponse<readonly WorkItem[]>(items, value => value);
+  const readiness=await projectAutonomousReadiness(client,items.value);
   const enriched = await Promise.all(items.value.map(async item => {
     const events = await service.listEvents(item.id);
     const contexts = await service.listContexts(item.id);
     if (!events.ok || !contexts.ok) return null;
-    return serializeReconstructedWorkPresentation(item, events.value, contexts.value);
+    return {...serializeReconstructedWorkPresentation(item, events.value, contexts.value),autonomousReadiness:readiness.get(item.id)};
   }));
   if (enriched.some(value => value === null)) return Response.json({ ok: false, error: { code: 'persistence_failure', message: 'Não foi possível reconstruir a proveniência dos trabalhos.' } }, { status: 503 });
   return Response.json({ ok: true, value: enriched });

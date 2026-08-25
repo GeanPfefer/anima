@@ -33,7 +33,7 @@ describe('WorkProposalCard', () => {
   });
   test('inicia somente o trabalho e a versão explícitos no modo autônomo', async () => {
     const autonomousItem={...item,state:'approved' as const,intent:{execution_spec:{schema_version:1,target:{kind:'project',reference:'sup04-live'},permissions:['workspace_read','workspace_write_isolated'],validation_criteria:[{label:'npm test',command:'npm test'}],limits:{max_attempts:1,max_duration_minutes:5}}}};
-    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start']})} onChange={jest.fn()} />);
+    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start'],autonomousReadiness:{eligible:true,blockingDependencyIds:[],reason:'eligible'}})} onChange={jest.fn()} />);
     fireEvent.click(screen.getByRole('button',{name:'Executar autonomamente'}));
     await waitFor(()=>expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/supervisor-turn',expect.objectContaining({
       method:'POST',body:JSON.stringify({workItemId:'item',expectedProposalVersion:2}),
@@ -149,7 +149,7 @@ describe('WorkProposalCard', () => {
   });
   const autonomousItem={...item,state:'approved' as const,intent:{execution_spec:{schema_version:1,target:{kind:'project',reference:'sup04-live'},permissions:['workspace_read','workspace_write_isolated'],validation_criteria:[{label:'npm test',command:'npm test'}],limits:{max_attempts:1,max_duration_minutes:5}}}};
   test('antes de qualquer execução autônoma, nenhum painel de advisory do governor aparece', () => {
-    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start']})} onChange={jest.fn()} />);
+    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start'],autonomousReadiness:{eligible:true,blockingDependencyIds:[],reason:'eligible'}})} onChange={jest.fn()} />);
     expect(screen.queryByText(/Resource Governor \(advisory\)/)).not.toBeInTheDocument();
   });
   test('exibe o parecer do Resource Governor devolvido pela execução autônoma (read-only, transparência)', async () => {
@@ -157,7 +157,7 @@ describe('WorkProposalCard', () => {
     (global.fetch as jest.Mock).mockImplementation((url:string)=>typeof url==='string'&&url.includes('/supervisor-turn')
       ? Promise.resolve({ok:true,json:async()=>({ok:true,value:{outcome:'execution_completed'},resourceGovernor:governor})})
       : Promise.resolve({ok:true,json:async()=>({ok:true,value:{presentation:presentation({item:autonomousItem,availableActions:['start']})}})}));
-    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start']})} onChange={jest.fn()} />);
+    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start'],autonomousReadiness:{eligible:true,blockingDependencyIds:[],reason:'eligible'}})} onChange={jest.fn()} />);
     fireEvent.click(screen.getByRole('button',{name:'Executar autonomamente'}));
     await waitFor(()=>expect(screen.getByText(/Resource Governor \(advisory\)/)).toBeInTheDocument());
     expect(screen.getByText(/Pressão da máquina agora: alta/)).toBeInTheDocument();
@@ -168,7 +168,7 @@ describe('WorkProposalCard', () => {
     (global.fetch as jest.Mock).mockImplementation((url:string)=>typeof url==='string'&&url.includes('/resource-advisory')
       ? Promise.resolve({ok:true,json:async()=>({ok:true,value:{resourceGovernor:governor}})})
       : Promise.resolve({ok:true,json:async()=>({ok:true,value:{presentation:presentation({item:autonomousItem,availableActions:['start']})}})}));
-    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start']})} onChange={jest.fn()} />);
+    render(<WorkProposalCard presentation={presentation({item:autonomousItem,availableActions:['start'],autonomousReadiness:{eligible:true,blockingDependencyIds:[],reason:'eligible'}})} onChange={jest.fn()} />);
     fireEvent.click(screen.getByRole('button',{name:'Consultar parecer de recursos'}));
     await waitFor(()=>expect(screen.getByText(/Resource Governor \(advisory\)/)).toBeInTheDocument());
     expect(screen.getByText(/Pressão da máquina agora: moderada/)).toBeInTheDocument();

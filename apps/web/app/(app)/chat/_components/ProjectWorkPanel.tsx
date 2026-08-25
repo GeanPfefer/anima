@@ -14,7 +14,7 @@ export function ProjectWorkPanel({items,focusedWorkItemId,onFocus,onChange}:Prop
     {rows.map(({presentation,dependencyIds,blockingDependencyIds,autonomousEligible,readinessLabel})=><div key={presentation.item.id} className={styles.projectWorkRow}>
       <div><strong>{presentation.item.proposal.data.summary}</strong><span>{presentation.item.state} · v{presentation.item.proposalVersion}</span></div>
       <p>{readinessLabel}</p>
-      <p className={styles.workNotice}>Classificação: {autonomousEligible||blockingDependencyIds.length>0?'contrato válido':'pendente'} · Dependências: {dependencyIds.length?dependencyIds.join(', '):'nenhuma'} · fonte {presentation.item.sourceMessageId}</p>
+      <p className={styles.workNotice}>Fila governada: {autonomousEligible?'elegível':blockingDependencyIds.length?'bloqueada por dependência':'não elegível'} · Dependências: {dependencyIds.length?dependencyIds.join(', '):'nenhuma'} · fonte {presentation.item.sourceMessageId}</p>
       <button type="button" onClick={()=>setExpanded(expanded===presentation.item.id?null:presentation.item.id)}>{expanded===presentation.item.id?'Ocultar detalhes':'Ver detalhes'}</button>
       {expanded===presentation.item.id&&<WorkProposalCard presentation={presentation} focused={focusedWorkItemId===presentation.item.id} onFocus={()=>onFocus(presentation.item.id)} onChange={onChange} autonomousExecutionAllowed={autonomousEligible} autonomousBlockReason={blockingDependencyIds.length?readinessLabel:null}/>}
     </div>)}
