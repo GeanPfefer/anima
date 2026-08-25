@@ -1,5 +1,11 @@
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import {
+  applyExperimentalAnchorOperations,
+  createServedAnchor,
+  parseExperimentalAnchorOperations,
+  type ServedAnchor,
+} from './ollama-anchor-experiment';
+import {
   OllamaProtocolError,
   applyEditOperations,
   assertNotTruncated,
@@ -53,6 +59,14 @@ export interface OllamaCoderOptions {
   readonly maxReadRounds?: number;
   /** Limite de contexto declarado pelo modelo, quando descoberto. Opcional. */
   readonly declaredContextLength?: number;
+  /**
+   * Seam EXPERIMENTAL do Plano 003 / ADR-004.
+   * Ausente por padrao: replace_anchor nao e anunciado nem aceito.
+   */
+  readonly experimentalAnchorMode?: {
+    readonly kind: 'r2-host-mediated-v1';
+    readonly cycleId: string;
+  };
 }
 
 const SYSTEM = [
@@ -64,6 +78,13 @@ const SYSTEM = [
   'Também é permitido {"kind":"create_file","path":"<do escopo>","content":"<conteúdo>"} para arquivo NOVO. Exclusão não é permitida.',
   'Acrescentar ao FIM de arquivo existente: {"kind":"append","path":"<escopo>","expected_file_sha256":"<sha lido>","content":"<texto>"}. Não invente "before" para o fim.',
   'Regras: só caminhos do escopo; "before" deve ser copiado EXATAMENTE de um trecho lido e ocorrer uma única vez; use o sha256 do arquivo como lido; peça leituras antes de editar; não explique.',
+].join('\n');
+
+const EXPERIMENTAL_ANCHOR_SYSTEM = [
+  'EXPERIMENTO R2 OPT-IN: o host pode anunciar anchors efemeros de trechos que ja foram servidos.',
+  'Quando uma ancora adequada estiver disponivel, voce PODE editar com {"action":"edit","operations":[{"kind":"replace_anchor","anchor_id":"<id anunciado pelo host>","after":"<novo conteudo>"}]}.',
+  'Em replace_anchor, forneca SOMENTE kind, anchor_id e after. Nunca forneca path, SHA, range ou conteudo original como autoridade alternativa.',
+  'A regra de copiar before byte-exato continua valendo para replace_exact; replace_anchor referencia apenas uma ancora anunciada nesta mesma execucao.',
 ].join('\n');
 
 const clip = (value: string, max: number): string => (value.length <= max ? value : `${value.slice(0, max)}…`);
@@ -113,6 +134,9 @@ export class OllamaCoderBackend implements CoderBackend {
     ].join('\n') + carried;
 
     const servedBlocks: string[] = [];
+    const experimentalAnchors = new Map<string, ServedAnchor>();
+    let experimentalAnchorOrdinal = 0;
+
     for (let round = 0; round <= this.maxReadRounds; round++) {
       const roundsLeft = this.maxReadRounds - round;
       // Na última volta (sem rodadas de leitura restantes) o prompt EXIGE edição e
@@ -133,7 +157,38 @@ export class OllamaCoderBackend implements CoderBackend {
       const response = await this.callProtocol(prompt, signal);
 
       if (response.action === 'edit') {
-        const operations = parseEditOperations(response.operations as unknown[], allowed);
+        const rawOperations = response.operations as unknown[];
+        const requestedExperimentalAnchor = rawOperations.some(raw =>
+          Boolean(raw)
+          && typeof raw === 'object'
+          && !Array.isArray(raw)
+          && (raw as Record<string, unknown>).kind === 'replace_anchor'
+        );
+
+        if (requestedExperimentalAnchor && this.options.experimentalAnchorMode) {
+          const operations = parseExperimentalAnchorOperations(rawOperations);
+          const changes = applyExperimentalAnchorOperations({
+            operations,
+            anchors: experimentalAnchors,
+            cycleId: this.options.experimentalAnchorMode.cycleId,
+            allowedPaths: allowed,
+            contentOf,
+          });
+          const touched = await writeChangeSet(
+            changes,
+            { writeFile: (path, content) => workspace.writeFile(path, content) },
+            signal,
+          );
+          return {
+            summary: `Modelo Ollama ${this.options.model} aplicou ${touched.length} edição(ões) pelo experimento R2 de âncora host-mediada, para revisão.`,
+            touchedResources: touched,
+          };
+        }
+
+        // Caminho vigente de produção: semanticamente inalterado.
+        // Se replace_anchor aparecer sem opt-in, parseEditOperations o recusa
+        // fail-closed como operação desconhecida.
+        const operations = parseEditOperations(rawOperations, allowed);
         const changes = applyEditOperations(operations, contentOf);
         // Validação integral contra o snapshot já ocorreu (applyEditOperations).
         // Aqui só escrevemos o lote (escreve-ou-lança, nunca sucesso parcial). A
@@ -156,7 +211,34 @@ export class OllamaCoderBackend implements CoderBackend {
       }
       const { requests, rejected } = parseReadRequests(response.reads as unknown[], allowed);
       const { served, rejected: missing } = serveReadRequests(requests, contentOf);
-      servedBlocks.push(renderServed(served, [...rejected, ...missing]));
+
+      const anchorsForThisRound: ServedAnchor[] = [];
+      if (this.options.experimentalAnchorMode) {
+        for (const item of served) {
+          const content = contentOf(item.path);
+          if (content === null) continue;
+
+          for (const [startLine, endLine] of experimentalRangesFromServedSlice(item.slice)) {
+            const anchor = createServedAnchor({
+              cycleId: this.options.experimentalAnchorMode.cycleId,
+              ordinal: experimentalAnchorOrdinal++,
+              path: item.path,
+              fileContent: content,
+              startLine,
+              endLine,
+              allowedPaths: allowed,
+            });
+            experimentalAnchors.set(anchor.anchorId, anchor);
+            anchorsForThisRound.push(anchor);
+          }
+        }
+      }
+
+      servedBlocks.push(renderServed(
+        served,
+        [...rejected, ...missing],
+        anchorsForThisRound,
+      ));
     }
     throw new OllamaProtocolError('ollama_read_round_limit', 'protocolo encerrou sem edições.');
   }
@@ -165,10 +247,13 @@ export class OllamaCoderBackend implements CoderBackend {
    * envelope. Um ÚNICO reparo é permitido quando o schema vem errado — apenas
    * reforçando o formato, sem reapresentar conteúdo algum. */
   private async callProtocol(prompt: string, signal: AbortSignal) {
-    const messages = [{ role: 'system' as const, content: SYSTEM }, { role: 'user' as const, content: prompt }];
-    assertPromptWithinBudget(SYSTEM + prompt, this.budget);
+    const system = this.options.experimentalAnchorMode
+      ? `${SYSTEM}\n${EXPERIMENTAL_ANCHOR_SYSTEM}`
+      : SYSTEM;
+    const messages = [{ role: 'system' as const, content: system }, { role: 'user' as const, content: prompt }];
+    assertPromptWithinBudget(system + prompt, this.budget);
     const first = await callOllamaChat({ url: this.url, model: this.options.model, messages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
-    assertNotTruncated(SYSTEM + prompt, first.meta);
+    assertNotTruncated(system + prompt, first.meta);
     try {
       return parseProtocolResponse(first.content);
     } catch (error) {
@@ -186,7 +271,7 @@ export class OllamaCoderBackend implements CoderBackend {
       // REAL do reparo, não sobre o prompt original (que já passou acima): senão um
       // reparo grande é enviado sem guarda e o Ollama o trunca em silêncio, exatamente
       // o que a Fase 1 evita. Não cresce o orçamento; só mede o que de fato é enviado.
-      const repairText = SYSTEM + prompt + assistantEcho + repairInstruction;
+      const repairText = system + prompt + assistantEcho + repairInstruction;
       assertPromptWithinBudget(repairText, this.budget);
       const repaired = await callOllamaChat({ url: this.url, model: this.options.model, messages: repairMessages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
       assertNotTruncated(repairText, repaired.meta);
@@ -195,8 +280,56 @@ export class OllamaCoderBackend implements CoderBackend {
   }
 }
 
-const renderServed = (served: readonly ServedRead[], rejected: readonly string[]): string => {
+const experimentalRangesFromServedSlice = (
+  slice: string,
+): readonly (readonly [number, number])[] => {
+  if (slice.includes('trecho truncado por limite de caracteres')) return [];
+
+  const lineNumbers = slice
+    .split('\n')
+    .map(line => /^\s*(\d+)\| /.exec(line))
+    .filter((match): match is RegExpExecArray => Boolean(match))
+    .map(match => Number(match[1]))
+    .filter(Number.isSafeInteger);
+
+  if (lineNumbers.length === 0) return [];
+
+  const ranges: Array<readonly [number, number]> = [];
+  let start = lineNumbers[0]!;
+  let previous = start;
+
+  for (const current of lineNumbers.slice(1)) {
+    if (current === previous + 1) {
+      previous = current;
+      continue;
+    }
+    ranges.push([start, previous]);
+    start = current;
+    previous = current;
+  }
+  ranges.push([start, previous]);
+  return ranges;
+};
+
+const renderServed = (
+  served: readonly ServedRead[],
+  rejected: readonly string[],
+  experimentalAnchors: readonly ServedAnchor[] = [],
+): string => {
   const blocks = served.map(item => `Arquivo ${item.path} (sha256 ${item.sha256}):\n${item.slice}`);
+
+  if (experimentalAnchors.length) {
+    blocks.push(
+      `Âncoras experimentais R2 disponíveis nesta execução: ${JSON.stringify(
+        experimentalAnchors.map(anchor => ({
+          anchor_id: anchor.anchorId,
+          path: anchor.path,
+          lines: [anchor.startLine, anchor.endLine],
+        })),
+      )}`,
+    );
+  }
+
   if (rejected.length) blocks.push(`Rejeitados: ${rejected.join('; ')}`);
   return blocks.join('\n');
 };

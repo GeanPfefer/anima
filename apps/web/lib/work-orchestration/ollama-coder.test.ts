@@ -214,4 +214,116 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     await expect(new OllamaCoderBackend({ model: 'x', fetchImpl }).edit(request, workspace, new AbortController().signal))
       .rejects.toMatchObject({ code: 'ollama_prompt_truncated' });
   });
+  test('R2 fica DESLIGADO por default: nao anuncia anchor e replace_anchor e recusado', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
+    const forged = JSON.stringify({
+      action: 'edit',
+      operations: [{
+        kind: 'replace_anchor',
+        anchor_id: 'r2a_' + 'a'.repeat(64),
+        after: 'Linha ALVO EDITADA',
+      }],
+    });
+    const { fetchImpl, sentBodies } = scriptedFetch([readReq, forged]);
+
+    await expect(
+      new OllamaCoderBackend({ model: 'x', fetchImpl }).edit(
+        request,
+        workspace,
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: 'ollama_invalid_response_schema' });
+
+    expect(sentBodies.join('\n')).not.toContain('replace_anchor');
+    expect(sentBodies.join('\n')).not.toContain('Âncoras experimentais R2');
+    expect(workspace.files.get('docs/a.md')).toBe(bigDoc);
+  });
+
+  test('R2 opt-in anuncia anchorId servido e aceita replace_anchor sem path/SHA/range vindos do modelo', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
+    const sentBodies: string[] = [];
+    let call = 0;
+
+    const fetchImpl = (async (_url: unknown, init: { body: string }) => {
+      sentBodies.push(init.body);
+      call += 1;
+
+      if (call === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            message: {
+              content: JSON.stringify({
+                action: 'read',
+                reads: [{
+                  path: 'docs/a.md',
+                  lineRange: [199, 201],
+                  contextBefore: 0,
+                  contextAfter: 0,
+                  maxLines: 10,
+                }],
+              }),
+            },
+            prompt_eval_count: 100_000,
+            eval_count: 50,
+            done_reason: 'stop',
+          }),
+        };
+      }
+
+      const match = /r2a_[a-f0-9]{64}/.exec(init.body);
+      if (!match) throw new Error('teste esperava anchorId anunciado pelo host');
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          message: {
+            content: JSON.stringify({
+              action: 'edit',
+              operations: [{
+                kind: 'replace_anchor',
+                anchor_id: match[0],
+                after: [
+                  'linha 199',
+                  'Linha ALVO EDITADA VIA R2',
+                  'linha 201',
+                ].join('\n'),
+              }],
+            }),
+          },
+          prompt_eval_count: 100_000,
+          eval_count: 50,
+          done_reason: 'stop',
+        }),
+      };
+    }) as unknown as typeof fetch;
+
+    const backend = new OllamaCoderBackend({
+      model: 'x',
+      fetchImpl,
+      experimentalAnchorMode: {
+        kind: 'r2-host-mediated-v1',
+        cycleId: 'phase-b-unit-test',
+      },
+    });
+
+    const result = await backend.edit(
+      request,
+      workspace,
+      new AbortController().signal,
+    );
+
+    expect(result.touchedResources).toEqual(['docs/a.md']);
+    expect(workspace.files.get('docs/a.md')).toContain('Linha ALVO EDITADA VIA R2');
+    expect(workspace.files.get('docs/a.md')).toContain('SENTINELA_LONGE');
+
+    const allSent = sentBodies.join('\n');
+    expect(allSent).toContain('replace_anchor');
+    expect(allSent).toContain('Âncoras experimentais R2');
+    expect(allSent).toMatch(/r2a_[a-f0-9]{64}/);
+    expect(allSent).not.toContain('SENTINELA_LONGE');
+  });
+
 });
