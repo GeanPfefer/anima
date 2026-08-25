@@ -29,6 +29,20 @@ const REPS = Math.max(1, parseInt(arg('reps', '5'), 10) || 5);
 const MODELS = arg('models', 'qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3-coder:30b').split(',').map(s => s.trim()).filter(Boolean);
 const CLASSES = arg('classes', FIXTURE_IDS.join(',')).split(',').map(s => s.trim()).filter(Boolean);
 const SEED = parseInt(arg('seed', '20260813'), 10) || 20260813;
+
+type R2CyclePolicy = 'per-protocol' | 'shared';
+
+const R2_CYCLE_POLICY_RAW = arg('r2-cycle-policy', 'per-protocol');
+
+if (
+  R2_CYCLE_POLICY_RAW !== 'per-protocol' &&
+  R2_CYCLE_POLICY_RAW !== 'shared'
+) {
+  throw new Error('--r2-cycle-policy precisa ser per-protocol ou shared');
+}
+
+const R2_CYCLE_POLICY: R2CyclePolicy = R2_CYCLE_POLICY_RAW;
+
 type ProtocolVariant = 'current' | 'r2' | 'r2-narrow' | 'r2-after-scope';
 
 const PROTOCOLS = arg('protocols', 'current')
@@ -160,6 +174,19 @@ function memoryWorkspace(initial: Record<string, string>) {
   };
 }
 
+function experimentalCycleId(
+  protocol: ProtocolVariant,
+  model: string,
+  fixtureId: string,
+  rep: number,
+): string {
+  if (R2_CYCLE_POLICY === 'shared') {
+    return `r2-c-shared-${model}-${fixtureId}-${rep}`;
+  }
+
+  return `r2-c-${protocol}-${model}-${fixtureId}-${rep}`;
+}
+
 async function runOne(
   model: string,
   protocol: ProtocolVariant,
@@ -181,7 +208,7 @@ async function runOne(
       ? {
           experimentalAnchorMode: {
             kind: 'r2-host-mediated-v1' as const,
-            cycleId: `r2-c-${protocol}-${model}-${fixture.id}-${rep}`,
+            cycleId: experimentalCycleId(protocol, model, fixture.id, rep),
             ...(protocol === 'r2-narrow'
               ? { readGuidance: 'narrow-target-v1' as const }
               : protocol === 'r2-after-scope'
@@ -269,10 +296,11 @@ async function main() {
     node: process.version, ollamaUrl: URL, ollamaVersion: meta.ollamaVersion,
     models: MODELS, protocols: PROTOCOLS, classes: selected.map(f => f.id), reps: REPS, seed: SEED,
     productionConfig: 'current=defaults; r2=mesmos defaults + experimentalAnchorMode; r2-narrow=r2 + narrow-target-v1; r2-after-scope=r2 + after-scope-v1. Todos preservam maxReadRounds=3, num_ctx=8192, num_predict=1536, temperature=0',
+    r2CyclePolicy: R2_CYCLE_POLICY,
     note: 'A/B pareado: a ordem fixture×rep é randomizada uma vez por modelo/seed e reutilizada IDENTICA para cada protocolo; blocos de protocolo ficam dentro do mesmo bloco de modelo para preservar hardware/modelo carregado. Fixtures são proxies sintéticos.',
   };
   writeFileSync(join(OUT_DIR, 'meta.json'), JSON.stringify({ config, tags: meta.tags }, null, 2));
-  console.log(`[harness] out=${OUT_DIR} models=${MODELS.join(',')} protocols=${PROTOCOLS.join(',')} classes=${selected.length} reps=${REPS} seed=${SEED}`);
+  console.log(`[harness] out=${OUT_DIR} models=${MODELS.join(',')} protocols=${PROTOCOLS.join(',')} classes=${selected.length} reps=${REPS} seed=${SEED} r2CyclePolicy=${R2_CYCLE_POLICY}`);
 
   const results: RunResult[] = [];
   let modelIdx = 0;

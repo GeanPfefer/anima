@@ -172,3 +172,30 @@ Comparação prevista:
 Se `r2-after-scope` reproduzir o ganho de `r2-narrow` sem alterar a sequência
 de reads/anchors, isso será evidência de que o efeito observado decorre da
 explicitação semântica de `after`, e não da redução do range.
+
+
+### Política de cycleId nas ablações R2
+
+O harness aceita:
+
+```text
+--r2-cycle-policy per-protocol
+--r2-cycle-policy shared
+```
+
+O default é `per-protocol`, preservando o comportamento das campanhas
+anteriores: o nome do protocolo participa do `cycleId`.
+
+Para ablações textuais controladas, `shared` gera o mesmo `cycleId` para o
+mesmo `model × fixture × rep` em todos os variants R2. Como o `anchorId`
+deriva do ciclo/snapshot/range, isso remove a mudança lexical do ID como
+confundidor entre `r2`, `r2-after-scope` e `r2-narrow`.
+
+Essa opção existe somente no harness experimental. Ela não altera o coder,
+o contrato host-mediated ou o comportamento de produção.
+
+Exemplo C3:
+
+```text
+--protocols r2,r2-after-scope,r2-narrow --r2-cycle-policy shared
+```
