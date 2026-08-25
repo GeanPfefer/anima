@@ -67,9 +67,10 @@ linha de métricas por execução), `matrix.json` e `matrix.md` (agregado por c�
   (batching/GPU) impede afirmar taxas exatas.
 - **Fixtures são proxies sintéticos** pequenos, não o repositório real — não
   reproduzem o volume/estrutura do alvo autônomo real.
-- `raw.jsonl` guarda **métricas derivadas**, não transcrições integrais do modelo
-  (tamanho/ruído); a auditabilidade vem da recomputabilidade (re-rodar) somada às
-  métricas. As fixtures são sintéticas, sem segredos.
+- `raw.jsonl` preserva métricas derivadas e, nos runs forenses atuais,
+  `callsRaw` com prompts/respostas observados e `finalFiles`. As fixtures são
+  sintéticas, sem segredos. Runs históricos anteriores à evidência forense podem
+  conter somente as métricas derivadas.
 
 Enquanto a evidência não for reconstruída com N estatístico em alvo realista,
 **não se promove piso de modelo nem se altera a âncora/protocolo** — decisão
@@ -199,3 +200,30 @@ Exemplo C3:
 ```text
 --protocols r2,r2-after-scope,r2-narrow --r2-cycle-policy shared
 ```
+
+
+### Observabilidade da forma das leituras
+
+`readResponses` mede quantas respostas `action:"read"` ocorreram. Isso não é
+suficiente para descrever as requests contidas em cada resposta.
+
+Runs novos também derivam, de forma passiva:
+
+- `readRequests`: quantidade total de requests individuais;
+- `readRequestShapes`: `lineRange-only`, `search-only`,
+  `search+lineRange` ou `default`;
+- `effectiveReadModes`: `search`, `lineRange` ou `head`;
+- `hybridReadRequests`: quantidade de requests com `search + lineRange`.
+
+Essas métricas espelham a semântica vigente de `extractSlice`: quando
+`search` e `lineRange` coexistem na mesma request, **search tem precedência**
+e o slice efetivo é determinado pela busca. Isso é uma única request híbrida,
+não duas leituras.
+
+O analyzer prefere recomputar essas informações diretamente de `callsRaw`,
+permitindo reexaminar runs forenses já preservados sem executar Ollama. Se um
+run não possui `callsRaw`, ele usa os campos derivados quando existirem; runs
+mais antigos permanecem analisáveis e a seção é marcada como indisponível.
+
+A inclusão dessas métricas não altera `parseReadRequests`, `extractSlice`,
+prompt, backend, anchors ou decisão do host.

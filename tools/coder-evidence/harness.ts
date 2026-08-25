@@ -130,6 +130,65 @@ const actionOf = (raw: string): 'read' | 'edit' | 'other' => {
   const p = extractJson(raw) as { action?: unknown } | null;
   return p?.action === 'read' ? 'read' : p?.action === 'edit' ? 'edit' : 'other';
 };
+
+type ReadRequestShape =
+  | 'lineRange-only'
+  | 'search-only'
+  | 'search+lineRange'
+  | 'default';
+
+type EffectiveReadMode = 'search' | 'lineRange' | 'head';
+
+interface ReadRequestObservation {
+  readonly shape: ReadRequestShape;
+  readonly effectiveMode: EffectiveReadMode;
+}
+
+const readRequestObservationsOf = (raw: string): ReadRequestObservation[] => {
+  const parsed = extractJson(raw) as { action?: unknown; reads?: unknown } | null;
+
+  if (parsed?.action !== 'read' || !Array.isArray(parsed.reads)) return [];
+
+  const observations: ReadRequestObservation[] = [];
+
+  for (const candidate of parsed.reads) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      continue;
+    }
+
+    const read = candidate as Record<string, unknown>;
+    const hasSearch =
+      typeof read.search === 'string'
+      && read.search.trim().length > 0;
+
+    const hasLineRange =
+      Array.isArray(read.lineRange)
+      && read.lineRange.length === 2;
+
+    const shape: ReadRequestShape =
+      hasSearch && hasLineRange
+        ? 'search+lineRange'
+        : hasSearch
+          ? 'search-only'
+          : hasLineRange
+            ? 'lineRange-only'
+            : 'default';
+
+    // Espelha a precedencia real de extractSlice():
+    // search > lineRange > começo do arquivo.
+    const effectiveMode: EffectiveReadMode =
+      hasSearch
+        ? 'search'
+        : hasLineRange
+          ? 'lineRange'
+          : 'head';
+
+    observations.push({ shape, effectiveMode });
+  }
+
+  return observations;
+};
+
 const roundsLeftOf = (userPrompt: string): number | null => {
   if (/0 rodadas de leitura restantes/.test(userPrompt) || /DEVE responder agora/.test(userPrompt)) return 0;
   const m = userPrompt.match(/(\d+) rodadas? de leitura restantes?/);
@@ -149,6 +208,10 @@ interface RunResult {
   achieved: boolean;
   calls: number;
   readResponses: number;
+  readRequests: number;
+  readRequestShapes: ReadRequestShape[];
+  effectiveReadModes: EffectiveReadMode[];
+  hybridReadRequests: number;
   editRound: number | null;         // idx da chamada onde veio a ação edit
   roundsLeftAtEdit: number | null;  // orçamento restante nessa chamada
   editOpKinds: string[];            // kinds das operações da edição
@@ -238,10 +301,31 @@ async function runOne(
   let roundsLeftAtEdit: number | null = null;
   const editOpKinds: string[] = [];
   const beforeOccurrences: number[] = [];
+  const readRequestShapes: ReadRequestShape[] = [];
+  const effectiveReadModes: EffectiveReadMode[] = [];
   let readResponses = 0;
+  let readRequests = 0;
+  let hybridReadRequests = 0;
+
   for (const call of records) {
     const act = actionOf(call.respContent);
-    if (act === 'read') readResponses++;
+
+    if (act === 'read') {
+      readResponses++;
+
+      const observations = readRequestObservationsOf(call.respContent);
+      readRequests += observations.length;
+
+      for (const observation of observations) {
+        readRequestShapes.push(observation.shape);
+        effectiveReadModes.push(observation.effectiveMode);
+
+        if (observation.shape === 'search+lineRange') {
+          hybridReadRequests++;
+        }
+      }
+    }
+
     if (act === 'edit' && editRound === null) {
       editRound = call.idx;
       roundsLeftAtEdit = roundsLeftOf(call.userPrompt);
@@ -263,6 +347,10 @@ async function runOne(
     outcome, failureCode, achieved,
     calls: records.length,
     readResponses,
+    readRequests,
+    readRequestShapes,
+    effectiveReadModes,
+    hybridReadRequests,
     editRound, roundsLeftAtEdit,
     editOpKinds, beforeOccurrences,
     touched,
@@ -329,14 +417,48 @@ async function main() {
 
   // ---- Agregação: matriz sucesso(host-aceito)/total e achieved/total por célula ----
   const cellKey = (m: string, p: string, c: string) => `${m}|${p}|${c}`;
-  const cells = new Map<string, { total: number; accepted: number; achieved: number; codes: Record<string, number> }>();
+  const cells = new Map<string, {
+    total: number;
+    accepted: number;
+    achieved: number;
+    codes: Record<string, number>;
+    readRequestShapes: Record<string, number>;
+    effectiveReadModes: Record<string, number>;
+    hybridReadRequests: number;
+  }>();
+
   for (const r of results) {
     const k = cellKey(r.model, r.protocol, r.class);
-    const cell = cells.get(k) ?? { total: 0, accepted: 0, achieved: 0, codes: {} };
+    const cell = cells.get(k) ?? {
+      total: 0,
+      accepted: 0,
+      achieved: 0,
+      codes: {},
+      readRequestShapes: {},
+      effectiveReadModes: {},
+      hybridReadRequests: 0,
+    };
+
     cell.total++;
+
     if (r.outcome === 'accepted') cell.accepted++;
     if (r.achieved) cell.achieved++;
-    if (r.failureCode) cell.codes[r.failureCode] = (cell.codes[r.failureCode] ?? 0) + 1;
+
+    if (r.failureCode) {
+      cell.codes[r.failureCode] = (cell.codes[r.failureCode] ?? 0) + 1;
+    }
+
+    for (const shape of r.readRequestShapes) {
+      cell.readRequestShapes[shape] =
+        (cell.readRequestShapes[shape] ?? 0) + 1;
+    }
+
+    for (const mode of r.effectiveReadModes) {
+      cell.effectiveReadModes[mode] =
+        (cell.effectiveReadModes[mode] ?? 0) + 1;
+    }
+
+    cell.hybridReadRequests += r.hybridReadRequests;
     cells.set(k, cell);
   }
   const matrix = {
@@ -359,8 +481,18 @@ async function main() {
         const codes = Object.entries(cell.codes)
           .map(([code, n]) => `${code.replace('ollama_', '')}×${n}`)
           .join(', ');
+        const shapeText = Object.entries(cell.readRequestShapes)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([shape, count]) => `${shape}×${count}`)
+          .join(', ') || '—';
+
+        const modeText = Object.entries(cell.effectiveReadModes)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([mode, count]) => `${mode}×${count}`)
+          .join(', ') || '—';
+
         mdRows.push(
-          `| \`${fixture.id}\` | \`${model}\` | \`${protocol}\` | ${cell.accepted}/${cell.total} | ${cell.achieved}/${cell.total} | ${codes || '—'} |`,
+          `| \`${fixture.id}\` | \`${model}\` | \`${protocol}\` | ${cell.accepted}/${cell.total} | ${cell.achieved}/${cell.total} | ${codes || '—'} | ${shapeText} | ${modeText} | ${cell.hybridReadRequests} |`,
         );
       }
     }
@@ -372,8 +504,8 @@ async function main() {
     `Config: ${config.productionConfig}. Node ${config.node}, Ollama ${config.ollamaVersion ?? '?'}. Seed ${SEED}, reps ${REPS}.`,
     `${config.note}`,
     '',
-    '| Classe | Modelo | Protocolo | Host-aceito | Achieved | Falhas |',
-    '|---|---|---|---:|---:|---|',
+    '| Classe | Modelo | Protocolo | Host-aceito | Achieved | Falhas | Read request shapes | Modo efetivo | Híbridas |',
+    '|---|---|---|---:|---:|---|---|---|---:|',
     ...mdRows,
     '',
   ].join('\n');

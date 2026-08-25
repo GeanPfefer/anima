@@ -22,6 +22,97 @@ const cell = (m, p, c) => rows.filter(r => r.model === m && protocolOf(r) === p 
 const pct = (n, d) => d ? `${Math.round((100 * n) / d)}%` : '—';
 const hist = arr => arr.reduce((a, x) => (a[x] = (a[x] ?? 0) + 1, a), {});
 
+const extractJson = raw => {
+  const text = String(raw ?? '').trim();
+  const candidate = text.startsWith('{')
+    ? text
+    : (text.match(/\{[\s\S]*\}/)?.[0] ?? '');
+
+  if (!candidate) return null;
+
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+};
+
+const readObservabilityFromCalls = row => {
+  if (!Array.isArray(row.callsRaw)) return null;
+
+  const shapes = [];
+  const effectiveModes = [];
+
+  for (const call of row.callsRaw) {
+    const parsed = extractJson(call?.respContent);
+
+    if (parsed?.action !== 'read' || !Array.isArray(parsed.reads)) {
+      continue;
+    }
+
+    for (const candidate of parsed.reads) {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        continue;
+      }
+
+      const hasSearch =
+        typeof candidate.search === 'string'
+        && candidate.search.trim().length > 0;
+
+      const hasLineRange =
+        Array.isArray(candidate.lineRange)
+        && candidate.lineRange.length === 2;
+
+      const shape =
+        hasSearch && hasLineRange
+          ? 'search+lineRange'
+          : hasSearch
+            ? 'search-only'
+            : hasLineRange
+              ? 'lineRange-only'
+              : 'default';
+
+      const effectiveMode =
+        hasSearch
+          ? 'search'
+          : hasLineRange
+            ? 'lineRange'
+            : 'head';
+
+      shapes.push(shape);
+      effectiveModes.push(effectiveMode);
+    }
+  }
+
+  return {
+    shapes,
+    effectiveModes,
+    hybridReadRequests: shapes.filter(shape => shape === 'search+lineRange').length,
+  };
+};
+
+const readObservabilityOf = row => {
+  const fromCalls = readObservabilityFromCalls(row);
+
+  if (fromCalls) return fromCalls;
+
+  if (
+    Array.isArray(row.readRequestShapes)
+    && Array.isArray(row.effectiveReadModes)
+  ) {
+    return {
+      shapes: row.readRequestShapes,
+      effectiveModes: row.effectiveReadModes,
+      hybridReadRequests:
+        typeof row.hybridReadRequests === 'number'
+          ? row.hybridReadRequests
+          : row.readRequestShapes.filter(shape => shape === 'search+lineRange').length,
+    };
+  }
+
+  return null;
+};
+
 /**
  * Assinatura observacional de um rep.
  *
@@ -134,6 +225,46 @@ for (const p of protocols) {
 }
 
 console.log(`\n→ ${stoch}/${total} células estocásticas.`);
+
+// ---- Forma das requests de leitura + modo efetivo do slice ----
+console.log('\n## Forma das requests de read e modo efetivo do slice');
+console.log('(search+lineRange é UMA request híbrida; pela semântica atual de extractSlice, search tem precedência sobre lineRange)');
+
+for (const m of models) {
+  for (const p of protocols) {
+    for (const c of classes) {
+      const rs = cell(m, p, c);
+
+      if (!rs.length) continue;
+
+      const observations = rs
+        .map(readObservabilityOf)
+        .filter(Boolean);
+
+      if (!observations.length) {
+        console.log(
+          `  ${m.padEnd(20)} ${p.padEnd(14)} / ${c}: indisponível (run sem callsRaw/campos derivados)`
+        );
+        continue;
+      }
+
+      const shapes = hist(observations.flatMap(observation => observation.shapes));
+      const modes = hist(observations.flatMap(observation => observation.effectiveModes));
+      const hybrid = observations.reduce(
+        (sum, observation) => sum + observation.hybridReadRequests,
+        0
+      );
+      const requestCount = observations.reduce(
+        (sum, observation) => sum + observation.shapes.length,
+        0
+      );
+
+      console.log(
+        `  ${m.padEnd(20)} ${p.padEnd(14)} / ${c}: requests=${requestCount} · shapes=${JSON.stringify(shapes)} · effective=${JSON.stringify(modes)} · hybrid=${hybrid}`
+      );
+    }
+  }
+}
 
 // ---- Assinaturas de falha por ocorrência do `before` ----
 console.log('\n## Ocorrências do `before` no arquivo original (unicidade da âncora)');
