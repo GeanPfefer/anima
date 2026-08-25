@@ -167,6 +167,32 @@ describe('ollama-protocol — Commit 2: leitura limitada', () => {
     expect(entry).toMatchObject({ exists: false, sha256: null, byteSize: 0, structure: [] });
   });
 
+  test('buildManifest mapeia blocos de teste (describe/test/it) além de exports, sem vazar corpo', () => {
+    const ts = [
+      "import x from 'y';",
+      'export const helper = 1;',
+      "describe('suite', () => {",
+      "  test('caso A', () => {",
+      '    const segredo = 42;',
+      '  });',
+      "  it.each([1])('caso B', () => {});",
+      '});',
+      'const interno = 2;',
+    ].join('\n');
+    const [entry] = buildManifest([{ path: 'lib/a.test.ts', content: ts }]);
+    expect(entry!.kind).toBe('typescript');
+    expect(entry!.structure).toEqual([
+      'export const helper = 1;',
+      "describe('suite', () => {",
+      "test('caso A', () => {",
+      "it.each([1])('caso B', () => {});",
+    ]);
+    // Corpo do teste e linhas não-estruturais (import, const interno) NÃO entram.
+    expect(JSON.stringify(entry!.structure)).not.toContain('segredo');
+    expect(JSON.stringify(entry!.structure)).not.toContain('const interno');
+    expect(JSON.stringify(entry!.structure)).not.toContain('import x');
+  });
+
   test('parseReadRequests: teto de leituras é erro de schema', () => {
     const many = Array.from({ length: 9 }, () => ({ path: 'docs/a.md' }));
     expect(() => parseReadRequests(many, SCOPE)).toThrow(OllamaProtocolError);

@@ -301,7 +301,12 @@ const structureOf = (kind: FileKind, content: string): string[] => {
   if (kind === 'markdown') {
     for (const line of content.split('\n')) { if (/^#{1,6}\s+/.test(line)) push(line); if (out.length >= MANIFEST_MAX_STRUCTURE) break; }
   } else if (kind === 'typescript') {
-    const re = /^\s*export\s+(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|const|enum)\s+[A-Za-z0-9_]+/;
+    // Estrutura SEGURA de TS: assinaturas exportadas E blocos de teste
+    // (describe/test/it, com .each/.only/.skip). Arquivos de teste não têm
+    // `export`, então sem os blocos o manifesto os mostra OPACOS e o modelo
+    // gasta rodadas de leitura só para mapeá-los. São rótulos estruturais
+    // (como as assinaturas), nunca o corpo — mesma regra de "estrutura, não conteúdo".
+    const re = /^\s*(?:export\s+(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|const|enum)\s+[A-Za-z0-9_]+|(?:describe|test|it)(?:\.[A-Za-z]+)?\s*\()/;
     for (const line of content.split('\n')) { if (re.test(line)) push(line); if (out.length >= MANIFEST_MAX_STRUCTURE) break; }
   }
   return out;
