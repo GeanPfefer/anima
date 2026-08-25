@@ -106,3 +106,46 @@
   restante coder→`review` é CAPACIDADE do qwen3-coder como editor (ortogonal ao retry
   governado e à autoridade de execução, ambos verdes). Próximo: avaliar melhor editor local
   ou hardware.
+
+## Item 1 Coder Recovery Plan V0 (2026-08-25, investigação read-only)
+
+- **Objetivo:** determinar a causa técnica do `ollama_read_round_limit` da attempt 2
+  e desenhar recuperação governada, SEM nova attempt/budget reset/cloud. Nenhuma
+  execução, nenhuma mutação de estado — só leitura + uma melhoria geral de maquinaria.
+- **O que aconteceu (evidência determinística):** o código-erro `ollama_read_round_limit`
+  só é lançado quando `action='read'` na rodada final (`ollama-coder.ts:155`). Qualquer
+  tentativa de edição — mesmo inválida — produziria OUTRO código (`invalid_response_schema`,
+  `ambiguous_replacement`, `edit_outside_scope`, `stale_file_hash`, `no_effective_edits`),
+  que propaga e encerra a tentativa. Logo: **o modelo pediu leitura em TODAS as rodadas e
+  NUNCA propôs edição; o host NÃO bloqueou nenhuma edição.** Transcript por-rodada NÃO é
+  preservado pelo caminho de produção (só desfecho + `durationMs 98276`); reconstrução
+  exata dos reads exigiria re-execução (não feita).
+- **execution_spec como tarefa de coder:** escopo = 4 arquivos, 2 camadas
+  (core `work-routing.ts`+test 400 linhas; web `resource-governor.ts`+test 537 linhas),
+  ~48k chars ≈ **~2× o input budget** (num_ctx 8192 − reserva 1536 = 6656 tok ≈ 23k chars);
+  objetivo ABSTRATO ("evoluir o advisory para preferir local e representar alternativa
+  remota"). Os arquivos de teste tinham **estrutura VAZIA no manifesto** (0 `export`).
+- **Comparação histórica local:** qwen3-coder via protocolo Ollama = **12 sucessos / 2 falhas**
+  (`host_observed_coder_evidence_recorded`); os sucessos eram escopos pequenos/âncora-única.
+  Attempt 2 durou 98s ≈ 2× a média dos sucessos (~55s). → o modelo **é capaz de editar**;
+  a falha é de CONVERGÊNCIA sob escopo amplo/abstrato, não incapacidade absoluta.
+- **Causa mais provável = (B)+(D):** o escopo largo/abstrato induziu leitura excessiva e o
+  qwen3-coder não convergiu para edição exata em 3 rodadas. NÃO é (A) bloqueio do host
+  (código-erro descarta); NÃO é bug do protocolo (final-round-demand `e004b2a` e `append`
+  `9d36f2a` já existem); NÃO é o `ollama_timeout` de RAM (o modelo carregou e gerou).
+- **Melhoria geral aplicada (`38ae84c`, com regressão):** o manifesto passa a mapear blocos
+  `describe/test/it` além de `export` — antes arquivos de teste eram opacos e queimavam
+  rodadas de leitura. NÃO altera budget/limites/contrato; vale para toda tarefa com testes.
+  (Contribuinte plausível, não causa única comprovada — o transcript não existe.)
+- **Lifecycle para nova execução SEM apagar 2/2:** o budget é contado POR `proposal_version`
+  (`execution_started ... AND proposal_version=v_item.proposal_version`). Item 1 está `failed`,
+  que só transiciona para `approved` (retry, já BLOCKED por budget); `request_work_proposal_revision`
+  exige `state='proposed'` → **não se revisa um item `failed`**. Portanto o mecanismo governado
+  correto é um **WORK ITEM SUCESSOR** (novo item, escopo menor, pelo fluxo proposed→aprovação
+  humana→execução), preservando o Item 1 `failed`/2/2 como fato histórico. Alternativa maior
+  (fora deste V0): desenhar transição governada de "re-escopo de falha de capacidade".
+- **Recomendação (menor risco):** item sucessor com **primeira fatia mínima** (1 arquivo /
+  1 âncora — dentro da capacidade PROVADA do qwen3-coder local), decidido pelo humano; a
+  melhoria do manifesto reduz a pressão de leitura no próximo passo. **Cloud NÃO é necessária**
+  (task é local-viável quando bem-escopada). Não implementei a política local-first (fora do
+  mandato). `ITEM1_CODER_RECOVERY_PLAN_V0 = PASS`.
