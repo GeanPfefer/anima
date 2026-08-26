@@ -2111,3 +2111,14 @@ vigente por RLS, conta attempts e repetição sem mutar estado. No Item 1 real,
 Próximo recorte: candidato estritamente menor → argumentos idempotentes da RPC
 de lineage, com desfecho máximo `proposed`.
 [Registro](../registros/2026-08-26-classificacao-deterministica-de-recovery.md).
+
+### Candidato governado de decomposição (2026-08-26)
+
+`validateRecoverySuccessor` impede que uma decomposição amplie escopo, target,
+capability, permissões, attempts, impacto, dependência no original falho ou
+autoridade financeira. O boundary web só chama `propose_recovery_successor`
+depois dessa validação e seu máximo é `proposed`; erro/envelope inválido falha
+fechado. Gates: core completo 54/1.191, web recovery 7/7 e typecheck dos cinco
+workspaces. Próximo ponto: materializar a fatia mínima do Item 1 uma vez e provar
+lineage/original/dependências reais intactos.
+[Registro](../registros/2026-08-26-candidato-governado-de-recovery.md).

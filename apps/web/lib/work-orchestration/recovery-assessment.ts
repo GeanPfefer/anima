@@ -1,19 +1,9 @@
-import { decideRecovery, recoveryFailureCode, type RecoveryDecision } from '@anima/core';
+import { decideRecovery, recoveryFailureCode, type WorkRecoveryAssessment } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type ItemRow = Pick<Database['public']['Tables']['work_items']['Row'], 'id' | 'state' | 'proposal_version' | 'intent'>;
 type EventRow = Pick<Database['public']['Tables']['work_events']['Row'], 'id' | 'event_type' | 'proposal_version' | 'payload' | 'seq'>;
-
-export interface WorkRecoveryAssessment {
-  readonly workItemId: string;
-  readonly proposalVersion: number;
-  readonly failureEventId: string;
-  readonly sourceAttemptId: string;
-  readonly attemptsUsed: number;
-  readonly maxAttempts: number;
-  readonly decision: RecoveryDecision;
-}
 
 const record = (value: Json | undefined): Record<string, Json | undefined> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -83,4 +73,3 @@ export async function readWorkRecoveryAssessment(
   if (eventsResult.error || !eventsResult.data) return null;
   return projectWorkRecoveryAssessment(itemResult.data, eventsResult.data);
 }
-
