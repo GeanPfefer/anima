@@ -2122,3 +2122,15 @@ fechado. Gates: core completo 54/1.191, web recovery 7/7 e typecheck dos cinco
 workspaces. Próximo ponto: materializar a fatia mínima do Item 1 uma vez e provar
 lineage/original/dependências reais intactos.
 [Registro](../registros/2026-08-26-candidato-governado-de-recovery.md).
+
+### Reconciliação real do successor do Item 1 (2026-08-26)
+
+Antes de materializar, a fonte autoritativa revelou que a lineage seq 1 já
+existia: successor `27c8d1ba…`, com a mesma fatia mínima de core, já aprovado,
+classificado e executado. Sua attempt `311ec98b…` falhou novamente em
+`ollama_read_round_limit`. O boundary novo impediu duplicação: original segue
+`failed` 2/2, successor `failed` 1/2, `satisfies_original_objective=false` e Item
+2 bloqueado. Uma seq 2 igual seria retry disfarçado; mudar backend/provider ou
+protocolo é mudança material e exige proposta/decisão própria. Nenhuma mutação
+foi feita nesta reconciliação.
+[Registro](../registros/2026-08-26-reconciliacao-real-do-successor-item1.md).
