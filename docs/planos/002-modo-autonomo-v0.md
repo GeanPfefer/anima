@@ -2071,3 +2071,16 @@ os demais checks do envelope. Após erro de escrita, a preparação relê o fato
 corrente para resolver corrida/resultado ambíguo como replay sem duplicação.
 Próximo ponto: novo clique único pelo humano na UI correta.
 [Registro](../registros/2026-08-25-preparacao-classificacao-estrutural.md).
+
+### Prova real da preparação de elegibilidade do novo ServedRead (2026-08-26)
+
+O novo item `26f3c07f-bc6d-42cb-9a03-57f6894883d7`, `programming/low`, foi
+aprovado pelo usuário na proposta v1 e recebeu um único clique em “Preparar
+elegibilidade autônoma”. A fonte autoritativa confirmou `work_intelligence_classified`
+seq 38931 e a `autonomous_work_queue()` autenticada devolveu o item para target
+`anima`. A preparação não criou claim, attempt nem pedido autônomo e o estado
+permaneceu `approved`. Portanto, a separação classificação ≠ execução está provada
+no fluxo real. O item estrutural anterior `0898a0c2…` avançou depois do registro de
+2026-08-25 e terminou `failed`; não deve ser confundido com este novo item. Próximo
+ponto: admissão de recursos e pedido autônomo separado, preservando o escopo v1.
+[Registro](../registros/2026-08-26-preparacao-elegibilidade-servedread-v1.md).
