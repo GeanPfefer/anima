@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(14);
+SELECT plan(16);
 
 -- Fixtures: U1 dono; U2 estranho. ORIG falho com 1 attempt; DEP depende de ORIG.
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
@@ -46,6 +46,8 @@ SELECT is((SELECT count(*)::text FROM public.work_events WHERE work_item_id='a30
 -- Idempotencia: replay da mesma key devolve o mesmo sucessor, sem nova linha.
 SELECT is((private.record_recovery_successor('a1000000-0000-4000-8000-000000000001','a3000000-0000-4000-8000-000000000001',1,'significant','programming',intent,proposal,'r1','a4000000-0000-4000-8000-000000000001'))->>'replayed','true','replay idempotente') FROM _p;
 SELECT is((SELECT count(*)::text FROM public.work_recovery_lineage WHERE original_work_item_id='a3000000-0000-4000-8000-000000000001'),'2','replay nao duplica lineage');
+SELECT throws_ok($$SELECT private.record_recovery_successor('a1000000-0000-4000-8000-000000000001','a3000000-0000-4000-8000-000000000001',1,'significant','programming','{"execution_spec":{}}','{"schema_version":1,"data":{"summary":"s","objective":"o","included_scope":["a"],"excluded_scope":["b"],"expected_effects":["e"],"risks":["r"]}}','razao divergente','a4000000-0000-4000-8000-000000000001')$$,'22023','recovery successor idempotency conflict','mesma chave com razao divergente falha fechado');
+SELECT throws_ok($$SELECT private.record_recovery_successor('a1000000-0000-4000-8000-000000000001','a3000000-0000-4000-8000-000000000001',1,'low','programming','{"execution_spec":{}}','{"schema_version":1,"data":{"summary":"s","objective":"o","included_scope":["a"],"excluded_scope":["b"],"expected_effects":["e"],"risks":["r"]}}','r1','a4000000-0000-4000-8000-000000000001')$$,'22023','recovery successor idempotency conflict','mesma chave com envelope divergente falha fechado');
 -- Nenhuma autorizacao financeira criada por este fluxo.
 SELECT is((SELECT count(*)::text FROM public.work_events e JOIN public.work_items i ON i.id=e.work_item_id WHERE i.user_id='a1000000-0000-4000-8000-000000000001' AND e.payload->'data'->>'authority' IN ('financial_authorization','paid_compute')),'0','zero autorizacao financeira');
 

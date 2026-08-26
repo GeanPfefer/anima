@@ -2084,3 +2084,17 @@ no fluxo real. O item estrutural anterior `0898a0c2…` avançou depois do regis
 2026-08-25 e terminou `failed`; não deve ser confundido com este novo item. Próximo
 ponto: admissão de recursos e pedido autônomo separado, preservando o escopo v1.
 [Registro](../registros/2026-08-26-preparacao-elegibilidade-servedread-v1.md).
+
+### Recovery lineage — reconciliação e idempotência estrita (2026-08-26)
+
+O HEAD já continha, desde `7556d03`, a tabela append-only e a RPC autenticada
+que criam um successor `proposed` para um original `failed`, preservam attempts e
+budget e não satisfazem dependências do original. A lacuna real era a semântica
+de replay: a mesma chave aceitava argumentos divergentes e concorrência dependia
+do índice único. A migration `20260826000004` serializa owner+key e só devolve
+replay quando original, sequência, razão, impacto, capacidade, intent e proposal
+coincidem; divergência falha fechado. PgTAP 16/16, tipos regenerados e typecheck
+dos cinco workspaces passaram. Próximo recorte: classificar deterministicamente a
+evidência de falha e decidir `retry | decompose | environment_wait | human_required`
+antes de qualquer materialização automática.
+[Registro](../registros/2026-08-26-recovery-lineage-idempotencia-estrita.md).

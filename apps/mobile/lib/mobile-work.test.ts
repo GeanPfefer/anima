@@ -31,7 +31,7 @@ function item(state: WorkState, overrides: Partial<WorkItem> = {}): WorkItem {
   } as WorkItem;
 }
 const withDecision = (state: WorkState): WorkPresentation => ({
-  item: item(state), latestResult: null, acceptedResult: null, latestEventType: null, availableActions: [],
+  item: item(state), latestResult: null, acceptedResult: null, latestEventType: null, availableActions: [], manualReleaseAvailable: false,
   pendingDecision: { requestEventId: 'evt-1', attemptId: 'attempt-1', proposalVersion: 1, reason: 'architectural_decision',
     explanation: 'Continuar?', checkpointReference: 'cp-1',
     options: [{ id: 'continuar', label: 'Continuar', effect: 'resume' }, { id: 'encerrar', label: 'Encerrar', effect: 'cancel' }] },
@@ -92,7 +92,7 @@ describe('decideWorkIntegration — segunda aprovação persistida',()=>{
   test.each(['authorize','refuse'] as const)('envia %s com IDs exatos e relê a projeção',async decision=>{
     repo.decideIntegration.mockResolvedValue(ok({action:'recorded',decision,eventSeq:9}));
     repo.getItem.mockResolvedValue(ok(item('completed')));repo.listEvents.mockResolvedValue(ok([]));
-    const value:WorkPresentation={item:item('completed'),latestResult:null,acceptedResult:null,latestEventType:'result_accepted',availableActions:[],integration:{status:'awaiting_decision',acceptedResultEventId:'result-1',decision:null,availableDecisions:['authorize','refuse']}};
+    const value:WorkPresentation={item:item('completed'),latestResult:null,acceptedResult:null,latestEventType:'result_accepted',availableActions:[],manualReleaseAvailable:false,integration:{status:'awaiting_decision',acceptedResultEventId:'result-1',decision:null,availableDecisions:['authorize','refuse']}};
     await decideWorkIntegration(value,decision);
     expect(repo.decideIntegration).toHaveBeenCalledWith({workItemId:'work-1',expectedProposalVersion:1,acceptedResultEventId:'result-1',decision,decisionId:`integration:result-1:${decision}`});
     expect(repo.getItem).toHaveBeenCalledWith('work-1');

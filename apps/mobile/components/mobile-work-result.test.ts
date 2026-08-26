@@ -17,7 +17,7 @@ function presentation(state: WorkState, overrides: Partial<WorkPresentation> = {
       proposal: { schemaVersion: 1, data: { summary: 'Cartão mobile', objective: 'Exibir resultado', includedScope: [], excludedScope: [], expectedEffects: [], risks: [] } },
       createdAt: new Date(), updatedAt: new Date(),
     },
-    latestResult: null, acceptedResult: null, latestEventType: null, availableActions: [], ...overrides,
+    latestResult: null, acceptedResult: null, latestEventType: null, availableActions: [], manualReleaseAvailable: false, ...overrides,
   };
 }
 

@@ -1325,6 +1325,60 @@ export type Database = {
           },
         ]
       }
+      work_recovery_lineage: {
+        Row: {
+          created_at: string
+          id: string
+          idempotency_key: string
+          original_work_item_id: string
+          recovery_reason: string
+          recovery_sequence: number
+          relation_kind: string
+          satisfies_original_objective: boolean
+          successor_work_item_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          idempotency_key: string
+          original_work_item_id: string
+          recovery_reason: string
+          recovery_sequence: number
+          relation_kind?: string
+          satisfies_original_objective?: boolean
+          successor_work_item_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          idempotency_key?: string
+          original_work_item_id?: string
+          recovery_reason?: string
+          recovery_sequence?: number
+          relation_kind?: string
+          satisfies_original_objective?: boolean
+          successor_work_item_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_recovery_lineage_original_work_item_id_fkey"
+            columns: ["original_work_item_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_recovery_lineage_successor_work_item_id_fkey"
+            columns: ["successor_work_item_id"]
+            isOneToOne: true
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       xp_records: {
         Row: {
           activity_date: string
@@ -1650,10 +1704,6 @@ export type Database = {
           work_item_id: string
         }[]
       }
-      current_work_retry_readiness: {
-        Args: { p_work_item_id: string }
-        Returns: Json
-      }
       begin_budget_interruption_resumed_attempt: {
         Args: {
           attempt_id: string
@@ -1821,6 +1871,10 @@ export type Database = {
         Args: { p_work_item_id: string }
         Returns: Json
       }
+      current_work_retry_readiness: {
+        Args: { p_work_item_id: string }
+        Returns: Json
+      }
       decide_integration: {
         Args: {
           accepted_result_event_id: string
@@ -1917,6 +1971,19 @@ export type Database = {
           target_reference: string
           work_item_id: string
         }[]
+      }
+      propose_recovery_successor: {
+        Args: {
+          p_capability: Database["public"]["Enums"]["work_capability"]
+          p_idempotency_key: string
+          p_impact_level: Database["public"]["Enums"]["work_impact_level"]
+          p_intent: Json
+          p_original_work_item_id: string
+          p_proposal: Json
+          p_recovery_reason: string
+          p_recovery_sequence: number
+        }
+        Returns: Json
       }
       readmit_budget_blocked_work: {
         Args: never
@@ -2117,6 +2184,14 @@ export type Database = {
         }
       }
       reopen_latest_conversation: { Args: never; Returns: string }
+      request_autonomous_execution: {
+        Args: {
+          p_expected_proposal_version: number
+          p_request_id: string
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
       request_project_backlog_proposal_changes: {
         Args: {
           expected_version: number
@@ -2134,14 +2209,6 @@ export type Database = {
           p_expected_proposal_version: number
           p_work_item_id: string
         }
-        Returns: Json
-      }
-      request_autonomous_execution: {
-        Args: { p_expected_proposal_version: number; p_request_id: string; p_work_item_id: string }
-        Returns: Json
-      }
-      request_work_retry: {
-        Args: { p_expected_proposal_version: number; p_failure_event_id: string; p_retry_request_id: string; p_work_item_id: string }
         Returns: Json
       }
       request_work_proposal_revision: {
@@ -2172,6 +2239,15 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      request_work_retry: {
+        Args: {
+          p_expected_proposal_version: number
+          p_failure_event_id: string
+          p_retry_request_id: string
+          p_work_item_id: string
+        }
+        Returns: Json
       }
       resolve_approval: {
         Args: {
