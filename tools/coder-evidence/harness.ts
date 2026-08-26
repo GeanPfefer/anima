@@ -19,6 +19,11 @@ import { join } from 'node:path';
 import { OllamaCoderBackend } from '../../apps/web/lib/work-orchestration/ollama-coder.ts';
 import { OllamaProtocolError } from '../../apps/web/lib/work-orchestration/ollama-protocol.ts';
 import { FIXTURES, FIXTURE_IDS, type Fixture } from './fixtures.ts';
+import {
+  REALISTIC_FIXTURES,
+  REALISTIC_FIXTURE_IDS,
+  REALISTIC_FIXTURE_PROVENANCE,
+} from './realistic-fixtures.ts';
 
 // ---- Args ----
 function arg(name: string, fallback: string): string {
@@ -29,6 +34,26 @@ const REPS = Math.max(1, parseInt(arg('reps', '5'), 10) || 5);
 const MODELS = arg('models', 'qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3-coder:30b').split(',').map(s => s.trim()).filter(Boolean);
 const CLASSES = arg('classes', FIXTURE_IDS.join(',')).split(',').map(s => s.trim()).filter(Boolean);
 const SEED = parseInt(arg('seed', '20260813'), 10) || 20260813;
+
+const ALL_FIXTURES: readonly Fixture[] = [
+  ...FIXTURES,
+  ...REALISTIC_FIXTURES,
+];
+
+const ALL_FIXTURE_IDS = [
+  ...FIXTURE_IDS,
+  ...REALISTIC_FIXTURE_IDS,
+];
+
+const unknownClasses = CLASSES.filter(
+  id => !ALL_FIXTURE_IDS.includes(id),
+);
+
+if (unknownClasses.length > 0) {
+  throw new Error(
+    `--classes desconhecidas: ${unknownClasses.join(', ')}`,
+  );
+}
 
 type R2CyclePolicy = 'per-protocol' | 'shared';
 
@@ -377,7 +402,24 @@ async function fetchMeta(): Promise<{ ollamaVersion: string | null; tags: unknow
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const rawPath = join(OUT_DIR, 'raw.jsonl');
-  const selected = FIXTURES.filter(f => CLASSES.includes(f.id));
+  const selected = ALL_FIXTURES.filter(
+    f => CLASSES.includes(f.id),
+  );
+
+  const realisticFixtureProvenance = Object.fromEntries(
+    selected
+      .filter(
+        fixture =>
+          fixture.id in REALISTIC_FIXTURE_PROVENANCE,
+      )
+      .map(fixture => [
+        fixture.id,
+        REALISTIC_FIXTURE_PROVENANCE[
+          fixture.id as keyof typeof REALISTIC_FIXTURE_PROVENANCE
+        ],
+      ]),
+  );
+
   const meta = await fetchMeta();
   const config = {
     startedAt: new Date().toISOString(),
@@ -385,7 +427,8 @@ async function main() {
     models: MODELS, protocols: PROTOCOLS, classes: selected.map(f => f.id), reps: REPS, seed: SEED,
     productionConfig: 'current=defaults; r2=mesmos defaults + experimentalAnchorMode; r2-narrow=r2 + narrow-target-v1; r2-after-scope=r2 + after-scope-v1. Todos preservam maxReadRounds=3, num_ctx=8192, num_predict=1536, temperature=0',
     r2CyclePolicy: R2_CYCLE_POLICY,
-    note: 'A/B pareado: a ordem fixture×rep é randomizada uma vez por modelo/seed e reutilizada IDENTICA para cada protocolo; blocos de protocolo ficam dentro do mesmo bloco de modelo para preservar hardware/modelo carregado. Fixtures são proxies sintéticos.',
+    realisticFixtureProvenance,
+    note: 'Paired A/B: fixture x rep order is randomized once per model/seed and reused identically for every protocol. Protocol blocks remain inside the same model block to preserve loaded hardware/model state. Historical synthetic fixtures remain the default; realistic fixtures are opt-in and record baseline provenance.',
   };
   writeFileSync(join(OUT_DIR, 'meta.json'), JSON.stringify({ config, tags: meta.tags }, null, 2));
   console.log(`[harness] out=${OUT_DIR} models=${MODELS.join(',')} protocols=${PROTOCOLS.join(',')} classes=${selected.length} reps=${REPS} seed=${SEED} r2CyclePolicy=${R2_CYCLE_POLICY}`);
