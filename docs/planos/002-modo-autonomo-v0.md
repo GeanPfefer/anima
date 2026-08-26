@@ -2098,3 +2098,16 @@ dos cinco workspaces passaram. Próximo recorte: classificar deterministicamente
 evidência de falha e decidir `retry | decompose | environment_wait | human_required`
 antes de qualquer materialização automática.
 [Registro](../registros/2026-08-26-recovery-lineage-idempotencia-estrita.md).
+
+### Classificação determinística de recovery (2026-08-26)
+
+A política pura `decideRecovery` separa falha de código, ambiente, capacidade do
+modelo, contexto, recursos, gate, timeout, no-progress, dependência externa,
+contrato e desconhecida. Só códigos allowlisted têm autoridade; `execution_failed`
+genérico é envelope e falha fechado. A projeção web lê os eventos da versão
+vigente por RLS, conta attempts e repetição sem mutar estado. No Item 1 real,
+2/2 attempts + `ollama_read_round_limit` produziram
+`model_capability_limit → decompose`, comprovando que recovery não é retry cego.
+Próximo recorte: candidato estritamente menor → argumentos idempotentes da RPC
+de lineage, com desfecho máximo `proposed`.
+[Registro](../registros/2026-08-26-classificacao-deterministica-de-recovery.md).
