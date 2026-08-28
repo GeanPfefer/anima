@@ -52,3 +52,23 @@
 
 Resolver humanamente a divergência entre remoto público e a condição de remoto
 privado antes de push. A decisão de consumir a attempt 2 continua humana.
+
+## Continuação canônica no mesmo dia
+
+- O banco autoritativo distinguiu o original `0cedae21…` do Successor A
+  `27c8d1ba…`: o successor tinha somente a attempt 1 `311ec98b…`; sua attempt 2
+  estava disponível.
+- O ato autorizado usou `request_work_retry` como o usuário proprietário e uma
+  volta do Resident Host in-process. Foram persistidos `retry_authorization`,
+  routing, claim e `execution_started` da attempt
+  `de724bcb-2a55-4d1e-b432-989e62d064c6`.
+- Terminal real: `worktree-create-failed`, `not a git repository`, antes do
+  coder. O invocador ad hoc foi executado por `node -e` na raiz; `projectRoot()`
+  pressupõe o cwd `apps/web` do script npm e resolveu `G:\` em vez do repo.
+- Não houve modelo executado, reads, edits, gates, repair, evidência de coder/gate
+  ou Verifier. O claim foi liberado e o item terminou `failed`, 2/2.
+- A falha ambiental não acionou repair, coerente com o envelope. Nenhuma attempt
+  3, reset de banco, mutação manual do item, successor, push, PR, merge ou deploy.
+- **Conclusão:** o loop permanece comprovado isoladamente, mas **não** foi
+  comprovado pelo caminho canônico nesta tentativa. A próxima prova exige nova
+  decisão/unidade governada; a attempt 2 é irrecuperável sem violar append-only.

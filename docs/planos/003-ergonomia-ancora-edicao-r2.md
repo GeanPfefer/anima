@@ -276,3 +276,20 @@ no mesmo attempt/worktree, sem banco e sem consumir a attempt 2 canônica.
 
 Próximo ponto exato: confirmar gates amplos e decidir humanamente se a evidência
 é suficiente para usar a attempt 2; esta continuação não promove R2.
+
+## Continuação — 2026-08-28: attempt 2 canônica
+
+A decisão humana autorizou consumir a attempt 2 do Successor A. O estado vivo
+confirmou 1/2 e distinguiu corretamente esse successor da attempt 2 histórica do
+item original. O retry RPC persistiu `retry_authorization` e o Resident Host
+in-process abriu a attempt `de724bcb-2a55-4d1e-b432-989e62d064c6`.
+
+A prova, porém, falhou antes do coder: o invocador ad hoc chamou o porto via
+`node -e` na raiz, enquanto `projectRoot()` pressupõe o cwd `apps/web` usado pelo
+script npm, resolvendo `G:\` em vez de `G:\anima`. A criação da worktree falhou
+com `not a git repository`; não houve reads, edit, gates, repair ou Verifier.
+O evento terminal foi preservado e o item ficou 2/2. Não foi criado retry extra,
+successor automático ou correção de estado.
+
+Próximo ponto exato: decisão humana sobre uma nova unidade governada de prova;
+a attempt 2 não pode ser repetida sem reescrever história.
