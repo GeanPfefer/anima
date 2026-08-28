@@ -17,6 +17,7 @@ import {
   parseReadRequests,
   resolveContextBudget,
   serveReadRequests,
+  sha256,
   writeChangeSet,
   type ContextBudget,
   type ManifestInputFile,
@@ -78,9 +79,12 @@ const SYSTEM = [
   'Você edita um repositório por um PROTOCOLO LIMITADO em JSON. Nunca recebe nem devolve arquivos inteiros.',
   'Você recebe um MANIFESTO (caminho, tamanho, sha256, estrutura) e pode pedir TRECHOS antes de editar.',
   'Responda SEMPRE com UM objeto JSON, sem texto fora dele, em uma destas formas:',
-  'LER: {"action":"read","reads":[{"path":"<do escopo>","search":"<termo opcional>","lineRange":[inicio,fim],"contextBefore":3,"contextAfter":3,"maxLines":60}]}',
+  'LOCALIZAR: {"action":"read","reads":[{"path":"<do escopo>","search":"<termo>","contextBefore":3,"contextAfter":3,"maxLines":60}]}',
+  'LER INTERVALO: {"action":"read","reads":[{"path":"<do escopo>","lineRange":[inicio,fim],"maxLines":60}]}',
+  'search e lineRange são modos EXCLUSIVOS: nunca envie ambos no mesmo objeto. Use search para localizar a linha e, na rodada seguinte, lineRange para obter o bloco necessário à edição.',
+  'Planeje as poucas rodadas pelo MANIFESTO: se pretende alterar vários arquivos existentes, reserve leitura para cada um; não releia ranges sobrepostos salvo se faltarem linhas específicas.',
   'EDITAR: {"action":"edit","operations":[{"kind":"replace_exact","path":"<do escopo>","expected_file_sha256":"<sha do arquivo como lido>","before":"<texto EXATO e ÚNICO do arquivo atual>","after":"<novo texto>","expected_occurrences":1}]}',
-  'Também é permitido {"kind":"create_file","path":"<do escopo>","content":"<conteúdo>"} para arquivo NOVO. Exclusão não é permitida.',
+  'Também é permitido {"kind":"create_file","path":"<do escopo>","content":"<conteúdo>"} somente quando o MANIFESTO marca exists=false. Nunca use create_file em exists=true. Exclusão não é permitida.',
   'Acrescentar ao FIM de arquivo existente: {"kind":"append","path":"<escopo>","expected_file_sha256":"<sha lido>","content":"<texto>"}. Não invente "before" para o fim.',
   'Regras: só caminhos do escopo; "before" deve ser copiado EXATAMENTE de um trecho lido e ocorrer uma única vez; use o sha256 do arquivo como lido; peça leituras antes de editar; não explique.',
 ].join('\n');
@@ -151,6 +155,11 @@ export class OllamaCoderBackend implements CoderBackend {
     ].join('\n') + carried;
 
     const servedBlocks: string[] = [];
+    const servedFingerprints = new Set<string>();
+    let totalReadRequests = 0;
+    let uniqueServedReads = 0;
+    let repeatedServedReads = 0;
+    const repeatedReadDescriptors = new Set<string>();
     const experimentalAnchors = new Map<string, ServedAnchor>();
     let experimentalAnchorOrdinal = 0;
 
@@ -165,9 +174,15 @@ export class OllamaCoderBackend implements CoderBackend {
         : roundsLeft === 1
           ? 'Orçamento: 1 rodada de leitura restante — a última. Peça {"action":"read",...} agora ou já aplique {"action":"edit",...}; depois só edição será aceita.'
           : `Orçamento: ${roundsLeft} rodadas de leitura restantes. Peça {"action":"read",...} ou aplique {"action":"edit",...}.`;
+      const progressLine = totalReadRequests === 0
+        ? null
+        : `Progresso host: requests=${totalReadRequests}; novos=${uniqueServedReads}; repetidos=${repeatedServedReads}.${repeatedServedReads > 0
+          ? ` Repetições idênticas não foram duplicadas: ${[...repeatedReadDescriptors].join(', ')}. Não repita; edite ou leia região diferente.`
+          : ''}`;
       const prompt = [
         header,
         servedBlocks.length ? `Contexto já fornecido:\n${servedBlocks.join('\n')}` : 'Nenhum trecho fornecido ainda.',
+        ...(progressLine ? [progressLine] : []),
         budgetLine,
       ].join('\n\n');
 
@@ -228,10 +243,24 @@ export class OllamaCoderBackend implements CoderBackend {
       }
       const { requests, rejected } = parseReadRequests(response.reads as unknown[], allowed);
       const { served, rejected: missing } = serveReadRequests(requests, contentOf);
+      totalReadRequests += requests.length;
+
+      const uniqueServed: ServedRead[] = [];
+      for (const item of served) {
+        const fingerprint = sha256(`${item.path}\n${item.sha256}\n${item.slice}`);
+        if (servedFingerprints.has(fingerprint)) {
+          repeatedServedReads += 1;
+          repeatedReadDescriptors.add(`${item.path} (${item.provenance.effectiveMode})`);
+          continue;
+        }
+        servedFingerprints.add(fingerprint);
+        uniqueServed.push(item);
+        uniqueServedReads += 1;
+      }
 
       const anchorsForThisRound: ServedAnchor[] = [];
       if (this.options.experimentalAnchorMode) {
-        for (const item of served) {
+        for (const item of uniqueServed) {
           const content = contentOf(item.path);
           if (content === null) continue;
 
@@ -252,7 +281,7 @@ export class OllamaCoderBackend implements CoderBackend {
       }
 
       servedBlocks.push(renderServed(
-        served,
+        uniqueServed,
         [...rejected, ...missing],
         anchorsForThisRound,
       ));

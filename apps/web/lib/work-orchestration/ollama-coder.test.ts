@@ -62,6 +62,22 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     expect(workspace.files.get('docs/a.md')).not.toContain('Linha ALVO unica');
   });
 
+  test('prompt ensina search e lineRange como modos exclusivos para localizar e ampliar contexto', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
+    const { fetchImpl, sentBodies } = scriptedFetch([readReq, editReq(bigSha)]);
+
+    await new OllamaCoderBackend({ model: 'x', fetchImpl })
+      .edit(request, workspace, new AbortController().signal);
+
+    const firstCall = sentBodies[0]!;
+    expect(firstCall).toContain('LOCALIZAR');
+    expect(firstCall).toContain('LER INTERVALO');
+    expect(firstCall).toContain('search e lineRange são modos EXCLUSIVOS');
+    expect(firstCall).toContain('Use search para localizar a linha');
+    expect(firstCall).toContain('reserve leitura para cada um');
+    expect(firstCall).toContain('Nunca use create_file em exists=true');
+  });
+
   test('NENHUMA chamada carrega o conteúdo integral do documento grande', async () => {
     const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
     const { fetchImpl, sentBodies } = scriptedFetch([readReq, editReq(bigSha)]);
@@ -95,6 +111,39 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     const { fetchImpl } = scriptedFetch([readReq, readReq, readReq]);
     await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, maxReadRounds: 1 }).edit(request, workspace, new AbortController().signal))
       .rejects.toMatchObject({ code: 'ollama_read_round_limit' });
+  });
+
+  test('leitura repetida é deduplicada e recebe diagnóstico explícito de progresso antes da volta final', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
+    const { fetchImpl, sentBodies } = scriptedFetch([readReq, readReq, readReq, editReq(bigSha)]);
+
+    const result = await new OllamaCoderBackend({ model: 'x', fetchImpl })
+      .edit(request, workspace, new AbortController().signal);
+
+    expect(result.touchedResources).toEqual(['docs/a.md']);
+    const finalPrompt = sentBodies.at(-1)!;
+    expect(finalPrompt).toContain('requests=3; novos=1; repetidos=2');
+    expect(finalPrompt).toContain('Repetições idênticas não foram duplicadas');
+    expect(finalPrompt).toContain('docs/a.md (search)');
+    expect(finalPrompt.match(/Linha ALVO unica para editar/g)).toHaveLength(1);
+  });
+
+  test('guard de progresso não confunde regiões diferentes do mesmo arquivo', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
+    const secondRead = JSON.stringify({
+      action: 'read',
+      reads: [{ path: 'docs/a.md', search: 'Cabeçalho', contextBefore: 0, contextAfter: 0, maxLines: 10 }],
+    });
+    const { fetchImpl, sentBodies } = scriptedFetch([readReq, secondRead, editReq(bigSha)]);
+
+    await new OllamaCoderBackend({ model: 'x', fetchImpl })
+      .edit(request, workspace, new AbortController().signal);
+
+    const editPrompt = sentBodies.at(-1)!;
+    expect(editPrompt).toContain('requests=2; novos=2; repetidos=0');
+    expect(editPrompt).not.toContain('Repetições idênticas');
+    expect(editPrompt).toContain('Linha ALVO unica para editar');
+    expect(editPrompt).toContain('# Cabeçalho');
   });
 
   test('edição fora do escopo é recusada', async () => {
@@ -186,10 +235,10 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     // reparo além do teto, enquanto a volta original ainda cabe. Antes da correção
     // o reparo reavaliava o prompt original e passava — mandando um payload maior
     // que o Ollama truncaria em silêncio.
-    const objective = 'reconciliar '.repeat(6); // padding p/ deixar o prompt original perto do teto (o SYSTEM inclui a op append)
+    const objective = 'reconciliar'; // o SYSTEM expandido deixa o prompt original perto deste teto estreito
     const bigInvalid = `{"lixo":"${'x'.repeat(700)}"}`; // schema inválido e grande (eco clip=500)
     const { fetchImpl, sentBodies } = scriptedFetch([bigInvalid, editReq(sha256('linha única'))]);
-    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, operationalContextCap: 1024 })
+    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, operationalContextCap: 1280 })
       .edit({ objective, includedScope: ['docs/a.md'], excludedScope: ['x'] }, workspace, new AbortController().signal))
       .rejects.toMatchObject({ code: 'ollama_context_budget_exceeded' });
     // A 1ª chamada (prompt original) foi enviada; o reparo foi barrado antes da 2ª.
