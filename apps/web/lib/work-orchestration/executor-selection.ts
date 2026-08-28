@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import type { ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
@@ -39,8 +39,32 @@ export type ExecutorSelection =
 const str = (value: unknown): string | null => (typeof value === 'string' && value.trim().length > 0 ? value : null);
 const objectOf = (value: unknown): Record<string, unknown> => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {});
 
-export function projectRoot(): string {
-  return resolve(process.env.ANIMA_PROJECT_ROOT ?? resolve(process.cwd(), '..', '..'));
+/**
+ * Descobre a raiz somente entre o cwd e seus ancestrais. Assim `apps/web` e a
+ * raiz do monorepo funcionam, mas um processo fora da árvore precisa declarar
+ * `ANIMA_PROJECT_ROOT`; nunca há fallback para um diretório apenas "provável".
+ */
+export function isAnimaProjectRoot(root: string): boolean {
+  return isAbsolute(root)
+    && existsSync(join(root, '.git'))
+    && existsSync(join(root, 'package.json'))
+    && existsSync(join(root, 'apps', 'web', 'package.json'));
+}
+
+const discoverProjectRoot = (start: string): string | null => {
+  let candidate = resolve(start);
+  const filesystemRoot = parse(candidate).root;
+  while (true) {
+    if (isAnimaProjectRoot(candidate)) return candidate;
+    if (candidate === filesystemRoot) return null;
+    candidate = dirname(candidate);
+  }
+};
+
+export function projectRoot(env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): string {
+  const configured = env.ANIMA_PROJECT_ROOT?.trim();
+  if (configured && configured.length > 0) return resolve(configured);
+  return discoverProjectRoot(cwd) ?? resolve(cwd);
 }
 
 /** Lê o SHA autorizado a partir do HEAD do repositório, no momento da proposta.
@@ -236,7 +260,7 @@ export function resolveExecutorRoute(
     if (contract.targetKind !== 'project' || !contract.targetReference) return err('worktree_target_invalid', 'O executor de worktree exige um alvo de projeto com referência.');
     if (!contract.baseSha || !SHA.test(contract.baseSha)) return err('worktree_base_sha_missing', 'O SHA-base autorizado não foi persistido ou é inválido.');
     const repoRoot = options.repoRoot ?? projectRoot();
-    if (!isAbsolute(repoRoot)) return err('project_root_invalid', 'A raiz do projeto n?o est? configurada.');
+    if (!isAnimaProjectRoot(repoRoot)) return err('project_root_invalid', 'A raiz do projeto Anima não é um repositório válido.');
     const backend = backendFor(contract, repoRoot, options.backendOverride);
     if ('error' in backend) return err('coder_backend_invalid', backend.error);
     const reference = contract.targetReference;

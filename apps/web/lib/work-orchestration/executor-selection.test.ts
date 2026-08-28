@@ -1,10 +1,11 @@
 /** @jest-environment node */
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { ScriptedCoderBackend } from './coder-backend';
-import { needsAnimaWebTypegen, prepareAnimaValidation, readExecutionContract, resolveExecutorRoute, type ExecutionContract, resolveAnimaNextCli } from './executor-selection';
+import { isAnimaProjectRoot, needsAnimaWebTypegen, prepareAnimaValidation, projectRoot, readExecutionContract, resolveExecutorRoute, type ExecutionContract, resolveAnimaNextCli } from './executor-selection';
 
 const SHA = 'a'.repeat(40);
+const REPO_ROOT = resolve(__dirname, '../../../..');
 const base: ExecutionContract = { executor: null, coderBackend: null, model: null, baseSha: null, targetKind: null, targetReference: null };
 const anima: ExecutionContract = { executor: 'worktree', coderBackend: 'ollama', model: 'qwen3-coder:latest', baseSha: SHA, targetKind: 'project', targetReference: 'anima' };
 const legacy: ExecutionContract = { ...base, executor: 'python_runner', targetKind: 'workspace', targetReference: 'legacy-target' };
@@ -20,9 +21,52 @@ describe('readExecutionContract', () => {
   });
 });
 
+describe('projectRoot — independente do cwd', () => {
+  const originalCwd = process.cwd();
+  const originalConfigured = process.env.ANIMA_PROJECT_ROOT;
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    if (originalConfigured === undefined) delete process.env.ANIMA_PROJECT_ROOT;
+    else process.env.ANIMA_PROJECT_ROOT = originalConfigured;
+  });
+
+  test('mantém a raiz correta a partir do cwd esperado apps/web', () => {
+    delete process.env.ANIMA_PROJECT_ROOT;
+    process.chdir(resolve(__dirname, '../..'));
+    expect(projectRoot()).toBe(resolve(__dirname, '../../../..'));
+    expect(isAnimaProjectRoot(projectRoot())).toBe(true);
+  });
+
+  test('execução in-process a partir da raiz do monorepo resolve o mesmo repositório', () => {
+    delete process.env.ANIMA_PROJECT_ROOT;
+    process.chdir(resolve(__dirname, '../../../..'));
+    expect(projectRoot()).toBe(resolve(__dirname, '../../../..'));
+    expect(isAnimaProjectRoot(projectRoot())).toBe(true);
+  });
+
+  test('override inválido falha fechado sem fallback para o default', () => {
+    process.env.ANIMA_PROJECT_ROOT = tmpdir();
+    expect(projectRoot()).toBe(resolve(tmpdir()));
+    expect(isAnimaProjectRoot(projectRoot())).toBe(false);
+    const selection = resolveExecutorRoute(anima);
+    expect(selection.ok).toBe(false);
+    if (!selection.ok) expect(selection.error.code).toBe('project_root_invalid');
+  });
+
+  test('cwd fora da árvore falha fechado sem adivinhar o repositório', () => {
+    delete process.env.ANIMA_PROJECT_ROOT;
+    process.chdir(tmpdir());
+    expect(projectRoot()).toBe(resolve(tmpdir()));
+    const selection = resolveExecutorRoute(anima);
+    expect(selection.ok).toBe(false);
+    if (!selection.ok) expect(selection.error.code).toBe('project_root_invalid');
+  });
+});
+
 describe('resolveExecutorRoute — seleção explícita', () => {
   test('alvo Anima seleciona o executor de worktree', () => {
-    const selection = resolveExecutorRoute(anima, { repoRoot: tmpdir() });
+    const selection = resolveExecutorRoute(anima, { repoRoot: REPO_ROOT });
     expect(selection.ok).toBe(true);
     if (selection.ok) expect(selection.route.adapter.id).toBe('worktree-v1');
   });
@@ -37,7 +81,7 @@ describe('resolveExecutorRoute — seleção explícita', () => {
     process.env.ANIMA_WORKTREE_OLLAMA_LOCALITY = 'remote';
     process.env.ANIMA_WORKTREE_OLLAMA_NODE_ID = 'runpod-a40';
     try {
-      const selection = resolveExecutorRoute(anima, { repoRoot: tmpdir() });
+      const selection = resolveExecutorRoute(anima, { repoRoot: REPO_ROOT });
       expect(selection.ok).toBe(true);
       if (selection.ok) expect(selection.route.candidate.modelRef).toBe('ollama:remote/runpod-a40:qwen3-coder:latest');
     } finally {
@@ -51,7 +95,7 @@ describe('resolveExecutorRoute — seleção explícita', () => {
     const saved = process.env.ANIMA_WORKTREE_OLLAMA_URL;
     process.env.ANIMA_WORKTREE_OLLAMA_URL = 'https://gpu.example:11434';
     try {
-      const selection = resolveExecutorRoute(anima, { repoRoot: tmpdir() });
+      const selection = resolveExecutorRoute(anima, { repoRoot: REPO_ROOT });
       expect(selection.ok).toBe(false);
       if (!selection.ok) expect(selection.error.code).toBe('coder_backend_invalid');
     } finally {
@@ -60,7 +104,7 @@ describe('resolveExecutorRoute — seleção explícita', () => {
   });
 
   test('backend determinístico só entra por injeção (teste)', () => {
-    const selection = resolveExecutorRoute(anima, { repoRoot: tmpdir(), backendOverride: new ScriptedCoderBackend([]) });
+    const selection = resolveExecutorRoute(anima, { repoRoot: REPO_ROOT, backendOverride: new ScriptedCoderBackend([]) });
     expect(selection.ok).toBe(true);
     if (selection.ok) expect(selection.route.candidate.executorId).toBe('worktree-v1');
   });
@@ -90,19 +134,19 @@ describe('resolveExecutorRoute — seleção explícita', () => {
   });
 
   test('config inválida (worktree sem SHA-base) falha explicitamente', () => {
-    const selection = resolveExecutorRoute({ ...anima, baseSha: null }, { repoRoot: tmpdir() });
+    const selection = resolveExecutorRoute({ ...anima, baseSha: null }, { repoRoot: REPO_ROOT });
     expect(selection.ok).toBe(false);
     if (!selection.ok) expect(selection.error.code).toBe('worktree_base_sha_missing');
   });
 
   test('SHA-base malformado é recusado', () => {
-    const selection = resolveExecutorRoute({ ...anima, baseSha: 'nope' }, { repoRoot: tmpdir() });
+    const selection = resolveExecutorRoute({ ...anima, baseSha: 'nope' }, { repoRoot: REPO_ROOT });
     expect(selection.ok).toBe(false);
     if (!selection.ok) expect(selection.error.code).toBe('worktree_base_sha_missing');
   });
 
   test('project:anima NUNCA cai silenciosamente no runner Python', () => {
-    const selection = resolveExecutorRoute({ ...anima, executor: 'python_runner' }, { repoRoot: tmpdir() });
+    const selection = resolveExecutorRoute({ ...anima, executor: 'python_runner' }, { repoRoot: REPO_ROOT });
     expect(selection.ok).toBe(false);
     if (!selection.ok) expect(selection.error.code).toBe('anima_requires_worktree');
   });
@@ -114,13 +158,13 @@ describe('resolveExecutorRoute — seleção explícita', () => {
   });
 
   test('backend de código inválido falha explicitamente', () => {
-    const selection = resolveExecutorRoute({ ...anima, coderBackend: 'inexistente' }, { repoRoot: tmpdir() });
+    const selection = resolveExecutorRoute({ ...anima, coderBackend: 'inexistente' }, { repoRoot: REPO_ROOT });
     expect(selection.ok).toBe(false);
     if (!selection.ok) expect(selection.error.code).toBe('coder_backend_invalid');
   });
 
   test('backend selecionável de nuvem (openai) resolve o worktree com GPT', () => {
-    const selection = resolveExecutorRoute({ ...anima, coderBackend: 'openai', model: 'gpt-x' }, { repoRoot: tmpdir() });
+    const selection = resolveExecutorRoute({ ...anima, coderBackend: 'openai', model: 'gpt-x' }, { repoRoot: REPO_ROOT });
     expect(selection.ok).toBe(true);
     if (selection.ok) {
       expect(selection.route.adapter.id).toBe('worktree-v1');
