@@ -235,7 +235,58 @@ describe('ollama-protocol — Commit 2: leitura limitada', () => {
     expect(served).toHaveLength(1);
     expect(served[0]!.sha256).toBe(sha256(files['docs/a.md']!));
     expect(served[0]!.slice).toContain('# A');
+    expect(served[0]!.provenance).toEqual({
+      search: 'A',
+      contextBefore: 3,
+      contextAfter: 3,
+      maxLines: 60,
+      effectiveMode: 'search',
+    });
     expect(rejected).toHaveLength(1);
+  });
+
+  test('serveReadRequests: preserva a proveniência normalizada sem alterar o slice efetivo', () => {
+    const content = Array.from({ length: 12 }, (_, i) => i === 7 ? 'alvo' : `L${i + 1}`).join('\n');
+    const { requests } = parseReadRequests([
+      {
+        path: 'docs/a.md',
+        search: ' alvo ',
+        lineRange: [2.9, 999],
+        contextBefore: 999,
+        contextAfter: -1,
+        maxLines: 2,
+      },
+      { path: 'docs/a.md', lineRange: [4.9, 5.9], contextBefore: 1, contextAfter: 2, maxLines: 999 },
+      { path: 'docs/a.md' },
+    ], SCOPE);
+
+    const { served, rejected } = serveReadRequests(requests, () => content);
+
+    expect(rejected).toEqual([]);
+    expect(served.map(item => item.provenance)).toEqual([
+      {
+        search: 'alvo',
+        lineRange: [2, 999],
+        contextBefore: 20,
+        contextAfter: 0,
+        maxLines: 2,
+        effectiveMode: 'search',
+      },
+      {
+        lineRange: [4, 5],
+        contextBefore: 1,
+        contextAfter: 2,
+        maxLines: 200,
+        effectiveMode: 'lineRange',
+      },
+      {
+        contextBefore: 3,
+        contextAfter: 3,
+        maxLines: 60,
+        effectiveMode: 'head',
+      },
+    ]);
+    expect(served.map(item => item.slice)).toEqual(requests.map(request => extractSlice(content, request)));
   });
 });
 

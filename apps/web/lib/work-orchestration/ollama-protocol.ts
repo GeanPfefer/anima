@@ -415,7 +415,45 @@ export function extractSlice(content: string, request: ReadRequest): string {
   return out.length > SLICE_MAX_CHARS ? `${out.slice(0, SLICE_MAX_CHARS)}\n… (trecho truncado por limite de caracteres)` : out;
 }
 
-export interface ServedRead { readonly path: string; readonly sha256: string; readonly slice: string; }
+export type ServedReadEffectiveMode =
+  | 'search'
+  | 'lineRange'
+  | 'head';
+
+export interface ServedReadProvenance {
+  readonly search?: string;
+  readonly lineRange?: readonly [number, number];
+  readonly contextBefore: number;
+  readonly contextAfter: number;
+  readonly maxLines: number;
+  readonly effectiveMode: ServedReadEffectiveMode;
+}
+
+export interface ServedRead {
+  readonly path: string;
+  readonly sha256: string;
+  readonly slice: string;
+  readonly provenance: ServedReadProvenance;
+}
+
+const provenanceOfReadRequest = (
+  request: ReadRequest,
+): ServedReadProvenance => ({
+  ...(request.search !== undefined
+    ? { search: request.search }
+    : {}),
+  ...(request.lineRange !== undefined
+    ? { lineRange: request.lineRange }
+    : {}),
+  contextBefore: request.contextBefore,
+  contextAfter: request.contextAfter,
+  maxLines: request.maxLines,
+  effectiveMode: request.search !== undefined
+    ? 'search'
+    : request.lineRange !== undefined
+      ? 'lineRange'
+      : 'head',
+});
 
 /** Atende as solicitações válidas com trechos numerados + o sha256 ATUAL de cada
  * arquivo (âncora para a fase de edição). Arquivo inexistente é rejeitado
@@ -429,7 +467,12 @@ export function serveReadRequests(
   for (const request of requests) {
     const content = contentOf(request.path);
     if (content === null) { rejected.push(`arquivo inexistente no escopo: ${request.path}`); continue; }
-    served.push({ path: request.path, sha256: sha256(content), slice: extractSlice(content, request) });
+    served.push({
+      path: request.path,
+      sha256: sha256(content),
+      slice: extractSlice(content, request),
+      provenance: provenanceOfReadRequest(request),
+    });
   }
   return { served, rejected };
 }
