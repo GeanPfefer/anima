@@ -12,6 +12,7 @@ import {
   type WorkResultValidation,
   type WorktreeGateOutcome,
 } from '@anima/core';
+import { createHash } from 'node:crypto';
 import type { CoderBackend, CoderWorkspace, HostValidationFeedback } from './coder-backend';
 import { GitWorktree, parseGateCommand, runGate } from './worktree';
 
@@ -100,6 +101,26 @@ const GATE_BEARER = /\bbearer\s+[a-z0-9._~+/-]{8,}=*/gi;
 const GATE_JWT = /\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\b/gi;
 const GATE_WINDOWS_PATH = /[A-Za-z]:[\\/][^\s'"<>|]*/g;
 const GATE_POSIX_PATH = /(?:\/[A-Za-z0-9._@-]+){2,}/g;
+const ENVIRONMENTAL_GATE_DIAGNOSTIC =
+  /(?:\.next[\\/]types|next-env\.d\.ts|ECONNREFUSED|ENOSPC|ENOMEM|out of memory|command not found|is not recognized as (?:an internal|the name)|spawn\s+\S+\s+ENOENT|network (?:is )?unreachable|temporary failure in name resolution)/i;
+
+export interface RepairableGateFailure {
+  readonly exitCode: number;
+  readonly timedOut: boolean;
+  readonly cancelled: boolean;
+  readonly diagnostic?: string;
+}
+
+/** Decisão pura e conservadora; a evidência bruta continua separada. */
+export function isGateFailureEligibleForCoderRepair(
+  failure: RepairableGateFailure,
+): boolean {
+  if (failure.exitCode === 0 || failure.timedOut || failure.cancelled) return false;
+  return !ENVIRONMENTAL_GATE_DIAGNOSTIC.test(failure.diagnostic ?? '');
+}
+
+const diffSha256 = (diff: string): string =>
+  createHash('sha256').update(diff, 'utf8').digest('hex');
 
 export function summarizeGateFailureForRetry(
   stdout: string,
@@ -204,6 +225,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         cancelled: boolean;
         diagnostic?: string;
       } | null = null;
+      let diffBeforeRepairSha256: string | null = null;
 
       while (true) {
         // Relogio de primeira parte do HOST por chamada ao coder. Um retry interno
@@ -278,6 +300,20 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
 
         changed = await worktree.changedFiles(signal);
         const noChanges = changed.length === 0;
+
+        if (!noChanges && retryIndex > 0 && diffBeforeRepairSha256 !== null) {
+          const repairedDiffSha256 = diffSha256(await worktree.diff(signal));
+          if (repairedDiffSha256 === diffBeforeRepairSha256) {
+            yield attach(++seq, {
+              kind: 'error',
+              code: 'execution_failed',
+              message: 'O repair não alterou o diff observado pelo host; execução encerrada sem repetir o gate.',
+              retryable: false,
+              handoffReference,
+            });
+            return;
+          }
+        }
 
         // Preserve the historical fail-closed behavior unless this executor was
         // explicitly given an internal host-gate retry budget.
@@ -466,9 +502,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
 
         const canRetry =
           failure !== null &&
-          failure.exitCode !== 0 &&
-          !failure.timedOut &&
-          !failure.cancelled &&
+          isGateFailureEligibleForCoderRepair(failure) &&
           retryIndex < gateRetryLimit;
 
         if (!canRetry) {
@@ -490,6 +524,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         // Antes de devolver controle ao coder, essa ponte precisa desaparecer.
         await worktree.unlinkNodeModules();
 
+        const initialDiff = await worktree.diff(signal);
+        diffBeforeRepairSha256 = diffSha256(initialDiff);
         retryIndex += 1;
         retryFeedback = {
           kind: 'gate-failure',
@@ -502,6 +538,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           },
           retryIndex,
           retryLimit: gateRetryLimit,
+          changedFiles: changed.map(norm),
+          diffSha256: diffBeforeRepairSha256,
           ...(failure!.diagnostic ? { diagnostic: failure!.diagnostic } : {}),
         };
       }

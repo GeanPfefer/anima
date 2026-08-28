@@ -18,6 +18,9 @@ export type HostValidationFeedback =
       readonly retryIndex: number;
       /** Configured internal retry limit for this execution attempt. */
       readonly retryLimit: number;
+      /** Estado observado pelo host antes do repair; conteúdo do diff não é exposto. */
+      readonly changedFiles: readonly string[];
+      readonly diffSha256: string;
       /**
        * Diagnostico curto e sanitizado derivado da saida do gate pelo host.
        * Efemero: nao e evidencia persistida e nunca amplia autoridade.

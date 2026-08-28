@@ -16,7 +16,7 @@ import {
 } from '@anima/core';
 import { runProcess } from './worktree';
 import { ScriptedCoderBackend, type CoderBackend, type CoderEditResult, type CoderWorkspace } from './coder-backend';
-import { WorktreeExecutorAdapter, summarizeGateFailureForRetry, type WorktreeTargetResolver } from './worktree-executor';
+import { WorktreeExecutorAdapter, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, type WorktreeTargetResolver } from './worktree-executor';
 
 // Operações git reais podem ficar lentas sob carga paralela; folga o timeout
 // para não flakar por contenção (o padrão de 5s do jest é curto demais aqui).
@@ -521,6 +521,8 @@ describe('WorktreeExecutorAdapter — retry interno dirigido por gate do host', 
         label: 'retry gate',
         exitCode: expect.any(Number),
       }),
+      changedFiles: ['src/added.ts'],
+      diffSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       diagnostic: expect.any(String),
     }));
 
@@ -843,4 +845,43 @@ process.exit(1);
     await git(repo, ['branch', '-D', branch]).catch(() => undefined);
   });
 
+  test('repair que repete o mesmo diff para sem reexecutar o gate', async () => {
+    let edits = 0;
+    const observed: ObservedGateInput[] = [];
+    const backend: CoderBackend = {
+      id: 'same-diff-coder',
+      async edit(_req, ws): Promise<CoderEditResult> {
+        edits += 1;
+        await ws.writeFile('src/added.ts', 'export const state = "broken";\n');
+        return { summary: `turn-${edits}`, touchedResources: ['src/added.ts'] };
+      },
+    };
+    const req = request({ validationCriteria: [{ label: 'retry gate', command: 'npm test -- retry' }] });
+
+    const signals = await collect(new WorktreeExecutorAdapter({
+      targets: resolver,
+      backend,
+      gateRetryLimit: 1,
+      onGateObserved: outcome => observed.push(outcome),
+    }), req, new AbortController().signal);
+
+    expect(edits).toBe(2);
+    expect(observed).toHaveLength(1);
+    const terminal = signals.at(-1);
+    expect(terminal).toMatchObject({ kind: 'error', retryable: false });
+    if (terminal?.kind === 'error') expect(terminal.message).toContain('repair não alterou o diff');
+    await git(repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
+
+});
+
+describe('isGateFailureEligibleForCoderRepair', () => {
+  test('aceita falha ordinaria atribuivel e recusa sucesso, timeout, cancelamento e ambiente', () => {
+    expect(isGateFailureEligibleForCoderRepair({ exitCode: 2, timedOut: false, cancelled: false, diagnostic: "Property 'location' does not exist" })).toBe(true);
+    expect(isGateFailureEligibleForCoderRepair({ exitCode: 0, timedOut: false, cancelled: false })).toBe(false);
+    expect(isGateFailureEligibleForCoderRepair({ exitCode: 1, timedOut: true, cancelled: false })).toBe(false);
+    expect(isGateFailureEligibleForCoderRepair({ exitCode: 1, timedOut: false, cancelled: true })).toBe(false);
+    expect(isGateFailureEligibleForCoderRepair({ exitCode: 1, timedOut: false, cancelled: false, diagnostic: 'apps/web/.next/types/routes.d.ts ausente' })).toBe(false);
+    expect(isGateFailureEligibleForCoderRepair({ exitCode: 1, timedOut: false, cancelled: false, diagnostic: 'ECONNREFUSED 127.0.0.1' })).toBe(false);
+  });
 });

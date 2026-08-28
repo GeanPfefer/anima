@@ -78,6 +78,47 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     expect(firstCall).toContain('Nunca use create_file em exists=true');
   });
 
+  test('repair recebe evidência concreta do gate e relê o estado atual sem declarar sucesso', async () => {
+    const broken = `${bigDoc}\nexport const invented = candidate.location;`;
+    const workspace = memoryWorkspace({ 'docs/a.md': broken });
+    const { fetchImpl, sentBodies } = scriptedFetch([
+      JSON.stringify({ action: 'read', reads: [{ path: 'docs/a.md', search: 'candidate.location' }] }),
+      JSON.stringify({
+        action: 'edit',
+        operations: [{
+          kind: 'replace_exact',
+          path: 'docs/a.md',
+          expected_file_sha256: sha256(broken),
+          before: 'export const invented = candidate.location;',
+          after: 'export const repaired = true;',
+          expected_occurrences: 1,
+        }],
+      }),
+    ]);
+
+    await new OllamaCoderBackend({ model: 'x', fetchImpl }).edit({
+      ...request,
+      hostValidationFeedback: {
+        kind: 'gate-failure',
+        failedGate: { label: 'typecheck', command: 'npm run typecheck', exitCode: 2, timedOut: false, cancelled: false },
+        retryIndex: 1,
+        retryLimit: 1,
+        changedFiles: ['docs/a.md'],
+        diffSha256: 'b'.repeat(64),
+        diagnostic: "Property 'location' does not exist on type Candidate",
+      },
+    }, workspace, new AbortController().signal);
+
+    const prompt = sentBodies[0]!;
+    expect(prompt).toContain('FASE DE REPARO');
+    expect(prompt).toContain('exitCode=2');
+    expect(prompt).toContain("Property 'location' does not exist");
+    expect(prompt).toContain('docs/a.md');
+    expect(prompt).toContain('diffSha256=bbbb');
+    expect(prompt).toContain('O host reexecutará os gates');
+    expect(workspace.files.get('docs/a.md')).toContain('export const repaired = true;');
+  });
+
   test('NENHUMA chamada carrega o conteúdo integral do documento grande', async () => {
     const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
     const { fetchImpl, sentBodies } = scriptedFetch([readReq, editReq(bigSha)]);

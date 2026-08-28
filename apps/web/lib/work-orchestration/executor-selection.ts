@@ -210,9 +210,9 @@ export async function prepareAnimaValidation(
 }
 
 export function gateRetryLimitForCoderBackend(kind: string | null): number {
-  // Uma ?nica corre??o interna ap?s falha ordin?ria de gate observada pelo host,
-  // no mesmo attempt/worktree. Outros backends preservam retry zero.
-  return kind === 'deepseek-harness' ? 1 : 0;
+  // Uma unica correcao interna apos falha elegivel de gate observada pelo host,
+  // no mesmo attempt/worktree. OpenAI preserva retry zero.
+  return kind === 'deepseek-harness' || kind === 'ollama' ? 1 : 0;
 }
 
 export function resolveExecutorRoute(

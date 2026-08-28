@@ -147,11 +147,25 @@ export class OllamaCoderBackend implements CoderBackend {
     const carried = request.carriedContext
       ? `\nRetomada — próximo passo: ${request.carriedContext.nextStep}. Restantes: ${request.carriedContext.remainingSteps.join('; ')}.`
       : '';
+    const feedback = request.hostValidationFeedback;
+    const repairContext = feedback?.kind === 'gate-failure'
+      ? [
+          'FASE DE REPARO: os arquivos atuais já contêm sua edição anterior; não reinicie a tarefa nem declare sucesso.',
+          `Repair interno ${feedback.retryIndex}/${feedback.retryLimit}.`,
+          `Gate observado pelo host: ${feedback.failedGate.label} | ${feedback.failedGate.command} | exitCode=${feedback.failedGate.exitCode}.`,
+          `Arquivos alterados observados: ${feedback.changedFiles.join(', ')}. diffSha256=${feedback.diffSha256}.`,
+          ...(feedback.diagnostic ? [`Diagnóstico sanitizado do host:\n${feedback.diagnostic}`] : []),
+          'Leia o estado ATUAL necessário, corrija a implementação existente dentro do mesmo escopo e inclua/ajuste a prova determinística exigida pelo objetivo. Não invente APIs ou campos: confirme-os no código servido. O host reexecutará os gates.',
+        ].join('\n')
+      : feedback?.kind === 'no-change'
+        ? `FASE DE REPARO: o host observou zero mudanças no turno anterior. Repair interno ${feedback.retryIndex}/${feedback.retryLimit}; produza uma edição real dentro do escopo.`
+        : null;
     const header = [
       `Tarefa: ${request.objective}`,
       `Escopo permitido (só estes caminhos): ${scope.join(', ')}`,
       `Fora do escopo (não toque): ${request.excludedScope.join('; ')}`,
       `Manifesto (sem conteúdo integral): ${JSON.stringify(manifest)}`,
+      ...(repairContext ? [repairContext] : []),
     ].join('\n') + carried;
 
     const servedBlocks: string[] = [];

@@ -127,6 +127,8 @@ describe('composeHarnessTask', () => {
       },
       retryIndex: 1,
       retryLimit: 1,
+      changedFiles: ['src/projector.js'],
+      diffSha256: 'a'.repeat(64),
       diagnostic: 'Expected: true\nReceived: false',
     } as const;
 

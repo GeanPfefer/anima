@@ -32,7 +32,7 @@ describe('DeepSeek Harness executor routing', () => {
 
   test('recebe exatamente um retry interno de gate', () => {
     expect(gateRetryLimitForCoderBackend('deepseek-harness')).toBe(1);
-    expect(gateRetryLimitForCoderBackend('ollama')).toBe(0);
+    expect(gateRetryLimitForCoderBackend('ollama')).toBe(1);
     expect(gateRetryLimitForCoderBackend('openai')).toBe(0);
     expect(gateRetryLimitForCoderBackend(null)).toBe(0);
   });

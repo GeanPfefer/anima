@@ -259,3 +259,20 @@ Isso prova a transição read → edit nesse alvo, não prova capacidade de conc
 trabalho. O próximo ponto exato é investigar qualidade pós-edit e recuperação por
 falha de gate observada, sem promover R2 nem consumir a attempt 2 canônica até
 existir uma estratégia governada e comprovada.
+
+## Continuação — 2026-08-28: gate → reparo → revalidação
+
+O executor de worktree existente passou a permitir ao Ollama, como já permitia
+ao DeepSeek Harness, no máximo um reparo interno no mesmo attempt e worktree.
+O contexto deriva exclusivamente do host: gate falho, diagnóstico sanitizado,
+arquivos alterados e SHA-256 do diff. Timeout, cancelamento, falha de ambiente ou
+preparação, escopo e segurança continuam terminais; diff idêntico após o reparo
+encerra por no-progress sem nova rodada de gates. OpenAI permanece no limite zero.
+
+A prova viva isolou a variável com patch inicial quebrado determinístico e
+reparo real pelo `qwen3-coder:latest`: typecheck passou, teste focado falhou, o
+coder reparou uma linha e typecheck + teste passaram na revalidação. Tudo ocorreu
+no mesmo attempt/worktree, sem banco e sem consumir a attempt 2 canônica.
+
+Próximo ponto exato: confirmar gates amplos e decidir humanamente se a evidência
+é suficiente para usar a attempt 2; esta continuação não promove R2.

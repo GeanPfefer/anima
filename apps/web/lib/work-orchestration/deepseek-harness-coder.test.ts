@@ -109,6 +109,8 @@ describe('DeepSeekHarnessCoderBackend — worktree enraizada', () => {
       },
       retryIndex: 1,
       retryLimit: 1,
+      changedFiles: ['src/projector.js'],
+      diffSha256: 'a'.repeat(64),
     } as const;
 
     await backend.edit(
