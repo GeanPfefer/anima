@@ -39,6 +39,10 @@
 - Nenhum work item, claim, attempt canônica, evento de banco ou budget foi
   criado/alterado. A attempt 2 do Successor A permanece intacta.
 - Nenhum PR, merge, deploy, `origin/main`, provedor pago ou segredo foi usado.
+- Consulta autenticada à API oficial do GitHub confirmou `GeanPfefer/anima`,
+  `PushPermission=true`, mas `Visibility=public`. Como o mandato condiciona o
+  envio ao repositório privado/autorizado esperado, nenhum push foi feito;
+  `origin/dev` permaneceu em `62d205d` e os quatro commits seguem locais.
 - Branches/worktrees de evidência e `.worktrees/`, `.claude/settings.local.json`
   e `watch4-sensors.txt` foram preservados.
 - Relatórios brutos em `tools/coder-evidence/runs/2026-08-28-repair-*` são
@@ -46,5 +50,5 @@
 
 ## Próximo ponto exato
 
-Executar gates amplos, revisar o diff e verificar a visibilidade do remoto antes
-de push. A decisão de consumir a attempt 2 continua humana.
+Resolver humanamente a divergência entre remoto público e a condição de remoto
+privado antes de push. A decisão de consumir a attempt 2 continua humana.
