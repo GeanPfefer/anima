@@ -19,7 +19,7 @@ describe('recoveryFailureCode', () => {
 });
 
 describe('decideRecovery', () => {
-  test.each(['ollama_read_round_limit', 'context_limit', 'no_progress', 'loop_detected'])(
+  test.each(['ollama_read_round_limit', 'context_limit'])(
     '%s decompõe sem retry cego', code => {
       expect(decideRecovery(evidence({ code }))).toMatchObject({ action: 'decompose', reason: 'task_should_be_decomposed' });
     });
@@ -34,6 +34,28 @@ describe('decideRecovery', () => {
   test('falha de código repetida decompõe em vez de consumir retries', () => {
     expect(decideRecovery(evidence({ code: 'code_failure', repeatedSameFailure: true }))).toMatchObject({ action: 'decompose' });
   });
+  test('edit idempotente é no-progress auditável e só tenta novamente uma vez com budget', () => {
+    expect(recoveryFailureCode(evidence({
+      code: 'execution_failed',
+      safeMessage: 'backend: [ollama_no_effective_edits] as operações não produziram mudança real',
+    }))).toBe('ollama_no_effective_edits');
+    expect(decideRecovery(evidence({ code: 'ollama_no_effective_edits', attemptsUsed: 1, maxAttempts: 2 })))
+      .toMatchObject({ failureKind: 'no_progress', action: 'retry', reason: 'transient_retry_within_budget' });
+    expect(decideRecovery(evidence({ code: 'ollama_no_effective_edits', attemptsUsed: 1, maxAttempts: 2, repeatedSameFailure: true })))
+      .toMatchObject({ failureKind: 'no_progress', action: 'decompose' });
+    expect(decideRecovery(evidence({ code: 'ollama_no_effective_edits', attemptsUsed: 2, maxAttempts: 2 })))
+      .toMatchObject({ failureKind: 'no_progress', action: 'human_required' });
+  });
+  test('transporte local indisponível não é patch failure e repetição espera ambiente', () => {
+    expect(decideRecovery(evidence({ code: 'ollama_transport_error' })))
+      .toMatchObject({ failureKind: 'external_unavailable', action: 'retry' });
+    expect(decideRecovery(evidence({ code: 'ollama_transport_error', repeatedSameFailure: true })))
+      .toMatchObject({ failureKind: 'external_unavailable', action: 'environment_wait' });
+  });
+  test.each(['execution_cancelled', 'cancelled'])(
+    '%s nunca vira retry', code => {
+      expect(decideRecovery(evidence({ code }))).toMatchObject({ action: 'human_required' });
+    });
   test('falha retryable conhecida sem repetição respeita o budget', () => {
     expect(decideRecovery(evidence({ code: 'gate_failed' }))).toMatchObject({ action: 'retry' });
     expect(decideRecovery(evidence({ code: 'gate_failed', attemptsUsed: 3, maxAttempts: 3 }))).toMatchObject({ action: 'human_required' });

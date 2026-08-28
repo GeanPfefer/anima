@@ -38,6 +38,30 @@ test('falha repetida de gate decompõe mesmo com budget restante', () => {
   expect(result?.decision).toMatchObject({ action: 'decompose', reason: 'task_should_be_decomposed' });
 });
 
+test('no-effective-edits canônico autoriza só a attempt restante e repetição decompõe', () => {
+  const first = projectWorkRecoveryAssessment(item(), [
+    event('s1', 'execution_started', 1, 'a1'),
+    event('f1', 'execution_failed', 2, 'a1', 'ollama_no_effective_edits'),
+  ]);
+  expect(first).toMatchObject({ attemptsUsed: 1, maxAttempts: 2, decision: {
+    failureKind: 'no_progress', normalizedCode: 'ollama_no_effective_edits', action: 'retry',
+  } });
+  const repeated = projectWorkRecoveryAssessment(
+    { ...item(), intent: { execution_spec: { limits: { max_attempts: 3 } } } },
+    [event('s1', 'execution_started', 1, 'a1'), event('f1', 'execution_failed', 2, 'a1', 'ollama_no_effective_edits'),
+      event('s2', 'execution_started', 3, 'a2'), event('f2', 'execution_failed', 4, 'a2', 'ollama_no_effective_edits')],
+  );
+  expect(repeated?.decision).toMatchObject({ failureKind: 'no_progress', action: 'decompose' });
+});
+
+test('transport error é indisponibilidade externa, não patch failure', () => {
+  const result = projectWorkRecoveryAssessment(item(), [
+    event('s1', 'execution_started', 1, 'a1'),
+    event('f1', 'execution_failed', 2, 'a1', 'ollama_transport_error'),
+  ]);
+  expect(result?.decision).toMatchObject({ failureKind: 'external_unavailable', action: 'retry' });
+});
+
 test('desconhecido e mensagem sensível falham fechado', () => {
   const failed = event('f1', 'execution_failed', 2, 'a1');
   failed.payload = { schema_version: 1, data: { attempt_id: 'a1', reason: 'execution_failed', retryable: true, message: 'token=segredo' } };

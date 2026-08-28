@@ -116,6 +116,12 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     expect(prompt).toContain('docs/a.md');
     expect(prompt).toContain('diffSha256=bbbb');
     expect(prompt).toContain('O host reexecutará os gates');
+    expect(prompt).toContain('não repita o patch já presente');
+    expect(prompt).toContain('Operação idempotente é no-progress');
+    expect(prompt).toContain('Preserve TypeScript strict');
+    expect(prompt).toContain('explicitamente null-safe');
+    expect(prompt).toContain('diagnóstico do gate e os critérios do objetivo como autoridade');
+    expect(prompt).toContain('sem substituir o comportamento exigido');
     expect(workspace.files.get('docs/a.md')).toContain('export const repaired = true;');
   });
 

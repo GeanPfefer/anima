@@ -1,4 +1,4 @@
-import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import {
   gateRetryLimitForCoderBackend,
   resolveExecutorRoute,
@@ -18,7 +18,7 @@ describe('DeepSeek Harness executor routing', () => {
   test('? selecion?vel no fluxo real preservando a identidade do modelo', () => {
     const selection = resolveExecutorRoute(
       harnessContract,
-      { repoRoot: tmpdir() },
+      { repoRoot: resolve(__dirname, '../../../..') },
     );
 
     expect(selection.ok).toBe(true);

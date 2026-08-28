@@ -43,8 +43,9 @@ const KNOWN_CODES = new Set([
   'ollama_read_round_limit', 'context_limit', 'context_window_exceeded',
   'resource_pressure', 'insufficient_memory', 'insufficient_vram',
   'ollama_timeout', 'runner_timeout', 'provider_timeout',
-  'no_progress', 'loop_detected',
-  'provider_unavailable', 'external_unavailable',
+  'no_progress', 'loop_detected', 'ollama_no_effective_edits',
+  'provider_unavailable', 'external_unavailable', 'ollama_transport_error',
+  'execution_cancelled', 'cancelled',
   'invalid_request', 'contract_violation', 'attempt_payload_conflict',
 ] as const);
 
@@ -77,8 +78,9 @@ const kindFor = (code: string | null): RecoveryFailureKind => {
     case 'resource_pressure': case 'insufficient_memory': case 'insufficient_vram': return 'resource_pressure';
     case 'gate_failed': return 'gate_failure';
     case 'ollama_timeout': case 'runner_timeout': case 'provider_timeout': return 'timeout';
-    case 'no_progress': case 'loop_detected': return 'no_progress';
-    case 'provider_unavailable': case 'external_unavailable': return 'external_unavailable';
+    case 'no_progress': case 'loop_detected': case 'ollama_no_effective_edits': return 'no_progress';
+    case 'provider_unavailable': case 'external_unavailable': case 'ollama_transport_error': return 'external_unavailable';
+    case 'execution_cancelled': case 'cancelled': return 'contract_violation';
     case 'invalid_request': case 'contract_violation': case 'attempt_payload_conflict': return 'contract_violation';
     default: return 'unknown';
   }
@@ -96,8 +98,17 @@ export function decideRecovery(evidence: RecoveryFailureEvidence): RecoveryDecis
   if (failureKind === 'contract_violation') {
     return { failureKind, normalizedCode, action: 'human_required', reason: 'contract_or_authority_review_required' };
   }
-  if (failureKind === 'model_capability_limit' || failureKind === 'context_limit' || failureKind === 'no_progress') {
+  if (failureKind === 'model_capability_limit' || failureKind === 'context_limit') {
     return { failureKind, normalizedCode, action: 'decompose', reason: 'task_should_be_decomposed' };
+  }
+  if (failureKind === 'no_progress') {
+    if (evidence.retryable && budgetAvailable && !evidence.repeatedSameFailure) {
+      return { failureKind, normalizedCode, action: 'retry', reason: 'transient_retry_within_budget' };
+    }
+    if (evidence.repeatedSameFailure) {
+      return { failureKind, normalizedCode, action: 'decompose', reason: 'task_should_be_decomposed' };
+    }
+    return { failureKind, normalizedCode, action: 'human_required', reason: 'failure_not_classified' };
   }
   if (failureKind === 'resource_pressure') {
     return { failureKind, normalizedCode, action: 'environment_wait', reason: 'resource_capacity_unavailable' };
