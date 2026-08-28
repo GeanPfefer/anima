@@ -293,3 +293,19 @@ successor automático ou correção de estado.
 
 Próximo ponto exato: decisão humana sobre uma nova unidade governada de prova;
 a attempt 2 não pode ser repetida sem reescrever história.
+
+## Continuação — 2026-08-28: successor após correção ambiental
+
+O root deixou de depender de `cwd=apps/web`: a descoberta sobe somente pelos
+ancestrais até encontrar marcadores do Anima; override explícito inválido e cwd
+fora da árvore falham fechados. Regressões 41/41 e typecheck web passaram.
+
+O successor `f7d50d04-b41d-4da8-bae9-6fedfea12335` foi criado com lineage
+`9ea51dcf-f7e0-470f-8411-be080abee5ee`. A attempt
+`3850dc97-5651-49cd-9777-926a7e6caeef` criou worktree, produziu edit e falhou no
+gate focado. O único repair ocorreu na mesma attempt/worktree, mas não produziu
+mudança efetiva (`ollama_no_effective_edits`); não houve re-gate nem Verifier.
+
+A recovery policy retornou `human_required/failure_not_classified` com 1/2
+attempts usadas. A segunda attempt foi preservada. Próximo ponto exato: decisão
+humana sobre retry ou classificação desse terminal; não promover R2.

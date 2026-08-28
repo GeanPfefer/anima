@@ -72,3 +72,28 @@ privado antes de push. A decisão de consumir a attempt 2 continua humana.
 - **Conclusão:** o loop permanece comprovado isoladamente, mas **não** foi
   comprovado pelo caminho canônico nesta tentativa. A próxima prova exige nova
   decisão/unidade governada; a attempt 2 é irrecuperável sem violar append-only.
+
+## Recovery autorizado após a falha ambiental
+
+- Commit `71a1aff`: `projectRoot` descobre a raiz no cwd/ancestrais por marcadores
+  do Anima; root configurado inválido e cwd fora da árvore falham fechados.
+  Regressões 41/41, typecheck web e diff-check verdes.
+- Successor `f7d50d04-b41d-4da8-bae9-6fedfea12335`; lineage
+  `9ea51dcf-f7e0-470f-8411-be080abee5ee`, seq 1 do Successor A; escopo estrito
+  somente em `work-routing.ts` e razão ambiental explícita.
+- Attempt `3850dc97-5651-49cd-9777-926a7e6caeef`, modelo
+  `qwen3-coder:latest`, digest `06c1097efce0…`: worktree criada, initial edit no
+  source, gate focado falhou (exit 1, 4.902 ms), repair na mesma attempt/worktree
+  e terminal `ollama_no_effective_edits`.
+- Persistidos checkpoint do edit, gate host-observed falho e coder host-observed
+  `failed`/64.551 ms. Sem re-gate, Verifier ou `result_submitted`; item 1/2.
+- Recovery policy: `unknown`, `normalizedCode=null`,
+  `human_required/failure_not_classified`. A attempt restante foi preservada.
+- Efeito não planejado preservado: antes da classificação válida do alvo, o host
+  selecionou `26f3c07f…`; com Ollama desligado, attempt `1453f735…` falhou em
+  7 ms com `ollama_transport_error`, sem edit/gate. O histórico não foi limpo.
+- Nenhum push, PR, merge, deploy, integração, reset ou mutação de `origin/main`.
+
+**Conclusão:** o caminho canônico provou recovery → autorização → routing →
+claim → worktree → coder → edit → gate → um repair. Ainda não provou re-gate,
+Verifier ou terminal de sucesso; a policy vigente exige fronteira humana.
