@@ -234,3 +234,28 @@ Este plano não autoriza:
 Implementar a Fase A exclusivamente como contrato puro experimental e testes, sem ligar a operação ao `OllamaCoderBackend` de produção.
 
 Depois executar os testes focados antes de qualquer Fase B.
+
+## Continuação — 2026-08-28: proveniência e transição read → edit
+
+O estado real posterior às Fases A–D mostrou que R2 sozinho não resolvia o
+`read-stalling`. Foi fechado um recorte anterior à âncora, sem promover R2:
+
+- `ServedRead` preserva a proveniência normalizada da solicitação e seu modo
+  efetivo, sem alterar o slice;
+- o protocolo apresenta `search` e `lineRange` como modos exclusivos. O prompt
+  anterior ensinava ambos no mesmo objeto, embora `extractSlice` desse
+  precedência silenciosa a `search`;
+- o host deduplica trechos byte-identicamente repetidos no contexto e informa
+  contagens de requests, trechos novos e repetições;
+- o budget permanece em três rodadas e nenhuma guarda fail-closed foi reduzida.
+
+Na fixture `successor_a_realistic`, o controle anterior terminou com quatro
+leituras e zero edits. Após o recorte, uma campanha N=3 produziu três edições
+host-aceitas, mas nenhuma atingiu o objetivo: o modelo anexou um helper inválido,
+não adicionou testes e o predicado semântico recusou 3/3. A regressão focada
+ficou verde em `multi_locate`, `structural_add` e `multiline_before` (2/2 cada).
+
+Isso prova a transição read → edit nesse alvo, não prova capacidade de concluir o
+trabalho. O próximo ponto exato é investigar qualidade pós-edit e recuperação por
+falha de gate observada, sem promover R2 nem consumir a attempt 2 canônica até
+existir uma estratégia governada e comprovada.

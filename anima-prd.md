@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-26 (sessão: successor real do Item 1 reconciliado; fatia mínima também falhou no limite de leitura e exige nova estratégia governada; ver [registro](docs/registros/2026-08-26-reconciliacao-real-do-successor-item1.md) e [Plano 002](docs/planos/002-modo-autonomo-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-28 (sessão: protocolo do coder passou a preservar proveniência e separar `search` de `lineRange`; fixture realista saiu de 0 edits para 3/3 edits host-aceitos, mas 0/3 semanticamente corretos; ver [registro](docs/registros/2026-08-28-protocolo-read-edit-do-coder-local.md) e [Plano 003](docs/planos/003-ergonomia-ancora-edicao-r2.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
