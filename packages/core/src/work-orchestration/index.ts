@@ -4,6 +4,7 @@ export * from './governed-retry';
 export * from './recovery-decision';
 export * from './recovery-successor-types';
 export * from './recovery-successor';
+export * from './decomposition';
 export * from './errors';
 export * from './validation';
 export * from './repository';
