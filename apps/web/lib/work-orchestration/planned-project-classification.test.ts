@@ -34,3 +34,28 @@ test('reconcilia corrida de escrita como replay sem duplicar classificação',as
   await expect(ensurePlannedProjectClassification(client as never,'item',3)).resolves.toEqual({ok:true,replayed:true});
   expect(rpc.mock.calls.map(call=>call[0])).toEqual(['current_work_intelligence_classification','record_work_intelligence_classification','current_work_intelligence_classification']);
 });
+
+test('classifica successor governado pela lineage sem adulterar o intent aprovado',async()=>{
+  const successor={...item,intent:{execution_spec:{...item.intent.execution_spec,resume_from_checkpoint:{base_sha:'a'.repeat(40),branch:'anima-work/attempt',commit_sha:'b'.repeat(40)}}}};
+  const maybeSingles=[
+    {data:successor,error:null},
+    {data:{original_work_item_id:'original'},error:null},
+    {data:{intent:{planner:'openai_project_tools_v1'}},error:null},
+  ];
+  const fromNames:string[]=[];
+  const from=jest.fn((name:string)=>{fromNames.push(name);return {select:jest.fn(()=>({eq:jest.fn(()=>({maybeSingle:jest.fn().mockImplementation(()=>Promise.resolve(maybeSingles.shift()))}))}))};});
+  const rpc=jest.fn().mockImplementation((name:string)=>name==='current_work_intelligence_classification'?Promise.resolve({data:null,error:null}):Promise.resolve({data:{},error:null}));
+  await expect(ensurePlannedProjectClassification({from,rpc} as never,'successor',3,()=>new Date('2026-08-29T00:00:00Z'))).resolves.toEqual({ok:true,replayed:false});
+  expect(fromNames).toEqual(['work_items','work_recovery_lineage','work_items']);
+  expect(rpc.mock.calls[1][1].p_classification.provenance.classifierId).toBe('openai_project_tools_v1-bridge');
+  expect(successor.intent).not.toHaveProperty('planner');
+});
+
+test('não confia em resume_from_checkpoint sem lineage persistida',async()=>{
+  const successor={...item,intent:{execution_spec:{...item.intent.execution_spec,resume_from_checkpoint:{base_sha:'a'.repeat(40),branch:'anima-work/attempt',commit_sha:'b'.repeat(40)}}}};
+  const maybeSingles=[{data:successor,error:null},{data:null,error:null}];
+  const from=jest.fn(()=>({select:jest.fn(()=>({eq:jest.fn(()=>({maybeSingle:jest.fn().mockImplementation(()=>Promise.resolve(maybeSingles.shift()))}))}))}));
+  const rpc=jest.fn();
+  await expect(ensurePlannedProjectClassification({from,rpc} as never,'orphan',3)).resolves.toMatchObject({ok:false,code:'classification_policy_not_applicable'});
+  expect(rpc).not.toHaveBeenCalled();
+});

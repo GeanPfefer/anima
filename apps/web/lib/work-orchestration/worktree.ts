@@ -252,6 +252,16 @@ export class GitWorktree {
     return result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   }
 
+  /** Arquivos alterados POR ESTA tentativa, medidos contra o estado inicial da
+   * árvore. Numa retomada isso exclui o diff herdado do checkpoint; numa tentativa
+   * nova é idêntico a changedFiles(). Usado para enforcement de escopo e no-op,
+   * nunca para esconder a proveniência B→checkpoint do handoff final. */
+  async changedFilesSinceStart(signal?: AbortSignal): Promise<readonly string[]> {
+    await this.stageAll(signal);
+    const result = await git(this.root, ['diff', '--cached', '--name-only', this.startSha], signal);
+    return result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  }
+
   async diff(signal?: AbortSignal): Promise<string> {
     await this.stageAll(signal);
     const result = await git(this.root, ['diff', '--cached', '--no-color', this.baseSha], signal);

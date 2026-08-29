@@ -227,6 +227,46 @@ describe('WorktreeExecutorAdapter', () => {
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
   });
 
+  test('retomada permite o diff herdado fora do novo escopo e fiscaliza somente o delta da attempt', async () => {
+    await writeFile(join(ctx.repo, 'src', 'implementation.ts'), 'export const value = 1;\n');
+    await git(ctx.repo, ['add', '.']);
+    await git(ctx.repo, ['commit', '-m', 'base da implementação']);
+    const baseSha = (await git(ctx.repo, ['rev-parse', 'HEAD'])).stdout.trim();
+    await writeFile(join(ctx.repo, 'src', 'implementation.ts'), 'export const value = 2;\n');
+    await git(ctx.repo, ['add', '.']);
+    await git(ctx.repo, ['commit', '-m', 'checkpoint preservado']);
+    const checkpointSha = (await git(ctx.repo, ['rev-parse', 'HEAD'])).stdout.trim();
+
+    const req = request({ includedScope: ['src/added.ts'], excludedScope: ['src/implementation.ts'] });
+    const adapter = new WorktreeExecutorAdapter({
+      targets: { resolve: () => ({ repoRoot: ctx.repo, sha: baseSha, startSha: checkpointSha }) },
+      backend: new ScriptedCoderBackend([added]), emitCheckpoint: true,
+    });
+    const signals = await collect(adapter, req, new AbortController().signal);
+    expect(signals.at(-1)?.kind).toBe('result');
+    const total = await git(ctx.repo, ['diff', '--name-only', baseSha, `anima-work/${req.attemptId}`]);
+    expect(total.stdout).toContain('src/implementation.ts');
+    expect(total.stdout).toContain('src/added.ts');
+    const attemptOnly = await git(ctx.repo, ['diff', '--name-only', checkpointSha, `anima-work/${req.attemptId}`]);
+    expect(attemptOnly.stdout.trim()).toBe('src/added.ts');
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
+  });
+
+  test('retomada recusa nova escrita no arquivo preservado fora do escopo', async () => {
+    await writeFile(join(ctx.repo, 'src', 'implementation.ts'), 'export const value = 3;\n');
+    await git(ctx.repo, ['add', '.']);
+    await git(ctx.repo, ['commit', '-m', 'checkpoint seguinte']);
+    const checkpointSha = (await git(ctx.repo, ['rev-parse', 'HEAD'])).stdout.trim();
+    const req = request({ includedScope: ['src/added.ts'], excludedScope: ['src/implementation.ts'] });
+    const adapter = new WorktreeExecutorAdapter({
+      targets: { resolve: () => ({ repoRoot: ctx.repo, sha: ctx.sha, startSha: checkpointSha }) },
+      backend: new ScriptedCoderBackend([{ path: 'src/implementation.ts', content: 'export const value = 4;\n' }]),
+    });
+    const terminal = (await collect(adapter, req, new AbortController().signal)).at(-1)!;
+    expect(terminal).toMatchObject({ kind: 'error', code: 'contract_violation' });
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
+  });
+
   test('concorrência no mesmo alvo: attemptIds distintos, branches isoladas', async () => {
     const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([added]) });
     const [reqA, reqB] = [request(), request()];

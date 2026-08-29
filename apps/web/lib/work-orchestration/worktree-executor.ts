@@ -221,6 +221,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       let retryFeedback: HostValidationFeedback | null = null;
       let editResult: Awaited<ReturnType<CoderBackend['edit']>>;
       let changed: readonly string[] = [];
+      let changedByAttempt: readonly string[] = [];
       let diffFiles: Awaited<ReturnType<GitWorktree['diffNumstat']>> = [];
       let validations: WorkResultValidation[] = [];
       let gateOutcomes: WorktreeGateOutcome[] = [];
@@ -307,8 +308,12 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           return;
         }
 
+        // `changed` preserva o diff auditável contra a base original. Enforcement
+        // de escopo/no-op usa somente o delta desta attempt contra seu estado
+        // inicial; numa retomada, o checkpoint herdado não é uma nova escrita.
         changed = await worktree.changedFiles(signal);
-        const noChanges = changed.length === 0;
+        changedByAttempt = await worktree.changedFilesSinceStart(signal);
+        const noChanges = changedByAttempt.length === 0;
 
         if (!noChanges && retryIndex > 0 && diffBeforeRepairSha256 !== null) {
           const repairedDiffSha256 = diffSha256(await worktree.diff(signal));
@@ -351,7 +356,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
 
         if (!noChanges) {
           const approved = new Set(request.includedScope.map(norm));
-          const outOfScope = changed.filter(path => !approved.has(norm(path)));
+          const outOfScope = changedByAttempt.filter(path => !approved.has(norm(path)));
 
           if (outOfScope.length > 0) {
             yield attach(++seq, {
