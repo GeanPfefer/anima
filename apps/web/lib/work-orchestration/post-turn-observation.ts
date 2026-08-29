@@ -60,12 +60,16 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
     await persistHostObservedCoderEvidence(correlation, coderObservations, coderEvidenceSinkFor(client)).catch(() => undefined);
   }
 
-  if (result.terminalKind !== 'result') return;
-
   // (1) GIT observado pelo host. Só o caminho worktree deixa uma branch real; o
   // host inspeciona `anima-work/<attempt>` contra o SHA-base do contrato e persiste
-  // o que o git de fato registrou — nunca o que o executor atestou.
-  if (contract?.executor === 'worktree' && contract.baseSha) {
+  // o que o git de fato registrou — nunca o que o executor atestou. Persiste
+  // INCLUSIVE em terminal de ERRO (gate falho): quando a tentativa deixou um
+  // checkpoint durável na branch, essa evidência é o que torna o checkpoint de uma
+  // tentativa FALHA disponível para diagnóstico e retomada (decomposição governada).
+  // observeHostGitEvidence é fail-closed em base==commit — sem checkpoint durável,
+  // nada é gravado —, então um erro sem edit efetivo não fabrica evidência.
+  if ((result.terminalKind === 'result' || result.terminalKind === 'error')
+      && contract?.executor === 'worktree' && contract.baseSha) {
     await observeAndPersistHostGitEvidence(
       {
         repoRoot: projectRoot(),
@@ -77,8 +81,10 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
     ).catch(() => undefined);
   }
 
-  // (2) PARECER do Verifier sobre o estado FRESCO (inclui as evidências observadas
-  // recém-persistidas). Advisory e recomputável: sem handoff durável não há parecer.
+  // (2) PARECER do Verifier sobre o estado FRESCO — só no terminal `result` (sem
+  // handoff durável de sucesso não há parecer). Inclui as evidências observadas
+  // recém-persistidas. Advisory e recomputável.
+  if (result.terminalKind !== 'result') return;
   const service = createWorkOrchestrationService(client);
   const [freshItem, freshEvents] = await Promise.all([
     service.getItem(correlation.workItemId),
