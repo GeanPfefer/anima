@@ -59,3 +59,10 @@ Materializar somente sob governança uma decomposição baseada no no-progress
 repetido. Na próxima prova real autorizada, confirmar que qualquer terminal após
 checkpoint deixa a branch e o diff retomáveis; depois continuar pela primeira
 barreira entre repair efetivo, re-gate, Verifier e review.
+
+## Versionamento e publicação
+
+- Commit local: `d15bcd6` — `Preserve o checkpoint Git do coder local`.
+- O `git push origin dev` não foi executado: `origin` aponta para o repositório
+  público `GeanPfefer/anima`, e a publicação dos dez commits locais exige
+  confirmação explícita desse destino público ou troca para remoto privado.
