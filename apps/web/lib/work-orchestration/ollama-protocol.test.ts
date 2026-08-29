@@ -391,6 +391,41 @@ describe('ollama-protocol — Commit 3: edições exatas', () => {
     catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
   });
 
+  test('CRLF: âncora multi-linha reproduzida com \\n casa e a saída preserva \\r\\n', () => {
+    // Arquivo no disco (Windows) com CRLF. O trecho servido ao modelo é fatiado
+    // por `\n`, então o modelo reproduz a âncora multi-linha com `\n`. Sem
+    // tolerância a EOL, esse `before` correto ocorreria 0 vez(es) no conteúdo cru
+    // (`ollama_ambiguous_replacement`) — a falha determinística observada ao vivo.
+    const crlf = 'export function f() {\r\n  return x\r\n    .a()\r\n    .b();\r\n}\r\n';
+    const shaCrlf = sha256(crlf);
+    const beforeLf = '  return x\n    .a()\n    .b();';
+    const afterLf = '  return unique(x\n    .a()\n    .b());';
+    const ops = parseEditOperations(
+      [{ kind: 'replace_exact', path: FILE, expected_file_sha256: shaCrlf, before: beforeLf, after: afterLf, expected_occurrences: 1 }],
+      new Set([FILE]),
+    );
+    const changes = applyEditOperations(ops, contentOf({ [FILE]: crlf }));
+    expect(changes).toHaveLength(1);
+    const out = changes[0]!.newContent;
+    // Bytes não editados preservados E o texto inserido reencodado para o EOL do arquivo.
+    expect(out).toBe('export function f() {\r\n  return unique(x\r\n    .a()\r\n    .b());\r\n}\r\n');
+    // Nenhum `\n` solto: todo LF continua precedido por CR.
+    expect(/[^\r]\n/.test(out)).toBe(false);
+  });
+
+  test('LF: âncora com \\r\\n casa em arquivo LF e a saída permanece LF', () => {
+    // Simetria: se por algum motivo o `before` trouxer `\r\n` mas o arquivo é LF,
+    // o match ainda ocorre e a saída não injeta CR.
+    const lf = 'a\nb\nc\n';
+    const ops = parseEditOperations(
+      [{ kind: 'replace_exact', path: FILE, expected_file_sha256: sha256(lf), before: 'a\r\nb', after: 'a\r\nB', expected_occurrences: 1 }],
+      new Set([FILE]),
+    );
+    const changes = applyEditOperations(ops, contentOf({ [FILE]: lf }));
+    expect(changes[0]!.newContent).toBe('a\nB\nc\n');
+    expect(changes[0]!.newContent.includes('\r')).toBe(false);
+  });
+
   test('operações sobrepostas no mesmo arquivo são recusadas', () => {
     const src = 'abcdef\n';
     const s = sha256(src);

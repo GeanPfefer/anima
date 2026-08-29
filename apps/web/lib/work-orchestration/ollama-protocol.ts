@@ -539,17 +539,37 @@ export function parseEditOperations(operations: readonly unknown[], allowed: Rea
   return out;
 }
 
-const countOccurrences = (haystack: string, needle: string): { count: number; first: number } => {
-  let count = 0; let first = -1; let from = 0;
-  for (;;) {
-    const idx = haystack.indexOf(needle, from);
-    if (idx === -1) break;
-    if (first === -1) first = idx;
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Conta as ocorrências de `needle` em `haystack` de forma AGNÓSTICA a fim de
+ * linha: cada quebra do needle (`\r\n`, `\r` ou `\n`) casa com `\r\n` OU `\n` no
+ * haystack. Todos os demais bytes precisam ser IDÊNTICOS — continua uma
+ * correspondência EXATA, não fuzzy. Devolve offsets no espaço CRU do haystack (a
+ * `firstEnd` é o fim real da 1ª ocorrência, que pode exceder `needle.length`
+ * quando o arquivo usa CRLF), o que preserva byte-a-byte tudo fora do trecho
+ * editado. Corrige a incompatibilidade determinística CRLF↔LF: o modelo enxerga o
+ * trecho servido (fatiado por `\n`) e reproduz a âncora com `\n`, enquanto o
+ * arquivo em disco no Windows guarda `\r\n`; sem esta tolerância um `before`
+ * multi-linha CORRETO ocorreria 0 vez(es) (`ollama_ambiguous_replacement`).
+ */
+const countOccurrences = (haystack: string, needle: string): { count: number; first: number; firstEnd: number } => {
+  const pattern = escapeRegExp(needle).replace(/\r\n|\r|\n/g, '(?:\\r\\n|\\n)');
+  const re = new RegExp(pattern, 'g');
+  let count = 0; let first = -1; let firstEnd = -1;
+  for (let m = re.exec(haystack); m !== null; m = re.exec(haystack)) {
+    if (first === -1) { first = m.index; firstEnd = m.index + m[0].length; }
     count++;
-    from = idx + needle.length;
+    if (m.index === re.lastIndex) re.lastIndex++; // guarda defensiva (needle nunca é vazio: o schema exige > 0)
   }
-  return { count, first };
+  return { count, first, firstEnd };
 };
+
+/** Reencoda todas as quebras de linha de `value` para o EOL predominante do
+ * arquivo (`\r\n` se o arquivo é CRLF, senão `\n`). Mantém o texto inserido
+ * coerente com o arquivo e evita injetar LF solto num arquivo CRLF. */
+const toFileEol = (value: string, fileUsesCrlf: boolean): string =>
+  fileUsesCrlf ? value.replace(/\r\n|\r|\n/g, '\r\n') : value.replace(/\r\n|\r/g, '\n');
 
 export interface AppliedChange { readonly path: string; readonly newContent: string; readonly kind: 'replace' | 'create'; }
 
@@ -587,12 +607,15 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
     const original = contentOf(path);
     if (original === null) throw new OllamaProtocolError('ollama_stale_file_hash', `arquivo do escopo não encontrado para edição: ${path}.`);
     const currentSha = sha256(original);
+    // EOL do arquivo COMO LIDO (o sha atestado é do conteúdo cru; a tolerância é
+    // só no casamento da âncora e no reencode do texto inserido).
+    const fileUsesCrlf = original.includes('\r\n');
     const ranges: { start: number; end: number; after: string }[] = [];
     for (const op of replaceByPath.get(path) ?? []) {
       if (op.sha !== currentSha) throw new OllamaProtocolError('ollama_stale_file_hash', `hash divergente para ${path}: o arquivo mudou desde a leitura.`);
-      const { count, first } = countOccurrences(original, op.before);
+      const { count, first, firstEnd } = countOccurrences(original, op.before);
       if (count !== 1) throw new OllamaProtocolError('ollama_ambiguous_replacement', `"before" ocorre ${count} vez(es) em ${path}; esperado exatamente 1.`);
-      ranges.push({ start: first, end: first + op.before.length, after: op.after });
+      ranges.push({ start: first, end: firstEnd, after: toFileEol(op.after, fileUsesCrlf) });
     }
     const sorted = [...ranges].sort((a, b) => a.start - b.start);
     for (let i = 1; i < sorted.length; i++) {
@@ -604,7 +627,7 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
     }
     for (const ap of appendByPath.get(path) ?? []) {
       if (ap.sha !== currentSha) throw new OllamaProtocolError('ollama_stale_file_hash', `hash divergente para ${path}: o arquivo mudou desde a leitura.`);
-      next = next + ap.content;
+      next = next + toFileEol(ap.content, fileUsesCrlf);
     }
     if (next !== original) changes.push({ path, newContent: next, kind: 'replace' });
   }
