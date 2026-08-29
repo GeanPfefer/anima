@@ -14,6 +14,7 @@ export interface RecoverySuccessorCandidate {
 
 export type RecoverySuccessorGap =
   | 'original_not_failed'
+  | 'original_not_changes_requested'
   | 'assessment_mismatch'
   | 'decomposition_not_recommended'
   | 'candidate_not_technically_ready'
@@ -37,18 +38,14 @@ const normalized = (values: readonly string[]): Set<string> => new Set(values.ma
 const maxAttempts = (item: WorkItem): number | null => readAutonomousExecutionSpec(item.intent)?.limits.maxAttempts ?? null;
 
 /**
- * Valida somente decomposição: o successor deve reduzir escopo sem ampliar
- * capacidade, impacto, alvo, permissões, budget ou autoridade. Não persiste nada.
+ * Envelope compartilhado por TODOS os sucessores governados (decomposição de
+ * falha e correção por retomada): reduzir escopo (subconjunto ESTRITO) sem ampliar
+ * capacidade, impacto, alvo, permissões, budget ou autoridade financeira, e ser
+ * tecnicamente pronto. Independente do ESTADO/gatilho do original — o precondition
+ * de estado é do chamador. Não persiste nada.
  */
-export function validateRecoverySuccessor(
-  original: WorkItem,
-  assessment: WorkRecoveryAssessment,
-  candidate: RecoverySuccessorCandidate,
-): RecoverySuccessorValidation {
+function validateSuccessorEnvelope(original: WorkItem, candidate: RecoverySuccessorCandidate): RecoverySuccessorGap[] {
   const gaps: RecoverySuccessorGap[] = [];
-  if (original.state !== 'failed') gaps.push('original_not_failed');
-  if (assessment.workItemId !== original.id || assessment.proposalVersion !== original.proposalVersion) gaps.push('assessment_mismatch');
-  if (assessment.decision.action !== 'decompose') gaps.push('decomposition_not_recommended');
   if (!candidate.recoveryReason.trim() || !Number.isInteger(candidate.recoverySequence)
       || candidate.recoverySequence < 1 || !uuid.test(candidate.idempotencyKey)) gaps.push('lineage_input_invalid');
   if (candidate.capability !== original.capability) gaps.push('capability_changed');
@@ -81,6 +78,39 @@ export function validateRecoverySuccessor(
   if (/financial_authorization|paid_compute|auto.?provision/i.test(JSON.stringify({ intent: candidate.intent, proposal: candidate.proposal }))) {
     gaps.push('financial_authority_introduced');
   }
+  return gaps;
+}
+
+/**
+ * Valida somente decomposição: original FALHO cuja política recomenda `decompose`,
+ * successor reduzindo escopo sem ampliar o envelope. Não persiste nada.
+ */
+export function validateRecoverySuccessor(
+  original: WorkItem,
+  assessment: WorkRecoveryAssessment,
+  candidate: RecoverySuccessorCandidate,
+): RecoverySuccessorValidation {
+  const gaps: RecoverySuccessorGap[] = [];
+  if (original.state !== 'failed') gaps.push('original_not_failed');
+  if (assessment.workItemId !== original.id || assessment.proposalVersion !== original.proposalVersion) gaps.push('assessment_mismatch');
+  if (assessment.decision.action !== 'decompose') gaps.push('decomposition_not_recommended');
+  gaps.push(...validateSuccessorEnvelope(original, candidate));
+  return gaps.length ? { valid: false, gaps: [...new Set(gaps)] } : { valid: true, candidate };
+}
+
+/**
+ * Valida a correção por RETOMADA de uma revisão: original em `changes_requested`,
+ * successor reduzindo escopo ao restante e retomando do checkpoint, sem ampliar o
+ * envelope. Mesmas invariantes de envelope da decomposição — só o precondition de
+ * ESTADO difere (revisão em vez de falha). Não persiste nada.
+ */
+export function validateCorrectionSuccessor(
+  original: WorkItem,
+  candidate: RecoverySuccessorCandidate,
+): RecoverySuccessorValidation {
+  const gaps: RecoverySuccessorGap[] = [];
+  if (original.state !== 'changes_requested') gaps.push('original_not_changes_requested');
+  gaps.push(...validateSuccessorEnvelope(original, candidate));
   return gaps.length ? { valid: false, gaps: [...new Set(gaps)] } : { valid: true, candidate };
 }
 

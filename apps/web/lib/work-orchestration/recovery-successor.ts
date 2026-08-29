@@ -1,4 +1,5 @@
 import {
+  validateCorrectionSuccessor,
   validateRecoverySuccessor,
   type RecoverySuccessorCandidate,
   type RecoverySuccessorGap,
@@ -45,7 +46,33 @@ export async function proposeRecoverySuccessor(
     p_idempotency_key: candidate.idempotencyKey,
   });
   if (result.error) return { ok: false, code: 'persistence_failed', message: result.error.message };
-  const root = object(result.data);
+  return readSuccessorEnvelope(result.data);
+}
+
+/** Boundary máximo `proposed`: correção por RETOMADA de uma revisão. Mesma RPC e
+ * mesmo boundary do sucessor de recuperação; só a VALIDAÇÃO difere (revisão em vez
+ * de falha — `validateCorrectionSuccessor` exige `changes_requested`). */
+export async function proposeCorrectionSuccessor(
+  client: SupabaseClient<Database>, original: WorkItem, candidate: RecoverySuccessorCandidate,
+): Promise<ProposeRecoverySuccessorResult> {
+  const validation = validateCorrectionSuccessor(original, candidate);
+  if (!validation.valid) return { ok: false, code: 'candidate_invalid', gaps: validation.gaps };
+  const result = await client.rpc('propose_recovery_successor', {
+    p_original_work_item_id: original.id,
+    p_recovery_sequence: candidate.recoverySequence,
+    p_impact_level: candidate.impactLevel,
+    p_capability: candidate.capability,
+    p_intent: candidate.intent as unknown as Json,
+    p_proposal: proposalJson(candidate),
+    p_recovery_reason: candidate.recoveryReason,
+    p_idempotency_key: candidate.idempotencyKey,
+  });
+  if (result.error) return { ok: false, code: 'persistence_failed', message: result.error.message };
+  return readSuccessorEnvelope(result.data);
+}
+
+function readSuccessorEnvelope(data: Json): ProposeRecoverySuccessorResult {
+  const root = object(data);
   const successorWorkItemId = root?.['successorWorkItemId'];
   const lineageId = root?.['lineageId'];
   const recoverySequence = root?.['recoverySequence'];

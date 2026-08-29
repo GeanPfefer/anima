@@ -109,15 +109,21 @@ const clip = (value: string, max: number): string => (value.length <= max ? valu
 export const decompositionIdempotencySeed = (originalWorkItemId: string, checkpointCommitSha: string): string =>
   `decompose:${originalWorkItemId.trim().toLowerCase()}:${checkpointCommitSha.trim().toLowerCase()}`;
 
+/** Referência git durável é retomável: base e commit são SHAs válidos e
+ * distintos (houve edit efetivo) numa branch preservada do Anima. Compartilhada
+ * pela decomposição (falha) e pela correção por retomada (revisão). */
+const checkpointComplete = (checkpoint: DecompositionCheckpoint): boolean =>
+  SHA.test(checkpoint.baseSha)
+  && SHA.test(checkpoint.commitSha)
+  && checkpoint.baseSha.toLowerCase() !== checkpoint.commitSha.toLowerCase()
+  && isAnimaWorktreeBranch(checkpoint.branch);
+
 const diagnosticComplete = (diagnostic: DecompositionDiagnostic): boolean =>
   diagnostic.failingGates.length > 0
   && diagnostic.failingGates.every(gate => gate.label.trim().length > 0 && gate.command.trim().length > 0)
   && diagnostic.changedFiles.length > 0
   && diagnostic.changedFiles.every(file => file.trim().length > 0)
-  && SHA.test(diagnostic.checkpoint.baseSha)
-  && SHA.test(diagnostic.checkpoint.commitSha)
-  && diagnostic.checkpoint.baseSha.toLowerCase() !== diagnostic.checkpoint.commitSha.toLowerCase()
-  && isAnimaWorktreeBranch(diagnostic.checkpoint.branch);
+  && checkpointComplete(diagnostic.checkpoint);
 
 /**
  * Deriva a MENOR unidade sucessora governada a partir do diagnóstico durável.
@@ -245,4 +251,142 @@ function buildSuccessorIntent(originalIntent: WorkIntent, checkpoint: Decomposit
   return { execution_spec: executionSpec };
 }
 
-const dedupe = (values: readonly DecompositionRefusal[]): readonly DecompositionRefusal[] => [...new Set(values)];
+const dedupe = <T>(values: readonly T[]): readonly T[] => [...new Set(values)];
+
+// ============================================================
+// Correção governada por RETOMADA de uma revisão (`changes_requested`).
+//
+// Quando a implementação já foi VERIFICADA e o humano pede só um complemento que
+// cabe no escopo AINDA NÃO tocado (ex.: adicionar testes), refazer tudo desde a
+// base reescreveria trabalho comprovadamente correto. Esta camada deriva — dos
+// mesmos FATOS duráveis (checkpoint git observado da tentativa revisada) — a
+// MENOR unidade sucessora que RETOMA do checkpoint e reduz o escopo aos arquivos
+// que o checkpoint NÃO tocou (o "restante" da revisão), mantendo a implementação
+// preservada FORA do escopo (o guard de edição impede reescrevê-la em silêncio).
+//
+// Invariantes (verificados a jusante por `validateCorrectionSuccessor`):
+//   * o original permanece `changes_requested` (nada é reaberto/reescrito);
+//   * capacidade, impacto, alvo, permissões e budget NUNCA aumentam;
+//   * o escopo é um subconjunto ESTRITO do original (só o restante);
+//   * a implementação preservada entra em EXCLUÍDO (não é tocada);
+//   * o `execution_spec` é espelhado + `resume_from_checkpoint`/`base_sha` do checkpoint.
+//
+// Fail-closed: sem checkpoint retomável, sem escopo restante, ou pedido vazio,
+// RECUSA — em vez de fabricar uma correção que amplia o envelope. Puro (sem I/O).
+// ============================================================
+
+/** Fatos DETERMINÍSTICOS da revisão: o pedido do humano + o checkpoint durável
+ * observado da tentativa revisada + os arquivos que ele PRESERVOU (tocou). */
+export interface ResumeCorrectionInput {
+  readonly original: WorkItem;
+  /** Texto da revisão solicitada (`request_changes`) — vira o objetivo. */
+  readonly requestedChanges: string;
+  /** Checkpoint git durável da tentativa revisada (base + branch + commit). */
+  readonly checkpoint: DecompositionCheckpoint;
+  /** Arquivos que o checkpoint tocou (a implementação preservada) — a excluir. */
+  readonly preservedFiles: readonly string[];
+  readonly recoverySequence: number;
+  readonly idempotencyKey: string;
+}
+
+export type ResumeCorrectionRefusal =
+  | 'original_not_changes_requested'
+  | 'requested_changes_empty'
+  | 'checkpoint_incomplete'
+  | 'spec_unreadable'
+  | 'preserved_files_out_of_scope'
+  | 'remaining_scope_empty'
+  | 'lineage_input_invalid';
+
+export type ResumeCorrectionResult =
+  | { readonly ok: true; readonly candidate: RecoverySuccessorCandidate }
+  | { readonly ok: false; readonly refusals: readonly ResumeCorrectionRefusal[] };
+
+/**
+ * Deriva a MENOR unidade sucessora de correção que RETOMA do checkpoint e reduz o
+ * escopo ao restante (arquivos não tocados). Construída para PASSAR em
+ * `validateCorrectionSuccessor`; o chamador ainda a submete à validação antes de
+ * persistir (defesa em profundidade). Fail-closed em toda lacuna.
+ */
+export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): ResumeCorrectionResult {
+  const { original, requestedChanges, checkpoint, preservedFiles } = input;
+  const refusals: ResumeCorrectionRefusal[] = [];
+
+  if (original.state !== 'changes_requested') refusals.push('original_not_changes_requested');
+  if (!requestedChanges.trim()) refusals.push('requested_changes_empty');
+  if (!checkpointComplete(checkpoint)) refusals.push('checkpoint_incomplete');
+  if (!Number.isInteger(input.recoverySequence) || input.recoverySequence < 1 || !uuid.test(input.idempotencyKey)) {
+    refusals.push('lineage_input_invalid');
+  }
+
+  const spec = readAutonomousExecutionSpec(original.intent);
+  if (!spec) refusals.push('spec_unreadable');
+
+  if (!spec || refusals.length > 0) return { ok: false, refusals: dedupe(refusals) };
+
+  // Escopo reduzido DETERMINÍSTICO: as entradas do escopo original que o
+  // checkpoint NÃO tocou (o "restante" da revisão). A implementação preservada
+  // (tocada) é casada por caminho tolerante e sai do escopo (byte-idêntico).
+  const originalScope = original.proposal.data.includedScope;
+  const preserved = new Set(preservedFiles.map(pathKey));
+  const everyPreservedInScope = preservedFiles.length > 0
+    && [...preserved].every(file => originalScope.some(entry => pathKey(entry) === file));
+  if (!everyPreservedInScope) refusals.push('preserved_files_out_of_scope');
+
+  const remainingScope = originalScope.filter(entry => !preserved.has(pathKey(entry)));
+  if (remainingScope.length === 0) refusals.push('remaining_scope_empty');
+
+  if (refusals.length > 0) return { ok: false, refusals: dedupe(refusals) };
+
+  const preservedScope = originalScope.filter(entry => preserved.has(pathKey(entry)));
+  const shortCommit = checkpoint.commitSha.slice(0, 12);
+  const feedback = requestedChanges.trim();
+
+  const proposal: WorkProposal = {
+    schemaVersion: 1,
+    data: {
+      summary: clip(
+        `Correção por retomada: cumprir a revisão em ${remainingScope.join(', ')} sem tocar a implementação preservada`,
+        200,
+      ),
+      objective: clip(
+        `Retomando do checkpoint durável ${shortCommit} (implementação já verificada preservada em `
+        + `${preservedScope.join(', ')}), cumprir a correção solicitada na revisão: ${feedback}. `
+        + `Alterar SOMENTE ${remainingScope.join(', ')}; não modificar os arquivos preservados nem ampliar `
+        + `objetivo, capacidade, impacto, permissões ou budget da unidade original.`,
+        1000,
+      ),
+      includedScope: [...remainingScope],
+      // A implementação preservada passa a ser EXCLUÍDA de forma explícita e honesta.
+      excludedScope: [...new Set([...original.proposal.data.excludedScope, ...preservedScope])],
+      expectedEffects: [
+        `A revisão é cumprida adicionando trabalho apenas a ${remainingScope.join(', ')}.`,
+        `A implementação já verificada (${preservedScope.join(', ')}) permanece intacta, retomada do checkpoint ${shortCommit}.`,
+      ],
+      risks: [
+        'Se a correção exigisse alterar os arquivos preservados, esta retomada NÃO a satisfaz (fail-closed): '
+        + 'o escopo reduzido é honesto e não deve ser ampliado silenciosamente.',
+      ],
+    },
+  };
+
+  const intent = buildSuccessorIntent(original.intent, checkpoint);
+  if (!intent) return { ok: false, refusals: ['spec_unreadable'] };
+
+  const recoveryReason = clip(
+    `Correção governada por retomada: cumprir a revisão no escopo restante (${remainingScope.length} arquivo(s)) `
+    + `a partir do checkpoint ${shortCommit}, preservando a implementação já verificada.`,
+    400,
+  );
+
+  const candidate: RecoverySuccessorCandidate = {
+    impactLevel: original.impactLevel,
+    capability: original.capability,
+    intent,
+    proposal,
+    recoveryReason,
+    recoverySequence: input.recoverySequence,
+    idempotencyKey: input.idempotencyKey,
+  };
+  return { ok: true, candidate };
+}
