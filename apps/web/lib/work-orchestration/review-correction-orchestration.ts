@@ -46,6 +46,9 @@ export interface ReviewCorrectionFacts {
   readonly events: readonly WorkEvent[];
   /** Sequências de lineage já existentes para o original (append-only). */
   readonly existingRecoverySequences: readonly number[];
+  /** Sequência não terminal já materializada. Quando existe, a operação deve
+   * replayar essa unidade em vez de criar uma concorrente. */
+  readonly activeRecoverySequence?: number;
 }
 
 export type ReviewCorrectionPlanResult =
@@ -87,8 +90,14 @@ export function planCorrectionFromReview(facts: ReviewCorrectionFacts): ReviewCo
   const gitEvidence = projectHostObservedEvidence(events);
   if (!gitEvidence || gitEvidence.attemptId !== reviewedAttemptId) return { ok: false, reason: 'checkpoint_evidence_missing' };
 
-  const recoverySequence = facts.existingRecoverySequences.reduce((max, value) => Math.max(max, value), 0) + 1;
-  const idempotencyKey = uuidFromSeed(`review-correction:${original.id.toLowerCase()}:${gitEvidence.observedCommitSha.toLowerCase()}`);
+  const recoverySequence = facts.activeRecoverySequence
+    ?? facts.existingRecoverySequences.reduce((max, value) => Math.max(max, value), 0) + 1;
+  // A primeira sequência mantém compatibilidade com a chave já publicada. Após
+  // um successor terminal, cada nova unidade governada recebe chave própria;
+  // enquanto estiver ativa, o mesmo número replaya estritamente a mesma linha.
+  const keySeed = `review-correction:${original.id.toLowerCase()}:${gitEvidence.observedCommitSha.toLowerCase()}`
+    + (recoverySequence === 1 ? '' : `:${recoverySequence}`);
+  const idempotencyKey = uuidFromSeed(keySeed);
 
   const derivation = deriveResumeCorrectionSuccessor({
     original,
@@ -125,15 +134,26 @@ export async function correctReviewedWorkItem(
 
   const lineage = await client
     .from('work_recovery_lineage')
-    .select('recovery_sequence')
+    .select('recovery_sequence,successor_work_item_id')
     .eq('original_work_item_id', workItemId);
   if (lineage.error) return { ok: false, reason: 'lineage_read_failed', message: lineage.error.message };
   const existingRecoverySequences = (lineage.data ?? []).map(row => row.recovery_sequence ?? 0);
+  const successorIds = (lineage.data ?? []).map(row => row.successor_work_item_id);
+  let activeRecoverySequence: number | undefined;
+  if (successorIds.length > 0) {
+    const successors = await client.from('work_items').select('id,state').in('id', successorIds);
+    if (successors.error) return { ok: false, reason: 'lineage_read_failed', message: successors.error.message };
+    const activeStates = new Set(['proposed', 'approved', 'in_progress', 'blocked', 'review', 'changes_requested']);
+    activeRecoverySequence = (lineage.data ?? [])
+      .filter(row => successors.data?.some(item => item.id === row.successor_work_item_id && activeStates.has(item.state)))
+      .reduce<number | undefined>((max, row) => max === undefined || row.recovery_sequence > max ? row.recovery_sequence : max, undefined);
+  }
 
   const planned = planCorrectionFromReview({
     original: itemResult.value,
     events: eventsResult.value,
     existingRecoverySequences,
+    activeRecoverySequence,
   });
   if (!planned.ok) return { ok: false, reason: planned.reason, refusals: planned.refusals };
 

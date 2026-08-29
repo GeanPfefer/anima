@@ -75,12 +75,16 @@ describe('planCorrectionFromReview — correção governada por retomada', () =>
     expect(plan.idempotencyKey).toMatch(UUID);
   });
 
-  test('sequência de lineage = max(existentes)+1; idempotência estável pelo commit', () => {
+  test('sequência de lineage avança após terminal e replaya a unidade ativa', () => {
     expect(okPlan(planCorrectionFromReview(facts({ existingRecoverySequences: [] }))).recoverySequence).toBe(1);
     expect(okPlan(planCorrectionFromReview(facts({ existingRecoverySequences: [2, 4] }))).recoverySequence).toBe(5);
-    const a = okPlan(planCorrectionFromReview(facts())).idempotencyKey;
-    const b = okPlan(planCorrectionFromReview(facts({ existingRecoverySequences: [9] }))).idempotencyKey;
-    expect(a).toBe(b);
+    expect(okPlan(planCorrectionFromReview(facts({ existingRecoverySequences: [1], activeRecoverySequence: 1 }))).recoverySequence).toBe(1);
+    expect(okPlan(planCorrectionFromReview(facts({ existingRecoverySequences: [1], activeRecoverySequence: 1 }))).idempotencyKey)
+      .toBe(okPlan(planCorrectionFromReview(facts())).idempotencyKey);
+    const second = okPlan(planCorrectionFromReview(facts({ existingRecoverySequences: [1] })));
+    expect(second.recoverySequence).toBe(2);
+    expect(second.idempotencyKey).not.toBe(okPlan(planCorrectionFromReview(facts())).idempotencyKey);
+    expect(second.idempotencyKey).toBe(okPlan(planCorrectionFromReview(facts({ existingRecoverySequences: [1], activeRecoverySequence: 2 }))).idempotencyKey);
   });
 
   describe('bloqueios fail-closed', () => {
