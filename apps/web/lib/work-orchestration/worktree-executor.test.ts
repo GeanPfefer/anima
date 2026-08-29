@@ -540,6 +540,34 @@ describe('WorktreeExecutorAdapter — retry interno dirigido por gate do host', 
 
     await git(ctx.repo, ['branch', '-D', branch]).catch(() => undefined);
   });
+
+  test('repair que falha preserva na branch o checkpoint anterior ao gate', async () => {
+    let edits = 0;
+    const backend: CoderBackend = {
+      id: 'failing-repair-coder',
+      async edit(_req, ws): Promise<CoderEditResult> {
+        edits += 1;
+        if (edits === 1) {
+          await ws.writeFile('src/added.ts', 'export const state = "broken";\n');
+          return { summary: 'edit inicial', touchedResources: ['src/added.ts'] };
+        }
+        await ws.writeFile('src/added.ts', 'export const state = "partial";\n');
+        throw new Error('repair interrompido');
+      },
+    };
+    const req = request({ validationCriteria: [{ label: 'retry gate', command: 'npm test -- retry' }] });
+    const signals = await collect(new WorktreeExecutorAdapter({
+      targets: ctx.resolver, backend, gateRetryLimit: 1, emitCheckpoint: true,
+    }), req, new AbortController().signal);
+
+    expect(signals.map(signal => signal.kind)).toEqual(['checkpoint', 'error']);
+    const branch = `anima-work/${req.attemptId}`;
+    const preserved = await git(ctx.repo, ['show', `${branch}:src/added.ts`]);
+    expect(preserved.stdout).toContain('broken');
+    expect(preserved.stdout).not.toContain('partial');
+    expect((await git(ctx.repo, ['rev-list', '--count', `${ctx.sha}..${branch}`])).stdout.trim()).toBe('1');
+    await git(ctx.repo, ['branch', '-D', branch]).catch(() => undefined);
+  });
   test('no-change inicial ainda pode receber feedback de gate e corrigir no retry', async () => {
     let edits = 0;
     const receivedFeedback: unknown[] = [];

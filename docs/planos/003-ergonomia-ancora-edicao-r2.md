@@ -309,3 +309,25 @@ mudança efetiva (`ollama_no_effective_edits`); não houve re-gate nem Verifier.
 A recovery policy retornou `human_required/failure_not_classified` com 1/2
 attempts usadas. A segunda attempt foi preservada. Próximo ponto exato: decisão
 humana sobre retry ou classificação desse terminal; não promover R2.
+
+## Continuação — 2026-08-29: no-progress repetido e checkpoint Git durável
+
+O estado real posterior já continha a classificação
+`ollama_no_effective_edits → no_progress` e a segunda attempt canônica
+`fb79667c-dc13-4122-b094-1c3be10ce2fc`. Ela repetiu a cadeia observada:
+edit inicial, gate focado falho e repair sem mudança efetiva. O successor
+`f7d50d04…` permanece `failed`, agora 2/2; repetição classifica como
+decomposição, nunca como uma attempt extra.
+
+A reconciliação encontrou uma violação independente de handoff: ambos os
+checkpoints diziam referenciar a branch da attempt, mas a branch continuava no
+SHA-base e a worktree descartável já não existia. O executor agora cria um
+commit local de checkpoint antes dos gates. Diffs, arquivos alterados e numstat
+continuam calculados contra o SHA-base autorizado; um repair bem-sucedido cria
+o estado final, enquanto um repair que lança erro volta ao commit do checkpoint,
+descarta somente sua mutação parcial e preserva o edit anterior. Nenhum gate foi
+afrouxado e falha não vira resultado.
+
+Próximo ponto exato: formular uma decomposição governada que use a evidência
+repetida e, numa nova prova autorizada, verificar que um terminal após checkpoint
+mantém branch/diff retomáveis antes de perseguir re-gate e Verifier.

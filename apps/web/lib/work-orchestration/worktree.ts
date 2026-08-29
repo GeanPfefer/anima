@@ -231,23 +231,24 @@ export class GitWorktree {
 
   async changedFiles(signal?: AbortSignal): Promise<readonly string[]> {
     await this.stageAll(signal);
-    const result = await git(this.root, ['diff', '--cached', '--name-only'], signal);
+    const result = await git(this.root, ['diff', '--cached', '--name-only', this.baseSha], signal);
     return result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   }
 
   async diff(signal?: AbortSignal): Promise<string> {
     await this.stageAll(signal);
-    const result = await git(this.root, ['diff', '--cached', '--no-color'], signal);
+    const result = await git(this.root, ['diff', '--cached', '--no-color', this.baseSha], signal);
     return result.stdout;
   }
 
   /** Diff estruturado (numstat) do estado atual vs base: por arquivo, caminho +
    * inserções/deleções (-1 quando binário). Contagens apenas — nunca linhas
    * cruas —, para alimentar o resumo do handoff durável (INT-05). Deve ser lido
-   * ANTES do commit (usa o índice staged vs HEAD). */
+   * O índice é sempre comparado ao SHA-base, inclusive quando um checkpoint
+   * intermediário já foi commitado na branch. */
   async diffNumstat(signal?: AbortSignal): Promise<readonly { readonly path: string; readonly insertions: number; readonly deletions: number }[]> {
     await this.stageAll(signal);
-    const result = await git(this.root, ['diff', '--cached', '--numstat'], signal);
+    const result = await git(this.root, ['diff', '--cached', '--numstat', this.baseSha], signal);
     const out: { path: string; insertions: number; deletions: number }[] = [];
     for (const line of result.stdout.split(/\r?\n/)) {
       const trimmed = line.trim();
@@ -303,6 +304,20 @@ export class GitWorktree {
     try {
       await this.unlinkNodeModules();
       const reset = await git(this.root, ['reset', '--hard', this.baseSha]);
+      const clean = await git(this.root, ['clean', '-fdx']);
+      return reset.exitCode === 0 && clean.exitCode === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Restaura ao commit durável de um checkpoint da própria branch. Usado quando
+   * um repair posterior falha: descarta somente a mutação parcial do repair e
+   * preserva o estado que o checkpoint já anunciou como transferível. */
+  async restoreToCheckpoint(commitSha: string): Promise<boolean> {
+    try {
+      await this.unlinkNodeModules();
+      const reset = await git(this.root, ['reset', '--hard', commitSha]);
       const clean = await git(this.root, ['clean', '-fdx']);
       return reset.exitCode === 0 && clean.exitCode === 0;
     } catch {

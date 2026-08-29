@@ -187,6 +187,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
     const branch = worktreeBranchFor(request.attemptId, this.options.branchPrefix ?? WORKTREE_BRANCH_PREFIX);
     const handoffReference = `worktree:${request.target.reference}:${branch}`;
     let worktree: GitWorktree | null = null;
+    let durableCheckpointSha: string | null = null;
     try {
       try {
         worktree = await GitWorktree.create({ repoRoot: target.repoRoot, sha: target.sha, branch, signal });
@@ -262,7 +263,9 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         } catch (error) {
           observeCoder(true);
 
-          const restored = await worktree.restoreToBase();
+          const restored = durableCheckpointSha
+            ? await worktree.restoreToCheckpoint(durableCheckpointSha)
+            : await worktree.restoreToBase();
 
           if (signal.aborted) {
             yield attach(++seq, {
@@ -362,6 +365,20 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           // Keep checkpoint semantics stable: no empty checkpoint and no duplicate
           // checkpoint merely because the coder received an internal retry.
           if (this.options.emitCheckpoint && retryIndex === 0) {
+            durableCheckpointSha = await worktree.commit(
+              `anima(checkpoint): ${clip(request.objective, 72)}`,
+              signal,
+            );
+            if (!durableCheckpointSha) {
+              yield attach(++seq, {
+                kind: 'error',
+                code: 'execution_failed',
+                message: 'Não foi possível persistir o checkpoint Git da alteração.',
+                retryable: false,
+                handoffReference,
+              });
+              return;
+            }
             const checkpoint: WorkCheckpointV1 = {
               schemaVersion: 1,
               handoffReference,
@@ -544,12 +561,12 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         };
       }
 
-      // Nenhum gate intermediario falho cria commit. A branch recebe no maximo
-      // o estado final desta tentativa.
-      const commitSha = await worktree.commit(
+      // O checkpoint intermediário é durável. Um estado final diferente recebe
+      // um segundo commit; sem mudança posterior, o SHA do checkpoint é o handoff.
+      const commitSha = (await worktree.commit(
         `anima(worktree): ${clip(request.objective, 80)}`,
         signal,
-      );
+      )) ?? durableCheckpointSha;
 
       if (failure) {
         yield attach(++seq, {
