@@ -18,10 +18,23 @@
 
 /** Ids autorizados a usar a superfície de chat de desenvolvimento. Vazio por padrão. */
 export function developmentChatUserIds(env: NodeJS.ProcessEnv = process.env): readonly string[] {
-  return (env.ANIMA_DEVELOPMENT_CHAT_USER_IDS ?? '')
+  const ids = (env.ANIMA_DEVELOPMENT_CHAT_USER_IDS ?? '')
     .split(',')
     .map(id => id.trim())
     .filter(id => id.length > 0);
+  
+  // Garantir que os IDs sejam únicos, mantendo a ordem de primeira ocorrência
+  const seen = new Set<string>();
+  const uniqueIds: string[] = [];
+  
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+  
+  return uniqueIds;
 }
 
 /** Autorização persistida e verificável no servidor: o usuário está no allowlist
