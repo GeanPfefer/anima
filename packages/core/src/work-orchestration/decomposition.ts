@@ -188,7 +188,7 @@ export function deriveDecompositionSuccessor(input: DecompositionInput): Decompo
     },
   };
 
-  const intent = buildSuccessorIntent(original.intent, spec.validationCriteria, spec.permissions, spec.limits, diagnostic.checkpoint);
+  const intent = buildSuccessorIntent(original.intent, diagnostic.checkpoint);
   if (!intent) {
     // Só ocorre se o spec original não puder ser reespelhado com fidelidade.
     return { ok: false, refusals: ['spec_unreadable'] };
@@ -213,49 +213,36 @@ export function deriveDecompositionSuccessor(input: DecompositionInput): Decompo
 }
 
 /**
- * Reespelha o `execution_spec` original SEM ampliar autoridade e anexa o
- * ponteiro de retomada `resume_from_checkpoint`. Alvo, permissões, critérios de
- * validação e limites são preservados idênticos; nenhuma outra chave do intent
- * original é herdada, para não carregar autoridade acidental. O parser de spec
- * ignora `resume_from_checkpoint` (chave desconhecida), então a proveniência de
- * retomada não afeta elegibilidade nem validação de envelope.
+ * Reespelha o `execution_spec` original VERBATIM e anexa o ponteiro de retomada.
+ * Copiar o spec inteiro do original — por definição dentro da autoridade do
+ * original — preserva IDÊNTICOS alvo, permissões, critérios, limites, dependências
+ * E os campos de roteamento/execução (`executor`, `coder_backend`, `model`) que o
+ * contrato de execução lê. Isso torna o sucessor efetivamente EXECUTÁVEL, não só
+ * validável. Nunca amplia autoridade: é uma cópia fiel do envelope original; a
+ * redução real (escopo de arquivos) vive na PROPOSTA, não no spec.
+ *
+ * Sobre-escreve apenas `base_sha` com a base do checkpoint (idêntica à base da
+ * tentativa original) e ADICIONA `resume_from_checkpoint` — o parser de spec ignora
+ * essa chave, então a retomada não afeta elegibilidade nem validação de envelope.
+ * Nenhuma outra chave do intent original (fora `execution_spec`) é herdada, para
+ * não carregar proveniência/autoridade acidental de outra camada.
  */
-function buildSuccessorIntent(
-  originalIntent: WorkIntent,
-  validationCriteria: readonly { readonly label: string; readonly command?: string }[],
-  permissions: readonly string[],
-  limits: { readonly maxAttempts?: number; readonly maxDurationMinutes?: number; readonly maxResourceUnits?: number },
-  checkpoint: DecompositionCheckpoint,
-): WorkIntent | null {
-  const spec = readAutonomousExecutionSpec(originalIntent);
-  if (!spec) return null;
+function buildSuccessorIntent(originalIntent: WorkIntent, checkpoint: DecompositionCheckpoint): WorkIntent | null {
+  if (!readAutonomousExecutionSpec(originalIntent)) return null;
+  const rawSpec = originalIntent['execution_spec'];
+  if (typeof rawSpec !== 'object' || rawSpec === null || Array.isArray(rawSpec)) return null;
 
-  const executionSpec: Record<string, Json> = {
-    schema_version: 1,
-    target: { kind: spec.target.kind, reference: spec.target.reference },
-    permissions: [...permissions],
-    validation_criteria: validationCriteria.map(criterion =>
-      criterion.command === undefined ? { label: criterion.label } : { label: criterion.label, command: criterion.command }),
-    limits: buildLimits(limits),
-    depends_on_work_item_ids: [...spec.dependsOnWorkItemIds],
-    // Proveniência de RETOMADA — auditável e ignorada pelos parsers de spec.
-    resume_from_checkpoint: {
-      base_sha: checkpoint.baseSha,
-      branch: checkpoint.branch,
-      commit_sha: checkpoint.commitSha,
-    },
+  // Cópia profunda por serialização (o spec é Json), sem compartilhar referências.
+  const executionSpec = JSON.parse(JSON.stringify(rawSpec)) as Record<string, Json>;
+  // A base do sucessor é a base do checkpoint (o diff continua medido contra ela).
+  executionSpec['base_sha'] = checkpoint.baseSha;
+  // Proveniência/ponto de RETOMADA — auditável e ignorada pelos parsers de spec.
+  executionSpec['resume_from_checkpoint'] = {
+    base_sha: checkpoint.baseSha,
+    branch: checkpoint.branch,
+    commit_sha: checkpoint.commitSha,
   };
   return { execution_spec: executionSpec };
 }
-
-const buildLimits = (limits: {
-  readonly maxAttempts?: number; readonly maxDurationMinutes?: number; readonly maxResourceUnits?: number;
-}): Record<string, Json> => {
-  const out: Record<string, Json> = {};
-  if (limits.maxAttempts !== undefined) out['max_attempts'] = limits.maxAttempts;
-  if (limits.maxDurationMinutes !== undefined) out['max_duration_minutes'] = limits.maxDurationMinutes;
-  if (limits.maxResourceUnits !== undefined) out['max_resource_units'] = limits.maxResourceUnits;
-  return out;
-};
 
 const dedupe = (values: readonly DecompositionRefusal[]): readonly DecompositionRefusal[] => [...new Set(values)];

@@ -126,7 +126,7 @@ describe('GitWorktree — ciclo de vida', () => {
     await rm(join(ctx.repo, 'node_modules'), { recursive: true, force: true });
   });
 
-  test('linkNodeModules religa tamb�m node_modules f�sicos dos workspaces e dispose preserva os alvos reais', async () => {
+  test('linkNodeModules religa tamb�m node_modules f�sicos dos workspaces e dispose preserva os alvos reais', async () => {
     await mkdir(join(ctx.repo, 'node_modules', 'root-pkg'), { recursive: true });
     await mkdir(join(ctx.repo, 'apps', 'web', 'node_modules', 'web-pkg'), { recursive: true });
     await mkdir(join(ctx.repo, 'apps', 'mobile', 'node_modules', 'mobile-pkg'), { recursive: true });
@@ -336,5 +336,44 @@ describe('GitWorktree.restoreToBase — outcome atomicity ao estado-base', () =>
     controller.abort();
     expect(await wt.restoreToBase()).toBe(true);
     expect(await wt.readWorkspaceFile('docs/existing.md')).toBe(baseExisting);
+  });
+});
+
+describe('GitWorktree — retomada de checkpoint (startSha)', () => {
+  let ctx: Awaited<ReturnType<typeof makeRepo>>;
+  beforeAll(async () => { ctx = await makeRepo(); });
+  afterAll(async () => { await ctx.cleanup(); });
+
+  test('parte do checkpoint, mede o diff contra a base e restaura ao checkpoint', async () => {
+    // (1) Tentativa original: edita e commita um checkpoint durável C sobre a base B.
+    const first = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: `anima-work/orig-${Date.now()}` });
+    await first.writeWorkspaceFile('packages/core/src/checkpoint.ts', 'export const c = 1;\n');
+    const checkpointSha = await first.commit('anima(checkpoint): edit inicial');
+    expect(checkpointSha).toMatch(/^[a-f0-9]{40}$/);
+    await first.dispose({ deleteBranch: false });
+
+    // (2) Sucessor RETOMA de C, com a base ainda B.
+    const resumed = await GitWorktree.create({
+      repoRoot: ctx.repo, sha: ctx.sha, startSha: checkpointSha!, branch: `anima-work/resume-${Date.now()}`,
+    });
+    // A árvore parte do checkpoint: o arquivo do checkpoint já existe (tolerante a
+    // CRLF do autocrlf do git no Windows — o que importa é a presença do conteúdo).
+    expect((await resumed.readWorkspaceFile('packages/core/src/checkpoint.ts'))?.replace(/\r\n/g, '\n')).toBe('export const c = 1;\n');
+    // O diff contra a BASE já inclui o edit do checkpoint (B→C) — a proveniência
+    // do que foi autorizado a mudar não é escondida pela retomada.
+    expect(await resumed.changedFiles()).toContain('packages/core/src/checkpoint.ts');
+
+    // (3) O sucessor ESTENDE: um novo edit soma ao diff contra a base.
+    await resumed.writeWorkspaceFile('packages/core/src/successor.ts', 'export const s = 2;\n');
+    expect(await resumed.changedFiles()).toEqual(
+      expect.arrayContaining(['packages/core/src/checkpoint.ts', 'packages/core/src/successor.ts']),
+    );
+
+    // (4) restoreToBase volta ao CHECKPOINT (estado inicial), não à base original:
+    // preserva o edit do checkpoint e descarta só a mutação parcial do sucessor.
+    expect(await resumed.restoreToBase()).toBe(true);
+    expect((await resumed.readWorkspaceFile('packages/core/src/checkpoint.ts'))?.replace(/\r\n/g, '\n')).toBe('export const c = 1;\n');
+    expect(await resumed.readWorkspaceFile('packages/core/src/successor.ts')).toBeNull();
+    await resumed.dispose({ deleteBranch: true });
   });
 });

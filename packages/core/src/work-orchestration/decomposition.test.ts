@@ -109,6 +109,29 @@ describe('deriveDecompositionSuccessor — caminho governado', () => {
     expect(readAutonomousExecutionSpec(candidate.intent)!.target.reference).toBe('anima');
   });
 
+  test('espelha os campos de roteamento/execução e reaponta base_sha ao checkpoint', () => {
+    const executable: WorkItem = {
+      ...original,
+      intent: {
+        execution_spec: {
+          ...(original.intent['execution_spec'] as Record<string, unknown>),
+          executor: 'worktree',
+          coder_backend: 'ollama',
+          model: 'qwen3-coder:latest',
+          base_sha: 'f'.repeat(40),
+        },
+      },
+    };
+    const candidate = ok(deriveDecompositionSuccessor(input({ original: executable })));
+    const spec = candidate.intent['execution_spec'] as Record<string, unknown>;
+    // Roteamento/execução preservados (sucessor é executável, não só validável).
+    expect(spec['executor']).toBe('worktree');
+    expect(spec['coder_backend']).toBe('ollama');
+    expect(spec['model']).toBe('qwen3-coder:latest');
+    // base_sha reaponta à base do checkpoint (o diff continua medido contra ela).
+    expect(spec['base_sha']).toBe(BASE_SHA);
+  });
+
   test('a semente de idempotência é estável e insensível a caixa', () => {
     expect(decompositionIdempotencySeed(original.id, COMMIT_SHA))
       .toBe(decompositionIdempotencySeed(original.id.toUpperCase(), COMMIT_SHA.toUpperCase()));

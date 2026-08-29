@@ -117,19 +117,36 @@ const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promi
  * diretório temporário; o repositório e o workspace original nunca mudam. */
 export class GitWorktree {
   private nodeModulesLinks: string[] = [];
-  private constructor(readonly repoRoot: string, readonly root: string, readonly branch: string, private readonly base: string, private readonly baseSha: string) {}
+  private constructor(
+    readonly repoRoot: string, readonly root: string, readonly branch: string,
+    private readonly base: string,
+    // `baseSha` é a BASE AUTORIZADA do diff (o que a execução tinha permissão de
+    // mudar, medido sempre contra ela). `startSha` é o ESTADO INICIAL da árvore —
+    // igual à base numa tentativa nova, ou o commit do checkpoint numa RETOMADA.
+    private readonly baseSha: string, private readonly startSha: string,
+  ) {}
 
-  static async create(input: { readonly repoRoot: string; readonly sha: string; readonly branch: string; readonly signal?: AbortSignal }): Promise<GitWorktree> {
+  static async create(input: {
+    readonly repoRoot: string; readonly sha: string; readonly branch: string;
+    /** Estado inicial da árvore quando RETOMANDO de um checkpoint durável. Ausente
+     * ⇒ nova tentativa a partir da base (comportamento idêntico ao anterior). O
+     * diff continua sendo medido contra `sha` (a base autorizada), não contra este. */
+    readonly startSha?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<GitWorktree> {
     const base = await mkdtemp(join(tmpdir(), 'anima-wt-'));
     const root = join(base, 'tree');
-    // Checkout completo do SHA numa branch nova. node_modules é ignorado pelo
-    // git, então não é copiado — é religado depois por linkNodeModules().
-    const created = await git(input.repoRoot, ['worktree', 'add', '-b', input.branch, root, input.sha], input.signal);
+    const start = input.startSha ?? input.sha;
+    // Checkout completo do estado inicial numa branch nova. Numa retomada, esse
+    // estado é o commit do checkpoint da tentativa anterior; a nova branch parte
+    // dele, mas o diff da tentativa continua contra a base autorizada. node_modules
+    // é ignorado pelo git, então é religado depois por linkNodeModules().
+    const created = await git(input.repoRoot, ['worktree', 'add', '-b', input.branch, root, start], input.signal);
     if (created.exitCode !== 0) {
       await rm(base, { recursive: true, force: true }).catch(() => {});
       throw new Error(`Falha ao criar worktree: ${created.stderr.trim() || created.stdout.trim() || created.exitCode}`);
     }
-    return new GitWorktree(input.repoRoot, root, input.branch, base, input.sha);
+    return new GitWorktree(input.repoRoot, root, input.branch, base, input.sha, start);
   }
 
   /** Resolve um caminho relativo dentro da raiz, com as guardas de segurança. */
@@ -303,7 +320,10 @@ export class GitWorktree {
   async restoreToBase(): Promise<boolean> {
     try {
       await this.unlinkNodeModules();
-      const reset = await git(this.root, ['reset', '--hard', this.baseSha]);
+      // Restaura ao ESTADO INICIAL da tentativa. Numa tentativa nova isso é a
+      // própria base; numa RETOMADA é o commit do checkpoint anterior — nunca a
+      // base original, que descartaria o trabalho retomado que se está estendendo.
+      const reset = await git(this.root, ['reset', '--hard', this.startSha]);
       const clean = await git(this.root, ['clean', '-fdx']);
       return reset.exitCode === 0 && clean.exitCode === 0;
     } catch {

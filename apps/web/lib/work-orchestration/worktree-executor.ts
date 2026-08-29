@@ -36,7 +36,13 @@ export const WORKTREE_BRANCH_PREFIX = 'anima-work';
  */
 export const worktreeBranchFor = (attemptId: string, prefix: string = WORKTREE_BRANCH_PREFIX): string => `${prefix}/${attemptId}`;
 
-export interface WorktreeTarget { readonly repoRoot: string; readonly sha: string; }
+export interface WorktreeTarget {
+  readonly repoRoot: string;
+  readonly sha: string;
+  /** Commit do checkpoint durável a partir do qual RETOMAR. Ausente ⇒ nova
+   * tentativa a partir de `sha`. O diff continua medido contra `sha` (base). */
+  readonly startSha?: string;
+}
 export interface WorktreeTargetResolver { resolve(reference: string): WorktreeTarget | null; }
 
 export interface WorktreeExecutorOptions {
@@ -190,7 +196,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
     let durableCheckpointSha: string | null = null;
     try {
       try {
-        worktree = await GitWorktree.create({ repoRoot: target.repoRoot, sha: target.sha, branch, signal });
+        worktree = await GitWorktree.create({ repoRoot: target.repoRoot, sha: target.sha, startSha: target.startSha, branch, signal });
       } catch (error) {
         yield attach(++seq, { kind: 'error', code: 'execution_failed', message: `Falha ao criar a worktree isolada: ${clip(error instanceof Error ? error.message : String(error))}`, retryable: true, handoffReference: 'checkpoint:worktree-create-failed' });
         return;

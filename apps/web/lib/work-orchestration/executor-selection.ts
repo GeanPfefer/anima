@@ -30,6 +30,10 @@ export interface ExecutionContract {
   readonly baseSha: string | null;
   readonly targetKind: string | null;
   readonly targetReference: string | null;
+  /** Commit do checkpoint durável a partir do qual RETOMAR (decomposição
+   * governada). Ausente ⇒ nova tentativa a partir da base. O diff continua
+   * medido contra `baseSha`. */
+  readonly resumeCheckpointCommitSha: string | null;
 }
 
 export type ExecutorSelection =
@@ -78,6 +82,8 @@ export async function readAuthorizedBaseSha(repoRoot: string = projectRoot()): P
 export function readExecutionContract(intent: unknown): ExecutionContract {
   const spec = objectOf(objectOf(intent)['execution_spec']);
   const target = objectOf(spec['target']);
+  const resume = objectOf(spec['resume_from_checkpoint']);
+  const resumeCommit = str(resume['commit_sha']);
   return {
     executor: str(spec['executor']),
     coderBackend: str(spec['coder_backend']),
@@ -85,6 +91,9 @@ export function readExecutionContract(intent: unknown): ExecutionContract {
     baseSha: str(spec['base_sha']),
     targetKind: str(target['kind']),
     targetReference: str(target['reference']),
+    // Só um SHA bem-formado habilita a retomada; qualquer coisa fora disso é
+    // ignorada (parte da base, sempre seguro) — nunca um commit arbitrário.
+    resumeCheckpointCommitSha: resumeCommit && SHA.test(resumeCommit) ? resumeCommit : null,
   };
 }
 
@@ -265,8 +274,11 @@ export function resolveExecutorRoute(
     if ('error' in backend) return err('coder_backend_invalid', backend.error);
     const reference = contract.targetReference;
     const baseSha = contract.baseSha;
+    // Retomada: se o contrato aponta um checkpoint durável, a worktree parte dele
+    // (o edit anterior preservado), enquanto o diff continua contra a base.
+    const startSha = contract.resumeCheckpointCommitSha ?? undefined;
     const adapter = new WorktreeExecutorAdapter({
-      targets: { resolve: ref => ref === reference ? { repoRoot, sha: baseSha } : null },
+      targets: { resolve: ref => ref === reference ? { repoRoot, sha: baseSha, ...(startSha ? { startSha } : {}) } : null },
       backend,
       emitCheckpoint: true,
       linkNodeModules: true,

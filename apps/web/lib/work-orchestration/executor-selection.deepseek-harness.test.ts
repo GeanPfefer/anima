@@ -12,6 +12,7 @@ const harnessContract: ExecutionContract = {
   baseSha: '0123456789abcdef0123456789abcdef01234567',
   targetKind: 'project',
   targetReference: 'anima',
+  resumeCheckpointCommitSha: null,
 };
 
 describe('DeepSeek Harness executor routing', () => {

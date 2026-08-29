@@ -6,18 +6,27 @@ import { isAnimaProjectRoot, needsAnimaWebTypegen, prepareAnimaValidation, proje
 
 const SHA = 'a'.repeat(40);
 const REPO_ROOT = resolve(__dirname, '../../../..');
-const base: ExecutionContract = { executor: null, coderBackend: null, model: null, baseSha: null, targetKind: null, targetReference: null };
-const anima: ExecutionContract = { executor: 'worktree', coderBackend: 'ollama', model: 'qwen3-coder:latest', baseSha: SHA, targetKind: 'project', targetReference: 'anima' };
+const base: ExecutionContract = { executor: null, coderBackend: null, model: null, baseSha: null, targetKind: null, targetReference: null, resumeCheckpointCommitSha: null };
+const anima: ExecutionContract = { executor: 'worktree', coderBackend: 'ollama', model: 'qwen3-coder:latest', baseSha: SHA, targetKind: 'project', targetReference: 'anima', resumeCheckpointCommitSha: null };
 const legacy: ExecutionContract = { ...base, executor: 'python_runner', targetKind: 'workspace', targetReference: 'legacy-target' };
 
 describe('readExecutionContract', () => {
   test('extrai executor, backend, modelo, SHA-base e alvo do execution_spec', () => {
     const intent = { execution_spec: { executor: 'worktree', coder_backend: 'ollama', model: 'm', base_sha: SHA, target: { kind: 'project', reference: 'anima' } } };
-    expect(readExecutionContract(intent)).toEqual({ executor: 'worktree', coderBackend: 'ollama', model: 'm', baseSha: SHA, targetKind: 'project', targetReference: 'anima' });
+    expect(readExecutionContract(intent)).toEqual({ executor: 'worktree', coderBackend: 'ollama', model: 'm', baseSha: SHA, targetKind: 'project', targetReference: 'anima', resumeCheckpointCommitSha: null });
   });
   test('intent sem execution_spec devolve tudo nulo', () => {
     expect(readExecutionContract({})).toEqual(base);
     expect(readExecutionContract(null)).toEqual(base);
+  });
+  test('extrai o commit de retomada de resume_from_checkpoint quando é um SHA válido', () => {
+    const commit = 'b'.repeat(40);
+    const intent = { execution_spec: { executor: 'worktree', base_sha: SHA, target: { kind: 'project', reference: 'anima' }, resume_from_checkpoint: { base_sha: SHA, branch: 'anima-work/x', commit_sha: commit } } };
+    expect(readExecutionContract(intent).resumeCheckpointCommitSha).toBe(commit);
+  });
+  test('ignora resume_from_checkpoint com commit malformado (fail-safe: parte da base)', () => {
+    const intent = { execution_spec: { executor: 'worktree', base_sha: SHA, target: { kind: 'project', reference: 'anima' }, resume_from_checkpoint: { commit_sha: 'não-é-sha' } } };
+    expect(readExecutionContract(intent).resumeCheckpointCommitSha).toBeNull();
   });
 });
 
