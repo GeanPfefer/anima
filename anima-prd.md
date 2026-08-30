@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-29 (prova viva de correção por review retomou checkpoint e preservou implementação, mas parou após 3/3 por incapacidade do coder de reparar o teste; classificação por lineage, enforcement do delta retomado, successor pós-terminal e retry do checkpoint mais recente foram corrigidos; ver [registro](docs/registros/2026-08-29-review-correction-retomada-viva.md) e [Plano 003](docs/planos/003-ergonomia-ancora-edicao-r2.md))
+> Documento vivo de design. Última atualização: 2026-08-30 (Execution Placement V0 provou localmente o boundary de inferência remota: placement local/remote/defer, protocolo Ollama host-mediado em outro endpoint, checkpoint/gates na Goma e evidência com node; compute pago permanece fail-closed; ver [Plano 004](docs/planos/004-execution-placement-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
