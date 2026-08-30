@@ -57,9 +57,29 @@ describe('observeHostGitEvidence — observação independente do git', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.observedChangedFiles).toEqual(['src/b.ts']);
+    expect(result.value.observedChangedFilesSinceStart).toEqual(['src/b.ts']);
     expect(result.value.observedCommitSha).not.toBe(ctx.baseSha);
     expect(result.value.observedDiffSummary.filesChanged).toBe(1);
     expect(result.value.coverage).toEqual({ git: true, gates: false });
+  });
+
+  test('resume preserva proveniência contra a base e separa o delta desde o checkpoint', async () => {
+    await commitOnBranch(ctx.repo, ctx.baseSha, 'anima-work/resume', 'src/implementation.ts', 'export const inherited = true;\n');
+    const checkpoint = (await git(ctx.repo, ['rev-parse', 'anima-work/resume'])).stdout.trim();
+    await git(ctx.repo, ['checkout', 'anima-work/resume']);
+    await writeFile(join(ctx.repo, 'src', 'test.ts'), 'export const test = true;\n');
+    await git(ctx.repo, ['add', '-A']);
+    await git(ctx.repo, ['commit', '-m', 'attempt']);
+    await git(ctx.repo, ['checkout', 'main']);
+
+    const result = await observeHostGitEvidence({
+      repoRoot: ctx.repo, baseSha: ctx.baseSha, startSha: checkpoint, branch: 'anima-work/resume',
+      workItemId: 'work-1', attemptId: 'resume', approvedProposalVersion: 2,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.observedChangedFiles).toEqual(['src/implementation.ts', 'src/test.ts']);
+    expect(result.value.observedChangedFilesSinceStart).toEqual(['src/test.ts']);
   });
 
   test('a observação reflete a VERDADE do git, não um relato: pega um arquivo real fora do que se alegaria', async () => {

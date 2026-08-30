@@ -11,7 +11,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 \ir helpers/routing.inc
-SELECT plan(20);
+SELECT plan(23);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('a5000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','hoe@test.invalid','',now(),'{}','{}',now(),now()),
@@ -45,6 +45,7 @@ RETURNS jsonb LANGUAGE sql AS $$
     'workItemId',p_item,'attemptId',p_attempt,'approvedProposalVersion',p_version,
     'baseSha',p_base,'observedCommitSha',p_commit,
     'observedChangedFiles',jsonb_build_array(p_path),
+    'observedChangedFilesSinceStart',jsonb_build_array(p_path),
     'observedDiffSummary',jsonb_build_object(
       'filesChanged',1,'insertions',3,'deletions',1,
       'files',jsonb_build_array(jsonb_build_object('path',p_path,'insertions',3,'deletions',1))),
@@ -76,7 +77,7 @@ SELECT public.start_claimed_work_attempt('a5000000-0000-0000-0000-0000000000c2',
 
 SELECT is(
   (public.record_host_observed_evidence((SELECT id FROM i1),1,'a5000000-0000-0000-0000-0000000000a1',
-    pg_temp.hoe((SELECT id FROM i1),'a5000000-0000-0000-0000-0000000000a1')))->>'action',
+    pg_temp.hoe((SELECT id FROM i1),'a5000000-0000-0000-0000-0000000000a1') - 'observedChangedFilesSinceStart'))->>'action',
   'recorded','evidência observada válida é registrada');
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_evidence_recorded'),
   1::bigint,'exatamente um evento host_observed_evidence_recorded');
@@ -91,6 +92,17 @@ SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM i1
 SELECT is(
   (SELECT payload#>'{data,evidence,observedChangedFiles}' FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_evidence_recorded'),
   '["packages/core/src/a.ts"]'::jsonb,'os fatos observados persistem exatamente como o host os produziu');
+SELECT is(
+  (SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_evidence_recorded'
+    AND payload#>'{data,evidence,observedChangedFilesSinceStart}' IS NOT NULL),
+  0::bigint,'evidência histórica permanece sem delta; ausência não vira lista vazia');
+SELECT is(
+  (public.record_host_observed_evidence((SELECT id FROM i1),1,'a5000000-0000-0000-0000-0000000000a1',
+    pg_temp.hoe((SELECT id FROM i1),'a5000000-0000-0000-0000-0000000000a1')))->>'action',
+  'recorded','reobservação corrigida é anexada sem reescrever a evidência histórica');
+SELECT is(
+  (SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_evidence_recorded'),
+  2::bigint,'histórico preserva evidência antiga e nova como dois eventos append-only');
 
 -- ============================================================
 -- (2) Idempotência: replay ignora observedAt; conflito por conteúdo divergente
@@ -102,14 +114,14 @@ SELECT is(
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','2026-08-15T23:59:59Z')))->>'action',
   'replayed','reobservação do MESMO git com outro observedAt é replay idempotente');
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_evidence_recorded'),
-  1::bigint,'replay não cria novo evento');
+  2::bigint,'replay não cria novo evento');
 SELECT throws_ok(
   $$ SELECT public.record_host_observed_evidence((SELECT id FROM i1),1,'a5000000-0000-0000-0000-0000000000a1',
        pg_temp.hoe((SELECT id FROM i1),'a5000000-0000-0000-0000-0000000000a1','packages/core/src/a.ts',
          'cccccccccccccccccccccccccccccccccccccccc')) $$,
   '55000',NULL,'mesmo attempt com commit divergente é conflito: nunca duas verdades');
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_evidence_recorded'),
-  1::bigint,'conflito não cria novo evento');
+  2::bigint,'conflito não cria novo evento');
 
 -- ============================================================
 -- (3) Correlação e existência real da tentativa (cliente não fabrica)

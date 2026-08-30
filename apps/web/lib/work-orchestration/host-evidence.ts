@@ -19,6 +19,8 @@ const SHA = /^[a-f0-9]{40}$/;
 export interface HostEvidenceObservationInput {
   readonly repoRoot: string;
   readonly baseSha: string;
+  /** SHA no qual esta tentativa começou; em resume é o checkpoint herdado. */
+  readonly startSha?: string;
   readonly branch: string;
   readonly workItemId: string;
   readonly attemptId: string;
@@ -62,7 +64,8 @@ export async function observeHostGitEvidence(
   runGit: GitRunner = defaultGitRunner(input.repoRoot),
   now: () => Date = () => new Date(),
 ): Promise<HostObservedEvidenceResult> {
-  if (!SHA.test(input.baseSha)) {
+  const startSha = input.startSha ?? input.baseSha;
+  if (!SHA.test(input.baseSha) || !SHA.test(startSha)) {
     return { ok: false, defect: 'invalid_git_reference', explanation: 'O SHA-base informado ao observador é inválido.' };
   }
   const head = await runGit(['rev-parse', '--verify', `${input.branch}^{commit}`]);
@@ -73,7 +76,8 @@ export async function observeHostGitEvidence(
   const range = `${input.baseSha}..${input.branch}`;
   const names = await runGit(['diff', '--name-only', range]);
   const numstat = await runGit(['diff', '--numstat', range]);
-  if (names.exitCode !== 0 || numstat.exitCode !== 0) {
+  const namesSinceStart = await runGit(['diff', '--name-only', `${startSha}..${input.branch}`]);
+  if (names.exitCode !== 0 || numstat.exitCode !== 0 || namesSinceStart.exitCode !== 0) {
     return { ok: false, defect: 'invalid_diff', explanation: 'Não foi possível observar o diff da branch contra a base.' };
   }
   return buildHostObservedGitEvidence({
@@ -83,6 +87,7 @@ export async function observeHostGitEvidence(
     baseSha: input.baseSha,
     observedCommitSha,
     observedChangedFiles: parseNameOnly(names.stdout),
+    observedChangedFilesSinceStart: parseNameOnly(namesSinceStart.stdout),
     observedDiffFiles: parseNumstat(numstat.stdout),
     observedAt: now().toISOString(),
   });

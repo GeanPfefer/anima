@@ -374,6 +374,64 @@ describe('verifyWorkResult — cross-check adversarial (independência)', () => 
     expect(report.findings.find(f => f.code === 'change_in_excluded_scope')?.provenance).toBe('independent');
   });
 
+  test('resume: escopo usa somente o delta observado desde o checkpoint', () => {
+    const resumedEvidence = {
+      ...observed({
+        observedChangedFiles: ['src/implementation.ts', 'src/test.ts'],
+        observedDiffFiles: [
+          { path: 'src/implementation.ts', insertions: 3, deletions: 1 },
+          { path: 'src/test.ts', insertions: 8, deletions: 0 },
+        ],
+      }),
+      observedChangedFilesSinceStart: ['src/test.ts'],
+    } as HostObservedGitEvidenceV1 & { readonly observedChangedFilesSinceStart: readonly string[] };
+    const report = verifyWorkResult(baseInput({
+      handoff: handoffWith({
+        changedFiles: ['src/implementation.ts', 'src/test.ts'],
+        diffFiles: [
+          { path: 'src/implementation.ts', insertions: 3, deletions: 1 },
+          { path: 'src/test.ts', insertions: 8, deletions: 0 },
+        ],
+      }),
+      authorized: {
+        includedScope: ['src/test.ts'],
+        excludedScope: ['src/implementation.ts'],
+        validationCriteria: [{ label: 'unit', command: 'npm test' }],
+      },
+      observed: resumedEvidence,
+    }));
+    expect(report.verdict).toBe('verified');
+    expect(codes(report)).not.toContain('change_in_excluded_scope');
+    expect(codes(report)).toContain('scope_independently_observed');
+  });
+
+  test('resume: alteração realmente feita após o checkpoint em arquivo excluído é rejeitada', () => {
+    const report = verifyWorkResult(baseInput({
+      authorized: {
+        includedScope: ['src/test.ts'],
+        excludedScope: ['src/implementation.ts'],
+        validationCriteria: [{ label: 'unit', command: 'npm test' }],
+      },
+      observed: observed({
+        observedChangedFiles: ['src/implementation.ts', 'src/test.ts'],
+        observedChangedFilesSinceStart: ['src/implementation.ts', 'src/test.ts'],
+        observedDiffFiles: [
+          { path: 'src/implementation.ts', insertions: 1, deletions: 0 },
+          { path: 'src/test.ts', insertions: 8, deletions: 0 },
+        ],
+      }),
+      handoff: handoffWith({
+        changedFiles: ['src/implementation.ts', 'src/test.ts'],
+        diffFiles: [
+          { path: 'src/implementation.ts', insertions: 1, deletions: 0 },
+          { path: 'src/test.ts', insertions: 8, deletions: 0 },
+        ],
+      }),
+    }));
+    expect(report.verdict).toBe('rejected');
+    expect(codes(report)).toContain('change_in_excluded_scope');
+  });
+
   test('divergência de commit observado × atestado ⇒ attested_contradicts_observed', () => {
     const report = verifyWorkResult(baseInput({ observed: observed({ observedCommitSha: 'c'.repeat(40) }) }));
     expect(report.verdict).toBe('rejected');

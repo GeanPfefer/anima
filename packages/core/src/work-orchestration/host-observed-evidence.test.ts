@@ -30,6 +30,13 @@ describe('buildHostObservedGitEvidence', () => {
     expect(a).toEqual(b);
   });
 
+  test('preserva e ordena separadamente o delta da tentativa', () => {
+    const result = build({ observedChangedFilesSinceStart: ['src/z.ts', 'src/a.ts'] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.observedChangedFilesSinceStart).toEqual(['src/a.ts', 'src/z.ts']);
+  });
+
   test.each([
     ['correlação', { workItemId: '' }, 'invalid_correlation'],
     ['SHA malformado', { observedCommitSha: 'xyz' }, 'invalid_git_reference'],
@@ -54,6 +61,13 @@ describe('parseHostObservedGitEvidence', () => {
     const parsed = parseHostObservedGitEvidence(serialized());
     expect(parsed).not.toBeNull();
     expect(parsed?.observedChangedFiles).toEqual(['src/a.ts']);
+  });
+
+  test('serializa o delta novo e aceita evidência histórica sem ele', () => {
+    const current = build({ observedChangedFilesSinceStart: ['src/a.ts'] });
+    if (!current.ok) throw new Error('build falhou');
+    expect(parseHostObservedGitEvidence(current.value as unknown as Json)?.observedChangedFilesSinceStart).toEqual(['src/a.ts']);
+    expect(parseHostObservedGitEvidence(serialized())?.observedChangedFilesSinceStart).toBeUndefined();
   });
 
   test.each([

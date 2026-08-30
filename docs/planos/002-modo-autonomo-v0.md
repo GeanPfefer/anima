@@ -1,5 +1,23 @@
 # Plano 002 — Modo Autônomo V0
 
+## Continuação — delta da attempt no Verifier e reverificação append-only (2026-08-30)
+
+O falso positivo da correção retomada foi fechado sem perder proveniência. A
+`HostObservedGitEvidenceV1` mantém `observedChangedFiles` como diff completo contra
+`baseSha` e passa a carregar opcionalmente `observedChangedFilesSinceStart`, observado
+pelo host contra `startSha` (o checkpoint em resume). Só a contenção de escopo da
+attempt usa o delta; cross-check de commit/arquivos e demais fatos continuam usando o
+resultado completo. Evidência histórica sem o campo conserva a semântica anterior,
+fail-closed, e nunca vira “nenhuma mudança”.
+
+A persistência agora admite, por attempt, uma observação histórica sem delta e uma
+observação atual com delta, ambas append-only; replay idêntico continua idempotente e
+divergência dentro da mesma base semântica continua conflito. Na prova real do successor
+`b811aaa1…`, attempt `f7fd8c2e…`, a evidência antiga e o parecer `rejected` permaneceram;
+foram anexados a evidência corrigida (seq 42058, full = implementação+teste, delta = só
+teste) e um novo parecer `verified` (seq 42059, 7 checks, 0 gaps, 0 violações). O item
+permanece em `review`; a única fronteira é o aceite humano do resultado no chat.
+
 ## Continuação — execução canônica autônoma no nó remoto (2026-08-24)
 
 `CANONICAL_AUTO_EXECUTION_REMOTE_NODE = PASS`. Uma identidade-fixture allowlisted, sem

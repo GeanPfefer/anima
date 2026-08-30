@@ -36,6 +36,9 @@ export interface HostObservedGitEvidenceV1 {
   readonly baseSha: string;
   readonly observedCommitSha: string;
   readonly observedChangedFiles: readonly string[];
+  /** Delta produzido por esta tentativa contra seu startSha. Ausente somente em
+   * evidência histórica anterior à introdução da retomada incremental. */
+  readonly observedChangedFilesSinceStart?: readonly string[];
   readonly observedDiffSummary: WorktreeDiffSummary;
   readonly observedAt: string;
   // Cobertura explícita do que foi observado de forma independente.
@@ -77,6 +80,7 @@ export interface BuildHostObservedGitEvidenceInput {
   readonly baseSha: string;
   readonly observedCommitSha: string;
   readonly observedChangedFiles: readonly string[];
+  readonly observedChangedFilesSinceStart?: readonly string[];
   readonly observedDiffFiles: readonly WorktreeFileChange[];
   readonly observedAt: string;
 }
@@ -111,13 +115,17 @@ export function buildHostObservedGitEvidence(input: BuildHostObservedGitEvidence
     return fail('invalid_timestamp', 'observedAt precisa ser um instante ISO-8601 válido.');
   }
   const changedFiles = [...input.observedChangedFiles.map(norm)].sort(byString);
+  const changedFilesSinceStart = input.observedChangedFilesSinceStart === undefined
+    ? undefined
+    : [...input.observedChangedFilesSinceStart.map(norm)].sort(byString);
   const diffFiles = [...input.observedDiffFiles.map(file => ({ ...file, path: norm(file.path) }))].sort((a, b) => byString(a.path, b.path));
-  if (changedFiles.length > MAX_CHANGED_FILES || diffFiles.length > MAX_DIFF_FILES
-    || changedFiles.some(path => !bounded(path, MAX_PATH)) || diffFiles.some(file => !bounded(file.path, MAX_PATH))
+  if ((changedFilesSinceStart !== undefined && (changedFilesSinceStart.length === 0 || !changedFilesSinceStart.every(nonBlank)))
+    || changedFiles.length > MAX_CHANGED_FILES || (changedFilesSinceStart?.length ?? 0) > MAX_CHANGED_FILES || diffFiles.length > MAX_DIFF_FILES
+    || changedFiles.some(path => !bounded(path, MAX_PATH)) || changedFilesSinceStart?.some(path => !bounded(path, MAX_PATH)) || diffFiles.some(file => !bounded(file.path, MAX_PATH))
     || !bounded(input.baseSha, MAX_SHA) || !bounded(input.observedCommitSha, MAX_SHA)) {
     return fail('payload_too_large', 'Um campo da evidência observada excede o limite de tamanho permitido.');
   }
-  if ([...changedFiles, ...diffFiles.map(f => f.path)].some(containsSensitiveData)) {
+  if ([...changedFiles, ...(changedFilesSinceStart ?? []), ...diffFiles.map(f => f.path)].some(containsSensitiveData)) {
     return fail('sensitive_data', 'A evidência observada não pode carregar credenciais nem caminhos absolutos locais.');
   }
   const insertions = diffFiles.reduce((sum, file) => sum + Math.max(file.insertions, 0), 0);
@@ -132,6 +140,7 @@ export function buildHostObservedGitEvidence(input: BuildHostObservedGitEvidence
       baseSha: input.baseSha,
       observedCommitSha: input.observedCommitSha,
       observedChangedFiles: changedFiles,
+      ...(changedFilesSinceStart ? { observedChangedFilesSinceStart: changedFilesSinceStart } : {}),
       observedDiffSummary: { filesChanged: diffFiles.length, insertions, deletions, files: diffFiles },
       observedAt: input.observedAt,
       coverage: { git: true, gates: false },
@@ -157,6 +166,12 @@ export function parseHostObservedGitEvidence(value: Json | undefined): HostObser
   for (const entry of diff.files) { if (!isFileChange(entry)) return null; files.push({ path: entry.path, insertions: entry.insertions, deletions: entry.deletions }); }
   const changedFiles: string[] = [];
   for (const entry of root.observedChangedFiles) { if (!nonBlank(entry)) return null; changedFiles.push(entry); }
+  const rawChangedFilesSinceStart = root.observedChangedFilesSinceStart;
+  const changedFilesSinceStart: string[] | undefined = rawChangedFilesSinceStart === undefined
+    ? undefined
+    : Array.isArray(rawChangedFilesSinceStart)
+      ? rawChangedFilesSinceStart.filter(nonBlank)
+      : [];
   if (!nonBlank(root.workItemId) || !nonBlank(root.attemptId) || !positiveVersion(root.approvedProposalVersion)
     || typeof root.baseSha !== 'string' || !SHA.test(root.baseSha)
     || typeof root.observedCommitSha !== 'string' || !SHA.test(root.observedCommitSha)
@@ -165,8 +180,11 @@ export function parseHostObservedGitEvidence(value: Json | undefined): HostObser
     || coverage.git !== true || coverage.gates !== false
     || typeof diff.filesChanged !== 'number' || typeof diff.insertions !== 'number' || typeof diff.deletions !== 'number'
     || changedFiles.length === 0 || files.length === 0
-    || changedFiles.length > MAX_CHANGED_FILES || files.length > MAX_DIFF_FILES
-    || [...changedFiles, ...files.map(f => f.path)].some(containsSensitiveData)) {
+    || (rawChangedFilesSinceStart !== undefined
+      && (!Array.isArray(rawChangedFilesSinceStart) || changedFilesSinceStart?.length === 0
+        || changedFilesSinceStart?.length !== rawChangedFilesSinceStart.length))
+    || changedFiles.length > MAX_CHANGED_FILES || (changedFilesSinceStart?.length ?? 0) > MAX_CHANGED_FILES || files.length > MAX_DIFF_FILES
+    || [...changedFiles, ...(changedFilesSinceStart ?? []), ...files.map(f => f.path)].some(containsSensitiveData)) {
     return null;
   }
   return {
@@ -177,6 +195,7 @@ export function parseHostObservedGitEvidence(value: Json | undefined): HostObser
     baseSha: root.baseSha,
     observedCommitSha: root.observedCommitSha,
     observedChangedFiles: changedFiles,
+    ...(changedFilesSinceStart ? { observedChangedFilesSinceStart: changedFilesSinceStart } : {}),
     observedDiffSummary: { filesChanged: diff.filesChanged, insertions: diff.insertions, deletions: diff.deletions, files },
     observedAt: root.observedAt as string,
     coverage: { git: true, gates: false },

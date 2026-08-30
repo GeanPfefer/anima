@@ -74,6 +74,7 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
       {
         repoRoot: projectRoot(),
         baseSha: contract.baseSha,
+        startSha: contract.resumeCheckpointCommitSha ?? contract.baseSha,
         branch: worktreeBranchFor(result.attemptId),
         ...correlation,
       },

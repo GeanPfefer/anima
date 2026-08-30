@@ -271,13 +271,16 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   let scopeProvenance: WorkVerificationProvenance = 'attested';
   if (observedUsable) {
     scopeProvenance = 'independent';
-    scopePaths = new Set<string>([
+    const observedFullPaths = new Set<string>([
       ...observed!.observedChangedFiles.map(norm),
       ...observed!.observedDiffSummary.files.map(file => norm(file.path)),
     ]);
+    scopePaths = observed!.observedChangedFilesSinceStart
+      ? new Set(observed!.observedChangedFilesSinceStart.map(norm))
+      : observedFullPaths;
     // Mentira detectada: o executor atestou um conjunto diferente do observado, ou
     // um commit/base diferente. O git é a verdade — a divergência é violação.
-    const same = attestedPaths.size === scopePaths.size && [...attestedPaths].every(p => scopePaths.has(p));
+    const same = attestedPaths.size === observedFullPaths.size && [...attestedPaths].every(p => observedFullPaths.has(p));
     if (!same || handoff.commitSha !== observed!.observedCommitSha || handoff.baseSha !== observed!.baseSha) {
       findings.push(violation('attested_contradicts_observed',
         'O que o executor atestou (arquivos/commit) diverge do que o host observou no git; a observação prevalece.', undefined, 'independent'));
