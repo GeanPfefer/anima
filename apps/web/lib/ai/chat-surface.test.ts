@@ -27,10 +27,6 @@ describe('chat-surface — separação chat pessoal x desenvolvimento', () => {
   });
 
   test('modo de desenvolvimento exige ação explícita E autorização (nenhuma isolada basta)', () => {  
-  test('allowlist deduplica e preserva ordem de primeira ocorrência', () => {
-    const env = { ANIMA_DEVELOPMENT_CHAT_USER_IDS: ` ${authorized} , 33333333-3333-3333-3333-333333333333 , ${authorized} ` } as unknown as NodeJS.ProcessEnv;
-    expect(developmentChatUserIds(env)).toEqual([authorized, '33333333-3333-3333-3333-333333333333']);
-  });
     // Usuário comum: nunca, mesmo pedindo explicitamente.
     expect(resolveChatDevelopmentMode({ requested: true, authorized: false })).toBe(false);
     // Autorizado sem ação explícita: continua chat pessoal (allowlist sozinho não basta).
@@ -38,5 +34,10 @@ describe('chat-surface — separação chat pessoal x desenvolvimento', () => {
     // Só quando as duas coincidem.
     expect(resolveChatDevelopmentMode({ requested: true, authorized: true })).toBe(true);
     expect(resolveChatDevelopmentMode({ requested: false, authorized: false })).toBe(false);
+  });
+  
+  test('allowlist deduplica e preserva ordem de primeira ocorrência', () => {
+    const env = { ANIMA_DEVELOPMENT_CHAT_USER_IDS: ` ${authorized} , 33333333-3333-3333-3333-333333333333 , ${authorized} ` } as unknown as NodeJS.ProcessEnv;
+    expect(developmentChatUserIds(env)).toEqual([authorized, '33333333-3333-3333-3333-333333333333']);
   });
 });
