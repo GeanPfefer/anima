@@ -5,7 +5,8 @@ import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } f
 import { persistPostTurnHostObservations } from './post-turn-observation';
 import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
-import { readResourceAdmission } from './resource-governor';
+import { readMachinePressure, readResourceAdmission } from './resource-governor';
+import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteRuntimeFor } from './coder-placement';
 
 // ============================================================
 // Dependências do driver de backlog para o PROJETO real (worktree/qwen3-coder),
@@ -54,6 +55,7 @@ export function buildProjectBacklogCycleDeps(
   client: SupabaseClient<Database>,
   ownerInstanceId: string,
 ): ProjectBacklogCycleDeps {
+  let admittedPressure: ReturnType<typeof readMachinePressure> = 'unknown';
   // Base de um resultado sintético do Supervisor para quando o contrato do item não
   // resolve um executor: o driver classifica `selection_not_executable` como parada
   // anti-spin (`turn_not_executable`), sem tentar executar às cegas.
@@ -72,7 +74,20 @@ export function buildProjectBacklogCycleDeps(
     readBacklog: () => readAutonomousBacklogCandidates(client),
     // Snapshot NOVO por consulta, antes de cada volta. Somente `permit` inicia;
     // defer e indisponibilidade da autoridade falham fechados.
-    hostPermitsAutonomousWork: () => readResourceAdmission().verdict === 'permit',
+    hostPermitsAutonomousWork: () => {
+      const admission = readResourceAdmission();
+      admittedPressure = admission.pressure;
+      if (admission.verdict === 'permit') return true;
+      const model = process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
+      const node = readExplicitCoderNodeV0(model);
+      return decideCoderPlacement({
+        pressure: admittedPressure,
+        model,
+        nodes: node ? [node] : [],
+        // O gate financeiro canônico ainda não existe: paid permanece inelegível.
+        paidComputeAuthorized: false,
+      }).placement === 'remote';
+    },
     runTurn: async (entry, signal) => {
       // Contrato persistido do item escolhido → executor de worktree (project:anima).
       const item = await client.from('work_items').select('intent').eq('id', entry.workItemId).maybeSingle();
@@ -83,9 +98,24 @@ export function buildProjectBacklogCycleDeps(
       const history = await client.from('work_events').select('event_type,payload')
         .eq('work_item_id', entry.workItemId).order('seq', { ascending: false }).limit(40);
       if (!history.error) contract = resumeLatestRetryCheckpoint(contract, history.data ?? []);
+      const model = contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
+      const node = readExplicitCoderNodeV0(model);
+      const placement = decideCoderPlacement({
+        pressure: admittedPressure,
+        model,
+        nodes: node ? [node] : [],
+        paidComputeAuthorized: false,
+      });
+      if (placement.placement === 'defer') {
+        return notExecutable(entry, 'coder_placement_deferred', `Placement do coder adiou a execução: ${placement.reason}.`);
+      }
+      const ollamaRuntimeOverride = placement.placement === 'remote'
+        ? remoteRuntimeFor(placement.node, model)
+        : localRuntimeFor(model);
       const gateObservations: ObservedGateInput[] = [];
       const coderObservations: ObservedCoderInput[] = [];
       const selection = resolveExecutorRoute(contract, {
+        ...(contract.coderBackend === null || contract.coderBackend === 'ollama' ? { ollamaRuntimeOverride } : {}),
         gateObserver: outcome => gateObservations.push(outcome),
         coderObserver: outcome => coderObservations.push(outcome),
       });

@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import type { ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
-import { resolveOllamaCoderRuntimeConfig } from './ollama-coder-config';
+import { resolveOllamaCoderRuntimeConfig, type OllamaCoderRuntimeConfig } from './ollama-coder-config';
 import { GptCoderBackend } from './gpt-coder';
 import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from './execution';
@@ -116,6 +116,7 @@ const backendFor = (
   contract: ExecutionContract,
   repoRoot: string,
   override?: CoderBackend,
+  ollamaRuntimeOverride?: OllamaCoderRuntimeConfig,
 ): CoderBackend | { readonly error: string } => {
   if (override) return override;
   const kind = contract.coderBackend ?? 'ollama';
@@ -124,12 +125,14 @@ const backendFor = (
   // O Supervisor continua sem conhecer detalhes de provider.
   if (kind === 'ollama') {
     const model = contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
-    const runtime = resolveOllamaCoderRuntimeConfig(model);
+    const runtime = ollamaRuntimeOverride ? { ok: true as const, value: ollamaRuntimeOverride } : resolveOllamaCoderRuntimeConfig(model);
     if (!runtime.ok) return { error: runtime.error };
     return new OllamaCoderBackend({
       model,
       url: runtime.value.url,
       backendId: runtime.value.backendId,
+      locality: runtime.value.locality,
+      nodeId: runtime.value.nodeId,
     });
   }
 
@@ -252,6 +255,8 @@ export function resolveExecutorRoute(
   contract: ExecutionContract,
   options: {
     readonly backendOverride?: CoderBackend;
+    /** Runtime escolhido pelo placement host-side. Só troca a inferência; worktree e efeitos continuam locais. */
+    readonly ollamaRuntimeOverride?: OllamaCoderRuntimeConfig;
     readonly repoRoot?: string;
     /** Observador host-side dos gates, injetado pela rota para captar a evidência
      * observada de gate. Só o executor de worktree (host in-process) o usa. */
@@ -270,7 +275,7 @@ export function resolveExecutorRoute(
     if (!contract.baseSha || !SHA.test(contract.baseSha)) return err('worktree_base_sha_missing', 'O SHA-base autorizado não foi persistido ou é inválido.');
     const repoRoot = options.repoRoot ?? projectRoot();
     if (!isAnimaProjectRoot(repoRoot)) return err('project_root_invalid', 'A raiz do projeto Anima não é um repositório válido.');
-    const backend = backendFor(contract, repoRoot, options.backendOverride);
+    const backend = backendFor(contract, repoRoot, options.backendOverride, options.ollamaRuntimeOverride);
     if ('error' in backend) return err('coder_backend_invalid', backend.error);
     const reference = contract.targetReference;
     const baseSha = contract.baseSha;

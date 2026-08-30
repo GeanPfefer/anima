@@ -77,6 +77,12 @@ export interface CoderEditResult {
 
 export interface CoderBackend {
   readonly id: string;
+  /** Identidade conhecida pelo host para evidência; nunca vem da resposta do node. */
+  readonly observation?: {
+    readonly placement: 'local' | 'remote';
+    readonly nodeId: string | null;
+    readonly model: string;
+  };
   edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult>;
 }
 

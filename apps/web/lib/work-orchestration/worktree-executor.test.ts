@@ -1,5 +1,6 @@
 /** @jest-environment node */
 import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -16,6 +17,7 @@ import {
 } from '@anima/core';
 import { runProcess } from './worktree';
 import { ScriptedCoderBackend, type CoderBackend, type CoderEditResult, type CoderWorkspace } from './coder-backend';
+import { OllamaCoderBackend } from './ollama-coder';
 import { WorktreeExecutorAdapter, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, type WorktreeTargetResolver } from './worktree-executor';
 
 // Operações git reais podem ficar lentas sob carga paralela; folga o timeout
@@ -443,6 +445,38 @@ describe('WorktreeExecutorAdapter — duração do coder observada de primeira p
     return { observed, terminal: signals.at(-1)! };
   };
 
+  test('endpoint remoto controlado devolve operação; host local aplica, cria checkpoint e roda gate', async () => {
+    const server = createServer((_req, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({
+        message: { content: JSON.stringify({ action: 'edit', operations: [{ kind: 'create_file', path: 'src/added.ts', content: added.content }] }) },
+        prompt_eval_count: 1000, eval_count: 50, done_reason: 'stop',
+      }));
+    });
+    await new Promise<void>((resolveListen, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolveListen);
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('endpoint de teste sem porta');
+    const backend = new OllamaCoderBackend({
+      model: 'qwen3-coder:latest', url: `http://127.0.0.1:${address.port}`,
+      backendId: 'ollama:remote/test-node:qwen3-coder:latest', locality: 'remote', nodeId: 'test-node', timeoutMs: 2_000,
+    });
+    const req = request();
+    try {
+      const { observed, terminal } = await runWithCoderObserver(req, backend);
+      expect(terminal.kind).toBe('result');
+      expect(observed[0]).toMatchObject({ placement: 'remote', nodeId: 'test-node', outcome: 'succeeded' });
+      const branch = `anima-work/${req.attemptId}`;
+      expect((await git(ctx.repo, ['show', `${branch}:src/added.ts`])).stdout).toContain('export const two = 2');
+      expect((await git(ctx.repo, ['show', 'main:src/added.ts'])).exitCode).not.toBe(0);
+      await git(ctx.repo, ['branch', '-D', branch]).catch(() => undefined);
+    } finally {
+      await new Promise<void>(resolveClose => server.close(() => resolveClose()));
+    }
+  });
+
   test('edição que resolve: host observa backendId, duração e desfecho succeeded', async () => {
     const req = request();
     const { observed, terminal } = await runWithCoderObserver(req, new ScriptedCoderBackend([added], 'ok', 'scripted-coder'));
@@ -452,6 +486,24 @@ describe('WorktreeExecutorAdapter — duração do coder observada de primeira p
     expect(observed[0]!.durationMs).toBeGreaterThanOrEqual(0);
     // A duração é do coder, NÃO do gate: reportada mesmo antes de qualquer gate.
     expect(Number.isInteger(observed[0]!.durationMs)).toBe(true);
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
+  });
+
+  test('host observa placement remoto declarado pelo backend, sem confiar na resposta do node', async () => {
+    const backend: CoderBackend = {
+      id: 'ollama:remote/gpu-a:qwen3-coder:latest',
+      observation: { placement: 'remote', nodeId: 'gpu-a', model: 'qwen3-coder:latest' },
+      async edit(_req, workspace) {
+        await workspace.writeFile(added.path, added.content);
+        return { summary: 'operação remota aplicada pelo host', touchedResources: [added.path] };
+      },
+    };
+    const req = request();
+    const { observed, terminal } = await runWithCoderObserver(req, backend);
+    expect(terminal.kind).toBe('result');
+    expect(observed[0]).toMatchObject({
+      backendId: backend.id, placement: 'remote', nodeId: 'gpu-a', model: 'qwen3-coder:latest', outcome: 'succeeded',
+    });
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
   });
 

@@ -10,7 +10,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 \ir helpers/routing.inc
-SELECT plan(15);
+SELECT plan(19);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('c8000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','hce@test.invalid','',now(),'{}','{}',now(),now()),
@@ -123,6 +123,27 @@ SELECT throws_ok(
   $$ SELECT public.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
        pg_temp.hce((SELECT id FROM i1),'c8000000-0000-0000-0000-0000000000a1')) $$,
   '42501',NULL,'usuário fora da allowlist é recusado');
+SELECT set_config('request.jwt.claim.sub','c8000000-0000-0000-0000-000000000000',true);
+
+-- Identidade opcional de placement: compatível com legado e fail-closed quando presente.
+SET LOCAL ROLE service_role;
+SELECT ok(private.is_valid_host_coder_evidence(
+  pg_temp.hce('c8000000-0000-0000-0000-000000000011','c8000000-0000-0000-0000-0000000000a1')
+  || '{"placement":"remote","nodeId":"gpu-a","model":"qwen3-coder:latest"}'::jsonb),
+  'placement remoto completo é válido');
+SELECT ok(NOT private.is_valid_host_coder_evidence(
+  pg_temp.hce('c8000000-0000-0000-0000-000000000011','c8000000-0000-0000-0000-0000000000a1')
+  || '{"placement":"remote","nodeId":null,"model":"m"}'::jsonb),
+  'placement remoto sem node falha fechado');
+SELECT ok(private.is_valid_host_coder_evidence(
+  pg_temp.hce('c8000000-0000-0000-0000-000000000011','c8000000-0000-0000-0000-0000000000a1')
+  || '{"placement":"local","nodeId":null,"model":"m"}'::jsonb),
+  'placement local com node nulo é válido');
+SELECT ok(NOT private.is_valid_host_coder_evidence(
+  pg_temp.hce('c8000000-0000-0000-0000-000000000011','c8000000-0000-0000-0000-0000000000a1')
+  || '{"placement":"local","nodeId":"gpu-a","model":"m"}'::jsonb),
+  'placement local não pode declarar node remoto');
+SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','c8000000-0000-0000-0000-000000000000',true);
 
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id IN ((SELECT id FROM i1),(SELECT id FROM i2))

@@ -247,6 +247,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             backendId: this.options.backend.id,
             durationMs: Date.now() - coderStartedAt,
             outcome,
+            ...(this.options.backend.observation ?? {}),
           });
         };
 

@@ -69,6 +69,11 @@ export async function persistHostObservedCoderEvidence(
       backendId: observation.backendId,
       durationMs: observation.durationMs,
       outcome: observation.outcome,
+      ...(observation.placement !== undefined ? {
+        placement: observation.placement,
+        nodeId: observation.nodeId,
+        model: observation.model,
+      } : {}),
       observedAt,
     });
 
@@ -88,6 +93,12 @@ export async function persistHostObservedCoderEvidence(
       reason: 'coder observations from one attempt must use the same backend',
     };
   }
+  const placement = validated[0]!.placement;
+  const nodeId = validated[0]!.nodeId;
+  const model = validated[0]!.model;
+  if (validated.some(turn => turn.placement !== placement || turn.nodeId !== nodeId || turn.model !== model)) {
+    return { ok: false, stage: 'build', reason: 'coder observations from one attempt must use the same placement identity' };
+  }
 
   const durationMs = validated.reduce(
     (total, turn) => total + turn.durationMs,
@@ -103,6 +114,7 @@ export async function persistHostObservedCoderEvidence(
     backendId,
     durationMs,
     outcome: finalTurn.outcome,
+    ...(placement !== undefined ? { placement, nodeId, model } : {}),
     observedAt,
   });
 

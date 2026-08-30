@@ -100,6 +100,24 @@ describe('resolveExecutorRoute — seleção explícita', () => {
     }
   });
 
+  test('placement injeta runtime remoto sem transferir a worktree ao node', () => {
+    const selection = resolveExecutorRoute(anima, {
+      repoRoot: REPO_ROOT,
+      ollamaRuntimeOverride: {
+        url: 'http://127.0.0.1:21434',
+        backendId: 'ollama:remote/gpu-a:qwen3-coder:latest',
+        locality: 'remote',
+        nodeId: 'gpu-a',
+      },
+    });
+    expect(selection.ok).toBe(true);
+    if (selection.ok) {
+      expect(selection.route.adapter.id).toBe('worktree-v1');
+      expect(selection.route.candidate.providerRef).toBe('worktree-host');
+      expect(selection.route.candidate.modelRef).toBe('ollama:remote/gpu-a:qwen3-coder:latest');
+    }
+  });
+
   test('config remota inválida falha fechado sem fallback local', () => {
     const saved = process.env.ANIMA_WORKTREE_OLLAMA_URL;
     process.env.ANIMA_WORKTREE_OLLAMA_URL = 'https://gpu.example:11434';

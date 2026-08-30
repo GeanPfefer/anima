@@ -92,6 +92,15 @@ export function readResourceAdmission(
   }
 }
 
+/** Pressão pontual para placement. Falha de sensor permanece `unknown`/fail-closed. */
+export function readMachinePressure(
+  readSnapshot: () => MachineSnapshotV1 = readMachineSnapshot,
+  reserve: InteractiveReserve = DEFAULT_INTERACTIVE_RESERVE,
+): MachinePressure {
+  try { return classifyMachinePressure(readSnapshot(), reserve); }
+  catch { return 'unknown'; }
+}
+
 // ---------------------------------------------------------------------------
 // Consumidor read-only para o read-model do Supervisor.
 //

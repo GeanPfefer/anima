@@ -15,6 +15,18 @@ const build = (over: Partial<Parameters<typeof buildHostObservedCoderEvidence>[0
   });
 
 describe('buildHostObservedCoderEvidence', () => {
+  test('aceita identidade de placement remoto observada pelo host', () => {
+    expect(build({ placement: 'remote', nodeId: 'gpu-a', model: 'qwen3-coder:latest' })).toMatchObject({
+      ok: true,
+      value: { placement: 'remote', nodeId: 'gpu-a', model: 'qwen3-coder:latest' },
+    });
+  });
+
+  test('recusa placement remoto sem node e identidade parcial', () => {
+    expect(build({ placement: 'remote', nodeId: null, model: 'm' })).toMatchObject({ ok: false, defect: 'invalid_backend' });
+    expect(build({ placement: 'local' })).toMatchObject({ ok: false, defect: 'invalid_backend' });
+  });
+
   test('constrói evidência válida com a duração host-observed e o backendId', () => {
     const result = build();
     expect(result.ok).toBe(true);

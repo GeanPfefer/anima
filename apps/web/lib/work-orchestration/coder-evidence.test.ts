@@ -29,6 +29,16 @@ describe('persistHostObservedCoderEvidence (fail-open)', () => {
     expect(calls[0]!.observedAt).toBe('2026-08-17T12:00:00.000Z');
   });
 
+  test('persiste identidade remota conhecida pelo host junto da duração e outcome', async () => {
+    const { sink, calls } = capturing();
+    const outcome = await persistHostObservedCoderEvidence(correlation, {
+      backendId: 'ollama:remote/gpu-a:qwen3-coder:latest', durationMs: 321, outcome: 'succeeded',
+      placement: 'remote', nodeId: 'gpu-a', model: 'qwen3-coder:latest',
+    }, sink, at);
+    expect(outcome.ok).toBe(true);
+    expect(calls[0]).toMatchObject({ placement: 'remote', nodeId: 'gpu-a', model: 'qwen3-coder:latest', durationMs: 321 });
+  });
+
   test('multiple coder turns aggregate into one attempt evidence', async () => {
     const { sink, calls } = capturing();
 

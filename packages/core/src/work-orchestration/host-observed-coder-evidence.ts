@@ -47,6 +47,9 @@ export interface HostObservedCoderEvidenceV1 {
   // Tempo de parede que o HOST mediu ao redor de `backend.edit()` (convenção Date.now()).
   readonly durationMs: number;
   readonly outcome: HostObservedCoderOutcome;
+  readonly placement?: 'local' | 'remote';
+  readonly nodeId?: string | null;
+  readonly model?: string;
   readonly observedAt: string;
 }
 
@@ -57,6 +60,9 @@ export interface ObservedCoderInput {
   readonly backendId: string;
   readonly durationMs: number;
   readonly outcome: HostObservedCoderOutcome;
+  readonly placement?: 'local' | 'remote';
+  readonly nodeId?: string | null;
+  readonly model?: string;
 }
 
 export interface BuildHostObservedCoderEvidenceInput {
@@ -66,6 +72,9 @@ export interface BuildHostObservedCoderEvidenceInput {
   readonly backendId: string;
   readonly durationMs: number;
   readonly outcome: HostObservedCoderOutcome;
+  readonly placement?: 'local' | 'remote';
+  readonly nodeId?: string | null;
+  readonly model?: string;
   readonly observedAt: string;
 }
 
@@ -109,6 +118,18 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
   if (!CODER_OUTCOMES.has(input.outcome)) {
     return fail('invalid_outcome', 'O desfecho precisa ser succeeded, failed ou cancelled.');
   }
+  const hasPlacementIdentity = input.placement !== undefined || input.nodeId !== undefined || input.model !== undefined;
+  if (hasPlacementIdentity) {
+    if ((input.placement !== 'local' && input.placement !== 'remote') || !nonBlank(input.model)) {
+      return fail('invalid_backend', 'A identidade de placement exige localidade e modelo válidos.');
+    }
+    if (input.placement === 'remote' && !nonBlank(input.nodeId)) {
+      return fail('invalid_backend', 'Placement remoto exige nodeId estável.');
+    }
+    if (input.placement === 'local' && input.nodeId !== null) {
+      return fail('invalid_backend', 'Placement local não pode declarar node remoto.');
+    }
+  }
   if (!nonBlank(input.observedAt) || Number.isNaN(Date.parse(input.observedAt))) {
     return fail('invalid_timestamp', 'observedAt precisa ser um instante ISO-8601 válido.');
   }
@@ -125,6 +146,7 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
       backendId: input.backendId,
       durationMs: input.durationMs,
       outcome: input.outcome,
+      ...(hasPlacementIdentity ? { placement: input.placement!, nodeId: input.nodeId!, model: input.model! } : {}),
       observedAt: input.observedAt,
     },
   };
@@ -148,6 +170,11 @@ export function parseHostObservedCoderEvidence(value: Json | undefined): HostObs
     backendId: root.backendId as string,
     durationMs: root.durationMs as number,
     outcome: root.outcome as HostObservedCoderOutcome,
+    ...(root.placement !== undefined ? {
+      placement: root.placement as 'local' | 'remote',
+      nodeId: root.nodeId as string | null,
+      model: root.model as string,
+    } : {}),
     observedAt: root.observedAt as string,
   });
   return built.ok ? built.value : null;

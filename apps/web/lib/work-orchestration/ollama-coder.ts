@@ -48,6 +48,8 @@ export interface OllamaCoderOptions {
   readonly url?: string;
   /** Identidade observada; ausente preserva `ollama:<model>`. */
   readonly backendId?: string;
+  readonly locality?: 'local' | 'remote';
+  readonly nodeId?: string | null;
   readonly timeoutMs?: number;
   /** Injeção para teste; por padrão o fetch global. */
   readonly fetchImpl?: typeof fetch;
@@ -114,6 +116,7 @@ const clip = (value: string, max: number): string => (value.length <= max ? valu
 
 export class OllamaCoderBackend implements CoderBackend {
   readonly id: string;
+  readonly observation: NonNullable<CoderBackend['observation']>;
   private readonly url: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
@@ -122,6 +125,11 @@ export class OllamaCoderBackend implements CoderBackend {
 
   constructor(private readonly options: OllamaCoderOptions) {
     this.id = options.backendId ?? coderBackendId('ollama', options.model);
+    this.observation = {
+      placement: options.locality ?? 'local',
+      nodeId: options.locality === 'remote' ? (options.nodeId ?? null) : null,
+      model: options.model,
+    };
     this.url = options.url ?? process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 120_000;
