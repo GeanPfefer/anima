@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-30 (Execution Placement V0 provou localmente o boundary de inferência remota: placement local/remote/defer, protocolo Ollama host-mediado em outro endpoint, checkpoint/gates na Goma e evidência com node; compute pago permanece fail-closed; ver [Plano 004](docs/planos/004-execution-placement-v0.md))
+> Documento vivo de design. Última atualização: 2026-08-30 (Provisionamento On-Demand V1, 1º recorte: lifecycle governado de node de compute — máquina de estados mínima idempotente, autorização financeira fail-closed com proveniência humana `necessidade ≠ gasto`, lease temporal, contrato provider-agnóstico e decisão de provisionamento separada do placement; evidência host-observed; provado com processo local real, sem cloud nem despesa; persistência e wiring vivo deferidos; ver [Plano 005](docs/planos/005-provisionamento-on-demand-v1.md). Antes: Execution Placement V0 — inferência remota host-mediada, [Plano 004](docs/planos/004-execution-placement-v0.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
