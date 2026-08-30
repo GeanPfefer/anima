@@ -498,7 +498,15 @@ const MAX_CREATE_CHARS = 200_000;
 export type EditOperation =
   | { readonly kind: 'replace_exact'; readonly path: string; readonly expectedFileSha256: string; readonly before: string; readonly after: string }
   | { readonly kind: 'create_file'; readonly path: string; readonly content: string }
-  | { readonly kind: 'append'; readonly path: string; readonly expectedFileSha256: string; readonly content: string };
+  | { readonly kind: 'append'; readonly path: string; readonly expectedFileSha256: string; readonly content: string }
+  // `insert` fecha o gap ergonômico PROVADO ao vivo: adicionar um caso a um bloco
+  // existente (ex.: um `test` dentro de um `describe`) não é "fim do arquivo" —
+  // `append` o joga FORA do bloco (léxicamente inválido) e `replace_exact` exige
+  // reproduzir a âncora DUAS vezes (em `before` e `after`). `insert` posiciona
+  // `content` imediatamente ANTES/DEPOIS de uma âncora ÚNICA e exata (reproduzida
+  // UMA vez), sem removê-la. Segue EXATO (ocorrência única, sem fuzzy), com stale
+  // hash, escopo e no-op fail-closed idênticos ao replace.
+  | { readonly kind: 'insert'; readonly path: string; readonly expectedFileSha256: string; readonly anchor: string; readonly position: 'before' | 'after'; readonly content: string };
 
 /** Parseia o lote de operações, fail-closed com limites de quantidade e tamanho.
  * Caminho fora do escopo é `ollama_edit_outside_scope`; qualquer outra violação
@@ -532,6 +540,15 @@ export function parseEditOperations(operations: readonly unknown[], allowed: Rea
       if (typeof op.expected_file_sha256 !== 'string' || !SHA_HEX.test(op.expected_file_sha256)) throw new OllamaProtocolError('ollama_invalid_response_schema', 'append exige "expected_file_sha256" (64 hex).');
       if (typeof op.content !== 'string' || op.content.length === 0 || op.content.length > MAX_AFTER_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'append exige "content" string não vazio dentro do limite.');
       out.push({ kind: 'append', path, expectedFileSha256: op.expected_file_sha256, content: op.content });
+    } else if (op.kind === 'insert') {
+      if (typeof op.path !== 'string') throw new OllamaProtocolError('ollama_invalid_response_schema', 'insert exige "path" string.');
+      const path = resolveScopedPath(op.path, allowed);
+      if (!path) throw new OllamaProtocolError('ollama_edit_outside_scope', `inserção fora do escopo: ${clipStr(op.path)}`);
+      if (typeof op.expected_file_sha256 !== 'string' || !SHA_HEX.test(op.expected_file_sha256)) throw new OllamaProtocolError('ollama_invalid_response_schema', 'insert exige "expected_file_sha256" (64 hex).');
+      if (typeof op.anchor !== 'string' || op.anchor.length === 0 || op.anchor.length > MAX_BEFORE_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'insert exige "anchor" não vazio e dentro do limite.');
+      if (op.position !== 'before' && op.position !== 'after') throw new OllamaProtocolError('ollama_invalid_response_schema', 'insert exige "position" igual a "before" ou "after".');
+      if (typeof op.content !== 'string' || op.content.length === 0 || op.content.length > MAX_AFTER_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'insert exige "content" não vazio dentro do limite.');
+      out.push({ kind: 'insert', path, expectedFileSha256: op.expected_file_sha256, anchor: op.anchor, position: op.position, content: op.content });
     } else {
       throw new OllamaProtocolError('ollama_invalid_response_schema', `operação não suportada: ${clipStr(op.kind)} (exclusão não é permitida neste recorte).`);
     }
@@ -583,6 +600,7 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
   const creates: AppliedChange[] = [];
   const replaceByPath = new Map<string, { before: string; after: string; sha: string }[]>();
   const appendByPath = new Map<string, { content: string; sha: string }[]>();
+  const insertByPath = new Map<string, { anchor: string; position: 'before' | 'after'; content: string; sha: string }[]>();
   for (const op of operations) {
     if (op.kind === 'create_file') {
       if (contentOf(op.path) !== null) throw new OllamaProtocolError('ollama_invalid_response_schema', `create_file exige caminho inexistente: ${op.path}.`);
@@ -591,6 +609,10 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
       const list = appendByPath.get(op.path) ?? [];
       list.push({ content: op.content, sha: op.expectedFileSha256 });
       appendByPath.set(op.path, list);
+    } else if (op.kind === 'insert') {
+      const list = insertByPath.get(op.path) ?? [];
+      list.push({ anchor: op.anchor, position: op.position, content: op.content, sha: op.expectedFileSha256 });
+      insertByPath.set(op.path, list);
     } else {
       const list = replaceByPath.get(op.path) ?? [];
       list.push({ before: op.before, after: op.after, sha: op.expectedFileSha256 });
@@ -602,7 +624,7 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
   // original (offsets do original) e então concatena os appends no fim, numa
   // ÚNICA mudança por caminho. O sha de CADA operação precisa bater com o arquivo
   // como lido — append não afrouxa a verificação de staleness.
-  const editedPaths = new Set<string>([...replaceByPath.keys(), ...appendByPath.keys()]);
+  const editedPaths = new Set<string>([...replaceByPath.keys(), ...appendByPath.keys(), ...insertByPath.keys()]);
   for (const path of editedPaths) {
     const original = contentOf(path);
     if (original === null) throw new OllamaProtocolError('ollama_stale_file_hash', `arquivo do escopo não encontrado para edição: ${path}.`);
@@ -610,16 +632,32 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
     // EOL do arquivo COMO LIDO (o sha atestado é do conteúdo cru; a tolerância é
     // só no casamento da âncora e no reencode do texto inserido).
     const fileUsesCrlf = original.includes('\r\n');
-    const ranges: { start: number; end: number; after: string }[] = [];
+    const ranges: { start: number; end: number; after: string; insert: boolean }[] = [];
     for (const op of replaceByPath.get(path) ?? []) {
       if (op.sha !== currentSha) throw new OllamaProtocolError('ollama_stale_file_hash', `hash divergente para ${path}: o arquivo mudou desde a leitura.`);
       const { count, first, firstEnd } = countOccurrences(original, op.before);
       if (count !== 1) throw new OllamaProtocolError('ollama_ambiguous_replacement', `"before" ocorre ${count} vez(es) em ${path}; esperado exatamente 1.`);
-      ranges.push({ start: first, end: firstEnd, after: toFileEol(op.after, fileUsesCrlf) });
+      ranges.push({ start: first, end: firstEnd, after: toFileEol(op.after, fileUsesCrlf), insert: false });
     }
-    const sorted = [...ranges].sort((a, b) => a.start - b.start);
+    // Insert = range de LARGURA ZERO na borda da âncora única (não remove a
+    // âncora). Mesma exatidão/EOL/stale do replace; a âncora é reproduzida UMA vez.
+    for (const op of insertByPath.get(path) ?? []) {
+      if (op.sha !== currentSha) throw new OllamaProtocolError('ollama_stale_file_hash', `hash divergente para ${path}: o arquivo mudou desde a leitura.`);
+      const { count, first, firstEnd } = countOccurrences(original, op.anchor);
+      if (count !== 1) throw new OllamaProtocolError('ollama_ambiguous_replacement', `"anchor" ocorre ${count} vez(es) em ${path}; esperado exatamente 1.`);
+      const at = op.position === 'before' ? first : firstEnd;
+      ranges.push({ start: at, end: at, after: toFileEol(op.content, fileUsesCrlf), insert: true });
+    }
+    // Inserts primeiro no desempate por posição, para a checagem de borda a seguir.
+    const sorted = [...ranges].sort((a, b) => a.start - b.start || Number(b.insert) - Number(a.insert));
     for (let i = 1; i < sorted.length; i++) {
-      if (sorted[i]!.start < sorted[i - 1]!.end) throw new OllamaProtocolError('ollama_ambiguous_replacement', `operações sobrepostas em ${path}.`);
+      const prev = sorted[i - 1]!; const cur = sorted[i]!;
+      // Interior sobreposto SEMPRE recusa; TOCAR uma borda só recusa quando um dos
+      // lados é insert (ambíguo qual lado do corte o conteúdo entra) — replaces
+      // adjacentes (borda a borda, sem insert) continuam permitidos como antes.
+      if (cur.start < prev.end || (cur.start === prev.end && (cur.insert || prev.insert))) {
+        throw new OllamaProtocolError('ollama_ambiguous_replacement', `operações sobrepostas em ${path}.`);
+      }
     }
     let next = original;
     for (const range of [...sorted].sort((a, b) => b.start - a.start)) {

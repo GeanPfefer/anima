@@ -85,8 +85,10 @@ const SYSTEM = [
   'Planeje as poucas rodadas pelo MANIFESTO: se pretende alterar vários arquivos existentes, reserve leitura para cada um; não releia ranges sobrepostos salvo se faltarem linhas específicas.',
   'EDITAR: {"action":"edit","operations":[{"kind":"replace_exact","path":"<do escopo>","expected_file_sha256":"<sha do arquivo como lido>","before":"<texto EXATO e ÚNICO do arquivo atual>","after":"<novo texto>","expected_occurrences":1}]}',
   'Também é permitido {"kind":"create_file","path":"<do escopo>","content":"<conteúdo>"} somente quando o MANIFESTO marca exists=false. Nunca use create_file em exists=true. Exclusão não é permitida.',
-  'Acrescentar ao FIM de arquivo existente: {"kind":"append","path":"<escopo>","expected_file_sha256":"<sha lido>","content":"<texto>"}. Não invente "before" para o fim.',
-  'Regras: só caminhos do escopo; "before" deve ser copiado EXATAMENTE de um trecho lido e ocorrer uma única vez; use o sha256 do arquivo como lido; peça leituras antes de editar; não explique.',
+  'Acrescentar ao FIM REAL do arquivo (ex.: novo export/função de topo): {"kind":"append","path":"<escopo>","expected_file_sha256":"<sha lido>","content":"<texto>"}. Não invente "before" para o fim.',
+  'Inserir DENTRO de um bloco já existente (ex.: um `test` novo dentro de um `describe` já aberto): {"kind":"insert","path":"<escopo>","expected_file_sha256":"<sha lido>","anchor":"<trecho EXATO e ÚNICO já no arquivo, ex.: o ÚLTIMO test do bloco>","position":"after","content":"<novo texto>"}. A âncora é copiada UMA vez e NÃO é removida; o conteúdo entra logo antes ("before") ou depois ("after") dela.',
+  'NÃO use append para adicionar dentro de um bloco: append vai para o FIM DO ARQUIVO e cai FORA do describe/bloco (léxicamente inválido, o gate falha). Para adicionar um caso a uma suíte, ancore no último caso do describe e use insert position="after".',
+  'Regras: só caminhos do escopo; "before"/"anchor" devem ser copiados EXATAMENTE de um trecho lido e ocorrer uma única vez; use o sha256 do arquivo como lido; peça leituras antes de editar; não explique.',
 ].join('\n');
 
 const EXPERIMENTAL_ANCHOR_SYSTEM = [
@@ -156,6 +158,7 @@ export class OllamaCoderBackend implements CoderBackend {
           `Arquivos alterados observados: ${feedback.changedFiles.join(', ')}. diffSha256=${feedback.diffSha256}.`,
           ...(feedback.diagnostic ? [`Diagnóstico sanitizado do host:\n${feedback.diagnostic}`] : []),
           'Leia o estado ATUAL necessário, corrija a implementação existente dentro do mesmo escopo e inclua/ajuste a prova determinística exigida pelo objetivo. Não invente APIs ou campos: confirme-os no código servido. O host reexecutará os gates.',
+          'Se o diagnóstico acusar nomes não encontrados (ex.: "Cannot find name") ou erro estrutural, o código novo provavelmente está no ESCOPO LÉXICO ERRADO — ex.: um test que ficou FORA do describe. Reposicione-o: remova-o de onde está (replace_exact do trecho mal colocado) e insira DENTRO do bloco correto ancorando no último caso (insert position="after"). NÃO apenas redeclare o nome nem repita o mesmo patch.',
           'O repair precisa mudar bytes do estado ATUAL: não repita o patch já presente e não envie replace_exact com before e after equivalentes. Operação idempotente é no-progress e será recusada.',
           'Preserve TypeScript strict: se o tipo de retorno exclui undefined, torne acessos por índice/find explicitamente null-safe e não introduza um caminho que retorne undefined.',
           'Trate o diagnóstico do gate e os critérios do objetivo como autoridade: corrija exatamente a asserção observada, sem substituir o comportamento exigido por fallback, exceção ou interpretação alternativa.',

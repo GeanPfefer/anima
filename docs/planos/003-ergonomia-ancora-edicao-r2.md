@@ -351,3 +351,47 @@ corretamente `755cf95`, mas terminou sem edit. O successor `fafd7af1…` ficou
 Próximo ponto exato: investigar, em seam isolado e sem nova attempt canônica, por
 que o repair do Ollama não moveu o teste para o escopo léxico existente apesar do
 diagnóstico de gate; só depois criar nova unidade governada.
+
+## Continuação — 2026-08-29: causa das 3 falhas e a primitive `insert`
+
+A reconstrução dos fatos persistidos do successor `fafd7af1…` isolou a barreira
+como bug de ergonomia de edição do HOST, não incompetência do modelo. As três
+attempts (`27236fa3`, `870ea9b7`, `7bbfbd82`) falharam todas com
+`ollama_no_effective_edits`, mas a cronologia distingue as causas:
+
+- A/B produziram checkpoint (`d1a93ea5`/`755cf95`), o gate reprovou (`exitCode 1`)
+  e o reparo não mudou bytes. O diff mostra a causa: o coder usou `append`, que
+  coloca o novo `test` DEPOIS do `});` que fecha o `describe` — FORA do bloco. O
+  teste referencia `authorized`/`other`, consts do escopo do describe, então o
+  gate quebra com `TS2304: Cannot find name 'authorized'`.
+- C retomou `755cf95` (já com o teste mal colocado) e terminou sem edit efetivo.
+
+Reprodução isolada (seam descartável, sem consumir attempt canônica) confirmou que
+o diagnóstico do gate CHEGA ao reparo (as linhas `TS2304` sobrevivem ao
+sanitizador), mas aponta o SINTOMA (nome indefinido), não a CAUSA (placement). Com
+`append` (fim do arquivo) e `replace_exact` (âncora `});` ambígua) não havia
+primitive para inserir DENTRO do bloco — classe D (ergonomia), contribuinte F
+(diagnóstico só do sintoma). Não é A/B/C/H nem hardware.
+
+Fix mínimo (bug de protocolo/host, não fuzzy): nova operação `insert`
+(`{kind,path,expected_file_sha256,anchor,position:"before"|"after",content}`).
+Posiciona `content` na borda de uma âncora ÚNICA e exata (reproduzida UMA vez, não
+duas como no `replace_exact`), sem removê-la. Reusa a maquinaria EXATA
+(EOL-agnóstica, ocorrência única, stale-hash, escopo); range de largura zero com
+recusa fail-closed de sobreposição/toque com outras edições; `content` não vazio
+evita no-op. O prompt do coder passou a ensinar `insert` para adicionar a um bloco
+e a PROIBIR `append` dentro de bloco; o contexto de reparo ganhou a dica de que
+"nome não encontrado" costuma ser escopo léxico errado, a corrigir por
+reposicionamento (`insert`), não por redeclaração.
+
+Provas: `ollama-protocol` 50/50 (5 casos novos de `insert`, incluindo o caso
+representativo "teste dentro do describe"); `ollama-coder` 20/20 (teste de
+orçamento de reparo re-calibrado ao SYSTEM expandido — a invariante testada é o
+guard do payload do reparo, não o tamanho absoluto); `worktree-executor` +
+`review-correction-orchestration` verdes; typecheck web verde. A correção CRLF↔LF
+anterior foi preservada (o `insert` a reusa).
+
+Próximo ponto exato: nova unidade governada de correção por retomada sobre
+`71445254…` (sequência 3, após o terminal `fafd7af1…`), aprovada pelo humano, para
+observar se o coder agora coloca o teste DENTRO do describe com `insert` e
+atravessa gate → Verifier → review. Sem reabrir o terminal `fafd7af1…`.

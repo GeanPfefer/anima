@@ -475,6 +475,71 @@ describe('ollama-protocol — Commit 3: edições exatas', () => {
   });
 });
 
+describe('ollama-protocol — insert (âncora exata, before/after)', () => {
+  const FILE = 'docs/a.md';
+  const contentOf = (files: Record<string, string>) => (p: string): string | null => (p in files ? files[p]! : null);
+  const insert = (anchor: string, position: string, content: string, s: string): unknown =>
+    ({ kind: 'insert', path: FILE, expected_file_sha256: s, anchor, position, content });
+
+  test('parse aceita insert válido; recusa position inválida, anchor/content vazios, sha inválido, fora do escopo', () => {
+    const sha = sha256('linha1\nlinha2\n');
+    const ops = parseEditOperations([insert('linha1', 'after', 'X\n', sha)], new Set([FILE]));
+    expect(ops[0]!.kind).toBe('insert');
+    const bad: [unknown, string][] = [
+      [insert('linha1', 'ao-lado', 'X', sha), 'ollama_invalid_response_schema'],
+      [insert('', 'after', 'X', sha), 'ollama_invalid_response_schema'],
+      [insert('linha1', 'after', '', sha), 'ollama_invalid_response_schema'],
+      [{ kind: 'insert', path: FILE, expected_file_sha256: 'nope', anchor: 'a', position: 'after', content: 'x' }, 'ollama_invalid_response_schema'],
+      [{ kind: 'insert', path: 'fora/y.md', expected_file_sha256: sha, anchor: 'a', position: 'after', content: 'x' }, 'ollama_edit_outside_scope'],
+    ];
+    for (const [op, code] of bad) {
+      try { parseEditOperations([op], new Set([FILE])); throw new Error('deveria lançar'); }
+      catch (e) { expect((e as { code?: string }).code).toBe(code); }
+    }
+  });
+
+  test('insert after/before posiciona ao redor da âncora única, preservando o resto byte a byte', () => {
+    const src = 'a\nb\nc\n'; const sha = sha256(src);
+    const after = applyEditOperations(parseEditOperations([insert('b\n', 'after', 'NOVO\n', sha)], new Set([FILE])), contentOf({ [FILE]: src }));
+    expect(after[0]!.newContent).toBe('a\nb\nNOVO\nc\n');
+    const before = applyEditOperations(parseEditOperations([insert('c\n', 'before', 'NOVO\n', sha)], new Set([FILE])), contentOf({ [FILE]: src }));
+    expect(before[0]!.newContent).toBe('a\nb\nNOVO\nc\n');
+  });
+
+  test('adiciona um caso DENTRO de um bloco ancorando no último elemento (não no fim do arquivo, como o append faria)', () => {
+    const src = "describe('s', () => {\n  test('a', () => { expect(1).toBe(1); });\n});\n";
+    const anchor = "  test('a', () => { expect(1).toBe(1); });";
+    const novo = "\n  test('b', () => { expect(2).toBe(2); });";
+    const out = applyEditOperations(parseEditOperations([insert(anchor, 'after', novo, sha256(src))], new Set([FILE])), contentOf({ [FILE]: src }))[0]!.newContent;
+    expect(out).toBe("describe('s', () => {\n  test('a', () => { expect(1).toBe(1); });\n  test('b', () => { expect(2).toBe(2); });\n});\n");
+    // O novo caso fica ANTES do `});` que fecha o describe (dentro do bloco léxico).
+    expect(out.indexOf("test('b'")).toBeLessThan(out.lastIndexOf('});'));
+  });
+
+  test('âncora ambígua (>1) e ausente (0) são recusadas; hash desatualizado é recusado; CRLF preservado', () => {
+    const src = 'x\nx\n'; const sha = sha256(src);
+    try { applyEditOperations(parseEditOperations([insert('x', 'after', 'Y', sha)], new Set([FILE])), contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+    try { applyEditOperations(parseEditOperations([insert('NÃO EXISTE', 'after', 'Y', sha)], new Set([FILE])), contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+    try { applyEditOperations(parseEditOperations([insert('x\n', 'after', 'Y', sha256('outro'))], new Set([FILE])), contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_stale_file_hash'); }
+    const crlf = 'p\r\nq\r\n';
+    const out = applyEditOperations(parseEditOperations([insert('p\n', 'after', 'R\n', sha256(crlf))], new Set([FILE])), contentOf({ [FILE]: crlf }))[0]!.newContent;
+    expect(out).toBe('p\r\nR\r\nq\r\n');
+  });
+
+  test('insert que sobrepõe/toca um replace no mesmo arquivo é recusado (fail-closed)', () => {
+    const src = 'INICIO meio FIM\n'; const sha = sha256(src);
+    const ops = parseEditOperations([
+      { kind: 'replace_exact', path: FILE, expected_file_sha256: sha, before: 'meio', after: 'X' },
+      insert('meio', 'before', 'Y', sha),
+    ], new Set([FILE]));
+    try { applyEditOperations(ops, contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+  });
+});
+
 describe('ollama-protocol — escrita do lote (writeChangeSet)', () => {
   const FALSE = '<<FALSE>>';
   const THROW = '<<THROW>>';

@@ -285,7 +285,10 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     const objective = 'reconciliar'; // o SYSTEM expandido deixa o prompt original perto deste teto estreito
     const bigInvalid = `{"lixo":"${'x'.repeat(700)}"}`; // schema inválido e grande (eco clip=500)
     const { fetchImpl, sentBodies } = scriptedFetch([bigInvalid, editReq(sha256('linha única'))]);
-    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, operationalContextCap: 1280 })
+    // Cap re-calibrado ao SYSTEM atual (que ganhou a operação `insert`): o prompt
+    // original cabe no inputBudget (=cap/2), mas o payload do reparo (eco clip 500)
+    // o estoura — a invariante testada é essa, não o tamanho absoluto do prompt.
+    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, operationalContextCap: 1700 })
       .edit({ objective, includedScope: ['docs/a.md'], excludedScope: ['x'] }, workspace, new AbortController().signal))
       .rejects.toMatchObject({ code: 'ollama_context_budget_exceeded' });
     // A 1ª chamada (prompt original) foi enviada; o reparo foi barrado antes da 2ª.
