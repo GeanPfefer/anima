@@ -36,3 +36,14 @@ describe('chat-surface — separação chat pessoal x desenvolvimento', () => {
     expect(resolveChatDevelopmentMode({ requested: false, authorized: false })).toBe(false);
   });
 });
+
+
+// Testes adicionais para verificar a deduplicação ordenada e preservação da primeira ocorrência
+  test('deduplicação ordenada e preservação da primeira ocorrência', () => {
+    const envWithDuplicates = {
+      ANIMA_DEVELOPMENT_CHAT_USER_IDS: `${authorized}, ${authorized}, ${other}, ${authorized}`
+    } as unknown as NodeJS.ProcessEnv;
+
+    const result = developmentChatUserIds(envWithDuplicates);
+    expect(result).toEqual([authorized, other]); // deve manter a ordem e remover duplicatas
+  });
