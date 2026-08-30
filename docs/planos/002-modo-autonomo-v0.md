@@ -1,5 +1,14 @@
 # Plano 002 — Modo Autônomo V0
 
+## Fechamento — Dev Local V1 + review/rework incremental completo (2026-08-30)
+
+`DEV_LOCAL_V1_REVIEW_REWORK_INCREMENTAL = PASS`. Após a reverificação append-only
+descrita abaixo, o usuário aceitou no chat o resultado da attempt `f7fd8c2e…`. O item
+`b811aaa1…` passou de `review` a `completed` pelo evento `result_accepted` seq 42060,
+`author=user`, referenciando exatamente o `result_submitted` `437f7ad9…`. Nenhuma
+integração, publicação, PR, merge ou deploy foi autorizada ou executada. Marco:
+[008](../marcos/008-dev-local-v1-review-rework-incremental.md).
+
 ## Continuação — delta da attempt no Verifier e reverificação append-only (2026-08-30)
 
 O falso positivo da correção retomada foi fechado sem perder proveniência. A
