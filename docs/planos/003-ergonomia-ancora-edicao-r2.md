@@ -331,3 +331,23 @@ afrouxado e falha não vira resultado.
 Próximo ponto exato: formular uma decomposição governada que use a evidência
 repetida e, numa nova prova autorizada, verificar que um terminal após checkpoint
 mantém branch/diff retomáveis antes de perseguir re-gate e Verifier.
+
+## Continuação — 2026-08-29: correção de review por retomada
+
+O item real `71445254…` materializou uma correção governada a partir de
+`c89765a`, reduzida exclusivamente a `chat-surface.test.ts`. A prova encontrou e
+corrigiu três lacunas gerais antes de atravessar a execução: classificação de
+successor pela lineage sem copiar proveniência ao intent, enforcement de escopo
+contra o delta da attempt (não contra o diff herdado) e nova sequência idempotente
+após successor terminal. O retry também passou a preferir o checkpoint Git mais
+recente da própria unidade, mantendo a base autorizada original.
+
+A prova canônica não concluiu: o coder adicionou duas vezes o mesmo teste fora do
+`describe`; gate falhou e repair não produziu mudança. A terceira attempt retomou
+corretamente `755cf95`, mas terminou sem edit. O successor `fafd7af1…` ficou
+`failed`, 3/3, sem Verifier. `chat-surface.ts` permaneceu byte a byte igual a
+`c89765a` em todas as attempts.
+
+Próximo ponto exato: investigar, em seam isolado e sem nova attempt canônica, por
+que o repair do Ollama não moveu o teste para o escopo léxico existente apesar do
+diagnóstico de gate; só depois criar nova unidade governada.

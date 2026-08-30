@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-29 (sessão: `ollama_no_effective_edits` reconciliado como `no_progress`; successor canônico confirmou repetição em 2/2 e revelou checkpoint Git não durável; executor corrigido para preservar o edit anterior ao gate/repair; ver [registro](docs/registros/2026-08-29-checkpoint-git-duravel-do-coder-local.md) e [Plano 003](docs/planos/003-ergonomia-ancora-edicao-r2.md))
+> Documento vivo de design. Última atualização: 2026-08-29 (prova viva de correção por review retomou checkpoint e preservou implementação, mas parou após 3/3 por incapacidade do coder de reparar o teste; classificação por lineage, enforcement do delta retomado, successor pós-terminal e retry do checkpoint mais recente foram corrigidos; ver [registro](docs/registros/2026-08-29-review-correction-retomada-viva.md) e [Plano 003](docs/planos/003-ergonomia-ancora-edicao-r2.md))
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
