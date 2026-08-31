@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import {
   buildNodeLifecycleEvidence,
   decideCoderProvisioning,
+  deriveBoundedLease,
   estimateLeaseCost,
   evaluatePaidComputeAuthorization,
   transitionNodeLifecycle,
@@ -140,13 +141,27 @@ export async function prepareResidentOnDemandCoderNode(input: {
   if (decision.action !== 'provision') return { ok: false, reason: 'provision_failed', detail: `unexpected decision: ${decision.action}` };
 
   const authorizationRef = financial.authorized && financial.requiresPayment ? financial.authorizationRef : null;
-  const lease: NodeLeaseV0 = {
-    schemaVersion: 1, nodeId: config.nodeId, providerId: config.providerId, billingMode: config.billingMode,
-    workItemId: input.workItemId, attemptId: input.leaseId,
-    maxActiveDurationMs: config.maxActiveDurationMs, idleTimeoutMs: config.idleTimeoutMs,
-    leaseExpiresAt: new Date(clock().getTime() + config.maxActiveDurationMs).toISOString(),
-    authorizationRef, priceHint: null,
-  };
+  // Node PAGO: a lease é derivada da AUTORIDADE (teto duro) — deadline nunca ultrapassa a
+  // janela da autorização. Fail-closed se a janela já se esgotou entre a avaliação e aqui.
+  // Node não-pago (owned): lease pelo envelope de config (sem autoridade financeira).
+  let lease: NodeLeaseV0;
+  if (config.billingMode === 'paid' && authorization !== null && financial.authorized && financial.requiresPayment) {
+    const bounded = deriveBoundedLease({
+      authorization, nodeId: config.nodeId, workItemId: input.workItemId, attemptId: input.leaseId,
+      requestedDurationMs: config.maxActiveDurationMs, idleTimeoutMs: config.idleTimeoutMs,
+      now: clock(), priceHint: null,
+    });
+    if (!bounded.ok) return { ok: false, reason: 'waiting_authorization', detail: `authority_envelope:${bounded.reason}` };
+    lease = bounded.lease;
+  } else {
+    lease = {
+      schemaVersion: 1, nodeId: config.nodeId, providerId: config.providerId, billingMode: config.billingMode,
+      workItemId: input.workItemId, attemptId: input.leaseId,
+      maxActiveDurationMs: config.maxActiveDurationMs, idleTimeoutMs: config.idleTimeoutMs,
+      leaseExpiresAt: new Date(clock().getTime() + config.maxActiveDurationMs).toISOString(),
+      authorizationRef, priceHint: null,
+    };
+  }
   const sink = input.evidenceSink ?? nodeLifecycleEvidenceSinkFor(input.client);
   const activeSince = clock();
   let state: NodeLifecycleState = 'offline';

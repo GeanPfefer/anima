@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import type { NodeLifecycleEvidenceV1, NodeProvisioner } from '@anima/core';
+import type { NodeLifecycleEvidenceV1, NodeProvisioner, NodeProvisionRequest } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
@@ -66,6 +66,36 @@ describe('Resident Host — node on-demand vivo', () => {
       'provision_requested', 'health_confirmed', 'reserved', 'released', 'shutdown_requested', 'shutdown_confirmed',
     ]);
     expect((await provisioner.inspect({ nodeId: 'node-owned', providerId: 'local-process', endpoint: prepared.runtime.url, providerRef: 'missing' }, new AbortController().signal)).reachable).toBe(false);
+  });
+
+  test('node PAGO: lease é clampada à janela da autorização ao vivo (teto duro)', async () => {
+    const now = new Date('2026-08-31T00:00:00.000Z');
+    const validUntil = '2026-08-31T00:03:00.000Z'; // autoridade vence em 3 min
+    const authRow = {
+      id: 'auth-x', user_id: 'u', provider_id: 'local-process', node_id: null, resource_class: null, work_item_id: null,
+      max_duration_ms: 60 * 60_000, max_cost_currency: null, max_cost_amount: null,
+      valid_from: '2026-08-30T23:00:00.000Z', valid_until: validUntil, revoked_at: null, created_at: '2026-08-30T23:00:00.000Z',
+    };
+    const chain = { eq: () => chain, is: () => chain, lte: () => chain, gt: () => chain, order: () => chain, limit: async () => ({ data: [authRow], error: null }) };
+    const client = { from: () => ({ select: () => chain }) } as unknown as SupabaseClient<Database>;
+    let capturedLease: NodeProvisionRequest['lease'] | null = null;
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async req => { capturedLease = req.lease; return { ok: false, reason: 'parar após capturar a lease' }; },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }),
+      stop: async () => ({ ok: true }),
+    };
+    const prepared = await prepareResidentOnDemandCoderNode({
+      client, config: { ...config('paid'), maxActiveDurationMs: 30 * 60_000 }, workItemId: 'work-1', proposalVersion: 1,
+      leaseId: 'lease-x', signal: new AbortController().signal, now: () => now,
+      evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) }, provisionerFactory: () => provisioner,
+    });
+    expect(prepared.ok).toBe(false); // provision falha de propósito depois de capturar a lease
+    expect(capturedLease).not.toBeNull();
+    // Deadline clampado à autoridade (3 min), NÃO agora+30min; duração = min(30, 60) = 30min.
+    expect(capturedLease!.leaseExpiresAt).toBe(validUntil);
+    expect(capturedLease!.maxActiveDurationMs).toBe(30 * 60_000);
+    expect(capturedLease!).toMatchObject({ billingMode: 'paid', authorizationRef: 'auth-x' });
   });
 
   test('paid sem autorização persistida não chama provisioner', async () => {
