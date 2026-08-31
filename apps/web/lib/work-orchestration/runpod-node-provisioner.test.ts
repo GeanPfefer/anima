@@ -193,6 +193,27 @@ describe('RunPodNodeProvisioner', () => {
     expect(await new RunPodNodeProvisioner(config(), fakeHttp(() => json(404, {})).client, opts).destroy(handle, signal())).toEqual({ ok: true });
   });
 
+  test('locate: encontra o pod pelo nome determinístico (reconciliação de órfão)', async () => {
+    const { client } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, [runningPod({ name: 'anima-burst-9' })]);
+      return json(404, {});
+    });
+    const located = await new RunPodNodeProvisioner(config(), client, opts).locate('burst-9', signal());
+    expect(located).toMatchObject({ ok: true, found: true, handle: { nodeId: 'burst-9', providerRef: 'pod-1' } });
+  });
+
+  test('locate: sem pod com o nome → found:false; erro de rede → ok:false', async () => {
+    const empty = fakeHttp(() => json(200, []));
+    expect(await new RunPodNodeProvisioner(config(), empty.client, opts).locate('burst-x', signal())).toEqual({ ok: true, found: false });
+    const net = fakeHttp(() => 'network');
+    expect(await new RunPodNodeProvisioner(config(), net.client, opts).locate('burst-x', signal())).toMatchObject({ ok: false });
+  });
+
+  test('locate: pod terminal (EXITED) não é reconciliável → found:false', async () => {
+    const { client } = fakeHttp(() => json(200, [runningPod({ name: 'anima-burst-1', desiredStatus: 'EXITED' })]));
+    expect(await new RunPodNodeProvisioner(config(), client, opts).locate('burst-1', signal())).toEqual({ ok: true, found: false });
+  });
+
   test('segredo NUNCA aparece em nenhum reason/detail de erro (Missão 6)', async () => {
     // Provider ecoa a chave no corpo de erro; o adapter redige internamente e devolve só o código.
     for (const status of [400, 401, 402, 429, 500]) {

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { get as httpGet } from 'node:http';
 import type {
+  LocateOutcome,
   NodeProvisioner,
   NodeProvisionRequest,
   NodeStatusReport,
@@ -109,6 +110,13 @@ export class LocalProcessNodeProvisioner implements NodeProvisioner {
     await this.killAndAwaitExit(child);
     this.children.delete(handle.providerRef);
     return { ok: true };
+  }
+
+  /** Reconciliação: um processo local NÃO sobrevive ao host — não há recurso externo durável a
+   * reconciliar após restart. Sempre `found:false` (o teardown do processo vivo é do fluxo, não
+   * do reconciler). */
+  async locate(_nodeId: string, _signal: AbortSignal): Promise<LocateOutcome> {
+    return { ok: true, found: false };
   }
 
   /** Cleanup de segurança para testes: mata e aguarda o exit de qualquer processo remanescente,

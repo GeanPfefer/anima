@@ -1,4 +1,5 @@
 import type {
+  LocateOutcome,
   NodePriceHintV0,
   NodeProvisioner,
   NodeProvisionRequest,
@@ -219,9 +220,18 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     return { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' };
   }
 
-  private podName(request: NodeProvisionRequest): string {
-    // Nome DETERMINÍSTICO por node: um replay de provision encontra o mesmo pod (não cria dois).
-    return `anima-${request.nodeId}`;
+  // Nome DETERMINÍSTICO por node: um replay de provision (ou a reconciliação após restart)
+  // encontra o mesmo pod pelo nome, sem depender de estado volátil.
+  private nameFor(nodeId: string): string { return `anima-${nodeId}`; }
+  private podName(request: NodeProvisionRequest): string { return this.nameFor(request.nodeId); }
+
+  /** Localiza o pod que respalda `nodeId` pelo nome determinístico — para reconciliação de
+   * órfão. Não cria nada. `found:false` quando não há pod não-terminal com esse nome. */
+  async locate(nodeId: string, signal: AbortSignal): Promise<LocateOutcome> {
+    const found = await this.findPodByName(this.nameFor(nodeId), signal);
+    if (!found.ok) return { ok: false, reason: found.reason };
+    if (!found.pod) return { ok: true, found: false };
+    return { ok: true, found: true, handle: { nodeId, providerId: this.providerId, endpoint: this.endpointOf(found.pod), providerRef: found.pod.id } };
   }
 
   async provision(request: NodeProvisionRequest, signal: AbortSignal): Promise<ProvisionOutcome> {
@@ -361,7 +371,7 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     return { kind: 'ok', pod };
   }
 
-  private endpointOf(pod: PodView): string | null {
+  private endpointOf(pod: PodView): string {
     const mapped = pod.portMappings[String(this.config.inferencePort)];
     if (pod.publicIp && typeof mapped === 'number') return `http://${pod.publicIp}:${mapped}`;
     // Sem exposição TCP: convenção de proxy HTTP do RunPod para portas http.

@@ -57,6 +57,15 @@ export type StopOutcome =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: string };
 
+/** Resultado de LOCALIZAR o recurso que hoje respalda um node lógico (por nodeId), sem criar
+ * nada. Usado pela RECONCILIAÇÃO após restart: a Goma perdeu o handle em memória, mas o recurso
+ * pago pode continuar de pé. O adapter reconstrói o handle a partir do nodeId (ex.: nome
+ * determinístico no provider), permitindo teardown de órfão sem depender de estado volátil. */
+export type LocateOutcome =
+  | { readonly ok: true; readonly found: false }
+  | { readonly ok: true; readonly found: true; readonly handle: ProvisionedNodeHandle }
+  | { readonly ok: false; readonly reason: string };
+
 /**
  * Porta do provisionamento. Implementações concretas (fake-realista local, e futuramente
  * providers reais) NÃO decidem nada — recebem um pedido já autorizado/decidido e tocam o
@@ -69,4 +78,8 @@ export interface NodeProvisioner {
   inspect(handle: ProvisionedNodeHandle, signal: AbortSignal): Promise<NodeStatusReport>;
   stop(handle: ProvisionedNodeHandle, signal: AbortSignal): Promise<StopOutcome>;
   destroy?(handle: ProvisionedNodeHandle, signal: AbortSignal): Promise<StopOutcome>;
+  /** Localiza (sem criar) o recurso que respalda `nodeId` — para reconciliação de órfão após
+   * restart. Opcional: providers sem estado durável externo (ex.: processo local que morre com
+   * o host) podem devolver `found:false`. */
+  locate?(nodeId: string, signal: AbortSignal): Promise<LocateOutcome>;
 }
