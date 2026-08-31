@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(15);
+SELECT plan(18);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('cb000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','budget-owner@test.invalid','',now(),'{}','{}',now(),now()),
@@ -38,6 +38,7 @@ SELECT is((public.void_paid_compute_budget_reservation(
   (SELECT reservation_id FROM public.paid_compute_budget_events WHERE event_type='reserved'),'provider_not_called'))->>'action','voided','void seguro é append-only');
 SELECT is((public.void_paid_compute_budget_reservation(
   (SELECT reservation_id FROM public.paid_compute_budget_events WHERE event_type='reserved'),'provider_not_called'))->>'action','replayed','retry do void é idempotente');
+SELECT is((pg_temp.reserve('key-a','lease-a',0.70))->>'reason','reservation_voided','reserva anulada não volta a conceder efeito');
 SELECT is((pg_temp.reserve('key-c','lease-c',1.00))->>'action','reserved','void comprovado libera exatamente o envelope');
 SELECT is((pg_temp.reserve('key-d','lease-d',0.000001))->>'reason','aggregate_budget_exceeded','mínimo acima do restante é negado');
 SELECT throws_ok($$ SELECT pg_temp.reserve('key-zero','lease-zero',0) $$,'22023',NULL,'estimate zero é inválido');
@@ -45,6 +46,26 @@ SELECT is((pg_temp.reserve('key-brl','lease-brl',0.1,'BRL'))->>'reason','currenc
 SELECT throws_ok($$ SELECT public.void_paid_compute_budget_reservation(
   (SELECT reservation_id FROM public.paid_compute_budget_events WHERE event_type='reserved' LIMIT 1),'lease_finished') $$,
   '22023',NULL,'término comum não autoriza liberar reserva');
+
+-- Replay idempotente preserva a reserva historica, mas nao concede
+-- autoridade nova depois que o envelope humano expirou.
+RESET ROLE;
+UPDATE public.paid_compute_authorizations
+SET valid_until = now() - interval '1 second'
+WHERE id = (SELECT id FROM budget_auth);
+
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub','cb000000-0000-0000-0000-000000000001',true);
+SELECT set_config('request.jwt.claim.role','authenticated',true);
+
+SELECT is(
+  (pg_temp.reserve('key-c','lease-c',1.00))->>'reason',
+  'authorization_expired',
+  'replay nao inicia efeito apos expiracao'
+);
+
+SELECT public.revoke_paid_compute_authorization((SELECT id FROM budget_auth));
+SELECT is((pg_temp.reserve('key-c','lease-c',1.00))->>'reason','authorization_revoked','replay não inicia efeito após revogação');
 
 SELECT set_config('request.jwt.claim.sub','cb000000-0000-0000-0000-000000000002',true);
 SELECT is((SELECT count(*) FROM public.paid_compute_budget_events),0::bigint,'outro usuário não lê o ledger');
