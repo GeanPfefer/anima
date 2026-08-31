@@ -35,8 +35,11 @@ expande o teto.
 
 `evaluateLeaseStatus` (core) decide deterministicamente `active | expired(deadline|max_duration|
 idle_timeout)`. O deadline é o `leaseExpiresAt` clampado à autoridade. O teardown ao fim é
-garantido pelo reconciler (§5), não por um `finally{}` de caminho feliz nem por `setTimeout` em
-memória.
+garantido pelo reconciler (§5) — o mecanismo DURÁVEL —, não por um `finally{}` de caminho feliz
+nem por `setTimeout` em memória. Como CONVENIÊNCIA (não substituto), um watchdog best-effort
+(`leaseDeadlineSignal`) aborta a volta paga no deadline da lease para parar o gasto MAIS CEDO; se
+o processo morre, o timer some mas o reconciler ainda converge. O teardown (`finish`) usa o sinal
+BASE, não o do watchdog, para rodar mesmo após o abort.
 
 ## 5. Reconciler / recuperação de órfão
 

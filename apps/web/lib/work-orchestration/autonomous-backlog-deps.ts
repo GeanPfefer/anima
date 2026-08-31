@@ -7,7 +7,7 @@ import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
 import { readMachinePressure, readResourceAdmission } from './resource-governor';
 import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteRuntimeFor } from './coder-placement';
-import { onDemandBurstForced, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
+import { leaseDeadlineSignal, onDemandBurstForced, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
 import { readLivePaidNodeCount } from './paid-compute-lease-reconciler-deps';
 
 // ============================================================
@@ -146,13 +146,18 @@ export function buildProjectBacklogCycleDeps(
       if (!selection.ok) return notExecutable(entry, selection.error.code, selection.error.message);
 
       let turn: SupervisorTurnResult | null = null;
+      // Watchdog best-effort: numa lease paga, a volta é abortada no DEADLINE da lease para parar
+      // o gasto mais cedo (o teardown/reconciler durável segue como rede de segurança). O
+      // `finish` usa o sinal BASE (não este) para garantir teardown mesmo após o abort.
+      const turnDeadline = onDemandSession?.ok ? leaseDeadlineSignal(signal, onDemandSession.leaseExpiresAt) : null;
       try {
         turn = await runSupervisorTurn({
           client, routes: [selection.route], ownerInstanceId,
-          newId: () => crypto.randomUUID(), signal,
+          newId: () => crypto.randomUUID(), signal: turnDeadline?.signal ?? signal,
           requestedWork: { workItemId: entry.workItemId, expectedProposalVersion: entry.approvedProposalVersion },
         });
       } finally {
+        turnDeadline?.dispose();
         if (onDemandSession?.ok) await onDemandSession.finish(turn?.attemptId ?? null);
       }
       if (turn === null) return notExecutable(entry, 'resident_turn_failed', 'A volta do Resident Host não devolveu resultado.');

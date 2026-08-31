@@ -3,7 +3,7 @@ import type { NodeLifecycleEvidenceV1, NodeProvisioner, NodeProvisionRequest } f
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
-import { prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig, resolveOnDemandProvisioner, type ResidentOnDemandNodeConfig } from './resident-on-demand-node';
+import { leaseDeadlineSignal, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig, resolveOnDemandProvisioner, type ResidentOnDemandNodeConfig } from './resident-on-demand-node';
 import { join } from 'node:path';
 
 const RUNPOD_ENV = {
@@ -250,5 +250,34 @@ describe('Resident Host — node on-demand vivo', () => {
     });
     expect(prepared).toMatchObject({ ok: false, reason: 'provision_failed' });
     expect(evidence.map(value => value.transition.event)).toEqual(['provision_requested', 'provision_failed']);
+  });
+});
+
+describe('leaseDeadlineSignal (watchdog best-effort do deadline da lease)', () => {
+  test('deadline já vencido → aborta imediatamente', () => {
+    const { signal, dispose } = leaseDeadlineSignal(new AbortController().signal, '2000-01-01T00:00:00.000Z');
+    expect(signal.aborted).toBe(true); dispose();
+  });
+  test('sinal base já abortado → deriva abortado', () => {
+    const c = new AbortController(); c.abort();
+    const { signal, dispose } = leaseDeadlineSignal(c.signal, '2100-01-01T00:00:00.000Z');
+    expect(signal.aborted).toBe(true); dispose();
+  });
+  test('abortar o base propaga ao derivado', () => {
+    const c = new AbortController();
+    const { signal, dispose } = leaseDeadlineSignal(c.signal, '2100-01-01T00:00:00.000Z');
+    expect(signal.aborted).toBe(false); c.abort(); expect(signal.aborted).toBe(true); dispose();
+  });
+  test('deadline futuro dispara o abort no prazo', async () => {
+    const { signal, dispose } = leaseDeadlineSignal(new AbortController().signal, new Date(Date.now() + 15).toISOString());
+    expect(signal.aborted).toBe(false);
+    await new Promise(r => setTimeout(r, 40));
+    expect(signal.aborted).toBe(true); dispose();
+  });
+  test('dispose limpa o timer (não aborta o gasto do teardown depois)', async () => {
+    const { signal, dispose } = leaseDeadlineSignal(new AbortController().signal, new Date(Date.now() + 50).toISOString());
+    dispose();
+    await new Promise(r => setTimeout(r, 80));
+    expect(signal.aborted).toBe(false);
   });
 });

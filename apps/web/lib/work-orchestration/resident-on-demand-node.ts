@@ -121,7 +121,31 @@ export function onDemandBurstForced(env: Record<string, string | undefined> = pr
 
 export type ResidentNodePreparation =
   | { readonly ok: false; readonly reason: 'waiting_authorization' | 'concurrency_limit' | 'provision_failed' | 'health_failed' | 'evidence_failed'; readonly detail: string }
-  | { readonly ok: true; readonly runtime: ReturnType<typeof remoteRuntimeFor>; finish(attemptId: string | null): Promise<void> };
+  | { readonly ok: true; readonly runtime: ReturnType<typeof remoteRuntimeFor>; readonly leaseExpiresAt: string; finish(attemptId: string | null): Promise<void> };
+
+/**
+ * Sinal derivado que aborta no DEADLINE da lease (ou quando o sinal base abortar) — watchdog
+ * BEST-EFFORT em memória para interromper uma volta paga que ultrapasse o teto temporal, parando
+ * o gasto MAIS CEDO. NÃO é o mecanismo de segurança durável (esse é o reconciler + o deadline
+ * persistido): se o processo morre, o timer some, mas o reconciler ainda converge. Devolve o
+ * sinal e um `dispose` para limpar o timer. Deadline já vencido → aborta imediatamente.
+ */
+export function leaseDeadlineSignal(base: AbortSignal, leaseExpiresAt: string, now: () => number = Date.now): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController();
+  const onBase = () => controller.abort();
+  if (base.aborted) controller.abort();
+  else base.addEventListener('abort', onBase, { once: true });
+  const remaining = Date.parse(leaseExpiresAt) - now();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  if (Number.isFinite(remaining)) {
+    if (remaining <= 0) controller.abort();
+    else timer = setTimeout(() => controller.abort(), remaining);
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => { if (timer) clearTimeout(timer); base.removeEventListener('abort', onBase); },
+  };
+}
 
 const inFlight = new Set<string>();
 
@@ -257,6 +281,7 @@ export async function prepareResidentOnDemandCoderNode(input: {
   return {
     ok: true,
     runtime: remoteRuntimeFor(node, config.model),
+    leaseExpiresAt: lease.leaseExpiresAt,
     finish: async (attemptId) => {
       try {
         if (attemptId !== null) {
