@@ -1,0 +1,1 @@
+export const marker = "owned-burst-v1";
