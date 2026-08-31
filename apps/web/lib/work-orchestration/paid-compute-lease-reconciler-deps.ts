@@ -76,6 +76,17 @@ export function buildPaidComputeLeaseReconcilerDeps(
   };
 }
 
+/** Conta os nodes PAGOS ainda vivos (do log durável) — para o gate de concorrência antes de uma
+ * nova provisão paga. Read-only; erro → 0 (o gate por-teto ainda protege o piso). */
+export async function readLivePaidNodeCount(client: SupabaseClient<Database>): Promise<number> {
+  const evidence = await client.from('work_events')
+    .select('event_type,payload').eq('event_type', NODE_LIFECYCLE_EVIDENCE_EVENT_TYPE)
+    .order('seq', { ascending: true }).limit(2000);
+  if (evidence.error) return 0;
+  const events: NodeLifecycleEvidenceEventLike[] = (evidence.data ?? []).map(row => ({ type: row.event_type as string, payload: row.payload as Json }));
+  return projectReconcilableLeases(events).length;
+}
+
 /** Atalho de composição: reconcilia leases pagas para um cliente já autenticado. */
 export function reconcilePaidComputeLeasesFor(
   client: SupabaseClient<Database>,

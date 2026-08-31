@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import {
+  admitConcurrentPaidNode,
   buildNodeLifecycleEvidence,
   decideCoderProvisioning,
   deriveBoundedLease,
@@ -39,6 +40,9 @@ export interface ResidentOnDemandNodeConfig {
   readonly billingMode: NodeBillingMode;
   readonly maxActiveDurationMs: number;
   readonly idleTimeoutMs: number;
+  /** Teto de nodes PAGOS concorrentes (Milestone G). `null` = sem gate (default retrocompatível);
+   * o gate só se aplica quando este teto está configurado E há um leitor de contagem viva. */
+  readonly maxConcurrentPaidNodes: number | null;
 }
 
 export function readResidentOnDemandNodeConfig(
@@ -59,12 +63,14 @@ export function readResidentOnDemandNodeConfig(
     if (billing !== 'paid') return null;
     if (readRunPodProvisionerConfig(env) === null) return null;
   }
+  const maxConcurrentRaw = Number(env.ANIMA_ON_DEMAND_MAX_CONCURRENT_PAID_NODES);
   return {
     nodeId, providerId: provisioner, model,
     resourceClass: env.ANIMA_ON_DEMAND_NODE_RESOURCE_CLASS?.trim() || provisioner,
     billingMode: billing,
     maxActiveDurationMs: 30 * 60_000,
     idleTimeoutMs: 60_000,
+    maxConcurrentPaidNodes: Number.isInteger(maxConcurrentRaw) && maxConcurrentRaw > 0 ? maxConcurrentRaw : null,
   };
 }
 
@@ -104,7 +110,7 @@ export function onDemandBurstForced(env: Record<string, string | undefined> = pr
 }
 
 export type ResidentNodePreparation =
-  | { readonly ok: false; readonly reason: 'waiting_authorization' | 'provision_failed' | 'health_failed' | 'evidence_failed'; readonly detail: string }
+  | { readonly ok: false; readonly reason: 'waiting_authorization' | 'concurrency_limit' | 'provision_failed' | 'health_failed' | 'evidence_failed'; readonly detail: string }
   | { readonly ok: true; readonly runtime: ReturnType<typeof remoteRuntimeFor>; finish(attemptId: string | null): Promise<void> };
 
 const inFlight = new Set<string>();
@@ -119,6 +125,9 @@ export async function prepareResidentOnDemandCoderNode(input: {
   readonly now?: () => Date;
   readonly evidenceSink?: NodeLifecycleEvidenceSink;
   readonly provisionerFactory?: () => NodeProvisioner & { disposeAll?: () => Promise<void> };
+  /** Contagem viva de nodes PAGOS (via projectReconcilableLeases). Só consultada quando há teto
+   * de concorrência configurado; ausente ⇒ sem gate de concorrência (retrocompatível). */
+  readonly readLivePaidNodeCount?: () => Promise<number>;
 }): Promise<ResidentNodePreparation> {
   const clock = input.now ?? (() => new Date());
   const config = input.config;
@@ -139,6 +148,17 @@ export async function prepareResidentOnDemandCoderNode(input: {
     return { ok: false, reason: 'waiting_authorization', detail: decision.reason };
   }
   if (decision.action !== 'provision') return { ok: false, reason: 'provision_failed', detail: `unexpected decision: ${decision.action}` };
+
+  // Gate de CONCORRÊNCIA de nodes pagos (Milestone G, fail-closed quando configurado): antes de
+  // subir um novo recurso faturável, não ultrapassar o teto de recursos simultâneos. Opt-in:
+  // só quando há teto configurado E um leitor de contagem viva. Nunca amplia autoridade.
+  if (config.billingMode === 'paid' && config.maxConcurrentPaidNodes !== null && input.readLivePaidNodeCount) {
+    const liveCount = await input.readLivePaidNodeCount();
+    const admission = admitConcurrentPaidNode({ liveCount, limit: config.maxConcurrentPaidNodes });
+    if (!admission.admit) {
+      return { ok: false, reason: 'concurrency_limit', detail: `nodes pagos vivos ${liveCount} ≥ teto ${config.maxConcurrentPaidNodes}` };
+    }
+  }
 
   const authorizationRef = financial.authorized && financial.requiresPayment ? financial.authorizationRef : null;
   // Node PAGO: a lease é derivada da AUTORIDADE (teto duro) — deadline nunca ultrapassa a

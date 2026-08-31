@@ -3,6 +3,7 @@ import {
   type BuildNodeLifecycleEvidenceInput,
 } from './node-lifecycle-evidence';
 import {
+  admitConcurrentPaidNode,
   decidePaidLeaseReconciliation,
   projectReconcilableLeases,
   type NodeLifecycleEvidenceEventLike,
@@ -108,5 +109,19 @@ describe('decidePaidLeaseReconciliation', () => {
   test('E9: idempotente — mesma entrada, mesma decisão', () => {
     const input = { latestState: 'idle' as NodeLifecycleState, observed: 'running' as const, authorityStillValid: false, deadlinePassed: false };
     expect(decidePaidLeaseReconciliation(input)).toBe(decidePaidLeaseReconciliation(input));
+  });
+});
+
+describe('admitConcurrentPaidNode (cap de recursos pagos concorrentes)', () => {
+  test('abaixo do teto → admite', () => {
+    expect(admitConcurrentPaidNode({ liveCount: 0, limit: 1 })).toEqual({ admit: true });
+    expect(admitConcurrentPaidNode({ liveCount: 2, limit: 3 })).toEqual({ admit: true });
+  });
+  test('no teto ou acima → concurrency_limit', () => {
+    expect(admitConcurrentPaidNode({ liveCount: 1, limit: 1 })).toEqual({ admit: false, reason: 'concurrency_limit' });
+    expect(admitConcurrentPaidNode({ liveCount: 5, limit: 3 })).toEqual({ admit: false, reason: 'concurrency_limit' });
+  });
+  test('limite <= 0 → fail-closed (sem concorrência paga permitida)', () => {
+    expect(admitConcurrentPaidNode({ liveCount: 0, limit: 0 })).toEqual({ admit: false, reason: 'concurrency_limit' });
   });
 });

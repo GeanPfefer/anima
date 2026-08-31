@@ -8,6 +8,7 @@ import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
 import { readMachinePressure, readResourceAdmission } from './resource-governor';
 import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteRuntimeFor } from './coder-placement';
 import { onDemandBurstForced, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
+import { readLivePaidNodeCount } from './paid-compute-lease-reconciler-deps';
 
 // ============================================================
 // Dependências do driver de backlog para o PROJETO real (worktree/qwen3-coder),
@@ -118,11 +119,13 @@ export function buildProjectBacklogCycleDeps(
           onDemandSession = await prepareResidentOnDemandCoderNode({
             client, config: onDemand, workItemId: entry.workItemId,
             proposalVersion: entry.approvedProposalVersion, leaseId: crypto.randomUUID(), signal,
+            readLivePaidNodeCount: () => readLivePaidNodeCount(client),
           });
           if (!onDemandSession.ok) {
-            return notExecutable(entry,
-              onDemandSession.reason === 'waiting_authorization' ? 'paid_compute_authorization_required' : 'coder_node_unavailable',
-              `Node on-demand indisponível: ${onDemandSession.detail}.`);
+            const code = onDemandSession.reason === 'waiting_authorization' ? 'paid_compute_authorization_required'
+              : onDemandSession.reason === 'concurrency_limit' ? 'paid_compute_concurrency_limit'
+              : 'coder_node_unavailable';
+            return notExecutable(entry, code, `Node on-demand indisponível: ${onDemandSession.detail}.`);
           }
           ollamaRuntimeOverride = onDemandSession.runtime;
           placement = { placement: 'remote', reason: 'local_pressure_requires_burst', node: {
