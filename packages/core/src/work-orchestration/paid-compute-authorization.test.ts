@@ -18,7 +18,7 @@ const auth = (overrides: Partial<PaidComputeAuthorizationV1> = {}): PaidComputeA
   resourceClass: 'gpu-16gb',
   workItemId: 'item-1',
   maxDurationMs: 60 * 60_000,
-  maxCostEstimate: null,
+  maxCostEstimate: { currency: 'USD', amount: 2 },
   validFrom: '2026-08-30T11:00:00.000Z',
   validUntil: '2026-08-30T13:00:00.000Z',
   ...overrides,
@@ -31,6 +31,7 @@ const paidRequest = (overrides: Partial<PaidComputeRequest> = {}): PaidComputeRe
   resourceClass: 'gpu-16gb',
   workItemId: 'item-1',
   requestedDurationMs: 30 * 60_000,
+  estimatedCost: { currency: 'USD', amount: 1 },
   ...overrides,
 });
 
@@ -55,6 +56,10 @@ describe('evaluatePaidComputeAuthorization — pago libera só com autorização
 });
 
 describe('evaluatePaidComputeAuthorization — fail-closed (necessidade ≠ autorização de gasto)', () => {
+  test('autorização histórica sem teto agregado não concede nova autoridade', () => {
+    expect(evaluatePaidComputeAuthorization(paidRequest(), auth({ maxCostEstimate: null }), NOW))
+      .toEqual({ authorized: false, reason: 'aggregate_cost_ceiling_required' });
+  });
   test('ausência de autorização é negada, nunca liberada por pressão de recurso', () => {
     expect(evaluatePaidComputeAuthorization(paidRequest(), null, NOW)).toEqual({ authorized: false, reason: 'authorization_missing' });
   });
@@ -85,7 +90,7 @@ describe('evaluatePaidComputeAuthorization — fail-closed (necessidade ≠ auto
 
   test('teto de custo exige estimativa presente na mesma moeda e recusa quando excede', () => {
     const capped = auth({ maxCostEstimate: { currency: 'USD', amount: 2 } });
-    expect(evaluatePaidComputeAuthorization(paidRequest(), capped, NOW)).toEqual({ authorized: false, reason: 'cost_estimate_required' });
+    expect(evaluatePaidComputeAuthorization(paidRequest({ estimatedCost: null }), capped, NOW)).toEqual({ authorized: false, reason: 'cost_estimate_required' });
     expect(evaluatePaidComputeAuthorization(paidRequest({ estimatedCost: { currency: 'BRL', amount: 1 } }), capped, NOW)).toEqual({ authorized: false, reason: 'cost_estimate_required' });
     expect(evaluatePaidComputeAuthorization(paidRequest({ estimatedCost: { currency: 'USD', amount: 3 } }), capped, NOW)).toEqual({ authorized: false, reason: 'cost_exceeds_authorized' });
     expect(evaluatePaidComputeAuthorization(paidRequest({ estimatedCost: { currency: 'USD', amount: 1.5 } }), capped, NOW)).toMatchObject({ authorized: true, requiresPayment: true });

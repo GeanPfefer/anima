@@ -18,6 +18,7 @@ const authed = () => ({ client: {}, userId: 'u1' });
 
 const validBody = {
   providerId: 'runpod', maxDurationMs: 1_800_000,
+  maxCost: { currency: 'USD', amount: 1 },
   validFrom: '2026-08-31T00:00:00.000Z', validUntil: '2026-08-31T01:00:00.000Z',
 };
 
@@ -70,9 +71,11 @@ describe('POST /paid-compute-authorizations (concessão = ato humano explícito)
     expect(grantMock).not.toHaveBeenCalled();
   });
 
-  test('maxCost malformado (só moeda, ou valor negativo) → 400', async () => {
+  test('maxCost ausente/malformado/não-positivo → 400', async () => {
+    expect((await POST(req({ ...validBody, maxCost: null }))).status).toBe(400);
     expect((await POST(req({ ...validBody, maxCost: { currency: 'USD' } }))).status).toBe(400);
     expect((await POST(req({ ...validBody, maxCost: { currency: 'USD', amount: -1 } }))).status).toBe(400);
+    expect((await POST(req({ ...validBody, maxCost: { currency: 'USD', amount: 0 } }))).status).toBe(400);
     expect(grantMock).not.toHaveBeenCalled();
   });
 
@@ -81,7 +84,7 @@ describe('POST /paid-compute-authorizations (concessão = ato humano explícito)
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, value: { authorizationId: 'new-id' } });
     expect(grantMock).toHaveBeenCalledTimes(1);
-    expect(grantMock.mock.calls[0][1]).toMatchObject({ providerId: 'runpod', nodeId: null, resourceClass: null, workItemId: null, maxCost: null });
+    expect(grantMock.mock.calls[0][1]).toMatchObject({ providerId: 'runpod', nodeId: null, resourceClass: null, workItemId: null, maxCost: { currency: 'USD', amount: 1 } });
   });
 
   test('corpo válido com custo e node → concede com envelope completo', async () => {

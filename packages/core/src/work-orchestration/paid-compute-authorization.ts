@@ -72,6 +72,7 @@ export type PaidComputeDenialReason =
   | 'resource_class_mismatch'
   | 'work_item_mismatch'
   | 'duration_exceeds_authorized'
+  | 'aggregate_cost_ceiling_required'
   | 'cost_estimate_required'
   | 'cost_exceeds_authorized';
 
@@ -171,6 +172,11 @@ export function evaluatePaidComputeAuthorization(
   }
   if (!positiveInt(request.requestedDurationMs) || request.requestedDurationMs > authorization.maxDurationMs) {
     return { authorized: false, reason: 'duration_exceeds_authorized' };
+  }
+  // Compute pago exige um teto monetário agregado explícito. Autorizações históricas sem teto
+  // continuam legíveis/revogáveis, mas não concedem autoridade financeira nova.
+  if (authorization.maxCostEstimate === null) {
+    return { authorized: false, reason: 'aggregate_cost_ceiling_required' };
   }
   if (authorization.maxCostEstimate !== null) {
     const cost = request.estimatedCost;

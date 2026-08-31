@@ -536,6 +536,78 @@ export type Database = {
           },
         ]
       }
+      paid_compute_budget_events: {
+        Row: {
+          amount: number
+          attempt_id: string | null
+          authorization_id: string
+          created_at: string
+          currency: string
+          event_type: string
+          id: string
+          idempotency_key: string
+          lease_id: string
+          node_id: string
+          provider_id: string
+          reason: string | null
+          reservation_id: string
+          resource_class: string | null
+          user_id: string
+          work_item_id: string
+        }
+        Insert: {
+          amount: number
+          attempt_id?: string | null
+          authorization_id: string
+          created_at?: string
+          currency: string
+          event_type: string
+          id?: string
+          idempotency_key: string
+          lease_id: string
+          node_id: string
+          provider_id: string
+          reason?: string | null
+          reservation_id: string
+          resource_class?: string | null
+          user_id: string
+          work_item_id: string
+        }
+        Update: {
+          amount?: number
+          attempt_id?: string | null
+          authorization_id?: string
+          created_at?: string
+          currency?: string
+          event_type?: string
+          id?: string
+          idempotency_key?: string
+          lease_id?: string
+          node_id?: string
+          provider_id?: string
+          reason?: string | null
+          reservation_id?: string
+          resource_class?: string | null
+          user_id?: string
+          work_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paid_compute_budget_events_authorization_id_fkey"
+            columns: ["authorization_id"]
+            isOneToOne: false
+            referencedRelation: "paid_compute_authorizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "paid_compute_budget_events_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pillar_catalog: {
         Row: {
           focus: string
@@ -2150,6 +2222,28 @@ export type Database = {
           evidence: Json
           expected_proposal_version: number
           work_item_id: string
+        }
+        Returns: Json
+      }
+      reserve_paid_compute_budget: {
+        Args: {
+          attempt_id: string
+          authorization_id: string
+          estimate_amount: number
+          estimate_currency: string
+          idempotency_key: string
+          lease_id: string
+          node_id: string
+          provider_id: string
+          resource_class: string
+          work_item_id: string
+        }
+        Returns: Json
+      }
+      void_paid_compute_budget_reservation: {
+        Args: {
+          reason: string
+          reservation_id: string
         }
         Returns: Json
       }

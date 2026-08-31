@@ -15,12 +15,22 @@ interface AuditRecord {
   orphanRisk: boolean;
   estimatedCost: { currency: string; amount: number } | null;
 }
+interface BudgetRecord {
+  authorizationId: string;
+  ceiling: { currency: string; amount: number } | null;
+  reserved: number;
+  voided: number;
+  committed: number;
+  remaining: number | null;
+  reservations: { reservationId: string; leaseId: string; nodeId: string; amount: number; currency: string; voided: boolean }[];
+}
 
 const ENDPOINT = '/api/work-orchestration/paid-compute-audit';
 const fmt = (iso: string | null): string => (iso ? new Date(iso).toLocaleString() : '—');
 
 export default function PaidComputeAudit() {
   const [items, setItems] = useState<AuditRecord[]>([]);
+  const [budgets, setBudgets] = useState<BudgetRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -31,7 +41,9 @@ export default function PaidComputeAudit() {
       const body = await res.json();
       if (!res.ok || !body.ok) { setError(body?.error?.message ?? 'Falha ao carregar a auditoria.'); return; }
       // Só compute PAGO importa aqui; owned morre com o host.
-      setItems((body.value as AuditRecord[]).filter(r => r.authorizationRef !== null || r.orphanRisk));
+      const value = body.value as { leases: AuditRecord[]; budgets: BudgetRecord[] };
+      setItems(value.leases.filter(r => r.authorizationRef !== null || r.orphanRisk));
+      setBudgets(value.budgets);
     } catch {
       setError('Falha de rede ao carregar a auditoria.');
     } finally {
@@ -49,7 +61,17 @@ export default function PaidComputeAudit() {
       </p>
       {loading && <p className={styles.muted}>Carregando…</p>}
       {error && <p className={styles.error}>{error}</p>}
-      {!loading && !error && items.length === 0 && <p className={styles.muted}>Nenhuma atividade de compute pago.</p>}
+      {budgets.map(b => (
+        <div key={b.authorizationId} className={styles.row}>
+          <div className={styles.head}><span className={styles.node}>Autorização {b.authorizationId.slice(0, 8)}</span></div>
+          <div className={styles.meta}>
+            <span>{b.ceiling ? `teto ${b.ceiling.currency} ${b.ceiling.amount.toFixed(4)}` : 'sem teto agregado — inelegível'}</span>
+            <span>reservado {b.reserved.toFixed(4)} · anulado {b.voided.toFixed(4)} · comprometido {b.committed.toFixed(4)}</span>
+            <span>{b.remaining === null ? 'restante indisponível' : `restante ${b.remaining.toFixed(4)}`} · {b.reservations.length} lease(s)</span>
+          </div>
+        </div>
+      ))}
+      {!loading && !error && items.length === 0 && budgets.length === 0 && <p className={styles.muted}>Nenhuma atividade de compute pago.</p>}
       {items.map((r, i) => (
         <div key={`${r.nodeId}-${i}`} className={styles.row}>
           <div className={styles.head}>

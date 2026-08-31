@@ -73,11 +73,11 @@ describe('Resident Host — node on-demand vivo', () => {
     const validUntil = '2026-08-31T00:03:00.000Z'; // autoridade vence em 3 min
     const authRow = {
       id: 'auth-x', user_id: 'u', provider_id: 'local-process', node_id: null, resource_class: null, work_item_id: null,
-      max_duration_ms: 60 * 60_000, max_cost_currency: null, max_cost_amount: null,
+      max_duration_ms: 60 * 60_000, max_cost_currency: 'USD', max_cost_amount: 10,
       valid_from: '2026-08-30T23:00:00.000Z', valid_until: validUntil, revoked_at: null, created_at: '2026-08-30T23:00:00.000Z',
     };
     const chain = { eq: () => chain, is: () => chain, lte: () => chain, gt: () => chain, order: () => chain, limit: async () => ({ data: [authRow], error: null }) };
-    const client = { from: () => ({ select: () => chain }) } as unknown as SupabaseClient<Database>;
+    const client = { from: () => ({ select: () => chain }), rpc: async () => ({ data: { action: 'reserved', reservation_id: 'reserve-x' }, error: null }) } as unknown as SupabaseClient<Database>;
     let capturedLease: NodeProvisionRequest['lease'] | null = null;
     const provisioner: NodeProvisioner = {
       providerId: 'local-process',
@@ -86,7 +86,7 @@ describe('Resident Host — node on-demand vivo', () => {
       stop: async () => ({ ok: true }),
     };
     const prepared = await prepareResidentOnDemandCoderNode({
-      client, config: { ...config('paid'), maxActiveDurationMs: 30 * 60_000 }, workItemId: 'work-1', proposalVersion: 1,
+      client, config: { ...config('paid'), maxActiveDurationMs: 30 * 60_000, priceHint: { currency: 'USD', perHour: 2 } }, workItemId: 'work-1', proposalVersion: 1,
       leaseId: 'lease-x', signal: new AbortController().signal, now: () => now,
       evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) }, provisionerFactory: () => provisioner,
     });
@@ -117,7 +117,7 @@ describe('Resident Host — node on-demand vivo', () => {
       valid_from: '2026-08-30T23:00:00.000Z', valid_until: '2026-08-31T02:00:00.000Z', revoked_at: null, created_at: '2026-08-30T23:00:00.000Z',
     };
     const chain = { eq: () => chain, is: () => chain, lte: () => chain, gt: () => chain, order: () => chain, limit: async () => ({ data: [authRow], error: null }) };
-    return { from: () => ({ select: () => chain }) } as unknown as SupabaseClient<Database>;
+    return { from: () => ({ select: () => chain }), rpc: async () => ({ data: { action: 'reserved', reservation_id: 'reserve-x' }, error: null }) } as unknown as SupabaseClient<Database>;
   };
 
   test('teto de CUSTO excedido pela estimativa pré-provision → nega fail-closed, provisioner não sobe', async () => {
@@ -158,18 +158,18 @@ describe('Resident Host — node on-demand vivo', () => {
   test('node PAGO no teto de concorrência → recusa concurrency_limit ANTES de provisionar', async () => {
     const authRow = {
       id: 'auth-x', user_id: 'u', provider_id: 'local-process', node_id: null, resource_class: null, work_item_id: null,
-      max_duration_ms: 60 * 60_000, max_cost_currency: null, max_cost_amount: null,
+      max_duration_ms: 60 * 60_000, max_cost_currency: 'USD', max_cost_amount: 10,
       valid_from: '2026-08-30T23:00:00.000Z', valid_until: '2026-08-31T02:00:00.000Z', revoked_at: null, created_at: '2026-08-30T23:00:00.000Z',
     };
     const chain = { eq: () => chain, is: () => chain, lte: () => chain, gt: () => chain, order: () => chain, limit: async () => ({ data: [authRow], error: null }) };
-    const client = { from: () => ({ select: () => chain }) } as unknown as SupabaseClient<Database>;
+    const client = { from: () => ({ select: () => chain }), rpc: async () => ({ data: { action: 'reserved', reservation_id: 'reserve-x' }, error: null }) } as unknown as SupabaseClient<Database>;
     let provisionCalls = 0;
     const provisioner: NodeProvisioner = {
       providerId: 'local-process', provision: async () => { provisionCalls += 1; return { ok: false, reason: 'não deveria chamar' }; },
       inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }), stop: async () => ({ ok: true }),
     };
     const prepared = await prepareResidentOnDemandCoderNode({
-      client, config: { ...config('paid'), maxConcurrentPaidNodes: 1 }, workItemId: 'work-1', proposalVersion: 1,
+      client, config: { ...config('paid'), maxConcurrentPaidNodes: 1, priceHint: { currency: 'USD', perHour: 2 } }, workItemId: 'work-1', proposalVersion: 1,
       leaseId: 'lease-x', signal: new AbortController().signal, now: () => new Date('2026-08-31T00:00:00Z'),
       evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) }, provisionerFactory: () => provisioner,
       readLivePaidNodeCount: async () => 1, // já no teto

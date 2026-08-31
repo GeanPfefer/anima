@@ -61,11 +61,12 @@ export async function POST(request: Request) {
     const c = body.maxCost as Record<string, unknown>;
     const currency = c?.currency;
     const amount = c?.amount;
-    if (!nonBlank(currency) || typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
-      return badRequest('maxCost exige { currency, amount>=0 } ou ausência total.');
+    if (!nonBlank(currency) || typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+      return badRequest('maxCost exige { currency, amount>0 }.');
     }
     maxCost = { currency: currency.trim(), amount };
   }
+  if (maxCost === null) return badRequest('maxCost é obrigatório e representa o teto agregado da autorização.');
 
   const validFrom = body.validFrom;
   const validUntil = body.validUntil;

@@ -138,3 +138,16 @@ não **autoridade para gastar**. Mesmo com a key configurada, um node pago só p
 autorização humana válida no envelope; o preflight reporta `readyForHumanPaidAuthorization` sem
 implicar `paidExecutionAuthorized`. `configuração ≠ autoridade`, `provider disponível ≠
 autorização`, `priceHint ≠ custo final`.
+## Teto monetário agregado e reserva atômica (2026-08-31)
+
+Para compute `paid`, `maxCostEstimate` é o envelope financeiro total concedido pela autorização.
+A autoridade de admissão não é a projeção de lifecycle nem a UI: é a RPC transacional
+`reserve_paid_compute_budget`, serializada por `FOR UPDATE` na autorização. Ela registra no ledger
+append-only `paid_compute_budget_events` antes do efeito no provider e deduplica pela identidade da
+lease. Assim retry, restart, successor, múltiplos processos e requests concorrentes não renovam nem
+multiplicam o teto.
+
+`reserved` significa exposição estimada comprometida, não gasto observado/final. Na ausência de
+billing final confiável, a reserva não é liberada quando a lease termina. Um evento `voided` só é
+válido quando o host prova que o provider não foi chamado ou rejeitou definitivamente antes de
+criar recurso; timeout, resposta perdida, crash e resultado ambíguo conservam a reserva.

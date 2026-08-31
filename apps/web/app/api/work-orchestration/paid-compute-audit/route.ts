@@ -1,5 +1,6 @@
 import { authenticateRequest } from '@/lib/supabase/request-auth';
 import { readPaidComputeAudit } from '@/lib/work-orchestration/paid-compute-lease-reconciler-deps';
+import { listPaidComputeBudgetAudit } from '@/lib/work-orchestration/paid-compute-authorization-store';
 
 export const runtime = 'nodejs';
 
@@ -8,6 +9,7 @@ export const runtime = 'nodejs';
 export async function GET(request: Request) {
   const auth = await authenticateRequest(request);
   if (!auth) return Response.json({ ok: false, error: { code: 'authentication_required' } }, { status: 401 });
-  const records = await readPaidComputeAudit(auth.client);
-  return Response.json({ ok: true, value: records });
+  const [leases, budgets] = await Promise.all([readPaidComputeAudit(auth.client), listPaidComputeBudgetAudit(auth.client)]);
+  if (!budgets.ok) return Response.json({ ok: false, error: { code: budgets.code, message: budgets.message } }, { status: 503 });
+  return Response.json({ ok: true, value: { leases, budgets: budgets.budgets } });
 }

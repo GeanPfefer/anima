@@ -85,6 +85,13 @@ describe('estimateLeaseCost — custo derivado, nunca inventado', () => {
     expect(estimateLeaseCost({ currency: 'USD', perHour: 2 }, 3_600_000)).toEqual({ currency: 'USD', amount: 2 });
     expect(estimateLeaseCost({ currency: 'USD', perHour: 2 }, 1_800_000)).toEqual({ currency: 'USD', amount: 1 });
   });
+
+  test('zero é estimável para owned; NaN, Infinity e duração inválida falham fechados', () => {
+    expect(estimateLeaseCost({ currency: 'USD', perHour: 0 }, 3_600_000)).toEqual({ currency: 'USD', amount: 0 });
+    expect(estimateLeaseCost({ currency: 'USD', perHour: Number.NaN }, 3_600_000)).toBeNull();
+    expect(estimateLeaseCost({ currency: 'USD', perHour: Number.POSITIVE_INFINITY }, 3_600_000)).toBeNull();
+    expect(estimateLeaseCost({ currency: 'USD', perHour: 1 }, Number.POSITIVE_INFINITY)).toBeNull();
+  });
 });
 
 describe('parseNodeLease — fail-closed', () => {

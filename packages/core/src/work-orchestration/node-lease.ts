@@ -83,9 +83,11 @@ export function evaluateLeaseStatus(input: LeaseEvaluationInput): LeaseStatus {
  * (preço × duração), não um fato gravado.
  */
 export function estimateLeaseCost(priceHint: NodePriceHintV0 | null, activeDurationMs: number): { readonly currency: string; readonly amount: number } | null {
-  if (!priceHint || activeDurationMs < 0) return null;
+  if (!priceHint || !nonBlank(priceHint.currency) || !Number.isFinite(priceHint.perHour)
+    || priceHint.perHour < 0 || !Number.isFinite(activeDurationMs) || activeDurationMs < 0) return null;
   const hours = activeDurationMs / 3_600_000;
-  return { currency: priceHint.currency, amount: priceHint.perHour * hours };
+  const amount = priceHint.perHour * hours;
+  return Number.isFinite(amount) ? { currency: priceHint.currency, amount } : null;
 }
 
 export type BoundedLeaseRefusal = 'authority_window_elapsed' | 'authority_duration_zero';

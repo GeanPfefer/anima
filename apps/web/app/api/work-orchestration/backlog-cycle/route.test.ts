@@ -7,7 +7,7 @@ jest.mock('@/lib/work-orchestration/autonomous-backlog-driver', () => ({ runAuto
 jest.mock('@/lib/work-orchestration/executor-selection', () => ({ readExecutionContract: jest.fn(), resolveExecutorRoute: jest.fn() }));
 jest.mock('@/lib/work-orchestration/post-turn-observation', () => ({ persistPostTurnHostObservations: jest.fn() }));
 jest.mock('@/lib/work-orchestration/supervisor', () => ({ runSupervisorTurn: jest.fn() }));
-jest.mock('@/lib/work-orchestration/resource-governor', () => ({ readResourceAdmission: jest.fn() }));
+jest.mock('@/lib/work-orchestration/resource-governor', () => ({ readResourceAdmission: jest.fn(), readMachinePressure: jest.fn() }));
 
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/supabase/request-auth';
@@ -16,7 +16,7 @@ import { runAutonomousBacklogCycle } from '@/lib/work-orchestration/autonomous-b
 import { readExecutionContract, resolveExecutorRoute } from '@/lib/work-orchestration/executor-selection';
 import { persistPostTurnHostObservations } from '@/lib/work-orchestration/post-turn-observation';
 import { runSupervisorTurn } from '@/lib/work-orchestration/supervisor';
-import { readResourceAdmission } from '@/lib/work-orchestration/resource-governor';
+import { readMachinePressure, readResourceAdmission } from '@/lib/work-orchestration/resource-governor';
 
 const auth = authenticateRequest as jest.Mock;
 const readBacklog = readAutonomousBacklogCandidates as jest.Mock;
@@ -26,6 +26,7 @@ const resolveRoute = resolveExecutorRoute as jest.Mock;
 const observe = persistPostTurnHostObservations as jest.Mock;
 const turn = runSupervisorTurn as jest.Mock;
 const admission = readResourceAdmission as jest.Mock;
+const pressure = readMachinePressure as jest.Mock;
 
 const request = (body: unknown): Request => ({
   json: async () => body, signal: new AbortController().signal,
@@ -39,6 +40,7 @@ const cycleResult = {
 beforeEach(() => {
   jest.clearAllMocks();
   admission.mockReturnValue({ verdict: 'permit', pressure: 'low', reason: 'host_ready' });
+  pressure.mockReturnValue({ level: 'low' });
   cycle.mockResolvedValue(cycleResult);
 });
 
@@ -96,7 +98,7 @@ test('porto consulta o Resource Governor a cada admissao e bloqueia defer/fail-c
 
 test('o runTurn injetado resolve o executor de worktree, chama o Supervisor e observa a volta', async () => {
   const maybeSingle = jest.fn().mockResolvedValue({ data: { intent: { execution_spec: {} } }, error: null });
-  const client = { from: jest.fn(() => ({ select: () => ({ eq: () => ({ maybeSingle }) }) })) };
+  const client = { from: jest.fn(() => ({ select: () => ({ eq: () => ({ maybeSingle, order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) })) };
   auth.mockResolvedValue({ client, userId: 'u' });
   readContract.mockReturnValue({ executor: 'worktree', targetReference: 'anima' });
   resolveRoute.mockReturnValue({ ok: true, route: { adapter: { id: 'worktree-v1' }, candidate: {} } });
@@ -104,7 +106,9 @@ test('o runTurn injetado resolve o executor de worktree, chama o Supervisor e ob
   turn.mockResolvedValue(turnResult);
 
   await POST(request({}));
-  const runTurn = cycle.mock.calls[0][0].runTurn;
+  const deps = cycle.mock.calls[0][0];
+  expect(deps.hostPermitsAutonomousWork()).toBe(true);
+  const runTurn = deps.runTurn;
   const entry = { workItemId: 'w', approvedProposalVersion: 2, approvalSeq: 5, targetReference: 'anima', queuePosition: 1, targetOccupied: false };
   const out = await runTurn(entry, new AbortController().signal);
 
@@ -118,13 +122,15 @@ test('o runTurn injetado resolve o executor de worktree, chama o Supervisor e ob
 
 test('runTurn com executor não resolvível → selection_not_executable, sem Supervisor', async () => {
   const maybeSingle = jest.fn().mockResolvedValue({ data: { intent: {} }, error: null });
-  const client = { from: jest.fn(() => ({ select: () => ({ eq: () => ({ maybeSingle }) }) })) };
+  const client = { from: jest.fn(() => ({ select: () => ({ eq: () => ({ maybeSingle, order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) })) };
   auth.mockResolvedValue({ client, userId: 'u' });
   readContract.mockReturnValue({ executor: null, targetReference: 'other' });
   resolveRoute.mockReturnValue({ ok: false, error: { code: 'executor_unknown', message: 'x' } });
 
   await POST(request({}));
-  const runTurn = cycle.mock.calls[0][0].runTurn;
+  const deps = cycle.mock.calls[0][0];
+  expect(deps.hostPermitsAutonomousWork()).toBe(true);
+  const runTurn = deps.runTurn;
   const entry = { workItemId: 'w', approvedProposalVersion: 1, approvalSeq: 5, targetReference: 'other', queuePosition: 1, targetOccupied: false };
   const out = await runTurn(entry, new AbortController().signal);
 

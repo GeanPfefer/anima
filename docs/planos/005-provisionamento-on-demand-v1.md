@@ -117,3 +117,18 @@ iniciado → health ready → coder remoto executa → resultado volta à Goma �
 evidence preservada`, sem mover worktree/Git/gates/Verifier/banco/Anima Web. O recorte atual
 prova essa cadeia com um processo local real; falta a prova com provider pago (bloqueada por
 autorização financeira persistida, deliberadamente).
+
+## Teto agregado por autorização (2026-08-31)
+
+`maxCostEstimate` passou a significar **teto agregado da autorização**, não teto independente
+por request. O write gate autoritativo é `reserve_paid_compute_budget`: numa transação, bloqueia
+a linha da autorização, revalida owner/status/validade/escopo/moeda, soma o ledger append-only e
+grava uma reserva idempotente antes do provider. Nova lease usa nova chave; replay da mesma lease
+recupera a reserva. Autorizações históricas sem teto continuam legíveis/revogáveis, mas não
+admitem compute pago; novas concessões exigem teto positivo.
+
+Reservas permanecem comprometidas após término normal, falha ambígua ou crash. `voided` só é
+permitido com prova de `provider_not_called` ou `provider_rejected_before_create`; não representa
+reembolso nem custo final. A auditoria de Configurações projeta teto, reservado, anulado,
+comprometido e restante, mas não participa da decisão (`READ MODEL != WRITE GATE`). Cloud paga e
+primeira prova paga permanecem fora do escopo.

@@ -46,7 +46,6 @@ export default function PaidComputeAuthorizations() {
   const [resourceClass, setResourceClass] = useState('');
   const [workItemId, setWorkItemId] = useState('');
   const [durationMinutes, setDurationMinutes] = useState('30');
-  const [withCost, setWithCost] = useState(false);
   const [costCurrency, setCostCurrency] = useState('USD');
   const [costAmount, setCostAmount] = useState('');
   const [validFrom, setValidFrom] = useState(() => localInput(new Date()));
@@ -83,14 +82,11 @@ export default function PaidComputeAuthorizations() {
     if (!Number.isFinite(durMin) || durMin <= 0) { setFormError('Duração máxima precisa ser positiva (minutos).'); return; }
     if (Date.parse(validUntil) <= Date.parse(validFrom)) { setFormError('Validade final precisa ser posterior à inicial.'); return; }
 
-    let maxCost: { currency: string; amount: number } | null = null;
-    if (withCost) {
-      const amount = Number(costAmount);
-      if (costCurrency.trim().length === 0 || !Number.isFinite(amount) || amount < 0) {
-        setFormError('Custo máximo exige moeda e valor ≥ 0.'); return;
-      }
-      maxCost = { currency: costCurrency.trim(), amount };
+    const amount = Number(costAmount);
+    if (costCurrency.trim().length === 0 || !Number.isFinite(amount) || amount <= 0) {
+      setFormError('O teto agregado exige moeda e valor > 0.'); return;
     }
+    const maxCost = { currency: costCurrency.trim(), amount };
 
     setSubmitting(true);
     try {
@@ -111,7 +107,7 @@ export default function PaidComputeAuthorizations() {
       const body = await res.json();
       if (!res.ok || !body.ok) { setFormError(body?.error?.message ?? 'Falha ao conceder autorização.'); return; }
       setFormSuccess('Autorização concedida.');
-      setNodeId(''); setResourceClass(''); setWorkItemId(''); setCostAmount(''); setWithCost(false);
+      setNodeId(''); setResourceClass(''); setWorkItemId(''); setCostAmount('');
       await load();
     } catch {
       setFormError('Falha de rede ao conceder autorização.');
@@ -183,23 +179,17 @@ export default function PaidComputeAuthorizations() {
           </label>
         </div>
 
-        <label className={styles.checkboxRow}>
-          <input type="checkbox" checked={withCost} onChange={e => setWithCost(e.target.checked)} />
-          <span>Definir custo máximo (opcional)</span>
-        </label>
-        {withCost && (
           <div className={styles.costRow}>
             <label className={styles.field}>
               <span className={styles.label}>Moeda</span>
               <input className={styles.input} value={costCurrency} onChange={e => setCostCurrency(e.target.value)} placeholder="USD" />
             </label>
             <label className={styles.field}>
-              <span className={styles.label}>Valor máximo</span>
-              <input className={styles.input} type="number" min={0} step="0.01" value={costAmount}
+              <span className={styles.label}>Teto agregado *</span>
+              <input className={styles.input} type="number" min="0.000001" step="0.000001" value={costAmount}
                 onChange={e => setCostAmount(e.target.value)} placeholder="0.00" />
             </label>
           </div>
-        )}
 
         {formError && <p className={styles.error}>{formError}</p>}
         {formSuccess && <p className={styles.success}>{formSuccess}</p>}

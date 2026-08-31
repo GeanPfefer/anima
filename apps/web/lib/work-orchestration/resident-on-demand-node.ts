@@ -20,7 +20,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
 import { RunPodNodeProvisioner, readRunPodProvisionerConfig } from './runpod-node-provisioner';
 import { nodeLifecycleEvidenceSinkFor, type NodeLifecycleEvidenceSink } from './node-lifecycle-evidence';
-import { readActivePaidComputeAuthorization } from './paid-compute-authorization-store';
+import { readActivePaidComputeAuthorization, reservePaidComputeBudget, voidPaidComputeBudgetReservation } from './paid-compute-authorization-store';
 import { remoteRuntimeFor, type CoderInferenceNodeV0 } from './coder-placement';
 import { projectRoot } from './executor-selection';
 
@@ -70,7 +70,7 @@ export function readResidentOnDemandNodeConfig(
   }
   const maxConcurrentRaw = Number(env.ANIMA_ON_DEMAND_MAX_CONCURRENT_PAID_NODES);
   const perHour = Number(env.ANIMA_ON_DEMAND_PRICE_PER_HOUR);
-  const priceHint: NodePriceHintV0 | null = Number.isFinite(perHour) && perHour >= 0
+  const priceHint: NodePriceHintV0 | null = Number.isFinite(perHour) && perHour > 0
     ? { currency: env.ANIMA_ON_DEMAND_PRICE_CURRENCY?.trim() || 'USD', perHour }
     : null;
   return {
@@ -120,7 +120,7 @@ export function onDemandBurstForced(env: Record<string, string | undefined> = pr
 }
 
 export type ResidentNodePreparation =
-  | { readonly ok: false; readonly reason: 'waiting_authorization' | 'concurrency_limit' | 'provision_failed' | 'health_failed' | 'evidence_failed'; readonly detail: string }
+  | { readonly ok: false; readonly reason: 'waiting_authorization' | 'aggregate_budget_denied' | 'concurrency_limit' | 'provision_failed' | 'health_failed' | 'evidence_failed'; readonly detail: string }
   | { readonly ok: true; readonly runtime: ReturnType<typeof remoteRuntimeFor>; readonly leaseExpiresAt: string; finish(attemptId: string | null): Promise<void> };
 
 /**
@@ -135,12 +135,17 @@ export function leaseDeadlineSignal(base: AbortSignal, leaseExpiresAt: string, n
   const onBase = () => controller.abort();
   if (base.aborted) controller.abort();
   else base.addEventListener('abort', onBase, { once: true });
-  const remaining = Date.parse(leaseExpiresAt) - now();
+  const deadlineMs = Date.parse(leaseExpiresAt);
   let timer: ReturnType<typeof setTimeout> | null = null;
-  if (Number.isFinite(remaining)) {
-    if (remaining <= 0) controller.abort();
-    else timer = setTimeout(() => controller.abort(), remaining);
-  }
+  const MAX_TIMER_MS = 2_147_483_647;
+  const arm = (): void => {
+    const remaining = deadlineMs - now();
+    if (remaining <= 0) { controller.abort(); return; }
+    // Node converte delays > 2^31-1 em 1 ms. Reagenda em parcelas para preservar deadlines
+    // distantes sem abort prematuro; cada parcela recalcula o relógio (mudanças de clock inclusas).
+    timer = setTimeout(arm, Math.min(remaining, MAX_TIMER_MS));
+  };
+  if (Number.isFinite(deadlineMs)) arm();
   return {
     signal: controller.signal,
     dispose: () => { if (timer) clearTimeout(timer); base.removeEventListener('abort', onBase); },
@@ -162,6 +167,8 @@ export async function prepareResidentOnDemandCoderNode(input: {
   /** Contagem viva de nodes PAGOS (via projectReconcilableLeases). Só consultada quando há teto
    * de concorrência configurado; ausente ⇒ sem gate de concorrência (retrocompatível). */
   readonly readLivePaidNodeCount?: () => Promise<number>;
+  readonly reserveBudget?: typeof reservePaidComputeBudget;
+  readonly voidBudget?: typeof voidPaidComputeBudgetReservation;
 }): Promise<ResidentNodePreparation> {
   const clock = input.now ?? (() => new Date());
   const config = input.config;
@@ -223,6 +230,24 @@ export async function prepareResidentOnDemandCoderNode(input: {
       authorizationRef, priceHint: null,
     };
   }
+
+  // WRITE GATE financeiro autoritativo: reserva durável, agregada e serializada ANTES de
+  // qualquer evidência de provisão ou chamada ao provider. A leaseId é a chave idempotente:
+  // replay da mesma admissão recupera a reserva; uma nova lease consome novo envelope.
+  let budgetReservationId: string | null = null;
+  if (config.billingMode === 'paid') {
+    if (authorizationRef === null || estimatedCost === null || estimatedCost.amount <= 0) {
+      return { ok: false, reason: 'aggregate_budget_denied', detail: 'positive_cost_estimate_required' };
+    }
+    const reserve = input.reserveBudget ?? reservePaidComputeBudget;
+    const reservation = await reserve(input.client, {
+      authorizationId: authorizationRef, idempotencyKey: input.leaseId,
+      providerId: config.providerId, nodeId: config.nodeId, resourceClass: config.resourceClass,
+      workItemId: input.workItemId, attemptId: null, leaseId: input.leaseId, estimate: estimatedCost,
+    });
+    if (!reservation.ok) return { ok: false, reason: 'aggregate_budget_denied', detail: reservation.code };
+    budgetReservationId = reservation.reservationId;
+  }
   const sink = input.evidenceSink ?? nodeLifecycleEvidenceSinkFor(input.client);
   const activeSince = clock();
   let state: NodeLifecycleState = 'offline';
@@ -247,7 +272,13 @@ export async function prepareResidentOnDemandCoderNode(input: {
     return true;
   };
 
-  if (!await persist('provision_requested', false, null)) return { ok: false, reason: 'evidence_failed', detail: 'provision_requested evidence failed' };
+  if (!await persist('provision_requested', false, null)) {
+    if (budgetReservationId !== null) {
+      const voidBudget = input.voidBudget ?? voidPaidComputeBudgetReservation;
+      await voidBudget(input.client, budgetReservationId, 'provider_not_called');
+    }
+    return { ok: false, reason: 'evidence_failed', detail: 'provision_requested evidence failed' };
+  }
   inFlight.add(config.nodeId);
   const provisioner = input.provisionerFactory?.() ?? resolveOnDemandProvisioner(config);
   const provisioned = await provisioner.provision({
