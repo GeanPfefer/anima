@@ -139,8 +139,21 @@ async function main(): Promise<void> {
   // Reconciliação: a recuperação SUP-04/SUP-05 acontece dentro da primeira volta do
   // Supervisor do host-turn. O porto existe como seam (a engine o chama no arranque e
   // após cada wake); uma chamada de recuperação dedicada é recorte futuro.
-  const reconcile = async (_identity: ResidentIdentity): Promise<void> => {
+  const reconcile = async (identity: ResidentIdentity): Promise<void> => {
     log('reconcile', { note: 'recuperação SUP-04/SUP-05 ocorre dentro da volta do host-turn' });
+    // Reconciliação de LEASES PAGAS órfãs (recurso pago pode ter sobrevivido a um crash). Roda
+    // ANTES da volta, sob a identidade do usuário (Bearer/RLS, sem service_role). Best-effort:
+    // falha aqui não derruba o runner (backoff cobre). Sem cloud/gasto quando não há órfão.
+    try {
+      const { createBearerClient } = await import('../lib/supabase/bearer.ts');
+      const { reconcilePaidComputeLeasesFor } = await import('../lib/work-orchestration/paid-compute-lease-reconciler-deps.ts');
+      const report = await reconcilePaidComputeLeasesFor(createBearerClient(identity.accessToken));
+      if (report.results.length > 0) {
+        log('paid-lease-reconcile', { tornDown: report.tornDown, retriable: report.retriable, leftAwaiting: report.leftAwaiting });
+      }
+    } catch (error) {
+      log('paid-lease-reconcile-error', { message: error instanceof Error ? error.message : 'reconcile_failed' });
+    }
   };
 
   // OPCIONAL: quando a fila operacional esvazia, materializar UM candidato do backlog
