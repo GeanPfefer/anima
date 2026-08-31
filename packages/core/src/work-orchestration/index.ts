@@ -41,6 +41,7 @@ export * from './provisioning-decision';
 export * from './node-lifecycle-evidence';
 export * from './paid-compute-lease-reconciliation';
 export * from './paid-compute-audit';
+export * from './paid-compute-price';
 export * from './harness-turn-lifecycle';
 export * from './work-verification';
 export * from './verifier-opinion';

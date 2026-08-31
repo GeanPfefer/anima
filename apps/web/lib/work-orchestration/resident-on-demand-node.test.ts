@@ -110,15 +110,99 @@ describe('Resident Host — node on-demand vivo', () => {
     })).toMatchObject({ priceHint: null });
   });
 
-  const paidAuthClient = (maxCost: { currency: string; amount: number } | null): SupabaseClient<Database> => {
+  const paidAuthClient = (maxCost: { currency: string; amount: number } | null, providerId = 'local-process', onRpc?: (args: unknown) => void): SupabaseClient<Database> => {
     const authRow = {
-      id: 'auth-x', user_id: 'u', provider_id: 'local-process', node_id: null, resource_class: null, work_item_id: null,
+      id: 'auth-x', user_id: 'u', provider_id: providerId, node_id: null, resource_class: null, work_item_id: null,
       max_duration_ms: 60 * 60_000, max_cost_currency: maxCost?.currency ?? null, max_cost_amount: maxCost?.amount ?? null,
       valid_from: '2026-08-30T23:00:00.000Z', valid_until: '2026-08-31T02:00:00.000Z', revoked_at: null, created_at: '2026-08-30T23:00:00.000Z',
     };
     const chain = { eq: () => chain, is: () => chain, lte: () => chain, gt: () => chain, order: () => chain, limit: async () => ({ data: [authRow], error: null }) };
-    return { from: () => ({ select: () => chain }), rpc: async () => ({ data: { action: 'reserved', reservation_id: 'reserve-x' }, error: null }) } as unknown as SupabaseClient<Database>;
+    return { from: () => ({ select: () => chain }), rpc: async (_name: string, args: unknown) => { onRpc?.(args); return { data: { action: 'reserved', reservation_id: 'reserve-x' }, error: null }; } } as unknown as SupabaseClient<Database>;
   };
+
+  test('RunPod usa max(configured, live) imediatamente antes da reserva; lookup falho não provisiona', async () => {
+    let reservedAmount: number | undefined; let provisionCalls = 0;
+    const provisioner: NodeProvisioner = { providerId: 'runpod', provision: async () => { provisionCalls += 1; return { ok: false, reason: 'fim' }; },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }), stop: async () => ({ ok: true }) };
+    const base = { ...config('paid'), providerId: 'runpod' as const, resourceClass: 'gpu-a40', maxActiveDurationMs: 30 * 60_000,
+      priceHint: { currency: 'USD', perHour: 0.4 } };
+    const prepared = await prepareResidentOnDemandCoderNode({ client: paidAuthClient({ currency: 'USD', amount: 5 }, 'runpod', args => { reservedAmount = (args as { estimate_amount: number }).estimate_amount; }),
+      config: base, workItemId: 'work-1', proposalVersion: 1, leaseId: 'lease-live', signal: new AbortController().signal,
+      now: () => new Date('2026-08-31T00:00:30Z'), evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) }, provisionerFactory: () => provisioner,
+      readLivePriceQuote: async () => ({ ok: true, quote: { providerId: 'runpod', resourceClass: 'gpu-a40', currency: 'USD', perHour: 0.7,
+        quotedAt: '2026-08-31T00:00:00Z', validUntil: '2026-08-31T00:01:00Z', kind: 'lowest_available' } }) });
+    expect(prepared).toMatchObject({ ok: false, reason: 'provision_failed' });
+    expect(reservedAmount).toBe(0.35); expect(provisionCalls).toBe(1);
+
+    provisionCalls = 0;
+    const denied = await prepareResidentOnDemandCoderNode({ client: paidAuthClient({ currency: 'USD', amount: 5 }, 'runpod'), config: base,
+      workItemId: 'work-1', proposalVersion: 1, leaseId: 'lease-no-quote', signal: new AbortController().signal,
+      now: () => new Date('2026-08-31T00:00:30Z'), evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) }, provisionerFactory: () => provisioner,
+      readLivePriceQuote: async () => ({ ok: false, reason: 'provider_unreachable' }) });
+    expect(denied).toMatchObject({ ok: false, reason: 'aggregate_budget_denied', detail: 'live_price:provider_unreachable' });
+    expect(provisionCalls).toBe(0);
+  });
+
+  test('RunPod: live price usado na reserva; budget denial impede qualquer chamada ao provider', async () => {
+    let reservedAmount: number | undefined;
+    let provisionCalls = 0;
+
+    const provisioner: NodeProvisioner = {
+      providerId: 'runpod',
+      provision: async () => {
+        provisionCalls += 1;
+        return { ok: false, reason: 'nao_deveria_provisionar' };
+      },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }),
+      stop: async () => ({ ok: true }),
+    };
+
+    const prepared = await prepareResidentOnDemandCoderNode({
+      client: paidAuthClient({ currency: 'USD', amount: 5 }, 'runpod'),
+      config: {
+        ...config('paid'),
+        providerId: 'runpod',
+        resourceClass: 'gpu-a40',
+        maxActiveDurationMs: 30 * 60_000,
+        priceHint: { currency: 'USD', perHour: 0.4 },
+      },
+      workItemId: 'work-1',
+      proposalVersion: 1,
+      leaseId: 'lease-live-budget-denied',
+      signal: new AbortController().signal,
+      now: () => new Date('2026-08-31T00:00:30Z'),
+      evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) },
+      provisionerFactory: () => provisioner,
+      readLivePriceQuote: async () => ({
+        ok: true,
+        quote: {
+          providerId: 'runpod',
+          resourceClass: 'gpu-a40',
+          currency: 'USD',
+          perHour: 0.7,
+          quotedAt: '2026-08-31T00:00:00Z',
+          validUntil: '2026-08-31T00:01:00Z',
+          kind: 'lowest_available',
+        },
+      }),
+      reserveBudget: async (_client, args) => {
+        reservedAmount = args.estimate.amount;
+        return {
+          ok: false,
+          code: 'aggregate_budget_exceeded',
+          message: 'aggregate_budget_exceeded',
+        };
+      },
+    });
+
+    expect(reservedAmount).toBe(0.35);
+    expect(prepared).toMatchObject({
+      ok: false,
+      reason: 'aggregate_budget_denied',
+      detail: 'aggregate_budget_exceeded',
+    });
+    expect(provisionCalls).toBe(0);
+  });
 
   test('teto de CUSTO excedido pela estimativa pré-provision → nega fail-closed, provisioner não sobe', async () => {
     // priceHint $2/h × 0.5h (30min) = estimativa $1 > teto $0.50 → cost_exceeds_authorized.

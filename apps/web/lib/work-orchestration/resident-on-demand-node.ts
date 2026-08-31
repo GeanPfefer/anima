@@ -6,6 +6,7 @@ import {
   deriveBoundedLease,
   estimateLeaseCost,
   evaluatePaidComputeAuthorization,
+  selectConservativePaidComputePrice,
   transitionNodeLifecycle,
   type NodeBillingMode,
   type NodeLeaseV0,
@@ -14,11 +15,13 @@ import {
   type NodePriceHintV0,
   type NodeProvisioner,
   type ProvisionedNodeHandle,
+  type LiveNodePriceQuoteV0,
 } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
 import { RunPodNodeProvisioner, readRunPodProvisionerConfig } from './runpod-node-provisioner';
+import { readRunPodLivePriceQuote } from './runpod-price-quote';
 import { nodeLifecycleEvidenceSinkFor, type NodeLifecycleEvidenceSink } from './node-lifecycle-evidence';
 import { readActivePaidComputeAuthorization, reservePaidComputeBudget, voidPaidComputeBudgetReservation } from './paid-compute-authorization-store';
 import { remoteRuntimeFor, type CoderInferenceNodeV0 } from './coder-placement';
@@ -167,6 +170,9 @@ export async function prepareResidentOnDemandCoderNode(input: {
   /** Contagem viva de nodes PAGOS (via projectReconcilableLeases). Só consultada quando há teto
    * de concorrência configurado; ausente ⇒ sem gate de concorrência (retrocompatível). */
   readonly readLivePaidNodeCount?: () => Promise<number>;
+  /** Override de teste para descoberta read-only. Em produção RunPod usa o GraphQL gpuTypes;
+   * outros provisioners mantêm o preço configurado até possuírem client concreto. */
+  readonly readLivePriceQuote?: () => Promise<{ readonly ok: true; readonly quote: LiveNodePriceQuoteV0 } | { readonly ok: false; readonly reason: string }>;
   readonly reserveBudget?: typeof reservePaidComputeBudget;
   readonly voidBudget?: typeof voidPaidComputeBudgetReservation;
 }): Promise<ResidentNodePreparation> {
@@ -183,8 +189,26 @@ export async function prepareResidentOnDemandCoderNode(input: {
   // provider; sem chamada ao provider). Alimenta o gate financeiro: uma autorização com teto de
   // custo é conferida contra esta estimativa. Sem priceHint → null (autorização com teto de
   // custo NEGA fail-closed via `cost_estimate_required`). NUNCA é custo final.
-  const estimatedCost = config.billingMode === 'paid' && config.priceHint
-    ? estimateLeaseCost(config.priceHint, config.maxActiveDurationMs)
+  let admissionPrice = config.priceHint;
+  if (config.billingMode === 'paid' && config.providerId === 'runpod') {
+    const readQuote = input.readLivePriceQuote ?? (() => {
+      const runpod = readRunPodProvisionerConfig();
+      if (runpod === null) return Promise.resolve({ ok: false as const, reason: 'runpod_config_unavailable' });
+      return readRunPodLivePriceQuote({
+        graphqlBase: process.env.ANIMA_RUNPOD_GRAPHQL_BASE?.trim() || 'https://api.runpod.io/graphql',
+        apiKey: runpod.apiKey, gpuTypeIds: runpod.gpuTypeIds, gpuCount: runpod.gpuCount,
+        cloudType: runpod.cloudType, resourceClass: config.resourceClass, freshnessMs: 60_000,
+      }, input.signal);
+    });
+    const live = await readQuote();
+    if (!live.ok) return { ok: false, reason: 'aggregate_budget_denied', detail: `live_price:${live.reason}` };
+    const selected = selectConservativePaidComputePrice({ configured: config.priceHint, live: live.quote,
+      expectedProviderId: 'runpod', expectedResourceClass: config.resourceClass, now: clock() });
+    if (!selected.ok) return { ok: false, reason: 'aggregate_budget_denied', detail: `live_price:${selected.reason}` };
+    admissionPrice = selected.priceHint;
+  }
+  const estimatedCost = config.billingMode === 'paid' && admissionPrice
+    ? estimateLeaseCost(admissionPrice, config.maxActiveDurationMs)
     : null;
   const financial = evaluatePaidComputeAuthorization({
     billingMode: config.billingMode, providerId: config.providerId, nodeId: config.nodeId,
@@ -217,7 +241,7 @@ export async function prepareResidentOnDemandCoderNode(input: {
     const bounded = deriveBoundedLease({
       authorization, nodeId: config.nodeId, workItemId: input.workItemId, attemptId: input.leaseId,
       requestedDurationMs: config.maxActiveDurationMs, idleTimeoutMs: config.idleTimeoutMs,
-      now: clock(), priceHint: config.priceHint,
+      now: clock(), priceHint: admissionPrice,
     });
     if (!bounded.ok) return { ok: false, reason: 'waiting_authorization', detail: `authority_envelope:${bounded.reason}` };
     lease = bounded.lease;
