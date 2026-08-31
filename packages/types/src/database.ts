@@ -480,6 +480,62 @@ export type Database = {
           },
         ]
       }
+      paid_compute_authorizations: {
+        Row: {
+          created_at: string
+          id: string
+          max_cost_amount: number | null
+          max_cost_currency: string | null
+          max_duration_ms: number
+          node_id: string | null
+          provider_id: string
+          resource_class: string | null
+          revoked_at: string | null
+          user_id: string
+          valid_from: string
+          valid_until: string
+          work_item_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          max_cost_amount?: number | null
+          max_cost_currency?: string | null
+          max_duration_ms: number
+          node_id?: string | null
+          provider_id: string
+          resource_class?: string | null
+          revoked_at?: string | null
+          user_id: string
+          valid_from: string
+          valid_until: string
+          work_item_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          max_cost_amount?: number | null
+          max_cost_currency?: string | null
+          max_duration_ms?: number
+          node_id?: string | null
+          provider_id?: string
+          resource_class?: string | null
+          revoked_at?: string | null
+          user_id?: string
+          valid_from?: string
+          valid_until?: string
+          work_item_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paid_compute_authorizations_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pillar_catalog: {
         Row: {
           focus: string
@@ -1913,6 +1969,20 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      grant_paid_compute_authorization: {
+        Args: {
+          max_cost_amount: number
+          max_cost_currency: string
+          max_duration_ms: number
+          node_id: string
+          provider_id: string
+          resource_class: string
+          valid_from: string
+          valid_until: string
+          work_item_id: string
+        }
+        Returns: Json
+      }
       human_decision_resumption_source: {
         Args: { p_work_item_id: string }
         Returns: Json
@@ -2069,6 +2139,14 @@ export type Database = {
       record_host_observed_gate_evidence: {
         Args: {
           attempt_id: string
+          evidence: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
+      record_host_observed_node_lifecycle: {
+        Args: {
           evidence: Json
           expected_proposal_version: number
           work_item_id: string
@@ -2400,6 +2478,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      revoke_paid_compute_authorization: {
+        Args: { authorization_id: string }
+        Returns: Json
+      }
       select_autonomous_work: {
         Args: { p_expected_proposal_version: number; p_work_item_id: string }
         Returns: {
@@ -2642,6 +2724,7 @@ export type Database = {
         | "host_observed_gate_evidence_recorded"
         | "host_observed_coder_evidence_recorded"
         | "manual_work_released"
+        | "host_observed_node_lifecycle_recorded"
       work_impact_level:
         | "low"
         | "significant"
@@ -2987,6 +3070,7 @@ export const Constants = {
         "host_observed_gate_evidence_recorded",
         "host_observed_coder_evidence_recorded",
         "manual_work_released",
+        "host_observed_node_lifecycle_recorded",
       ],
       work_impact_level: [
         "low",
@@ -3017,3 +3101,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

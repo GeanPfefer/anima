@@ -10,6 +10,7 @@ import type { Json } from '@anima/types';
 const input = (overrides: Partial<BuildNodeLifecycleEvidenceInput> = {}): BuildNodeLifecycleEvidenceInput => ({
   nodeId: 'gpu-a',
   providerId: 'local-process',
+  leaseId: 'lease-1',
   workItemId: 'item-1',
   attemptId: 'att-1',
   billingMode: 'owned',

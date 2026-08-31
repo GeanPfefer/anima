@@ -33,8 +33,10 @@ export interface NodeLifecycleEvidenceV1 {
   readonly schemaVersion: 1;
   readonly nodeId: string;
   readonly providerId: string;
+  readonly leaseId: string;
   readonly workItemId: WorkItemId;
-  readonly attemptId: string;
+  /** Tentativa quando já existe; provisão pode começar antes de `execution_started`. */
+  readonly attemptId: string | null;
   readonly billingMode: NodeBillingMode;
   readonly transition: { readonly from: NodeLifecycleState; readonly to: NodeLifecycleState; readonly event: NodeLifecycleEvent };
   readonly healthy: boolean;
@@ -50,8 +52,9 @@ export interface NodeLifecycleEvidenceV1 {
 export interface BuildNodeLifecycleEvidenceInput {
   readonly nodeId: string;
   readonly providerId: string;
+  readonly leaseId: string;
   readonly workItemId: WorkItemId;
-  readonly attemptId: string;
+  readonly attemptId?: string | null;
   readonly billingMode: NodeBillingMode;
   readonly transition: { readonly from: NodeLifecycleState; readonly to: NodeLifecycleState; readonly event: NodeLifecycleEvent };
   readonly healthy: boolean;
@@ -95,9 +98,11 @@ const isCost = (v: unknown): v is { currency: string; amount: number } => {
  * SEM `authorizationRef` é malformado (não há evidência de gasto sem referência de autorização).
  */
 export function buildNodeLifecycleEvidence(input: BuildNodeLifecycleEvidenceInput): NodeLifecycleEvidenceResult {
-  if (!nonBlank(input.nodeId) || !nonBlank(input.providerId)) return fail('invalid_identity', 'A evidência exige nodeId e providerId.');
-  if (input.nodeId.length > MAX_ID || input.providerId.length > MAX_ID) return fail('payload_too_large', 'Identidade excede o tamanho permitido.');
-  if (!nonBlank(input.workItemId) || !nonBlank(input.attemptId)) return fail('invalid_correlation', 'A evidência exige item e tentativa.');
+  if (!nonBlank(input.nodeId) || !nonBlank(input.providerId) || !nonBlank(input.leaseId)) return fail('invalid_identity', 'A evidência exige nodeId, providerId e leaseId.');
+  if (input.nodeId.length > MAX_ID || input.providerId.length > MAX_ID || input.leaseId.length > MAX_ID) return fail('payload_too_large', 'Identidade excede o tamanho permitido.');
+  if (!nonBlank(input.workItemId) || (input.attemptId !== null && input.attemptId !== undefined && !nonBlank(input.attemptId))) {
+    return fail('invalid_correlation', 'A evidência exige item e tentativa válida quando disponível.');
+  }
   if (!BILLING_MODES.has(input.billingMode)) return fail('invalid_billing', 'Modo de cobrança inválido.');
   const { from, to, event } = input.transition;
   if (!LIFECYCLE_STATES.has(from) || !LIFECYCLE_STATES.has(to) || !LIFECYCLE_EVENTS.has(event)) {
@@ -124,8 +129,9 @@ export function buildNodeLifecycleEvidence(input: BuildNodeLifecycleEvidenceInpu
       schemaVersion: 1,
       nodeId: input.nodeId,
       providerId: input.providerId,
+      leaseId: input.leaseId,
       workItemId: input.workItemId,
-      attemptId: input.attemptId,
+      attemptId: input.attemptId ?? null,
       billingMode: input.billingMode,
       transition: { from, to, event },
       healthy: input.healthy,
@@ -150,8 +156,9 @@ export function parseNodeLifecycleEvidence(value: Json | undefined): NodeLifecyc
   const built = buildNodeLifecycleEvidence({
     nodeId: root.nodeId as string,
     providerId: root.providerId as string,
+    leaseId: root.leaseId as string,
     workItemId: root.workItemId as WorkItemId,
-    attemptId: root.attemptId as string,
+    attemptId: (root.attemptId as string | null | undefined) ?? null,
     billingMode: root.billingMode as NodeBillingMode,
     transition: { from: transition.from as NodeLifecycleState, to: transition.to as NodeLifecycleState, event: transition.event as NodeLifecycleEvent },
     healthy: root.healthy as boolean,
@@ -186,7 +193,7 @@ export function projectNodeLifecycleEvidence(events: readonly NodeLifecycleEvide
     const data = object(object(event.payload)?.data);
     const evidence = parseNodeLifecycleEvidence(data?.evidence);
     if (!evidence) continue;
-    if (data?.work_item_id !== evidence.workItemId || data?.attempt_id !== evidence.attemptId) continue;
+    if (data?.work_item_id !== evidence.workItemId || (data?.attempt_id ?? null) !== evidence.attemptId) continue;
     projected.push(evidence);
   }
   return projected;
