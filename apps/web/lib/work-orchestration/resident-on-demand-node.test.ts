@@ -3,8 +3,14 @@ import type { NodeLifecycleEvidenceV1, NodeProvisioner } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
-import { prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig, type ResidentOnDemandNodeConfig } from './resident-on-demand-node';
+import { prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig, resolveOnDemandProvisioner, type ResidentOnDemandNodeConfig } from './resident-on-demand-node';
 import { join } from 'node:path';
+
+const RUNPOD_ENV = {
+  ANIMA_ON_DEMAND_NODE_ENABLED: 'true', ANIMA_ON_DEMAND_NODE_PROVISIONER: 'runpod',
+  ANIMA_ON_DEMAND_NODE_ID: 'burst-a', ANIMA_ON_DEMAND_NODE_BILLING_MODE: 'paid',
+  ANIMA_RUNPOD_API_KEY: 'rp_key', ANIMA_RUNPOD_IMAGE: 'ollama/ollama', ANIMA_RUNPOD_GPU_TYPE_IDS: 'NVIDIA A40',
+} as const;
 
 const dummyClient = {} as SupabaseClient<Database>;
 const FIXTURE = join(__dirname, '__fixtures__', 'fake-inference-node.cjs');
@@ -20,6 +26,27 @@ describe('Resident Host — node on-demand vivo', () => {
       ANIMA_ON_DEMAND_NODE_ENABLED: 'true', ANIMA_ON_DEMAND_NODE_PROVISIONER: 'local-process',
       ANIMA_ON_DEMAND_NODE_ID: 'owned-a', ANIMA_ON_DEMAND_NODE_BILLING_MODE: 'owned',
     })).toMatchObject({ nodeId: 'owned-a', billingMode: 'owned' });
+  });
+
+  test('seleção runpod: env-gate + paid + config do adapter → providerId runpod (Missão 9)', () => {
+    expect(readResidentOnDemandNodeConfig('m', RUNPOD_ENV)).toMatchObject({ providerId: 'runpod', billingMode: 'paid' });
+  });
+
+  test('runpod fail-closed: owned NUNCA aluga cloud (só paid passa pelo gate financeiro)', () => {
+    expect(readResidentOnDemandNodeConfig('m', { ...RUNPOD_ENV, ANIMA_ON_DEMAND_NODE_BILLING_MODE: 'owned' })).toBeNull();
+  });
+
+  test('runpod fail-closed: sem API key não há adapter (Missão 6)', () => {
+    const { ANIMA_RUNPOD_API_KEY: _omit, ...noKey } = RUNPOD_ENV;
+    expect(readResidentOnDemandNodeConfig('m', noKey)).toBeNull();
+  });
+
+  test('resolveOnDemandProvisioner escolhe o provisioner por config (Missão 9)', () => {
+    const local = resolveOnDemandProvisioner(config(), {});
+    expect(local).toBeInstanceOf(LocalProcessNodeProvisioner);
+    expect(local.providerId).toBe('local-process');
+    const runpod = resolveOnDemandProvisioner({ ...config('paid'), providerId: 'runpod' }, RUNPOD_ENV);
+    expect(runpod.providerId).toBe('runpod');
   });
 
   test('owned offline provisiona processo real, observa lifecycle e desliga', async () => {

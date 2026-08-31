@@ -15,10 +15,13 @@ import {
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
+import { RunPodNodeProvisioner, readRunPodProvisionerConfig } from './runpod-node-provisioner';
 import { nodeLifecycleEvidenceSinkFor, type NodeLifecycleEvidenceSink } from './node-lifecycle-evidence';
 import { readActivePaidComputeAuthorization } from './paid-compute-authorization-store';
 import { remoteRuntimeFor, type CoderInferenceNodeV0 } from './coder-placement';
 import { projectRoot } from './executor-selection';
+
+export type OnDemandProvisionerId = 'local-process' | 'runpod';
 
 // Caminho do provisioner fake-realista de prova, resolvido a partir da RAIZ do projeto
 // (discovery por cwd). Deliberadamente NÃO usa `__dirname`: o Resident Host roda como ESM
@@ -29,7 +32,7 @@ const fakeInferenceNodeFixture = (): string =>
 
 export interface ResidentOnDemandNodeConfig {
   readonly nodeId: string;
-  readonly providerId: 'local-process';
+  readonly providerId: OnDemandProvisionerId;
   readonly model: string;
   readonly resourceClass: string;
   readonly billingMode: NodeBillingMode;
@@ -42,18 +45,51 @@ export function readResidentOnDemandNodeConfig(
   env: Record<string, string | undefined> = process.env,
 ): ResidentOnDemandNodeConfig | null {
   if (env.ANIMA_ON_DEMAND_NODE_ENABLED?.trim().toLowerCase() !== 'true') return null;
-  if (env.ANIMA_ON_DEMAND_NODE_PROVISIONER?.trim() !== 'local-process') return null;
+  const provisioner = env.ANIMA_ON_DEMAND_NODE_PROVISIONER?.trim();
+  if (provisioner !== 'local-process' && provisioner !== 'runpod') return null;
   const nodeId = env.ANIMA_ON_DEMAND_NODE_ID?.trim() ?? '';
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(nodeId)) return null;
   const billing = env.ANIMA_ON_DEMAND_NODE_BILLING_MODE?.trim();
   if (billing !== 'owned' && billing !== 'paid') return null;
+  // RunPod é compute PAGO: só é elegível sob billingMode `paid` (passa pelo gate financeiro
+  // humano) E com a config do adapter presente (API key/imagem/GPU). Sem isso, fail-closed —
+  // o burst nem é admitido. Nunca `owned` (não se aluga cloud sem autorização de gasto).
+  if (provisioner === 'runpod') {
+    if (billing !== 'paid') return null;
+    if (readRunPodProvisionerConfig(env) === null) return null;
+  }
   return {
-    nodeId, providerId: 'local-process', model,
-    resourceClass: env.ANIMA_ON_DEMAND_NODE_RESOURCE_CLASS?.trim() || 'local-process',
+    nodeId, providerId: provisioner, model,
+    resourceClass: env.ANIMA_ON_DEMAND_NODE_RESOURCE_CLASS?.trim() || provisioner,
     billingMode: billing,
     maxActiveDurationMs: 30 * 60_000,
     idleTimeoutMs: 60_000,
   };
+}
+
+/** Seleciona o provisioner concreto atrás da porta `NodeProvisioner` conforme a config —
+ * `local-process` (prova, processo real local) ou `runpod` (adapter real, env-gated). Só é
+ * alcançado DEPOIS do gate financeiro (a decisão de provisionar); RunPod exige a config do
+ * adapter presente (fail-closed). O `env` é o único portador da credencial (nunca banco/log). */
+export function resolveOnDemandProvisioner(
+  config: ResidentOnDemandNodeConfig,
+  env: Record<string, string | undefined> = process.env,
+): (NodeProvisioner & { disposeAll?: () => Promise<void> }) {
+  if (config.providerId === 'runpod') {
+    const runpod = readRunPodProvisionerConfig(env);
+    if (runpod === null) throw new Error('runpod_config_unavailable'); // fail-closed (não deveria ocorrer: já validado)
+    return new RunPodNodeProvisioner(runpod);
+  }
+  return new LocalProcessNodeProvisioner({
+    command: process.execPath,
+    args: [fakeInferenceNodeFixture()],
+    env: {
+      ...(env.ANIMA_ON_DEMAND_NODE_TARGET_PATH ? { FAKE_NODE_TARGET_PATH: env.ANIMA_ON_DEMAND_NODE_TARGET_PATH } : {}),
+      ...(env.ANIMA_ON_DEMAND_NODE_TARGET_CONTENT ? { FAKE_NODE_TARGET_CONTENT: env.ANIMA_ON_DEMAND_NODE_TARGET_CONTENT } : {}),
+      ...(env.ANIMA_ON_DEMAND_NODE_FAILURE_MODE === 'health' ? { FAKE_NODE_UNHEALTHY: '1' } : {}),
+      ...(env.ANIMA_ON_DEMAND_NODE_FAILURE_MODE === 'crash' ? { FAKE_NODE_CRASH_ON_POST: '1' } : {}),
+    },
+  });
 }
 
 /**
@@ -134,16 +170,7 @@ export async function prepareResidentOnDemandCoderNode(input: {
 
   if (!await persist('provision_requested', false, null)) return { ok: false, reason: 'evidence_failed', detail: 'provision_requested evidence failed' };
   inFlight.add(config.nodeId);
-  const provisioner = input.provisionerFactory?.() ?? new LocalProcessNodeProvisioner({
-    command: process.execPath,
-    args: [fakeInferenceNodeFixture()],
-    env: {
-      ...(process.env.ANIMA_ON_DEMAND_NODE_TARGET_PATH ? { FAKE_NODE_TARGET_PATH: process.env.ANIMA_ON_DEMAND_NODE_TARGET_PATH } : {}),
-      ...(process.env.ANIMA_ON_DEMAND_NODE_TARGET_CONTENT ? { FAKE_NODE_TARGET_CONTENT: process.env.ANIMA_ON_DEMAND_NODE_TARGET_CONTENT } : {}),
-      ...(process.env.ANIMA_ON_DEMAND_NODE_FAILURE_MODE === 'health' ? { FAKE_NODE_UNHEALTHY: '1' } : {}),
-      ...(process.env.ANIMA_ON_DEMAND_NODE_FAILURE_MODE === 'crash' ? { FAKE_NODE_CRASH_ON_POST: '1' } : {}),
-    },
-  });
+  const provisioner = input.provisionerFactory?.() ?? resolveOnDemandProvisioner(config);
   const provisioned = await provisioner.provision({
     nodeId: config.nodeId, providerId: config.providerId, model: config.model,
     resourceClass: config.resourceClass, lease,
