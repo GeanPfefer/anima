@@ -7,6 +7,7 @@ import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
 import { readMachinePressure, readResourceAdmission } from './resource-governor';
 import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteRuntimeFor } from './coder-placement';
+import { prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
 
 // ============================================================
 // Dependências do driver de backlog para o PROJETO real (worktree/qwen3-coder),
@@ -79,6 +80,7 @@ export function buildProjectBacklogCycleDeps(
       admittedPressure = admission.pressure;
       if (admission.verdict === 'permit') return true;
       const model = process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
+      if (readResidentOnDemandNodeConfig(model)) return true;
       const node = readExplicitCoderNodeV0(model);
       return decideCoderPlacement({
         pressure: admittedPressure,
@@ -100,18 +102,35 @@ export function buildProjectBacklogCycleDeps(
       if (!history.error) contract = resumeLatestRetryCheckpoint(contract, history.data ?? []);
       const model = contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
       const node = readExplicitCoderNodeV0(model);
-      const placement = decideCoderPlacement({
+      let placement = decideCoderPlacement({
         pressure: admittedPressure,
         model,
         nodes: node ? [node] : [],
         paidComputeAuthorized: false,
       });
-      if (placement.placement === 'defer') {
-        return notExecutable(entry, 'coder_placement_deferred', `Placement do coder adiou a execução: ${placement.reason}.`);
+      let onDemandSession: Awaited<ReturnType<typeof prepareResidentOnDemandCoderNode>> | null = null;
+      let ollamaRuntimeOverride;
+      if (placement.placement === 'defer' && admittedPressure !== 'unknown') {
+        const onDemand = readResidentOnDemandNodeConfig(model);
+        if (onDemand) {
+          onDemandSession = await prepareResidentOnDemandCoderNode({
+            client, config: onDemand, workItemId: entry.workItemId,
+            proposalVersion: entry.approvedProposalVersion, leaseId: crypto.randomUUID(), signal,
+          });
+          if (!onDemandSession.ok) {
+            return notExecutable(entry,
+              onDemandSession.reason === 'waiting_authorization' ? 'paid_compute_authorization_required' : 'coder_node_unavailable',
+              `Node on-demand indisponível: ${onDemandSession.detail}.`);
+          }
+          ollamaRuntimeOverride = onDemandSession.runtime;
+          placement = { placement: 'remote', reason: 'local_pressure_requires_burst', node: {
+            id: onDemand.nodeId, endpoint: onDemandSession.runtime.url, locality: 'remote', enabled: true, healthy: true,
+            capabilities: ['coder_inference'], models: [model], resourceClass: onDemand.resourceClass, billingMode: onDemand.billingMode,
+          } };
+        }
       }
-      const ollamaRuntimeOverride = placement.placement === 'remote'
-        ? remoteRuntimeFor(placement.node, model)
-        : localRuntimeFor(model);
+      if (placement.placement === 'defer') return notExecutable(entry, 'coder_placement_deferred', `Placement do coder adiou a execução: ${placement.reason}.`);
+      ollamaRuntimeOverride ??= placement.placement === 'remote' ? remoteRuntimeFor(placement.node, model) : localRuntimeFor(model);
       const gateObservations: ObservedGateInput[] = [];
       const coderObservations: ObservedCoderInput[] = [];
       const selection = resolveExecutorRoute(contract, {
@@ -121,11 +140,17 @@ export function buildProjectBacklogCycleDeps(
       });
       if (!selection.ok) return notExecutable(entry, selection.error.code, selection.error.message);
 
-      const turn = await runSupervisorTurn({
-        client, routes: [selection.route], ownerInstanceId,
-        newId: () => crypto.randomUUID(), signal,
-        requestedWork: { workItemId: entry.workItemId, expectedProposalVersion: entry.approvedProposalVersion },
-      });
+      let turn: SupervisorTurnResult | null = null;
+      try {
+        turn = await runSupervisorTurn({
+          client, routes: [selection.route], ownerInstanceId,
+          newId: () => crypto.randomUUID(), signal,
+          requestedWork: { workItemId: entry.workItemId, expectedProposalVersion: entry.approvedProposalVersion },
+        });
+      } finally {
+        if (onDemandSession?.ok) await onDemandSession.finish(turn?.attemptId ?? null);
+      }
+      if (turn === null) return notExecutable(entry, 'resident_turn_failed', 'A volta do Resident Host não devolveu resultado.');
 
       // Observação host-side pós-volta (evidência de gate/coder/git + parecer do
       // Verifier) — a MESMA da rota supervisor-turn. Fail-open: nunca altera o desfecho.

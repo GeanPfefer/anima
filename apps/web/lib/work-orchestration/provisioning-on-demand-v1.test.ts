@@ -96,7 +96,7 @@ describe('Provisionamento On-Demand V1 — prova controlada sem cloud paga', () 
     const activeSince = new Date();
     const recordEvidence = (from: NodeLifecycleState, to: NodeLifecycleState, event: NodeLifecycleEvent, healthy: boolean, durationMs: number): void => {
       const built = buildNodeLifecycleEvidence({
-        nodeId, providerId: 'local-process', workItemId: 'item-1', attemptId: 'att-lease', billingMode: 'owned',
+        nodeId, providerId: 'local-process', leaseId: 'lease-att-lease', workItemId: 'item-1', attemptId: 'att-lease', billingMode: 'owned',
         transition: { from, to, event }, healthy, activeDurationMs: durationMs, observedAt: new Date().toISOString(),
       });
       expect(built.ok).toBe(true);
