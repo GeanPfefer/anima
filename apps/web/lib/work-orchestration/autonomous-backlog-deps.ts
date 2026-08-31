@@ -7,7 +7,7 @@ import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
 import { readMachinePressure, readResourceAdmission } from './resource-governor';
 import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteRuntimeFor } from './coder-placement';
-import { prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
+import { onDemandBurstForced, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
 
 // ============================================================
 // Dependências do driver de backlog para o PROJETO real (worktree/qwen3-coder),
@@ -110,7 +110,9 @@ export function buildProjectBacklogCycleDeps(
       });
       let onDemandSession: Awaited<ReturnType<typeof prepareResidentOnDemandCoderNode>> | null = null;
       let ollamaRuntimeOverride;
-      if (placement.placement === 'defer' && admittedPressure !== 'unknown') {
+      // On-demand engata sob defer (pressão moderada/alta) OU quando o lever de prova/ops
+      // força a pré-condição; `unknown` permanece fail-closed (sensor indisponível).
+      if ((placement.placement === 'defer' || onDemandBurstForced()) && admittedPressure !== 'unknown') {
         const onDemand = readResidentOnDemandNodeConfig(model);
         if (onDemand) {
           onDemandSession = await prepareResidentOnDemandCoderNode({

@@ -18,6 +18,14 @@ import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
 import { nodeLifecycleEvidenceSinkFor, type NodeLifecycleEvidenceSink } from './node-lifecycle-evidence';
 import { readActivePaidComputeAuthorization } from './paid-compute-authorization-store';
 import { remoteRuntimeFor, type CoderInferenceNodeV0 } from './coder-placement';
+import { projectRoot } from './executor-selection';
+
+// Caminho do provisioner fake-realista de prova, resolvido a partir da RAIZ do projeto
+// (discovery por cwd). Deliberadamente NÃO usa `__dirname`: o Resident Host roda como ESM
+// (`--experimental-transform-types`), onde `__dirname` é indefinido — só o jest (CommonJS)
+// o teria. `projectRoot()` funciona nos dois runtimes.
+const fakeInferenceNodeFixture = (): string =>
+  join(projectRoot(), 'apps', 'web', 'lib', 'work-orchestration', '__fixtures__', 'fake-inference-node.cjs');
 
 export interface ResidentOnDemandNodeConfig {
   readonly nodeId: string;
@@ -46,6 +54,16 @@ export function readResidentOnDemandNodeConfig(
     maxActiveDurationMs: 30 * 60_000,
     idleTimeoutMs: 60_000,
   };
+}
+
+/**
+ * Lever de PROVA/OPS, env-gated e fail-closed: força a pré-condição "local sem headroom"
+ * para exercitar o burst on-demand quando a máquina TEM headroom (pressão `low`). Só afeta
+ * o gatilho de pressão → placement; NÃO burla o gate financeiro (um node `paid` sem
+ * autorização válida continua fechado). Ausente/≠'true' ⇒ comportamento normal por pressão.
+ */
+export function onDemandBurstForced(env: Record<string, string | undefined> = process.env): boolean {
+  return env.ANIMA_ON_DEMAND_FORCE_BURST?.trim().toLowerCase() === 'true';
 }
 
 export type ResidentNodePreparation =
@@ -118,7 +136,7 @@ export async function prepareResidentOnDemandCoderNode(input: {
   inFlight.add(config.nodeId);
   const provisioner = input.provisionerFactory?.() ?? new LocalProcessNodeProvisioner({
     command: process.execPath,
-    args: [join(__dirname, '__fixtures__', 'fake-inference-node.cjs')],
+    args: [fakeInferenceNodeFixture()],
     env: {
       ...(process.env.ANIMA_ON_DEMAND_NODE_TARGET_PATH ? { FAKE_NODE_TARGET_PATH: process.env.ANIMA_ON_DEMAND_NODE_TARGET_PATH } : {}),
       ...(process.env.ANIMA_ON_DEMAND_NODE_TARGET_CONTENT ? { FAKE_NODE_TARGET_CONTENT: process.env.ANIMA_ON_DEMAND_NODE_TARGET_CONTENT } : {}),

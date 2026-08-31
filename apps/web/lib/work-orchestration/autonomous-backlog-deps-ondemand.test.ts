@@ -24,12 +24,15 @@ jest.mock('./local-process-node-provisioner', () => ({
 
 import { buildProjectBacklogCycleDeps } from './autonomous-backlog-deps';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
+import { readResourceAdmission, readMachinePressure } from './resource-governor';
 
 const ProvisionerMock = LocalProcessNodeProvisioner as unknown as jest.Mock;
+const admissionMock = readResourceAdmission as unknown as jest.Mock;
+const pressureMock = readMachinePressure as unknown as jest.Mock;
 
 const ON_DEMAND_ENV = [
   'ANIMA_ON_DEMAND_NODE_ENABLED', 'ANIMA_ON_DEMAND_NODE_PROVISIONER',
-  'ANIMA_ON_DEMAND_NODE_ID', 'ANIMA_ON_DEMAND_NODE_BILLING_MODE',
+  'ANIMA_ON_DEMAND_NODE_ID', 'ANIMA_ON_DEMAND_NODE_BILLING_MODE', 'ANIMA_ON_DEMAND_FORCE_BURST',
 ] as const;
 
 const entry: AutonomousQueueEntry = {
@@ -87,7 +90,13 @@ function makeClient(spy: { paidAuthQueried: number }): SupabaseClient<Database> 
 
 describe('buildProjectBacklogCycleDeps — via financeira pelo MESMO wiring do Resident Host', () => {
   const saved: Record<string, string | undefined> = {};
-  beforeEach(() => { for (const k of ON_DEMAND_ENV) saved[k] = process.env[k]; ProvisionerMock.mockClear(); });
+  beforeEach(() => {
+    for (const k of ON_DEMAND_ENV) saved[k] = process.env[k];
+    ProvisionerMock.mockClear();
+    // Default determinístico: local sem headroom (defer/high).
+    admissionMock.mockReturnValue({ verdict: 'defer', pressure: 'high' });
+    pressureMock.mockReturnValue('high');
+  });
   afterEach(() => {
     for (const k of ON_DEMAND_ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
   });
@@ -150,5 +159,44 @@ describe('buildProjectBacklogCycleDeps — via financeira pelo MESMO wiring do R
     // Owned não consulta autorização paga; o provisioner FOI instanciado (a falha é real).
     expect(spy.paidAuthQueried).toBe(0);
     expect(ProvisionerMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('lever de prova força o burst sob pressão low (owned engata; provisioner instanciado)', async () => {
+    // A Goma TEM headroom (low → permit): sem o lever, o placement seria local. Com o
+    // lever de prova/ops, o burst on-demand engata mesmo assim — o provisioner é instanciado.
+    admissionMock.mockReturnValue({ verdict: 'permit', pressure: 'low' });
+    pressureMock.mockReturnValue('low');
+    process.env.ANIMA_ON_DEMAND_NODE_ENABLED = 'true';
+    process.env.ANIMA_ON_DEMAND_NODE_PROVISIONER = 'local-process';
+    process.env.ANIMA_ON_DEMAND_NODE_ID = 'owned-burst-1';
+    process.env.ANIMA_ON_DEMAND_NODE_BILLING_MODE = 'owned';
+    process.env.ANIMA_ON_DEMAND_FORCE_BURST = 'true';
+    const spy = { paidAuthQueried: 0 };
+
+    const deps = buildProjectBacklogCycleDeps(makeClient(spy), 'supervisor-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    // Provisão falha no mock (ok:false) → coder_node_unavailable, MAS o provisioner foi
+    // instanciado: prova que o lever engatou o burst apesar da pressão low.
+    expect(turn.refusal?.code).toBe('coder_node_unavailable');
+    expect(ProvisionerMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('lever de prova NÃO burla o gate financeiro (paid sem autorização continua fechado sob low)', async () => {
+    admissionMock.mockReturnValue({ verdict: 'permit', pressure: 'low' });
+    pressureMock.mockReturnValue('low');
+    process.env.ANIMA_ON_DEMAND_NODE_ENABLED = 'true';
+    process.env.ANIMA_ON_DEMAND_NODE_PROVISIONER = 'local-process';
+    process.env.ANIMA_ON_DEMAND_NODE_ID = 'paid-burst-1';
+    process.env.ANIMA_ON_DEMAND_NODE_BILLING_MODE = 'paid';
+    process.env.ANIMA_ON_DEMAND_FORCE_BURST = 'true';
+    const spy = { paidAuthQueried: 0 };
+
+    const deps = buildProjectBacklogCycleDeps(makeClient(spy), 'supervisor-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true); // admissão primeiro (fluxo real)
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.refusal?.code).toBe('paid_compute_authorization_required');
+    expect(spy.paidAuthQueried).toBe(1);
+    expect(ProvisionerMock).not.toHaveBeenCalled();
   });
 });
