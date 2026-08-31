@@ -42,6 +42,15 @@ describe('assessPaidComputePreflight (READ-ONLY / NO-SPEND)', () => {
     expect(assessPaidComputePreflight({ env: { ...FULL, ANIMA_ON_DEMAND_NODE_ENABLED: 'false' } }).missing).toContain('env_gate_enabled');
   });
 
+  test('price_hint é informativo: sem ele infra segue pronta; ele NÃO entra em `missing`', () => {
+    const semPreco = assessPaidComputePreflight({ env: FULL }); // FULL não tem ANIMA_ON_DEMAND_PRICE_PER_HOUR
+    expect(semPreco.infraReady).toBe(true);
+    expect(semPreco.missing).not.toContain('price_hint_for_cost_ceiling');
+    expect(semPreco.conditions.find(c => c.key === 'price_hint_for_cost_ceiling')).toMatchObject({ status: 'missing' });
+    const comPreco = assessPaidComputePreflight({ env: { ...FULL, ANIMA_ON_DEMAND_PRICE_PER_HOUR: '1.5' } });
+    expect(comPreco.conditions.find(c => c.key === 'price_hint_for_cost_ceiling')).toMatchObject({ status: 'ok' });
+  });
+
   test('teardown/recovery/lease-bounded são estruturalmente disponíveis (não exigem config)', () => {
     const r = assessPaidComputePreflight({ env: FULL });
     for (const key of ['teardown_path', 'recovery_reconciler', 'lease_bounded_by_authority']) {

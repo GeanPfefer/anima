@@ -11,6 +11,7 @@ import {
   type NodeLeaseV0,
   type NodeLifecycleEvent,
   type NodeLifecycleState,
+  type NodePriceHintV0,
   type NodeProvisioner,
   type ProvisionedNodeHandle,
 } from '@anima/core';
@@ -43,6 +44,10 @@ export interface ResidentOnDemandNodeConfig {
   /** Teto de nodes PAGOS concorrentes (Milestone G). `null` = sem gate (default retrocompatível);
    * o gate só se aplica quando este teto está configurado E há um leitor de contagem viva. */
   readonly maxConcurrentPaidNodes: number | null;
+  /** Palpite de preço CONFIGURADO pelo operador (do catálogo do provider), fonte da ESTIMATIVA
+   * de custo PRÉ-provision. `null` = sem estimativa (uma autorização com teto de custo então
+   * NEGA fail-closed). NUNCA é custo final — é hint para o gate financeiro. */
+  readonly priceHint: NodePriceHintV0 | null;
 }
 
 export function readResidentOnDemandNodeConfig(
@@ -64,6 +69,10 @@ export function readResidentOnDemandNodeConfig(
     if (readRunPodProvisionerConfig(env) === null) return null;
   }
   const maxConcurrentRaw = Number(env.ANIMA_ON_DEMAND_MAX_CONCURRENT_PAID_NODES);
+  const perHour = Number(env.ANIMA_ON_DEMAND_PRICE_PER_HOUR);
+  const priceHint: NodePriceHintV0 | null = Number.isFinite(perHour) && perHour >= 0
+    ? { currency: env.ANIMA_ON_DEMAND_PRICE_CURRENCY?.trim() || 'USD', perHour }
+    : null;
   return {
     nodeId, providerId: provisioner, model,
     resourceClass: env.ANIMA_ON_DEMAND_NODE_RESOURCE_CLASS?.trim() || provisioner,
@@ -71,6 +80,7 @@ export function readResidentOnDemandNodeConfig(
     maxActiveDurationMs: 30 * 60_000,
     idleTimeoutMs: 60_000,
     maxConcurrentPaidNodes: Number.isInteger(maxConcurrentRaw) && maxConcurrentRaw > 0 ? maxConcurrentRaw : null,
+    priceHint,
   };
 }
 
@@ -138,10 +148,17 @@ export async function prepareResidentOnDemandCoderNode(input: {
         workItemId: input.workItemId, now: clock(),
       })
     : null;
+  // Estimativa de custo PRÉ-provision a partir do priceHint CONFIGURADO (do catálogo do
+  // provider; sem chamada ao provider). Alimenta o gate financeiro: uma autorização com teto de
+  // custo é conferida contra esta estimativa. Sem priceHint → null (autorização com teto de
+  // custo NEGA fail-closed via `cost_estimate_required`). NUNCA é custo final.
+  const estimatedCost = config.billingMode === 'paid' && config.priceHint
+    ? estimateLeaseCost(config.priceHint, config.maxActiveDurationMs)
+    : null;
   const financial = evaluatePaidComputeAuthorization({
     billingMode: config.billingMode, providerId: config.providerId, nodeId: config.nodeId,
     resourceClass: config.resourceClass, workItemId: input.workItemId,
-    requestedDurationMs: config.maxActiveDurationMs,
+    requestedDurationMs: config.maxActiveDurationMs, estimatedCost,
   }, authorization, clock());
   const decision = decideCoderProvisioning({ lifecycleState: 'offline', billingMode: config.billingMode, authorization: financial });
   if (decision.action === 'waiting_authorization') {
@@ -169,7 +186,7 @@ export async function prepareResidentOnDemandCoderNode(input: {
     const bounded = deriveBoundedLease({
       authorization, nodeId: config.nodeId, workItemId: input.workItemId, attemptId: input.leaseId,
       requestedDurationMs: config.maxActiveDurationMs, idleTimeoutMs: config.idleTimeoutMs,
-      now: clock(), priceHint: null,
+      now: clock(), priceHint: config.priceHint,
     });
     if (!bounded.ok) return { ok: false, reason: 'waiting_authorization', detail: `authority_envelope:${bounded.reason}` };
     lease = bounded.lease;

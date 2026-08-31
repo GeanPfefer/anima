@@ -76,12 +76,18 @@ externo bruto.
 ## 9. Hard limits × hints × observed
 
 - **Hard limit** (determinístico, aplicado antes/durante): duração da autoridade (`validUntil`,
-  `maxDurationMs`), provider/node/class permitidos, teto de custo quando informado.
-- **Estimate/hint**: `priceHint` (`costPerHr` do provider → `NodePriceHintV0`) e
-  `estimateLeaseCost` — CLASSIFICAÇÃO, nunca custo final imutável; nunca é gate.
+  `maxDurationMs`), provider/node/class permitidos, e **teto de custo** — a autorização pode
+  carregar `maxCostEstimate`, conferido contra uma **ESTIMATIVA de custo PRÉ-provision**
+  (`estimateLeaseCost(priceHint, maxActiveDurationMs)`) derivada de um `priceHint` **configurado
+  pelo operador** (`ANIMA_ON_DEMAND_PRICE_PER_HOUR`, do catálogo do provider — sem chamada ao
+  provider). Estimativa > teto → NEGA fail-closed; sem `priceHint` configurado, uma autorização
+  COM teto de custo NEGA (`cost_estimate_required`); autorização só-temporal segue válida.
+- **Estimate/hint**: `priceHint` e `estimateLeaseCost` — CLASSIFICAÇÃO derivada, nunca custo
+  final imutável. Serve ao gate (limite superior conservador), não é o custo real.
 - **Observed**: estado do lifecycle e alcançabilidade observados pela Goma (não auto-relato).
-- **Ainda não garantido**: custo FINAL só o provider conhece a posteriori; o gate real é a
-  autorização + o envelope temporal.
+- **Ainda não garantido**: custo FINAL só o provider conhece a posteriori. A estimativa usa o
+  preço CONFIGURADO (não uma consulta viva ao catálogo); se o preço real divergir, a estimativa
+  pode ficar defasada — mas o gate é fail-closed contra o teto CONFIGURADO.
 
 ## 10. Riscos residuais
 
@@ -91,8 +97,10 @@ externo bruto.
 - **Host offline após expirar a autoridade:** se o host não roda, o reconciler não roda; o recurso
   pode faturar até o host voltar. Mitigação futura: TTL/idle-stop do lado do provider como
   belt-and-suspenders. O teardown local do fluxo vivo cobre o caminho normal.
-- **Custo pré-provision:** com teto de custo na autorização, sem estimativa pré-provision o gate
-  nega (fail-closed). Estimar por classe/GPU é refinamento futuro.
+- **Custo pré-provision:** a estimativa depende de um `priceHint` CONFIGURADO pelo operador
+  (`ANIMA_ON_DEMAND_PRICE_PER_HOUR`), não de uma consulta viva ao catálogo do provider; um preço
+  real divergente pode defasar a estimativa (o gate segue fail-closed contra o teto configurado).
+  Consulta viva de preço por classe/GPU é refinamento futuro (exigiria um READ ao provider).
 - **Concorrência residual da API externa:** `at-most-one` por nodeId é estabelecido pelo nome
   determinístico + list-before-create; janelas da API do provider convergem por reconciliação.
 

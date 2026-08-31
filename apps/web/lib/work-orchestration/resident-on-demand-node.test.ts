@@ -16,7 +16,7 @@ const dummyClient = {} as SupabaseClient<Database>;
 const FIXTURE = join(__dirname, '__fixtures__', 'fake-inference-node.cjs');
 const config = (billingMode: 'owned' | 'paid' = 'owned'): ResidentOnDemandNodeConfig => ({
   nodeId: `node-${billingMode}`, providerId: 'local-process', model: 'qwen3-coder:latest',
-  resourceClass: 'local-cpu', billingMode, maxActiveDurationMs: 60_000, idleTimeoutMs: 1_000, maxConcurrentPaidNodes: null,
+  resourceClass: 'local-cpu', billingMode, maxActiveDurationMs: 60_000, idleTimeoutMs: 1_000, maxConcurrentPaidNodes: null, priceHint: null,
 });
 
 describe('Resident Host — node on-demand vivo', () => {
@@ -96,6 +96,63 @@ describe('Resident Host — node on-demand vivo', () => {
     expect(capturedLease!.leaseExpiresAt).toBe(validUntil);
     expect(capturedLease!.maxActiveDurationMs).toBe(30 * 60_000);
     expect(capturedLease!).toMatchObject({ billingMode: 'paid', authorizationRef: 'auth-x' });
+  });
+
+  test('config lê priceHint do env (fonte da estimativa de custo pré-provision)', () => {
+    expect(readResidentOnDemandNodeConfig('m', {
+      ANIMA_ON_DEMAND_NODE_ENABLED: 'true', ANIMA_ON_DEMAND_NODE_PROVISIONER: 'local-process',
+      ANIMA_ON_DEMAND_NODE_ID: 'p-a', ANIMA_ON_DEMAND_NODE_BILLING_MODE: 'owned',
+      ANIMA_ON_DEMAND_PRICE_PER_HOUR: '1.5', ANIMA_ON_DEMAND_PRICE_CURRENCY: 'USD',
+    })).toMatchObject({ priceHint: { currency: 'USD', perHour: 1.5 } });
+    expect(readResidentOnDemandNodeConfig('m', {
+      ANIMA_ON_DEMAND_NODE_ENABLED: 'true', ANIMA_ON_DEMAND_NODE_PROVISIONER: 'local-process',
+      ANIMA_ON_DEMAND_NODE_ID: 'p-a', ANIMA_ON_DEMAND_NODE_BILLING_MODE: 'owned',
+    })).toMatchObject({ priceHint: null });
+  });
+
+  const paidAuthClient = (maxCost: { currency: string; amount: number } | null): SupabaseClient<Database> => {
+    const authRow = {
+      id: 'auth-x', user_id: 'u', provider_id: 'local-process', node_id: null, resource_class: null, work_item_id: null,
+      max_duration_ms: 60 * 60_000, max_cost_currency: maxCost?.currency ?? null, max_cost_amount: maxCost?.amount ?? null,
+      valid_from: '2026-08-30T23:00:00.000Z', valid_until: '2026-08-31T02:00:00.000Z', revoked_at: null, created_at: '2026-08-30T23:00:00.000Z',
+    };
+    const chain = { eq: () => chain, is: () => chain, lte: () => chain, gt: () => chain, order: () => chain, limit: async () => ({ data: [authRow], error: null }) };
+    return { from: () => ({ select: () => chain }) } as unknown as SupabaseClient<Database>;
+  };
+
+  test('teto de CUSTO excedido pela estimativa pré-provision → nega fail-closed, provisioner não sobe', async () => {
+    // priceHint $2/h × 0.5h (30min) = estimativa $1 > teto $0.50 → cost_exceeds_authorized.
+    let provisionCalls = 0;
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process', provision: async () => { provisionCalls += 1; return { ok: false, reason: 'não deveria' }; },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }), stop: async () => ({ ok: true }),
+    };
+    const prepared = await prepareResidentOnDemandCoderNode({
+      client: paidAuthClient({ currency: 'USD', amount: 0.5 }),
+      config: { ...config('paid'), maxActiveDurationMs: 30 * 60_000, priceHint: { currency: 'USD', perHour: 2 } },
+      workItemId: 'work-1', proposalVersion: 1, leaseId: 'lease-x', signal: new AbortController().signal,
+      now: () => new Date('2026-08-31T00:00:00Z'), evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) },
+      provisionerFactory: () => provisioner,
+    });
+    expect(prepared).toMatchObject({ ok: false, reason: 'waiting_authorization' });
+    expect(provisionCalls).toBe(0);
+  });
+
+  test('estimativa dentro do teto de custo → procede; lease carrega o priceHint (custo na evidência)', async () => {
+    let capturedLease: NodeProvisionRequest['lease'] | null = null;
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process', provision: async req => { capturedLease = req.lease; return { ok: false, reason: 'parar após capturar' }; },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }), stop: async () => ({ ok: true }),
+    };
+    await prepareResidentOnDemandCoderNode({
+      client: paidAuthClient({ currency: 'USD', amount: 5 }), // teto $5 ≥ estimativa $1
+      config: { ...config('paid'), maxActiveDurationMs: 30 * 60_000, priceHint: { currency: 'USD', perHour: 2 } },
+      workItemId: 'work-1', proposalVersion: 1, leaseId: 'lease-x', signal: new AbortController().signal,
+      now: () => new Date('2026-08-31T00:00:00Z'), evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) },
+      provisionerFactory: () => provisioner,
+    });
+    expect(capturedLease).not.toBeNull();
+    expect(capturedLease!.priceHint).toEqual({ currency: 'USD', perHour: 2 });
   });
 
   test('node PAGO no teto de concorrência → recusa concurrency_limit ANTES de provisionar', async () => {

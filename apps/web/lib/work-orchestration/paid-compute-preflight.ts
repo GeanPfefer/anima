@@ -67,6 +67,9 @@ export function assessPaidComputePreflight(input: PaidComputePreflightInput = {}
     cond('teardown_path', true, 'stop + destroy implementados na porta NodeProvisioner'),
     cond('recovery_reconciler', true, 'locate + reconcilePaidComputeLeases (órfão após restart)'),
     cond('lease_bounded_by_authority', true, 'deriveBoundedLease clampa deadline à validUntil da autorização'),
+    // Informativo (NÃO exigido para infra): sem priceHint configurado, uma autorização COM teto
+    // de custo NEGA fail-closed; uma autorização só-temporal (sem teto de custo) segue válida.
+    cond('price_hint_for_cost_ceiling', present(env.ANIMA_ON_DEMAND_PRICE_PER_HOUR), 'ANIMA_ON_DEMAND_PRICE_PER_HOUR (só necessário p/ autorização com teto de custo)'),
   ];
   const humanAuth = cond('human_paid_authorization', input.humanAuthorizationValid === true, 'autorização humana válida no envelope (ato humano; nunca fabricada)');
 
@@ -77,6 +80,8 @@ export function assessPaidComputePreflight(input: PaidComputePreflightInput = {}
     infraReady,
     readyForHumanPaidAuthorization: infraReady,
     paidExecutionAuthorized: infraReady && humanAuth.status === 'ok',
-    missing: conditions.filter(c => c.status === 'missing').map(c => c.key),
+    // `missing` lista só o REQUERIDO (infra + autorização humana). Condições estruturais/
+    // informativas (ex.: price_hint, só necessário p/ teto de custo) ficam em `conditions`.
+    missing: [...infra, humanAuth].filter(c => c.status === 'missing').map(c => c.key),
   };
 }
