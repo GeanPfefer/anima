@@ -1,10 +1,19 @@
 import {
+  deriveBoundedLease,
   estimateLeaseCost,
   evaluateLeaseStatus,
   parseNodeLease,
   type NodeLeaseV0,
 } from './node-lease';
+import type { PaidComputeAuthorizationV1 } from './paid-compute-authorization';
 import type { Json } from '@anima/types';
+
+const authorization = (over: Partial<PaidComputeAuthorizationV1> = {}): PaidComputeAuthorizationV1 => ({
+  schemaVersion: 1, authorizationId: 'auth-1', authorizedBy: 'user-1', authorizedByAuthor: 'user',
+  providerId: 'runpod', nodeId: null, resourceClass: null, workItemId: null,
+  maxDurationMs: 30 * 60_000, maxCostEstimate: null,
+  validFrom: '2026-08-31T00:00:00.000Z', validUntil: '2026-08-31T02:00:00.000Z', ...over,
+});
 
 const lease = (overrides: Partial<NodeLeaseV0> = {}): NodeLeaseV0 => ({
   schemaVersion: 1,
@@ -98,5 +107,51 @@ describe('parseNodeLease — fail-closed', () => {
 
   test('price hint malformado invalida', () => {
     expect(parseNodeLease({ ...good, priceHint: { currency: 'USD', perHour: -1 } } as Json)).toBeNull();
+  });
+});
+
+describe('deriveBoundedLease (autoridade humana = teto duro)', () => {
+  const now = new Date('2026-08-31T00:00:00.000Z');
+  const base = { nodeId: 'gpu-a', workItemId: 'item-1', attemptId: 'att-1', idleTimeoutMs: 60_000, priceHint: null, now };
+
+  test('pedido dentro da autoridade → deadline = agora + duração pedida', () => {
+    const r = deriveBoundedLease({ ...base, authorization: authorization(), requestedDurationMs: 10 * 60_000 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.lease.maxActiveDurationMs).toBe(10 * 60_000);
+    expect(r.lease.leaseExpiresAt).toBe('2026-08-31T00:10:00.000Z');
+    expect(r.lease).toMatchObject({ billingMode: 'paid', providerId: 'runpod', authorizationRef: 'auth-1' });
+    // Round-trip válido e o status respeita o deadline clampado.
+    expect(parseNodeLease(r.lease as unknown as Json)).not.toBeNull();
+  });
+
+  test('duração pedida excede maxDurationMs → clampa à autoridade', () => {
+    const r = deriveBoundedLease({ ...base, authorization: authorization({ maxDurationMs: 5 * 60_000 }), requestedDurationMs: 30 * 60_000 });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.lease.maxActiveDurationMs).toBe(5 * 60_000);
+  });
+
+  test('validUntil mais cedo que agora+duração → deadline clampado à validade (invariante-chave)', () => {
+    const r = deriveBoundedLease({ ...base, authorization: authorization({ validUntil: '2026-08-31T00:05:00.000Z' }), requestedDurationMs: 30 * 60_000 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // Deadline absoluto NUNCA passa da janela da autorização, mesmo com duração maior autorizada.
+    expect(r.lease.leaseExpiresAt).toBe('2026-08-31T00:05:00.000Z');
+  });
+
+  test('janela da autoridade já esgotada → fail-closed (authority_window_elapsed)', () => {
+    const r = deriveBoundedLease({ ...base, authorization: authorization({ validUntil: '2026-08-30T23:59:59.000Z' }), requestedDurationMs: 10 * 60_000 });
+    expect(r).toEqual({ ok: false, reason: 'authority_window_elapsed' });
+  });
+
+  test('duração pedida não-positiva → fail-closed (authority_duration_zero)', () => {
+    expect(deriveBoundedLease({ ...base, authorization: authorization(), requestedDurationMs: 0 })).toEqual({ ok: false, reason: 'authority_duration_zero' });
+  });
+
+  test('lease derivada expira determinística no deadline via evaluateLeaseStatus', () => {
+    const r = deriveBoundedLease({ ...base, authorization: authorization({ validUntil: '2026-08-31T00:05:00.000Z' }), requestedDurationMs: 30 * 60_000 });
+    if (!r.ok) throw new Error('esperava lease');
+    const status = evaluateLeaseStatus({ lease: r.lease, now: new Date('2026-08-31T00:06:00.000Z'), activeSince: now, idleSince: null });
+    expect(status).toMatchObject({ status: 'expired', reason: 'deadline' });
   });
 });

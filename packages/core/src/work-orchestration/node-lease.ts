@@ -13,7 +13,7 @@
 // ============================================================
 
 import type { Json } from '@anima/types';
-import type { NodeBillingMode } from './paid-compute-authorization';
+import type { NodeBillingMode, PaidComputeAuthorizationV1 } from './paid-compute-authorization';
 
 /** Palpite de preço do provider (opcional). Preço é INTERPRETAÇÃO dependente de catálogo,
  * não fato eterno — por isso é um "hint" que deriva custo estimado, não custo gravado. */
@@ -86,6 +86,60 @@ export function estimateLeaseCost(priceHint: NodePriceHintV0 | null, activeDurat
   if (!priceHint || activeDurationMs < 0) return null;
   const hours = activeDurationMs / 3_600_000;
   return { currency: priceHint.currency, amount: priceHint.perHour * hours };
+}
+
+export type BoundedLeaseRefusal = 'authority_window_elapsed' | 'authority_duration_zero';
+export type BoundedLeaseResult =
+  | { readonly ok: true; readonly lease: NodeLeaseV0 }
+  | { readonly ok: false; readonly reason: BoundedLeaseRefusal };
+
+export interface BoundedLeaseInput {
+  /** A autorização HUMANA que concede a autoridade — o TETO. */
+  readonly authorization: PaidComputeAuthorizationV1;
+  readonly nodeId: string;
+  readonly workItemId: string;
+  readonly attemptId: string;
+  /** Duração pretendida da lease (ms). Será limitada pela autoridade. */
+  readonly requestedDurationMs: number;
+  readonly idleTimeoutMs: number;
+  readonly now: Date;
+  readonly priceHint: NodePriceHintV0 | null;
+}
+
+/**
+ * Deriva uma lease PAGA cujo envelope é o MENOR entre o pedido e a autoridade concedida — a
+ * autorização humana é TETO DURO, JAMAIS ampliável por uma camada inferior. Duas barreiras
+ * determinísticas, ambas apertadas para a autoridade:
+ *   - `leaseExpiresAt` (deadline absoluto) = min(agora + duração pedida, `validUntil` da auth);
+ *   - `maxActiveDurationMs` = min(duração pedida, `maxDurationMs` da auth).
+ * A lease NUNCA fatura além da janela de validade da autorização. Fail-closed se a janela já
+ * se esgotou (nada a autorizar) — devolve refusal, não uma lease frouxa. Assume que a
+ * autorização já foi validada contra o pedido (`evaluatePaidComputeAuthorization`); aqui só
+ * se APLICA o teto. Não persiste, não chama provider.
+ */
+export function deriveBoundedLease(input: BoundedLeaseInput): BoundedLeaseResult {
+  const nowMs = input.now.getTime();
+  const authUntilMs = Date.parse(input.authorization.validUntil);
+  const boundedDuration = Math.min(input.requestedDurationMs, input.authorization.maxDurationMs);
+  if (!Number.isInteger(boundedDuration) || boundedDuration <= 0) return { ok: false, reason: 'authority_duration_zero' };
+  const deadlineMs = Math.min(nowMs + boundedDuration, authUntilMs);
+  if (!Number.isFinite(deadlineMs) || deadlineMs <= nowMs) return { ok: false, reason: 'authority_window_elapsed' };
+  return {
+    ok: true,
+    lease: {
+      schemaVersion: 1,
+      nodeId: input.nodeId,
+      providerId: input.authorization.providerId,
+      billingMode: 'paid',
+      workItemId: input.workItemId,
+      attemptId: input.attemptId,
+      maxActiveDurationMs: boundedDuration,
+      idleTimeoutMs: input.idleTimeoutMs,
+      leaseExpiresAt: new Date(deadlineMs).toISOString(),
+      authorizationRef: input.authorization.authorizationId,
+      priceHint: input.priceHint,
+    },
+  };
 }
 
 const asObject = (v: Json | undefined): Record<string, Json | undefined> | null =>
