@@ -46,8 +46,11 @@ memória.
 fase de **reconcile** do Resident Host (arranque + pós-wake, ANTES da volta ⇒ toda lease paga
 viva é órfã): `locate(nodeId)` → decide → `stop`+`destroy` → evidência de teardown. Bounded,
 idempotente, `retry_later` em indisponibilidade temporária (nunca abandona). `locate` reconstrói
-o recurso pelo nome determinístico `anima-<nodeId>` — **reset-safe, dispensa provider_ref
-persistido**.
+o recurso pelo nome determinístico `anima-<nodeId>` — reset-safe. Além disso, o **`providerRef`
+(id opaco do recurso no provider) é PERSISTIDO na evidência** a partir de `health_confirmed`
+(nunca credencial): dá recovery/observabilidade por referência DIRETA e, em `confirm_offline`,
+um `stop`/`destroy` por id como defesa em profundidade (encerra um recurso que a busca por nome
+possa ter perdido; idempotente).
 
 ## 6. Teardown garantido e idempotente
 
@@ -91,9 +94,11 @@ externo bruto.
 
 ## 10. Riscos residuais
 
-- **Janela create→primeira-evidência:** um crash entre criar o pod e persistir a 1ª evidência com
-  o nodeId deixa o órfão localizável só pelo nome (`locate`), não por provider_ref durável.
-  `locate` cobre; persistir `provider_ref` na evidência é um endurecimento futuro.
+- **Janela create→health_confirmed:** o `providerRef` é persistido a partir de `health_confirmed`;
+  um crash ENTRE criar o pod e esse primeiro evento deixa o órfão localizável só pelo nome
+  (`locate anima-<nodeId>`), não por `providerRef`. Janela estreita e coberta por `locate`;
+  fechá-la totalmente exigiria persistir o `providerRef` no exato instante do create (evento
+  intermediário) — refinamento futuro de baixo retorno.
 - **Host offline após expirar a autoridade:** se o host não roda, o reconciler não roda; o recurso
   pode faturar até o host voltar. Mitigação futura: TTL/idle-stop do lado do provider como
   belt-and-suspenders. O teardown local do fluxo vivo cobre o caminho normal.

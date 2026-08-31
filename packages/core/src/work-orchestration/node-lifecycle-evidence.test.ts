@@ -25,7 +25,28 @@ describe('buildNodeLifecycleEvidence — fail-closed', () => {
   test('fatos válidos constroem a evidência', () => {
     const built = buildNodeLifecycleEvidence(input());
     expect(built.ok).toBe(true);
-    if (built.ok) expect(built.value).toMatchObject({ schemaVersion: 1, nodeId: 'gpu-a', transition: { to: 'ready' }, authorizationRef: null, estimatedCost: null });
+    if (built.ok) expect(built.value).toMatchObject({ schemaVersion: 1, nodeId: 'gpu-a', transition: { to: 'ready' }, authorizationRef: null, estimatedCost: null, providerRef: null });
+  });
+
+  test('providerRef opcional: presente (string), ausente (null) e roundtrip', () => {
+    const withRef = buildNodeLifecycleEvidence(input({ providerRef: 'pod-99' }));
+    expect(withRef.ok).toBe(true);
+    if (withRef.ok) {
+      expect(withRef.value.providerRef).toBe('pod-99');
+      expect(parseNodeLifecycleEvidence(withRef.value as unknown as Json)?.providerRef).toBe('pod-99');
+    }
+    expect(buildNodeLifecycleEvidence(input({ providerRef: null })).ok).toBe(true);
+    // ausente → null
+    const { providerRef: _omit, ...noRef } = input();
+    const built = buildNodeLifecycleEvidence(noRef as BuildNodeLifecycleEvidenceInput);
+    if (built.ok) expect(built.value.providerRef).toBeNull();
+  });
+
+  test('providerRef malformado é rejeitado (vazio, ou dado sensível)', () => {
+    expect(buildNodeLifecycleEvidence(input({ providerRef: '   ' })).ok).toBe(false);
+    const sensitive = buildNodeLifecycleEvidence(input({ providerRef: 'api_key=abc123' }));
+    expect(sensitive.ok).toBe(false);
+    if (!sensitive.ok) expect(sensitive.defect).toBe('sensitive_data');
   });
 
   test('transição fora do vocabulário do ciclo de vida é recusada', () => {

@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(16);
+SELECT plan(19);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('ca000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','node-owner@test.invalid','',now(),'{}','{}',now(),now()),
@@ -44,6 +44,16 @@ SELECT throws_ok($$ SELECT public.record_host_observed_node_lifecycle((SELECT id
 SELECT throws_ok($$ SELECT public.record_host_observed_node_lifecycle((SELECT id FROM node_item),1,
   pg_temp.lifecycle('provisioning','ready','health_confirmed','ca000000-0000-0000-0000-00000000aaaa')) $$,
   'P0002',NULL,'attempt inexistente é recusada');
+
+-- providerRef OPCIONAL: aceito quando string; persistido na evidência; vazio é recusado.
+SELECT is((public.record_host_observed_node_lifecycle((SELECT id FROM node_item),1,
+  pg_temp.lifecycle('ready','busy','reserved') || '{"providerRef":"pod-proof-1"}'::jsonb))->>'action','recorded','evidência com providerRef é aceita');
+SELECT is((SELECT payload->'data'->'evidence'->>'providerRef' FROM public.work_events
+  WHERE work_item_id=(SELECT id FROM node_item) AND payload->'data'->'evidence'->'transition'->>'event'='reserved' LIMIT 1),
+  'pod-proof-1','providerRef é persistido na evidência');
+SELECT throws_ok($$ SELECT public.record_host_observed_node_lifecycle((SELECT id FROM node_item),1,
+  pg_temp.lifecycle('busy','idle','released') || '{"providerRef":"  "}'::jsonb) $$,
+  '22023',NULL,'providerRef vazio é recusado');
 
 SELECT is((public.grant_paid_compute_authorization('fake-provider','fake-node','gpu-test',(SELECT id FROM node_item),
   60000,'USD',1.25,now()-interval '1 minute',now()+interval '10 minutes'))->>'action','granted','usuário concede autorização paga');

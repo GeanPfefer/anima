@@ -202,13 +202,16 @@ export async function prepareResidentOnDemandCoderNode(input: {
   const sink = input.evidenceSink ?? nodeLifecycleEvidenceSinkFor(input.client);
   const activeSince = clock();
   let state: NodeLifecycleState = 'offline';
+  // Referência do recurso no provider: `null` até o provision retornar; a partir daí toda
+  // evidência a carrega, permitindo recovery/teardown do órfão exato após restart.
+  let providerRef: string | null = null;
   const persist = async (event: NodeLifecycleEvent, healthy: boolean, attemptId: string | null): Promise<boolean> => {
     const transition = transitionNodeLifecycle(state, event);
     if (!transition.ok) return false;
     if (transition.kind === 'noop') return true;
     const duration = Math.max(0, clock().getTime() - activeSince.getTime());
     const built = buildNodeLifecycleEvidence({
-      nodeId: config.nodeId, providerId: config.providerId, leaseId: input.leaseId,
+      nodeId: config.nodeId, providerId: config.providerId, leaseId: input.leaseId, providerRef,
       workItemId: input.workItemId, attemptId, billingMode: config.billingMode,
       transition, healthy, activeDurationMs: duration, authorizationRef,
       estimatedCost: estimateLeaseCost(lease.priceHint, duration), observedAt: clock().toISOString(),
@@ -233,6 +236,7 @@ export async function prepareResidentOnDemandCoderNode(input: {
     return { ok: false, reason: 'provision_failed', detail: provisioned.reason };
   }
   const handle: ProvisionedNodeHandle = provisioned.handle;
+  providerRef = handle.providerRef; // a partir daqui a evidência carrega a referência do recurso
   const health = await provisioner.inspect(handle, input.signal);
   if (!health.healthy) {
     await persist('health_lost', false, null);

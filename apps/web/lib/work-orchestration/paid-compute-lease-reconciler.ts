@@ -107,6 +107,13 @@ export async function reconcilePaidComputeLeases(deps: PaidComputeLeaseReconcile
       continue;
     }
     if (decision === 'confirm_offline') {
+      // Defesa em profundidade: com providerRef persistido, um stop/destroy DIRETO por id garante
+      // encerrar um recurso que a busca por nome possa ter perdido (idempotente; 404 = já foi).
+      if (lease.providerRef) {
+        const byRef: ProvisionedNodeHandle = { nodeId: lease.nodeId, providerId: lease.providerId, providerRef: lease.providerRef, endpoint: '' };
+        await provisioner.stop(byRef, signal);
+        if (provisioner.destroy) await provisioner.destroy(byRef, signal);
+      }
       const ok = await recordTeardown(deps, lease, ['shutdown_requested', 'shutdown_confirmed'], now());
       results.push({ ...ids(lease), decision, outcome: ok ? 'confirmed_offline' : 'teardown_failed' });
       continue;
@@ -155,7 +162,7 @@ async function recordTeardown(
   for (const event of events) {
     const to = TEARDOWN_TO[event];
     const built = buildNodeLifecycleEvidence({
-      nodeId: lease.nodeId, providerId: lease.providerId, leaseId: lease.leaseId,
+      nodeId: lease.nodeId, providerId: lease.providerId, leaseId: lease.leaseId, providerRef: lease.providerRef,
       workItemId: lease.workItemId, attemptId: lease.attemptId, billingMode: lease.billingMode,
       transition: { from, to, event }, healthy: false, activeDurationMs: 0,
       authorizationRef: lease.authorizationRef, observedAt: now.toISOString(),

@@ -92,7 +92,7 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     destroy: async () => { spies.destroy += 1; return { ok: true }; },
     locate: async () => locateResult,
   });
-  const lease: ReconcilerLease = { nodeId: 'burst-1', providerId: 'runpod', leaseId: 'lease-1', workItemId: 'item-1', attemptId: null, billingMode: 'paid', authorizationRef: 'auth-1', latestState: 'ready', latestObservedAt: '', proposalVersion: 1 };
+  const lease: ReconcilerLease = { nodeId: 'burst-1', providerId: 'runpod', leaseId: 'lease-1', providerRef: null, workItemId: 'item-1', attemptId: null, billingMode: 'paid', authorizationRef: 'auth-1', latestState: 'ready', latestObservedAt: '', proposalVersion: 1 };
   const handle: ProvisionedNodeHandle = { nodeId: 'burst-1', providerId: 'runpod', endpoint: 'http://x', providerRef: 'pod-1' };
 
   test('órfão de pé + autoridade esgotada → teardown (stop+destroy) e confirma offline', async () => {
@@ -120,6 +120,18 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     });
     expect(report.results[0]!.outcome).toBe('confirmed_offline');
     expect(spies.stop).toBe(0);
+  });
+
+  test('provider ausente MAS com providerRef persistido → stop/destroy direto por id (defesa em profundidade)', async () => {
+    const spies = { stop: 0, destroy: 0 };
+    const store = durableStore();
+    const report = await reconcilePaidComputeLeases({
+      resolveProvisioner: () => fakeProvisioner({ ok: true, found: false }, spies),
+      readLeases: async () => [{ ...lease, providerRef: 'pod-77' }],
+      readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+    });
+    expect(report.results[0]!.outcome).toBe('confirmed_offline');
+    expect(spies).toEqual({ stop: 1, destroy: 1 }); // encerra o pod por id mesmo não achado por nome
   });
 
   test('provider inalcançável → retry_later, NÃO abandona nem fabrica teardown', async () => {

@@ -52,6 +52,15 @@ describe('projectReconcilableLeases', () => {
     ])).toHaveLength(0);
   });
 
+  test('providerRef projetado é o último NÃO-nulo (provision_requested traz null; health o preenche)', () => {
+    const leases = projectReconcilableLeases([
+      evidenceEvent('offline', 'provisioning', 'provision_requested'), // providerRef null
+      evidenceEvent('provisioning', 'ready', 'health_confirmed', { providerRef: 'pod-42' }),
+      evidenceEvent('ready', 'busy', 'reserved', { providerRef: 'pod-42' }),
+    ]);
+    expect(leases[0]).toMatchObject({ latestState: 'busy', providerRef: 'pod-42' });
+  });
+
   test('falha deixa recurso possivelmente pendurado → candidata (health_failed/provision_failed)', () => {
     expect(projectReconcilableLeases([evidenceEvent('provisioning', 'health_failed', 'health_lost')])).toHaveLength(1);
   });

@@ -34,6 +34,10 @@ export interface NodeLifecycleEvidenceV1 {
   readonly nodeId: string;
   readonly providerId: string;
   readonly leaseId: string;
+  /** Referência OPACA do recurso no provider (pod/instância/pid) quando já conhecida — permite
+   * recovery/teardown do órfão exato após restart. `null` antes de o recurso existir (ex.:
+   * `provision_requested`). NUNCA credencial. */
+  readonly providerRef: string | null;
   readonly workItemId: WorkItemId;
   /** Tentativa quando já existe; provisão pode começar antes de `execution_started`. */
   readonly attemptId: string | null;
@@ -53,6 +57,7 @@ export interface BuildNodeLifecycleEvidenceInput {
   readonly nodeId: string;
   readonly providerId: string;
   readonly leaseId: string;
+  readonly providerRef?: string | null;
   readonly workItemId: WorkItemId;
   readonly attemptId?: string | null;
   readonly billingMode: NodeBillingMode;
@@ -100,6 +105,9 @@ const isCost = (v: unknown): v is { currency: string; amount: number } => {
 export function buildNodeLifecycleEvidence(input: BuildNodeLifecycleEvidenceInput): NodeLifecycleEvidenceResult {
   if (!nonBlank(input.nodeId) || !nonBlank(input.providerId) || !nonBlank(input.leaseId)) return fail('invalid_identity', 'A evidência exige nodeId, providerId e leaseId.');
   if (input.nodeId.length > MAX_ID || input.providerId.length > MAX_ID || input.leaseId.length > MAX_ID) return fail('payload_too_large', 'Identidade excede o tamanho permitido.');
+  const providerRef = input.providerRef ?? null;
+  if (providerRef !== null && !nonBlank(providerRef)) return fail('invalid_identity', 'providerRef precisa ser string não-vazia ou null.');
+  if (providerRef !== null && providerRef.length > MAX_ID) return fail('payload_too_large', 'providerRef excede o tamanho permitido.');
   if (!nonBlank(input.workItemId) || (input.attemptId !== null && input.attemptId !== undefined && !nonBlank(input.attemptId))) {
     return fail('invalid_correlation', 'A evidência exige item e tentativa válida quando disponível.');
   }
@@ -119,7 +127,9 @@ export function buildNodeLifecycleEvidence(input: BuildNodeLifecycleEvidenceInpu
   if (estimatedCost !== null && !isCost(estimatedCost)) return fail('invalid_cost', 'estimatedCost precisa ser {currency, amount>=0} ou null.');
 
   if (!nonBlank(input.observedAt) || Number.isNaN(Date.parse(input.observedAt))) return fail('invalid_timestamp', 'observedAt precisa ser ISO-8601 válido.');
-  if (containsSensitiveData(input.nodeId) || containsSensitiveData(input.providerId) || (authorizationRef !== null && containsSensitiveData(authorizationRef))) {
+  if (containsSensitiveData(input.nodeId) || containsSensitiveData(input.providerId)
+    || (authorizationRef !== null && containsSensitiveData(authorizationRef))
+    || (providerRef !== null && containsSensitiveData(providerRef))) {
     return fail('sensitive_data', 'A evidência não pode carregar credenciais nem caminhos absolutos.');
   }
 
@@ -130,6 +140,7 @@ export function buildNodeLifecycleEvidence(input: BuildNodeLifecycleEvidenceInpu
       nodeId: input.nodeId,
       providerId: input.providerId,
       leaseId: input.leaseId,
+      providerRef,
       workItemId: input.workItemId,
       attemptId: input.attemptId ?? null,
       billingMode: input.billingMode,
@@ -157,6 +168,7 @@ export function parseNodeLifecycleEvidence(value: Json | undefined): NodeLifecyc
     nodeId: root.nodeId as string,
     providerId: root.providerId as string,
     leaseId: root.leaseId as string,
+    providerRef: (root.providerRef as string | null | undefined) ?? null,
     workItemId: root.workItemId as WorkItemId,
     attemptId: (root.attemptId as string | null | undefined) ?? null,
     billingMode: root.billingMode as NodeBillingMode,
