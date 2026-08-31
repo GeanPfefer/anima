@@ -71,10 +71,13 @@ re-derruba → nenhum segredo na evidência. Também: crash após stop antes de 
 ## 8. Evidência
 
 Append-only via `host_observed_node_lifecycle_recorded` (autor `system`, origem `host`): node,
-provider, lease, transição, billing, `authorizationRef`, custo estimado, timestamps. O humano
-recupera *quem autorizou, qual node/provider, quando começou, deadline, quando o shutdown foi
-solicitado/observado, se houve recovery/erro*. **Nunca** segredo, endpoint sensível ou payload
-externo bruto.
+provider, lease, `providerRef`, transição, billing, `authorizationRef`, custo estimado, timestamps.
+**Nunca** segredo, endpoint sensível ou payload externo bruto. A projeção
+`projectPaidComputeAudit` (core puro) / `readPaidComputeAudit` (web, RLS) devolve um REGISTRO por
+lease respondendo as perguntas do humano: quem autorizou (`authorizationRef`), qual node/provider/
+`providerRef`, `startedAt`/`readyAt`/`shutdownRequestedAt`/`offlineAt`, `lastState`, `failed`,
+`estimatedCost`, `outcome` (active|teardown_pending|terminated|failed) e **`orphanRisk`** (paga
+ainda viva). Read-only, sem provider, sem segredo.
 
 ## 9. Hard limits × hints × observed
 

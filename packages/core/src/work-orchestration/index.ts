@@ -40,6 +40,7 @@ export * from './node-provisioner';
 export * from './provisioning-decision';
 export * from './node-lifecycle-evidence';
 export * from './paid-compute-lease-reconciliation';
+export * from './paid-compute-audit';
 export * from './harness-turn-lifecycle';
 export * from './work-verification';
 export * from './verifier-opinion';

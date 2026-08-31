@@ -2,7 +2,7 @@
 import { buildNodeLifecycleEvidence, NODE_LIFECYCLE_EVIDENCE_EVENT_TYPE, type NodeLifecycleEvidenceV1 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { buildPaidComputeLeaseReconcilerDeps } from './paid-compute-lease-reconciler-deps';
+import { buildPaidComputeLeaseReconcilerDeps, readLivePaidNodeCount, readPaidComputeAudit } from './paid-compute-lease-reconciler-deps';
 import { RunPodNodeProvisioner } from './runpod-node-provisioner';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
 
@@ -70,6 +70,17 @@ describe('buildPaidComputeLeaseReconcilerDeps', () => {
     expect(await expired.readAuthorityValid('auth-1', now)).toBe(false);
     expect(await buildPaidComputeLeaseReconcilerDeps(fakeClient({ auth: null })).readAuthorityValid('auth-1', now)).toBe(false);
     expect(await valid.readAuthorityValid(null, now)).toBe(false);
+  });
+
+  test('readPaidComputeAudit / readLivePaidNodeCount projetam do log durável', async () => {
+    const client = fakeClient({ events: [evRow(evidence('provision_requested', 'offline', 'provisioning')), evRow(evidence('health_confirmed', 'provisioning', 'ready'))] });
+    const audit = await readPaidComputeAudit(client);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ nodeId: 'burst-1', providerId: 'runpod', lastState: 'ready', outcome: 'active', orphanRisk: true });
+    expect(await readLivePaidNodeCount(client)).toBe(1);
+    // log vazio → sem registros nem contagem
+    expect(await readPaidComputeAudit(fakeClient({ events: [] }))).toHaveLength(0);
+    expect(await readLivePaidNodeCount(fakeClient({ events: [] }))).toBe(0);
   });
 
   test('resolveProvisioner: runpod só com config; local-process sempre; desconhecido null', () => {
