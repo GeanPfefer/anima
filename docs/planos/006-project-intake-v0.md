@@ -80,6 +80,23 @@ self-dev (SQL + pgTAP + typegen). Recomenda-se dar ao coder primeiro um recorte 
 — ex.: um serializador puro `ProjectIdeaV0 ↔ shape persistido`, ou a projeção de apresentação —
 e deixar a migration para depois de uma convergência provada.
 
+### PIN-02 — Codec persistível puro de ProjectIdeaV0
+
+- **Status:** not_started
+- **Problema:** o contrato de domínio ainda não possui uma fronteira explícita e testada entre
+  `ProjectIdeaV0` e o shape que uma futura camada de persistência poderá armazenar/ler.
+- **Resultado esperado:** exatamente um recorte puro em `packages/core`: shape persistível V0,
+  serialização e desserialização fail-closed com round-trip determinístico e testes focados.
+- **Dependências:** nenhuma; o contrato puro do recorte 1 já existe.
+- **Escopo:** `packages/core/src/project-intake.ts` e seu teste focado.
+- **Fora do escopo:** migration, banco, RLS, API, UI, criação via chat, mudança de status,
+  decisão build/buy e qualquer Work Item derivado de uma ideia de projeto.
+- **Aceite:** round-trip preserva uma ideia V0 válida; shape ausente, extra, malformado ou com
+  versão desconhecida falha fechado; teste focado e typecheck de `packages/core` passam.
+- **Riscos:** acoplar o domínio prematuramente ao schema SQL futuro; o shape deve permanecer
+  provider-neutral e não criar IDs, timestamps ou decisões ainda inexistentes.
+- **Tamanho:** S · **Capacidade:** programação · **Raciocínio:** médio · **Checkpoint humano:** sim
+
 ## Barreira desta sessão (por que o self-dev não rodou)
 
 Ato humano/infra impossível de substituir por Claude aqui, registrado sem inventar aprovação:
