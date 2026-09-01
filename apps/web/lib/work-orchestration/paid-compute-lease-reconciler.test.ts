@@ -134,6 +134,25 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     expect(spies).toEqual({ stop: 1, destroy: 1 }); // encerra o pod por id mesmo não achado por nome
   });
 
+  test('confirm_offline com providerRef: stop por id FALHA (não-404) → teardown_failed, NÃO fabrica offline', async () => {
+    const store = durableStore();
+    const provisioner: NodeProvisioner = {
+      providerId: 'runpod',
+      provision: async () => ({ ok: false, reason: 'n/a' }),
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }),
+      stop: async () => ({ ok: false, reason: 'provider_unreachable' }), // teardown por id falha
+      destroy: async () => ({ ok: true }),
+      locate: async () => ({ ok: true, found: false }), // nome não achou → confirm_offline
+    };
+    const report = await reconcilePaidComputeLeases({
+      resolveProvisioner: () => provisioner,
+      readLeases: async () => [{ ...lease, providerRef: 'pod-live' }],
+      readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+    });
+    expect(report.results[0]!.outcome).toBe('teardown_failed'); // não afirma offline sobre recurso possivelmente vivo
+    expect(store.events).toHaveLength(0); // nenhuma evidência de shutdown_confirmed fabricada
+  });
+
   test('provider inalcançável → retry_later, NÃO abandona nem fabrica teardown', async () => {
     const store = durableStore();
     const report = await reconcilePaidComputeLeases({

@@ -107,12 +107,24 @@ export async function reconcilePaidComputeLeases(deps: PaidComputeLeaseReconcile
       continue;
     }
     if (decision === 'confirm_offline') {
-      // Defesa em profundidade: com providerRef persistido, um stop/destroy DIRETO por id garante
-      // encerrar um recurso que a busca por nome possa ter perdido (idempotente; 404 = já foi).
+      // Defesa em profundidade: com providerRef persistido, um stop/destroy DIRETO por id encerra
+      // um recurso que a busca por nome possa ter perdido (404 = já foi ⇒ `stop` devolve ok). Mas
+      // se ESSE teardown por id FALHAR (não-404: 5xx/rede), NÃO podemos afirmar offline — mantemos
+      // reconciliável em vez de FABRICAR convergência sobre um recurso possivelmente vivo/faturando.
       if (lease.providerRef) {
         const byRef: ProvisionedNodeHandle = { nodeId: lease.nodeId, providerId: lease.providerId, providerRef: lease.providerRef, endpoint: '' };
-        await provisioner.stop(byRef, signal);
-        if (provisioner.destroy) await provisioner.destroy(byRef, signal);
+        const stopped = await provisioner.stop(byRef, signal);
+        if (!stopped.ok) {
+          results.push({ ...ids(lease), decision, outcome: 'teardown_failed', detail: `by_ref_stop:${stopped.reason}` });
+          continue;
+        }
+        if (provisioner.destroy) {
+          const destroyed = await provisioner.destroy(byRef, signal);
+          if (!destroyed.ok) {
+            results.push({ ...ids(lease), decision, outcome: 'teardown_failed', detail: `by_ref_destroy:${destroyed.reason}` });
+            continue;
+          }
+        }
       }
       const ok = await recordTeardown(deps, lease, ['shutdown_requested', 'shutdown_confirmed'], now());
       results.push({ ...ids(lease), decision, outcome: ok ? 'confirmed_offline' : 'teardown_failed' });
