@@ -61,6 +61,16 @@ describe('projectReconcilableLeases', () => {
     expect(leases[0]).toMatchObject({ latestState: 'busy', providerRef: 'pod-42' });
   });
 
+  test('recovery: provider_identified deixa a lease em provisioning reconciliável PELO providerRef', () => {
+    // Crash logo após a criação do pod: só provision_requested + provider_identified no log.
+    const leases = projectReconcilableLeases([
+      evidenceEvent('offline', 'provisioning', 'provision_requested'), // providerRef null
+      evidenceEvent('provisioning', 'provisioning', 'provider_identified', { providerRef: 'pod-created', healthy: false }),
+    ]);
+    expect(leases).toHaveLength(1);
+    expect(leases[0]).toMatchObject({ latestState: 'provisioning', providerRef: 'pod-created', billingMode: 'paid' });
+  });
+
   test('falha deixa recurso possivelmente pendurado → candidata (health_failed/provision_failed)', () => {
     expect(projectReconcilableLeases([evidenceEvent('provisioning', 'health_failed', 'health_lost')])).toHaveLength(1);
   });

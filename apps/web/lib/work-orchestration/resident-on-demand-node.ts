@@ -14,6 +14,7 @@ import {
   type NodeLifecycleState,
   type NodePriceHintV0,
   type NodeProvisioner,
+  type NodeProvisionObserver,
   type ProvisionedNodeHandle,
   type LiveNodePriceQuoteV0,
 } from '@anima/core';
@@ -123,7 +124,7 @@ export function onDemandBurstForced(env: Record<string, string | undefined> = pr
 }
 
 export type ResidentNodePreparation =
-  | { readonly ok: false; readonly reason: 'waiting_authorization' | 'aggregate_budget_denied' | 'concurrency_limit' | 'provision_failed' | 'health_failed' | 'evidence_failed'; readonly detail: string }
+  | { readonly ok: false; readonly reason: 'waiting_authorization' | 'aggregate_budget_denied' | 'concurrency_limit' | 'provision_failed' | 'provider_identity_unpersisted' | 'health_failed' | 'evidence_failed'; readonly detail: string }
   | { readonly ok: true; readonly runtime: ReturnType<typeof remoteRuntimeFor>; readonly leaseExpiresAt: string; finish(attemptId: string | null): Promise<void> };
 
 /**
@@ -305,17 +306,48 @@ export async function prepareResidentOnDemandCoderNode(input: {
   }
   inFlight.add(config.nodeId);
   const provisioner = input.provisionerFactory?.() ?? resolveOnDemandProvisioner(config);
+
+  // Observador da IDENTIDADE do recurso: o provisioner o chama assim que o provider devolve o id
+  // (pod existente OU recém-criado), ANTES de readiness. Persistimos `provider_identified`
+  // (providerRef DURÁVEL, healthy=false, provisioning→provisioning) para que um crash entre a
+  // criação e o ready deixe o recurso faturável reconciliável pelo id — não só pelo nome.
+  const observer: NodeProvisionObserver = {
+    providerIdentified: async (identity) => {
+      if (identity.nodeId !== config.nodeId || identity.providerId !== config.providerId || identity.providerRef.trim() === '') return false;
+      providerRef = identity.providerRef;
+      return await persist('provider_identified', false, null);
+    },
+  };
+
   const provisioned = await provisioner.provision({
     nodeId: config.nodeId, providerId: config.providerId, model: config.model,
     resourceClass: config.resourceClass, lease,
-  }, input.signal);
+  }, input.signal, observer);
   if (!provisioned.ok) {
-    await persist('provision_failed', false, null);
+    // Se a IDENTIDADE já é conhecida (recurso faturável criado), o provider FOI chamado: NUNCA
+    // voidar a reserva; tentar teardown COMPENSATÓRIO por providerRef com um signal FRESCO — nunca
+    // deixar um signal de workload já abortado impedir a parada de um recurso pago conhecido.
+    if (providerRef !== null) {
+      const teardownSignal = new AbortController().signal;
+      const byRef: ProvisionedNodeHandle = { nodeId: config.nodeId, providerId: config.providerId, providerRef, endpoint: '' };
+      await persist('shutdown_requested', false, null);
+      const stopped = await provisioner.stop(byRef, teardownSignal);
+      if (provisioner.destroy) await provisioner.destroy(byRef, teardownSignal);
+      await persist(stopped.ok ? 'shutdown_confirmed' : 'shutdown_failed', false, null);
+    } else {
+      // Nenhum recurso criado (create falhou): registra provision_failed. Não voida a reserva —
+      // a política só voida quando o provider comprovadamente NÃO foi chamado (pré-provisão).
+      await persist('provision_failed', false, null);
+    }
     inFlight.delete(config.nodeId);
-    return { ok: false, reason: 'provision_failed', detail: provisioned.reason };
+    return {
+      ok: false,
+      reason: provisioned.reason === 'provider_identity_unpersisted' ? 'provider_identity_unpersisted' : 'provision_failed',
+      detail: provisioned.reason,
+    };
   }
   const handle: ProvisionedNodeHandle = provisioned.handle;
-  providerRef = handle.providerRef; // a partir daqui a evidência carrega a referência do recurso
+  providerRef = handle.providerRef; // confirma a referência (o observer já a setou antes do ready)
   const health = await provisioner.inspect(handle, input.signal);
   if (!health.healthy) {
     await persist('health_lost', false, null);

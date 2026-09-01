@@ -262,6 +262,82 @@ describe('Resident Host — node on-demand vivo', () => {
     expect(provisionCalls).toBe(0);
   });
 
+  type PrepareInput = Parameters<typeof prepareResidentOnDemandCoderNode>[0];
+  const RESERVE_OK = (async () => ({ ok: true, reservationId: 'res-1' })) as unknown as PrepareInput['reserveBudget'];
+  const paidPrepare = (over: Partial<PrepareInput>) => prepareResidentOnDemandCoderNode({
+    client: paidAuthClient({ currency: 'USD', amount: 10 }), config: { ...config('paid'), priceHint: { currency: 'USD', perHour: 1 } },
+    workItemId: 'work-1', proposalVersion: 1, leaseId: 'lease-x', signal: new AbortController().signal,
+    now: () => new Date('2026-08-31T00:00:00Z'), reserveBudget: RESERVE_OK, ...over,
+  });
+
+  test('node PAGO: sequência inclui provider_identified antes de health_lost (sem ready fabricado)', async () => {
+    const events: NodeLifecycleEvidenceV1[] = [];
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async (req, _sig, observer) => {
+        const ok = observer ? await observer.providerIdentified({ nodeId: req.nodeId, providerId: req.providerId, providerRef: 'pod-x' }) : true;
+        if (!ok) return { ok: false, reason: 'provider_identity_unpersisted' };
+        return { ok: true, handle: { nodeId: req.nodeId, providerId: req.providerId, endpoint: 'http://x', providerRef: 'pod-x' } };
+      },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: true, healthy: false }), // health FALHA
+      stop: async () => ({ ok: true }),
+    };
+    const prepared = await paidPrepare({
+      evidenceSink: { record: async (v: NodeLifecycleEvidenceV1) => { events.push(v); return { ok: true, action: 'recorded' }; } },
+      provisionerFactory: () => provisioner,
+    });
+    expect(prepared).toMatchObject({ ok: false, reason: 'health_failed' });
+    expect(events.map(e => e.transition.event)).toEqual(['provision_requested', 'provider_identified', 'health_lost']);
+    expect(events.find(e => e.transition.event === 'provider_identified')).toMatchObject({
+      providerRef: 'pod-x', healthy: false, transition: { from: 'provisioning', to: 'provisioning' },
+    });
+  });
+
+  test('falha ao persistir provider_identified → teardown compensatório por providerRef, sem void, sem inspect/runtime', async () => {
+    const stopped: string[] = []; const destroyed: string[] = []; let inspects = 0; let voids = 0;
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async (req, _sig, observer) => {
+        const ok = observer ? await observer.providerIdentified({ nodeId: req.nodeId, providerId: req.providerId, providerRef: 'pod-y' }) : true;
+        if (!ok) return { ok: false, reason: 'provider_identity_unpersisted' };
+        return { ok: true, handle: { nodeId: req.nodeId, providerId: req.providerId, endpoint: 'http://x', providerRef: 'pod-y' } };
+      },
+      inspect: async h => { inspects += 1; return { nodeId: h.nodeId, reachable: false, healthy: false }; },
+      stop: async h => { stopped.push(h.providerRef); return { ok: true }; },
+      destroy: async h => { destroyed.push(h.providerRef); return { ok: true }; },
+    };
+    const prepared = await paidPrepare({
+      // sink falha ESPECIFICAMENTE no provider_identified
+      evidenceSink: { record: async (v: NodeLifecycleEvidenceV1) => v.transition.event === 'provider_identified' ? { ok: false, message: 'sink down' } : { ok: true, action: 'recorded' } },
+      voidBudget: (async () => { voids += 1; }) as unknown as PrepareInput['voidBudget'],
+      provisionerFactory: () => provisioner,
+    });
+    expect(prepared).toMatchObject({ ok: false, reason: 'provider_identity_unpersisted' });
+    expect(stopped).toEqual(['pod-y']);   // stop pelo providerRef OBSERVADO
+    expect(destroyed).toEqual(['pod-y']); // destroy pelo providerRef observado
+    expect(inspects).toBe(0);             // NUNCA chamou inspect (não fabricou ready)
+    expect(voids).toBe(0);                // NÃO voidou o orçamento (provider foi chamado)
+  });
+
+  test('observer recusa identidade divergente de node/provider sem persistir provider_identified', async () => {
+    const events: NodeLifecycleEvidenceV1[] = [];
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async (req, _sig, observer) => {
+        const ok = observer ? await observer.providerIdentified({ nodeId: 'outro-node', providerId: req.providerId, providerRef: 'pod-z' }) : true;
+        return ok ? { ok: true, handle: { nodeId: req.nodeId, providerId: req.providerId, endpoint: 'http://x', providerRef: 'pod-z' } } : { ok: false, reason: 'provider_identity_unpersisted' };
+      },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }),
+      stop: async () => ({ ok: true }),
+    };
+    const prepared = await paidPrepare({
+      evidenceSink: { record: async (v: NodeLifecycleEvidenceV1) => { events.push(v); return { ok: true, action: 'recorded' }; } },
+      provisionerFactory: () => provisioner,
+    });
+    expect(prepared).toMatchObject({ ok: false, reason: 'provider_identity_unpersisted' });
+    expect(events.some(e => e.transition.event === 'provider_identified')).toBe(false);
+  });
+
   test('paid sem autorização persistida não chama provisioner', async () => {
     let provisionCalls = 0;
     const chain = { eq: () => chain, is: () => chain, lte: () => chain, gt: () => chain, order: () => chain, limit: async () => ({ data: [], error: null }) };

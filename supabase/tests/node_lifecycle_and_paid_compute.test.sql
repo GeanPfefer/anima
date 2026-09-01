@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(19);
+SELECT plan(20);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('ca000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','node-owner@test.invalid','',now(),'{}','{}',now(),now()),
@@ -54,6 +54,14 @@ SELECT is((SELECT payload->'data'->'evidence'->>'providerRef' FROM public.work_e
 SELECT throws_ok($$ SELECT public.record_host_observed_node_lifecycle((SELECT id FROM node_item),1,
   pg_temp.lifecycle('busy','idle','released') || '{"providerRef":"  "}'::jsonb) $$,
   '22023',NULL,'providerRef vazio é recusado');
+
+-- Identidade do recurso pode ser observada DURANTE provisioning, sem afirmar ready.
+SELECT is((public.record_host_observed_node_lifecycle((SELECT id FROM node_item),1,
+  pg_temp.lifecycle('provisioning','provisioning','provider_identified')
+  || '{"providerRef":"pod-created-before-ready"}'::jsonb))->>'action',
+  'recorded',
+  'provider identity is durable before readiness');
+
 
 SELECT is((public.grant_paid_compute_authorization('fake-provider','fake-node','gpu-test',(SELECT id FROM node_item),
   60000,'USD',1.25,now()-interval '1 minute',now()+interval '10 minutes'))->>'action','granted','usuário concede autorização paga');

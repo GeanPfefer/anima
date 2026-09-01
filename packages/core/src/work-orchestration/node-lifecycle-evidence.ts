@@ -25,7 +25,7 @@ const LIFECYCLE_STATES: ReadonlySet<NodeLifecycleState> = new Set<NodeLifecycleS
   'offline', 'provisioning', 'ready', 'busy', 'idle', 'shutting_down', 'provision_failed', 'health_failed', 'shutdown_failed',
 ]);
 const LIFECYCLE_EVENTS: ReadonlySet<NodeLifecycleEvent> = new Set<NodeLifecycleEvent>([
-  'provision_requested', 'health_confirmed', 'provision_failed', 'health_lost', 'reserved', 'released',
+  'provision_requested', 'provider_identified', 'health_confirmed', 'provision_failed', 'health_lost', 'reserved', 'released',
   'shutdown_requested', 'shutdown_confirmed', 'shutdown_failed',
 ]);
 

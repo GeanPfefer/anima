@@ -41,6 +41,7 @@ export type NodeLifecycleState =
  * (autorização/placement), aqui só se registra a transição. */
 export type NodeLifecycleEvent =
   | 'provision_requested'
+  | 'provider_identified'
   | 'health_confirmed'
   | 'provision_failed'
   | 'health_lost'
@@ -82,6 +83,9 @@ const TRANSITIONS: Readonly<Record<NodeLifecycleState, Partial<Record<NodeLifecy
     provision_requested: 'provisioning',
   },
   provisioning: {
+    // Fato intermediario duravel: o recurso externo ja recebeu identidade,
+    // mas ainda nao foi provado healthy/ready.
+    provider_identified: 'provisioning',
     health_confirmed: 'ready',
     provision_failed: 'provision_failed',
     health_lost: 'health_failed',

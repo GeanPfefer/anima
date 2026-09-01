@@ -130,3 +130,20 @@ describe('predicados de estado', () => {
     expect(isNodeLifecycleFailure('ready')).toBe(false);
   });
 });
+
+
+describe('provider identity lifecycle', () => {
+  test('provider_identified preserva provisioning sem afirmar readiness', () => {
+    expect(transitionNodeLifecycle('provisioning', 'provider_identified')).toEqual({
+      ok: true,
+      kind: 'transition',
+      from: 'provisioning',
+      to: 'provisioning',
+      event: 'provider_identified',
+    });
+    expect(transitionNodeLifecycle('offline', 'provider_identified')).toMatchObject({
+      ok: false,
+      kind: 'illegal',
+    });
+  });
+});

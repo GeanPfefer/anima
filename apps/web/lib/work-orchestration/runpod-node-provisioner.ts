@@ -2,6 +2,7 @@ import type {
   LocateOutcome,
   NodePriceHintV0,
   NodeProvisioner,
+  NodeProvisionObserver,
   NodeProvisionRequest,
   NodeStatusReport,
   ProvisionedNodeHandle,
@@ -234,7 +235,7 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     return { ok: true, found: true, handle: { nodeId, providerId: this.providerId, endpoint: this.endpointOf(found.pod), providerRef: found.pod.id } };
   }
 
-  async provision(request: NodeProvisionRequest, signal: AbortSignal): Promise<ProvisionOutcome> {
+  async provision(request: NodeProvisionRequest, signal: AbortSignal, observer?: NodeProvisionObserver): Promise<ProvisionOutcome> {
     if (signal.aborted) return { ok: false, reason: 'aborted' };
     const name = this.podName(request);
 
@@ -247,6 +248,15 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
       const created = await this.createPod(name, request, signal);
       if (!created.ok) return { ok: false, reason: created.reason };
       podId = created.pod.id;
+    }
+
+    // IDENTIDADE ANTES DE READINESS: assim que o recurso faturável tem id (pod existente OU
+    // recém-criado), informa a governança ANTES de qualquer polling de readiness. Se a identidade
+    // não ficou duravelmente observada (`false`), PARA a progressão — não faz polling, não cria
+    // segundo recurso; o caller é dono do teardown/recovery pelo providerRef que já conhece.
+    if (observer) {
+      const persisted = await observer.providerIdentified({ nodeId: request.nodeId, providerId: this.providerId, providerRef: podId });
+      if (!persisted) return { ok: false, reason: 'provider_identity_unpersisted' };
     }
 
     const ready = await this.awaitEndpoint(podId, signal);

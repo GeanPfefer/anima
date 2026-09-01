@@ -122,3 +122,29 @@ describe('projectNodeLifecycleEvidence — projeta do log com correlação coere
     expect(projectNodeLifecycleEvidence([{ type: 'work_approved', payload: {} as Json }])).toHaveLength(0);
   });
 });
+
+
+describe('provider identity evidence', () => {
+  test('provider_identified carrega providerRef sem fabricar ready', () => {
+    const built = buildNodeLifecycleEvidence(input({
+      providerRef: 'pod-created-123',
+      transition: {
+        from: 'provisioning',
+        to: 'provisioning',
+        event: 'provider_identified',
+      },
+      healthy: false,
+    }));
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value).toMatchObject({
+      providerRef: 'pod-created-123',
+      healthy: false,
+      transition: {
+        from: 'provisioning',
+        to: 'provisioning',
+        event: 'provider_identified',
+      },
+    });
+  });
+});

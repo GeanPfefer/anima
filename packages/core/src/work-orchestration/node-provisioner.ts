@@ -42,6 +42,23 @@ export interface ProvisionedNodeHandle {
 /** Status observado pela Goma via provisioner. `reachable` = o recurso responde;
  * `healthy` = está apto a servir inferência. A Goma NÃO confia no auto-relato do node —
  * este report é o que o provisioner/host consegue verificar de fora. */
+export interface ProviderResourceIdentity {
+  readonly nodeId: string;
+  readonly providerId: string;
+  readonly providerRef: string;
+}
+
+/**
+ * Observador da camada de governanca. O provisioner informa a identidade assim
+ * que o provider a devolve, antes de aguardar readiness/health.
+ *
+ * false = a identidade nao ficou duravelmente observada; o adapter deve parar
+ * de avancar a provisao. O caller continua responsavel pelo teardown/recovery.
+ */
+export interface NodeProvisionObserver {
+  providerIdentified(identity: ProviderResourceIdentity): Promise<boolean>;
+}
+
 export interface NodeStatusReport {
   readonly nodeId: string;
   readonly reachable: boolean;
@@ -74,7 +91,11 @@ export type LocateOutcome =
  */
 export interface NodeProvisioner {
   readonly providerId: string;
-  provision(request: NodeProvisionRequest, signal: AbortSignal): Promise<ProvisionOutcome>;
+  provision(
+    request: NodeProvisionRequest,
+    signal: AbortSignal,
+    observer?: NodeProvisionObserver,
+  ): Promise<ProvisionOutcome>;
   inspect(handle: ProvisionedNodeHandle, signal: AbortSignal): Promise<NodeStatusReport>;
   stop(handle: ProvisionedNodeHandle, signal: AbortSignal): Promise<StopOutcome>;
   destroy?(handle: ProvisionedNodeHandle, signal: AbortSignal): Promise<StopOutcome>;

@@ -113,6 +113,42 @@ describe('RunPodNodeProvisioner', () => {
     expect(posts).toBe(0); // nenhum recurso novo criado
   });
 
+  test('observer recebe o id ANTES do 1º poll de readiness; false → falha sem readiness', async () => {
+    const { client, calls } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
+      if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1', desiredStatus: 'CREATED' });
+      if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      return json(404, {});
+    });
+    let identifiedRef: string | null = null;
+    let readinessGetsAtIdentify = -1;
+    const observer = { providerIdentified: async (identity: { nodeId: string; providerId: string; providerRef: string }) => {
+      identifiedRef = identity.providerRef;
+      readinessGetsAtIdentify = calls.filter(c => c.url.endsWith('/pods/pod-1')).length;
+      return false; // identidade não ficou durável
+    } };
+    const outcome = await new RunPodNodeProvisioner(config(), client, opts).provision(request, signal(), observer);
+    expect(identifiedRef).toBe('pod-1');
+    expect(readinessGetsAtIdentify).toBe(0); // nenhum GET de readiness antes do observer
+    expect(outcome).toEqual({ ok: false, reason: 'provider_identity_unpersisted' });
+    expect(calls.some(c => c.url.endsWith('/pods/pod-1'))).toBe(false); // parou; não pollou readiness
+  });
+
+  test('replay: pod existente por nome → observer recebe id, sem POST create, segue se true', async () => {
+    let posts = 0; let identifiedRef: string | null = null;
+    const { client } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, [runningPod({ name: 'anima-node-1' })]);
+      if (req.method === 'POST' && req.url.endsWith('/pods')) { posts += 1; return json(201, { id: 'pod-2', name: 'anima-node-1' }); }
+      if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      return json(404, {});
+    });
+    const observer = { providerIdentified: async (identity: { providerRef: string }) => { identifiedRef = identity.providerRef; return true; } };
+    const outcome = await new RunPodNodeProvisioner(config(), client, opts).provision(request, signal(), observer);
+    expect(identifiedRef).toBe('pod-1'); // do pod EXISTENTE, não um novo
+    expect(posts).toBe(0); // nenhum recurso novo criado
+    expect(outcome.ok).toBe(true);
+  });
+
   test('auth inválida → auth_invalid, sem vazar a chave (Missões 5+6)', async () => {
     const { client } = fakeHttp(() => json(401, { error: `invalid key ${API_KEY}` }));
     const p = new RunPodNodeProvisioner(config(), client, opts);
