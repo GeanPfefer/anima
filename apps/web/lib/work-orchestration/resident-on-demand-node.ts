@@ -179,6 +179,9 @@ export async function prepareResidentOnDemandCoderNode(input: {
   /** Override de teste para descoberta read-only. Em produção RunPod usa o GraphQL gpuTypes;
    * outros provisioners mantêm o preço configurado até possuírem client concreto. */
   readonly readLivePriceQuote?: () => Promise<{ readonly ok: true; readonly quote: LiveNodePriceQuoteV0 } | { readonly ok: false; readonly reason: string }>;
+  /** Revalidação fresca da mesma autoridade paga antes de entregar runtime. Override de teste;
+   * produção relê a autorização persistida e exige o mesmo authorizationRef. */
+  readonly revalidatePaidAuthority?: () => Promise<boolean>;
   readonly reserveBudget?: typeof reservePaidComputeBudget;
   readonly voidBudget?: typeof voidPaidComputeBudgetReservation;
   /** Timeout próprio do teardown de segurança. Override existe para provas determinísticas. */
@@ -364,6 +367,22 @@ export async function prepareResidentOnDemandCoderNode(input: {
     await persist(tornDown.ok ? 'shutdown_confirmed' : 'shutdown_failed', false, null);
     inFlight.delete(config.nodeId);
     return { ok: false, reason: 'health_failed', detail: health.detail ?? 'node unhealthy' };
+  }
+  if (config.billingMode === 'paid') {
+    const authorityStillValid = input.revalidatePaidAuthority
+      ? await input.revalidatePaidAuthority()
+      : (await readActivePaidComputeAuthorization(input.client, {
+          providerId: config.providerId, nodeId: config.nodeId, resourceClass: config.resourceClass,
+          workItemId: input.workItemId, now: clock(),
+        }))?.authorizationId === authorizationRef;
+    if (!authorityStillValid) {
+      await persist('health_lost', false, null);
+      await persist('shutdown_requested', false, null);
+      const tornDown = await teardownKnownNode(provisioner, handle, input.cleanupTimeoutMs ?? DEFAULT_NODE_TEARDOWN_TIMEOUT_MS);
+      await persist(tornDown.ok ? 'shutdown_confirmed' : 'shutdown_failed', false, null);
+      inFlight.delete(config.nodeId);
+      return { ok: false, reason: 'waiting_authorization', detail: 'authority_unavailable_before_runtime' };
+    }
   }
   if (!await persist('health_confirmed', true, null)) {
     await persist('shutdown_requested', false, null);

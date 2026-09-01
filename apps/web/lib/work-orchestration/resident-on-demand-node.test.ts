@@ -374,6 +374,30 @@ describe('Resident Host — node on-demand vivo', () => {
     expect(cleanupSignals[0]!.aborted).toBe(false);
   });
 
+  test('autoridade revogada/expirada durante provisioning impede runtime e força teardown', async () => {
+    const events: NodeLifecycleEvidenceV1[] = []; const stopped: string[] = []; const destroyed: string[] = [];
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async (req, _signal, observer) => {
+        await observer?.providerIdentified({ nodeId: req.nodeId, providerId: req.providerId, providerRef: 'pod-expired' });
+        return { ok: true, handle: { nodeId: req.nodeId, providerId: req.providerId, providerRef: 'pod-expired', endpoint: 'http://x' } };
+      },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: true, healthy: true }),
+      stop: async h => { stopped.push(h.providerRef); return { ok: true }; },
+      destroy: async h => { destroyed.push(h.providerRef); return { ok: true }; },
+    };
+    const prepared = await paidPrepare({
+      provisionerFactory: () => provisioner, revalidatePaidAuthority: async () => false,
+      evidenceSink: { record: async value => { events.push(value); return { ok: true, action: 'recorded' }; }, },
+    });
+    expect(prepared).toEqual({ ok: false, reason: 'waiting_authorization', detail: 'authority_unavailable_before_runtime' });
+    expect(stopped).toEqual(['pod-expired']); expect(destroyed).toEqual(['pod-expired']);
+    expect(events.map(e => e.transition.event)).toEqual([
+      'provision_requested', 'provider_identified', 'health_lost', 'shutdown_requested', 'shutdown_confirmed',
+    ]);
+    expect(events.some(e => e.transition.event === 'health_confirmed')).toBe(false);
+  });
+
   test('falha ao persistir provider_identified → teardown compensatório por providerRef, sem void, sem inspect/runtime', async () => {
     const stopped: string[] = []; const destroyed: string[] = []; const signals: AbortSignal[] = []; let inspects = 0; let voids = 0;
     const provisioner: NodeProvisioner = {
@@ -400,6 +424,24 @@ describe('Resident Host — node on-demand vivo', () => {
     expect(voids).toBe(0);                // NÃO voidou o orçamento (provider foi chamado)
     expect(signals).toHaveLength(2);
     expect(signals.every(signal => !signal.aborted)).toBe(true);
+  });
+
+  test('create ambíguo sem providerRef conserva reserva e continua reconciliável por nome', async () => {
+    const events: NodeLifecycleEvidenceV1[] = []; let voids = 0;
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async () => ({ ok: false, reason: 'provider_unreachable' }),
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }),
+      stop: async () => ({ ok: true }), locate: async () => ({ ok: true, found: false }),
+    };
+    const prepared = await paidPrepare({
+      provisionerFactory: () => provisioner,
+      voidBudget: (async () => { voids += 1; return { ok: true }; }) as unknown as PrepareInput['voidBudget'],
+      evidenceSink: { record: async value => { events.push(value); return { ok: true, action: 'recorded' }; } },
+    });
+    expect(prepared).toMatchObject({ ok: false, reason: 'provision_failed', detail: 'provider_unreachable' });
+    expect(voids).toBe(0);
+    expect(events.map(e => e.transition.event)).toEqual(['provision_requested', 'provision_failed']);
   });
 
   test('observer recusa identidade divergente de node/provider sem persistir provider_identified', async () => {
