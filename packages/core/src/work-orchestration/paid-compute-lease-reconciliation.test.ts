@@ -114,6 +114,11 @@ describe('decidePaidLeaseReconciliation', () => {
   test('E3: teardown solicitado (shutting_down) + provider ativo → stop', () => {
     expect(decide({ latestState: 'shutting_down' })).toBe('stop');
   });
+  test('estado de falha + provider ativo → stop mesmo com autoridade ainda válida', () => {
+    for (const latestState of ['provision_failed', 'health_failed', 'shutdown_failed'] as const) {
+      expect(decide({ latestState, authorityStillValid: true })).toBe('stop');
+    }
+  });
   test('E4/E6: provider ausente → confirm_offline (convergência observada)', () => {
     expect(decide({ observed: 'absent' })).toBe('confirm_offline');
     expect(decide({ observed: 'absent', latestState: 'shutting_down' })).toBe('confirm_offline');
