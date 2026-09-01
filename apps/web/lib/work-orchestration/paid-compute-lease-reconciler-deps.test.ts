@@ -22,11 +22,12 @@ const evRow = (e: NodeLifecycleEvidenceV1) => ({
 });
 
 function fakeClient(over: {
-  events?: unknown[]; items?: unknown[]; auth?: { revoked_at: string | null; valid_until: string } | null;
+  events?: unknown[]; eventsError?: boolean; items?: unknown[]; auth?: { revoked_at: string | null; valid_until: string } | null;
 } = {}): SupabaseClient<Database> {
   const from = (table: string): unknown => {
     if (table === 'work_events') {
-      const chain: Record<string, unknown> = { select: () => chain, eq: () => chain, order: () => chain, limit: async () => ({ data: over.events ?? [], error: null }) };
+      const result = over.eventsError ? { data: null, error: { message: 'read failed' } } : { data: over.events ?? [], error: null };
+      const chain: Record<string, unknown> = { select: () => chain, eq: () => chain, order: () => chain, limit: async () => result };
       return chain;
     }
     if (table === 'work_items') {
@@ -81,6 +82,11 @@ describe('buildPaidComputeLeaseReconcilerDeps', () => {
     // log vazio → sem registros nem contagem
     expect(await readPaidComputeAudit(fakeClient({ events: [] }))).toHaveLength(0);
     expect(await readLivePaidNodeCount(fakeClient({ events: [] }))).toBe(0);
+  });
+
+  test('readLivePaidNodeCount é FAIL-CLOSED: erro de leitura → Infinity (nega o gate de concorrência)', async () => {
+    // Contar 0 em erro admitiria novo compute pago às cegas. Infinity ≥ qualquer teto → NEGA.
+    expect(await readLivePaidNodeCount(fakeClient({ eventsError: true }))).toBe(Number.POSITIVE_INFINITY);
   });
 
   test('resolveProvisioner: runpod só com config; local-process sempre; desconhecido null', () => {

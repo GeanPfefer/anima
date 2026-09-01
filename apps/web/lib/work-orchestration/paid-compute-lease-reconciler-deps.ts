@@ -88,9 +88,19 @@ async function readLifecycleEvents(client: SupabaseClient<Database>): Promise<No
 }
 
 /** Conta os nodes PAGOS ainda vivos (do log durável) — para o gate de concorrência antes de uma
- * nova provisão paga. Read-only; erro → 0 (o gate por-teto ainda protege o piso). */
+ * nova provisão paga. Read-only; FAIL-CLOSED: erro de leitura → Infinity (nega até observar). */
 export async function readLivePaidNodeCount(client: SupabaseClient<Database>): Promise<number> {
-  return projectReconcilableLeases(await readLifecycleEvents(client)).length;
+  const evidence = await client.from('work_events')
+    .select('event_type,payload').eq('event_type', NODE_LIFECYCLE_EVIDENCE_EVENT_TYPE)
+    .order('seq', { ascending: true }).limit(2000);
+  // FAIL-CLOSED: um erro de leitura NÃO pode admitir novo compute pago (contar 0 passaria o gate
+  // de concorrência). Devolve Infinity → NEGA até observar o estado real. (Query própria, sem
+  // reusar `readLifecycleEvents`, cujo `[]`-em-erro é benigno só para a auditoria read-only.) O
+  // gate financeiro AUTORITATIVO é a reserva transacional de orçamento; este é o teto secundário
+  // de NÚMERO de nodes concorrentes — fail-closed por defesa em profundidade.
+  if (evidence.error) return Number.POSITIVE_INFINITY;
+  const events: NodeLifecycleEvidenceEventLike[] = (evidence.data ?? []).map(row => ({ type: row.event_type as string, payload: row.payload as Json }));
+  return projectReconcilableLeases(events).length;
 }
 
 /** Auditoria READ-ONLY de compute (Milestone J) para o humano: um registro por lease com
