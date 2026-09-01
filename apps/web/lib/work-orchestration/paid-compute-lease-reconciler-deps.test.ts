@@ -84,15 +84,20 @@ describe('buildPaidComputeLeaseReconcilerDeps', () => {
   test('readPaidComputeAudit / readLivePaidNodeCount projetam do log durável', async () => {
     const client = fakeClient({ events: [evRow(evidence('provision_requested', 'offline', 'provisioning')), evRow(evidence('health_confirmed', 'provisioning', 'ready'))] });
     const audit = await readPaidComputeAudit(client);
-    expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ nodeId: 'burst-1', providerId: 'runpod', lastState: 'ready', outcome: 'active', orphanRisk: true });
+    expect(audit).toMatchObject({ ok: true });
+    if (!audit.ok) return;
+    expect(audit.records).toHaveLength(1);
+    expect(audit.records[0]).toMatchObject({ nodeId: 'burst-1', providerId: 'runpod', lastState: 'ready', outcome: 'active', orphanRisk: true });
     expect(await readLivePaidNodeCount(client)).toEqual({ ok: true, count: 1 });
-    // log vazio → sem registros nem contagem
-    expect(await readPaidComputeAudit(fakeClient({ events: [] }))).toHaveLength(0);
+    // log vazio OBSERVADO COM SUCESSO → ok:true com zero registros (≠ indisponibilidade)
+    expect(await readPaidComputeAudit(fakeClient({ events: [] }))).toEqual({ ok: true, records: [] });
     expect(await readLivePaidNodeCount(fakeClient({ events: [] }))).toEqual({ ok: true, count: 0 });
   });
 
-  test('readLivePaidNodeCount distingue erro de leitura de zero observado', async () => {
+  test('readPaidComputeAudit / readLivePaidNodeCount distinguem erro de leitura de zero observado', async () => {
+    expect(await readPaidComputeAudit(fakeClient({ eventsError: true }))).toEqual({
+      ok: false, reason: 'paid_compute_audit_unavailable',
+    });
     expect(await readLivePaidNodeCount(fakeClient({ eventsError: true }))).toEqual({
       ok: false, reason: 'paid_node_count_unavailable',
     });

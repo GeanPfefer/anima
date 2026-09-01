@@ -79,13 +79,24 @@ export function buildPaidComputeLeaseReconcilerDeps(
   };
 }
 
-/** Lê os eventos de evidência de lifecycle do log durável (RLS). Base de projeções read-only. */
-async function readLifecycleEvents(client: SupabaseClient<Database>): Promise<NodeLifecycleEvidenceEventLike[]> {
+/** Resultado da auditoria READ-ONLY de compute pago. Distingue explicitamente log observado com
+ * sucesso (zero registros = zero atividade) de indisponibilidade de leitura: a auditoria humana
+ * NUNCA deve ler erro de banco como "nenhum compute pago". Espelha `LivePaidNodeCountResult`. */
+export type PaidComputeAuditResult =
+  | { readonly ok: true; readonly records: readonly PaidComputeAuditRecord[] }
+  | { readonly ok: false; readonly reason: 'paid_compute_audit_unavailable' };
+
+/** Lê os eventos de evidência de lifecycle do log durável (RLS). Base de projeções read-only.
+ * Fail-closed: erro de leitura é SINALIZADO (`ok:false`), nunca colapsado em log vazio — quem
+ * projeta decide honestamente entre "zero observado" e "não pude ler". */
+async function readLifecycleEvents(
+  client: SupabaseClient<Database>,
+): Promise<{ readonly ok: true; readonly events: NodeLifecycleEvidenceEventLike[] } | { readonly ok: false }> {
   const evidence = await client.from('work_events')
     .select('event_type,payload').eq('event_type', NODE_LIFECYCLE_EVIDENCE_EVENT_TYPE)
     .order('seq', { ascending: true }).limit(2000);
-  if (evidence.error) return [];
-  return (evidence.data ?? []).map(row => ({ type: row.event_type as string, payload: row.payload as Json }));
+  if (evidence.error) return { ok: false };
+  return { ok: true, events: (evidence.data ?? []).map(row => ({ type: row.event_type as string, payload: row.payload as Json })) };
 }
 
 /** Conta os nodes PAGOS ainda vivos (do log durável) para o gate de concorrência. Distingue
@@ -101,9 +112,12 @@ export async function readLivePaidNodeCount(client: SupabaseClient<Database>): P
 
 /** Auditoria READ-ONLY de compute (Milestone J) para o humano: um registro por lease com
  * quem autorizou, node/provider/providerRef, marcos, desfecho, custo estimado e risco de órfão.
- * Nunca chama provider; nunca expõe segredo (a evidência já é livre de credencial). */
-export async function readPaidComputeAudit(client: SupabaseClient<Database>): Promise<readonly PaidComputeAuditRecord[]> {
-  return projectPaidComputeAudit(await readLifecycleEvents(client));
+ * Nunca chama provider; nunca expõe segredo (a evidência já é livre de credencial). Distingue
+ * zero observado de indisponibilidade — não mente por omissão quando o log não pôde ser lido. */
+export async function readPaidComputeAudit(client: SupabaseClient<Database>): Promise<PaidComputeAuditResult> {
+  const read = await readLifecycleEvents(client);
+  if (!read.ok) return { ok: false, reason: 'paid_compute_audit_unavailable' };
+  return { ok: true, records: projectPaidComputeAudit(read.events) };
 }
 
 /** Atalho de composição: reconcilia leases pagas para um cliente já autenticado. */
