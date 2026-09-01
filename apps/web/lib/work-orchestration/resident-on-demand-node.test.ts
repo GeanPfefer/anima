@@ -302,10 +302,38 @@ describe('Resident Host — node on-demand vivo', () => {
       client, config: { ...config('paid'), maxConcurrentPaidNodes: 1, priceHint: { currency: 'USD', perHour: 2 } }, workItemId: 'work-1', proposalVersion: 1,
       leaseId: 'lease-x', signal: new AbortController().signal, now: () => new Date('2026-08-31T00:00:00Z'),
       evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) }, provisionerFactory: () => provisioner,
-      readLivePaidNodeCount: async () => 1, // já no teto
+      readLivePaidNodeCount: async () => ({ ok: true, count: 1 }), // já no teto
     });
     expect(prepared).toMatchObject({ ok: false, reason: 'concurrency_limit' });
     expect(provisionCalls).toBe(0);
+  });
+
+  test('falha ao observar contagem paga nega antes de reserva, evidência e provider; retry saudável prossegue', async () => {
+    let reserveCalls = 0; let evidenceCalls = 0; let provisionCalls = 0;
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async () => { provisionCalls += 1; return { ok: false, reason: 'fim do retry' }; },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }), stop: async () => ({ ok: true }),
+    };
+    const common = {
+      client: paidAuthClient({ currency: 'USD', amount: 10 }),
+      config: { ...config('paid'), maxConcurrentPaidNodes: 1, priceHint: { currency: 'USD' as const, perHour: 1 } },
+      workItemId: 'work-1', proposalVersion: 1, leaseId: 'lease-count', signal: new AbortController().signal,
+      now: () => new Date('2026-08-31T00:00:00Z'),
+      reserveBudget: (async () => { reserveCalls += 1; return { ok: true, reservationId: 'res-count' }; }) as unknown as PrepareInput['reserveBudget'],
+      evidenceSink: { record: async () => { evidenceCalls += 1; return { ok: true as const, action: 'recorded' as const }; } },
+      provisionerFactory: () => provisioner,
+    };
+    const denied = await prepareResidentOnDemandCoderNode({
+      ...common, readLivePaidNodeCount: async () => ({ ok: false, reason: 'paid_node_count_unavailable' }),
+    });
+    expect(denied).toEqual({ ok: false, reason: 'paid_node_count_unavailable', detail: 'paid_node_count_unavailable' });
+    expect({ reserveCalls, evidenceCalls, provisionCalls }).toEqual({ reserveCalls: 0, evidenceCalls: 0, provisionCalls: 0 });
+
+    await prepareResidentOnDemandCoderNode({
+      ...common, readLivePaidNodeCount: async () => ({ ok: true, count: 0 }),
+    });
+    expect({ reserveCalls, evidenceCalls, provisionCalls }).toEqual({ reserveCalls: 1, evidenceCalls: 2, provisionCalls: 1 });
   });
 
   type PrepareInput = Parameters<typeof prepareResidentOnDemandCoderNode>[0];

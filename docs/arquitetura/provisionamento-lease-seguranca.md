@@ -156,3 +156,17 @@ multiplicam o teto.
 billing final confiável, a reserva não é liberada quando a lease termina. Um evento `voided` só é
 válido quando o host prova que o provider não foi chamado ou rejeitou definitivamente antes de
 criar recurso; timeout, resposta perdida, crash e resultado ambíguo conservam a reserva.
+
+## Observabilidade fail-closed de compute pago (2026-09-01)
+
+A contagem usada no teto de concorrência distingue `count: 0` observado de
+`paid_node_count_unavailable`. Indisponibilidade do log durável nega nova admissão paga antes da
+reserva financeira, de `provision_requested` e de qualquer chamada ao provider; não há sentinela
+numérica nem conversão para zero.
+
+O reconciler também distingue falha ao ler lifecycle/versões de uma lista vazia observada e
+reporta `observation: unavailable`. Leitura de autoridade permanece `false` em erro porque essa é
+a interpretação fail-closed: nunca concede poder financeiro. Reserva limita exposição estimada;
+identidade persistida e nome determinístico permitem localização; cleanup imediato é a primeira
+linha e reconciler durável a segunda. `offline` só representa ausência ou teardown completo
+comprovado conforme a semântica do provider.

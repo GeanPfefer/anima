@@ -11,7 +11,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
 import { RunPodNodeProvisioner, readRunPodProvisionerConfig } from './runpod-node-provisioner';
 import { nodeLifecycleEvidenceSinkFor } from './node-lifecycle-evidence';
-import { reconcilePaidComputeLeases, type PaidComputeLeaseReconcilerDeps, type ReconcilerLease } from './paid-compute-lease-reconciler';
+import { reconcilePaidComputeLeases, type PaidComputeLeaseReconcilerDeps, type ReconcilerLease, type ReconcilerLeaseReadResult } from './paid-compute-lease-reconciler';
+import type { LivePaidNodeCountResult } from './resident-on-demand-node';
 
 // ============================================================
 // Composição REAL das dependências do reconciler de leases pagas (Bearer/RLS, sem service_role).
@@ -38,29 +39,29 @@ export function buildPaidComputeLeaseReconcilerDeps(
       return null;
     },
 
-    readLeases: async (): Promise<readonly ReconcilerLease[]> => {
+    readLeases: async (): Promise<ReconcilerLeaseReadResult> => {
       const evidence = await client.from('work_events')
         .select('event_type,payload')
         .eq('event_type', NODE_LIFECYCLE_EVIDENCE_EVENT_TYPE)
         .order('seq', { ascending: true })
         .limit(2000);
-      if (evidence.error) return [];
+      if (evidence.error) return { ok: false, reason: 'paid_lease_observation_unavailable' };
       const events: NodeLifecycleEvidenceEventLike[] = (evidence.data ?? []).map(row => ({
         type: row.event_type as string, payload: row.payload as Json,
       }));
       const summaries = projectReconcilableLeases(events);
-      if (summaries.length === 0) return [];
+      if (summaries.length === 0) return { ok: true, leases: [] };
       // Versão CORRENTE do item (a RPC de teardown exige expected_proposal_version == item).
       const ids = [...new Set(summaries.map(s => s.workItemId))];
       const items = await client.from('work_items').select('id,proposal_version').in('id', ids);
-      if (items.error) return [];
+      if (items.error) return { ok: false, reason: 'paid_lease_observation_unavailable' };
       const versionOf = new Map((items.data ?? []).map(i => [i.id as string, i.proposal_version as number]));
       const leases: ReconcilerLease[] = [];
       for (const s of summaries) {
         const version = versionOf.get(s.workItemId);
         if (typeof version === 'number') leases.push({ ...s, proposalVersion: version });
       }
-      return leases;
+      return { ok: true, leases };
     },
 
     readAuthorityValid: async (authorizationRef, now): Promise<boolean> => {
@@ -87,20 +88,15 @@ async function readLifecycleEvents(client: SupabaseClient<Database>): Promise<No
   return (evidence.data ?? []).map(row => ({ type: row.event_type as string, payload: row.payload as Json }));
 }
 
-/** Conta os nodes PAGOS ainda vivos (do log durável) — para o gate de concorrência antes de uma
- * nova provisão paga. Read-only; FAIL-CLOSED: erro de leitura → Infinity (nega até observar). */
-export async function readLivePaidNodeCount(client: SupabaseClient<Database>): Promise<number> {
+/** Conta os nodes PAGOS ainda vivos (do log durável) para o gate de concorrência. Distingue
+ * explicitamente zero observado de indisponibilidade; a admission nega o segundo caso. */
+export async function readLivePaidNodeCount(client: SupabaseClient<Database>): Promise<LivePaidNodeCountResult> {
   const evidence = await client.from('work_events')
     .select('event_type,payload').eq('event_type', NODE_LIFECYCLE_EVIDENCE_EVENT_TYPE)
     .order('seq', { ascending: true }).limit(2000);
-  // FAIL-CLOSED: um erro de leitura NÃO pode admitir novo compute pago (contar 0 passaria o gate
-  // de concorrência). Devolve Infinity → NEGA até observar o estado real. (Query própria, sem
-  // reusar `readLifecycleEvents`, cujo `[]`-em-erro é benigno só para a auditoria read-only.) O
-  // gate financeiro AUTORITATIVO é a reserva transacional de orçamento; este é o teto secundário
-  // de NÚMERO de nodes concorrentes — fail-closed por defesa em profundidade.
-  if (evidence.error) return Number.POSITIVE_INFINITY;
+  if (evidence.error) return { ok: false, reason: 'paid_node_count_unavailable' };
   const events: NodeLifecycleEvidenceEventLike[] = (evidence.data ?? []).map(row => ({ type: row.event_type as string, payload: row.payload as Json }));
-  return projectReconcilableLeases(events).length;
+  return { ok: true, count: projectReconcilableLeases(events).length };
 }
 
 /** Auditoria READ-ONLY de compute (Milestone J) para o humano: um registro por lease com

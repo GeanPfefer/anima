@@ -142,3 +142,17 @@ porta expõe `destroy` só convergem para `offline` depois de `stop + destroy`; 
 qualquer etapa preserva `shutdown_failed`/recovery elegível. Para RunPod, a documentação oficial
 confirma que `stop` libera GPU, mas mantém o Pod e pode manter cobrança de storage, portanto não é
 prova de ausência. Nenhuma garantia de TTL provider-side foi assumida ou implementada.
+
+## Endurecimento de observabilidade e auditoria de crash (2026-09-01)
+
+- Contador pago discriminado: zero observado é sucesso; erro é
+  `paid_node_count_unavailable` e bloqueia antes de reserva/evidência/provider.
+- Leitura de leases discriminada: indisponibilidade vira `observation: unavailable`, não relatório
+  vazio observado nem convergência fabricada.
+- A auditoria dos demais padrões `erro = vazio/zero/false` confirmou que negar autoridade em erro
+  é corretamente fail-closed e que projeções somente de UI não participam dos write gates.
+- A matriz focal cobre `provision_requested` com provider ausente; identidade persistida e recurso
+  running; autoridade expirada; `shutdown_requested`; stop/destroy parcial; provider ausente ou
+  inalcançável; falha/timeout de teardown; e replay sem efeito duplicado.
+- Reserva sem `provision_requested` só é anulada com prova `provider_not_called`; create ambíguo
+  conserva orçamento e converge por nome determinístico/`providerRef`.

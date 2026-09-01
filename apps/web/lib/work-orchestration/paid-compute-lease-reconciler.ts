@@ -30,11 +30,15 @@ export interface ReconcilerLease extends LeaseReconciliationSummary {
   readonly proposalVersion: number;
 }
 
+export type ReconcilerLeaseReadResult =
+  | { readonly ok: true; readonly leases: readonly ReconcilerLease[] }
+  | { readonly ok: false; readonly reason: 'paid_lease_observation_unavailable' };
+
 export interface PaidComputeLeaseReconcilerDeps {
   /** Resolve o provisioner concreto para um providerId (ou `null` se indisponível/não configurado). */
   readonly resolveProvisioner: (providerId: string) => NodeProvisioner | null;
   /** Lê as leases pagas ainda vivas do log durável (via `projectReconcilableLeases` + versão). */
-  readonly readLeases: () => Promise<readonly ReconcilerLease[]>;
+  readonly readLeases: () => Promise<ReconcilerLeaseReadResult>;
   /** A autoridade ainda vale? (agora < validUntil e não revogada). `null`/ausente → false. */
   readonly readAuthorityValid: (authorizationRef: string | null, now: Date) => Promise<boolean>;
   /** Persiste UMA evidência de lifecycle (append-only; idempotente na RPC). */
@@ -68,6 +72,7 @@ export interface LeaseReconciliationReport {
   readonly tornDown: number;
   readonly retriable: number;
   readonly leftAwaiting: number;
+  readonly observation: 'observed' | 'unavailable';
 }
 
 const observedFromLocate = (
@@ -82,7 +87,11 @@ export async function reconcilePaidComputeLeases(deps: PaidComputeLeaseReconcile
   const now = deps.now ?? (() => new Date());
   const signal = deps.signal ?? new AbortController().signal;
   const max = deps.maxReconcile ?? 25;
-  const leases = (await deps.readLeases()).slice(0, max);
+  const observed = await deps.readLeases();
+  if (!observed.ok) {
+    return { results: [], tornDown: 0, retriable: 0, leftAwaiting: 0, observation: 'unavailable' };
+  }
+  const leases = observed.leases.slice(0, max);
   const results: LeaseReconcileResult[] = [];
 
   for (const lease of leases) {
@@ -148,6 +157,7 @@ export async function reconcilePaidComputeLeases(deps: PaidComputeLeaseReconcile
     tornDown: results.filter(r => r.outcome === 'torn_down').length,
     retriable: results.filter(r => r.outcome === 'retry_later' || r.outcome === 'reconciler_unavailable' || r.outcome === 'teardown_failed').length,
     leftAwaiting: results.filter(r => r.outcome === 'awaited').length,
+    observation: 'observed',
   };
 }
 

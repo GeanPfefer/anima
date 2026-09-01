@@ -49,16 +49,24 @@ describe('buildPaidComputeLeaseReconcilerDeps', () => {
       events: [evRow(evidence('provision_requested', 'offline', 'provisioning')), evRow(evidence('health_confirmed', 'provisioning', 'ready'))],
       items: [{ id: 'item-1', proposal_version: 4 }],
     }));
-    const leases = await deps.readLeases();
-    expect(leases).toHaveLength(1);
-    expect(leases[0]).toMatchObject({ nodeId: 'burst-1', providerId: 'runpod', latestState: 'ready', proposalVersion: 4 });
+    const observed = await deps.readLeases();
+    expect(observed).toMatchObject({ ok: true });
+    if (!observed.ok) return;
+    expect(observed.leases).toHaveLength(1);
+    expect(observed.leases[0]).toMatchObject({ nodeId: 'burst-1', providerId: 'runpod', latestState: 'ready', proposalVersion: 4 });
   });
 
   test('readLeases descarta lease sem versão de item conhecida (fail-safe)', async () => {
     const deps = buildPaidComputeLeaseReconcilerDeps(fakeClient({
       events: [evRow(evidence('provision_requested', 'offline', 'provisioning'))], items: [],
     }));
-    expect(await deps.readLeases()).toHaveLength(0);
+    expect(await deps.readLeases()).toEqual({ ok: true, leases: [] });
+  });
+
+  test('readLeases torna falha de lifecycle explicitamente observável', async () => {
+    expect(await buildPaidComputeLeaseReconcilerDeps(fakeClient({ eventsError: true })).readLeases()).toEqual({
+      ok: false, reason: 'paid_lease_observation_unavailable',
+    });
   });
 
   test('readAuthorityValid: válida (não revogada, dentro do prazo) → true; revogada/expirada/ausente → false', async () => {
@@ -78,15 +86,16 @@ describe('buildPaidComputeLeaseReconcilerDeps', () => {
     const audit = await readPaidComputeAudit(client);
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ nodeId: 'burst-1', providerId: 'runpod', lastState: 'ready', outcome: 'active', orphanRisk: true });
-    expect(await readLivePaidNodeCount(client)).toBe(1);
+    expect(await readLivePaidNodeCount(client)).toEqual({ ok: true, count: 1 });
     // log vazio → sem registros nem contagem
     expect(await readPaidComputeAudit(fakeClient({ events: [] }))).toHaveLength(0);
-    expect(await readLivePaidNodeCount(fakeClient({ events: [] }))).toBe(0);
+    expect(await readLivePaidNodeCount(fakeClient({ events: [] }))).toEqual({ ok: true, count: 0 });
   });
 
-  test('readLivePaidNodeCount é FAIL-CLOSED: erro de leitura → Infinity (nega o gate de concorrência)', async () => {
-    // Contar 0 em erro admitiria novo compute pago às cegas. Infinity ≥ qualquer teto → NEGA.
-    expect(await readLivePaidNodeCount(fakeClient({ eventsError: true }))).toBe(Number.POSITIVE_INFINITY);
+  test('readLivePaidNodeCount distingue erro de leitura de zero observado', async () => {
+    expect(await readLivePaidNodeCount(fakeClient({ eventsError: true }))).toEqual({
+      ok: false, reason: 'paid_node_count_unavailable',
+    });
   });
 
   test('resolveProvisioner: runpod só com config; local-process sempre; desconhecido null', () => {

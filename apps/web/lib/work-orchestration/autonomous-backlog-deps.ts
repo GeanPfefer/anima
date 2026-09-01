@@ -124,6 +124,7 @@ export function buildProjectBacklogCycleDeps(
           if (!onDemandSession.ok) {
             const code = onDemandSession.reason === 'waiting_authorization' ? 'paid_compute_authorization_required'
               : onDemandSession.reason === 'concurrency_limit' ? 'paid_compute_concurrency_limit'
+              : onDemandSession.reason === 'paid_node_count_unavailable' ? 'paid_compute_observability_unavailable'
               : 'coder_node_unavailable';
             return notExecutable(entry, code, `Node on-demand indisponível: ${onDemandSession.detail}.`);
           }

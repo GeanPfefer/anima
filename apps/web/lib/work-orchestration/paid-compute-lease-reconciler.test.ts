@@ -81,6 +81,7 @@ const request: NodeProvisionRequest = {
 
 const leasesFrom = (events: readonly NodeLifecycleEvidenceEventLike[]): ReconcilerLease[] =>
   projectReconcilableLeases(events).map(l => ({ ...l, proposalVersion: 1 }));
+const observedLeases = (leases: readonly ReconcilerLease[]) => ({ ok: true as const, leases });
 
 // ============================================================
 describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
@@ -95,12 +96,22 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
   const lease: ReconcilerLease = { nodeId: 'burst-1', providerId: 'runpod', leaseId: 'lease-1', providerRef: null, workItemId: 'item-1', attemptId: null, billingMode: 'paid', authorizationRef: 'auth-1', latestState: 'ready', latestObservedAt: '', proposalVersion: 1 };
   const handle: ProvisionedNodeHandle = { nodeId: 'burst-1', providerId: 'runpod', endpoint: 'http://x', providerRef: 'pod-1' };
 
+  test('falha ao observar leases fica explícita e não fabrica lista vazia observada', async () => {
+    const report = await reconcilePaidComputeLeases({
+      resolveProvisioner: () => { throw new Error('não deve resolver provider'); },
+      readLeases: async () => ({ ok: false, reason: 'paid_lease_observation_unavailable' }),
+      readAuthorityValid: async () => false,
+      recordEvidence: async () => ({ ok: true }),
+    });
+    expect(report).toEqual({ results: [], tornDown: 0, retriable: 0, leftAwaiting: 0, observation: 'unavailable' });
+  });
+
   test('órfão de pé + autoridade esgotada → teardown (stop+destroy) e confirma offline', async () => {
     const spies = { stop: 0, destroy: 0 };
     const store = durableStore();
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => fakeProvisioner({ ok: true, found: true, handle }, spies),
-      readLeases: async () => [lease],
+      readLeases: async () => observedLeases([lease]),
       readAuthorityValid: async () => false, // autoridade esgotada
       recordEvidence: async e => store.record(e),
     });
@@ -116,7 +127,7 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     const store = durableStore();
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => fakeProvisioner({ ok: true, found: false }, spies),
-      readLeases: async () => [lease], readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+      readLeases: async () => observedLeases([lease]), readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
     });
     expect(report.results[0]!.outcome).toBe('confirmed_offline');
     expect(spies.stop).toBe(0);
@@ -127,7 +138,7 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     const store = durableStore();
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => fakeProvisioner({ ok: true, found: false }, spies),
-      readLeases: async () => [{ ...lease, providerRef: 'pod-77' }],
+      readLeases: async () => observedLeases([{ ...lease, providerRef: 'pod-77' }]),
       readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
     });
     expect(report.results[0]!.outcome).toBe('confirmed_offline');
@@ -146,7 +157,7 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     };
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => provisioner,
-      readLeases: async () => [{ ...lease, providerRef: 'pod-live' }],
+      readLeases: async () => observedLeases([{ ...lease, providerRef: 'pod-live' }]),
       readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
     });
     expect(report.results[0]!.outcome).toBe('teardown_failed'); // não afirma offline sobre recurso possivelmente vivo
@@ -157,7 +168,7 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     const store = durableStore();
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => fakeProvisioner({ ok: false, reason: 'ECONNREFUSED' }),
-      readLeases: async () => [lease], readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+      readLeases: async () => observedLeases([lease]), readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
     });
     expect(report.results[0]!.outcome).toBe('retry_later');
     expect(store.events).toHaveLength(0);
@@ -169,7 +180,7 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     provisioner.destroy = async () => ({ ok: false, reason: 'provider_unreachable' });
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => provisioner,
-      readLeases: async () => [lease], readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+      readLeases: async () => observedLeases([lease]), readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
     });
     expect(report.results[0]).toMatchObject({ outcome: 'teardown_failed', detail: 'destroy: provider_unreachable' });
     expect(store.events).toHaveLength(1);
@@ -183,7 +194,7 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     provisioner.stop = async (_h, signal) => { cleanupSignals.push(signal); return await new Promise(() => undefined); };
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => provisioner, cleanupTimeoutMs: 15,
-      readLeases: async () => [lease], readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+      readLeases: async () => observedLeases([lease]), readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
     });
     expect(report.results[0]).toMatchObject({ outcome: 'teardown_failed', detail: 'timeout: node_teardown_timeout' });
     expect(cleanupSignals).toHaveLength(1);
@@ -194,7 +205,7 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
   test('dentro da autoridade + de pé → await (não mata recurso possivelmente em uso)', async () => {
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => fakeProvisioner({ ok: true, found: true, handle }),
-      readLeases: async () => [lease], readAuthorityValid: async () => true, recordEvidence: async () => ({ ok: true }),
+      readLeases: async () => observedLeases([lease]), readAuthorityValid: async () => true, recordEvidence: async () => ({ ok: true }),
     });
     expect(report.results[0]!.outcome).toBe('awaited');
   });
@@ -202,7 +213,7 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
   test('sem provisioner/locate para o provider → reconciler_unavailable (não abandona silenciosamente)', async () => {
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => null,
-      readLeases: async () => [lease], readAuthorityValid: async () => false, recordEvidence: async () => ({ ok: true }),
+      readLeases: async () => observedLeases([lease]), readAuthorityValid: async () => false, recordEvidence: async () => ({ ok: true }),
     });
     expect(report.results[0]!.outcome).toBe('reconciler_unavailable');
   });
@@ -233,7 +244,7 @@ describe('PROVA de crash/recovery (Milestone H) — sem cloud, provider fake sta
 
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: (pid) => (pid === 'runpod' ? provider.newProvisioner() : null),
-      readLeases: async () => leasesFrom(store.events),
+      readLeases: async () => observedLeases(leasesFrom(store.events)),
       readAuthorityValid: async () => false, // autoridade esgotada → deve desligar
       recordEvidence: async e => store.record(e),
     });
@@ -249,7 +260,7 @@ describe('PROVA de crash/recovery (Milestone H) — sem cloud, provider fake sta
     const provisionCallsBefore = provider.calls.filter(c => c === 'POST /pods').length;
     const replay = await reconcilePaidComputeLeases({
       resolveProvisioner: () => provider.newProvisioner(),
-      readLeases: async () => leasesFrom(store.events), readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+      readLeases: async () => observedLeases(leasesFrom(store.events)), readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
     });
     expect(replay.results).toHaveLength(0); // nada a reconciliar (lease offline)
     expect(provider.pods.size).toBe(0);
@@ -273,7 +284,7 @@ describe('PROVA de crash/recovery (Milestone H) — sem cloud, provider fake sta
 
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => provider.newProvisioner(),
-      readLeases: async () => leasesFrom(store.events), readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+      readLeases: async () => observedLeases(leasesFrom(store.events)), readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
     });
     expect(report.results[0]!.outcome).toBe('confirmed_offline'); // ausente → confirma, não ressuscita
     expect(projectReconcilableLeases(store.events)).toHaveLength(0);

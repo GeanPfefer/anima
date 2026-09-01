@@ -31,6 +31,10 @@ import { DEFAULT_NODE_TEARDOWN_TIMEOUT_MS, teardownKnownNode } from './bounded-n
 
 export type OnDemandProvisionerId = 'local-process' | 'runpod';
 
+export type LivePaidNodeCountResult =
+  | { readonly ok: true; readonly count: number }
+  | { readonly ok: false; readonly reason: 'paid_node_count_unavailable' };
+
 // Caminho do provisioner fake-realista de prova, resolvido a partir da RAIZ do projeto
 // (discovery por cwd). Deliberadamente NÃO usa `__dirname`: o Resident Host roda como ESM
 // (`--experimental-transform-types`), onde `__dirname` é indefinido — só o jest (CommonJS)
@@ -125,7 +129,7 @@ export function onDemandBurstForced(env: Record<string, string | undefined> = pr
 }
 
 export type ResidentNodePreparation =
-  | { readonly ok: false; readonly reason: 'waiting_authorization' | 'aggregate_budget_denied' | 'concurrency_limit' | 'provision_failed' | 'provider_identity_unpersisted' | 'health_failed' | 'evidence_failed'; readonly detail: string }
+  | { readonly ok: false; readonly reason: 'waiting_authorization' | 'aggregate_budget_denied' | 'concurrency_limit' | 'paid_node_count_unavailable' | 'provision_failed' | 'provider_identity_unpersisted' | 'health_failed' | 'evidence_failed'; readonly detail: string }
   | { readonly ok: true; readonly runtime: ReturnType<typeof remoteRuntimeFor>; readonly leaseExpiresAt: string; finish(attemptId: string | null): Promise<void> };
 
 /**
@@ -171,7 +175,7 @@ export async function prepareResidentOnDemandCoderNode(input: {
   readonly provisionerFactory?: () => NodeProvisioner & { disposeAll?: () => Promise<void> };
   /** Contagem viva de nodes PAGOS (via projectReconcilableLeases). Só consultada quando há teto
    * de concorrência configurado; ausente ⇒ sem gate de concorrência (retrocompatível). */
-  readonly readLivePaidNodeCount?: () => Promise<number>;
+  readonly readLivePaidNodeCount?: () => Promise<LivePaidNodeCountResult>;
   /** Override de teste para descoberta read-only. Em produção RunPod usa o GraphQL gpuTypes;
    * outros provisioners mantêm o preço configurado até possuírem client concreto. */
   readonly readLivePriceQuote?: () => Promise<{ readonly ok: true; readonly quote: LiveNodePriceQuoteV0 } | { readonly ok: false; readonly reason: string }>;
@@ -229,10 +233,13 @@ export async function prepareResidentOnDemandCoderNode(input: {
   // subir um novo recurso faturável, não ultrapassar o teto de recursos simultâneos. Opt-in:
   // só quando há teto configurado E um leitor de contagem viva. Nunca amplia autoridade.
   if (config.billingMode === 'paid' && config.maxConcurrentPaidNodes !== null && input.readLivePaidNodeCount) {
-    const liveCount = await input.readLivePaidNodeCount();
-    const admission = admitConcurrentPaidNode({ liveCount, limit: config.maxConcurrentPaidNodes });
+    const observed = await input.readLivePaidNodeCount();
+    if (!observed.ok) {
+      return { ok: false, reason: observed.reason, detail: observed.reason };
+    }
+    const admission = admitConcurrentPaidNode({ liveCount: observed.count, limit: config.maxConcurrentPaidNodes });
     if (!admission.admit) {
-      return { ok: false, reason: 'concurrency_limit', detail: `nodes pagos vivos ${liveCount} ≥ teto ${config.maxConcurrentPaidNodes}` };
+      return { ok: false, reason: 'concurrency_limit', detail: `nodes pagos vivos ${observed.count} ≥ teto ${config.maxConcurrentPaidNodes}` };
     }
   }
 
