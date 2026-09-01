@@ -9,6 +9,7 @@ import {
   type PaidLeaseReconcileAction,
   type ProvisionedNodeHandle,
 } from '@anima/core';
+import { DEFAULT_NODE_TEARDOWN_TIMEOUT_MS, teardownKnownNode } from './bounded-node-teardown';
 
 // ============================================================
 // RECONCILER de leases pagas (orquestração web) — o SEGURO contra recurso pago esquecido.
@@ -42,6 +43,7 @@ export interface PaidComputeLeaseReconcilerDeps {
   readonly signal?: AbortSignal;
   /** Teto de leases reconciliadas por ciclo (bounded). Default 25. */
   readonly maxReconcile?: number;
+  readonly cleanupTimeoutMs?: number;
 }
 
 export type LeaseReconcileOutcome =
@@ -113,17 +115,10 @@ export async function reconcilePaidComputeLeases(deps: PaidComputeLeaseReconcile
       // reconciliável em vez de FABRICAR convergência sobre um recurso possivelmente vivo/faturando.
       if (lease.providerRef) {
         const byRef: ProvisionedNodeHandle = { nodeId: lease.nodeId, providerId: lease.providerId, providerRef: lease.providerRef, endpoint: '' };
-        const stopped = await provisioner.stop(byRef, signal);
-        if (!stopped.ok) {
-          results.push({ ...ids(lease), decision, outcome: 'teardown_failed', detail: `by_ref_stop:${stopped.reason}` });
+        const tornDown = await teardownKnownNode(provisioner, byRef, deps.cleanupTimeoutMs ?? DEFAULT_NODE_TEARDOWN_TIMEOUT_MS);
+        if (!tornDown.ok) {
+          results.push({ ...ids(lease), decision, outcome: 'teardown_failed', detail: `by_ref_${tornDown.stage}:${tornDown.reason}` });
           continue;
-        }
-        if (provisioner.destroy) {
-          const destroyed = await provisioner.destroy(byRef, signal);
-          if (!destroyed.ok) {
-            results.push({ ...ids(lease), decision, outcome: 'teardown_failed', detail: `by_ref_destroy:${destroyed.reason}` });
-            continue;
-          }
         }
       }
       const ok = await recordTeardown(deps, lease, ['shutdown_requested', 'shutdown_confirmed'], now());
@@ -139,12 +134,11 @@ export async function reconcilePaidComputeLeases(deps: PaidComputeLeaseReconcile
       results.push({ ...ids(lease), decision, outcome: 'teardown_failed', detail: 'shutdown_requested não persistiu' });
       continue;
     }
-    const stopped = await provisioner.stop(handle, signal);
-    if (!stopped.ok) {
-      results.push({ ...ids(lease), decision, outcome: 'teardown_failed', detail: `stop: ${stopped.reason}` });
+    const tornDown = await teardownKnownNode(provisioner, handle, deps.cleanupTimeoutMs ?? DEFAULT_NODE_TEARDOWN_TIMEOUT_MS);
+    if (!tornDown.ok) {
+      results.push({ ...ids(lease), decision, outcome: 'teardown_failed', detail: `${tornDown.stage}: ${tornDown.reason}` });
       continue;
     }
-    if (provisioner.destroy) await provisioner.destroy(handle, signal); // best-effort: liberar de vez
     const confirmed = await recordTeardown(deps, lease, ['shutdown_confirmed'], now());
     results.push({ ...ids(lease), decision, outcome: confirmed ? 'torn_down' : 'teardown_failed' });
   }

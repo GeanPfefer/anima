@@ -27,6 +27,7 @@ import { nodeLifecycleEvidenceSinkFor, type NodeLifecycleEvidenceSink } from './
 import { readActivePaidComputeAuthorization, reservePaidComputeBudget, voidPaidComputeBudgetReservation } from './paid-compute-authorization-store';
 import { remoteRuntimeFor, type CoderInferenceNodeV0 } from './coder-placement';
 import { projectRoot } from './executor-selection';
+import { DEFAULT_NODE_TEARDOWN_TIMEOUT_MS, teardownKnownNode } from './bounded-node-teardown';
 
 export type OnDemandProvisionerId = 'local-process' | 'runpod';
 
@@ -176,6 +177,8 @@ export async function prepareResidentOnDemandCoderNode(input: {
   readonly readLivePriceQuote?: () => Promise<{ readonly ok: true; readonly quote: LiveNodePriceQuoteV0 } | { readonly ok: false; readonly reason: string }>;
   readonly reserveBudget?: typeof reservePaidComputeBudget;
   readonly voidBudget?: typeof voidPaidComputeBudgetReservation;
+  /** Timeout próprio do teardown de segurança. Override existe para provas determinísticas. */
+  readonly cleanupTimeoutMs?: number;
 }): Promise<ResidentNodePreparation> {
   const clock = input.now ?? (() => new Date());
   const config = input.config;
@@ -328,12 +331,10 @@ export async function prepareResidentOnDemandCoderNode(input: {
     // voidar a reserva; tentar teardown COMPENSATÓRIO por providerRef com um signal FRESCO — nunca
     // deixar um signal de workload já abortado impedir a parada de um recurso pago conhecido.
     if (providerRef !== null) {
-      const teardownSignal = new AbortController().signal;
       const byRef: ProvisionedNodeHandle = { nodeId: config.nodeId, providerId: config.providerId, providerRef, endpoint: '' };
       await persist('shutdown_requested', false, null);
-      const stopped = await provisioner.stop(byRef, teardownSignal);
-      if (provisioner.destroy) await provisioner.destroy(byRef, teardownSignal);
-      await persist(stopped.ok ? 'shutdown_confirmed' : 'shutdown_failed', false, null);
+      const tornDown = await teardownKnownNode(provisioner, byRef, input.cleanupTimeoutMs ?? DEFAULT_NODE_TEARDOWN_TIMEOUT_MS);
+      await persist(tornDown.ok ? 'shutdown_confirmed' : 'shutdown_failed', false, null);
     } else {
       // Nenhum recurso criado (create falhou): registra provision_failed. Não voida a reserva —
       // a política só voida quando o provider comprovadamente NÃO foi chamado (pré-provisão).
@@ -351,12 +352,16 @@ export async function prepareResidentOnDemandCoderNode(input: {
   const health = await provisioner.inspect(handle, input.signal);
   if (!health.healthy) {
     await persist('health_lost', false, null);
-    await provisioner.stop(handle, input.signal);
+    await persist('shutdown_requested', false, null);
+    const tornDown = await teardownKnownNode(provisioner, handle, input.cleanupTimeoutMs ?? DEFAULT_NODE_TEARDOWN_TIMEOUT_MS);
+    await persist(tornDown.ok ? 'shutdown_confirmed' : 'shutdown_failed', false, null);
     inFlight.delete(config.nodeId);
     return { ok: false, reason: 'health_failed', detail: health.detail ?? 'node unhealthy' };
   }
   if (!await persist('health_confirmed', true, null)) {
-    await provisioner.stop(handle, input.signal);
+    await persist('shutdown_requested', false, null);
+    const tornDown = await teardownKnownNode(provisioner, handle, input.cleanupTimeoutMs ?? DEFAULT_NODE_TEARDOWN_TIMEOUT_MS);
+    await persist(tornDown.ok ? 'shutdown_confirmed' : 'shutdown_failed', false, null);
     inFlight.delete(config.nodeId);
     return { ok: false, reason: 'evidence_failed', detail: 'ready evidence failed' };
   }
@@ -376,8 +381,8 @@ export async function prepareResidentOnDemandCoderNode(input: {
           await persist('released', true, attemptId);
         }
         await persist('shutdown_requested', false, attemptId);
-        const stopped = await provisioner.stop(handle, input.signal);
-        await persist(stopped.ok ? 'shutdown_confirmed' : 'shutdown_failed', false, attemptId);
+        const tornDown = await teardownKnownNode(provisioner, handle, input.cleanupTimeoutMs ?? DEFAULT_NODE_TEARDOWN_TIMEOUT_MS);
+        await persist(tornDown.ok ? 'shutdown_confirmed' : 'shutdown_failed', false, attemptId);
       } finally {
         await provisioner.disposeAll?.();
         inFlight.delete(config.nodeId);

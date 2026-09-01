@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-31 (Provisionamento On-Demand V1: `maxCostEstimate` é teto agregado por autorização; ledger append-only e RPC com row lock reservam exposição estimada, de forma idempotente e antes do provider; auditoria humana projeta teto/comprometido/anulado/restante; concorrência real 0,70+0,70 sob teto 1,00 admitiu exatamente uma; zero cloud/gasto. Ver [Plano 005](docs/planos/005-provisionamento-on-demand-v1.md). Antes: lifecycle governado, autorização financeira, lease, RunPod env-gated e wiring vivo.)
+> Documento vivo de design. Última atualização: 2026-08-31 (Provisionamento On-Demand V1: teardown de recurso conhecido usa signal próprio e timeout bounded; providers com `destroy` só confirmam `offline` após `stop + destroy`; falha permanece reconciliável. `maxCostEstimate` é teto agregado por autorização; zero cloud/gasto. Ver [Plano 005](docs/planos/005-provisionamento-on-demand-v1.md).)
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---

@@ -47,13 +47,16 @@ Sem `API_KEY`/`IMAGE`/`GPU_TYPE_IDS` a config é `null` (fail-closed) e o burst 
 - **inspect(handle)** → `GET /pods/{id}` (status do provider) **E** health-check EXTERNO ao
   endpoint real (a Goma não confia só no provider). `reachable` = provider RUNNING; `healthy`
   = endpoint respondeu 2xx.
-- **stop(handle)** → `POST /pods/{id}/stop` (para a cobrança). `404` = idempotente (nada a parar).
+- **stop(handle)** → `POST /pods/{id}/stop` (libera GPU, mas preserva o Pod e pode manter cobrança
+  de storage). `404` = idempotente (nada a parar).
 - **destroy(handle)** → `DELETE /pods/{id}`. `404` = idempotente (já destruído).
 
 Endpoint resolvido: `http://<publicIp>:<portMapped>` quando há exposição TCP; senão a convenção
 de proxy HTTP do RunPod `https://<podId>-<port>.proxy.runpod.net`.
 
 `providerRef` (pod id) é suficiente para `stop`/`destroy` após restart do host.
+Como a lease on-demand não declara intenção de manter capacidade aquecida, seu término normal é
+`stop` seguido de `destroy`; só ambos (ou 404 idempotente) comprovam ausência do Pod.
 
 ## Erros (códigos estáveis, sem vazar payload)
 

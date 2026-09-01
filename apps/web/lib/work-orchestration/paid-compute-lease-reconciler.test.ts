@@ -163,6 +163,34 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     expect(store.events).toHaveLength(0);
   });
 
+  test('destroy falho no recurso localizado não confirma offline', async () => {
+    const store = durableStore();
+    const provisioner = fakeProvisioner({ ok: true, found: true, handle });
+    provisioner.destroy = async () => ({ ok: false, reason: 'provider_unreachable' });
+    const report = await reconcilePaidComputeLeases({
+      resolveProvisioner: () => provisioner,
+      readLeases: async () => [lease], readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+    });
+    expect(report.results[0]).toMatchObject({ outcome: 'teardown_failed', detail: 'destroy: provider_unreachable' });
+    expect(store.events).toHaveLength(1);
+    expect(leasesFrom(store.events)[0]?.latestState).toBe('shutting_down');
+  });
+
+  test('teardown travado é bounded e permanece reconciliável', async () => {
+    const store = durableStore();
+    const cleanupSignals: AbortSignal[] = [];
+    const provisioner = fakeProvisioner({ ok: true, found: true, handle });
+    provisioner.stop = async (_h, signal) => { cleanupSignals.push(signal); return await new Promise(() => undefined); };
+    const report = await reconcilePaidComputeLeases({
+      resolveProvisioner: () => provisioner, cleanupTimeoutMs: 15,
+      readLeases: async () => [lease], readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+    });
+    expect(report.results[0]).toMatchObject({ outcome: 'teardown_failed', detail: 'timeout: node_teardown_timeout' });
+    expect(cleanupSignals).toHaveLength(1);
+    expect(cleanupSignals[0]!.aborted).toBe(true);
+    expect(store.events).toHaveLength(1);
+  });
+
   test('dentro da autoridade + de pé → await (não mata recurso possivelmente em uso)', async () => {
     const report = await reconcilePaidComputeLeases({
       resolveProvisioner: () => fakeProvisioner({ ok: true, found: true, handle }),

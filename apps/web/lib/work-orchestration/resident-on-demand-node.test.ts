@@ -68,6 +68,52 @@ describe('Resident Host — node on-demand vivo', () => {
     expect((await provisioner.inspect({ nodeId: 'node-owned', providerId: 'local-process', endpoint: prepared.runtime.url, providerRef: 'missing' }, new AbortController().signal)).reachable).toBe(false);
   });
 
+  test('finish ignora signal de workload abortado e confirma stop + destroy pelo providerRef', async () => {
+    const workload = new AbortController();
+    const events: NodeLifecycleEvidenceV1[] = [];
+    const calls: string[] = [];
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async req => ({ ok: true, handle: { nodeId: req.nodeId, providerId: req.providerId, endpoint: 'http://x', providerRef: 'pod-finish' } }),
+      inspect: async h => ({ nodeId: h.nodeId, reachable: true, healthy: true }),
+      stop: async (h, signal) => { expect(signal).not.toBe(workload.signal); expect(signal.aborted).toBe(false); calls.push(`stop:${h.providerRef}`); return { ok: true }; },
+      destroy: async (h, signal) => { expect(signal.aborted).toBe(false); calls.push(`destroy:${h.providerRef}`); return { ok: true }; },
+    };
+    const prepared = await prepareResidentOnDemandCoderNode({
+      client: dummyClient, config: { ...config(), nodeId: 'finish-aborted' }, workItemId: 'work-1', proposalVersion: 1,
+      leaseId: 'lease-finish', signal: workload.signal,
+      evidenceSink: { record: async value => { events.push(value); return { ok: true, action: 'recorded' }; } },
+      provisionerFactory: () => provisioner,
+    });
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    workload.abort();
+    await prepared.finish(null);
+    expect(calls).toEqual(['stop:pod-finish', 'destroy:pod-finish']);
+    expect(events.at(-1)?.transition.event).toBe('shutdown_confirmed');
+  });
+
+  test('finish bounded não fabrica offline quando teardown trava', async () => {
+    const events: NodeLifecycleEvidenceV1[] = [];
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async req => ({ ok: true, handle: { nodeId: req.nodeId, providerId: req.providerId, endpoint: 'http://x', providerRef: 'pod-hung' } }),
+      inspect: async h => ({ nodeId: h.nodeId, reachable: true, healthy: true }),
+      stop: async () => await new Promise(() => undefined),
+    };
+    const prepared = await prepareResidentOnDemandCoderNode({
+      client: dummyClient, config: { ...config(), nodeId: 'finish-hung' }, workItemId: 'work-1', proposalVersion: 1,
+      leaseId: 'lease-hung', signal: new AbortController().signal, cleanupTimeoutMs: 15,
+      evidenceSink: { record: async value => { events.push(value); return { ok: true, action: 'recorded' }; } },
+      provisionerFactory: () => provisioner,
+    });
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    await prepared.finish(null);
+    expect(events.at(-1)?.transition.event).toBe('shutdown_failed');
+    expect(events.at(-1)?.transition.to).toBe('shutdown_failed');
+  });
+
   test('node PAGO: lease é clampada à janela da autorização ao vivo (teto duro)', async () => {
     const now = new Date('2026-08-31T00:00:00.000Z');
     const validUntil = '2026-08-31T00:03:00.000Z'; // autoridade vence em 3 min
@@ -272,6 +318,8 @@ describe('Resident Host — node on-demand vivo', () => {
 
   test('node PAGO: sequência inclui provider_identified antes de health_lost (sem ready fabricado)', async () => {
     const events: NodeLifecycleEvidenceV1[] = [];
+    const workload = new AbortController();
+    const cleanupSignals: AbortSignal[] = [];
     const provisioner: NodeProvisioner = {
       providerId: 'local-process',
       provision: async (req, _sig, observer) => {
@@ -279,22 +327,27 @@ describe('Resident Host — node on-demand vivo', () => {
         if (!ok) return { ok: false, reason: 'provider_identity_unpersisted' };
         return { ok: true, handle: { nodeId: req.nodeId, providerId: req.providerId, endpoint: 'http://x', providerRef: 'pod-x' } };
       },
-      inspect: async h => ({ nodeId: h.nodeId, reachable: true, healthy: false }), // health FALHA
-      stop: async () => ({ ok: true }),
+      inspect: async h => { workload.abort(); return { nodeId: h.nodeId, reachable: true, healthy: false }; }, // health FALHA junto do cancelamento
+      stop: async (_h, signal) => { cleanupSignals.push(signal); return { ok: true }; },
     };
     const prepared = await paidPrepare({
       evidenceSink: { record: async (v: NodeLifecycleEvidenceV1) => { events.push(v); return { ok: true, action: 'recorded' }; } },
-      provisionerFactory: () => provisioner,
+      provisionerFactory: () => provisioner, signal: workload.signal,
     });
     expect(prepared).toMatchObject({ ok: false, reason: 'health_failed' });
-    expect(events.map(e => e.transition.event)).toEqual(['provision_requested', 'provider_identified', 'health_lost']);
+    expect(events.map(e => e.transition.event)).toEqual([
+      'provision_requested', 'provider_identified', 'health_lost', 'shutdown_requested', 'shutdown_confirmed',
+    ]);
     expect(events.find(e => e.transition.event === 'provider_identified')).toMatchObject({
       providerRef: 'pod-x', healthy: false, transition: { from: 'provisioning', to: 'provisioning' },
     });
+    expect(cleanupSignals).toHaveLength(1);
+    expect(cleanupSignals[0]).not.toBe(workload.signal);
+    expect(cleanupSignals[0]!.aborted).toBe(false);
   });
 
   test('falha ao persistir provider_identified → teardown compensatório por providerRef, sem void, sem inspect/runtime', async () => {
-    const stopped: string[] = []; const destroyed: string[] = []; let inspects = 0; let voids = 0;
+    const stopped: string[] = []; const destroyed: string[] = []; const signals: AbortSignal[] = []; let inspects = 0; let voids = 0;
     const provisioner: NodeProvisioner = {
       providerId: 'local-process',
       provision: async (req, _sig, observer) => {
@@ -303,8 +356,8 @@ describe('Resident Host — node on-demand vivo', () => {
         return { ok: true, handle: { nodeId: req.nodeId, providerId: req.providerId, endpoint: 'http://x', providerRef: 'pod-y' } };
       },
       inspect: async h => { inspects += 1; return { nodeId: h.nodeId, reachable: false, healthy: false }; },
-      stop: async h => { stopped.push(h.providerRef); return { ok: true }; },
-      destroy: async h => { destroyed.push(h.providerRef); return { ok: true }; },
+      stop: async (h, signal) => { stopped.push(h.providerRef); signals.push(signal); return { ok: true }; },
+      destroy: async (h, signal) => { destroyed.push(h.providerRef); signals.push(signal); return { ok: true }; },
     };
     const prepared = await paidPrepare({
       // sink falha ESPECIFICAMENTE no provider_identified
@@ -317,6 +370,8 @@ describe('Resident Host — node on-demand vivo', () => {
     expect(destroyed).toEqual(['pod-y']); // destroy pelo providerRef observado
     expect(inspects).toBe(0);             // NUNCA chamou inspect (não fabricou ready)
     expect(voids).toBe(0);                // NÃO voidou o orçamento (provider foi chamado)
+    expect(signals).toHaveLength(2);
+    expect(signals.every(signal => !signal.aborted)).toBe(true);
   });
 
   test('observer recusa identidade divergente de node/provider sem persistir provider_identified', async () => {

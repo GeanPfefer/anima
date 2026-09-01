@@ -132,3 +132,13 @@ permitido com prova de `provider_not_called` ou `provider_rejected_before_create
 reembolso nem custo final. A auditoria de Configurações projeta teto, reservado, anulado,
 comprometido e restante, mas não participa da decisão (`READ MODEL != WRITE GATE`). Cloud paga e
 primeira prova paga permanecem fora do escopo.
+
+## Teardown independente e ausência comprovada (2026-08-31)
+
+O signal cancelável da execução não governa mais o cleanup de um recurso conhecido. Teardown
+imediato e reconciler usam signal próprio e timeout bounded; o watchdog da lease continua
+best-effort e o reconciler durável é a segunda linha de defesa após crash/restart. Providers cuja
+porta expõe `destroy` só convergem para `offline` depois de `stop + destroy`; falha ou timeout em
+qualquer etapa preserva `shutdown_failed`/recovery elegível. Para RunPod, a documentação oficial
+confirma que `stop` libera GPU, mas mantém o Pod e pode manter cobrança de storage, portanto não é
+prova de ausência. Nenhuma garantia de TTL provider-side foi assumida ou implementada.

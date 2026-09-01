@@ -38,8 +38,10 @@ idle_timeout)`. O deadline é o `leaseExpiresAt` clampado à autoridade. O teard
 garantido pelo reconciler (§5) — o mecanismo DURÁVEL —, não por um `finally{}` de caminho feliz
 nem por `setTimeout` em memória. Como CONVENIÊNCIA (não substituto), um watchdog best-effort
 (`leaseDeadlineSignal`) aborta a volta paga no deadline da lease para parar o gasto MAIS CEDO; se
-o processo morre, o timer some mas o reconciler ainda converge. O teardown (`finish`) usa o sinal
-BASE, não o do watchdog, para rodar mesmo após o abort.
+o processo morre, o timer some mas o reconciler ainda converge. O teardown imediato usa signal
+próprio e timeout bounded: cancelamento/deadline do workload não pode impedir a tentativa de
+reduzir o efeito já existente. Quando a porta expõe `destroy`, `stop + destroy` são necessários
+antes de `shutdown_confirmed`; falha/timeout mantém recovery elegível e nunca fabrica `offline`.
 
 ## 5. Reconciler / recuperação de órfão
 
@@ -59,9 +61,12 @@ possa ter perdido; idempotente).
 
 `release` (idle) → `stop` (para o faturamento) → `destroy` (termina o recurso) →
 `shutdown_confirmed` (evidência observada). `404` após stop/destroy = convergência já alcançada.
+Cada tentativa usa signal independente do workload e timeout próprio; o reconciler durável é a
+segunda linha de defesa. Não há garantia de TTL provider-side assumida ou comprovada.
 Replays são seguros (a projeção `offline` exclui do próximo ciclo; a RPC deduplica a evidência).
-"Shutdown confirmado" só é registrado quando a Goma OBSERVA (locate ausente), nunca só porque uma
-chamada foi enviada.
+"Shutdown confirmado" só é registrado após a Goma observar ausência por `locate` sem referência
+direta pendente, ou receber sucesso idempotente de toda a sequência provider-specific necessária;
+nunca só porque uma chamada foi enviada.
 
 ## 7. Crash recovery (provado sem cloud)
 
