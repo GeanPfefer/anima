@@ -27,6 +27,27 @@ test('classifica conservadoramente proposta estrutural já aprovada pelo humano'
   expect(rpc.mock.calls[1][1].p_classification).toMatchObject({complexity:'bounded',risk:'moderate',reversibility:'conditionally_reversible',planClarity:'clear',urgency:'normal'});
 });
 
+test('reconhece proveniência canônica válida após revisão humana sem depender da metadata do planner',async()=>{
+  const canonical={...item,intent:{
+    planner:'operator_revision_after_local_planner_v1',
+    canonical_provenance:{kind:'canonical_backlog',sourceId:'PIN-02',document:'docs/planos/006-project-intake-v0.md',heading:'PIN-02 — Codec persistível puro',canonicalObjective:'Codec persistível puro',planningGeneration:1,materializationReason:'selected_ready'},
+    execution_spec:item.intent.execution_spec,
+  }};
+  const maybeSingle=jest.fn().mockResolvedValue({data:canonical,error:null});
+  const rpc=jest.fn().mockImplementation((name:string)=>name==='current_work_intelligence_classification'?Promise.resolve({data:null,error:null}):Promise.resolve({data:{},error:null}));
+  const client={from:jest.fn(()=>({select:jest.fn(()=>({eq:jest.fn(()=>({maybeSingle}))}))})),rpc};
+  await expect(ensurePlannedProjectClassification(client as never,'pin-02',3,()=>new Date('2026-09-01T00:00:00Z'))).resolves.toEqual({ok:true,replayed:false});
+  expect(rpc.mock.calls[1][1].p_classification.provenance.classifierId).toBe('canonical_backlog_v1-bridge');
+});
+
+test('não confia em proveniência canônica malformada para substituir planner desconhecido',async()=>{
+  const malformed={...item,intent:{planner:'operator_revision',canonical_provenance:{kind:'canonical_backlog',sourceId:'PIN-02'},execution_spec:item.intent.execution_spec}};
+  const maybeSingle=jest.fn().mockResolvedValue({data:malformed,error:null});
+  const client={from:jest.fn(()=>({select:jest.fn(()=>({eq:jest.fn(()=>({maybeSingle}))}))})),rpc:jest.fn()};
+  await expect(ensurePlannedProjectClassification(client as never,'pin-02',3)).resolves.toMatchObject({ok:false,code:'classification_policy_not_applicable'});
+  expect(client.rpc).not.toHaveBeenCalled();
+});
+
 test('reconcilia corrida de escrita como replay sem duplicar classificação',async()=>{
   const maybeSingle=jest.fn().mockResolvedValue({data:item,error:null});let reads=0;
   const rpc=jest.fn().mockImplementation((name:string)=>name==='record_work_intelligence_classification'?Promise.resolve({data:null,error:{code:'55000',message:'revision changed'}}):Promise.resolve({data:++reads===1?null:{classification:{schemaVersion:1}},error:null}));
