@@ -113,6 +113,28 @@ describe('RunPodNodeProvisioner', () => {
     expect(posts).toBe(0); // nenhum recurso novo criado
   });
 
+  test('create ambíguo: resposta perdida; replay encontra por nome, persiste identidade e não duplica', async () => {
+    let exists = false; let posts = 0; let identifiedRef: string | null = null;
+    const { client } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) {
+        return json(200, exists ? [runningPod({ name: 'anima-node-1' })] : []);
+      }
+      if (req.method === 'POST' && req.url.endsWith('/pods')) {
+        posts += 1; exists = true; return 'network'; // provider criou, resposta se perdeu
+      }
+      if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      return json(404, {});
+    });
+    const provisioner = new RunPodNodeProvisioner(config(), client, opts);
+    expect(await provisioner.provision(request, signal())).toEqual({ ok: false, reason: 'provider_unreachable' });
+    const replay = await provisioner.provision(request, signal(), {
+      providerIdentified: async identity => { identifiedRef = identity.providerRef; return true; },
+    });
+    expect(replay.ok).toBe(true);
+    expect(identifiedRef).toBe('pod-1');
+    expect(posts).toBe(1);
+  });
+
   test('observer recebe o id ANTES do 1º poll de readiness; false → falha sem readiness', async () => {
     const { client, calls } = fakeHttp((req) => {
       if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
