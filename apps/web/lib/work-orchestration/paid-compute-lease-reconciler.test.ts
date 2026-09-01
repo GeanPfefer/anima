@@ -174,6 +174,25 @@ describe('reconcilePaidComputeLeases — unidade (fake provisioner)', () => {
     expect(store.events).toHaveLength(0);
   });
 
+  test('provider volta após indisponibilidade: próximo ciclo converge sem loop dentro do ciclo', async () => {
+    const store = durableStore(); let locateCalls = 0; const spies = { stop: 0, destroy: 0 };
+    const provisioner = fakeProvisioner({ ok: true, found: true, handle }, spies);
+    provisioner.locate = async () => {
+      locateCalls += 1;
+      return locateCalls === 1 ? { ok: false, reason: 'provider_unreachable' } : { ok: true, found: true, handle };
+    };
+    const deps = {
+      resolveProvisioner: () => provisioner,
+      readLeases: async () => observedLeases([lease]),
+      readAuthorityValid: async () => false,
+      recordEvidence: async (e: NodeLifecycleEvidenceV1) => store.record(e),
+    };
+    expect((await reconcilePaidComputeLeases(deps)).results[0]?.outcome).toBe('retry_later');
+    expect(locateCalls).toBe(1); expect(spies).toEqual({ stop: 0, destroy: 0 });
+    expect((await reconcilePaidComputeLeases(deps)).results[0]?.outcome).toBe('torn_down');
+    expect(locateCalls).toBe(2); expect(spies).toEqual({ stop: 1, destroy: 1 });
+  });
+
   test('destroy falho no recurso localizado não confirma offline', async () => {
     const store = durableStore();
     const provisioner = fakeProvisioner({ ok: true, found: true, handle });
@@ -288,5 +307,11 @@ describe('PROVA de crash/recovery (Milestone H) — sem cloud, provider fake sta
     });
     expect(report.results[0]!.outcome).toBe('confirmed_offline'); // ausente → confirma, não ressuscita
     expect(projectReconcilableLeases(store.events)).toHaveLength(0);
+    const replay = await reconcilePaidComputeLeases({
+      resolveProvisioner: () => provider.newProvisioner(),
+      readLeases: async () => observedLeases(leasesFrom(store.events)),
+      readAuthorityValid: async () => false, recordEvidence: async e => store.record(e),
+    });
+    expect(replay.results).toHaveLength(0);
   });
 });
