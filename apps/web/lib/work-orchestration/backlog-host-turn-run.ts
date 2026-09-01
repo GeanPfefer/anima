@@ -44,7 +44,12 @@ export function runProjectBacklogHostTurn(input: RunProjectBacklogHostTurnInput)
   const baseDeps = buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId);
   const deps = input.requestedWorkItemId ? {
     ...baseDeps,
-    readBacklog: async () => (await baseDeps.readBacklog()).filter(candidate=>candidate.item.id===input.requestedWorkItemId),
+    // Amarração ao item pedido, MAS preservando as dependências `completed`: a projeção pura
+    // precisa vê-las para satisfazer `depends_on_work_item_ids` (senão o próprio item pedido
+    // sairia da fila por dependência "não-satisfeita"). Candidatos `completed` são INERTES —
+    // nunca entram na fila nem executam —, então mantê-los não amplia o escopo da execução.
+    readBacklog: async () => (await baseDeps.readBacklog()).filter(candidate =>
+      candidate.item.id === input.requestedWorkItemId || candidate.item.state === 'completed'),
   } : baseDeps;
   return runAutonomousBacklogHostTurn({
     // Um ciclo bounded = o driver já provado, com `maxTurns = maxTurnsPerCycle`.

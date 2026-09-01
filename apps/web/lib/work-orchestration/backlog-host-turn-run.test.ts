@@ -17,14 +17,15 @@ import { runAutonomousBacklogCycle } from './autonomous-backlog-driver';
 import { runAutonomousBacklogHostTurn } from './autonomous-backlog-host-turn';
 
 const RESULT = { cyclesExecuted: 0, turnsExecuted: 0, itemsTouched: 0, stopReason: 'max_cycles_reached', continuation: 'stop', moreWorkAvailable: false, lastOutcome: null, cycles: [] } as unknown as BacklogHostTurnResult;
-const candidate = (id: string) => ({ item: { id } });
+type RawEntry = string | { readonly id: string; readonly state?: string };
+const candidate = (entry: RawEntry) => (typeof entry === 'string' ? { item: { id: entry } } : { item: { id: entry.id, state: entry.state } });
 
 // O host-turn é mockado: apenas dispara UM ciclo e devolve o resultado. O ciclo captura o
 // que `readBacklog` (possivelmente filtrado pela amarração) realmente entrega ao driver.
-function wire(rawBacklogIds: readonly string[]): () => Promise<string[]> {
+function wire(rawBacklog: readonly RawEntry[]): () => Promise<string[]> {
   let seen: string[] = [];
   (buildProjectBacklogCycleDeps as jest.Mock).mockReturnValue({
-    readBacklog: async () => rawBacklogIds.map(candidate),
+    readBacklog: async () => rawBacklog.map(candidate),
     hostPermitsAutonomousWork: () => true,
     runTurn: jest.fn(),
   });
@@ -57,6 +58,13 @@ describe('runProjectBacklogHostTurn — amarração por workItemId', () => {
     const readSeen = wire(['A', 'B']);
     await run('C');
     expect(await readSeen()).toEqual([]);
+  });
+
+  test('sinal para B preserva a dependência `completed` A (senão B sairia da fila por dependência)', async () => {
+    // B (pedido) depende de A (completed). A amarração mantém B E A (inerte), descarta X.
+    const readSeen = wire([{ id: 'B', state: 'approved' }, { id: 'A', state: 'completed' }, { id: 'X', state: 'approved' }]);
+    await run('B');
+    expect((await readSeen()).sort()).toEqual(['A', 'B']);
   });
 
   test('sem ato explícito mantém o backlog autônomo íntegro (comportamento idle)', async () => {
