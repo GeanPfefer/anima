@@ -67,9 +67,13 @@ export function assessPaidComputePreflight(input: PaidComputePreflightInput = {}
     cond('teardown_path', true, 'stop + destroy implementados na porta NodeProvisioner'),
     cond('recovery_reconciler', true, 'locate + reconcilePaidComputeLeases (órfão após restart)'),
     cond('lease_bounded_by_authority', true, 'deriveBoundedLease clampa deadline à validUntil da autorização'),
-    // Informativo (NÃO exigido para infra): sem priceHint configurado, uma autorização COM teto
-    // de custo NEGA fail-closed; uma autorização só-temporal (sem teto de custo) segue válida.
-    cond('price_hint_for_cost_ceiling', present(env.ANIMA_ON_DEMAND_PRICE_PER_HOUR), 'ANIMA_ON_DEMAND_PRICE_PER_HOUR (só necessário p/ autorização com teto de custo)'),
+    // Informativo (NÃO exigido para infra): a estimativa de custo também pode vir da COTAÇÃO VIVA
+    // do provider (RunPod), então o priceHint configurado é apenas uma fonte local alternativa.
+    // TODA autorização paga hoje EXIGE teto de custo explícito (`maxCostEstimate`): sem ele,
+    // `evaluatePaidComputeAuthorization` nega com `aggregate_cost_ceiling_required`. Uma
+    // autorização histórica só-temporal (sem teto monetário) continua legível e revogável, mas
+    // NÃO concede autoridade financeira nova.
+    cond('price_hint_for_cost_ceiling', present(env.ANIMA_ON_DEMAND_PRICE_PER_HOUR), 'ANIMA_ON_DEMAND_PRICE_PER_HOUR (estimativa local; RunPod também deriva de cotação viva)'),
   ];
   const humanAuth = cond('human_paid_authorization', input.humanAuthorizationValid === true, 'autorização humana válida no envelope (ato humano; nunca fabricada)');
 
@@ -81,7 +85,8 @@ export function assessPaidComputePreflight(input: PaidComputePreflightInput = {}
     readyForHumanPaidAuthorization: infraReady,
     paidExecutionAuthorized: infraReady && humanAuth.status === 'ok',
     // `missing` lista só o REQUERIDO (infra + autorização humana). Condições estruturais/
-    // informativas (ex.: price_hint, só necessário p/ teto de custo) ficam em `conditions`.
+    // informativas (ex.: price_hint, estimativa local opcional — RunPod deriva de cotação viva)
+    // ficam em `conditions`.
     missing: [...infra, humanAuth].filter(c => c.status === 'missing').map(c => c.key),
   };
 }
