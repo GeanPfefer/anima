@@ -115,6 +115,9 @@ const hasCurrentApproval = (candidate: AutonomousQueueCandidate): candidate is A
  *
  * `candidates` deve conter todos os itens não encerrados do usuário, não
  * apenas os elegíveis: itens em execução não entram na fila, mas ocupam alvo.
+ * DEVE conter TAMBÉM os itens `completed` referenciados como dependência por
+ * algum não-terminal — a satisfação de `depends_on_work_item_ids` exige vê-los
+ * (estado `completed`); ausência é tratada, fail-closed, como não-satisfeita.
  */
 export function projectAutonomousQueue(
   candidates: readonly AutonomousQueueCandidate[],

@@ -31,6 +31,17 @@ const NON_TERMINAL_STATES = [
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+/** IDs de work items declarados como dependência de EXECUÇÃO do item (se houver). Leitura
+ * frouxa (não valida UUID): serve só para descobrir quais itens `completed` buscar; a
+ * satisfação real da dependência é decidida pela projeção pura e pela autoridade SQL. */
+const readDependencyIds = (item: WorkItem): readonly string[] => {
+  const spec = item.intent['execution_spec'];
+  if (!isRecord(spec)) return [];
+  const deps = spec['depends_on_work_item_ids'];
+  if (!Array.isArray(deps)) return [];
+  return deps.filter((entry): entry is string => typeof entry === 'string');
+};
+
 /**
  * Lê o backlog não-terminal do usuário (RLS escopa ao dono) e monta os
  * candidatos: item + classificação vigente + aprovação vigente + claim em aberto.
@@ -97,6 +108,31 @@ export async function readAutonomousBacklogCandidates(
       approval: latestApproval.get(item.id) ?? null,
       openClaim: openClaim.get(item.id) ?? null,
     });
+  }
+
+  // Dependências CONCLUÍDAS (`completed`) referenciadas por itens não-terminais precisam
+  // estar VISÍVEIS para a projeção pura satisfazer `depends_on_work_item_ids`: a satisfação
+  // exige `completed`, um estado TERMINAL que NÃO entra no conjunto não-terminal acima. Sem
+  // elas o dependente ficaria eternamente inelegível NA PROJEÇÃO do driver — divergindo da
+  // autoridade SQL (`autonomous_work_dependencies_satisfied`, que consulta a tabela inteira)
+  // e travando a continuação "A completa → B fica elegível → segue". Buscamos SÓ as
+  // dependências `completed` ainda ausentes; entram como candidatos INERTES (sem aprovação/
+  // claim/classificação): a projeção os usa apenas para resolver a dependência e nunca os
+  // executa (eligibility exclui `completed`; sem aprovação também não entram na fila).
+  const present = new Set(ids);
+  const dependencyIds = new Set<string>();
+  for (const item of items) {
+    for (const dependencyId of readDependencyIds(item)) {
+      if (!present.has(dependencyId)) dependencyIds.add(dependencyId);
+    }
+  }
+  if (dependencyIds.size > 0) {
+    const depsRes = await client.from('work_items').select('*').in('id', [...dependencyIds]).eq('state', 'completed');
+    for (const row of depsRes.data ?? []) {
+      try {
+        candidates.push({ item: mapWorkItem(row), currentClassification: null, approval: null, openClaim: null });
+      } catch { /* linha inválida sai do backlog */ }
+    }
   }
   return candidates;
 }

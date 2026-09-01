@@ -1,9 +1,9 @@
 jest.mock('@anima/supabase', () => ({
   // Isola a projeção do mapper real (coberto em packages/supabase): o teste controla
   // o WorkItem produzido por linha e injeta uma linha inválida via `THROW`.
-  mapWorkItem: (row: { id: string; state: string; proposalVersion?: number }) => {
+  mapWorkItem: (row: { id: string; state: string; proposalVersion?: number; intent?: unknown }) => {
     if (row.id === 'THROW') throw new Error('linha inválida');
-    return { id: row.id, state: row.state, proposalVersion: row.proposalVersion ?? 1, intent: {}, capability: 'programming' };
+    return { id: row.id, state: row.state, proposalVersion: row.proposalVersion ?? 1, intent: row.intent ?? {}, capability: 'programming' };
   },
 }));
 
@@ -17,18 +17,28 @@ const validClassification: WorkIntelligenceClassificationV1 = {
 
 type Script = {
   work_items?: { data: unknown; error: unknown };
+  /** 2ª query de `work_items`: dependências `completed` (a que usa `.eq('state','completed')`). */
+  work_items_completed?: { data: unknown; error: unknown };
   work_events?: { data: unknown; error: unknown };
   work_claims?: { data: unknown; error: unknown };
   classification?: (id: string) => { data: unknown; error: unknown };
 };
 
 // Fake client: cada `from(table)` devolve um builder encadeável e "thenable" que
-// resolve o resultado roteirizado da tabela; `rpc` resolve por item.
+// resolve o resultado roteirizado da tabela; `rpc` resolve por item. A 2ª leitura de
+// `work_items` (dependências `completed`) é distinguida pelo `.eq('state','completed')`.
 const makeClient = (script: Script) => ({
   from: (table: keyof Script) => {
+    const eqs: Array<[string, unknown]> = [];
     const builder: Record<string, unknown> = {};
-    for (const m of ['select', 'in', 'eq', 'is', 'order']) builder[m] = () => builder;
-    builder.then = (resolve: (v: unknown) => void) => resolve(script[table] ?? { data: [], error: null });
+    for (const m of ['select', 'in', 'is', 'order']) builder[m] = () => builder;
+    builder.eq = (col: string, val: unknown) => { eqs.push([col, val]); return builder; };
+    builder.then = (resolve: (v: unknown) => void) => {
+      if (table === 'work_items' && eqs.some(([c, v]) => c === 'state' && v === 'completed') && script.work_items_completed) {
+        return resolve(script.work_items_completed);
+      }
+      return resolve(script[table] ?? { data: [], error: null });
+    };
     return builder;
   },
   rpc: (_name: string, args: { p_work_item_id: string }) =>
@@ -90,5 +100,34 @@ describe('readAutonomousBacklogCandidates — projeção do backlog', () => {
   test('falha ao ler itens → [] (fail-closed: sem candidatos, o driver para em no_eligible_work)', async () => {
     const candidates = await run({ work_items: { data: null, error: { code: '55000', message: 'x' } } });
     expect(candidates).toEqual([]);
+  });
+
+  test('inclui a dependência `completed` referenciada (a projeção precisa vê-la p/ satisfazer depends_on)', async () => {
+    const depId = '11111111-1111-4111-8111-111111111111';
+    const candidates = await run({
+      // B (não-terminal) depende de A (completed, terminal → fora do conjunto não-terminal).
+      work_items: { data: [{ id: 'b', state: 'approved', intent: { execution_spec: { depends_on_work_item_ids: [depId] } } }], error: null },
+      work_items_completed: { data: [{ id: depId, state: 'completed' }], error: null },
+      classification: () => ({ data: { classification: validClassification }, error: null }),
+    });
+    // A dependência completed entra como candidato INERTE, para `projectAutonomousQueue`
+    // resolver a dependência (sem ela, B ficaria eternamente inelegível na projeção do driver).
+    expect(candidates).toHaveLength(2);
+    expect(candidates.map(c => c.item.id)).toEqual(expect.arrayContaining(['b', depId]));
+    const dep = candidates.find(c => c.item.id === depId)!;
+    expect(dep.item.state).toBe('completed');
+    expect(dep.approval).toBeNull();
+    expect(dep.openClaim).toBeNull();
+    expect(dep.currentClassification).toBeNull();
+  });
+
+  test('dependência referenciada que NÃO está completed não é incluída (fail-closed: dependente continua bloqueado)', async () => {
+    const depId = '22222222-2222-4222-8222-222222222222';
+    const candidates = await run({
+      work_items: { data: [{ id: 'b', state: 'approved', intent: { execution_spec: { depends_on_work_item_ids: [depId] } } }], error: null },
+      work_items_completed: { data: [], error: null }, // a query por `completed` não encontra A (failed/cancelled/inexistente)
+      classification: () => ({ data: { classification: validClassification }, error: null }),
+    });
+    expect(candidates.map(c => c.item.id)).toEqual(['b']); // só o dependente; A ausente ⇒ projeção falha fechado
   });
 });
