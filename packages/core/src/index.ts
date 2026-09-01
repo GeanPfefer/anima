@@ -9,3 +9,4 @@ export * from './project-item-drilldown';
 export * from './project-conversational-item-reference';
 export * from './project-conversation-governance';
 export * from './project-backlog-proposal';
+export * from './project-intake';
