@@ -1,5 +1,5 @@
 # Anima — Product Requirements Document
-> Documento vivo de design. Última atualização: 2026-08-31 (Provisionamento On-Demand V1: teardown de recurso conhecido usa signal próprio e timeout bounded; providers com `destroy` só confirmam `offline` após `stop + destroy`; falha permanece reconciliável. `maxCostEstimate` é teto agregado por autorização; zero cloud/gasto. Ver [Plano 005](docs/planos/005-provisionamento-on-demand-v1.md).)
+> Documento vivo de design. Última atualização: 2026-09-01 (Provisionamento On-Demand V1: falha de observação financeira não equivale a zero; admission paga e leitura do reconciler usam resultados discriminados e permanecem fail-closed. Teardown usa signal próprio/timeout bounded e `offline` exige ausência comprovada. `maxCostEstimate` é teto agregado; zero cloud/gasto. Ver [Plano 005](docs/planos/005-provisionamento-on-demand-v1.md).)
 > Para retomar o projeto em qualquer IA: cole `anima-manifesto.md` + este documento e diga "quero continuar desenvolvendo o Anima a partir deste PRD."
 
 ---
