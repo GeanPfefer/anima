@@ -233,7 +233,23 @@ export function deriveDecompositionSuccessor(input: DecompositionInput): Decompo
  * Nenhuma outra chave do intent original (fora `execution_spec`) é herdada, para
  * não carregar proveniência/autoridade acidental de outra camada.
  */
-function buildSuccessorIntent(originalIntent: WorkIntent, checkpoint: DecompositionCheckpoint): WorkIntent | null {
+/**
+ * Requisitos de PROVA a materializar no `execution_spec` do sucessor (opcional). Quando
+ * presente (correção governada), enriquece os `validation_criteria` mirrorados:
+ *  * cada gate por comando passa a COBRIR o critério funcional (`covers += functional`);
+ *  * é ACRESCENTADO um critério `proof:'scope'` que cobre os critérios de escopo.
+ * Ausente (decomposição por falha) ⇒ o spec é espelhado VERBATIM, sem enriquecer.
+ */
+interface SuccessorProofRequirements {
+  readonly functional: string | null;
+  readonly scopeCriteria: readonly string[];
+}
+
+function buildSuccessorIntent(
+  originalIntent: WorkIntent,
+  checkpoint: DecompositionCheckpoint,
+  proof?: SuccessorProofRequirements,
+): WorkIntent | null {
   if (!readAutonomousExecutionSpec(originalIntent)) return null;
   const rawSpec = originalIntent['execution_spec'];
   if (typeof rawSpec !== 'object' || rawSpec === null || Array.isArray(rawSpec)) return null;
@@ -248,6 +264,31 @@ function buildSuccessorIntent(originalIntent: WorkIntent, checkpoint: Decomposit
     branch: checkpoint.branch,
     commit_sha: checkpoint.commitSha,
   };
+
+  // Enriquecimento de PROVA (só na correção governada). Amarra os critérios de aceite
+  // às suas fontes de prova, para que o Verifier v2 possa classificar cada um pelo
+  // requisito certo (gate para funcional, escopo para invariante) — sem afrouxar nada.
+  if (proof) {
+    const rawCriteria = executionSpec['validation_criteria'];
+    if (Array.isArray(rawCriteria)) {
+      const enriched: Json[] = rawCriteria.map(entry => {
+        if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return entry;
+        const criterion = entry as Record<string, Json>;
+        const command = criterion['command'];
+        if (proof.functional !== null && typeof command === 'string' && command.trim().length > 0) {
+          const existing = Array.isArray(criterion['covers'])
+            ? (criterion['covers'] as Json[]).filter((value): value is string => typeof value === 'string')
+            : [];
+          return { ...criterion, covers: [...new Set([...existing, proof.functional])] };
+        }
+        return criterion;
+      });
+      if (proof.scopeCriteria.length > 0) {
+        enriched.push({ label: 'Contenção de escopo da correção', proof: 'scope', covers: [...proof.scopeCriteria] });
+      }
+      executionSpec['validation_criteria'] = enriched;
+    }
+  }
   return { execution_spec: executionSpec };
 }
 
@@ -342,6 +383,20 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
   const shortCommit = checkpoint.commitSha.slice(0, 12);
   const feedback = requestedChanges.trim();
 
+  // Requisitos de PROVA dos critérios de aceite da correção — heterogêneos:
+  //  * FUNCIONAL (provado por gate): as validações declaradas passam sobre a correção.
+  //    Só é asserido quando há ao menos um gate por comando para prová-lo (senão
+  //    ficaria descoberto). Os gates herdados passam a COBRIR este critério.
+  //  * ESCOPO (provado por invariante observada): a correção altera apenas o restante,
+  //    e a implementação preservada fica intacta. Um critério de validação `proof:'scope'`
+  //    cobre ambos; a prova é a contenção de escopo observada pelo host, não um gate.
+  // Textos EXATOS reusados nos `covers` (o Verifier casa por identidade).
+  const functionalCriterion = 'As validações declaradas da unidade (gates) passam sobre a correção retomada.';
+  const scopeRemainingCriterion = `A revisão é cumprida adicionando trabalho apenas a ${remainingScope.join(', ')}.`;
+  const scopeIntactCriterion = `A implementação já verificada (${preservedScope.join(', ')}) permanece intacta, retomada do checkpoint ${shortCommit}.`;
+  const hasGate = spec.validationCriteria.some(criterion => typeof criterion.command === 'string' && criterion.command.trim().length > 0);
+  const scopeCriteria = [scopeRemainingCriterion, scopeIntactCriterion];
+
   const proposal: WorkProposal = {
     schemaVersion: 1,
     data: {
@@ -359,10 +414,8 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
       includedScope: [...remainingScope],
       // A implementação preservada passa a ser EXCLUÍDA de forma explícita e honesta.
       excludedScope: [...new Set([...original.proposal.data.excludedScope, ...preservedScope])],
-      expectedEffects: [
-        `A revisão é cumprida adicionando trabalho apenas a ${remainingScope.join(', ')}.`,
-        `A implementação já verificada (${preservedScope.join(', ')}) permanece intacta, retomada do checkpoint ${shortCommit}.`,
-      ],
+      // Aceite com PROVAS heterogêneas: funcional (gate, quando há) + escopo (invariante).
+      expectedEffects: [...(hasGate ? [functionalCriterion] : []), ...scopeCriteria],
       risks: [
         'Se a correção exigisse alterar os arquivos preservados, esta retomada NÃO a satisfaz (fail-closed): '
         + 'o escopo reduzido é honesto e não deve ser ampliado silenciosamente.',
@@ -370,7 +423,10 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
     },
   };
 
-  const intent = buildSuccessorIntent(original.intent, checkpoint);
+  const intent = buildSuccessorIntent(original.intent, checkpoint, {
+    functional: hasGate ? functionalCriterion : null,
+    scopeCriteria,
+  });
   if (!intent) return { ok: false, refusals: ['spec_unreadable'] };
 
   const recoveryReason = clip(

@@ -6,6 +6,7 @@ import {
   type DecompositionCheckpoint,
   type ResumeCorrectionInput,
 } from './decomposition';
+import { buildHostObservedGitEvidence, buildWorktreeHandoff, verifyWorkResult, type WorkResultVerificationInput } from './index';
 
 const BASE_SHA = 'a'.repeat(40);
 const COMMIT_SHA = 'b'.repeat(40);
@@ -144,5 +145,104 @@ describe('validateCorrectionSuccessor — rejeita ampliação de envelope', () =
     const result = validateCorrectionSuccessor(original, escalated);
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.gaps).toContain('capability_changed');
+  });
+});
+
+describe('deriveResumeCorrectionSuccessor — requisitos de prova heterogêneos (Verifier v2)', () => {
+  const SHORT_COMMIT = COMMIT_SHA.slice(0, 12);
+  const FUNCTIONAL = 'As validações declaradas da unidade (gates) passam sobre a correção retomada.';
+  const SCOPE_REMAINING = `A revisão é cumprida adicionando trabalho apenas a ${TEST}.`;
+  const SCOPE_INTACT = `A implementação já verificada (${IMPL}) permanece intacta, retomada do checkpoint ${SHORT_COMMIT}.`;
+
+  test('o aceite carrega critério funcional (gate) + critérios de escopo', () => {
+    const candidate = ok(deriveResumeCorrectionSuccessor(input()));
+    expect(candidate.proposal.data.expectedEffects).toEqual([FUNCTIONAL, SCOPE_REMAINING, SCOPE_INTACT]);
+  });
+
+  test('o execution_spec liga gate→funcional e ACRESCENTA um critério proof:scope', () => {
+    const candidate = ok(deriveResumeCorrectionSuccessor(input()));
+    const spec = readAutonomousExecutionSpec(candidate.intent);
+    expect(spec).not.toBeNull();
+    const gate = spec!.validationCriteria.find(c => c.label === 'test');
+    expect(gate?.covers).toEqual([FUNCTIONAL]);
+    const scope = spec!.validationCriteria.find(c => c.proof === 'scope');
+    expect(scope).toMatchObject({ proof: 'scope', covers: [SCOPE_REMAINING, SCOPE_INTACT] });
+    expect(scope?.command).toBeUndefined();
+  });
+
+  // Determinação da §13: um sucessor CORRETAMENTE derivado pode alcançar VERIFIED
+  // se só o test file mudar (escopo observado limpo) e os gates passarem — SEM rodar o coder.
+  test('convergência: só o test file muda + gate verde ⇒ VERIFIED com cobertura completa', () => {
+    const candidate = ok(deriveResumeCorrectionSuccessor(input()));
+    const spec = readAutonomousExecutionSpec(candidate.intent)!;
+    const attemptId = 'b0000000-0000-4000-8000-0000000000aa';
+    const handoff = buildWorktreeHandoff({
+      workItemId: 'successor-1', attemptId, approvedProposalVersion: 1,
+      executorId: 'worktree-v1', backendId: 'fake', model: null,
+      baseSha: BASE_SHA, branch: `anima-work/${attemptId}`, commitSha: COMMIT_SHA, status: 'succeeded',
+      changedFiles: [TEST], diffFiles: [{ path: TEST, insertions: 30, deletions: 0 }],
+      gates: [{ label: 'test', command: spec.validationCriteria[0]!.command!, exitCode: 0, outcome: 'passed' }],
+    });
+    if (!handoff.ok) throw new Error(handoff.explanation);
+    const observed = buildHostObservedGitEvidence({
+      workItemId: 'successor-1', attemptId, approvedProposalVersion: 1,
+      baseSha: BASE_SHA, observedCommitSha: COMMIT_SHA,
+      observedChangedFiles: [TEST], observedDiffFiles: [{ path: TEST, insertions: 30, deletions: 0 }],
+      observedAt: '2026-09-02T12:00:00.000Z',
+    });
+    if (!observed.ok) throw new Error(observed.explanation);
+    const verification: WorkResultVerificationInput = {
+      expected: { workItemId: 'successor-1', attemptId, approvedProposalVersion: 1 },
+      authorized: {
+        includedScope: candidate.proposal.data.includedScope,
+        excludedScope: candidate.proposal.data.excludedScope,
+        validationCriteria: spec.validationCriteria,
+        acceptanceCriteria: candidate.proposal.data.expectedEffects,
+      },
+      handoff: handoff.value,
+      observed: observed.value,
+    };
+    const report = verifyWorkResult(verification);
+    expect(report.verdict).toBe('verified');
+    expect(report.summary.gaps).toBe(0);
+    expect(report.summary.violations).toBe(0);
+    const covered = report.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject);
+    expect(covered).toEqual(expect.arrayContaining([FUNCTIONAL, SCOPE_REMAINING, SCOPE_INTACT]));
+  });
+
+  // Prova NEGATIVA: se o coder tocar a implementação preservada (escopo excluído),
+  // o Verifier detecta e NUNCA classifica como verified.
+  test('prova negativa: tocar a implementação preservada ⇒ violação, nunca verified', () => {
+    const candidate = ok(deriveResumeCorrectionSuccessor(input()));
+    const spec = readAutonomousExecutionSpec(candidate.intent)!;
+    const attemptId = 'b0000000-0000-4000-8000-0000000000bb';
+    const handoff = buildWorktreeHandoff({
+      workItemId: 'successor-1', attemptId, approvedProposalVersion: 1,
+      executorId: 'worktree-v1', backendId: 'fake', model: null,
+      baseSha: BASE_SHA, branch: `anima-work/${attemptId}`, commitSha: COMMIT_SHA, status: 'succeeded',
+      changedFiles: [TEST, IMPL], diffFiles: [{ path: TEST, insertions: 30, deletions: 0 }, { path: IMPL, insertions: 2, deletions: 1 }],
+      gates: [{ label: 'test', command: spec.validationCriteria[0]!.command!, exitCode: 0, outcome: 'passed' }],
+    });
+    if (!handoff.ok) throw new Error(handoff.explanation);
+    const observed = buildHostObservedGitEvidence({
+      workItemId: 'successor-1', attemptId, approvedProposalVersion: 1,
+      baseSha: BASE_SHA, observedCommitSha: COMMIT_SHA,
+      observedChangedFiles: [TEST, IMPL], observedDiffFiles: [{ path: TEST, insertions: 30, deletions: 0 }, { path: IMPL, insertions: 2, deletions: 1 }],
+      observedAt: '2026-09-02T12:00:00.000Z',
+    });
+    if (!observed.ok) throw new Error(observed.explanation);
+    const report = verifyWorkResult({
+      expected: { workItemId: 'successor-1', attemptId, approvedProposalVersion: 1 },
+      authorized: {
+        includedScope: candidate.proposal.data.includedScope,
+        excludedScope: candidate.proposal.data.excludedScope,
+        validationCriteria: spec.validationCriteria,
+        acceptanceCriteria: candidate.proposal.data.expectedEffects,
+      },
+      handoff: handoff.value,
+      observed: observed.value,
+    });
+    expect(report.verdict).toBe('rejected');
+    expect(report.findings.map(f => f.code)).toContain('change_in_excluded_scope');
   });
 });

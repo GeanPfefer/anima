@@ -40,6 +40,9 @@ export type ReviewOutcomeState = 'changes_requested' | 'completed' | string;
 export interface AcceptanceCriterionCoverage {
   readonly criterion: string;
   readonly covered: boolean;
+  /** Requisito de prova declarado no execution_spec: `gate` (comando), `scope`
+   * (invariante observada) ou `null` quando nenhum critério de validação o cobre. */
+  readonly proof: 'gate' | 'scope' | null;
 }
 export interface ValidationCriterionCoverage {
   readonly label: string;
@@ -204,11 +207,28 @@ function verifierLiveSummary(report: WorkVerificationReport | null | undefined):
   };
 }
 
+/** Mapa critério de aceite → requisito de prova declarado (gate/scope), lido do
+ * execution_spec (independente do resultado). Nem toda prova é um gate. */
+function acceptanceProofKinds(item: WorkItem): ReadonlyMap<string, 'gate' | 'scope'> {
+  const spec = readAutonomousExecutionSpec(item.intent);
+  const map = new Map<string, 'gate' | 'scope'>();
+  for (const criterion of spec?.validationCriteria ?? []) {
+    const kind: 'gate' | 'scope' | null = criterion.proof === 'scope' ? 'scope'
+      : criterion.proof === 'gate' ? 'gate'
+      : typeof criterion.command === 'string' && criterion.command.trim().length > 0 ? 'gate' : null;
+    if (kind === null) continue;
+    for (const covered of criterion.covers ?? []) if (!map.has(covered)) map.set(covered, kind);
+  }
+  return map;
+}
+
 function acceptanceCoverage(item: WorkItem, report: WorkVerificationReport | null | undefined): readonly AcceptanceCriterionCoverage[] {
   const criteria = item.proposal.data.expectedEffects;
-  if (!report) return criteria.map(criterion => ({ criterion, covered: false }));
-  const covered = new Set(report.findings.filter(f => f.code === 'acceptance_criterion_covered' && f.subject !== undefined).map(f => f.subject!));
-  return criteria.map(criterion => ({ criterion, covered: covered.has(criterion) }));
+  const proofKinds = acceptanceProofKinds(item);
+  const covered = report
+    ? new Set(report.findings.filter(f => f.code === 'acceptance_criterion_covered' && f.subject !== undefined).map(f => f.subject!))
+    : new Set<string>();
+  return criteria.map(criterion => ({ criterion, covered: covered.has(criterion), proof: proofKinds.get(criterion) ?? null }));
 }
 
 function validationCoverage(report: WorkVerificationReport | null | undefined): readonly ValidationCriterionCoverage[] {

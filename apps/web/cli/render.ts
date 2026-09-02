@@ -11,6 +11,9 @@ const DOT = '·'; // ·
 const verdictLabel = (v: VerifierSummaryPayload | null): string =>
   v === null ? 'sem parecer (sem handoff durável)' : `${v.verdict} (violations ${v.violations} ${DOT} gaps ${v.gaps} ${DOT} checks ${v.checks})`;
 
+const proofLabel = (proof: 'gate' | 'scope' | null): string =>
+  proof === 'gate' ? 'gate' : proof === 'scope' ? 'escopo' : '—';
+
 export function renderHuman(payload: CliPayload): string {
   switch (payload.kind) {
     case 'help':
@@ -60,7 +63,7 @@ export function renderHuman(payload: CliPayload): string {
       lines.push('');
       lines.push(`Cobertura de aceite: ${payload.acceptance.covered}/${payload.acceptance.total} com evidência`);
       for (const c of payload.acceptance.criteria) {
-        lines.push(`  ${c.covered ? YES : NO} ${c.criterion}`);
+        lines.push(`  ${c.covered ? YES : NO} ${c.criterion}  [prova: ${proofLabel(c.proof)}]`);
       }
       if (payload.provenance.issues.length > 0) {
         lines.push('');
@@ -79,7 +82,7 @@ export function renderHuman(payload: CliPayload): string {
       if (payload.verifierRecorded) lines.push(`Verifier (registrado): ${payload.verifierRecorded.verdict}`);
       lines.push('');
       lines.push('Critérios de aceite (aprovados pelo humano):');
-      for (const c of payload.acceptanceCriteria) lines.push(`  ${c.covered ? YES : NO} ${c.criterion}${c.covered ? '' : '   (sem evidência de gate)'}`);
+      for (const c of payload.acceptanceCriteria) lines.push(`  ${c.covered ? YES : NO} ${c.criterion}  [prova: ${proofLabel(c.proof)}]${c.covered ? '' : '   (sem evidência suficiente)'}`);
       if (payload.validationCriteria.length > 0) {
         lines.push('');
         lines.push('Critérios de validação (gates declarados):');

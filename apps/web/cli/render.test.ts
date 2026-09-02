@@ -18,7 +18,7 @@ describe('render humano da CLI', () => {
       latestResult: { eventId: 'r', proposalVersion: 2, summary: 'feito' },
       verifierLive: { verdict: 'inconclusive', violations: 0, gaps: 3, checks: 11, restsOnAttestedEvidence: false },
       verifierRecorded: { verdict: 'verified', opinions: 1 },
-      acceptance: { total: 2, covered: 1, missing: 1, criteria: [{ criterion: 'A', covered: true }, { criterion: 'B', covered: false }] },
+      acceptance: { total: 2, covered: 1, missing: 1, criteria: [{ criterion: 'A', covered: true, proof: 'gate' }, { criterion: 'B', covered: false, proof: 'scope' }] },
       availableActions: ['accept_result', 'request_result_changes'], suggestedDecision: 'request_changes',
       provenance: { status: 'complete', issues: [] },
     };
