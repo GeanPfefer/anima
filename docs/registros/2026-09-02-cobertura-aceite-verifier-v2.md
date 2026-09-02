@@ -35,6 +35,8 @@ Sem migration, escrita manual no banco, re-verificação canônica, aceite, requ
 integração, merge, deploy ou alteração de `origin/main`. Docker foi iniciado em background
 somente para leitura dos fatos canônicos. Nenhum aplicativo interativo do usuário foi encerrado.
 Artefatos locais `.worktrees/`, `watch4-sensors.txt` e `.claude/settings.local.json` preservados.
+O push fast-forward para `origin/dev` foi tentado após os gates, mas bloqueado pela política do
+ambiente por tratar o remoto como destino não verificado; não houve egress nem workaround.
 
 ## Próximo ponto
 
