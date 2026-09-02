@@ -34,6 +34,7 @@ export * from './worktree-handoff';
 export * from './host-observed-evidence';
 export * from './host-observed-gate-evidence';
 export * from './host-observed-coder-evidence';
+export * from './coder-model-selection';
 export * from './node-lifecycle';
 export * from './paid-compute-authorization';
 export * from './node-lease';

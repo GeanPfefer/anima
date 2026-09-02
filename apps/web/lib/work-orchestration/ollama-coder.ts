@@ -50,6 +50,9 @@ export interface OllamaCoderOptions {
   readonly backendId?: string;
   readonly locality?: 'local' | 'remote';
   readonly nodeId?: string | null;
+  /** Seleção governada de modelo (downgrade observável) quando o preferido não coube;
+   * anexada à observação do backend para fluir à evidência host-observed do coder. */
+  readonly modelSelection?: import('@anima/core').CoderModelSelectionEvidenceV1;
   readonly timeoutMs?: number;
   /** Injeção para teste; por padrão o fetch global. */
   readonly fetchImpl?: typeof fetch;
@@ -129,6 +132,7 @@ export class OllamaCoderBackend implements CoderBackend {
       placement: options.locality ?? 'local',
       nodeId: options.locality === 'remote' ? (options.nodeId ?? null) : null,
       model: options.model,
+      ...(options.modelSelection ? { modelSelection: options.modelSelection } : {}),
     };
     this.url = options.url ?? process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
     this.fetchImpl = options.fetchImpl ?? fetch;

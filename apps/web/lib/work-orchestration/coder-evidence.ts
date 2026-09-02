@@ -74,6 +74,7 @@ export async function persistHostObservedCoderEvidence(
         nodeId: observation.nodeId,
         model: observation.model,
       } : {}),
+      ...(observation.modelSelection !== undefined ? { modelSelection: observation.modelSelection } : {}),
       observedAt,
     });
 
@@ -115,6 +116,7 @@ export async function persistHostObservedCoderEvidence(
     durationMs,
     outcome: finalTurn.outcome,
     ...(placement !== undefined ? { placement, nodeId, model } : {}),
+    ...(finalTurn.modelSelection !== undefined ? { modelSelection: finalTurn.modelSelection } : {}),
     observedAt,
   });
 

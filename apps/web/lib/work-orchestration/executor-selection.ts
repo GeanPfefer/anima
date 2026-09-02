@@ -1,8 +1,10 @@
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
-import type { ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
+import type { CoderModelSelectionEvidenceV1, ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
+import { selectGovernedCoderModel } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
+import { resolveCoderCapacityPolicy } from './coder-model-policy';
 import { resolveOllamaCoderRuntimeConfig, type OllamaCoderRuntimeConfig } from './ollama-coder-config';
 import { GptCoderBackend } from './gpt-coder';
 import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
@@ -124,7 +126,21 @@ const backendFor = (
   // Intelig?ncias selecion?veis atr?s da mesma seam CoderBackend.
   // O Supervisor continua sem conhecer detalhes de provider.
   if (kind === 'ollama') {
-    const model = contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
+    // Modelo PREFERIDO do contrato aprovado (intent intacto). Se uma política de
+    // capacidade estiver CONFIGURADA e o preferido não couber, o host escolhe de forma
+    // governada um modelo permitido compatível e REGISTRA o downgrade na evidência.
+    const preferredModel = contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
+    let model = preferredModel;
+    let modelSelection: CoderModelSelectionEvidenceV1 | undefined;
+    const policy = resolveCoderCapacityPolicy();
+    if (policy) {
+      const selection = selectGovernedCoderModel(preferredModel, policy);
+      if (!selection.ok) {
+        return { error: `Nenhum modelo de coder local permitido cabe na capacidade (${selection.capacityGb} GB) para o preferido "${preferredModel}": ${selection.reason}.` };
+      }
+      model = selection.evidence.selected;
+      modelSelection = selection.evidence;
+    }
     const runtime = ollamaRuntimeOverride ? { ok: true as const, value: ollamaRuntimeOverride } : resolveOllamaCoderRuntimeConfig(model);
     if (!runtime.ok) return { error: runtime.error };
     return new OllamaCoderBackend({
@@ -133,6 +149,7 @@ const backendFor = (
       backendId: runtime.value.backendId,
       locality: runtime.value.locality,
       nodeId: runtime.value.nodeId,
+      ...(modelSelection ? { modelSelection } : {}),
     });
   }
 

@@ -82,6 +82,8 @@ export interface CoderBackend {
     readonly placement: 'local' | 'remote';
     readonly nodeId: string | null;
     readonly model: string;
+    /** Seleção governada de modelo (downgrade observável), quando aplicada. */
+    readonly modelSelection?: import('@anima/core').CoderModelSelectionEvidenceV1;
   };
   edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult>;
 }

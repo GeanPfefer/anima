@@ -1,4 +1,5 @@
 import { containsSensitiveData } from './execution-attempt';
+import type { CoderModelSelectionEvidenceV1 } from './coder-model-selection';
 import type { ProposalVersion, WorkEvent, WorkItemId } from './types';
 import type { Json } from '@anima/types';
 
@@ -50,6 +51,8 @@ export interface HostObservedCoderEvidenceV1 {
   readonly placement?: 'local' | 'remote';
   readonly nodeId?: string | null;
   readonly model?: string;
+  /** Seleção governada de modelo (downgrade observável) quando o preferido não coube. */
+  readonly modelSelection?: CoderModelSelectionEvidenceV1;
   readonly observedAt: string;
 }
 
@@ -63,6 +66,7 @@ export interface ObservedCoderInput {
   readonly placement?: 'local' | 'remote';
   readonly nodeId?: string | null;
   readonly model?: string;
+  readonly modelSelection?: CoderModelSelectionEvidenceV1;
 }
 
 export interface BuildHostObservedCoderEvidenceInput {
@@ -75,6 +79,7 @@ export interface BuildHostObservedCoderEvidenceInput {
   readonly placement?: 'local' | 'remote';
   readonly nodeId?: string | null;
   readonly model?: string;
+  readonly modelSelection?: CoderModelSelectionEvidenceV1;
   readonly observedAt: string;
 }
 
@@ -85,7 +90,8 @@ export type HostObservedCoderEvidenceDefect =
   | 'invalid_outcome'
   | 'invalid_timestamp'
   | 'payload_too_large'
-  | 'sensitive_data';
+  | 'sensitive_data'
+  | 'invalid_model_selection';
 
 export type HostObservedCoderEvidenceResult =
   | { readonly ok: true; readonly value: HostObservedCoderEvidenceV1 }
@@ -136,6 +142,9 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
   if (containsSensitiveData(input.backendId)) {
     return fail('sensitive_data', 'A evidência do coder não pode carregar credenciais nem caminhos absolutos locais.');
   }
+  if (input.modelSelection !== undefined && !isValidModelSelection(input.modelSelection)) {
+    return fail('invalid_model_selection', 'A evidência de seleção de modelo está malformada.');
+  }
   return {
     ok: true,
     value: {
@@ -147,10 +156,25 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
       durationMs: input.durationMs,
       outcome: input.outcome,
       ...(hasPlacementIdentity ? { placement: input.placement!, nodeId: input.nodeId!, model: input.model! } : {}),
+      ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       observedAt: input.observedAt,
     },
   };
 }
+
+const isValidModelSelection = (value: unknown): value is CoderModelSelectionEvidenceV1 => {
+  const s = value as Partial<CoderModelSelectionEvidenceV1> | null;
+  return !!s && s.schemaVersion === 1
+    && nonBlank(s.preferred) && nonBlank(s.selected) && typeof s.downgraded === 'boolean'
+    && (s.reason === 'preferred_fits' || s.reason === 'preferred_exceeds_capacity')
+    && typeof s.capacityGb === 'number' && Number.isFinite(s.capacityGb) && s.capacityGb > 0
+    && typeof s.requiresGb === 'number' && Number.isFinite(s.requiresGb) && s.requiresGb > 0;
+};
+
+const parseModelSelection = (value: Json | undefined): CoderModelSelectionEvidenceV1 | undefined => {
+  const record = object(value);
+  return record && isValidModelSelection(record) ? record as unknown as CoderModelSelectionEvidenceV1 : undefined;
+};
 
 const object = (value: Json | undefined): Record<string, Json | undefined> | null =>
   value !== null && value !== undefined && !Array.isArray(value) && typeof value === 'object' ? value : null;
@@ -175,6 +199,10 @@ export function parseHostObservedCoderEvidence(value: Json | undefined): HostObs
       nodeId: root.nodeId as string | null,
       model: root.model as string,
     } : {}),
+    ...((): { modelSelection?: CoderModelSelectionEvidenceV1 } => {
+      const selection = parseModelSelection(root.modelSelection);
+      return selection ? { modelSelection: selection } : {};
+    })(),
     observedAt: root.observedAt as string,
   });
   return built.ok ? built.value : null;
