@@ -119,6 +119,14 @@ describe('summarizeProjectIdeaIntake (projeção read-only)', () => {
     expect(deserialized).toEqual(baseIdea);
   });
 
+  test('shape ausente/malformado fail-closed', () => {
+    expect(() => serializeProjectIdeaV0({})).toThrow();
+  });
+
+  test('versão desconhecida fail-closed', () => {
+    expect(() => deserializeProjectIdeaV0({ version: 'unknown' })).toThrow();
+  });
+
   test('campo extra fail-closed', () => {
     const ideaWithExtraField = { ...baseIdea, extraField: 'extra' };
     expect(validateProjectIdea(ideaWithExtraField)).not.toBeNull();
