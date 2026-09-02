@@ -112,3 +112,25 @@ describe('summarizeProjectIdeaIntake (projeção read-only)', () => {
     expect(summary.openStructuringFields).toEqual(['constraints', 'openQuestions', 'candidateIntegrations']);
   });
 });
+
+  test('round-trip serializeProjectIdeaV0 → deserializeProjectIdeaV0', () => {
+    const serialized = serializeProjectIdeaV0(baseIdea);
+    const deserialized = deserializeProjectIdeaV0(serialized);
+    expect(deserialized).toEqual(baseIdea);
+  });
+
+  test('campo extra fail-closed', () => {
+    const ideaWithExtraField = { ...baseIdea, extraField: 'extra' };
+    expect(validateProjectIdea(ideaWithExtraField)).not.toBeNull();
+  });
+
+  test('shape ausente/malformado fail-closed', () => {
+    expect(validateProjectIdea({})).not.toBeNull();
+    expect(validateProjectIdea({ title: 'title' })).not.toBeNull();
+    expect(validateProjectIdea({ title: 'title', summary: 'summary' })).not.toBeNull();
+  });
+
+  test('versão desconhecida fail-closed', () => {
+    const unknownVersionIdea = { ...baseIdea, version: 'unknown' };
+    expect(validateProjectIdea(unknownVersionIdea)).not.toBeNull();
+  });
