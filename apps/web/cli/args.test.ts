@@ -40,6 +40,11 @@ describe('parser de argumentos da CLI', () => {
       .toEqual({ ok: true, command: { kind: 'work-withdraw', id: 'abc', reason: 'plano obsoleto', json: false } });
   });
 
+  test('work retry <id> (deriva o resto do estado persistido)', () => {
+    expect(parseArgs(['work', 'retry', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'work-retry', id: 'abc', json: true } });
+    expect(parseArgs(['work', 'retry'])).toEqual({ ok: false, error: 'Uso: anima work retry <id>' });
+  });
+
   test('work request-changes exige --reason não vazio', () => {
     expect(parseArgs(['work', 'request-changes', 'abc'])).toMatchObject({ ok: false });
     expect(parseArgs(['work', 'request-changes', 'abc', '--reason', '   '])).toMatchObject({ ok: false });

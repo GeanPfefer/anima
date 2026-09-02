@@ -13,7 +13,8 @@ export type ParsedCommand =
   | { readonly kind: 'work-correct'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-approve'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-accept'; readonly id: string; readonly json: boolean }
-  | { readonly kind: 'work-withdraw'; readonly id: string; readonly reason: string; readonly json: boolean };
+  | { readonly kind: 'work-withdraw'; readonly id: string; readonly reason: string; readonly json: boolean }
+  | { readonly kind: 'work-retry'; readonly id: string; readonly json: boolean };
 
 export type ParseResult =
   | { readonly ok: true; readonly command: ParsedCommand }
@@ -95,6 +96,10 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       if (reason === null || reason.trim().length === 0) return { ok: false, error: 'withdraw exige --reason "<motivo>" não vazio.' };
       return { ok: true, command: { kind: 'work-withdraw', id, reason: reason.trim(), json } };
     }
+    if (sub === 'retry') {
+      if (!id) return { ok: false, error: 'Uso: anima work retry <id>' };
+      return { ok: true, command: { kind: 'work-retry', id, json } };
+    }
     return { ok: false, error: `Subcomando de "work" desconhecido: ${sub ?? '(vazio)'}` };
   }
 
@@ -113,6 +118,7 @@ Uso:
   anima work approve <id>                     Aprova uma PROPOSTA (proposed → approved)
   anima work accept <id>                       Aceita o RESULTADO em review (review → completed)
   anima work withdraw <id> --reason "..."      Retira um plano APROVADO não iniciado (approved → cancelled)
+  anima work retry <id>                        Solicita o retry governado de um item failed/RETRY_READY
   anima help                                  Esta ajuda
 
 Flags:

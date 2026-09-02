@@ -118,6 +118,12 @@ export function renderHuman(payload: CliPayload): string {
     case 'withdraw':
       return `${payload.workItemId} ${DOT} ${payload.message}`;
 
+    case 'retry':
+      return [
+        `${payload.workItemId} ${DOT} ${payload.message}`,
+        `retryRequestId: ${payload.retryRequestId} ${DOT} failureEvent: ${payload.failureEventId} ${DOT} v${payload.expectedProposalVersion}${payload.replayed ? ' (replay)' : ''}`,
+      ].join('\n');
+
     case 'work-correct':
       return [
         `${payload.message}`,

@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { ResultReviewDecision } from '@anima/core';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { correctReviewedWorkItem } from '@/lib/work-orchestration/review-correction-orchestration';
+import { readWorkRetryReadiness } from '@/lib/work-orchestration/retry-readiness';
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
-import { runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkWithdraw, type CommandResult } from './app';
+import { runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkWithdraw, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
 
@@ -51,6 +53,18 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
       return runWorkReview(service, command.id, { type: 'accept' });
     case 'work-withdraw':
       return runWorkWithdraw(service, command.id, command.reason);
+    case 'work-retry': {
+      const retry: WorkRetryCapability = {
+        readReadiness: (workItemId) => readWorkRetryReadiness(client, workItemId),
+        requestRetry: async ({ workItemId, expectedProposalVersion, failureEventId, retryRequestId }) => {
+          const res = await client.rpc('request_work_retry', { p_work_item_id: workItemId, p_expected_proposal_version: expectedProposalVersion, p_failure_event_id: failureEventId, p_retry_request_id: retryRequestId });
+          if (res.error) return { ok: false, code: res.error.code ?? null, message: res.error.message };
+          const data = res.data as { replayed?: unknown } | null;
+          return { ok: true, replayed: data?.replayed === true };
+        },
+      };
+      return runWorkRetry(retry, command.id, () => randomUUID());
+    }
   }
 }
 

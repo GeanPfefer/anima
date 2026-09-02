@@ -139,6 +139,17 @@ export interface WithdrawPayload {
   readonly state: string;
   readonly message: string;
 }
+export interface RetryPayload {
+  readonly ok: true;
+  readonly kind: 'retry';
+  readonly workItemId: string;
+  readonly expectedProposalVersion: number;
+  readonly failureEventId: string;
+  readonly retryRequestId: string;
+  readonly replayed: boolean;
+  readonly remainingAttempts: number;
+  readonly message: string;
+}
 export interface WorkCorrectPayload {
   readonly ok: true;
   readonly kind: 'work-correct';
@@ -163,13 +174,36 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | WorkCorrectPayload | ErrorPayload | HelpPayload;
+  | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | ErrorPayload | HelpPayload;
 
 /** Capacidade de correção pós-review (a MESMA que a rota web usa): recebe o id do
  * item em `changes_requested` e materializa/replaya o sucessor governado. Injetada
  * como porta para o entrypoint ligar `correctReviewedWorkItem(client, id)` e os
  * testes um duplo — a regra permanece no application service. */
 export type ReviewCorrectionCapability = (workItemId: string) => Promise<ReviewCorrectionResult>;
+
+// Capacidade de RETRY GOVERNADO (a MESMA que a rota web `retries` usa): a prontidão
+// (`current_work_retry_readiness`) e a RPC `request_work_retry`. A CLI só LÊ a prontidão
+// para DERIVAR os campos (versão vigente, failureEventId) e emitir um `retryRequestId`
+// novo; toda a regra (estado failed, RETRY_READY, budget, correlação, idempotência,
+// autoria) vive na RPC. Injetada como porta para o entrypoint ligar o cliente real e os
+// testes um duplo.
+export interface WorkRetryReadinessView {
+  readonly status: 'RETRY_READY' | 'BLOCKED' | string;
+  readonly reason: string | null;
+  readonly proposalVersion: number;
+  readonly failureEventId: string | null;
+  readonly attemptsUsed: number;
+  readonly maxAttempts: number;
+  readonly remainingAttempts: number;
+}
+export type WorkRetryRequestOutcome =
+  | { readonly ok: true; readonly replayed: boolean }
+  | { readonly ok: false; readonly code: string | null; readonly message: string };
+export interface WorkRetryCapability {
+  readReadiness(workItemId: string): Promise<WorkRetryReadinessView>;
+  requestRetry(input: { readonly workItemId: string; readonly expectedProposalVersion: number; readonly failureEventId: string; readonly retryRequestId: string }): Promise<WorkRetryRequestOutcome>;
+}
 
 export interface CommandResult {
   readonly exitCode: ExitCode;
@@ -401,6 +435,47 @@ export async function runWorkWithdraw(service: WorkOrchestrationPort, id: string
   return {
     exitCode: EXIT.OK,
     payload: { ok: true, kind: 'withdraw', workItemId: result.value.id, state: result.value.state, message: `Plano aprovado retirado antes da execução. Novo estado: ${result.value.state}.` },
+  };
+}
+
+// Código PG da RPC → exit code: precondições/governança (55000/22023/42501) ⇒ 3;
+// operacional/ausente ⇒ 1.
+const RETRY_GOVERNANCE_PG: ReadonlySet<string> = new Set(['55000', '22023', '42501']);
+const exitCodeForPgCode = (code: string | null): ExitCode => (code !== null && RETRY_GOVERNANCE_PG.has(code) ? EXIT.REJECTED : EXIT.ERROR);
+
+/**
+ * Solicita o RETRY GOVERNADO (ato humano) de um item `failed`/RETRY_READY, reusando a
+ * MESMA capability da rota web: lê `current_work_retry_readiness` para DERIVAR a versão
+ * vigente e o `failureEventId` (o usuário não repassa o que o sistema já tem), gera um
+ * `retryRequestId` novo e chama `request_work_retry`. Fail-closed pela prontidão ANTES da
+ * RPC (não RETRY_READY / sem failureEvent) e pela própria RPC (autoridade final: budget,
+ * correlação, versão, idempotência). NÃO executa o trabalho — apenas reabre `failed → approved`.
+ */
+export async function runWorkRetry(retry: WorkRetryCapability, id: string, newRetryRequestId: () => string): Promise<CommandResult> {
+  const readiness = await retry.readReadiness(id);
+  if (readiness.status !== 'RETRY_READY') {
+    const operational = readiness.reason === 'read_failed';
+    const message = operational
+      ? `Não foi possível ler a prontidão de retry de "${id}" (item inexistente ou leitura falhou).`
+      : `O item não está pronto para retry (status ${readiness.status}${readiness.reason ? `, motivo ${readiness.reason}` : ''}).`;
+    return errorResult(message, readiness.reason ?? 'not_retry_ready', operational ? EXIT.ERROR : EXIT.REJECTED);
+  }
+  if (!readiness.failureEventId) {
+    return errorResult('A prontidão não expõe o evento de falha a retomar; não é possível derivar o retry.', 'failure_event_missing', EXIT.REJECTED);
+  }
+  const retryRequestId = newRetryRequestId();
+  const outcome = await retry.requestRetry({ workItemId: id, expectedProposalVersion: readiness.proposalVersion, failureEventId: readiness.failureEventId, retryRequestId });
+  if (!outcome.ok) return errorResult(outcome.message, outcome.code, exitCodeForPgCode(outcome.code));
+  const message = outcome.replayed
+    ? `Retry já solicitado (replay idempotente). Item reaberto para nova tentativa.`
+    : `Retry autorizado. Item reaberto (approved) para nova tentativa; ${readiness.remainingAttempts} restante(s).`;
+  return {
+    exitCode: EXIT.OK,
+    payload: {
+      ok: true, kind: 'retry', workItemId: id, expectedProposalVersion: readiness.proposalVersion,
+      failureEventId: readiness.failureEventId, retryRequestId, replayed: outcome.replayed,
+      remainingAttempts: readiness.remainingAttempts, message,
+    },
   };
 }
 

@@ -52,7 +52,14 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work approve <id>` | Aprova uma PROPOSTA (`proposed → approved`) via `resolveApproval` |
 | `anima work accept <id>` | Aceita o RESULTADO em review (`review → completed`) via `reviewResult` |
 | `anima work withdraw <id> --reason "..."` | Retira um plano APROVADO não iniciado (`approved → cancelled`) via `withdraw_approved_work` |
+| `anima work retry <id>` | Solicita o retry governado (ato humano) de um item `failed`/RETRY_READY via `request_work_retry` |
 | `anima help` | Ajuda |
+
+`work retry` reusa a MESMA capability da rota web `retries`: lê `current_work_retry_readiness`
+para DERIVAR automaticamente a versão vigente e o `failureEventId` (o usuário não repassa o que
+o sistema já tem), gera um `retryRequestId` novo e chama `request_work_retry`. Fail-closed pela
+prontidão (não RETRY_READY / sem failureEvent) e pela RPC (budget, correlação, versão,
+idempotência, autoria). NÃO executa o trabalho — apenas reabre `failed → approved`.
 
 `work withdraw` retira canonicamente um plano aprovado que ficou obsoleto ANTES da
 execução (base mudou, o contrato de domínio evoluiu, um sucessor melhor o substitui).

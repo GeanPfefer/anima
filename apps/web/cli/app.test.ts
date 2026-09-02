@@ -142,6 +142,65 @@ describe('runners da CLI sobre o application service', () => {
     expect(result.payload).toMatchObject({ ok: false, code: 'version_conflict' });
   });
 
+  test('work retry num item RETRY_READY deriva versão+failureEvent e chama request_work_retry (exit 0)', async () => {
+    let requested: { workItemId: string; expectedProposalVersion: number; failureEventId: string; retryRequestId: string } | null = null;
+    const { runWorkRetry } = await import('./app');
+    const retry = {
+      readReadiness: async () => ({ status: 'RETRY_READY' as const, reason: null, proposalVersion: 1, failureEventId: 'ed49', attemptsUsed: 1, maxAttempts: 3, remainingAttempts: 2 }),
+      requestRetry: async (input: { workItemId: string; expectedProposalVersion: number; failureEventId: string; retryRequestId: string }) => { requested = input; return { ok: true as const, replayed: false }; },
+    };
+    const result = await runWorkRetry(retry, 'i', () => 'req-uuid');
+    expect(requested).toEqual({ workItemId: 'i', expectedProposalVersion: 1, failureEventId: 'ed49', retryRequestId: 'req-uuid' });
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(result.payload).toMatchObject({ ok: true, kind: 'retry', workItemId: 'i', failureEventId: 'ed49', retryRequestId: 'req-uuid', replayed: false, remainingAttempts: 2 });
+  });
+
+  test('work retry replay idempotente reflete o replay', async () => {
+    const { runWorkRetry } = await import('./app');
+    const retry = {
+      readReadiness: async () => ({ status: 'RETRY_READY' as const, reason: null, proposalVersion: 1, failureEventId: 'ed49', attemptsUsed: 1, maxAttempts: 3, remainingAttempts: 2 }),
+      requestRetry: async () => ({ ok: true as const, replayed: true }),
+    };
+    const result = await runWorkRetry(retry, 'i', () => 'req-uuid');
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect((result.payload as { replayed: boolean }).replayed).toBe(true);
+  });
+
+  test('work retry num item NÃO RETRY_READY (ex.: budget) é recusado por regra (exit 3), sem chamar a RPC', async () => {
+    const { runWorkRetry } = await import('./app');
+    let called = false;
+    const retry = {
+      readReadiness: async () => ({ status: 'BLOCKED' as const, reason: 'attempt_budget_exhausted', proposalVersion: 1, failureEventId: 'ed49', attemptsUsed: 3, maxAttempts: 3, remainingAttempts: 0 }),
+      requestRetry: async () => { called = true; return { ok: true as const, replayed: false }; },
+    };
+    const result = await runWorkRetry(retry, 'i', () => 'req-uuid');
+    expect(called).toBe(false);
+    expect(result.exitCode).toBe(EXIT.REJECTED);
+    expect(result.payload).toMatchObject({ ok: false, code: 'attempt_budget_exhausted' });
+  });
+
+  test('work retry de item inexistente (read_failed) é erro operacional (exit 1)', async () => {
+    const { runWorkRetry } = await import('./app');
+    const retry = {
+      readReadiness: async () => ({ status: 'BLOCKED' as const, reason: 'read_failed', proposalVersion: 0, failureEventId: null, attemptsUsed: 0, maxAttempts: 0, remainingAttempts: 0 }),
+      requestRetry: async () => ({ ok: true as const, replayed: false }),
+    };
+    const result = await runWorkRetry(retry, 'zzz', () => 'req-uuid');
+    expect(result.exitCode).toBe(EXIT.ERROR);
+    expect(result.payload).toMatchObject({ ok: false, code: 'read_failed' });
+  });
+
+  test('work retry: erro de precondição da RPC (55000) vira recusa por regra (exit 3)', async () => {
+    const { runWorkRetry } = await import('./app');
+    const retry = {
+      readReadiness: async () => ({ status: 'RETRY_READY' as const, reason: null, proposalVersion: 1, failureEventId: 'ed49', attemptsUsed: 1, maxAttempts: 3, remainingAttempts: 2 }),
+      requestRetry: async () => ({ ok: false as const, code: '55000', message: 'o item mudou' }),
+    };
+    const result = await runWorkRetry(retry, 'i', () => 'req-uuid');
+    expect(result.exitCode).toBe(EXIT.REJECTED);
+    expect(result.payload).toMatchObject({ ok: false, code: '55000' });
+  });
+
   test('work correct materializa o sucessor e NÃO o aprova (exit 0)', async () => {
     const capability = async (): Promise<ReviewCorrectionResult> => ({ ok: true, successorWorkItemId: 's1', lineageId: 'l1', recoverySequence: 1, replayed: false });
     const result = await runWorkCorrect(capability, 'i');
