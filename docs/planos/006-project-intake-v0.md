@@ -1,5 +1,11 @@
 # Plano 006 — Project Intake V0
 
+> Diagnóstico posterior 2026-09-02: cenário A, testes incorretos (imports ausentes e
+> negativos que não provam o codec); comportamento da implementação confirmado por
+> sondagens separadas. Nenhum successor/attempt criado: a recovery atual exige redução
+> estrita de escopo e o item já é unitário. Ver [registro](../registros/2026-09-02-diagnostico-semantico-pin02.md)
+> e [desenho da operação faltante](007-replanejamento-apos-falha-deterministica.md).
+
 > Atualização operacional 2026-09-02: o successor `5b8e371d` recebeu o retry humano
 > pela CLI e rodou a attempt `0cfdd6cb` com fallback governado para qwen2.5-coder:14b.
 > Terminal `failed`: teste focado falhou antes/depois do reparo interno; só o teste

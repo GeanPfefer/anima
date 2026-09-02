@@ -1,4 +1,9 @@
 # Anima — Product Requirements Document
+> Diagnóstico 2026-09-02: falha PIN-02 classificada **A (testes/coder)**. Dois snapshots
+> falham por TS2304; codec satisfaz os comportamentos sondados. Nenhuma recovery criada:
+> escopo mínimo impede decomposição existente. [Plano 007](docs/planos/007-replanejamento-apos-falha-deterministica.md)
+> propõe replanejamento por diagnóstico, ainda sem política implementada. Futuras falhas
+> ordinárias de gate preservam `[gate_failed]` sem liberar retry; [registro](docs/registros/2026-09-02-diagnostico-semantico-pin02.md).
 > Prova viva 2026-09-02: retry canônico do successor PIN-02 `5b8e371d` executado;
 > fallback qwen3-coder→qwen2.5-coder:14b persistido. Attempt `0cfdd6cb` terminou
 > `failed` após teste focado falhar antes/depois do reparo interno; implementação
