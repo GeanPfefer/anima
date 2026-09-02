@@ -14,11 +14,31 @@ export interface AutonomousExecutionLimits {
   readonly maxDurationMinutes?: number;
   readonly maxResourceUnits?: number;
 }
+/**
+ * Classe de PROVA de um critério de validação — o requisito verificável que o
+ * Verifier deve conferir. Um gate (execução de comando) é apenas UMA classe; nem
+ * toda prova é um gate.
+ *
+ * - `gate`: provado por um comando executado que passou (teste/typecheck/build).
+ *   Requer `command` e casa por rótulo com a evidência de gate observada.
+ * - `scope`: provado por INVARIANTE ESTRUTURAL observada — o conjunto de arquivos
+ *   alterados respeita o escopo (nada fora do incluído, nada no excluído). Não tem
+ *   comando: a prova é a evidência de escopo observada pelo host (git), não uma
+ *   execução. Serve a critérios como "só o arquivo X mudou" / "o arquivo Y ficou
+ *   intacto", que um gate não prova.
+ *
+ * Ausente ⇒ inferido: `gate` quando há `command`, senão um critério apenas
+ * declarado (a cargo do humano) — preserva o comportamento pré-existente.
+ */
+export type WorkProofKind = 'gate' | 'scope';
+
 export interface AutonomousValidationCriterion {
   readonly label: string;
   readonly command?: string;
-  /** Textos EXATOS de `proposal.data.expectedEffects` que este gate prova. */
+  /** Textos EXATOS de `proposal.data.expectedEffects` que este critério prova. */
   readonly covers?: readonly string[];
+  /** Requisito de prova explícito. Ausente ⇒ inferido do `command` (ver `WorkProofKind`). */
+  readonly proof?: WorkProofKind;
 }
 export interface AutonomousExecutionSpecV1 {
   readonly schemaVersion: 1;
@@ -154,8 +174,11 @@ const parseValidationCriteria = (raw: Readonly<Record<string, Json>>): readonly 
     if (covers !== undefined && (!Array.isArray(covers) || covers.length === 0
       || !covers.every(value => typeof value === 'string' && value.trim().length > 0)
       || new Set(covers).size !== covers.length)) return null;
+    const proof = entry['proof'];
+    if (proof !== undefined && proof !== 'gate' && proof !== 'scope') return null;
     criteria.push({ label, ...(command === undefined ? {} : { command }),
-      ...(covers === undefined ? {} : { covers: covers as readonly string[] }) });
+      ...(covers === undefined ? {} : { covers: covers as readonly string[] }),
+      ...(proof === undefined ? {} : { proof: proof as WorkProofKind }) });
   }
   return criteria;
 };

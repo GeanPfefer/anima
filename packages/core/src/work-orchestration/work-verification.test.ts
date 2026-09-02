@@ -638,3 +638,106 @@ describe('verifyPersistedWorkResult — composição a partir de fatos persistid
     expect(withoutEvidence.verification).toBeNull();
   });
 });
+
+// ============================================================
+// Cobertura HETEROGÊNEA: nem toda prova é um gate. Um critério de aceite pode ser
+// provado por EXECUÇÃO (gate) OU por INVARIANTE DE ESCOPO (contenção observada pelo
+// host). Mirror do contrato de um sucessor de correção: um critério funcional
+// (gate) + dois de escopo (só o test file mudou / impl intacta).
+// ============================================================
+describe('verifyWorkResult — critérios de aceite provados por escopo (não só gate)', () => {
+  const FUNC = 'Os gates de validação da correção passam.';
+  const SCOPE_ONLY = 'A correção altera apenas src/test.ts.';
+  const SCOPE_INTACT = 'A implementação src/impl.ts permanece intacta.';
+
+  const gitObserved = (over: Partial<Parameters<typeof buildHostObservedGitEvidence>[0]> = {}): HostObservedGitEvidenceV1 => {
+    const built = buildHostObservedGitEvidence({
+      workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2,
+      baseSha: BASE, observedCommitSha: COMMIT,
+      observedChangedFiles: ['src/test.ts'],
+      observedDiffFiles: [{ path: 'src/test.ts', insertions: 20, deletions: 0 }],
+      observedAt: '2026-09-02T12:00:00.000Z', ...over,
+    });
+    if (!built.ok) throw new Error(built.explanation);
+    return built.value;
+  };
+
+  // Contrato base do sucessor de correção: 1 gate funcional + 1 critério de escopo
+  // que cobre os DOIS invariantes de escopo. Handoff/observado tocam SÓ o test file.
+  const scopeInput = (overrides: Partial<WorkResultVerificationInput> = {}): WorkResultVerificationInput => ({
+    expected: { workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2 },
+    authorized: {
+      includedScope: ['src/test.ts'],
+      excludedScope: ['src/impl.ts'],
+      validationCriteria: [
+        { label: 'unit', command: 'npm test', covers: [FUNC] },
+        { label: 'Contenção de escopo', proof: 'scope', covers: [SCOPE_ONLY, SCOPE_INTACT] },
+      ],
+      acceptanceCriteria: [FUNC, SCOPE_ONLY, SCOPE_INTACT],
+    },
+    handoff: handoffWith({ changedFiles: ['src/test.ts'], diffFiles: [{ path: 'src/test.ts', insertions: 20, deletions: 0 }] }),
+    observed: gitObserved(),
+    ...overrides,
+  });
+
+  test('CASO 1 — escopo respeitado + observado independente ⇒ critério de escopo PROVADO', () => {
+    const report = verifyWorkResult(scopeInput());
+    expect(report.verdict).toBe('verified');
+    const covered = report.findings.find(f => f.code === 'scope_criterion_covered');
+    expect(covered?.provenance).toBe('independent');
+    // Os DOIS invariantes de escopo ficam com evidência.
+    const acceptanceCovered = report.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject);
+    expect(acceptanceCovered).toEqual(expect.arrayContaining([SCOPE_ONLY, SCOPE_INTACT]));
+  });
+
+  test('CASO 2 — arquivo excluído alterado (observado) ⇒ violação, NUNCA verified, escopo não coberto', () => {
+    const report = verifyWorkResult(scopeInput({
+      handoff: handoffWith({ changedFiles: ['src/test.ts', 'src/impl.ts'], diffFiles: [{ path: 'src/test.ts', insertions: 20, deletions: 0 }, { path: 'src/impl.ts', insertions: 1, deletions: 0 }] }),
+      observed: gitObserved({ observedChangedFiles: ['src/test.ts', 'src/impl.ts'], observedDiffFiles: [{ path: 'src/test.ts', insertions: 20, deletions: 0 }, { path: 'src/impl.ts', insertions: 1, deletions: 0 }] }),
+    }));
+    expect(report.verdict).toBe('rejected');
+    expect(codes(report)).toContain('change_in_excluded_scope');
+    // Os critérios de escopo NÃO são cobertos (fail-closed).
+    const missing = report.findings.filter(f => f.code === 'acceptance_criterion_without_evidence').map(f => f.subject);
+    expect(missing).toEqual(expect.arrayContaining([SCOPE_ONLY, SCOPE_INTACT]));
+  });
+
+  test('CASO 3 — critério funcional exige gate, gate ausente ⇒ gap ⇒ inconclusive', () => {
+    const report = verifyWorkResult(scopeInput({
+      authorized: {
+        includedScope: ['src/test.ts'], excludedScope: ['src/impl.ts'],
+        validationCriteria: [
+          { label: 'gate-que-nao-rodou', command: 'npm run focused', covers: [FUNC] },
+          { label: 'Contenção de escopo', proof: 'scope', covers: [SCOPE_ONLY, SCOPE_INTACT] },
+        ],
+        acceptanceCriteria: [FUNC, SCOPE_ONLY, SCOPE_INTACT],
+      },
+    }));
+    expect(report.verdict).toBe('inconclusive');
+    expect(codes(report)).toContain('criterion_without_gate_coverage');
+    expect(report.findings.filter(f => f.code === 'acceptance_criterion_without_evidence').map(f => f.subject)).toContain(FUNC);
+    // Mas os critérios de escopo continuam PROVADOS pela observação.
+    expect(report.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject)).toEqual(expect.arrayContaining([SCOPE_ONLY, SCOPE_INTACT]));
+  });
+
+  test('CASO 4 — cobertura heterogênea completa (gate + escopo) ⇒ verified, 0 gaps', () => {
+    const report = verifyWorkResult(scopeInput());
+    expect(report.verdict).toBe('verified');
+    expect(report.summary.gaps).toBe(0);
+    expect(report.summary.violations).toBe(0);
+    const acceptanceCovered = report.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject);
+    expect(acceptanceCovered).toEqual(expect.arrayContaining([FUNC, SCOPE_ONLY, SCOPE_INTACT]));
+    expect(codes(report)).toEqual(expect.arrayContaining(['criterion_covered', 'scope_criterion_covered']));
+  });
+
+  test('CASO 5 — só evidência ATESTADA de escopo (sem observação independente) ⇒ não conta, inconclusive', () => {
+    // Sem `observed`: o escopo recai na atestação do executor, que NÃO basta como
+    // prova de escopo. O gate funcional passa, mas os invariantes de escopo ficam sem prova.
+    const report = verifyWorkResult(scopeInput({ observed: undefined }));
+    expect(report.verdict).toBe('inconclusive');
+    expect(codes(report)).toContain('scope_criterion_uncovered');
+    expect(report.findings.filter(f => f.code === 'acceptance_criterion_without_evidence').map(f => f.subject)).toEqual(expect.arrayContaining([SCOPE_ONLY, SCOPE_INTACT]));
+    // A prova de EXECUÇÃO (gate) continua válida — evidência do tipo certo.
+    expect(report.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject)).toContain(FUNC);
+  });
+});

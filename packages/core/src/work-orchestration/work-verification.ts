@@ -92,6 +92,12 @@ export type WorkVerificationFindingCode =
   | 'acceptance_criterion_without_evidence'
   | 'criterion_covers_unknown_acceptance'
   | 'declared_criterion_unverifiable'
+  // Critério provado por INVARIANTE DE ESCOPO (não por gate): satisfeito quando a
+  // evidência de escopo OBSERVADA pelo host confirma contenção. `uncovered` quando o
+  // escopo não foi observado independentemente (fail-conservative: atestação do
+  // executor não basta como prova de escopo).
+  | 'scope_criterion_covered'
+  | 'scope_criterion_uncovered'
   // Coerência do desfecho com os gates.
   | 'status_coherent'
   | 'status_contradicts_gates'
@@ -202,6 +208,12 @@ export interface WorkResultVerificationInput {
 const norm = (path: string): string => path.replace(/\\/g, '/');
 const nonBlankCommand = (criterion: AutonomousValidationCriterion): boolean =>
   typeof criterion.command === 'string' && criterion.command.trim().length > 0;
+// Requisito de prova de um critério: explícito (`proof`) ou inferido do `command`.
+// `declared` = sem comando e sem `proof` (informativo, a cargo do humano).
+const proofKindOf = (criterion: AutonomousValidationCriterion): 'gate' | 'scope' | 'declared' =>
+  criterion.proof === 'scope' ? 'scope'
+  : criterion.proof === 'gate' ? 'gate'
+  : nonBlankCommand(criterion) ? 'gate' : 'declared';
 
 // Proveniência default = `attested` (conservador): tudo que descreve o que
 // ACONTECEU repousa na atestação do Executor, salvo o que é marcado `independent`
@@ -308,6 +320,12 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   if (scopeClean) {
     findings.push(ok('scope_respected', 'Todo arquivo alterado pertence ao escopo incluído e nenhum ao excluído.', undefined, scopeProvenance));
   }
+  // Um critério de ESCOPO só é PROVADO quando a contenção é confirmada por
+  // observação INDEPENDENTE do host (git) — nunca pela mera atestação do executor
+  // (§ "não permita que o executor se autoateste como prova de escopo"). Sem
+  // evidência observada, o escopo recai na atestação e um critério de escopo fica
+  // sem prova independente (fail-conservative), mesmo que os arquivos "pareçam" ok.
+  const scopeIndependentlyClean = scopeClean && scopeProvenance === 'independent';
 
   // ---------- Coerência de desfecho com os gates ----------
   const failedGates = handoff.gates.filter(g => g.outcome === 'failed');
@@ -405,11 +423,25 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   const passedByLabel = new Set(gateOutcomeSource.filter(g => g.outcome === 'passed').map(g => g.label));
   const anyGateByLabel = new Set(gateOutcomeSource.map(g => g.label));
   for (const criterion of authorized.validationCriteria) {
-    if (!nonBlankCommand(criterion)) {
+    const proofKind = proofKindOf(criterion);
+    if (proofKind === 'scope') {
+      // Prova por INVARIANTE DE ESCOPO: satisfeita quando o host confirmou a contenção
+      // de forma INDEPENDENTE (git). Sem observação independente ⇒ lacuna (não `verified`).
+      if (scopeIndependentlyClean) {
+        findings.push(ok('scope_criterion_covered',
+          `O critério de escopo "${criterion.label}" é confirmado pela contenção de escopo observada pelo host.`, criterion.label, 'independent'));
+      } else {
+        findings.push(gap('scope_criterion_uncovered',
+          `O critério de escopo "${criterion.label}" exige contenção OBSERVADA independentemente; a atestação do executor não basta.`, criterion.label, 'independent'));
+      }
+      continue;
+    }
+    if (proofKind === 'declared') {
       findings.push(ok('declared_criterion_unverifiable',
         `O critério "${criterion.label}" foi apenas declarado (sem comando) e não é verificável por evidência; permanece a cargo do humano.`, criterion.label, 'independent'));
       continue;
     }
+    // proofKind === 'gate'
     if (passedByLabel.has(criterion.label)) {
       findings.push(ok('criterion_covered', `O critério "${criterion.label}" tem um gate correspondente aprovado.`, criterion.label));
     } else if (anyGateByLabel.has(criterion.label)) {
@@ -423,18 +455,27 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   }
 
   // ---------- Cobertura do ACEITE aprovado ----------
-  // `validationCriteria` diz quais gates existem; `acceptanceCriteria` diz o que o
-  // humano aprovou. Sem esta segunda dimensão, gates podem cobrir perfeitamente a
-  // si mesmos enquanto parte da intenção desaparece no planejamento (PIN-02).
+  // `validationCriteria` diz quais PROVAS existem (gate OU escopo); `acceptanceCriteria`
+  // diz o que o humano aprovou. Cada critério aprovado precisa estar associado (via
+  // `covers`) a uma prova SUFICIENTE do tipo declarado: um gate que passou, ou a
+  // contenção de escopo observada independentemente. Nem toda prova é um gate — mas a
+  // evidência precisa CORRESPONDER ao requisito do critério (§ "não conte qualquer
+  // evidência"). Sem esta dimensão, gates cobririam a si mesmos enquanto parte da
+  // intenção desaparece no planejamento (PIN-02).
   const acceptance = authorized.acceptanceCriteria ?? [];
   const acceptanceSet = new Set(acceptance);
   const coveredAcceptance = new Set<string>();
   for (const criterion of authorized.validationCriteria) {
+    const proofKind = proofKindOf(criterion);
+    // A prova deste critério está SATISFEITA pela evidência do seu PRÓPRIO tipo?
+    const proven = proofKind === 'gate' ? passedByLabel.has(criterion.label)
+      : proofKind === 'scope' ? scopeIndependentlyClean
+      : false; // `declared` não cobre aceite (a cargo do humano).
     for (const covered of criterion.covers ?? []) {
       if (!acceptanceSet.has(covered)) {
         findings.push(violation('criterion_covers_unknown_acceptance',
-          `O gate "${criterion.label}" declara cobrir um critério que não pertence ao aceite aprovado.`, covered, 'independent'));
-      } else if (passedByLabel.has(criterion.label)) {
+          `O critério "${criterion.label}" declara cobrir um item que não pertence ao aceite aprovado.`, covered, 'independent'));
+      } else if (proven) {
         coveredAcceptance.add(covered);
       }
     }
@@ -442,10 +483,10 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   for (const approved of acceptance) {
     if (coveredAcceptance.has(approved)) {
       findings.push(ok('acceptance_criterion_covered',
-        `O critério aprovado possui associação explícita com um gate executado e aprovado.`, approved));
+        `O critério aprovado possui associação explícita com uma prova suficiente (gate aprovado ou escopo observado).`, approved));
     } else {
       findings.push(gap('acceptance_criterion_without_evidence',
-        `O critério aprovado não possui associação com evidência de gate aprovada.`, approved, 'independent'));
+        `O critério aprovado não possui associação com prova suficiente (gate aprovado ou escopo observado independentemente).`, approved, 'independent'));
     }
   }
 
