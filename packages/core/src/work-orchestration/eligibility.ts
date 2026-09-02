@@ -14,7 +14,12 @@ export interface AutonomousExecutionLimits {
   readonly maxDurationMinutes?: number;
   readonly maxResourceUnits?: number;
 }
-export interface AutonomousValidationCriterion { readonly label: string; readonly command?: string; }
+export interface AutonomousValidationCriterion {
+  readonly label: string;
+  readonly command?: string;
+  /** Textos EXATOS de `proposal.data.expectedEffects` que este gate prova. */
+  readonly covers?: readonly string[];
+}
 export interface AutonomousExecutionSpecV1 {
   readonly schemaVersion: 1;
   readonly target: AutonomousExecutionTarget;
@@ -145,7 +150,12 @@ const parseValidationCriteria = (raw: Readonly<Record<string, Json>>): readonly 
     if (typeof label !== 'string' || label.trim().length === 0) return null;
     const command = entry['command'];
     if (command !== undefined && (typeof command !== 'string' || command.trim().length === 0)) return null;
-    criteria.push(command === undefined ? { label } : { label, command });
+    const covers = entry['covers'];
+    if (covers !== undefined && (!Array.isArray(covers) || covers.length === 0
+      || !covers.every(value => typeof value === 'string' && value.trim().length > 0)
+      || new Set(covers).size !== covers.length)) return null;
+    criteria.push({ label, ...(command === undefined ? {} : { command }),
+      ...(covers === undefined ? {} : { covers: covers as readonly string[] }) });
   }
   return criteria;
 };

@@ -14,6 +14,7 @@ const candidate: CanonicalBacklogCandidate = {
   status: 'not_started',
   statusEvidence: null,
   dependencies: ['AUTO-01'],
+  acceptanceCriteria: ['gates passam'],
   sourceRef: { document: 'docs/planos/002.md', heading: 'SUP-01 — Fila persistente', line: 220 },
 };
 

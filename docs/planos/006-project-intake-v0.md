@@ -1,6 +1,7 @@
 # Plano 006 — Project Intake V0
 
-> Estado em 2026-09-01: contrato puro implementado e testado (por Claude); persistência,
+> Estado em 2026-09-02: contrato puro implementado; PIN-02 segue em review humano. A prova
+> revelou e motivou o fechamento sistêmico da cobertura aceite→gate→Verifier; persistência,
 > caminho de criação e UI ficam para recortes seguintes — preferencialmente construídos pelo
 > próprio Anima (self-dev). Nenhuma execução automática de projeto; nenhuma decisão humana
 > fabricada.
@@ -88,6 +89,8 @@ e deixar a migration para depois de uma convergência provada.
   [registro 2026-09-02](../registros/2026-09-02-pin02-prova-viva-self-dev-review.md). Achado para a
   revisão: a implementação do coder é mínima e o aceite escrito ainda não está codificado como teste
   executável (round-trip / campo extra / versão desconhecida).
+  O Verifier v2 agora torna essa ausência explícita como coverage incompleto; o parecer histórico
+  v1 não foi reescrito e nenhuma decisão humana sobre o PIN-02 foi executada.
 - **Problema:** o contrato de domínio ainda não possui uma fronteira explícita e testada entre
   `ProjectIdeaV0` e o shape que uma futura camada de persistência poderá armazenar/ler.
 - **Resultado esperado:** exatamente um recorte puro em `packages/core`: shape persistível V0,

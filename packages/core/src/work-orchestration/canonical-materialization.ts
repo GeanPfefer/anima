@@ -128,6 +128,10 @@ export function buildCanonicalSlicePlanningMessage(input: {
     `Fonte: ${input.candidate.sourceRef.document} (${input.candidate.sourceRef.heading}).`,
     `Geração de planejamento: ${input.planningGeneration}.`,
   ];
+  if (input.candidate.acceptanceCriteria.length > 0) {
+    lines.push('', 'Aceite canônico obrigatório (não omita nem substitua por gates genéricos):',
+      ...input.candidate.acceptanceCriteria.map(criterion => `- ${criterion}`));
+  }
   if (input.priorSlicesSummary && input.priorSlicesSummary.trim().length > 0) {
     lines.push('', 'Slices anteriores deste objetivo (não repita o já feito):', input.priorSlicesSummary.trim());
   }

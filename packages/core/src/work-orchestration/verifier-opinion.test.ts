@@ -27,7 +27,7 @@ const item = (overrides: Partial<WorkItem> = {}): WorkItem => ({
     execution_spec: {
       schema_version: 1, target: { kind: 'project', reference: 'proj' },
       permissions: ['workspace_read', 'workspace_write_isolated'],
-      validation_criteria: [{ label: 'unit', command: 'npm test' }],
+      validation_criteria: [{ label: 'unit', command: 'npm test', covers: ['e'] }],
       limits: { max_attempts: 3 },
     },
   } as unknown as WorkItem['intent'],

@@ -98,6 +98,12 @@ describe('parseCanonicalBacklog', () => {
     expect(byId['UX-09']!.dependencies).toEqual(['SUP-04']);     // self-dep UX-09 removido
   });
 
+  test('preserva o aceite textual canônico para a fronteira de planejamento', () => {
+    const [candidate] = parseCanonicalBacklog({ document: 'd.md', markdown:
+      '### PIN-02 — Codec\n\n- **Aceite:** round-trip passa; versão desconhecida falha fechado.\n' });
+    expect(candidate!.acceptanceCriteria).toEqual(['round-trip passa; versão desconhecida falha fechado.']);
+  });
+
   test('estado/dependências NÃO vazam entre seções de itens', () => {
     // ORQ-02 não herda o "aceito" de ORQ-01 nem a linha de estado de AUTO-05.
     expect(byId['ORQ-02']!.statusEvidence).toBeNull();
@@ -130,7 +136,7 @@ const cand = (
   status: CanonicalBacklogStatus,
   dependencies: readonly string[] = [],
 ): CanonicalBacklogCandidate => ({
-  sourceId, title: sourceId, status, statusEvidence: null, dependencies,
+  sourceId, title: sourceId, status, statusEvidence: null, dependencies, acceptanceCriteria: [],
   sourceRef: { document: 'd.md', heading: sourceId, line: 1 },
 });
 

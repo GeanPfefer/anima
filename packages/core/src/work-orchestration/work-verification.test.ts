@@ -470,7 +470,7 @@ describe('verifyPersistedWorkResult — composição a partir de fatos persistid
       execution_spec: {
         schema_version: 1, target: { kind: 'project', reference: 'proj' },
         permissions: ['workspace_read', 'workspace_write_isolated'],
-        validation_criteria: [{ label: 'unit', command: 'npm test' }],
+        validation_criteria: [{ label: 'unit', command: 'npm test', covers: ['e'] }],
         limits: { max_attempts: 3 },
       },
     } as unknown as WorkItem['intent'],
@@ -501,6 +501,45 @@ describe('verifyPersistedWorkResult — composição a partir de fatos persistid
     expect(report.verdict).toBe('verified');
     expect(report.workItemId).toBe('work-1');
     expect(report.approvedProposalVersion).toBe(2);
+  });
+
+  test('N critérios aprovados e apenas N-1 cobertos ⇒ gap explícito e inconclusive', () => {
+    const candidate = item({
+      intent: { execution_spec: {
+        schema_version: 1, target: { kind: 'project', reference: 'proj' }, permissions: [],
+        validation_criteria: [{ label: 'unit', command: 'npm test', covers: ['round-trip', 'extra fields'] }],
+        limits: { max_attempts: 1 },
+      } } as unknown as WorkItem['intent'],
+      proposal: { schemaVersion: 1, data: {
+        summary: 'PIN-02', objective: 'codec', includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'],
+        expectedEffects: ['round-trip', 'extra fields', 'unknown version'], risks: [],
+      } },
+    });
+    const report = verifyPersistedWorkResult(candidate, [resultEvent(handoffWith())]);
+    expect(report.verdict).toBe('inconclusive');
+    expect(report.findings.filter(f => f.code === 'acceptance_criterion_without_evidence').map(f => f.subject))
+      .toEqual(['unknown version']);
+  });
+
+  test('PIN-02 reconstruído: gates verdes não escondem comportamentos sem prova', () => {
+    const effects = [
+      'Round-trip preserva integralmente uma ProjectIdeaV0 válida.',
+      'Shape ausente, extra, malformado ou com versão desconhecida falha fechado.',
+      'Teste focado e typecheck de packages/core passam.',
+    ];
+    const candidate = item({
+      intent: { execution_spec: {
+        schema_version: 1, target: { kind: 'project', reference: 'anima' }, permissions: [],
+        validation_criteria: [{ label: 'unit', command: 'npm test', covers: [effects[2]!] }],
+        limits: { max_attempts: 1 },
+      } } as unknown as WorkItem['intent'],
+      proposal: { schemaVersion: 1, data: { summary: 'PIN-02', objective: 'codec',
+        includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'], expectedEffects: effects, risks: [] } },
+    });
+    const report = verifyPersistedWorkResult(candidate, [resultEvent(handoffWith())]);
+    expect(report.verdict).toBe('inconclusive');
+    expect(report.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject)).toEqual([effects[2]]);
+    expect(report.findings.filter(f => f.code === 'acceptance_criterion_without_evidence').map(f => f.subject)).toEqual(effects.slice(0, 2));
   });
 
   test('sem evento de resultado com handoff ⇒ inconclusive', () => {

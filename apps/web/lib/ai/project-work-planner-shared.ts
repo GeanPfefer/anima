@@ -28,6 +28,8 @@ export type PlannerArguments = {
   risks: string[];
   validation_label: string;
   validation_command: string;
+  /** Itens EXATOS de expected_effects demonstrados pelo gate principal. */
+  validation_covers: string[];
   /**
    * Provas ADICIONAIS além da principal (validation_label/validation_command),
    * quando o trabalho exige múltiplas verificações independentes (ex.: um teste
@@ -37,7 +39,7 @@ export type PlannerArguments = {
    * propostas antigas de gate único. NUNCA é comando composto (`A && B`): são N
    * critérios, não uma concatenação de shell.
    */
-  additional_validations?: { label: string; command: string }[];
+  additional_validations?: { label: string; command: string; covers: string[] }[];
 };
 
 /** Resultado do PLANEJADOR (parte provider-específica): a string JSON dos
@@ -70,6 +72,7 @@ export const SUBMIT_PARAMETERS = {
     risks: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 8 },
     validation_label: { type: 'string' },
     validation_command: { type: 'string', description: 'Um único comando npm de teste, typecheck ou build.' },
+    validation_covers: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Itens exatos de expected_effects provados por este gate.' },
     additional_validations: {
       type: 'array',
       description: 'Provas ADICIONAIS além da principal, SÓ quando múltiplas verificações independentes são realmente necessárias. Cada item é UM único comando npm (test/typecheck/build); nunca encadeie comandos com &&. Use [] quando uma única prova basta.',
@@ -78,14 +81,15 @@ export const SUBMIT_PARAMETERS = {
         properties: {
           label: { type: 'string' },
           command: { type: 'string', description: 'Um único comando npm de teste, typecheck ou build.' },
+          covers: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Itens exatos de expected_effects provados por este gate.' },
         },
-        required: ['label', 'command'],
+        required: ['label', 'command', 'covers'],
         additionalProperties: false,
       },
       maxItems: 6,
     },
   },
-  required: ['summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command', 'additional_validations'],
+  required: ['summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command', 'validation_covers', 'additional_validations'],
   additionalProperties: false,
 } as const;
 
@@ -124,7 +128,7 @@ export const PLANNER_CHAT_TOOLS = [
 ];
 
 export const PLANNER_SYSTEM_INSTRUCTIONS =
-  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Quando o trabalho exigir MAIS DE UMA prova independente (por exemplo, um teste direcionado, uma regressão de compatibilidade e um typecheck), registre a primeira em validation_label/validation_command e as demais em additional_validations, cada uma com seu label e um ÚNICO comando npm — nunca encadeie comandos com && nem componha vários num só. Use additional_validations = [] quando uma única prova basta. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS (arrays) de strings, cada uma com pelo menos um item — nunca uma string única; excluded_scope deve listar ao menos um caminho ou área que NÃO deve ser tocada. Executar um teste NÃO concede permissão de editar o arquivo testado: só o included_scope autoriza escrita. Quando houver evidência suficiente, chame submit_project_work_proposal.';
+  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Para cada gate, `covers` deve repetir literalmente os itens de `expected_effects` que aquela prova demonstra; TODO expected_effect deve ser coberto por ao menos um gate. Quando o trabalho exigir MAIS DE UMA prova independente, registre a primeira em validation_label/validation_command/validation_covers e as demais em additional_validations, cada uma com seu label, comando e covers. Use additional_validations = [] quando uma única prova basta. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS de strings. Executar um teste NÃO concede permissão de editar o arquivo testado: só o included_scope autoriza escrita. Quando houver evidência suficiente, chame submit_project_work_proposal.';
 
 export function buildPlannerUserPrompt(message: string): string {
   return `Prepare uma proposta executável para este pedido:\n\n${message}\n\nInvestigue primeiro o repositório com as ferramentas locais (project_search, project_read_file, project_list_files, project_git_status, project_git_diff). Leia AGENTS.md e os arquivos relevantes. Não altere nada. O alvo será fixado pelo servidor como anima. Escolha somente caminhos exatos de arquivos necessários. Quando houver informação suficiente, chame submit_project_work_proposal.`;
@@ -262,17 +266,18 @@ export const MAX_ADDITIONAL_VALIDATIONS = 6;
  */
 export function parseAdditionalValidations(
   value: unknown,
-): { label: string; command: string }[] | undefined | null {
+): { label: string; command: string; covers: string[] }[] | undefined | null {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) return null;
   if (value.length === 0) return undefined;
   if (value.length > MAX_ADDITIONAL_VALIDATIONS) return null;
-  const out: { label: string; command: string }[] = [];
+  const out: { label: string; command: string; covers: string[] }[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
-    const candidate = entry as { label?: unknown; command?: unknown };
-    if (!nonBlank(candidate.label) || !nonBlank(candidate.command) || !safeValidationCommand(candidate.command)) return null;
-    out.push({ label: candidate.label, command: candidate.command });
+    const candidate = entry as { label?: unknown; command?: unknown; covers?: unknown };
+    if (!nonBlank(candidate.label) || !nonBlank(candidate.command) || !safeValidationCommand(candidate.command)
+      || !textList(candidate.covers)) return null;
+    out.push({ label: candidate.label, command: candidate.command, covers: candidate.covers });
   }
   return out;
 }
@@ -284,10 +289,14 @@ export function parseProposal(raw: string): PlannerArguments | null {
     const value = JSON.parse(raw) as Partial<PlannerArguments>;
     if (!nonBlank(value.summary) || !nonBlank(value.objective) || !textList(value.included_scope)
       || !textList(value.excluded_scope) || !textList(value.expected_effects) || !textList(value.risks)
-      || !nonBlank(value.validation_label) || !nonBlank(value.validation_command)) return null;
+      || !nonBlank(value.validation_label) || !nonBlank(value.validation_command) || !textList(value.validation_covers)) return null;
     if (value.included_scope.length > 12 || !value.included_scope.every(safePath) || !safeValidationCommand(value.validation_command)) return null;
     const additionalValidations = parseAdditionalValidations(value.additional_validations);
     if (additionalValidations === null) return null;
+    const expected = new Set(value.expected_effects);
+    const allCovered = [value.validation_covers, ...(additionalValidations ?? []).map(v => v.covers)].flat();
+    if (allCovered.some(criterion => !expected.has(criterion))
+      || value.expected_effects.some(criterion => !allCovered.includes(criterion))) return null;
     return { ...(value as PlannerArguments), additional_validations: additionalValidations };
   } catch {
     return null;

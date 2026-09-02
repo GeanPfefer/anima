@@ -1041,6 +1041,19 @@ evidência suficiente para **conquistar** mais autonomia nesta classe de ação?
 autonomia progressivamente conquistada por evidência continua sendo uma diferença central
 — e a política automática que a materializaria permanece **explicitamente não autorizada**.
 
+## Cobertura do aceite aprovado (Verifier v2)
+
+`proposal.data.expectedEffects` é o conjunto de critérios aprovados;
+`execution_spec.validation_criteria` é o conjunto de gates e cada gate declara em
+`covers` quais critérios prova. O host rejeita planejamento cuja união de `covers` deixe
+aceite sem prova. Após a execução, o Verifier considera somente associações de gates que
+passaram: critério aprovado sem evidência gera `acceptance_criterion_without_evidence` e
+parecer `inconclusive`; associação a texto fora da proposal é violação.
+
+O parser do backlog preserva `**Aceite:**` e o entrega à fronteira de planejamento. A cadeia
+fica explícita: `aceite canônico → expectedEffects aprovado → gate.covers → evidência
+host-observed → coverage → parecer`. Pareceres antigos continuam append-only.
+
 ## Fora de escopo desta fundação
 
 - migrations, tabelas, enums, views, RPCs ou policies;

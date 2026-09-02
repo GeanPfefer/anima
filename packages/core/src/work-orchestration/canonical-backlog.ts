@@ -36,6 +36,7 @@ export interface CanonicalBacklogCandidate {
   readonly statusEvidence: string | null;
   /** IDs canônicos dos quais este item depende (só os com forma de ID; refs de fase são ignoradas). */
   readonly dependencies: readonly string[];
+  readonly acceptanceCriteria: readonly string[];
   readonly sourceRef: CanonicalBacklogSourceRef;
 }
 
@@ -52,6 +53,7 @@ const H3_RE = /^###\s+/;
 const STATUS_RE = /^\s*[-*]?\s*\*\*Status:\*\*\s*(.+?)\s*$/;
 const STATE_RE = /^\s*\*\*(?:Estado|Atualiza[^:]*)[^:]*:\*\*\s*(.+?)\s*$/;
 const DEP_RE = /\*\*Depend[^:]*:\*\*\s*([^*]*)/;
+const ACCEPTANCE_RE = /^\s*[-*]?\s*\*\*Aceite:\*\*\s*(.+?)\s*$/;
 const ID_RE = /\b[A-Z]{2,6}-\d{2}\b/g;
 
 // Tokens diretos aceitos no campo `**Status:**` (além das palavras-chave em prosa).
@@ -122,6 +124,7 @@ interface Building {
   explicitStatus: string | null;
   stateText: string | null;
   dependencies: string[];
+  acceptanceCriteria: string[];
 }
 
 /**
@@ -147,6 +150,7 @@ export function parseCanonicalBacklog(input: ParseCanonicalBacklogInput): readon
       status: b.explicitStatus !== null ? classifyExplicitStatus(b.explicitStatus) : classifyCanonicalBacklogStatus(b.stateText),
       statusEvidence: b.explicitStatus ?? b.stateText,
       dependencies: b.dependencies.filter(id => id !== b.sourceId),
+      acceptanceCriteria: b.acceptanceCriteria,
       sourceRef: { document: input.document, heading: b.heading, line: b.line },
     });
   };
@@ -164,6 +168,7 @@ export function parseCanonicalBacklog(input: ParseCanonicalBacklogInput): readon
         explicitStatus: null,
         stateText: null,
         dependencies: [],
+        acceptanceCriteria: [],
       };
       continue;
     }
@@ -186,6 +191,8 @@ export function parseCanonicalBacklog(input: ParseCanonicalBacklogInput): readon
       const dep = DEP_RE.exec(line);
       if (dep) current.dependencies = [...extractIds(dep[1]!)];
     }
+    const acceptance = ACCEPTANCE_RE.exec(line);
+    if (acceptance) current.acceptanceCriteria.push(acceptance[1]!.trim());
   }
   if (current) finalize(current);
   return candidates;

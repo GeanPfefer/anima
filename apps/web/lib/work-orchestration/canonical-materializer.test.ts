@@ -11,7 +11,7 @@ const cand = (
   status: CanonicalBacklogCandidate['status'],
   dependencies: readonly string[] = [],
 ): CanonicalBacklogCandidate => ({
-  sourceId, title: `T ${sourceId}`, status, statusEvidence: null, dependencies,
+  sourceId, title: `T ${sourceId}`, status, statusEvidence: null, dependencies, acceptanceCriteria: [],
   sourceRef: { document: 'd.md', heading: `${sourceId} — T`, line: 1 },
 });
 

@@ -115,10 +115,12 @@ export async function planExecutableProjectWork(
             {
               label: proposal.validation_label,
               command: scopeTestCommandToWorkspace(proposal.validation_command, proposal.included_scope),
+              covers: proposal.validation_covers,
             },
             ...(proposal.additional_validations ?? []).map(validation => ({
               label: validation.label,
               command: scopeTestCommandToWorkspace(validation.command, proposal.included_scope),
+              covers: validation.covers,
             })),
           ],
           limits: { max_attempts: 3, max_duration_minutes: 30 },

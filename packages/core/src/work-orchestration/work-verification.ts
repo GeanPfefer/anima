@@ -88,6 +88,9 @@ export type WorkVerificationFindingCode =
   // Cobertura dos critérios declarados por um gate factual.
   | 'criterion_covered'
   | 'criterion_without_gate_coverage'
+  | 'acceptance_criterion_covered'
+  | 'acceptance_criterion_without_evidence'
+  | 'criterion_covers_unknown_acceptance'
   | 'declared_criterion_unverifiable'
   // Coerência do desfecho com os gates.
   | 'status_coherent'
@@ -159,6 +162,8 @@ export interface WorkResultVerificationInput {
     readonly includedScope: readonly string[];
     readonly excludedScope: readonly string[];
     readonly validationCriteria: readonly AutonomousValidationCriterion[];
+    /** Critérios aprovados pelo humano (`proposal.data.expectedEffects`). */
+    readonly acceptanceCriteria?: readonly string[];
   };
   /** Evidência git estruturada e durável (INT-05). `null` quando o resultado não
    * veio de uma execução de worktree: sem evidência independente, o parecer é
@@ -214,9 +219,8 @@ const violation = make('violation');
  *
  * Fail-conservative: qualquer violação demonstrada ⇒ `rejected`; qualquer lacuna
  * de evidência ⇒ `inconclusive`; só evidência completa e coerente ⇒ `verified`.
- * Um critério apenas declarado (sem comando) não pode ser confirmado por evidência
- * e é registrado como informativo — não bloqueia `verified`, mas fica visível para
- * o humano saber exatamente o que não foi verificado independentemente.
+ * Cada critério aprovado precisa estar explicitamente associado a ao menos um gate
+ * que passou. Ausência de associação é lacuna e impede `verified`.
  */
 export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerificationReport {
   const { expected, authorized, handoff } = input;
@@ -418,6 +422,33 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     }
   }
 
+  // ---------- Cobertura do ACEITE aprovado ----------
+  // `validationCriteria` diz quais gates existem; `acceptanceCriteria` diz o que o
+  // humano aprovou. Sem esta segunda dimensão, gates podem cobrir perfeitamente a
+  // si mesmos enquanto parte da intenção desaparece no planejamento (PIN-02).
+  const acceptance = authorized.acceptanceCriteria ?? [];
+  const acceptanceSet = new Set(acceptance);
+  const coveredAcceptance = new Set<string>();
+  for (const criterion of authorized.validationCriteria) {
+    for (const covered of criterion.covers ?? []) {
+      if (!acceptanceSet.has(covered)) {
+        findings.push(violation('criterion_covers_unknown_acceptance',
+          `O gate "${criterion.label}" declara cobrir um critério que não pertence ao aceite aprovado.`, covered, 'independent'));
+      } else if (passedByLabel.has(criterion.label)) {
+        coveredAcceptance.add(covered);
+      }
+    }
+  }
+  for (const approved of acceptance) {
+    if (coveredAcceptance.has(approved)) {
+      findings.push(ok('acceptance_criterion_covered',
+        `O critério aprovado possui associação explícita com um gate executado e aprovado.`, approved));
+    } else {
+      findings.push(gap('acceptance_criterion_without_evidence',
+        `O critério aprovado não possui associação com evidência de gate aprovada.`, approved, 'independent'));
+    }
+  }
+
   // ---------- Cross-check das validações autodeclaradas do resultado × gates ----------
   // Ambas as fontes são atestadas pelo Executor: isto pega inconsistência interna
   // (uma validação que discorda do próprio gate de mesmo rótulo), não fabrica
@@ -481,6 +512,7 @@ export function verifyPersistedWorkResult(item: WorkItem, events: readonly WorkE
       includedScope: item.proposal.data.includedScope,
       excludedScope: item.proposal.data.excludedScope,
       validationCriteria: spec?.validationCriteria ?? [],
+      acceptanceCriteria: item.proposal.data.expectedEffects,
     },
     handoff,
     observed,

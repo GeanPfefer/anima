@@ -6,6 +6,7 @@ const VALID_ARGS = JSON.stringify({
   included_scope: ['apps/web/lib/ai/project-work-planner.ts'],
   excluded_scope: ['Não alterar banco'], expected_effects: ['gate verde'], risks: ['variância'],
   validation_label: 'coder-backend', validation_command: 'npm test -- coder-backend.test.ts',
+  validation_covers: ['gate verde'], additional_validations: [],
 });
 
 type Msg = { role: string; content?: string; tool_calls?: unknown[] };
@@ -124,6 +125,7 @@ describe('LocalOllamaProjectWorkPlanner', () => {
       excluded_scope: 'não tocar banco', // string única
       expected_effects: 'efeito único', risks: 'risco único',
       validation_label: 'v', validation_command: 'npm test -- x.test.ts',
+      validation_covers: ['efeito único'], additional_validations: [],
     });
     const { impl } = scriptedFetch([
       { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md","start_line":1,"end_line":3}')] },
@@ -212,6 +214,7 @@ describe('LocalOllamaProjectWorkPlanner', () => {
       risks: ['erro'],
       validation_label: 'tests',
       validation_command: 'npm run test',
+      validation_covers: ['feature'], additional_validations: [],
     });
 
     const { impl } = scriptedFetch([
@@ -239,6 +242,7 @@ describe('LocalOllamaProjectWorkPlanner', () => {
       risks: ['baixo'],
       validation_label: 'tests',
       validation_command: 'npm run test',
+      validation_covers: ['diagnostico'], additional_validations: [],
     });
 
     const { impl } = scriptedFetch([

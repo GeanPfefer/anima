@@ -39,7 +39,7 @@ import type { Json } from '@anima/types';
 
 /** Versão da lógica do Verifier. Bump quando a derivação do parecer mudar de forma
  * que um mesmo estado de evidência possa produzir veredito diferente. */
-export const VERIFIER_VERSION = 'work-verifier-v1';
+export const VERIFIER_VERSION = 'work-verifier-v2';
 
 /** Achado compactado para o parecer durável: a espinha estruturada (código +
  * severidade + proveniência + sujeito), sem a prosa `detail` — que é recomputável. */

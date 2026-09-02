@@ -31,6 +31,7 @@ const validArgs = (over: Record<string, unknown> = {}): string => JSON.stringify
   included_scope: ['apps/web/lib/ai/project-work-planner.ts'],
   excluded_scope: ['Não alterar banco'], expected_effects: ['gate verde'], risks: ['variância'],
   validation_label: 'coder-backend', validation_command: 'npm test -- coder-backend.test.ts',
+  validation_covers: ['gate verde'], additional_validations: [],
   ...over,
 });
 
@@ -206,11 +207,11 @@ describe('parseAdditionalValidations — autoridade do host sobre provas adicion
 
   test('provas válidas na allowlist são normalizadas e preservadas', () => {
     expect(parseAdditionalValidations([
-      { label: 'Regressão do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts' },
-      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web' },
+      { label: 'Regressão do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts', covers: ['regressão'] },
+      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['tipos'] },
     ])).toEqual([
-      { label: 'Regressão do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts' },
-      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web' },
+      { label: 'Regressão do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts', covers: ['regressão'] },
+      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['tipos'] },
     ]);
   });
 
@@ -232,20 +233,26 @@ describe('parseAdditionalValidations — autoridade do host sobre provas adicion
       included_scope: ['apps/web/lib/work-orchestration/ollama-protocol.ts'],
       excluded_scope: ['packages/core'], expected_effects: ['e'], risks: ['r'],
       validation_label: 'principal', validation_command: 'npm test --workspace=apps/web -- ollama-protocol.test.ts',
-      additional_validations: [{ label: 'ruim', command: 'rm -rf /' }],
+      validation_covers: ['e'], additional_validations: [{ label: 'ruim', command: 'rm -rf /', covers: ['e'] }],
     });
     expect(parseProposal(raw)).toBeNull();
   });
 });
 
 describe('planExecutableProjectWork — múltiplos validation_criteria governados (multi-gate)', () => {
+  test('fail-closed: N expected_effects com cobertura declarada de apenas N-1', async () => {
+    const result = await planExecutableProjectWork('faça', base, fakePlanner(validArgs({
+      expected_effects: ['A', 'B'], validation_covers: ['A'],
+    })));
+    expect(result.ok).toBe(false);
+  });
   test('gate único (sem additional_validations) ⇒ exatamente um critério (compat)', async () => {
     const result = await planExecutableProjectWork('faça', base, fakePlanner(validArgs()));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const spec = (result.command.intent as { execution_spec: { validation_criteria: Array<{ label: string; command: string }> } }).execution_spec;
     expect(spec.validation_criteria).toEqual([
-      { label: 'coder-backend', command: 'npm test --workspace=apps/web -- coder-backend.test.ts' },
+      { label: 'coder-backend', command: 'npm test --workspace=apps/web -- coder-backend.test.ts', covers: ['gate verde'] },
     ]);
   });
 
@@ -259,8 +266,8 @@ describe('planExecutableProjectWork — múltiplos validation_criteria governado
       // Sem --workspace: o host precisa escopar (senão fan-out na raiz do monorepo).
       validation_command: 'npm test -- ollama-protocol.test.ts',
       additional_validations: [
-        { label: 'Regressão de compatibilidade do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts' },
-        { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web' },
+        { label: 'Regressão de compatibilidade do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts', covers: ['gate verde'] },
+        { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['gate verde'] },
       ],
     });
     const result = await planExecutableProjectWork('faça multi-gate', base, fakePlanner(args));
@@ -268,9 +275,9 @@ describe('planExecutableProjectWork — múltiplos validation_criteria governado
     if (!result.ok) return;
     const spec = (result.command.intent as { execution_spec: { validation_criteria: Array<{ label: string; command: string }> } }).execution_spec;
     expect(spec.validation_criteria).toEqual([
-      { label: 'Testes unitários direcionados de ollama-protocol', command: 'npm test --workspace=apps/web -- ollama-protocol.test.ts' },
-      { label: 'Regressão de compatibilidade do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts' },
-      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web' },
+      { label: 'Testes unitários direcionados de ollama-protocol', command: 'npm test --workspace=apps/web -- ollama-protocol.test.ts', covers: ['gate verde'] },
+      { label: 'Regressão de compatibilidade do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts', covers: ['gate verde'] },
+      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['gate verde'] },
     ]);
     // Rodar um teste externo ao diff NÃO amplia o included_scope de ESCRITA.
     expect(result.command.proposal.data.includedScope).toEqual([

@@ -47,6 +47,7 @@ describe('planejador executável do projeto', () => {
             risks: ['Mock divergir da API real'],
             validation_label: 'Teste do planejador aprovado',
             validation_command: 'npm test -- project-work-planner.test.ts',
+            validation_covers: ['Teste unitário verde'], additional_validations: [],
           }),
         }] }),
       });
@@ -108,6 +109,7 @@ describe('planejador executável do projeto', () => {
               risks: ['r'],
               validation_label: 'v',
               validation_command: 'npm test -- project-work-planner.test.ts',
+              validation_covers: ['e'], additional_validations: [],
             }),
           }],
         }),
@@ -140,6 +142,7 @@ describe('planejador executável do projeto', () => {
       risks: ['baixo'],
       validation_label: 'teste',
       validation_command: 'npm test -- project-work-planner.test.ts',
+      validation_covers: ['teste'], additional_validations: [],
     };
 
     const invented = {
@@ -208,6 +211,7 @@ describe('planejador executável do projeto', () => {
       risks: ['baixo'],
       validation_label: 'teste',
       validation_command: 'npm test -- project-work-planner.test.ts',
+      validation_covers: ['teste'], additional_validations: [],
     };
 
     const fetchImpl = jest.fn()
