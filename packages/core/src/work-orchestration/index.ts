@@ -9,6 +9,7 @@ export * from './errors';
 export * from './validation';
 export * from './repository';
 export * from './service';
+export * from './result-review';
 export * from './interpret';
 export * from './executor';
 export * from './presentation';

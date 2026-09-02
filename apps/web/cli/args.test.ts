@@ -1,0 +1,50 @@
+import { parseArgs } from './args';
+
+describe('parser de argumentos da CLI', () => {
+  test('sem argumentos → help', () => {
+    expect(parseArgs([])).toEqual({ ok: true, command: { kind: 'help' } });
+  });
+
+  test('status com --json', () => {
+    expect(parseArgs(['status', '--json'])).toEqual({ ok: true, command: { kind: 'status', json: true } });
+  });
+
+  test('work list sem json', () => {
+    expect(parseArgs(['work', 'list'])).toEqual({ ok: true, command: { kind: 'work-list', json: false } });
+  });
+
+  test('work show <id>', () => {
+    expect(parseArgs(['work', 'show', 'abc'])).toEqual({ ok: true, command: { kind: 'work-show', id: 'abc', json: false } });
+  });
+
+  test('work show sem id → uso inválido', () => {
+    expect(parseArgs(['work', 'show'])).toEqual({ ok: false, error: 'Uso: anima work show <id>' });
+  });
+
+  test('work request-changes exige --reason não vazio', () => {
+    expect(parseArgs(['work', 'request-changes', 'abc'])).toMatchObject({ ok: false });
+    expect(parseArgs(['work', 'request-changes', 'abc', '--reason', '   '])).toMatchObject({ ok: false });
+  });
+
+  test('work request-changes com --reason e --json', () => {
+    expect(parseArgs(['work', 'request-changes', 'abc', '--json', '--reason', 'faltam provas']))
+      .toEqual({ ok: true, command: { kind: 'work-request-changes', id: 'abc', reason: 'faltam provas', json: true } });
+  });
+
+  test('--reason=valor inline também é aceito e é trimado', () => {
+    expect(parseArgs(['work', 'request-changes', 'abc', '--reason=  x  ']))
+      .toEqual({ ok: true, command: { kind: 'work-request-changes', id: 'abc', reason: 'x', json: false } });
+  });
+
+  test('flag desconhecida → uso inválido', () => {
+    expect(parseArgs(['status', '--bogus'])).toEqual({ ok: false, error: 'Flag desconhecida: --bogus' });
+  });
+
+  test('subcomando de work desconhecido → uso inválido', () => {
+    expect(parseArgs(['work', 'frobnicate'])).toMatchObject({ ok: false });
+  });
+
+  test('comando de topo desconhecido → uso inválido', () => {
+    expect(parseArgs(['bogus'])).toEqual({ ok: false, error: 'Comando desconhecido: bogus' });
+  });
+});

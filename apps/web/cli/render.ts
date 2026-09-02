@@ -1,0 +1,101 @@
+import type { CliPayload, VerifierSummaryPayload } from './app';
+
+// Render HUMANO derivado do payload estável. Curto e legível; o `--json` é a
+// interface de automação. Sem cores/ANSI (funciona em log e pipe). Uma única
+// fonte de verdade: os mesmos dados do JSON, só formatados.
+
+const YES = '✓'; // ✓
+const NO = '✗';  // ✗
+const DOT = '·'; // ·
+
+const verdictLabel = (v: VerifierSummaryPayload | null): string =>
+  v === null ? 'sem parecer (sem handoff durável)' : `${v.verdict} (violations ${v.violations} ${DOT} gaps ${v.gaps} ${DOT} checks ${v.checks})`;
+
+export function renderHuman(payload: CliPayload): string {
+  switch (payload.kind) {
+    case 'help':
+      return payload.usage;
+
+    case 'error':
+      return `erro${payload.code ? ` [${payload.code}]` : ''}: ${payload.error}`;
+
+    case 'status': {
+      const states = Object.entries(payload.resumable.byState).map(([s, n]) => `${s}: ${n}`).join(`  ${DOT}  `);
+      return [
+        `anima ${DOT} conectado como ${payload.userId}`,
+        `Supabase: ${payload.supabaseUrl}`,
+        `Autonomia: ${payload.autonomyEnabled ? 'habilitada' : 'desabilitada'}`,
+        `Trabalhos retomáveis: ${payload.resumable.total}${states ? `  (${states})` : ''}`,
+      ].join('\n');
+    }
+
+    case 'work-list': {
+      if (payload.items.length === 0) return 'Nenhum trabalho retomável.';
+      return payload.items
+        .map(item => `${item.id}  ${item.state.padEnd(18)}  ${item.summary}`)
+        .join('\n');
+    }
+
+    case 'work-show': {
+      const lines: string[] = [];
+      lines.push(`${payload.id} ${DOT} ${payload.state}${payload.phase ? ` (${payload.phase})` : ''}`);
+      lines.push(`Proposta v${payload.proposalVersion}${payload.attemptId ? ` ${DOT} tentativa ${payload.attemptId}` : ''}`);
+      lines.push(`Resumo: ${payload.summary}`);
+      lines.push('');
+      lines.push(`Verifier (agora): ${verdictLabel(payload.verifierLive)}`);
+      if (payload.verifierRecorded) {
+        lines.push(`Verifier (registrado): ${payload.verifierRecorded.verdict} (${payload.verifierRecorded.opinions} parecer(es))`);
+      }
+      lines.push('');
+      lines.push(`Cobertura de aceite: ${payload.acceptance.covered}/${payload.acceptance.total} com evidência`);
+      for (const c of payload.acceptance.criteria) {
+        lines.push(`  ${c.covered ? YES : NO} ${c.criterion}`);
+      }
+      if (payload.provenance.issues.length > 0) {
+        lines.push('');
+        lines.push(`Proveniência: ${payload.provenance.status} (${payload.provenance.issues.join(', ')})`);
+      }
+      lines.push('');
+      lines.push(`Ações disponíveis: ${payload.availableActions.length ? payload.availableActions.join(', ') : '(nenhuma)'}`);
+      if (payload.suggestedDecision) lines.push(`Decisão sugerida: ${payload.suggestedDecision}`);
+      return lines.join('\n');
+    }
+
+    case 'work-evidence': {
+      const lines: string[] = [];
+      lines.push(`${payload.id} ${DOT} ${payload.state}${payload.attemptId ? ` ${DOT} tentativa ${payload.attemptId}` : ''}`);
+      lines.push(`Verifier (agora): ${verdictLabel(payload.verifierLive)}`);
+      if (payload.verifierRecorded) lines.push(`Verifier (registrado): ${payload.verifierRecorded.verdict}`);
+      lines.push('');
+      lines.push('Critérios de aceite (aprovados pelo humano):');
+      for (const c of payload.acceptanceCriteria) lines.push(`  ${c.covered ? YES : NO} ${c.criterion}${c.covered ? '' : '   (sem evidência de gate)'}`);
+      if (payload.validationCriteria.length > 0) {
+        lines.push('');
+        lines.push('Critérios de validação (gates declarados):');
+        for (const v of payload.validationCriteria) {
+          const mark = v.status === 'covered' ? YES : v.status === 'gap' ? NO : DOT;
+          lines.push(`  ${mark} ${v.label}${v.status === 'unverifiable' ? '   (só declarado, a cargo do humano)' : v.status === 'gap' ? '   (nenhum gate executado)' : ''}`);
+        }
+      }
+      if (payload.declaredValidations && payload.declaredValidations.length > 0) {
+        lines.push('');
+        lines.push('Validações autodeclaradas no resultado:');
+        for (const v of payload.declaredValidations) lines.push(`  ${DOT} ${v.label} — ${v.outcome}`);
+      }
+      if (payload.violations.length > 0) {
+        lines.push('');
+        lines.push('Violações:');
+        for (const v of payload.violations) lines.push(`  ${NO} [${v.code}]${v.subject ? ` ${v.subject}:` : ''} ${v.detail}`);
+      }
+      if (payload.gaps.length > 0) {
+        lines.push('');
+        lines.push('Lacunas (impedem VERIFIED):');
+        for (const g of payload.gaps) lines.push(`  ${NO} [${g.code}]${g.subject ? ` ${g.subject}:` : ''} ${g.detail}`);
+      }
+      return lines.join('\n');
+    }
+
+    case 'review':
+      return `${payload.workItemId} ${DOT} ${payload.decision} ${DOT} ${payload.message}`;
+  }
+}
