@@ -21,6 +21,19 @@ describe('parser de argumentos da CLI', () => {
     expect(parseArgs(['work', 'show'])).toEqual({ ok: false, error: 'Uso: anima work show <id>' });
   });
 
+  test('work correct <id>', () => {
+    expect(parseArgs(['work', 'correct', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'work-correct', id: 'abc', json: true } });
+  });
+
+  test('work correct sem id → uso inválido', () => {
+    expect(parseArgs(['work', 'correct'])).toEqual({ ok: false, error: 'Uso: anima work correct <id>' });
+  });
+
+  test('work approve e work accept são comandos distintos', () => {
+    expect(parseArgs(['work', 'approve', 'abc'])).toEqual({ ok: true, command: { kind: 'work-approve', id: 'abc', json: false } });
+    expect(parseArgs(['work', 'accept', 'abc'])).toEqual({ ok: true, command: { kind: 'work-accept', id: 'abc', json: false } });
+  });
+
   test('work request-changes exige --reason não vazio', () => {
     expect(parseArgs(['work', 'request-changes', 'abc'])).toMatchObject({ ok: false });
     expect(parseArgs(['work', 'request-changes', 'abc', '--reason', '   '])).toMatchObject({ ok: false });

@@ -48,8 +48,32 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work show <id>` | Estado, versão, tentativa, Verifier (ao vivo × registrado) e cobertura de aceite |
 | `anima work evidence <id>` | Critérios de aceite, gates, validações e lacunas (Verifier) |
 | `anima work request-changes <id> --reason "..."` | Registra REQUEST_CHANGES pelo fluxo canônico (`reviewResult`) |
-| `anima work approve <id>` | Aceita o resultado em review (`accept_result`) |
+| `anima work correct <id>` | Materializa o sucessor de correção governado (`proposed`) via `correctReviewedWorkItem` — NÃO aprova |
+| `anima work approve <id>` | Aprova uma PROPOSTA (`proposed → approved`) via `resolveApproval` |
+| `anima work accept <id>` | Aceita o RESULTADO em review (`review → completed`) via `reviewResult` |
 | `anima help` | Ajuda |
+
+`work approve` (aprovar proposta) e `work accept` (aceitar resultado) são operações
+de domínio DISTINTAS — a CLI as mantém separadas em vez de colapsá-las.
+
+### Ciclo de correção pós-review, sem a web
+
+`correctReviewedWorkItem` (`lib/work-orchestration/review-correction-orchestration.ts`)
+já era application-level: a rota web `review-corrections` só faz parse do body e mapeia
+status HTTP. A CLI chama a MESMA capacidade. Assim o ciclo abaixo roda com o Next parado:
+
+```
+anima work show <id>            # review → request_changes já registrado → changes_requested
+anima work correct <id>         # materializa o sucessor de correção (proposed), preservando
+                                #   lineage/budget/idempotência; NÃO aprova
+anima work show <successor>     # inspeciona escopo, objetivo e gates planejados (covers)
+anima work approve <successor>  # aprovação humana da proposta (proposed → approved)
+# a partir daqui, supervisor/resident host seleciona e executa o self-dev
+```
+
+O sucessor nasce `proposed` (boundary máximo da correção); a aprovação continua sendo
+ato humano. `work show <successor>` expõe os `covers` dos gates planejados para inspeção
+de governança do pipeline do Verifier v2 antes de aprovar.
 
 `--json` em qualquer comando de leitura/decisão emite a interface estável para
 automação e self-dev. O modo humano é derivado do mesmo payload.

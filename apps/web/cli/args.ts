@@ -10,7 +10,9 @@ export type ParsedCommand =
   | { readonly kind: 'work-show'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-evidence'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-request-changes'; readonly id: string; readonly reason: string; readonly json: boolean }
-  | { readonly kind: 'work-approve'; readonly id: string; readonly json: boolean };
+  | { readonly kind: 'work-correct'; readonly id: string; readonly json: boolean }
+  | { readonly kind: 'work-approve'; readonly id: string; readonly json: boolean }
+  | { readonly kind: 'work-accept'; readonly id: string; readonly json: boolean };
 
 export type ParseResult =
   | { readonly ok: true; readonly command: ParsedCommand }
@@ -75,9 +77,17 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       if (reason === null || reason.trim().length === 0) return { ok: false, error: 'request-changes exige --reason "<pedido>" não vazio.' };
       return { ok: true, command: { kind: 'work-request-changes', id, reason: reason.trim(), json } };
     }
+    if (sub === 'correct') {
+      if (!id) return { ok: false, error: 'Uso: anima work correct <id>' };
+      return { ok: true, command: { kind: 'work-correct', id, json } };
+    }
     if (sub === 'approve') {
       if (!id) return { ok: false, error: 'Uso: anima work approve <id>' };
       return { ok: true, command: { kind: 'work-approve', id, json } };
+    }
+    if (sub === 'accept') {
+      if (!id) return { ok: false, error: 'Uso: anima work accept <id>' };
+      return { ok: true, command: { kind: 'work-accept', id, json } };
     }
     return { ok: false, error: `Subcomando de "work" desconhecido: ${sub ?? '(vazio)'}` };
   }
@@ -93,7 +103,9 @@ Uso:
   anima work show <id>                        Estado, versão, tentativa, Verifier e cobertura
   anima work evidence <id>                    Critérios de aceite, provas e lacunas (Verifier)
   anima work request-changes <id> --reason "" Registra REQUEST_CHANGES pelo fluxo canônico
-  anima work approve <id>                     Aceita o resultado em review (accept_result)
+  anima work correct <id>                      Materializa o sucessor de correção (proposed)
+  anima work approve <id>                     Aprova uma PROPOSTA (proposed → approved)
+  anima work accept <id>                       Aceita o RESULTADO em review (review → completed)
   anima help                                  Esta ajuda
 
 Flags:

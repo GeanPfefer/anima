@@ -13,7 +13,9 @@ describe('render humano da CLI', () => {
   test('work-show contrasta Verifier ao vivo × registrado e marca cobertura de aceite', () => {
     const payload: CliPayload = {
       ok: true, kind: 'work-show', id: 'i', state: 'review', proposalVersion: 2, phase: 'Revisando', attemptId: 'a1',
-      summary: 's', latestResult: { eventId: 'r', proposalVersion: 2, summary: 'feito' },
+      summary: 's', objective: 'o', includedScope: ['pkg/x.ts'], excludedScope: [], risks: [],
+      plannedGates: [{ label: 'G', command: 'npm test', covers: ['A'] }],
+      latestResult: { eventId: 'r', proposalVersion: 2, summary: 'feito' },
       verifierLive: { verdict: 'inconclusive', violations: 0, gaps: 3, checks: 11, restsOnAttestedEvidence: false },
       verifierRecorded: { verdict: 'verified', opinions: 1 },
       acceptance: { total: 2, covered: 1, missing: 1, criteria: [{ criterion: 'A', covered: true }, { criterion: 'B', covered: false }] },

@@ -1,11 +1,13 @@
 import type {
+  ResolveWorkApprovalCommand,
   ReviewWorkResultCommand,
   WorkContextSnapshot,
   WorkEvent,
   WorkItem,
   WorkOperationResult,
 } from '@anima/core';
-import { runStatus, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
+import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
+import { runStatus, runWorkApprove, runWorkCorrect, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
 import { EXIT } from './exit-codes';
 
 const ok = <T>(value: T): WorkOperationResult<T> => ({ ok: true, value });
@@ -24,8 +26,9 @@ const resultEvent = {
 
 /** Duplo do application service: registra a chamada de reviewResult para provar que a
  * governança do adapter para ANTES do serviço quando o estado não permite. */
-function fakePort(overrides: Partial<WorkOrchestrationPort> & { reviewSpy?: { called: boolean } } = {}): WorkOrchestrationPort {
+function fakePort(overrides: Partial<WorkOrchestrationPort> & { reviewSpy?: { called: boolean }; approveSpy?: { called: boolean } } = {}): WorkOrchestrationPort {
   const spy = overrides.reviewSpy;
+  const approveSpy = overrides.approveSpy;
   return {
     getItem: overrides.getItem ?? (async () => ok(reviewItem)),
     listEvents: overrides.listEvents ?? (async () => ok<readonly WorkEvent[]>([resultEvent])),
@@ -35,8 +38,21 @@ function fakePort(overrides: Partial<WorkOrchestrationPort> & { reviewSpy?: { ca
       if (spy) spy.called = true;
       return ok({ ...reviewItem, state: 'changes_requested' });
     }),
+    resolveApproval: overrides.resolveApproval ?? (async (command: ResolveWorkApprovalCommand) => {
+      if (approveSpy) approveSpy.called = true;
+      return ok({ ...reviewItem, state: 'approved' });
+    }),
   };
 }
+
+// Item `proposed` com proveniência íntegra (work_proposed v1 + referência da mensagem).
+const proposedItem = { ...reviewItem, state: 'proposed', proposalVersion: 1 } satisfies WorkItem;
+const proposedEvents: readonly WorkEvent[] = [
+  { id: 'p', workItemId: 'i', type: 'work_proposed', author: 'anima', proposalVersion: 1, payload: { schema_version: 1, data: {} }, occurredAt: new Date() },
+];
+const sourceContext: readonly WorkContextSnapshot[] = [
+  { id: 'ctx', workItemId: 'i', version: 1, references: [{ kind: 'message', id: 'm' }], createdAt: new Date() },
+];
 
 describe('runners da CLI sobre o application service', () => {
   test('request_changes num item em review monta o comando e persiste pelo serviço', async () => {
@@ -75,6 +91,59 @@ describe('runners da CLI sobre o application service', () => {
     const result = await runWorkShow(fakePort({ getItem: async () => notFound() }), 'zzz');
     expect(result.exitCode).toBe(EXIT.ERROR);
     expect(result.payload).toMatchObject({ ok: false, kind: 'error', code: 'work_item_not_found' });
+  });
+
+  test('work approve aprova uma PROPOSTA íntegra pelo resolveApproval (exit 0)', async () => {
+    const approveSpy = { called: false };
+    const port = fakePort({
+      approveSpy,
+      getItem: async () => ok(proposedItem),
+      listEvents: async () => ok(proposedEvents),
+      listContexts: async () => ok(sourceContext),
+      resolveApproval: async () => { approveSpy.called = true; return ok({ ...proposedItem, state: 'approved' }); },
+    });
+    const result = await runWorkApprove(port, 'i');
+    expect(approveSpy.called).toBe(true);
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(result.payload).toMatchObject({ ok: true, kind: 'approve', workItemId: 'i', state: 'approved' });
+  });
+
+  test('work approve num item que não está em proposed é recusado por regra (exit 3), sem tocar o serviço', async () => {
+    const approveSpy = { called: false };
+    const port = fakePort({ approveSpy, getItem: async () => ok(reviewItem), listContexts: async () => ok(sourceContext) });
+    const result = await runWorkApprove(port, 'i');
+    expect(approveSpy.called).toBe(false);
+    expect(result.exitCode).toBe(EXIT.REJECTED);
+    expect(result.payload).toMatchObject({ ok: false, code: 'not_proposed' });
+  });
+
+  test('work correct materializa o sucessor e NÃO o aprova (exit 0)', async () => {
+    const capability = async (): Promise<ReviewCorrectionResult> => ({ ok: true, successorWorkItemId: 's1', lineageId: 'l1', recoverySequence: 1, replayed: false });
+    const result = await runWorkCorrect(capability, 'i');
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(result.payload).toMatchObject({ ok: true, kind: 'work-correct', originalWorkItemId: 'i', successorWorkItemId: 's1', lineageId: 'l1', recoverySequence: 1, replayed: false });
+  });
+
+  test('work correct replay idempotente reflete o replay na mensagem', async () => {
+    const capability = async (): Promise<ReviewCorrectionResult> => ({ ok: true, successorWorkItemId: 's1', lineageId: 'l1', recoverySequence: 1, replayed: true });
+    const result = await runWorkCorrect(capability, 'i');
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(result.payload).toMatchObject({ ok: true, replayed: true });
+    expect((result.payload as { message: string }).message).toContain('replay');
+  });
+
+  test('work correct num estado não corrigível é recusa por regra (exit 3)', async () => {
+    const capability = async (): Promise<ReviewCorrectionResult> => ({ ok: false, reason: 'item_unavailable' });
+    const result = await runWorkCorrect(capability, 'i');
+    expect(result.exitCode).toBe(EXIT.REJECTED);
+    expect(result.payload).toMatchObject({ ok: false, code: 'item_unavailable' });
+  });
+
+  test('work correct com falha de persistência é erro operacional (exit 1)', async () => {
+    const capability = async (): Promise<ReviewCorrectionResult> => ({ ok: false, reason: 'persistence_failed', message: 'db down' });
+    const result = await runWorkCorrect(capability, 'i');
+    expect(result.exitCode).toBe(EXIT.ERROR);
+    expect(result.payload).toMatchObject({ ok: false, code: 'persistence_failed' });
   });
 
   test('status agrega os trabalhos retomáveis por estado', async () => {

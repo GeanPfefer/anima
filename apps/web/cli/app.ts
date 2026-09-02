@@ -1,6 +1,8 @@
 import {
   planResultReview,
+  readAutonomousExecutionSpec,
   reconstructWorkPresentation,
+  type ResolveWorkApprovalCommand,
   type ResultReviewDecision,
   type WorkContextSnapshot,
   type WorkEvent,
@@ -11,6 +13,7 @@ import {
 } from '@anima/core';
 import type { WorkOrchestrationErrorCode, WorkOperationResult } from '@anima/core';
 import { parseAutonomyFlag } from '@/lib/resident-host/ports';
+import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
 import { EXIT, type ExitCode } from './exit-codes';
 
 // A CLI depende do APPLICATION SERVICE (a mesma abstração que as rotas web usam),
@@ -19,7 +22,7 @@ import { EXIT, type ExitCode } from './exit-codes';
 // e os testes passam um duplo. Assim a regra fica no serviço/core, não no adapter.
 export type WorkOrchestrationPort = Pick<
   WorkOrchestrationService,
-  'getItem' | 'listEvents' | 'listContexts' | 'findResumableWorkItems' | 'reviewResult'
+  'getItem' | 'listEvents' | 'listContexts' | 'findResumableWorkItems' | 'reviewResult' | 'resolveApproval'
 >;
 
 // Camada de APLICAÇÃO da CLI. Cada runner recebe o cliente user-scoped já resolvido
@@ -49,6 +52,11 @@ export interface VerifierSummaryPayload {
   readonly checks: number;
   readonly restsOnAttestedEvidence: boolean;
 }
+export interface PlannedGatePayload {
+  readonly label: string;
+  readonly command: string | null;
+  readonly covers: readonly string[];
+}
 export interface WorkShowPayload {
   readonly ok: true;
   readonly kind: 'work-show';
@@ -58,6 +66,14 @@ export interface WorkShowPayload {
   readonly phase: string | null;
   readonly attemptId: string | null;
   readonly summary: string;
+  readonly objective: string;
+  readonly includedScope: readonly string[];
+  readonly excludedScope: readonly string[];
+  readonly risks: readonly string[];
+  /** Gates planejados no execution_spec, com `covers` (Verifier v2). Vazio quando o
+   * item não declara execução autônoma. Essencial para inspeção de governança de um
+   * sucessor `proposed` antes da aprovação. */
+  readonly plannedGates: readonly PlannedGatePayload[];
   readonly latestResult: { readonly eventId: string; readonly proposalVersion: number; readonly summary: string } | null;
   /** Veredito recomputado AGORA pelo Verifier vigente (v2). */
   readonly verifierLive: VerifierSummaryPayload | null;
@@ -106,6 +122,24 @@ export interface ReviewPayload {
   readonly reviewedResultEventId: string;
   readonly message: string;
 }
+export interface ApprovePayload {
+  readonly ok: true;
+  readonly kind: 'approve';
+  readonly workItemId: string;
+  readonly state: string;
+  readonly message: string;
+}
+export interface WorkCorrectPayload {
+  readonly ok: true;
+  readonly kind: 'work-correct';
+  readonly originalWorkItemId: string;
+  readonly successorWorkItemId: string;
+  readonly lineageId: string;
+  readonly recoverySequence: number;
+  /** Replay idempotente: a mesma unidade sucessora já existia e foi reencontrada. */
+  readonly replayed: boolean;
+  readonly message: string;
+}
 export interface ErrorPayload {
   readonly ok: false;
   readonly kind: 'error';
@@ -119,7 +153,13 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ErrorPayload | HelpPayload;
+  | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WorkCorrectPayload | ErrorPayload | HelpPayload;
+
+/** Capacidade de correção pós-review (a MESMA que a rota web usa): recebe o id do
+ * item em `changes_requested` e materializa/replaya o sucessor governado. Injetada
+ * como porta para o entrypoint ligar `correctReviewedWorkItem(client, id)` e os
+ * testes um duplo — a regra permanece no application service. */
+export type ReviewCorrectionCapability = (workItemId: string) => Promise<ReviewCorrectionResult>;
 
 export interface CommandResult {
   readonly exitCode: ExitCode;
@@ -234,6 +274,12 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
   const inReview = item.state === 'review';
   const suggestedDecision: 'request_changes' | null =
     inReview && ((live && live.verdict !== 'verified') || missing > 0) ? 'request_changes' : null;
+  const spec = readAutonomousExecutionSpec(item.intent);
+  const plannedGates: readonly PlannedGatePayload[] = (spec?.validationCriteria ?? []).map(criterion => ({
+    label: criterion.label,
+    command: criterion.command ?? null,
+    covers: criterion.covers ?? [],
+  }));
   return {
     exitCode: EXIT.OK,
     payload: {
@@ -241,6 +287,11 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
       phase: presentation.progress?.label ?? null,
       attemptId: presentation.execution?.attemptId ?? live?.attemptId ?? null,
       summary: item.proposal.data.summary,
+      objective: item.proposal.data.objective,
+      includedScope: item.proposal.data.includedScope,
+      excludedScope: item.proposal.data.excludedScope,
+      risks: item.proposal.data.risks,
+      plannedGates,
       latestResult: presentation.latestResult
         ? { eventId: presentation.latestResult.eventId, proposalVersion: presentation.latestResult.proposalVersion, summary: presentation.latestResult.summary }
         : null,
@@ -307,4 +358,81 @@ export async function runWorkReview(
       state: reviewed.value.state, reviewedResultEventId: plan.command.reviewedResultEventId, message,
     },
   };
+}
+
+/**
+ * Aprova uma PROPOSTA (`proposed → approved`) pelo application service canônico
+ * (`resolveApproval` com `{type:'approve'}`) — distinto de aceitar um RESULTADO em
+ * review (`work accept`/`reviewResult`). A regra "aprovável quando proposed com
+ * proveniência íntegra" vem da projeção (`availableWorkActions`), não do adapter; a
+ * autoridade final é do service/RPC. NÃO executa nem inicia o trabalho.
+ */
+export async function runWorkApprove(service: WorkOrchestrationPort, id: string): Promise<CommandResult> {
+  const loaded = await loadPresentation(service, id);
+  if (!loaded.ok) return loaded.result;
+  const { item, presentation } = loaded;
+  if (!presentation.availableActions.includes('approve')) {
+    if (item.state !== 'proposed') {
+      return errorResult(`O item está em "${item.state}", não em "proposed": não há proposta a aprovar.`, 'not_proposed', EXIT.REJECTED);
+    }
+    const issues = presentation.provenance?.issues ?? [];
+    return errorResult(
+      `A proposta não está aprovável — proveniência ${presentation.provenance?.status ?? 'desconhecida'}${issues.length ? ` (${issues.join(', ')})` : ''}.`,
+      'provenance_incomplete', EXIT.REJECTED,
+    );
+  }
+  const command: ResolveWorkApprovalCommand = { workItemId: item.id, expectedProposalVersion: item.proposalVersion, decision: { type: 'approve' } };
+  const resolved = await service.resolveApproval(command);
+  if (!resolved.ok) return errorResult(resolved.error.message, resolved.error.code, exitCodeForError(resolved.error.code));
+  return {
+    exitCode: EXIT.OK,
+    payload: { ok: true, kind: 'approve', workItemId: resolved.value.id, state: resolved.value.state, message: `Proposta aprovada. Novo estado: ${resolved.value.state}.` },
+  };
+}
+
+// Recusas de correção que são de INFRAESTRUTURA (a rota web as trata como 5xx) →
+// erro operacional (exit 1). As demais são precondições de estado/envelope (422 na
+// rota) → recusa por regra (exit 3). Espelha exatamente o split da rota.
+const CORRECTION_INFRA_REASONS: ReadonlySet<string> = new Set(['events_unavailable', 'lineage_read_failed', 'persistence_failed']);
+function correctionReasonMessage(reason: string): string {
+  switch (reason) {
+    case 'item_unavailable': return 'O item não está em "changes_requested": não há correção a materializar.';
+    case 'review_request_missing': return 'Não há pedido de revisão persistido (requested_changes) para derivar a correção.';
+    case 'reviewed_result_missing': return 'O resultado revisado não pôde ser correlacionado à tentativa (attempt_id).';
+    case 'checkpoint_evidence_missing': return 'Não há checkpoint git durável elegível da tentativa revisada para retomar.';
+    case 'derivation_refused': return 'A derivação da correção por retomada foi recusada (envelope não satisfeito).';
+    case 'candidate_invalid': return 'O candidato de correção falhou na validação de envelope.';
+    case 'events_unavailable': return 'Não foi possível ler os eventos do item.';
+    case 'lineage_read_failed': return 'Não foi possível ler o lineage de recuperação.';
+    case 'persistence_failed': return 'Falha ao persistir o sucessor de correção.';
+    default: return 'Não foi possível materializar a correção.';
+  }
+}
+
+/**
+ * Materializa (ou replaya) o sucessor de correção governada de um item em
+ * `changes_requested`, usando a MESMA capacidade que a rota web `review-corrections`
+ * (`correctReviewedWorkItem`). Boundary máximo `proposed`: NÃO aprova nem executa —
+ * a aprovação continua sendo ato humano (via `anima work approve`). Idempotente: um
+ * replay devolve o mesmo sucessor.
+ */
+export async function runWorkCorrect(correct: ReviewCorrectionCapability, id: string): Promise<CommandResult> {
+  const result = await correct(id);
+  if (result.ok) {
+    const message = result.replayed
+      ? `Sucessor de correção já existente (replay idempotente): ${result.successorWorkItemId} (seq ${result.recoverySequence}).`
+      : `Sucessor de correção materializado em proposed: ${result.successorWorkItemId} (seq ${result.recoverySequence}). Aguarda aprovação humana.`;
+    return {
+      exitCode: EXIT.OK,
+      payload: {
+        ok: true, kind: 'work-correct', originalWorkItemId: id,
+        successorWorkItemId: result.successorWorkItemId, lineageId: result.lineageId,
+        recoverySequence: result.recoverySequence, replayed: result.replayed, message,
+      },
+    };
+  }
+  const detail = [...(result.refusals ?? []), ...(result.gaps ?? [])];
+  const suffix = detail.length > 0 ? ` (${detail.join(', ')})` : result.message ? ` (${result.message})` : '';
+  const exitCode = CORRECTION_INFRA_REASONS.has(result.reason) ? EXIT.ERROR : EXIT.REJECTED;
+  return errorResult(`${correctionReasonMessage(result.reason)}${suffix}`, result.reason, exitCode);
 }

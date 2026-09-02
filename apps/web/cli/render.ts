@@ -41,6 +41,17 @@ export function renderHuman(payload: CliPayload): string {
       lines.push(`${payload.id} ${DOT} ${payload.state}${payload.phase ? ` (${payload.phase})` : ''}`);
       lines.push(`Proposta v${payload.proposalVersion}${payload.attemptId ? ` ${DOT} tentativa ${payload.attemptId}` : ''}`);
       lines.push(`Resumo: ${payload.summary}`);
+      lines.push(`Objetivo: ${payload.objective}`);
+      if (payload.includedScope.length > 0) lines.push(`Escopo incluído: ${payload.includedScope.join(' | ')}`);
+      if (payload.excludedScope.length > 0) lines.push(`Escopo excluído: ${payload.excludedScope.join(' | ')}`);
+      if (payload.plannedGates.length > 0) {
+        lines.push('');
+        lines.push('Gates planejados (execution_spec · covers):');
+        for (const g of payload.plannedGates) {
+          const covers = g.covers.length > 0 ? `cobre: ${g.covers.join(' | ')}` : 'SEM covers';
+          lines.push(`  ${DOT} ${g.label}${g.command ? ` [${g.command}]` : ''} → ${covers}`);
+        }
+      }
       lines.push('');
       lines.push(`Verifier (agora): ${verdictLabel(payload.verifierLive)}`);
       if (payload.verifierRecorded) {
@@ -97,5 +108,16 @@ export function renderHuman(payload: CliPayload): string {
 
     case 'review':
       return `${payload.workItemId} ${DOT} ${payload.decision} ${DOT} ${payload.message}`;
+
+    case 'approve':
+      return `${payload.workItemId} ${DOT} ${payload.message}`;
+
+    case 'work-correct':
+      return [
+        `${payload.message}`,
+        `Sucessor: ${payload.successorWorkItemId}`,
+        `Lineage: ${payload.lineageId} ${DOT} seq ${payload.recoverySequence}${payload.replayed ? ' (replay)' : ''}`,
+        `Próximo passo: anima work show ${payload.successorWorkItemId} ${DOT} depois anima work approve ${payload.successorWorkItemId}`,
+      ].join('\n');
   }
 }

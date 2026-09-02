@@ -1,8 +1,9 @@
 import type { ResultReviewDecision } from '@anima/core';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
+import { correctReviewedWorkItem } from '@/lib/work-orchestration/review-correction-orchestration';
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
-import { runStatus, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, type CommandResult } from './app';
+import { runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, type CommandResult } from './app';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
 
@@ -42,7 +43,11 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
       const decision: ResultReviewDecision = { type: 'request_changes', requestedChanges: command.reason };
       return runWorkReview(service, command.id, decision);
     }
+    case 'work-correct':
+      return runWorkCorrect((workItemId) => correctReviewedWorkItem(client, workItemId), command.id);
     case 'work-approve':
+      return runWorkApprove(service, command.id);
+    case 'work-accept':
       return runWorkReview(service, command.id, { type: 'accept' });
   }
 }
