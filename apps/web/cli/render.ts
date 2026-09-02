@@ -115,6 +115,9 @@ export function renderHuman(payload: CliPayload): string {
     case 'approve':
       return `${payload.workItemId} ${DOT} ${payload.message}`;
 
+    case 'withdraw':
+      return `${payload.workItemId} ${DOT} ${payload.message}`;
+
     case 'work-correct':
       return [
         `${payload.message}`,

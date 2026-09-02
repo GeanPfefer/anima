@@ -42,6 +42,7 @@ function fakePort(overrides: Partial<WorkOrchestrationPort> & { reviewSpy?: { ca
       if (approveSpy) approveSpy.called = true;
       return ok({ ...reviewItem, state: 'approved' });
     }),
+    withdrawApprovedWork: overrides.withdrawApprovedWork ?? (async () => ok({ ...reviewItem, state: 'cancelled' })),
   };
 }
 
@@ -115,6 +116,30 @@ describe('runners da CLI sobre o application service', () => {
     expect(approveSpy.called).toBe(false);
     expect(result.exitCode).toBe(EXIT.REJECTED);
     expect(result.payload).toMatchObject({ ok: false, code: 'not_proposed' });
+  });
+
+  test('work withdraw retira um plano aprovado pela versão vigente (exit 0)', async () => {
+    let calledWith: { workItemId: string; expectedProposalVersion: number; reason: string } | null = null;
+    const port = fakePort({
+      getItem: async () => ok({ ...reviewItem, state: 'approved' }),
+      withdrawApprovedWork: async (command) => { calledWith = command; return ok({ ...reviewItem, state: 'cancelled' }); },
+    });
+    const { runWorkWithdraw } = await import('./app');
+    const result = await runWorkWithdraw(port, 'i', 'plano obsoleto antes da execução');
+    expect(calledWith).toMatchObject({ workItemId: 'i', expectedProposalVersion: 2, reason: 'plano obsoleto antes da execução' });
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(result.payload).toMatchObject({ ok: true, kind: 'withdraw', state: 'cancelled' });
+  });
+
+  test('work withdraw negado por regra (estado errado) vira exit 3', async () => {
+    const { runWorkWithdraw } = await import('./app');
+    const port = fakePort({
+      getItem: async () => ok({ ...reviewItem, state: 'in_progress' }),
+      withdrawApprovedWork: async () => ({ ok: false, error: { code: 'version_conflict', message: 'não é plano aprovado não iniciado', retryable: false } }),
+    });
+    const result = await runWorkWithdraw(port, 'i', 'x');
+    expect(result.exitCode).toBe(EXIT.REJECTED);
+    expect(result.payload).toMatchObject({ ok: false, code: 'version_conflict' });
   });
 
   test('work correct materializa o sucessor e NÃO o aprova (exit 0)', async () => {

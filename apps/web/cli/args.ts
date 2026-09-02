@@ -12,7 +12,8 @@ export type ParsedCommand =
   | { readonly kind: 'work-request-changes'; readonly id: string; readonly reason: string; readonly json: boolean }
   | { readonly kind: 'work-correct'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-approve'; readonly id: string; readonly json: boolean }
-  | { readonly kind: 'work-accept'; readonly id: string; readonly json: boolean };
+  | { readonly kind: 'work-accept'; readonly id: string; readonly json: boolean }
+  | { readonly kind: 'work-withdraw'; readonly id: string; readonly reason: string; readonly json: boolean };
 
 export type ParseResult =
   | { readonly ok: true; readonly command: ParsedCommand }
@@ -89,6 +90,11 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       if (!id) return { ok: false, error: 'Uso: anima work accept <id>' };
       return { ok: true, command: { kind: 'work-accept', id, json } };
     }
+    if (sub === 'withdraw') {
+      if (!id) return { ok: false, error: 'Uso: anima work withdraw <id> --reason "..."' };
+      if (reason === null || reason.trim().length === 0) return { ok: false, error: 'withdraw exige --reason "<motivo>" não vazio.' };
+      return { ok: true, command: { kind: 'work-withdraw', id, reason: reason.trim(), json } };
+    }
     return { ok: false, error: `Subcomando de "work" desconhecido: ${sub ?? '(vazio)'}` };
   }
 
@@ -106,6 +112,7 @@ Uso:
   anima work correct <id>                      Materializa o sucessor de correção (proposed)
   anima work approve <id>                     Aprova uma PROPOSTA (proposed → approved)
   anima work accept <id>                       Aceita o RESULTADO em review (review → completed)
+  anima work withdraw <id> --reason "..."      Retira um plano APROVADO não iniciado (approved → cancelled)
   anima help                                  Esta ajuda
 
 Flags:

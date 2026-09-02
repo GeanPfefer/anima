@@ -22,7 +22,7 @@ import { EXIT, type ExitCode } from './exit-codes';
 // e os testes passam um duplo. Assim a regra fica no serviço/core, não no adapter.
 export type WorkOrchestrationPort = Pick<
   WorkOrchestrationService,
-  'getItem' | 'listEvents' | 'listContexts' | 'findResumableWorkItems' | 'reviewResult' | 'resolveApproval'
+  'getItem' | 'listEvents' | 'listContexts' | 'findResumableWorkItems' | 'reviewResult' | 'resolveApproval' | 'withdrawApprovedWork'
 >;
 
 // Camada de APLICAÇÃO da CLI. Cada runner recebe o cliente user-scoped já resolvido
@@ -132,6 +132,13 @@ export interface ApprovePayload {
   readonly state: string;
   readonly message: string;
 }
+export interface WithdrawPayload {
+  readonly ok: true;
+  readonly kind: 'withdraw';
+  readonly workItemId: string;
+  readonly state: string;
+  readonly message: string;
+}
 export interface WorkCorrectPayload {
   readonly ok: true;
   readonly kind: 'work-correct';
@@ -156,7 +163,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WorkCorrectPayload | ErrorPayload | HelpPayload;
+  | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | WorkCorrectPayload | ErrorPayload | HelpPayload;
 
 /** Capacidade de correção pós-review (a MESMA que a rota web usa): recebe o id do
  * item em `changes_requested` e materializa/replaya o sucessor governado. Injetada
@@ -377,6 +384,23 @@ export async function runWorkReview(
       ok: true, kind: 'review', workItemId: reviewed.value.id, decision: decision.type,
       state: reviewed.value.state, reviewedResultEventId: plan.command.reviewedResultEventId, message,
     },
+  };
+}
+
+/**
+ * Retira canonicamente um plano APROVADO NÃO INICIADO obsoleto antes da execução
+ * (`approved → cancelled` via `withdraw_approved_work`). A regra (só approved sem
+ * histórico de execução, autoridade, idempotência) vive na RPC/serviço, não no
+ * adapter; a CLI só resolve a versão vigente e encaminha o motivo. NÃO executa.
+ */
+export async function runWorkWithdraw(service: WorkOrchestrationPort, id: string, reason: string): Promise<CommandResult> {
+  const item = await service.getItem(id);
+  if (!item.ok) return errorResult(item.error.message, item.error.code, exitCodeForError(item.error.code));
+  const result = await service.withdrawApprovedWork({ workItemId: item.value.id, expectedProposalVersion: item.value.proposalVersion, reason });
+  if (!result.ok) return errorResult(result.error.message, result.error.code, exitCodeForError(result.error.code));
+  return {
+    exitCode: EXIT.OK,
+    payload: { ok: true, kind: 'withdraw', workItemId: result.value.id, state: result.value.state, message: `Plano aprovado retirado antes da execução. Novo estado: ${result.value.state}.` },
   };
 }
 

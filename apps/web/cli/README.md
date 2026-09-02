@@ -51,7 +51,14 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work correct <id>` | Materializa o sucessor de correção governado (`proposed`) via `correctReviewedWorkItem` — NÃO aprova |
 | `anima work approve <id>` | Aprova uma PROPOSTA (`proposed → approved`) via `resolveApproval` |
 | `anima work accept <id>` | Aceita o RESULTADO em review (`review → completed`) via `reviewResult` |
+| `anima work withdraw <id> --reason "..."` | Retira um plano APROVADO não iniciado (`approved → cancelled`) via `withdraw_approved_work` |
 | `anima help` | Ajuda |
+
+`work withdraw` retira canonicamente um plano aprovado que ficou obsoleto ANTES da
+execução (base mudou, o contrato de domínio evoluiu, um sucessor melhor o substitui).
+Fail-closed: só atinge `approved` sem histórico de execução; não satisfaz dependências
+nem apaga lineage. Distinto de `reject` (proposta nunca aprovada) e `failed` (execução
+que falhou).
 
 `work approve` (aprovar proposta) e `work accept` (aceitar resultado) são operações
 de domínio DISTINTAS — a CLI as mantém separadas em vez de colapsá-las.

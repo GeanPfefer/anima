@@ -34,6 +34,12 @@ describe('parser de argumentos da CLI', () => {
     expect(parseArgs(['work', 'accept', 'abc'])).toEqual({ ok: true, command: { kind: 'work-accept', id: 'abc', json: false } });
   });
 
+  test('work withdraw exige --reason não vazio', () => {
+    expect(parseArgs(['work', 'withdraw', 'abc'])).toMatchObject({ ok: false });
+    expect(parseArgs(['work', 'withdraw', 'abc', '--reason', 'plano obsoleto']))
+      .toEqual({ ok: true, command: { kind: 'work-withdraw', id: 'abc', reason: 'plano obsoleto', json: false } });
+  });
+
   test('work request-changes exige --reason não vazio', () => {
     expect(parseArgs(['work', 'request-changes', 'abc'])).toMatchObject({ ok: false });
     expect(parseArgs(['work', 'request-changes', 'abc', '--reason', '   '])).toMatchObject({ ok: false });

@@ -3,7 +3,7 @@ import { createWorkOrchestrationService } from '@/lib/work-orchestration/server'
 import { correctReviewedWorkItem } from '@/lib/work-orchestration/review-correction-orchestration';
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
-import { runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, type CommandResult } from './app';
+import { runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkWithdraw, type CommandResult } from './app';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
 
@@ -49,6 +49,8 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
       return runWorkApprove(service, command.id);
     case 'work-accept':
       return runWorkReview(service, command.id, { type: 'accept' });
+    case 'work-withdraw':
+      return runWorkWithdraw(service, command.id, command.reason);
   }
 }
 
