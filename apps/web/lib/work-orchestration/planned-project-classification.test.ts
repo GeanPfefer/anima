@@ -72,6 +72,37 @@ test('classifica successor governado pela lineage sem adulterar o intent aprovad
   expect(successor.intent).not.toHaveProperty('planner');
 });
 
+test('recupera a proveniência CANÔNICA do original via lineage quando o planner do original não é suportado (successor com intent reduzido)',async()=>{
+  // Cenário PIN-02/5b8e371d: o original canônico teve o planner trocado por metadata de
+  // operador (não suportada), mas mantém canonical_provenance válida; o successor copia só
+  // o execution_spec. A preparação deve recuperar a origem canônica do original pela lineage.
+  const successor={...item,intent:{execution_spec:{...item.intent.execution_spec,resume_from_checkpoint:{base_sha:'a'.repeat(40),branch:'anima-work/attempt',commit_sha:'b'.repeat(40)}}}};
+  const canonicalOriginal={intent:{
+    planner:'operator_revision_after_local_planner_v1',
+    canonical_provenance:{kind:'canonical_backlog',sourceId:'PIN-02',document:'docs/planos/006-project-intake-v0.md',heading:'PIN-02 — Codec persistível puro',canonicalObjective:'Codec persistível puro',planningGeneration:1,materializationReason:'selected_ready'},
+    execution_spec:item.intent.execution_spec,
+  }};
+  const maybeSingles=[{data:successor,error:null},{data:{original_work_item_id:'original'},error:null},{data:canonicalOriginal,error:null}];
+  const fromNames:string[]=[];
+  const from=jest.fn((name:string)=>{fromNames.push(name);return {select:jest.fn(()=>({eq:jest.fn(()=>({maybeSingle:jest.fn().mockImplementation(()=>Promise.resolve(maybeSingles.shift()))}))}))};});
+  const rpc=jest.fn().mockImplementation((name:string)=>name==='current_work_intelligence_classification'?Promise.resolve({data:null,error:null}):Promise.resolve({data:{},error:null}));
+  await expect(ensurePlannedProjectClassification({from,rpc} as never,'successor',3,()=>new Date('2026-09-02T00:00:00Z'))).resolves.toEqual({ok:true,replayed:false});
+  expect(fromNames).toEqual(['work_items','work_recovery_lineage','work_items']);
+  expect(rpc.mock.calls[1][1].p_classification.provenance.classifierId).toBe('canonical_backlog_v1-bridge');
+  expect(successor.intent).not.toHaveProperty('planner');
+});
+
+test('fail-closed: successor cujo original não tem planner suportado NEM proveniência canônica válida',async()=>{
+  const successor={...item,intent:{execution_spec:{...item.intent.execution_spec,resume_from_checkpoint:{base_sha:'a'.repeat(40),branch:'anima-work/attempt',commit_sha:'b'.repeat(40)}}}};
+  // Original com planner de operador e proveniência canônica MALFORMADA (faltam campos) ⇒ nenhuma origem governada.
+  const badOriginal={intent:{planner:'operator_revision_after_local_planner_v1',canonical_provenance:{kind:'canonical_backlog',sourceId:'PIN-02'},execution_spec:item.intent.execution_spec}};
+  const maybeSingles=[{data:successor,error:null},{data:{original_work_item_id:'original'},error:null},{data:badOriginal,error:null}];
+  const from=jest.fn(()=>({select:jest.fn(()=>({eq:jest.fn(()=>({maybeSingle:jest.fn().mockImplementation(()=>Promise.resolve(maybeSingles.shift()))}))}))}));
+  const rpc=jest.fn();
+  await expect(ensurePlannedProjectClassification({from,rpc} as never,'successor',3)).resolves.toMatchObject({ok:false,code:'classification_policy_not_applicable'});
+  expect(rpc).not.toHaveBeenCalled();
+});
+
 test('não confia em resume_from_checkpoint sem lineage persistida',async()=>{
   const successor={...item,intent:{execution_spec:{...item.intent.execution_spec,resume_from_checkpoint:{base_sha:'a'.repeat(40),branch:'anima-work/attempt',commit_sha:'b'.repeat(40)}}}};
   const maybeSingles=[{data:successor,error:null},{data:null,error:null}];

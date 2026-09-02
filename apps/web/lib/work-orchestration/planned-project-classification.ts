@@ -37,7 +37,12 @@ async function sourceForClassification(
   const original=await client.from('work_items').select('intent').eq('id',lineage.data.original_work_item_id).maybeSingle();
   if(original.error||!original.data)return null;
   const originalIntent=original.data.intent as {planner?:unknown};
-  return supportedPlanner(originalIntent.planner)?originalIntent.planner:null;
+  if(supportedPlanner(originalIntent.planner))return originalIntent.planner;
+  // Uma revisão humana pode ter trocado o planner do ORIGINAL por metadata de operador
+  // (não suportada), mas a ORIGEM CANÔNICA estável do trabalho, quando válida, continua
+  // sendo uma proveniência governada — espelha a guarda do item direto (acima) para o
+  // caminho do successor recuperado por lineage. Fail-closed se nenhuma das duas existir.
+  return readCanonicalProvenanceFromIntent(original.data.intent)!==null?'canonical_backlog_v1':null;
 }
 
 export async function ensurePlannedProjectClassification(client:SupabaseClient<Database>,workItemId:string,expectedProposalVersion:number,now=()=>new Date()):Promise<PreparationResult>{
