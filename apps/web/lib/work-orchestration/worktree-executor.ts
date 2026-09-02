@@ -584,7 +584,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         yield attach(++seq, {
           kind: 'error',
           code: 'execution_failed',
-          message: `Gate falhou: ${failure.command} terminou com c?digo ${failure.exitCode}.`,
+          // Não classificar timeout como falha determinística do código.
+          message: `${failure.timedOut ? '' : '[gate_failed] '}Gate falhou: ${failure.command} terminou com código ${failure.exitCode}.`,
           retryable: false,
           handoffReference,
         });

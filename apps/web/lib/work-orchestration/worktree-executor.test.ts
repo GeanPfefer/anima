@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   buildHostObservedGateEvidence,
   buildWorktreeHandoff,
+  decideRecovery,
   validateWorkExecutorTranscript,
   verifyWorkResult,
   type ObservedCoderInput,
@@ -133,6 +134,36 @@ describe('WorktreeExecutorAdapter', () => {
     expect(terminal.kind).toBe('error');
     if (terminal.kind === 'error') expect(terminal.code).toBe('execution_failed');
     expect(validateWorkExecutorTranscript(signals)).toBeNull();
+  });
+
+  test('gate falho após repair preserva causa classificável sem autorizar terceira edição ou retry', async () => {
+    let edits = 0;
+    const observed: ObservedGateInput[] = [];
+    const backend: CoderBackend = {
+      id: 'unsuccessful-repair',
+      async edit(_req, workspace) {
+        edits++;
+        await workspace.writeFile('src/added.ts', `export const broken = ${edits};\n`);
+        return { summary: 'edição sem resolver o gate', touchedResources: ['src/added.ts'] };
+      },
+    };
+    const req = request({ validationCriteria: [{ label: 'teste', command: 'npm test -- retry' }] });
+    const signals = await collect(new WorktreeExecutorAdapter({
+      targets: ctx.resolver, backend, gateRetryLimit: 1,
+      onGateObserved: outcome => observed.push(outcome),
+    }), req, new AbortController().signal);
+    expect(edits).toBe(2);
+    expect(observed.map(gate => gate.exitCode)).toEqual([1, 1]);
+    expect(signals.some(signal => signal.kind === 'result')).toBe(false);
+    const terminal = signals.at(-1)!;
+    expect(terminal.kind).toBe('error');
+    if (terminal.kind !== 'error') throw new Error('terminal inesperado');
+    expect(terminal.retryable).toBe(false);
+    expect(decideRecovery({ code: terminal.code, safeMessage: terminal.message,
+      retryable: terminal.retryable, attemptsUsed: 2, maxAttempts: 3, repeatedSameFailure: false,
+    })).toMatchObject({ failureKind: 'gate_failure', normalizedCode: 'gate_failed', action: 'human_required' });
+    expect(validateWorkExecutorTranscript(signals)).toBeNull();
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
   });
 
   test('alteração fora do escopo aprovado vira contract_violation', async () => {
