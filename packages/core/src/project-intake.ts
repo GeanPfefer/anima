@@ -56,6 +56,20 @@ export interface ProjectIdeaV0 {
   readonly status: ProjectIdeaStatus;
 }
 
+/** Serialização e desserialização fail-closed com round-trip determinístico. */
+export function serializeProjectIdeaV0(idea: ProjectIdeaV0): string {
+  return JSON.stringify(idea);
+}
+
+export function deserializeProjectIdeaV0(json: string): ProjectIdeaV0 {
+  const parsed = JSON.parse(json);
+  const error = validateProjectIdea(parsed);
+  if (error !== null) {
+    throw new Error(`Invalid ProjectIdeaV0: ${error}`);
+  }
+  return parsed;
+}
+
 /** Entrada mínima para registrar uma ideia crua: o núcleo irredutível (o que um humano/chat
  * fornece de saída). O restante do contrato nasce vazio e é preenchido no discovery. */
 export interface DraftProjectIdeaInput {
