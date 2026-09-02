@@ -82,7 +82,12 @@ e deixar a migration para depois de uma convergência provada.
 
 ### PIN-02 — Codec persistível puro de ProjectIdeaV0
 
-- **Status:** not_started
+- **Status:** provado ao vivo pelo self-dev até `review` em 2026-09-02, **aguardando aceitação
+  humana** (branch `anima-work/5a0c7716…`). 1ª prova de que o Anima consome o próprio backlog
+  canônico e evolui a si mesmo pelo fluxo real supervisor→coder→gates→Verifier. Detalhe:
+  [registro 2026-09-02](../registros/2026-09-02-pin02-prova-viva-self-dev-review.md). Achado para a
+  revisão: a implementação do coder é mínima e o aceite escrito ainda não está codificado como teste
+  executável (round-trip / campo extra / versão desconhecida).
 - **Problema:** o contrato de domínio ainda não possui uma fronteira explícita e testada entre
   `ProjectIdeaV0` e o shape que uma futura camada de persistência poderá armazenar/ler.
 - **Resultado esperado:** exatamente um recorte puro em `packages/core`: shape persistível V0,
