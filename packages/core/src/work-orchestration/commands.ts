@@ -4,6 +4,7 @@ export interface ReviseWorkProposalCommand { workItemId: WorkItemId; expectedPro
 export interface ResolveWorkApprovalCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; decision: ApprovalDecision; }
 export interface StartWorkCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; }
 export interface ReleaseManualWorkCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; }
+export interface WithdrawApprovedWorkCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; reason: string; }
 export interface SubmitWorkResultCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; result: WorkResultInput; }
 export interface ReviewWorkResultCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; reviewedResultEventId:string; decision: ResultReviewDecision; }
 export interface AttachWorkContextCommand { workItemId: WorkItemId; expectedProposalVersion: ProposalVersion; references: readonly WorkContextReference[]; }

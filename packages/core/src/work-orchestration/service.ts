@@ -1,4 +1,4 @@
-import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, ReleaseManualWorkCommand, RequestProposalRevisionCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand } from './commands';
+import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, ReleaseManualWorkCommand, RequestProposalRevisionCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand, WithdrawApprovedWorkCommand } from './commands';
 import { failure, type WorkOperationResult } from './errors';
 import type { DecideIntegrationCommand, IntegrationDecisionOutcome } from './integration-decision';
 import type { WorkOrchestrationRepository } from './repository';
@@ -26,6 +26,10 @@ export class WorkOrchestrationService {
   releaseManualWork(command: ReleaseManualWorkCommand): Promise<WorkOperationResult<WorkItem>> {
     if (!this.validVersion(command.expectedProposalVersion)) return Promise.resolve(invalid('Versão inválida.'));
     return this.repository.releaseManualWork(command);
+  }
+  withdrawApprovedWork(command: WithdrawApprovedWorkCommand): Promise<WorkOperationResult<WorkItem>> {
+    if (!this.validVersion(command.expectedProposalVersion) || !command.reason.trim()) return Promise.resolve(invalid('Retirada inválida: versão e motivo são obrigatórios.'));
+    return this.repository.withdrawApprovedWork(command);
   }
   submitResult(command: SubmitWorkResultCommand): Promise<WorkOperationResult<WorkItem>> {
     if (!this.validVersion(command.expectedProposalVersion) || !isValidWorkResult(command.result)) return Promise.resolve(invalid('Resultado inválido.'));

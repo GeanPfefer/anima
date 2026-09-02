@@ -2225,28 +2225,6 @@ export type Database = {
         }
         Returns: Json
       }
-      reserve_paid_compute_budget: {
-        Args: {
-          attempt_id: string
-          authorization_id: string
-          estimate_amount: number
-          estimate_currency: string
-          idempotency_key: string
-          lease_id: string
-          node_id: string
-          provider_id: string
-          resource_class: string
-          work_item_id: string
-        }
-        Returns: Json
-      }
-      void_paid_compute_budget_reservation: {
-        Args: {
-          reason: string
-          reservation_id: string
-        }
-        Returns: Json
-      }
       record_review_request_created: {
         Args: {
           authorization_decision_id: string
@@ -2418,6 +2396,21 @@ export type Database = {
           p_failure_event_id: string
           p_retry_request_id: string
           p_work_item_id: string
+        }
+        Returns: Json
+      }
+      reserve_paid_compute_budget: {
+        Args: {
+          attempt_id: string
+          authorization_id: string
+          estimate_amount: number
+          estimate_currency: string
+          idempotency_key: string
+          lease_id: string
+          node_id: string
+          provider_id: string
+          resource_class: string
+          work_item_id: string
         }
         Returns: Json
       }
@@ -2720,6 +2713,37 @@ export type Database = {
         Args: {
           expected_proposal_version: number
           result: Json
+          work_item_id: string
+        }
+        Returns: {
+          capability: Database["public"]["Enums"]["work_capability"]
+          created_at: string
+          id: string
+          impact_level: Database["public"]["Enums"]["work_impact_level"]
+          intent: Json
+          original_request: string
+          proposal: Json
+          proposal_version: number
+          source_message_id: string
+          state: Database["public"]["Enums"]["work_state"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      void_paid_compute_budget_reservation: {
+        Args: { reason: string; reservation_id: string }
+        Returns: Json
+      }
+      withdraw_approved_work: {
+        Args: {
+          expected_proposal_version: number
+          reason: string
           work_item_id: string
         }
         Returns: {
