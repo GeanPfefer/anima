@@ -1,5 +1,13 @@
 # Plano 006 — Project Intake V0
 
+> Atualização operacional 2026-09-02: o successor `5b8e371d` recebeu o retry humano
+> pela CLI e rodou a attempt `0cfdd6cb` com fallback governado para qwen2.5-coder:14b.
+> Terminal `failed`: teste focado falhou antes/depois do reparo interno; só o teste
+> mudou, implementação preservada. Sem review/parecer Verifier. Readiness
+> `BLOCKED/failure_not_retryable`, 2/3 usadas, 1 restante nominal. Próxima decisão
+> humana: encaminhamento governado da falha; PIN-03 permanece adiado.
+> [Registro da prova](../registros/2026-09-02-retry-pin02-fallback-gate-failed.md).
+
 > Estado em 2026-09-02: contrato puro implementado; PIN-02 segue em review humano. A prova
 > revelou e motivou o fechamento sistêmico da cobertura aceite→gate→Verifier; persistência,
 > caminho de criação e UI ficam para recortes seguintes — preferencialmente construídos pelo
