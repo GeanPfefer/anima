@@ -1507,6 +1507,103 @@ export type Database = {
           },
         ]
       }
+      work_replans: {
+        Row: {
+          allocated_attempts: number
+          created_at: string
+          diagnosis: Json
+          failure_event_id: string
+          gate_event_id: string
+          git_event_id: string
+          id: string
+          lineage_id: string
+          predecessor_attempts_used: number
+          predecessor_id: string
+          predecessor_max_attempts: number
+          source_attempt_id: string
+          strategy: Json
+          successor_id: string
+          user_id: string
+        }
+        Insert: {
+          allocated_attempts: number
+          created_at?: string
+          diagnosis: Json
+          failure_event_id: string
+          gate_event_id: string
+          git_event_id: string
+          id?: string
+          lineage_id: string
+          predecessor_attempts_used: number
+          predecessor_id: string
+          predecessor_max_attempts: number
+          source_attempt_id: string
+          strategy: Json
+          successor_id: string
+          user_id: string
+        }
+        Update: {
+          allocated_attempts?: number
+          created_at?: string
+          diagnosis?: Json
+          failure_event_id?: string
+          gate_event_id?: string
+          git_event_id?: string
+          id?: string
+          lineage_id?: string
+          predecessor_attempts_used?: number
+          predecessor_id?: string
+          predecessor_max_attempts?: number
+          source_attempt_id?: string
+          strategy?: Json
+          successor_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_replans_failure_event_id_fkey"
+            columns: ["failure_event_id"]
+            isOneToOne: true
+            referencedRelation: "work_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_replans_gate_event_id_fkey"
+            columns: ["gate_event_id"]
+            isOneToOne: false
+            referencedRelation: "work_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_replans_git_event_id_fkey"
+            columns: ["git_event_id"]
+            isOneToOne: false
+            referencedRelation: "work_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_replans_lineage_id_fkey"
+            columns: ["lineage_id"]
+            isOneToOne: false
+            referencedRelation: "work_recovery_lineage"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_replans_predecessor_id_fkey"
+            columns: ["predecessor_id"]
+            isOneToOne: true
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_replans_successor_id_fkey"
+            columns: ["successor_id"]
+            isOneToOne: true
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       xp_records: {
         Row: {
           activity_date: string
@@ -2334,6 +2431,15 @@ export type Database = {
         }
       }
       reopen_latest_conversation: { Args: never; Returns: string }
+      replan_failed_work: {
+        Args: {
+          p_diagnosis: Json
+          p_expected_proposal_version: number
+          p_failure_event_id: string
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
       request_autonomous_execution: {
         Args: {
           p_expected_proposal_version: number

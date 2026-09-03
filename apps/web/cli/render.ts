@@ -131,5 +131,7 @@ export function renderHuman(payload: CliPayload): string {
         `Lineage: ${payload.lineageId} ${DOT} seq ${payload.recoverySequence}${payload.replayed ? ' (replay)' : ''}`,
         `Próximo passo: anima work show ${payload.successorWorkItemId} ${DOT} depois anima work approve ${payload.successorWorkItemId}`,
       ].join('\n');
+    case 'work-replan':
+      return `Sucessor: ${payload.successorWorkItemId}\nLineage: ${payload.lineageId}\nReplan: ${payload.replanId}${payload.replayed ? ' (replay)' : ''}\nBudget transferido: ${payload.allocatedAttempts}\nEstratégia: ${payload.strategy.map(s=>`${s.kind}: ${s.symbols.join(', ')}`).join(' | ')}\nAprovação humana permanece separada.`;
   }
 }

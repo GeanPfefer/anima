@@ -15,6 +15,7 @@ import type { WorkOrchestrationErrorCode, WorkOperationResult } from '@anima/cor
 import { parseAutonomyFlag } from '@/lib/resident-host/ports';
 import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
 import { EXIT, type ExitCode } from './exit-codes';
+import type { ReplanResult } from '@/lib/work-orchestration/replan-orchestration';
 
 // A CLI depende do APPLICATION SERVICE (a mesma abstração que as rotas web usam),
 // não do transporte Supabase. `WorkOrchestrationPort` é o subconjunto exato de
@@ -174,7 +175,14 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | ErrorPayload | HelpPayload;
+  | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | ErrorPayload | HelpPayload
+  | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'});
+
+export async function runWorkReplan(capability: () => Promise<ReplanResult>): Promise<CommandResult> {
+  const r = await capability();
+  return r.ok ? {exitCode:EXIT.OK,payload:{...r,kind:'work-replan'}}
+    : {exitCode:r.rejected ? EXIT.REJECTED : EXIT.ERROR,payload:{ok:false,kind:'error',code:r.code,error:r.message}};
+}
 
 /** Capacidade de correção pós-review (a MESMA que a rota web usa): recebe o id do
  * item em `changes_requested` e materializa/replaya o sucessor governado. Injetada

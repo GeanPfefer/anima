@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { replanFailedWorkItem } from '@/lib/work-orchestration/replan-orchestration';
+import { runWorkReplan } from './app';
 import type { ResultReviewDecision } from '@anima/core';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { correctReviewedWorkItem } from '@/lib/work-orchestration/review-correction-orchestration';
@@ -47,6 +50,14 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
     }
     case 'work-correct':
       return runWorkCorrect((workItemId) => correctReviewedWorkItem(client, workItemId), command.id);
+    case 'work-replan': {
+      let diagnosis: unknown;
+      if (command.diagnosisPath !== null) {
+        try { diagnosis = JSON.parse(await readFile(command.diagnosisPath,'utf8')); }
+        catch { return {exitCode:EXIT.USAGE,payload:{ok:false,kind:'error',code:'diagnosis_file_invalid',error:'Não foi possível ler o JSON do diagnóstico.'}}; }
+      }
+      return runWorkReplan(() => replanFailedWorkItem(client,command.id,diagnosis));
+    }
     case 'work-approve':
       return runWorkApprove(service, command.id);
     case 'work-accept':
