@@ -63,3 +63,5 @@ export * from './resource-history';
 export * from './resource-advisory';
 
 export * from './coder-transcript';
+
+export * from './human-resume';

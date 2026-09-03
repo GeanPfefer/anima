@@ -1604,6 +1604,99 @@ export type Database = {
           },
         ]
       }
+      work_resume_authorizations: {
+        Row: {
+          actor: string
+          additional_attempts: number
+          aggregate_ceiling: number
+          authority: Json
+          created_at: string
+          envelope_root_id: string
+          failure_event_id: string
+          id: string
+          lineage_id: string
+          predecessor_id: string
+          previous_authorized: number
+          previous_consumed: number
+          request_id: string
+          source_attempt_id: string
+          successor_id: string
+          user_id: string
+        }
+        Insert: {
+          actor?: string
+          additional_attempts: number
+          aggregate_ceiling: number
+          authority: Json
+          created_at?: string
+          envelope_root_id: string
+          failure_event_id: string
+          id?: string
+          lineage_id: string
+          predecessor_id: string
+          previous_authorized: number
+          previous_consumed: number
+          request_id: string
+          source_attempt_id: string
+          successor_id: string
+          user_id: string
+        }
+        Update: {
+          actor?: string
+          additional_attempts?: number
+          aggregate_ceiling?: number
+          authority?: Json
+          created_at?: string
+          envelope_root_id?: string
+          failure_event_id?: string
+          id?: string
+          lineage_id?: string
+          predecessor_id?: string
+          previous_authorized?: number
+          previous_consumed?: number
+          request_id?: string
+          source_attempt_id?: string
+          successor_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_resume_authorizations_envelope_root_id_fkey"
+            columns: ["envelope_root_id"]
+            isOneToOne: true
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_resume_authorizations_failure_event_id_fkey"
+            columns: ["failure_event_id"]
+            isOneToOne: false
+            referencedRelation: "work_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_resume_authorizations_lineage_id_fkey"
+            columns: ["lineage_id"]
+            isOneToOne: false
+            referencedRelation: "work_recovery_lineage"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_resume_authorizations_predecessor_id_fkey"
+            columns: ["predecessor_id"]
+            isOneToOne: true
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_resume_authorizations_successor_id_fkey"
+            columns: ["successor_id"]
+            isOneToOne: true
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       xp_records: {
         Row: {
           activity_date: string
@@ -1903,6 +1996,15 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      authorize_work_resume: {
+        Args: {
+          p_authorization: Json
+          p_expected_proposal_version: number
+          p_failure_event_id: string
+          p_work_item_id: string
+        }
+        Returns: Json
       }
       auto_approve_autonomous_work: {
         Args: {
