@@ -12,6 +12,7 @@ export type ParsedCommand =
   | { readonly kind: 'work-request-changes'; readonly id: string; readonly reason: string; readonly json: boolean }
   | { readonly kind: 'work-correct'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-replan'; readonly id: string; readonly diagnosisPath: string | null; readonly json: boolean }
+  | { readonly kind: 'work-authorize-resume'; readonly id: string; readonly planPath: string | null; readonly json: boolean }
   | { readonly kind: 'work-approve'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-accept'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-withdraw'; readonly id: string; readonly reason: string; readonly json: boolean }
@@ -26,6 +27,7 @@ interface Extracted {
   readonly json: boolean;
   readonly reason: string | null;
   readonly diagnosisPath: string | null;
+  readonly planPath: string | null;
   readonly help: boolean;
   readonly unknownFlag: string | null;
 }
@@ -36,23 +38,25 @@ function extract(argv: readonly string[]): Extracted {
   let json = false;
   let reason: string | null = null;
   let diagnosisPath: string | null = null;
+  let planPath: string | null = null;
   let help = false;
   let unknownFlag: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i]!;
     if (token === '--json') { json = true; continue; }
     if (token === '--diagnosis') { diagnosisPath = argv[++i] ?? ''; continue; }
+    if (token === '--plan') { planPath = argv[++i] ?? ''; continue; }
     if (token === '--help' || token === '-h') { help = true; continue; }
     if (token === '--reason' || token === '-m') { reason = argv[++i] ?? ''; continue; }
     if (token.startsWith('--reason=')) { reason = token.slice('--reason='.length); continue; }
     if (token.startsWith('-') && token !== '-') { if (unknownFlag === null) unknownFlag = token; continue; }
     positionals.push(token);
   }
-  return { positionals, json, reason, diagnosisPath, help, unknownFlag };
+  return { positionals, json, reason, diagnosisPath, planPath, help, unknownFlag };
 }
 
 export function parseArgs(argv: readonly string[]): ParseResult {
-  const { positionals, json, reason, diagnosisPath, help, unknownFlag } = extract(argv);
+  const { positionals, json, reason, diagnosisPath, planPath, help, unknownFlag } = extract(argv);
 
   if (help || positionals[0] === 'help' || positionals.length === 0) return { ok: true, command: { kind: 'help' } };
   if (unknownFlag !== null) return { ok: false, error: `Flag desconhecida: ${unknownFlag}` };
@@ -60,6 +64,9 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   const [group, sub, ...rest] = positionals;
   if (diagnosisPath !== null && (group !== 'work' || sub !== 'replan' || !diagnosisPath.trim())) {
     return { ok: false, error: '--diagnosis exige um arquivo e work replan.' };
+  }
+  if (planPath !== null && (group !== 'work' || sub !== 'authorize-resume' || !planPath.trim())) {
+    return { ok: false, error: '--plan exige um arquivo e work authorize-resume.' };
   }
 
   if (group === 'status') {
@@ -76,6 +83,10 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     if (sub === 'replan') {
       if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:'Uso: anima work replan <id> [--diagnosis arquivo.json]' };
       return {ok:true, command:{kind:'work-replan',id,diagnosisPath,json}};
+    }
+    if (sub === 'authorize-resume') {
+      if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:'Uso: anima work authorize-resume <id> [--plan arquivo.json]' };
+      return {ok:true, command:{kind:'work-authorize-resume',id,planPath,json}};
     }
     if (sub === 'show') {
       if (!id) return { ok: false, error: 'Uso: anima work show <id>' };
@@ -127,6 +138,7 @@ Uso:
   anima work request-changes <id> --reason "" Registra REQUEST_CHANGES pelo fluxo canônico
   anima work correct <id>                      Materializa o sucessor de correção (proposed)
   anima work replan <id> [--diagnosis arquivo] Replaneja unidade mínima; sem diagnóstico, replay persistido
+  anima work authorize-resume <id> [--plan f]  Autoridade humana: +1 tentativa após saldo esgotado (sucessor proposed)
   anima work approve <id>                     Aprova uma PROPOSTA (proposed → approved)
   anima work accept <id>                       Aceita o RESULTADO em review (review → completed)
   anima work withdraw <id> --reason "..."      Retira um plano APROVADO não iniciado (approved → cancelled)
@@ -136,5 +148,7 @@ Uso:
 Flags:
   --json           Saída estável em JSON (para automação/self-dev)
   --reason "..."   Texto do pedido de correção (request-changes)
+  --diagnosis f    Arquivo JSON do diagnóstico (work replan)
+  --plan f         Arquivo JSON da autorização humana de retomada (work authorize-resume)
 
 Códigos de saída: 0 sucesso · 1 erro operacional · 2 uso inválido · 3 ação recusada por regra`;

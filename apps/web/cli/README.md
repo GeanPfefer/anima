@@ -53,6 +53,7 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work accept <id>` | Aceita o RESULTADO em review (`review → completed`) via `reviewResult` |
 | `anima work withdraw <id> --reason "..."` | Retira um plano APROVADO não iniciado (`approved → cancelled`) via `withdraw_approved_work` |
 | `anima work retry <id>` | Solicita o retry governado (ato humano) de um item `failed`/RETRY_READY via `request_work_retry` |
+| `anima work authorize-resume <id> [--plan f]` | Autoridade humana: +1 tentativa após o saldo transferido se esgotar; materializa um sucessor `proposed` via `authorize_work_resume` — NÃO aprova |
 | `anima help` | Ajuda |
 
 `work retry` reusa a MESMA capability da rota web `retries`: lê `current_work_retry_readiness`
@@ -60,6 +61,16 @@ para DERIVAR automaticamente a versão vigente e o `failureEventId` (o usuário 
 o sistema já tem), gera um `retryRequestId` novo e chama `request_work_retry`. Fail-closed pela
 prontidão (não RETRY_READY / sem failureEvent) e pela RPC (budget, correlação, versão,
 idempotência, autoria). NÃO executa o trabalho — apenas reabre `failed → approved`.
+
+`work authorize-resume` é a autoridade HUMANA de retomada quando o saldo transferido de
+um replan de unidade mínima se esgotou (o item está `failed`, `retryable:true`, mas sem
+tentativas): concede EXATAMENTE +1 tentativa, sob teto agregado explícito (consumo anterior
++1) e envelope de compute LOCAL, materializando um sucessor `proposed`. É distinta de
+`retry` (que exige saldo) e de `replan` (que exige falha NÃO-retryável). A autorização
+humana (`--plan arquivo.json`) carrega requestId idempotente, diagnóstico/plano corrigido,
+teto e modelos; sem `--plan`, replaya a concessão já persistida. Append-only: o consumo
+anterior nunca é reescrito e não há segunda extensão automática — nova falha volta ao
+humano. NÃO aprova nem executa (aprovação segue sendo `anima work approve`).
 
 `work withdraw` retira canonicamente um plano aprovado que ficou obsoleto ANTES da
 execução (base mudou, o contrato de domínio evoluiu, um sucessor melhor o substitui).

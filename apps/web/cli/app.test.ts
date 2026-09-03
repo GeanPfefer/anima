@@ -7,7 +7,8 @@ import type {
   WorkOperationResult,
 } from '@anima/core';
 import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
-import { runStatus, runWorkApprove, runWorkCorrect, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
+import type { AuthorizeResumeResult } from '@/lib/work-orchestration/authorize-resume';
+import { runStatus, runWorkApprove, runWorkAuthorizeResume, runWorkCorrect, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
 import { EXIT } from './exit-codes';
 
 const ok = <T>(value: T): WorkOperationResult<T> => ({ ok: true, value });
@@ -228,6 +229,34 @@ describe('runners da CLI sobre o application service', () => {
     const result = await runWorkCorrect(capability, 'i');
     expect(result.exitCode).toBe(EXIT.ERROR);
     expect(result.payload).toMatchObject({ ok: false, code: 'persistence_failed' });
+  });
+
+  test('work authorize-resume concede +1 e materializa o sucessor proposed (exit 0), sem aprovar', async () => {
+    const capability = async (): Promise<AuthorizeResumeResult> => ({ ok: true, authorizationId: 'g1', successorWorkItemId: 's1', lineageId: 'l1', additionalAttempts: 1, aggregateCeiling: 4, previousConsumed: 3, replayed: false });
+    const result = await runWorkAuthorizeResume(capability);
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(result.payload).toMatchObject({ ok: true, kind: 'work-authorize-resume', authorizationId: 'g1', successorWorkItemId: 's1', additionalAttempts: 1, aggregateCeiling: 4, previousConsumed: 3, replayed: false });
+  });
+
+  test('work authorize-resume replay idempotente reflete o replay', async () => {
+    const capability = async (): Promise<AuthorizeResumeResult> => ({ ok: true, authorizationId: 'g1', successorWorkItemId: 's1', lineageId: 'l1', additionalAttempts: 1, aggregateCeiling: 4, previousConsumed: 3, replayed: true });
+    const result = await runWorkAuthorizeResume(capability);
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect((result.payload as { replayed: boolean }).replayed).toBe(true);
+  });
+
+  test('work authorize-resume recusada por regra (ex.: saldo ainda disponível) vira exit 3', async () => {
+    const capability = async (): Promise<AuthorizeResumeResult> => ({ ok: false, code: 'budget_not_exhausted', message: 'use retry', rejected: true });
+    const result = await runWorkAuthorizeResume(capability);
+    expect(result.exitCode).toBe(EXIT.REJECTED);
+    expect(result.payload).toMatchObject({ ok: false, code: 'budget_not_exhausted' });
+  });
+
+  test('work authorize-resume com erro operacional (leitura) vira exit 1', async () => {
+    const capability = async (): Promise<AuthorizeResumeResult> => ({ ok: false, code: 'read_failed', message: 'db down', rejected: false });
+    const result = await runWorkAuthorizeResume(capability);
+    expect(result.exitCode).toBe(EXIT.ERROR);
+    expect(result.payload).toMatchObject({ ok: false, code: 'read_failed' });
   });
 
   test('status agrega os trabalhos retomáveis por estado', async () => {

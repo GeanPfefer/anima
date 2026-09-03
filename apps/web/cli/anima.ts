@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { replanFailedWorkItem } from '@/lib/work-orchestration/replan-orchestration';
-import { runWorkReplan } from './app';
+import { authorizeResume } from '@/lib/work-orchestration/authorize-resume';
+import { runWorkReplan, runWorkAuthorizeResume } from './app';
 import type { ResultReviewDecision } from '@anima/core';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { correctReviewedWorkItem } from '@/lib/work-orchestration/review-correction-orchestration';
@@ -57,6 +58,14 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
         catch { return {exitCode:EXIT.USAGE,payload:{ok:false,kind:'error',code:'diagnosis_file_invalid',error:'Não foi possível ler o JSON do diagnóstico.'}}; }
       }
       return runWorkReplan(() => replanFailedWorkItem(client,command.id,diagnosis));
+    }
+    case 'work-authorize-resume': {
+      let authorization: unknown;
+      if (command.planPath !== null) {
+        try { authorization = JSON.parse(await readFile(command.planPath,'utf8')); }
+        catch { return {exitCode:EXIT.USAGE,payload:{ok:false,kind:'error',code:'plan_file_invalid',error:'Não foi possível ler o JSON da autorização de retomada.'}}; }
+      }
+      return runWorkAuthorizeResume(() => authorizeResume(client,command.id,authorization));
     }
     case 'work-approve':
       return runWorkApprove(service, command.id);

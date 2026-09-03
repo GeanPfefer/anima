@@ -45,6 +45,21 @@ describe('parser de argumentos da CLI', () => {
     expect(parseArgs(['work', 'retry'])).toEqual({ ok: false, error: 'Uso: anima work retry <id>' });
   });
 
+  test('work authorize-resume <id> (deriva o resto do estado persistido)', () => {
+    expect(parseArgs(['work', 'authorize-resume', 'abc'])).toEqual({ ok: true, command: { kind: 'work-authorize-resume', id: 'abc', planPath: null, json: false } });
+    expect(parseArgs(['work', 'authorize-resume'])).toEqual({ ok: false, error: 'Uso: anima work authorize-resume <id> [--plan arquivo.json]' });
+  });
+
+  test('work authorize-resume com --plan e --json', () => {
+    expect(parseArgs(['work', 'authorize-resume', 'abc', '--plan', 'auth.json', '--json']))
+      .toEqual({ ok: true, command: { kind: 'work-authorize-resume', id: 'abc', planPath: 'auth.json', json: true } });
+  });
+
+  test('--plan só vale para work authorize-resume', () => {
+    expect(parseArgs(['work', 'replan', 'abc', '--plan', 'auth.json'])).toMatchObject({ ok: false });
+    expect(parseArgs(['status', '--plan', 'x'])).toMatchObject({ ok: false });
+  });
+
   test('work request-changes exige --reason não vazio', () => {
     expect(parseArgs(['work', 'request-changes', 'abc'])).toMatchObject({ ok: false });
     expect(parseArgs(['work', 'request-changes', 'abc', '--reason', '   '])).toMatchObject({ ok: false });

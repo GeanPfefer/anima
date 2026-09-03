@@ -16,6 +16,7 @@ import { parseAutonomyFlag } from '@/lib/resident-host/ports';
 import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
 import { EXIT, type ExitCode } from './exit-codes';
 import type { ReplanResult } from '@/lib/work-orchestration/replan-orchestration';
+import type { AuthorizeResumeResult } from '@/lib/work-orchestration/authorize-resume';
 
 // A CLI depende do APPLICATION SERVICE (a mesma abstração que as rotas web usam),
 // não do transporte Supabase. `WorkOrchestrationPort` é o subconjunto exato de
@@ -176,11 +177,26 @@ export interface HelpPayload {
 
 export type CliPayload =
   | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | ErrorPayload | HelpPayload
-  | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'});
+  | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
+  | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
 export async function runWorkReplan(capability: () => Promise<ReplanResult>): Promise<CommandResult> {
   const r = await capability();
   return r.ok ? {exitCode:EXIT.OK,payload:{...r,kind:'work-replan'}}
+    : {exitCode:r.rejected ? EXIT.REJECTED : EXIT.ERROR,payload:{ok:false,kind:'error',code:r.code,error:r.message}};
+}
+
+/**
+ * Registra a AUTORIDADE HUMANA de retomada de um item `failed` cujo saldo transferido
+ * se esgotou (a MESMA capability que a rota web usa): concede EXATAMENTE +1 tentativa,
+ * sob teto agregado explícito e envelope de compute local, materializando um sucessor
+ * `proposed`. Toda a regra (saldo esgotado, plano corrigido, append-only, anti-loop,
+ * idempotência) vive na RPC `authorize_work_resume`; a CLI só encaminha a decisão.
+ * NÃO aprova nem executa — a aprovação continua sendo ato humano (`anima work approve`).
+ */
+export async function runWorkAuthorizeResume(capability: () => Promise<AuthorizeResumeResult>): Promise<CommandResult> {
+  const r = await capability();
+  return r.ok ? {exitCode:EXIT.OK,payload:{...r,kind:'work-authorize-resume'}}
     : {exitCode:r.rejected ? EXIT.REJECTED : EXIT.ERROR,payload:{ok:false,kind:'error',code:r.code,error:r.message}};
 }
 

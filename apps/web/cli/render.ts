@@ -133,5 +133,15 @@ export function renderHuman(payload: CliPayload): string {
       ].join('\n');
     case 'work-replan':
       return `Sucessor: ${payload.successorWorkItemId}\nLineage: ${payload.lineageId}\nReplan: ${payload.replanId}${payload.replayed ? ' (replay)' : ''}\nBudget transferido: ${payload.allocatedAttempts}\nEstratégia: ${payload.strategy.map(s=>`${s.kind}: ${s.symbols.join(', ')}`).join(' | ')}\nAprovação humana permanece separada.`;
+
+    case 'work-authorize-resume':
+      return [
+        `Autoridade humana de retomada registrada${payload.replayed ? ' (replay idempotente)' : ''}.`,
+        `Concessão: ${payload.authorizationId}`,
+        `Sucessor (proposed): ${payload.successorWorkItemId}`,
+        `Lineage: ${payload.lineageId}`,
+        `Orçamento: consumido ${payload.previousConsumed} ${DOT} +${payload.additionalAttempts} ${DOT} teto agregado ${payload.aggregateCeiling} (consumo anterior preservado)`,
+        `Próximo passo: anima work show ${payload.successorWorkItemId} ${DOT} depois anima work approve ${payload.successorWorkItemId}. Nova falha volta ao humano.`,
+      ].join('\n');
   }
 }
