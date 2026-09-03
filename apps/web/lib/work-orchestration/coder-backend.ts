@@ -38,6 +38,7 @@ export type HostValidationFeedback =
     };
 
 export interface CoderEditRequest {
+  readonly onTranscript?: (transcript: import('@anima/core').CoderTranscript) => void;
   readonly objective: string;
   readonly includedScope: readonly string[];
   readonly excludedScope: readonly string[];

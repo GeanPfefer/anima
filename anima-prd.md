@@ -1,4 +1,12 @@
 # Anima — Product Requirements Document
+> Coder local: transcript redigido READ→EDIT→application→repair agora segue a
+> evidência host existente, sem relaxar matching nem executar PIN-02. Hashes,
+> contagens e referências distinguem stale/invalid/ambiguous/normalized/applied.
+> [Contrato, provas e limites](docs/registros/2026-09-02-transcript-coder-local.md).
+> Investigação READ→EDIT: primeira edição do replan introduziu TS1128; o repair
+> recusou before ausente com hash válido. CRLF/LF isolado não explica a falha.
+> Transcript literal não preservado: causa textual exata ainda não demonstrável;
+> nenhuma nova execução. [Evidência](docs/registros/2026-09-02-investigacao-read-edit-replan.md).
 > Retomada 2026-09-02 (eventos UTC de 2026-09-03): Plano 007 implementado em
 > `4b5c500`/`ae6d6d9`. Replan real `7b132de5` aprovado e executado, agora **failed**,
 > orçamento 1/1 esgotado; predecessor `5b8e371d` continua failed, 2/3, retryable:false.

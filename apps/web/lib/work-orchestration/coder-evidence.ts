@@ -75,6 +75,7 @@ export async function persistHostObservedCoderEvidence(
         model: observation.model,
       } : {}),
       ...(observation.modelSelection !== undefined ? { modelSelection: observation.modelSelection } : {}),
+      ...(observation.transcripts ? { transcripts: observation.transcripts } : {}),
       observedAt,
     });
 
@@ -108,6 +109,7 @@ export async function persistHostObservedCoderEvidence(
 
   const finalTurn = validated.at(-1)!;
 
+  const transcripts = validated.flatMap(turn => turn.transcripts ?? []);
   const built = buildHostObservedCoderEvidence({
     workItemId: correlation.workItemId,
     attemptId: correlation.attemptId,
@@ -115,6 +117,7 @@ export async function persistHostObservedCoderEvidence(
     backendId,
     durationMs,
     outcome: finalTurn.outcome,
+    ...(transcripts.length ? { transcripts } : {}),
     ...(placement !== undefined ? { placement, nodeId, model } : {}),
     ...(finalTurn.modelSelection !== undefined ? { modelSelection: finalTurn.modelSelection } : {}),
     observedAt,

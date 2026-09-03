@@ -61,3 +61,5 @@ export * from './resource-observation';
 export * from './resource-classification';
 export * from './resource-history';
 export * from './resource-advisory';
+
+export * from './coder-transcript';

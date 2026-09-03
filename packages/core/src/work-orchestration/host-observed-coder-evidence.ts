@@ -1,3 +1,4 @@
+import { validCoderTranscripts, type CoderTranscript } from './coder-transcript';
 import { containsSensitiveData } from './execution-attempt';
 import type { CoderModelSelectionEvidenceV1 } from './coder-model-selection';
 import type { ProposalVersion, WorkEvent, WorkItemId } from './types';
@@ -53,6 +54,7 @@ export interface HostObservedCoderEvidenceV1 {
   readonly model?: string;
   /** Seleção governada de modelo (downgrade observável) quando o preferido não coube. */
   readonly modelSelection?: CoderModelSelectionEvidenceV1;
+  readonly transcripts?: readonly CoderTranscript[];
   readonly observedAt: string;
 }
 
@@ -67,6 +69,7 @@ export interface ObservedCoderInput {
   readonly nodeId?: string | null;
   readonly model?: string;
   readonly modelSelection?: CoderModelSelectionEvidenceV1;
+  readonly transcripts?: readonly CoderTranscript[];
 }
 
 export interface BuildHostObservedCoderEvidenceInput {
@@ -80,6 +83,7 @@ export interface BuildHostObservedCoderEvidenceInput {
   readonly nodeId?: string | null;
   readonly model?: string;
   readonly modelSelection?: CoderModelSelectionEvidenceV1;
+  readonly transcripts?: readonly CoderTranscript[];
   readonly observedAt: string;
 }
 
@@ -145,6 +149,7 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
   if (input.modelSelection !== undefined && !isValidModelSelection(input.modelSelection)) {
     return fail('invalid_model_selection', 'A evidência de seleção de modelo está malformada.');
   }
+  if (input.transcripts !== undefined && !validCoderTranscripts(input.transcripts)) return fail('invalid_correlation', 'Invalid coder transcript');
   return {
     ok: true,
     value: {
@@ -157,6 +162,7 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
       outcome: input.outcome,
       ...(hasPlacementIdentity ? { placement: input.placement!, nodeId: input.nodeId!, model: input.model! } : {}),
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+      ...(input.transcripts !== undefined ? { transcripts: input.transcripts } : {}),
       observedAt: input.observedAt,
     },
   };
@@ -203,6 +209,7 @@ export function parseHostObservedCoderEvidence(value: Json | undefined): HostObs
       const selection = parseModelSelection(root.modelSelection);
       return selection ? { modelSelection: selection } : {};
     })(),
+    ...(root.transcripts !== undefined ? { transcripts: root.transcripts as unknown as readonly CoderTranscript[] } : {}),
     observedAt: root.observedAt as string,
   });
   return built.ok ? built.value : null;

@@ -67,6 +67,25 @@ process.exit(1);
 }
 
 let counter = 0;
+test('transcript survives backend failure through the host observation channel', async () => {
+  const ctx = await makeNpmRepo();
+  const observations: ObservedCoderInput[] = [];
+  try {
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      onCoderObserved: observation => { observations.push(observation); },
+      backend: { id: 'fixture', edit: async req => {
+        req.onTranscript?.({ schemaVersion: 1, call: 0, previousCall: null,
+          gateFingerprint: null, diffFingerprint: null, termination: 'ollama_ambiguous_replacement', truncated: false, entries: [] });
+        throw new Error('fixture failure');
+      } },
+    });
+    const signals = await collect(adapter, request(), new AbortController().signal);
+    expect(signals.at(-1)?.kind).toBe('error');
+    expect(observations).toHaveLength(1);
+    expect(observations[0]).toMatchObject({ outcome: 'failed', transcripts: [{ termination: 'ollama_ambiguous_replacement' }] });
+  } finally { await ctx.cleanup(); }
+});
+
 const request = (overrides: Partial<WorkExecutorRequest> = {}): WorkExecutorRequest => ({
   attemptId: `att-${Date.now()}-${counter++}`,
   workItemId: 'item-1',

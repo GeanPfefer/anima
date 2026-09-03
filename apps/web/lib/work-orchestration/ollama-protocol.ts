@@ -582,6 +582,14 @@ const countOccurrences = (haystack: string, needle: string): { count: number; fi
   return { count, first, firstEnd };
 };
 
+/** Diagnostic only: uses precisely the production matcher, never applies a patch. */
+export function anchorMatchEvidence(original: string, before: string): { rawMatchCount: number; matchCount: number } {
+  return {
+    rawMatchCount: before.length ? original.split(before).length - 1 : 0,
+    matchCount: before.length ? countOccurrences(original, before).count : 0,
+  };
+}
+
 /** Reencoda todas as quebras de linha de `value` para o EOL predominante do
  * arquivo (`\r\n` se o arquivo é CRLF, senão `\n`). Mantém o texto inserido
  * coerente com o arquivo e evita injetar LF solto num arquivo CRLF. */

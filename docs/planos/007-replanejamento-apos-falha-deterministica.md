@@ -131,3 +131,20 @@ de plano semanticamente correto nem evidência isolada de insuficiência do mode
 Próxima barreira: revisar o diagnóstico contra o checkpoint e investigar a âncora
 de edição; nova execução/budget dependem de nova decisão humana, sem cadeia automática.
 Ver [reconciliação final](../registros/2026-09-02-reconciliacao-final-replan.md).
+
+### Investigação READ → EDIT após publicação de 154089f
+
+Primeira edição do replan introduziu fechamento extra e TS1128; erro de âncora
+ocorreu no repair interno. Hash passou; CRLF/LF isolado não explica zero ocorrências.
+Faltam before literal e transcript de leituras, impedindo distinguir invenção,
+reuso de texto antigo e outras divergências. Diagnóstico factual do codec corrigido
+somente no repositório; event log intacto. Nenhuma nova execução enquanto essa
+lacuna permanecer. [Investigação](../registros/2026-09-02-investigacao-read-edit-replan.md).
+
+### Observabilidade futura implementada sob mandato separado
+
+Transcript redigido de produção passa a integrar a evidência host do coder:
+READ/hash/linhas → EDIT/fingerprint/contagem → aplicação; reparo ligado à chamada
+anterior e gate/diff. Sem mudança de matching, budget, estado ou execução real.
+Não recupera o before perdido da attempt histórica. Persistência pós-volta ainda
+não cobre crash abrupto. [Contrato e provas](../registros/2026-09-02-transcript-coder-local.md).

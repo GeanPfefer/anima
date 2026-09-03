@@ -1,3 +1,4 @@
+import { OllamaTranscript } from './ollama-transcript';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import {
   applyExperimentalAnchorOperations,
@@ -147,6 +148,16 @@ export class OllamaCoderBackend implements CoderBackend {
   }
 
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
+    const transcript = new OllamaTranscript(request.hostValidationFeedback);
+    try { return await this.editWithTranscript(request, workspace, signal, transcript); }
+    catch (error) { transcript.failed(error); throw error; }
+    finally {
+      // Evidence failures must never change the editing outcome.
+      try { request.onTranscript?.(transcript.value()); } catch { /* advisory */ }
+    }
+  }
+
+  private async editWithTranscript(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal, transcript: OllamaTranscript): Promise<CoderEditResult> {
     const scope = request.includedScope.map(path => path.replace(/\\/g, '/'));
     const allowed = new Set(scope);
 
@@ -253,16 +264,21 @@ export class OllamaCoderBackend implements CoderBackend {
         // Se replace_anchor aparecer sem opt-in, parseEditOperations o recusa
         // fail-closed como operação desconhecida.
         const operations = parseEditOperations(rawOperations, allowed);
-        const changes = applyEditOperations(operations, contentOf);
+        const steps = operations.map(op => transcript.edit(op, contentOf(op.path), round));
+        let changes;
+        try { changes = applyEditOperations(operations, contentOf); }
+        catch (error) { transcript.application(steps, 'batch_failed'); throw error; }
         // Validação integral contra o snapshot já ocorreu (applyEditOperations).
         // Aqui só escrevemos o lote (escreve-ou-lança, nunca sucesso parcial). A
         // restauração ao estado-base em caso de falha é da worktree (autoridade
         // única, via WorktreeExecutorAdapter → GitWorktree.restoreToBase).
-        const touched = await writeChangeSet(
+        let touched;
+        try { touched = await writeChangeSet(
           changes,
           { writeFile: (path, content) => workspace.writeFile(path, content) },
           signal,
-        );
+        ); } catch (error) { transcript.application(steps, 'write_failed'); throw error; }
+        transcript.application(steps, 'applied');
         return {
           summary: `Modelo Ollama ${this.options.model} aplicou ${touched.length} edição(ões) estruturada(s) por protocolo limitado, para revisão.`,
           touchedResources: touched,
@@ -287,6 +303,7 @@ export class OllamaCoderBackend implements CoderBackend {
         }
         servedFingerprints.add(fingerprint);
         uniqueServed.push(item);
+        transcript.read(item, round);
         uniqueServedReads += 1;
       }
 

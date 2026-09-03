@@ -240,6 +240,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         // continua sendo uma nova observacao de execucao do backend, embora permaneça
         // dentro do mesmo attemptId/worktree.
         const coderStartedAt = Date.now();
+        let transcript: import('@anima/core').CoderTranscript | undefined;
         const observeCoder = (threw: boolean): void => {
           const outcome: HostObservedCoderOutcome =
             signal.aborted ? 'cancelled' : threw ? 'failed' : 'succeeded';
@@ -247,6 +248,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             backendId: this.options.backend.id,
             durationMs: Date.now() - coderStartedAt,
             outcome,
+            ...(transcript ? { transcripts: [transcript] } : {}),
             ...(this.options.backend.observation ?? {}),
           });
         };
@@ -255,6 +257,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           editResult = await this.options.backend.edit(
             {
               objective: request.objective,
+              onTranscript: value => { transcript = value; },
               includedScope: request.includedScope,
               excludedScope: request.excludedScope,
               ...(request.carriedContext

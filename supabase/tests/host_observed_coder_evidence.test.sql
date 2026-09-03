@@ -10,7 +10,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 \ir helpers/routing.inc
-SELECT plan(19);
+SELECT plan(20);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('c8000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','hce@test.invalid','',now(),'{}','{}',now(),now()),
@@ -34,7 +34,7 @@ CREATE FUNCTION pg_temp.hce(p_item uuid, p_attempt uuid, p_duration integer DEFA
   p_outcome text DEFAULT 'succeeded', p_at text DEFAULT '2026-08-17T10:00:00Z', p_backend text DEFAULT 'ollama-coder')
 RETURNS jsonb LANGUAGE sql AS $$
   SELECT jsonb_build_object('schemaVersion',1,'workItemId',p_item,'attemptId',p_attempt,'approvedProposalVersion',1,
-    'backendId',p_backend,'durationMs',p_duration,'outcome',p_outcome,'observedAt',p_at);
+    'backendId',p_backend,'durationMs',p_duration,'outcome',p_outcome,'observedAt',p_at,'transcripts','[{"schemaVersion":1,"call":0,"previousCall":null,"gateFingerprint":null,"diffFingerprint":null,"termination":"ollama_ambiguous_replacement","truncated":false,"entries":[{"step":1,"round":0,"phase":"read","path":"src/a.ts","operation":"read","operationStep":null,"readRefs":[],"anchorReadRefs":[],"readHash":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","expectedHash":null,"fingerprint":"2367956d2d282920bf34b21e806edd81ab4db0a25cc75f370f4861dd39a5292e","normalizedFingerprint":"2367956d2d282920bf34b21e806edd81ab4db0a25cc75f370f4861dd39a5292e","length":8,"structure":"xx xxxxx","lines":[1],"clipped":false,"rawMatchCount":null,"matchCount":null,"result":"served"},{"step":2,"round":1,"phase":"edit","path":"src/a.ts","operation":"replace_exact","operationStep":null,"readRefs":[1],"anchorReadRefs":[],"readHash":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","expectedHash":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","fingerprint":"5ad38304b535c2987dbd24657c1a11b884984ff600d9f389deb0d4e634fee792","normalizedFingerprint":"5ad38304b535c2987dbd24657c1a11b884984ff600d9f389deb0d4e634fee792","length":6,"structure":"xxxxxx","lines":[],"clipped":false,"rawMatchCount":0,"matchCount":0,"result":"invalid_anchor"},{"step":3,"round":1,"phase":"application","path":"src/a.ts","operation":"replace_exact","operationStep":2,"readRefs":[1],"anchorReadRefs":[],"readHash":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","expectedHash":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","fingerprint":"5ad38304b535c2987dbd24657c1a11b884984ff600d9f389deb0d4e634fee792","normalizedFingerprint":"5ad38304b535c2987dbd24657c1a11b884984ff600d9f389deb0d4e634fee792","length":6,"structure":"xxxxxx","lines":[],"clipped":false,"rawMatchCount":0,"matchCount":0,"result":"batch_failed"}]}]'::jsonb);
 $$;
 
 CREATE FUNCTION pg_temp.start_attempt(p_conv uuid, p_target jsonb, p_claim uuid, p_attempt uuid)
@@ -150,5 +150,6 @@ SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id IN ((SELEC
   AND event_type IN ('result_accepted','integration_decided')),0::bigint,
   'a evidência do coder não aceita resultado nem decide integração');
 
+SELECT is((SELECT payload#>>'{data,evidence,transcripts,0,entries,1,result}' FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_coder_evidence_recorded'),'invalid_anchor','RPC existente preserva transcript READ EDIT e falha correlacionada');
 SELECT * FROM finish();
 ROLLBACK;
