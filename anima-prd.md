@@ -1,4 +1,12 @@
 # Anima — Product Requirements Document
+> Recovery com saldo esgotado: `7b132de5` está BLOCKED/attempt_budget_exhausted,
+> retryable:true. Envelope correction→replan consumiu 3/3; árvore PIN-02 soma 5
+> attempts históricas. addf467 não renova autoridade. Human Recovery Authority
+> (`authorize_work_resume`) IMPLEMENTADA e provada (pgTAP 32/32, codec 48, service 12,
+> CLI 46): concede +1 append-only sob teto agregado e compute local, sucessor `proposed`,
+> anti-loop. Caso real do PIN-02 aguarda decisão humana + infra (fronteira preservada).
+> [Análise](docs/registros/2026-09-02-recovery-budget-transferido-esgotado.md) ·
+> [Implementação](docs/registros/2026-09-03-human-recovery-authority-implementada.md).
 > Coder local: transcript redigido READ→EDIT→application→repair agora segue a
 > evidência host existente, sem relaxar matching nem executar PIN-02. Hashes,
 > contagens e referências distinguem stale/invalid/ambiguous/normalized/applied.

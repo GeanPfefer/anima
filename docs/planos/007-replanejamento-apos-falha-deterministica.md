@@ -148,3 +148,16 @@ READ/hash/linhas → EDIT/fingerprint/contagem → aplicação; reparo ligado à
 anterior e gate/diff. Sem mudança de matching, budget, estado ou execução real.
 Não recupera o before perdido da attempt histórica. Persistência pós-volta ainda
 não cobre crash abrupto. [Contrato e provas](../registros/2026-09-02-transcript-coder-local.md).
+
+### Recovery após esgotamento do saldo transferido
+
+Retryability técnica não supera budget; observabilidade nova não justifica replan nem
+concede tentativas. Retry humano com saldo e política automática são vias distintas: a
+falha de âncora atual sequer é classificada pela política automática. A concessão
+append-only limitada saiu do desenho e virou a Human Recovery Authority
+(`authorize_work_resume`): +1 tentativa sob teto agregado explícito (consumo+1), plano
+corrigido obrigatório, compute local, sucessor `proposed`, append-only e anti-loop —
+provada por fixtures/rollback (pgTAP 32/32) + testes TS/CLI. A execução do caso real do
+PIN-02 permanece fronteira humana (nenhuma autorização real fabricada aqui).
+[Decisão](../registros/2026-09-02-recovery-budget-transferido-esgotado.md) ·
+[Implementação e provas](../registros/2026-09-03-human-recovery-authority-implementada.md).
