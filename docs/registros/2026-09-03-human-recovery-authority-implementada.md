@@ -67,27 +67,41 @@ MESMO application service da web (`authorizeResume`), sem regra nova na CLI:
 CLI → application service → codec/contratos → RPC persistida. Sem `--plan`, replaya a
 concessão persistida. NÃO aprova nem executa.
 
-## Caso real (PIN-02) — fronteira HUMANA + infra, NÃO atravessada
+## Caso real (PIN-02) — RATIFICADO pelo humano e executado até a barreira do Governor
 
-A cadeia real segue exatamente no estado esperado pela RPC (conferido read-only):
-`7b132de5` (replan) `failed`/v1, `max=used=1`; raiz `5b8e371d` (correction) `failed`/v1,
-`2/3`; ledger `work_replans` pred=`5b8e371d` used=2 max=3 alloc=1; falha
-`07664942` `retryable:true`, attempt `ab7e7b6f`; evidência host base `6ff4d43c…`/commit
-`967008e5…`, `observedChangedFilesSinceStart=["packages/core/src/project-intake.test.ts"]`;
-agregado da árvore correction→replan = 3, teto = 4; `excluded_scope` contém
-`packages/core/src/project-intake.ts`; modelo `qwen3-coder:latest`; sem claim/execução ativa;
-tabela de concessões vazia.
+Numa segunda mensagem o usuário RATIFICOU explicitamente esta cadeia específica: +1
+tentativa, teto agregado 4, compute local, `qwen3-coder:latest`→`qwen2.5-coder:14b`, sem
+pago, sem 2ª extensão, parar em `review`. Docker/Supabase já de volta. Executei pela CLI
+oficial e pelos mecanismos padrão do runtime, tudo sob a identidade residente (Bearer/RLS,
+sem service_role):
 
-**Não fabriquei autorização humana real.** Materializar a concessão real é uma mutação
-PERSISTENTE que cria um sucessor real e reabre uma cadeia esgotada — decisão humana. Além
-disso, o Docker Desktop caiu no meio da sessão (npipe indisponível), bloqueando tanto a
-concessão quanto a prova viva (host local + Ollama). A capability está PROVADA por fixtures
-com rollback; o único passo restante é a decisão humana + infra.
+1. **Concessão real materializada** — `anima work authorize-resume 7b132de5 --plan auth.json`
+   → authorization `96358464`, sucessor `2b860033`, `previousConsumed=3`, `additionalAttempts=1`,
+   `aggregateCeiling=4`, `replayed=false`. Tabela append-only: `previous_authorized=3`,
+   `previous_consumed=3`, `additional_attempts=1`, `aggregate_ceiling=4`, `envelope_root=5b8e371d`.
+   Sucessor `proposed`/v1, `max_attempts=1`, `human_resume` embutido, `resume_from_checkpoint`
+   base `6ff4d43c…`, escopo mínimo `project-intake.test.ts`, impl `project-intake.ts` excluída.
+   Predecessor `7b132de5` intacto `failed`; consumo histórico 3/3 preservado.
+2. **Aprovação** — `anima work approve 2b860033` → `approved`.
+3. **Classificação** — `ensurePlannedProjectClassification` → `work_intelligence_classified`
+   (determinístico, sem LLM): o sucessor humano-retomado integra ao pipeline autônomo como
+   qualquer sucessor de recovery. Elegível na `autonomous_work_queue`.
+4. **Pedido escopado** — `request_autonomous_execution(2b860033, v1)` → `work_approved` com
+   `authority=autonomous_execution_request` (event `a92015f1`). Escopa o host-turn a SÓ este item.
+5. **Host bounded** (in-process, `maxTurnsPerCycle=1`/`maxCycles=1`/`maxIterations=2`) com o
+   envelope de fallback governado (`ANIMA_CODER_VRAM_GB=16` + allowlist qwen3-coder:latest(18)/
+   qwen2.5-coder:14b(10)). Ollama estava down; iniciei `ollama serve` (binário e modelos já em
+   disco, sem download). **Resultado: o Resource Governor NEGOU admissão** (`resource_pressure`,
+   RAM livre 16.5% < reserva 25%) nas 2 voltas → `stopReason=max_iterations`, `itemsTouched=0`.
 
-Para atravessar (quando o humano ratificar e o Docker voltar):
-`anima work authorize-resume 7b132de5-8ca1-436e-9d23-e4317d59aaea --plan <auth.json>`
-com `aggregateCeiling:4`, `compute.preferred:qwen3-coder:latest`,
-`diagnosis.apiPath:packages/core/src/project-intake.ts`. Efeito: concessão append-only +
-sucessor `proposed` (+1, teto 4), predecessor permanece `failed`, consumo 3 preservado.
-Depois: `anima work approve <sucessor>` e rodar o host local (fallback governado
-`qwen2.5-coder:14b`) para UMA tentativa. Parar em `review`.
+**A ÚNICA tentativa autorizada foi PRESERVADA** (zero `execution_started` no sucessor; zero
+claim). A ratificação era condicional a "se o Resource Governor permitir" — ele não permitiu,
+então não forcei nem burlei o gate (substrato ratificado) nem matei apps do usuário. Barreira
+REAL e segura: pressão de RAM da máquina (apps do usuário: Opera/Spotify/ChatGPT/Defender).
+
+**Passo restante (idempotente, tentativa intacta):** liberar ~2 GB de RAM (fechar alguns apps
+para free ≥ 25%) e re-rodar o mesmo host bounded — o sucessor `2b860033` segue `approved`+
+classificado+`autonomous_execution_request` pendente. Esperado: coder cai para `qwen2.5-coder:14b`,
+edição no worktree isolado, gates + escopo + Verifier v2 → `review` (VERIFIED esperado) OU falha
+determinística. Se falhar, preservar o terminal e a lineage e voltar ao humano (anti-loop: sem
+nova recovery automática).
