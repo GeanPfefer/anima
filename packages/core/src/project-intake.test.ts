@@ -28,6 +28,27 @@ describe('validateProjectIdea (Project Intake V0)', () => {
     expect(validateProjectIdea(baseIdea)).toBeNull();
   });
 
+  test('round-trip serializeProjectIdeaV0 → deserializeProjectIdeaV0', () => {
+    const serialized = serializeProjectIdeaV0(baseIdea);
+    const deserialized = deserializeProjectIdeaV0(serialized);
+    expect(deserialized).toEqual(baseIdea);
+  });
+
+  test('shape ausente/malformado fail-closed', () => {
+    const malformedIdea = { ...baseIdea, shape: null };
+    expect(validateProjectIdea(malformedIdea)).not.toBeNull();
+  });
+
+  test('versão desconhecida fail-closed', () => {
+    const unknownVersionIdea = { ...baseIdea, schemaVersion: 'unknown' };
+    expect(validateProjectIdea(unknownVersionIdea)).not.toBeNull();
+  });
+
+  test('campo extra fail-closed', () => {
+    const extraFieldIdea = { ...baseIdea, extraField: 'extra' };
+    expect(validateProjectIdea(extraFieldIdea)).not.toBeNull();
+  });
+});
   test('uma ideia estruturada é válida', () => {
     const idea: ProjectIdeaV0 = {
       ...baseIdea,
