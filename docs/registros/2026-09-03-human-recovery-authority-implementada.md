@@ -67,7 +67,7 @@ MESMO application service da web (`authorizeResume`), sem regra nova na CLI:
 CLI → application service → codec/contratos → RPC persistida. Sem `--plan`, replaya a
 concessão persistida. NÃO aprova nem executa.
 
-## Caso real (PIN-02) — RATIFICADO pelo humano e executado até a barreira do Governor
+## Caso real (PIN-02) — RATIFICADO, tentativa única consumida e falhou; anti-loop segurou
 
 Numa segunda mensagem o usuário RATIFICOU explicitamente esta cadeia específica: +1
 tentativa, teto agregado 4, compute local, `qwen3-coder:latest`→`qwen2.5-coder:14b`, sem
@@ -88,20 +88,31 @@ sem service_role):
    qualquer sucessor de recovery. Elegível na `autonomous_work_queue`.
 4. **Pedido escopado** — `request_autonomous_execution(2b860033, v1)` → `work_approved` com
    `authority=autonomous_execution_request` (event `a92015f1`). Escopa o host-turn a SÓ este item.
-5. **Host bounded** (in-process, `maxTurnsPerCycle=1`/`maxCycles=1`/`maxIterations=2`) com o
-   envelope de fallback governado (`ANIMA_CODER_VRAM_GB=16` + allowlist qwen3-coder:latest(18)/
-   qwen2.5-coder:14b(10)). Ollama estava down; iniciei `ollama serve` (binário e modelos já em
-   disco, sem download). **Resultado: o Resource Governor NEGOU admissão** (`resource_pressure`,
-   RAM livre 16.5% < reserva 25%) nas 2 voltas → `stopReason=max_iterations`, `itemsTouched=0`.
+5. **Host bounded, 1ª volta (RAM 16.5%): Governor NEGOU** (`resource_pressure` < reserva 25%),
+   `itemsTouched=0`, tentativa PRESERVADA. Não burlei o gate nem matei apps do usuário; a
+   ratificação era condicional a "se o Governor permitir".
+6. **Host bounded, 2ª volta (RAM 36.6% ≥ 25%): Governor PERMITIU** — a tentativa única rodou.
+   Envelope de fallback governado (`ANIMA_CODER_VRAM_GB=16` + allowlist qwen3-coder:latest(18)/
+   qwen2.5-coder:14b(10)); Ollama subido via `ollama serve` (binário/modelos já em disco).
+   Attempt `7802904a` (~26s): routing → claim → worktree isolado `anima-work/7802904a` →
+   coder. **Modelo: `qwen2.5-coder:14b` (fallback governado OBSERVÁVEL)** —
+   `CoderModelSelectionEvidenceV1.modelSelection = {selected: qwen2.5-coder:14b, preferred:
+   qwen3-coder:latest, reason: preferred_exceeds_capacity, capacityGb: 16}`.
 
-**A ÚNICA tentativa autorizada foi PRESERVADA** (zero `execution_started` no sucessor; zero
-claim). A ratificação era condicional a "se o Resource Governor permitir" — ele não permitiu,
-então não forcei nem burlei o gate (substrato ratificado) nem matei apps do usuário. Barreira
-REAL e segura: pressão de RAM da máquina (apps do usuário: Opera/Spotify/ChatGPT/Defender).
+**Desfecho: a tentativa FALHOU determinísticamente ANTES dos gates** —
+`execution_failed [ollama_ambiguous_replacement]` ("before" ocorre 2× em
+`packages/core/src/project-intake.test.ts`; esperado exatamente 1), `retryable:true`. O coder
+do 14b produziu uma âncora de edição ambígua; o `replace_exact` recusou fail-closed (sem fuzzy);
+nenhum gate/Verifier alcançado. Mesma CLASSE de falha (âncora) do histórico — a barreira aqui é
+a robustez de edição do 14b, não a lógica da capability.
 
-**Passo restante (idempotente, tentativa intacta):** liberar ~2 GB de RAM (fechar alguns apps
-para free ≥ 25%) e re-rodar o mesmo host bounded — o sucessor `2b860033` segue `approved`+
-classificado+`autonomous_execution_request` pendente. Esperado: coder cai para `qwen2.5-coder:14b`,
-edição no worktree isolado, gates + escopo + Verifier v2 → `review` (VERIFIED esperado) OU falha
-determinística. Se falhar, preservar o terminal e a lineage e voltar ao humano (anti-loop: sem
-nova recovery automática).
+**Anti-loop verificado (parte da prova):** sucessor `2b860033` terminou `failed`, `max=used=1`
+(budget esgotado), 0 claim aberto, **0 lineage e 0 grant derivados dele** — nenhuma recovery
+automática. Agregado da árvore correction→replan→human-resume = **4/4** (exatamente o teto).
+Predecessor `7b132de5` intacto `failed`; PIN-02 original `8e9fd82b` intacto `changes_requested`;
+grant `96358464` append-only único. Consumo histórico jamais reescrito.
+
+**Parei na fronteira humana:** não alterei `max_attempts`, não emiti nova Human Recovery
+Authority, não criei sucessor adicional, não fiz replan/recovery para contornar o anti-loop.
+A decisão volta ao humano. Se o humano quiser nova tentativa, é uma NOVA autoridade explícita
+(outra concessão), não automática — e o gap conhecido é a robustez de edição do coder local.
