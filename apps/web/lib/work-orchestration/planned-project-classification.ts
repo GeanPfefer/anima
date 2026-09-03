@@ -16,9 +16,11 @@ const supportedPlanner=(value:unknown):value is SupportedPlanner=>value==='opena
 /**
  * Recovery successors deliberately copy only `execution_spec`: planner metadata
  * is provenance, not execution authority. For those already-governed units, the
- * classifier may recover the planner only through the persisted one-to-one
- * lineage and the original item. A bare intent with `resume_from_checkpoint`
- * but no lineage remains ineligible (fail-closed).
+ * classifier may recover the planner only by walking the persisted 1:1 lineage
+ * chain (possibly several hops — e.g. correction → replan) up to an ancestor that
+ * still carries a supported planner or valid canonical provenance. A bare intent
+ * with `resume_from_checkpoint` but no lineage (orphan), or a lineage cycle,
+ * remains ineligible (fail-closed).
  */
 async function sourceForClassification(
   client:SupabaseClient<Database>,workItemId:string,intent:{planner?:unknown;execution_spec?:unknown},
@@ -32,17 +34,28 @@ async function sourceForClassification(
   const rawSpec=intent.execution_spec;
   if(typeof rawSpec!=='object'||rawSpec===null||Array.isArray(rawSpec)
     ||typeof (rawSpec as Record<string,unknown>).resume_from_checkpoint!=='object')return null;
-  const lineage=await client.from('work_recovery_lineage').select('original_work_item_id').eq('successor_work_item_id',workItemId).maybeSingle();
-  if(lineage.error||!lineage.data)return null;
-  const original=await client.from('work_items').select('intent').eq('id',lineage.data.original_work_item_id).maybeSingle();
-  if(original.error||!original.data)return null;
-  const originalIntent=original.data.intent as {planner?:unknown};
-  if(supportedPlanner(originalIntent.planner))return originalIntent.planner;
-  // Uma revisão humana pode ter trocado o planner do ORIGINAL por metadata de operador
-  // (não suportada), mas a ORIGEM CANÔNICA estável do trabalho, quando válida, continua
-  // sendo uma proveniência governada — espelha a guarda do item direto (acima) para o
-  // caminho do successor recuperado por lineage. Fail-closed se nenhuma das duas existir.
-  return readCanonicalProvenanceFromIntent(original.data.intent)!==null?'canonical_backlog_v1':null;
+  // Recovery lineage pode encadear MÚLTIPLOS hops (ex.: correção humana → replan): sobe
+  // pela linhagem 1:1 até encontrar, num ancestral, um planner suportado OU proveniência
+  // canônica válida (contrato puro). Uma revisão humana pode ter trocado o planner do
+  // ancestral por metadata de operador (não suportada) sem apagar a ORIGEM CANÔNICA
+  // estável do trabalho. Guarda contra ciclos (visitados) e órfãos (sem pai ⇒ fail-closed),
+  // com teto de profundidade. NUNCA altera o intent aprovado do candidato.
+  const visited=new Set<string>([workItemId]);
+  let currentId=workItemId;
+  for(let hop=0;hop<16;hop++){
+    const lineage=await client.from('work_recovery_lineage').select('original_work_item_id').eq('successor_work_item_id',currentId).maybeSingle();
+    if(lineage.error||!lineage.data)return null;
+    const originalId=lineage.data.original_work_item_id;
+    if(visited.has(originalId))return null;
+    visited.add(originalId);
+    const original=await client.from('work_items').select('intent').eq('id',originalId).maybeSingle();
+    if(original.error||!original.data)return null;
+    const originalIntent=original.data.intent as {planner?:unknown};
+    if(supportedPlanner(originalIntent.planner))return originalIntent.planner;
+    if(readCanonicalProvenanceFromIntent(original.data.intent)!==null)return 'canonical_backlog_v1';
+    currentId=originalId;
+  }
+  return null;
 }
 
 export async function ensurePlannedProjectClassification(client:SupabaseClient<Database>,workItemId:string,expectedProposalVersion:number,now=()=>new Date()):Promise<PreparationResult>{
@@ -57,7 +70,10 @@ export async function ensurePlannedProjectClassification(client:SupabaseClient<D
     &&classificationSource!==null
     &&spec?.target?.kind==='project'&&spec.target.reference==='anima'
     &&Array.isArray(spec.permissions)&&spec.permissions.length===2&&spec.permissions[0]==='workspace_read'&&spec.permissions[1]==='workspace_write_isolated'
-    &&Array.isArray(spec.validation_criteria)&&spec.validation_criteria.length>0&&spec.limits?.max_attempts===3&&spec.limits.max_duration_minutes===30;
+    // Budget: o planner fresco emite 3 tentativas, mas um successor de replan (Plano 007)
+    // TRANSFERE o saldo não consumido (1–2). Aceitar o intervalo [1,3] preserva a política
+    // sem forçar o candidato a resetar o budget só para classificar (o Plano 007 proíbe isso).
+    &&Array.isArray(spec.validation_criteria)&&spec.validation_criteria.length>0&&typeof spec.limits?.max_attempts==='number'&&spec.limits.max_attempts>=1&&spec.limits.max_attempts<=3&&spec.limits.max_duration_minutes===30;
   if(!planned)return failure('classification_policy_not_applicable',`A preparação não se aplica ao envelope persistido (${item.state}, v${item.proposal_version}, impacto ${item.impact_level}).`);
   const current=await client.rpc('current_work_intelligence_classification',{p_work_item_id:workItemId});
   if(current.error)return failure('classification_read_failed',current.error.message,current.error.code);
