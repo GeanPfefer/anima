@@ -285,10 +285,11 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     const objective = 'reconciliar'; // o SYSTEM expandido deixa o prompt original perto deste teto estreito
     const bigInvalid = `{"lixo":"${'x'.repeat(700)}"}`; // schema inválido e grande (eco clip=500)
     const { fetchImpl, sentBodies } = scriptedFetch([bigInvalid, editReq(sha256('linha única'))]);
-    // Cap re-calibrado ao SYSTEM atual (que ganhou a operação `insert`): o prompt
-    // original cabe no inputBudget (=cap/2), mas o payload do reparo (eco clip 500)
-    // o estoura — a invariante testada é essa, não o tamanho absoluto do prompt.
-    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, operationalContextCap: 1700 })
+    // Cap re-calibrado ao SYSTEM atual (que ganhou a instrução `in_lines`): o prompt
+    // original (~898 tokens) cabe no inputBudget (=cap/2=950), mas o payload do reparo
+    // (eco clip 500 + instrução, ~1080 tokens) o estoura — a invariante testada é essa,
+    // não o tamanho absoluto do prompt.
+    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, operationalContextCap: 1900 })
       .edit({ objective, includedScope: ['docs/a.md'], excludedScope: ['x'] }, workspace, new AbortController().signal))
       .rejects.toMatchObject({ code: 'ollama_context_budget_exceeded' });
     // A 1ª chamada (prompt original) foi enviada; o reparo foi barrado antes da 2ª.
@@ -425,4 +426,53 @@ describe('OllamaCoderBackend — protocolo limitado', () => {
     expect(allSent).not.toContain('SENTINELA_LONGE');
   });
 
+});
+
+// Recuperação BOUNDED de âncora ambígua na MESMA tentativa (sem nova recovery):
+// o host devolve as ocorrências e pede in_lines; o modelo reapresenta e converge.
+describe('OllamaCoderBackend — âncora ambígua é recuperável dentro do budget', () => {
+  const dupReq = { objective: 'editar bloco B', includedScope: ['docs/a.md'], excludedScope: [] };
+  // 'const x = compute(a);' ocorre nas linhas 2 e 4 → âncora globalmente ambígua.
+  const dupDoc = ['# head', '  const x = compute(a);', '  mid', '  const x = compute(a);', '  tail'].join('\n');
+  const dupSha = sha256(dupDoc);
+  const readDup = '{"action":"read","reads":[{"path":"docs/a.md","lineRange":[1,5],"maxLines":10}]}';
+  const editAmbiguous = JSON.stringify({ action: 'edit', operations: [{ kind: 'replace_exact', path: 'docs/a.md', expected_file_sha256: dupSha, before: '  const x = compute(a);', after: '  const x = compute(b);' }] });
+  const editScoped = JSON.stringify({ action: 'edit', operations: [{ kind: 'replace_exact', path: 'docs/a.md', expected_file_sha256: dupSha, before: '  const x = compute(a);', after: '  const x = compute(b);', in_lines: [4, 4] }] });
+
+  test('ambíguo → host devolve ocorrências e pede in_lines → o modelo reapresenta e a edição converge', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': dupDoc });
+    const { fetchImpl, sentBodies } = scriptedFetch([readDup, editAmbiguous, editScoped]);
+    const result = await new OllamaCoderBackend({ model: 'qwen2.5-coder:14b', fetchImpl }).edit(dupReq, workspace, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['docs/a.md']);
+    const out = workspace.files.get('docs/a.md')!;
+    // Só a ocorrência da linha 4 mudou; a da linha 2 permanece.
+    expect(out.split('const x = compute(b);').length - 1).toBe(1);
+    expect(out.split('const x = compute(a);').length - 1).toBe(1);
+    // O feedback do host (ambiguidade + in_lines) chegou ao modelo antes da 2ª edição.
+    const feedback = sentBodies[2] ?? '';
+    expect(feedback).toContain('âncora ambígua');
+    expect(feedback).toContain('in_lines');
+    expect(feedback).toContain('linha 2');
+    expect(feedback).toContain('linha 4');
+  });
+
+  test('nenhuma mutação parcial no turno ambíguo (o arquivo fica intacto até a edição unívoca)', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': dupDoc });
+    // read, ambíguo, ambíguo, ambíguo — nunca resolve.
+    const { fetchImpl } = scriptedFetch([readDup, editAmbiguous, editAmbiguous, editAmbiguous, editAmbiguous]);
+    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, maxReadRounds: 5 }).edit(dupReq, workspace, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_ambiguous_replacement' });
+    // Fail-closed: o arquivo permaneceu byte a byte igual (nenhuma escrita parcial).
+    expect(workspace.files.get('docs/a.md')).toBe(dupDoc);
+  });
+
+  test('reapresentação é BOUNDED: esgotado o teto de feedbacks, a ambiguidade vira terminal', async () => {
+    const workspace = memoryWorkspace({ 'docs/a.md': dupDoc });
+    // maxReadRounds alto isola o TETO de feedbacks (2) como causa terminal, não o limite de rodadas.
+    const { fetchImpl, sentBodies } = scriptedFetch([readDup, editAmbiguous, editAmbiguous, editAmbiguous, editScoped]);
+    await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, maxReadRounds: 6 }).edit(dupReq, workspace, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_ambiguous_replacement' });
+    // Houve read + 3 tentativas de edição (2 reapresentações + a 3ª já terminal); a 4ª (editScoped) nunca é pedida.
+    expect(sentBodies.length).toBe(4);
+  });
 });

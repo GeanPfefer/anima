@@ -475,6 +475,140 @@ describe('ollama-protocol — Commit 3: edições exatas', () => {
   });
 });
 
+describe('ollama-protocol — in_lines (desambiguação determinística por intervalo lido)', () => {
+  const FILE = 'packages/core/src/project-intake.test.ts';
+  const contentOf = (files: Record<string, string>) => (p: string): string | null => (p in files ? files[p]! : null);
+  // Reprodução fiel da falha real (attempt 7802904a): um bloco de 3 linhas de
+  // setup+asserção idêntico em DOIS testes (linhas 5-7 e 13-15). O `before` de 3
+  // linhas ocorre 2×; sem desambiguador é `ollama_ambiguous_replacement`.
+  const lines = [
+    "import { validateProjectIdea, summarizeProjectIdeaIntake, draftProjectIdea } from './project-intake';", // 1
+    '',                                                          // 2
+    "describe('captura', () => {",                              // 3
+    "  test('valida', () => {",                                 // 4
+    '    const idea = draftProjectIdea(input);',                // 5  bloco A
+    '    const summary = summarizeProjectIdeaIntake(idea);',    // 6
+    "    expect(summary.status).toBe('captured');",             // 7
+    '  });',                                                    // 8
+    '});',                                                      // 9
+    '',                                                         // 10
+    "describe('estrutura', () => {",                            // 11
+    "  test('resume', () => {",                                 // 12
+    '    const idea = draftProjectIdea(input);',                // 13 bloco B (idêntico a 5-7)
+    '    const summary = summarizeProjectIdeaIntake(idea);',    // 14
+    "    expect(summary.status).toBe('captured');",             // 15
+    '  });',                                                    // 16
+    '});',                                                      // 17
+    '',                                                         // 18
+  ];
+  const src = lines.join('\n');
+  const sha = sha256(src);
+  const block = [lines[4], lines[5], lines[6]].join('\n'); // linhas 5-7 == 13-15
+  const rep = (extra: Record<string, unknown>): unknown =>
+    ({ kind: 'replace_exact', path: FILE, expected_file_sha256: sha, before: block, after: block + "\n    expect(summary.title.length).toBeGreaterThan(0);", ...extra });
+
+  test('2 ocorrências sem in_lines → recusado, com as linhas de cada ocorrência na mensagem', () => {
+    const ops = parseEditOperations([rep({})], new Set([FILE]));
+    try { applyEditOperations(ops, contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) {
+      expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement');
+      expect((e as Error).message).toContain('linha 5');
+      expect((e as Error).message).toContain('linha 13');
+      expect((e as Error).message).toContain('in_lines');
+    }
+  });
+
+  test('2 ocorrências + in_lines válido → exatamente UMA alterada (a do intervalo)', () => {
+    const opsB = parseEditOperations([rep({ in_lines: [13, 15] })], new Set([FILE]));
+    const [changeB] = applyEditOperations(opsB, contentOf({ [FILE]: src }));
+    // O bloco A (linhas 5-7) permanece intacto; só o B (13-15) ganhou a asserção nova.
+    const outB = changeB!.newContent;
+    expect(outB.split('expect(summary.title.length).toBeGreaterThan(0);').length - 1).toBe(1);
+    const idxNew = outB.indexOf('toBeGreaterThan');
+    const idxSecondBlock = outB.indexOf('estrutura');
+    expect(idxNew).toBeGreaterThan(idxSecondBlock); // a inserção ficou no bloco B, depois de 'estrutura'
+    // in_lines apontando para o bloco A edita a OUTRA ocorrência.
+    const opsA = parseEditOperations([rep({ in_lines: [5, 7] })], new Set([FILE]));
+    const [changeA] = applyEditOperations(opsA, contentOf({ [FILE]: src }));
+    const idxNewA = changeA!.newContent.indexOf('toBeGreaterThan');
+    expect(idxNewA).toBeLessThan(changeA!.newContent.indexOf('estrutura'));
+  });
+
+  test('in_lines fora do arquivo → recusado (não desambigua)', () => {
+    const ops = parseEditOperations([rep({ in_lines: [900, 950] })], new Set([FILE]));
+    try { applyEditOperations(ops, contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+  });
+
+  test('in_lines apontando para região SEM a âncora (0 no intervalo) → recusado', () => {
+    const ops = parseEditOperations([rep({ in_lines: [1, 3] })], new Set([FILE]));
+    try { applyEditOperations(ops, contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+  });
+
+  test('in_lines abrangente demais (as 2 ocorrências caem no intervalo) → continua recusado', () => {
+    const ops = parseEditOperations([rep({ in_lines: [1, 18] })], new Set([FILE]));
+    try { applyEditOperations(ops, contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+  });
+
+  test('ocorrência única + in_lines correto → sucesso (in_lines não atrapalha o caso já unívoco)', () => {
+    const uniq = 'const x = 1;\nconst y = 2;\n';
+    const ops = parseEditOperations(
+      [{ kind: 'replace_exact', path: FILE, expected_file_sha256: sha256(uniq), before: 'const y = 2;', after: 'const y = 3;', in_lines: [2, 2] }],
+      new Set([FILE]),
+    );
+    const [change] = applyEditOperations(ops, contentOf({ [FILE]: uniq }));
+    expect(change!.newContent).toBe('const x = 1;\nconst y = 3;\n');
+  });
+
+  test('CRLF: 2 ocorrências, in_lines desambigua e a saída preserva \\r\\n', () => {
+    const crlf = src.replace(/\n/g, '\r\n');
+    const opsB = parseEditOperations([{ kind: 'replace_exact', path: FILE, expected_file_sha256: sha256(crlf), before: block, after: block + "\n    expect(true).toBe(true);", in_lines: [13, 15] }], new Set([FILE]));
+    const [change] = applyEditOperations(opsB, contentOf({ [FILE]: crlf }));
+    expect(/[^\r]\n/.test(change!.newContent)).toBe(false); // nenhum LF solto
+    expect(change!.newContent.split('expect(true).toBe(true);').length - 1).toBe(1);
+  });
+
+  test('in_lines + before===after continua no_effective_edits (in_lines não afrouxa nada)', () => {
+    const ops = parseEditOperations([{ kind: 'replace_exact', path: FILE, expected_file_sha256: sha, before: block, after: block, in_lines: [13, 15] }], new Set([FILE]));
+    try { applyEditOperations(ops, contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_no_effective_edits'); }
+  });
+
+  test('in_lines + sha desatualizado continua recusado (staleness antes da desambiguação)', () => {
+    const ops = parseEditOperations([rep({ in_lines: [13, 15], expected_file_sha256: sha256('outro') })], new Set([FILE]));
+    try { applyEditOperations(ops, contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_stale_file_hash'); }
+  });
+
+  test('parse recusa in_lines malformado (não-array, tamanho, não-int, início>fim, início<1)', () => {
+    const bad: unknown[] = [
+      rep({ in_lines: [13] }),
+      rep({ in_lines: [13, 15, 20] }),
+      rep({ in_lines: ['13', '15'] }),
+      rep({ in_lines: [15, 13] }),
+      rep({ in_lines: [0, 3] }),
+      rep({ in_lines: 13 }),
+    ];
+    for (const op of bad) {
+      try { parseEditOperations([op], new Set([FILE])); throw new Error('deveria lançar'); }
+      catch (e) { expect((e as { code?: string }).code).toBe('ollama_invalid_response_schema'); }
+    }
+  });
+
+  test('insert com anchor repetido: sem in_lines recusa, com in_lines insere em exatamente uma borda', () => {
+    const anchor = lines[6]; // "    expect(summary.status).toBe('captured');" — ocorre 2× (linha 7 e 15)
+    const ambiguous = parseEditOperations([{ kind: 'insert', path: FILE, expected_file_sha256: sha, anchor, position: 'after', content: "\n    expect(true).toBe(true);" }], new Set([FILE]));
+    try { applyEditOperations(ambiguous, contentOf({ [FILE]: src })); throw new Error('deveria lançar'); }
+    catch (e) { expect((e as { code?: string }).code).toBe('ollama_ambiguous_replacement'); }
+    const scoped = parseEditOperations([{ kind: 'insert', path: FILE, expected_file_sha256: sha, anchor, position: 'after', content: '\n    // marca-bloco-B', in_lines: [15, 15] }], new Set([FILE]));
+    const [change] = applyEditOperations(scoped, contentOf({ [FILE]: src }));
+    expect(change!.newContent.split('// marca-bloco-B').length - 1).toBe(1);
+    expect(change!.newContent.indexOf('// marca-bloco-B')).toBeGreaterThan(change!.newContent.indexOf('estrutura'));
+  });
+});
+
 describe('ollama-protocol — insert (âncora exata, before/after)', () => {
   const FILE = 'docs/a.md';
   const contentOf = (files: Record<string, string>) => (p: string): string | null => (p in files ? files[p]! : null);

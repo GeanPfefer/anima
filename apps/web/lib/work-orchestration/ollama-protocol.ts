@@ -496,7 +496,12 @@ const MAX_CREATE_CHARS = 200_000;
  * export/função/caso de teste ao fim é operação real; `append` a torna inequívoca
  * sem afrouxar nada (segue exigindo escopo + sha do arquivo como lido). */
 export type EditOperation =
-  | { readonly kind: 'replace_exact'; readonly path: string; readonly expectedFileSha256: string; readonly before: string; readonly after: string }
+  // `inLines` (opcional): intervalo [início,fim] de linhas 1-based OBSERVADO num READ
+  // desta execução, que contém a ocorrência a editar. Desambigua uma âncora que se
+  // repete no arquivo SEM heurística: o host exige exatamente 1 ocorrência CUJO início
+  // caia nessas linhas (0 ou >1 dentro do intervalo continua recusado fail-closed). O
+  // sha do arquivo já garante que a numeração de linhas segue válida.
+  | { readonly kind: 'replace_exact'; readonly path: string; readonly expectedFileSha256: string; readonly before: string; readonly after: string; readonly inLines?: readonly [number, number] }
   | { readonly kind: 'create_file'; readonly path: string; readonly content: string }
   | { readonly kind: 'append'; readonly path: string; readonly expectedFileSha256: string; readonly content: string }
   // `insert` fecha o gap ergonômico PROVADO ao vivo: adicionar um caso a um bloco
@@ -506,7 +511,19 @@ export type EditOperation =
   // `content` imediatamente ANTES/DEPOIS de uma âncora ÚNICA e exata (reproduzida
   // UMA vez), sem removê-la. Segue EXATO (ocorrência única, sem fuzzy), com stale
   // hash, escopo e no-op fail-closed idênticos ao replace.
-  | { readonly kind: 'insert'; readonly path: string; readonly expectedFileSha256: string; readonly anchor: string; readonly position: 'before' | 'after'; readonly content: string };
+  | { readonly kind: 'insert'; readonly path: string; readonly expectedFileSha256: string; readonly anchor: string; readonly position: 'before' | 'after'; readonly content: string; readonly inLines?: readonly [number, number] };
+
+/** Valida o `in_lines` opcional: par de inteiros 1-based [início,fim], início ≤ fim,
+ * dentro de um teto defensivo. Ausente ⇒ undefined (comportamento global preservado). */
+const parseInLines = (raw: unknown, op: string): readonly [number, number] | undefined => {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || raw.length !== 2
+    || !Number.isInteger(raw[0]) || !Number.isInteger(raw[1])
+    || raw[0] < 1 || raw[1] < raw[0] || raw[1] > 10_000_000) {
+    throw new OllamaProtocolError('ollama_invalid_response_schema', `${op} exige "in_lines" como [início,fim] inteiros 1-based com início ≤ fim.`);
+  }
+  return [raw[0], raw[1]];
+};
 
 /** Parseia o lote de operações, fail-closed com limites de quantidade e tamanho.
  * Caminho fora do escopo é `ollama_edit_outside_scope`; qualquer outra violação
@@ -526,7 +543,8 @@ export function parseEditOperations(operations: readonly unknown[], allowed: Rea
       if (typeof op.before !== 'string' || op.before.length === 0 || op.before.length > MAX_BEFORE_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'replace_exact exige "before" não vazio e dentro do limite.');
       if (typeof op.after !== 'string' || op.after.length > MAX_AFTER_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'replace_exact exige "after" string dentro do limite.');
       if (op.expected_occurrences !== undefined && op.expected_occurrences !== 1) throw new OllamaProtocolError('ollama_invalid_response_schema', '"expected_occurrences" só pode ser 1.');
-      out.push({ kind: 'replace_exact', path, expectedFileSha256: op.expected_file_sha256, before: op.before, after: op.after });
+      const inLines = parseInLines(op.in_lines, 'replace_exact');
+      out.push({ kind: 'replace_exact', path, expectedFileSha256: op.expected_file_sha256, before: op.before, after: op.after, ...(inLines ? { inLines } : {}) });
     } else if (op.kind === 'create_file') {
       if (typeof op.path !== 'string') throw new OllamaProtocolError('ollama_invalid_response_schema', 'create_file exige "path" string.');
       const path = resolveScopedPath(op.path, allowed);
@@ -548,7 +566,8 @@ export function parseEditOperations(operations: readonly unknown[], allowed: Rea
       if (typeof op.anchor !== 'string' || op.anchor.length === 0 || op.anchor.length > MAX_BEFORE_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'insert exige "anchor" não vazio e dentro do limite.');
       if (op.position !== 'before' && op.position !== 'after') throw new OllamaProtocolError('ollama_invalid_response_schema', 'insert exige "position" igual a "before" ou "after".');
       if (typeof op.content !== 'string' || op.content.length === 0 || op.content.length > MAX_AFTER_CHARS) throw new OllamaProtocolError('ollama_invalid_response_schema', 'insert exige "content" não vazio dentro do limite.');
-      out.push({ kind: 'insert', path, expectedFileSha256: op.expected_file_sha256, anchor: op.anchor, position: op.position, content: op.content });
+      const insertInLines = parseInLines(op.in_lines, 'insert');
+      out.push({ kind: 'insert', path, expectedFileSha256: op.expected_file_sha256, anchor: op.anchor, position: op.position, content: op.content, ...(insertInLines ? { inLines: insertInLines } : {}) });
     } else {
       throw new OllamaProtocolError('ollama_invalid_response_schema', `operação não suportada: ${clipStr(op.kind)} (exclusão não é permitida neste recorte).`);
     }
@@ -570,16 +589,71 @@ const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\
  * arquivo em disco no Windows guarda `\r\n`; sem esta tolerância um `before`
  * multi-linha CORRETO ocorreria 0 vez(es) (`ollama_ambiguous_replacement`).
  */
-const countOccurrences = (haystack: string, needle: string): { count: number; first: number; firstEnd: number } => {
+/** Todas as ocorrências EXATAS (EOL-agnósticas) de `needle` em `haystack`, como
+ * intervalos [start,end) no espaço CRU do haystack. Base única do matcher. */
+const allOccurrences = (haystack: string, needle: string): { start: number; end: number }[] => {
+  if (!needle.length) return [];
   const pattern = escapeRegExp(needle).replace(/\r\n|\r|\n/g, '(?:\\r\\n|\\n)');
   const re = new RegExp(pattern, 'g');
-  let count = 0; let first = -1; let firstEnd = -1;
+  const out: { start: number; end: number }[] = [];
   for (let m = re.exec(haystack); m !== null; m = re.exec(haystack)) {
-    if (first === -1) { first = m.index; firstEnd = m.index + m[0].length; }
-    count++;
+    out.push({ start: m.index, end: m.index + m[0].length });
     if (m.index === re.lastIndex) re.lastIndex++; // guarda defensiva (needle nunca é vazio: o schema exige > 0)
   }
-  return { count, first, firstEnd };
+  return out;
+};
+
+const countOccurrences = (haystack: string, needle: string): { count: number; first: number; firstEnd: number } => {
+  const occ = allOccurrences(haystack, needle);
+  return { count: occ.length, first: occ[0]?.start ?? -1, firstEnd: occ[0]?.end ?? -1 };
+};
+
+/** Janela [winStart,winEnd) em offsets CRUS cobrindo as linhas 1-based [start,end]
+ * (incluindo os terminadores). Agnóstica a CRLF/LF: fatia por `\n` (o `\r` fica na
+ * peça da linha) e conta um `\n` por linha existente. `null` fora do arquivo. */
+const lineRangeWindow = (content: string, start: number, end: number): { winStart: number; winEnd: number } | null => {
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) return null;
+  const lines = content.split('\n');
+  if (start > lines.length || end > lines.length) return null;
+  let winStart = 0;
+  for (let i = 1; i < start; i++) winStart += lines[i - 1]!.length + 1;
+  let winEnd = winStart;
+  for (let i = start; i <= end; i++) { winEnd += lines[i - 1]!.length; if (i < lines.length) winEnd += 1; }
+  return { winStart, winEnd };
+};
+
+/** Linha 1-based de um offset cru (conta `\n`). Só para diagnóstico da ambiguidade. */
+const lineOfOffset = (content: string, offset: number): number => {
+  let line = 1;
+  const limit = Math.min(offset, content.length);
+  for (let i = 0; i < limit; i++) if (content[i] === '\n') line++;
+  return line;
+};
+
+/**
+ * Resolve a ÚNICA ocorrência-alvo de `needle` no conteúdo atual, fail-closed:
+ * - com `inLines`: exige exatamente 1 ocorrência cujo início caia nessas linhas
+ *   (0 ou >1 dentro do intervalo ⇒ recusado; intervalo fora do arquivo ⇒ recusado);
+ * - sem `inLines`: exige exatamente 1 ocorrência GLOBAL (comportamento preservado);
+ *   quando há >1, a mensagem lista as linhas e sugere `in_lines` para desambiguar.
+ * NUNCA "escolhe a primeira" nem aproxima — só há edição quando o alvo é único.
+ */
+const resolveUniqueOccurrence = (
+  original: string, needle: string, inLines: readonly [number, number] | undefined, path: string, label: 'before' | 'anchor',
+): { start: number; end: number } => {
+  if (inLines) {
+    const win = lineRangeWindow(original, inLines[0], inLines[1]);
+    if (!win) throw new OllamaProtocolError('ollama_ambiguous_replacement', `in_lines ${inLines[0]}-${inLines[1]} está fora de ${path}; não desambigua.`);
+    const inWindow = allOccurrences(original, needle).filter(o => o.start >= win.winStart && o.start < win.winEnd);
+    if (inWindow.length !== 1) throw new OllamaProtocolError('ollama_ambiguous_replacement', `"${label}" ocorre ${inWindow.length} vez(es) nas linhas ${inLines[0]}-${inLines[1]} de ${path}; esperado exatamente 1.`);
+    return inWindow[0]!;
+  }
+  const occ = allOccurrences(original, needle);
+  if (occ.length !== 1) {
+    const where = occ.length > 1 ? ` (${occ.map(o => `linha ${lineOfOffset(original, o.start)}`).join(', ')}); envie um "${label}" mais específico ou inclua "in_lines" do intervalo lido que contém a ocorrência desejada` : '';
+    throw new OllamaProtocolError('ollama_ambiguous_replacement', `"${label}" ocorre ${occ.length} vez(es) em ${path}${where}; esperado exatamente 1.`);
+  }
+  return occ[0]!;
 };
 
 /** Diagnostic only: uses precisely the production matcher, never applies a patch. */
@@ -606,9 +680,9 @@ export interface AppliedChange { readonly path: string; readonly newContent: str
 export function applyEditOperations(operations: readonly EditOperation[], contentOf: (path: string) => string | null): AppliedChange[] {
   if (operations.length === 0) throw new OllamaProtocolError('ollama_no_effective_edits', 'nenhuma operação de edição foi fornecida.');
   const creates: AppliedChange[] = [];
-  const replaceByPath = new Map<string, { before: string; after: string; sha: string }[]>();
+  const replaceByPath = new Map<string, { before: string; after: string; sha: string; inLines?: readonly [number, number] }[]>();
   const appendByPath = new Map<string, { content: string; sha: string }[]>();
-  const insertByPath = new Map<string, { anchor: string; position: 'before' | 'after'; content: string; sha: string }[]>();
+  const insertByPath = new Map<string, { anchor: string; position: 'before' | 'after'; content: string; sha: string; inLines?: readonly [number, number] }[]>();
   for (const op of operations) {
     if (op.kind === 'create_file') {
       if (contentOf(op.path) !== null) throw new OllamaProtocolError('ollama_invalid_response_schema', `create_file exige caminho inexistente: ${op.path}.`);
@@ -619,11 +693,11 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
       appendByPath.set(op.path, list);
     } else if (op.kind === 'insert') {
       const list = insertByPath.get(op.path) ?? [];
-      list.push({ anchor: op.anchor, position: op.position, content: op.content, sha: op.expectedFileSha256 });
+      list.push({ anchor: op.anchor, position: op.position, content: op.content, sha: op.expectedFileSha256, ...(op.inLines ? { inLines: op.inLines } : {}) });
       insertByPath.set(op.path, list);
     } else {
       const list = replaceByPath.get(op.path) ?? [];
-      list.push({ before: op.before, after: op.after, sha: op.expectedFileSha256 });
+      list.push({ before: op.before, after: op.after, sha: op.expectedFileSha256, ...(op.inLines ? { inLines: op.inLines } : {}) });
       replaceByPath.set(op.path, list);
     }
   }
@@ -643,17 +717,15 @@ export function applyEditOperations(operations: readonly EditOperation[], conten
     const ranges: { start: number; end: number; after: string; insert: boolean }[] = [];
     for (const op of replaceByPath.get(path) ?? []) {
       if (op.sha !== currentSha) throw new OllamaProtocolError('ollama_stale_file_hash', `hash divergente para ${path}: o arquivo mudou desde a leitura.`);
-      const { count, first, firstEnd } = countOccurrences(original, op.before);
-      if (count !== 1) throw new OllamaProtocolError('ollama_ambiguous_replacement', `"before" ocorre ${count} vez(es) em ${path}; esperado exatamente 1.`);
-      ranges.push({ start: first, end: firstEnd, after: toFileEol(op.after, fileUsesCrlf), insert: false });
+      const { start, end } = resolveUniqueOccurrence(original, op.before, op.inLines, path, 'before');
+      ranges.push({ start, end, after: toFileEol(op.after, fileUsesCrlf), insert: false });
     }
     // Insert = range de LARGURA ZERO na borda da âncora única (não remove a
     // âncora). Mesma exatidão/EOL/stale do replace; a âncora é reproduzida UMA vez.
     for (const op of insertByPath.get(path) ?? []) {
       if (op.sha !== currentSha) throw new OllamaProtocolError('ollama_stale_file_hash', `hash divergente para ${path}: o arquivo mudou desde a leitura.`);
-      const { count, first, firstEnd } = countOccurrences(original, op.anchor);
-      if (count !== 1) throw new OllamaProtocolError('ollama_ambiguous_replacement', `"anchor" ocorre ${count} vez(es) em ${path}; esperado exatamente 1.`);
-      const at = op.position === 'before' ? first : firstEnd;
+      const { start, end } = resolveUniqueOccurrence(original, op.anchor, op.inLines, path, 'anchor');
+      const at = op.position === 'before' ? start : end;
       ranges.push({ start: at, end: at, after: toFileEol(op.content, fileUsesCrlf), insert: true });
     }
     // Inserts primeiro no desempate por posição, para a checagem de borda a seguir.

@@ -90,6 +90,7 @@ const SYSTEM = [
   'search e lineRange são modos EXCLUSIVOS: nunca envie ambos no mesmo objeto. Use search para localizar a linha e, na rodada seguinte, lineRange para obter o bloco necessário à edição.',
   'Planeje as poucas rodadas pelo MANIFESTO: se pretende alterar vários arquivos existentes, reserve leitura para cada um; não releia ranges sobrepostos salvo se faltarem linhas específicas.',
   'EDITAR: {"action":"edit","operations":[{"kind":"replace_exact","path":"<do escopo>","expected_file_sha256":"<sha do arquivo como lido>","before":"<texto EXATO e ÚNICO do arquivo atual>","after":"<novo texto>","expected_occurrences":1}]}',
+  'Se o "before" (ou o "anchor" de insert) puder REPETIR no arquivo, adicione "in_lines":[inicio,fim] com o intervalo de linhas (que você LEU) que contém a ocorrência exata a editar; o host exige que exatamente 1 ocorrência comece nesse intervalo. Não escolha "a primeira": expanda o before com contexto único OU use in_lines.',
   'Também é permitido {"kind":"create_file","path":"<do escopo>","content":"<conteúdo>"} somente quando o MANIFESTO marca exists=false. Nunca use create_file em exists=true. Exclusão não é permitida.',
   'Acrescentar ao FIM REAL do arquivo (ex.: novo export/função de topo): {"kind":"append","path":"<escopo>","expected_file_sha256":"<sha lido>","content":"<texto>"}. Não invente "before" para o fim.',
   'Inserir DENTRO de um bloco já existente (ex.: um `test` novo dentro de um `describe` já aberto): {"kind":"insert","path":"<escopo>","expected_file_sha256":"<sha lido>","anchor":"<trecho EXATO e ÚNICO já no arquivo, ex.: o ÚLTIMO test do bloco>","position":"after","content":"<novo texto>"}. A âncora é copiada UMA vez e NÃO é removida; o conteúdo entra logo antes ("before") ou depois ("after") dela.',
@@ -205,6 +206,10 @@ export class OllamaCoderBackend implements CoderBackend {
     const repeatedReadDescriptors = new Set<string>();
     const experimentalAnchors = new Map<string, ServedAnchor>();
     let experimentalAnchorOrdinal = 0;
+    // Teto próprio de reapresentações por âncora ambígua (independente das rodadas de
+    // leitura): mantém a recuperação BOUNDED — nunca um laço ilimitado de edição.
+    const MAX_AMBIGUITY_FEEDBACKS = 2;
+    let ambiguityFeedbacks = 0;
 
     for (let round = 0; round <= this.maxReadRounds; round++) {
       const roundsLeft = this.maxReadRounds - round;
@@ -267,7 +272,21 @@ export class OllamaCoderBackend implements CoderBackend {
         const steps = operations.map(op => transcript.edit(op, contentOf(op.path), round));
         let changes;
         try { changes = applyEditOperations(operations, contentOf); }
-        catch (error) { transcript.application(steps, 'batch_failed'); throw error; }
+        catch (error) {
+          transcript.application(steps, 'batch_failed');
+          // Âncora ambígua é RECUPERÁVEL: nenhuma mutação, gate ou perda de integridade
+          // ocorreu. Enquanto houver rodada e dentro do teto próprio, o host devolve ao
+          // modelo as ocorrências e pede um `before`/`anchor` mais específico ou `in_lines`
+          // — sem "escolher a primeira" nem afrouxar. Esgotado o teto/as rodadas: terminal.
+          // Stale/scope/no-op continuam fail-closed terminais (não são reapresentados).
+          if (error instanceof OllamaProtocolError && error.code === 'ollama_ambiguous_replacement'
+              && roundsLeft > 0 && ambiguityFeedbacks < MAX_AMBIGUITY_FEEDBACKS) {
+            ambiguityFeedbacks += 1;
+            servedBlocks.push(`Edição recusada (âncora ambígua), NADA foi aplicado: ${error.message} Reapresentação ${ambiguityFeedbacks}/${MAX_AMBIGUITY_FEEDBACKS}. Reenvie uma edição com "before"/"anchor" mais específico ou com "in_lines":[inicio,fim] do intervalo lido que contém a ocorrência desejada.`);
+            continue;
+          }
+          throw error;
+        }
         // Validação integral contra o snapshot já ocorreu (applyEditOperations).
         // Aqui só escrevemos o lote (escreve-ou-lança, nunca sucesso parcial). A
         // restauração ao estado-base em caso de falha é da worktree (autoridade
