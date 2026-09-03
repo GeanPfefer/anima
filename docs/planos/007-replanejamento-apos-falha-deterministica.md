@@ -100,3 +100,34 @@ Ratificar a semântica de progresso sem redução de arquivos e orçamento da li
 então implementar a operação geral, suas garantias na persistência e application
 layer/CLI. Apenas após os gates e preview, aplicar o mandato humano de uma recovery
 ao caso. Até lá: original failed, nenhuma terceira attempt, nenhuma criação ad hoc.
+
+## Atualização de implementação e prova — retomada 2026-09-02
+
+Esta atualização substitui o estado proposto e a próxima retomada acima, preservados
+como histórico. A operação existe em `4b5c500`, com integração da classificação em
+`ae6d6d9`: `work replan <id> --diagnosis <arquivo.json>` cria somente `proposed`;
+sem arquivo, replay usa o diagnóstico persistido. Suporta `--json` e códigos
+0 sucesso, 1 operacional, 2 uso, 3 precondition/governança.
+
+O recorte implementado admite diagnóstico humano estruturado `test_code_incorrect`
+em uma unidade de teste de baixo impacto. Correções tipadas e símbolos normalizados
+representam a estratégia; mudar apenas redação não concede progresso. Isso verifica
+diferença estrutural declarada, **não a veracidade do diagnóstico contra o código**.
+Retry repete execução autorizada retryable; decomposição reduz arquivos; replan
+preserva escopo e deriva instruções novas sob aprovação separada.
+
+RPC `replan_failed_work`, tabela `work_replans`, auth.uid/allowlist/RLS, falha
+não-retryable terminal, evidência host de gate determinístico/Git, ausência de
+execução ativa, checkpoint e lineage correlacionados. Escopo, exclusões, gates/covers
+e permissões são herdados. Replay não duplica. Saldo transferido = max − usadas;
+predecessor com successor e descendência de replan são recusados para evitar loop.
+Detalhes e provas: [implementação](../registros/2026-09-02-replanejamento-unidade-minima-implementacao.md).
+
+Prova real já executada: `7b132de5` derivado de `5b8e371d`, attempt `ab7e7b6f`,
+fallback local 14b; failed por erro de edição, gate focado falho, budget 1/1.
+Sem review/Verifier. A reconciliação encontrou diagnóstico persistido incorreto:
+serialize/deserialize existem em `1ee1921`. Não considerar essa prova confirmação
+de plano semanticamente correto nem evidência isolada de insuficiência do modelo.
+Próxima barreira: revisar o diagnóstico contra o checkpoint e investigar a âncora
+de edição; nova execução/budget dependem de nova decisão humana, sem cadeia automática.
+Ver [reconciliação final](../registros/2026-09-02-reconciliacao-final-replan.md).

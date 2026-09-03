@@ -52,7 +52,7 @@ SELECT is((SELECT intent#>>'{execution_spec,limits,max_attempts}' FROM public.wo
 SELECT is((SELECT count(*)::integer FROM public.work_events WHERE work_item_id=(SELECT id FROM cases WHERE name='valid') AND event_type='execution_started'),2,'attempts históricas preservadas');
 SELECT ok((SELECT r.failure_event_id=f.id AND r.lineage_id=l.id AND l.original_work_item_id=r.predecessor_id AND l.successor_work_item_id=r.successor_id FROM public.work_replans r JOIN public.work_events f ON f.id=r.failure_event_id JOIN public.work_recovery_lineage l ON l.id=r.lineage_id WHERE r.predecessor_id=(SELECT id FROM cases WHERE name='valid')),'lineage e falha correlacionadas');
 SELECT is((SELECT pg_temp.run(id)->>'replayed' FROM cases WHERE name='valid'),'true','replay');
-SELECT is((SELECT count(*)::integer FROM public.work_replans),1,'replay não duplica');
+SELECT is((SELECT count(*)::integer FROM public.work_replans WHERE predecessor_id=(SELECT id FROM cases WHERE name='valid')),1,'replay não duplica');
 SELECT throws_ok($$SELECT pg_temp.run(id,jsonb_set(pg_temp.diagnosis(),'{corrections,0,instruction}','"Texto cosmeticamente diferente apenas."')) FROM cases WHERE name='valid'$$,'55000','duplicate_replan','cosmética não cria novo filho');
 SELECT throws_ok($$SELECT pg_temp.run(id) FROM cases WHERE name='equivalent'$$,'55000','no_semantic_progress','C estratégia equivalente recusada');
 SELECT throws_ok($$SELECT pg_temp.run(id) FROM cases WHERE name='retryable'$$,'55000','failure_not_nonretryable','D não substitui retry');
@@ -63,7 +63,7 @@ SELECT throws_ok($$SELECT pg_temp.run(id) FROM cases WHERE name='active'$$,'5500
 SELECT throws_ok($$SELECT pg_temp.run(id) FROM cases WHERE name='budget'$$,'55000','replan_budget_exhausted','J não reseta orçamento');
 SELECT throws_ok($$SELECT pg_temp.run(id) FROM cases WHERE name='scope'$$,'55000','scope_evidence_mismatch','não oculta violação');
 SELECT throws_ok($$SELECT pg_temp.run(id) FROM cases WHERE name='timeout'$$,'55000','deterministic_gate_evidence_missing','timeout não é falha determinística');
-SELECT ok((SELECT p.proposal#>'{data,included_scope}'=s.proposal#>'{data,included_scope}' AND p.intent#>'{execution_spec,validation_criteria}'=s.intent#>'{execution_spec,validation_criteria}' FROM public.work_replans r JOIN public.work_items p ON p.id=r.predecessor_id JOIN public.work_items s ON s.id=r.successor_id),'escopo e gates/covers intactos');
+SELECT ok((SELECT p.proposal#>'{data,included_scope}'=s.proposal#>'{data,included_scope}' AND p.intent#>'{execution_spec,validation_criteria}'=s.intent#>'{execution_spec,validation_criteria}' FROM public.work_replans r JOIN public.work_items p ON p.id=r.predecessor_id JOIN public.work_items s ON s.id=r.successor_id WHERE r.predecessor_id=(SELECT id FROM cases WHERE name='valid')),'escopo e gates/covers intactos');
 SELECT set_config('request.jwt.claim.sub','71000000-0000-4000-8000-000000000002',true);
 SELECT throws_ok($$SELECT pg_temp.run(id) FROM cases WHERE name='valid'$$,'P0002','work_item_not_found','owner alheio recusado');
 SET LOCAL ROLE authenticated;

@@ -1,4 +1,12 @@
 # Anima — Product Requirements Document
+> Retomada 2026-09-02 (eventos UTC de 2026-09-03): Plano 007 implementado em
+> `4b5c500`/`ae6d6d9`. Replan real `7b132de5` aprovado e executado, agora **failed**,
+> orçamento 1/1 esgotado; predecessor `5b8e371d` continua failed, 2/3, retryable:false.
+> Nenhum resultado/parecer Verifier. O diagnóstico persistido do replan contém uma
+> premissa incorreta sobre exports existentes no checkpoint; a próxima barreira é
+> reconciliar diagnóstico com o código executado e investigar a edição, antes de
+> qualquer nova autoridade. [Reconciliação](docs/registros/2026-09-02-reconciliacao-final-replan.md).
+> As notas abaixo sobre ausência de implementação/recovery descrevem o estado anterior.
 > Diagnóstico 2026-09-02: falha PIN-02 classificada **A (testes/coder)**. Dois snapshots
 > falham por TS2304; codec satisfaz os comportamentos sondados. Nenhuma recovery criada:
 > escopo mínimo impede decomposição existente. [Plano 007](docs/planos/007-replanejamento-apos-falha-deterministica.md)
