@@ -193,7 +193,7 @@ describe('resolveExecutorRoute — seleção explícita', () => {
   test('backend selecionável de nuvem (openai) resolve o worktree com GPT', () => {
     const selection = resolveExecutorRoute({ ...anima, coderBackend: 'openai', model: 'gpt-x' }, {
       repoRoot: REPO_ROOT,
-      authorizeOpenAIPaidCall: async () => undefined,
+      openAIAdmission: { admit: async intent => ({ consumer: intent.consumer, authorizationRef: 'a', reservationId: null }) },
     });
     expect(selection.ok).toBe(true);
     if (selection.ok) {

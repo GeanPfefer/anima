@@ -9,7 +9,7 @@ import { createWorkOrchestrationService } from '@/lib/work-orchestration/server'
 
 // Prova viva do coder pago governado (OpenAI). Materializa (ou REUTILIZA) a menor unidade
 // canônica, concede a autorização paga pelo ledger oficial e roda UMA volta do backlog pela
-// borda do Resident Host. O gate financeiro (`createOpenAIPaidCallAuthorizer`) reserva o teto
+// borda do Resident Host. A admissão financeira (`createOpenAICoderAdmission`) reserva o teto
 // humano na 1ª chamada ao provider. Para em `review`: NÃO aceita, integra nem publica.
 // Uso: `... prove-openai-paid-coder.ts [--work-item <uuid>]` — sem o arg, cria a unidade nova.
 

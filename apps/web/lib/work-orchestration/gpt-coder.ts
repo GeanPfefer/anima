@@ -1,15 +1,26 @@
+import {
+  fetchAdmittedOpenAIResponses,
+  OpenAIAdmissionDenied,
+  type OpenAIAdmissionControl,
+} from '@/lib/ai/openai-paid-transport';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend, type CoderProtocolTransport } from './ollama-coder';
 
 export interface OpenAIUsage { readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number; readonly cachedInputTokens?: number }
 export interface GptCoderOptions {
-  readonly model?: string; readonly apiKey?: string; readonly url?: string; readonly fetchImpl?: typeof fetch;
+  readonly model?: string;
+  /** Admissão financeira OBRIGATÓRIA (borda única). Sem ela o adapter não é
+   * construível: é assim que o coder OpenAI de produção é fail-closed por construção. */
+  readonly admission: OpenAIAdmissionControl;
+  /** Chave explícita só para teste determinístico; produção lê do env NA BORDA. */
+  readonly apiKey?: string;
+  readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number; readonly maxReadRounds?: number; readonly onUsage?: (usage: OpenAIUsage) => void;
-  readonly authorizePaidCall?: (input: OpenAIPaidCallInput) => Promise<void>;
 }
-export interface OpenAIPaidCallInput {
-  readonly workItemId: string; readonly attemptId: string; readonly approvedProposalVersion: number;
-  readonly providerId: 'openai'; readonly model: string; readonly callIndex: number; readonly maxDurationMs: number;
+/** Correlação do attempt pago, derivada do `CoderEditRequest` a cada `edit()`. */
+interface CoderPaidContext {
+  readonly workItemId: string; readonly attemptId: string;
+  readonly approvedProposalVersion: number; readonly maxDurationMs: number;
 }
 export type OpenAICoderErrorCode = 'openai_auth' | 'openai_paid_authorization' | 'openai_rate_limit' | 'openai_timeout' | 'openai_cancelled' | 'openai_api' | 'openai_malformed_response';
 export class OpenAICoderError extends Error {
@@ -42,27 +53,40 @@ export class GptCoderBackend implements CoderBackend {
   readonly observation: NonNullable<CoderBackend['observation']>;
   private readonly delegate: OllamaCoderBackend;
   private readonly usages: OpenAIUsage[] = [];
-  private activePaidContext: Omit<OpenAIPaidCallInput, 'providerId' | 'model' | 'callIndex'> | null = null;
+  private activePaidContext: CoderPaidContext | null = null;
   private callIndex = 0;
-  constructor(options: GptCoderOptions = {}) {
+  constructor(options: GptCoderOptions) {
     const model = options.model ?? process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
-    const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
-    const url = options.url ?? 'https://api.openai.com/v1/responses'; const fetchImpl = options.fetchImpl ?? fetch;
+    const fetchImpl = options.fetchImpl ?? fetch;
+    const admission = options.admission;
+    // O transport NUNCA fala com o provider sem admissão: `fetchAdmittedOpenAIResponses`
+    // roda `admit()` antes de qualquer rede. A chave e a URL vivem SÓ na borda; aqui
+    // nem a credencial é lida. Correlação ausente ⇒ erro ANTES de qualquer fetch.
     const transport: CoderProtocolTransport = async ({ messages, signal, timeoutMs }) => {
-      if (!apiKey) throw new OpenAICoderError('openai_auth', 'A chave da OpenAI não está configurada no servidor.');
       this.callIndex += 1;
-      if (options.authorizePaidCall) {
-        if (!this.activePaidContext) throw new OpenAICoderError('openai_paid_authorization', 'A chamada paga não possui correlação de work item/attempt.');
-        try {
-          await options.authorizePaidCall({ ...this.activePaidContext, providerId: 'openai', model, callIndex: this.callIndex });
-        } catch (error) {
-          throw new OpenAICoderError('openai_paid_authorization', error instanceof Error ? error.message : 'A autorização de compute pago recusou a chamada.');
-        }
-      }
+      const context = this.activePaidContext;
+      if (!context) throw new OpenAICoderError('openai_paid_authorization', 'A chamada paga não possui correlação de work item/attempt.');
       const bounded = combinedSignal(signal, timeoutMs); let response: Response;
       try {
-        response = await fetchImpl(url, { method: 'POST', signal: bounded.signal, headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, store: false, input: messages }) });
-      } catch {
+        const admitted = await fetchAdmittedOpenAIResponses({
+          admission,
+          intent: {
+            consumer: 'coder', workItemId: context.workItemId, attemptId: context.attemptId,
+            approvedProposalVersion: context.approvedProposalVersion, model,
+            callIndex: this.callIndex, maxDurationMs: context.maxDurationMs,
+          },
+          body: { model, store: false, input: messages },
+          signal: bounded.signal,
+          fetchImpl,
+          ...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+        });
+        response = admitted.response;
+      } catch (error) {
+        if (error instanceof OpenAIAdmissionDenied) {
+          // Chave ausente preserva a classe histórica `openai_auth`; qualquer outra
+          // recusa da borda é falha de admissão paga.
+          throw new OpenAICoderError(error.reason === 'openai_key_missing' ? 'openai_auth' : 'openai_paid_authorization', error.message);
+        }
         const code = signal.aborted ? 'openai_cancelled' : bounded.timedOut() ? 'openai_timeout' : 'openai_api';
         throw new OpenAICoderError(code, code === 'openai_timeout' ? 'A chamada da OpenAI excedeu o timeout.' : code === 'openai_cancelled' ? 'A chamada da OpenAI foi cancelada.' : 'Falha de transporte ao chamar a OpenAI.');
       } finally { bounded.dispose(); }

@@ -6,7 +6,8 @@ import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { resolveCoderCapacityPolicy } from './coder-model-policy';
 import { resolveOllamaCoderRuntimeConfig, type OllamaCoderRuntimeConfig } from './ollama-coder-config';
-import { GptCoderBackend, type GptCoderOptions } from './gpt-coder';
+import { GptCoderBackend } from './gpt-coder';
+import type { OpenAIAdmissionControl } from '@/lib/ai/openai-paid-transport';
 import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from './execution';
 import { WorktreeExecutorAdapter } from './worktree-executor';
@@ -119,7 +120,7 @@ const backendFor = (
   repoRoot: string,
   override?: CoderBackend,
   ollamaRuntimeOverride?: OllamaCoderRuntimeConfig,
-  authorizeOpenAIPaidCall?: GptCoderOptions['authorizePaidCall'],
+  openAIAdmission?: OpenAIAdmissionControl,
 ): CoderBackend | { readonly error: string } => {
   if (override) return override;
   const kind = contract.coderBackend ?? 'ollama';
@@ -155,10 +156,14 @@ const backendFor = (
   }
 
   if (kind === 'openai') {
-    if (!authorizeOpenAIPaidCall) return { error: 'Backend OpenAI exige admissão de compute pago ligada ao ledger.' };
+    // Fail-closed por construção: sem admissão financeira ligada ao ledger o backend
+    // OpenAI de produção NÃO é sequer construído (nunca chega perto de um fetch).
+    if (!openAIAdmission) return { error: 'Backend OpenAI exige admissão de compute pago ligada ao ledger.' };
     return new GptCoderBackend({
-      model: contract.model ?? process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL,
-      authorizePaidCall: authorizeOpenAIPaidCall,
+      ...(contract.model ?? process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL
+        ? { model: contract.model ?? process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL }
+        : {}),
+      admission: openAIAdmission,
     });
   }
 
@@ -285,7 +290,7 @@ export function resolveExecutorRoute(
      * pela rota para captar a evidência observada do coder. Só o executor de worktree
      * (host in-process) o usa. */
     readonly coderObserver?: (outcome: ObservedCoderInput) => void;
-    readonly authorizeOpenAIPaidCall?: GptCoderOptions['authorizePaidCall'];
+    readonly openAIAdmission?: OpenAIAdmissionControl;
   } = {},
 ): ExecutorSelection {
   const err = (code: string, message: string): ExecutorSelection => ({ ok: false, error: { code, message } });
@@ -296,7 +301,7 @@ export function resolveExecutorRoute(
     if (!contract.baseSha || !SHA.test(contract.baseSha)) return err('worktree_base_sha_missing', 'O SHA-base autorizado não foi persistido ou é inválido.');
     const repoRoot = options.repoRoot ?? projectRoot();
     if (!isAnimaProjectRoot(repoRoot)) return err('project_root_invalid', 'A raiz do projeto Anima não é um repositório válido.');
-    const backend = backendFor(contract, repoRoot, options.backendOverride, options.ollamaRuntimeOverride, options.authorizeOpenAIPaidCall);
+    const backend = backendFor(contract, repoRoot, options.backendOverride, options.ollamaRuntimeOverride, options.openAIAdmission);
     if ('error' in backend) return err('coder_backend_invalid', backend.error);
     const reference = contract.targetReference;
     const baseSha = contract.baseSha;

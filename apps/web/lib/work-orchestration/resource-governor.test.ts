@@ -251,8 +251,11 @@ describe('declaredGateCommands + composeItemGateAdvisory (pré-execução)', () 
     const fetchImpl = (() => Promise.reject(new Error('sem rede no teste'))) as unknown as typeof fetch;
     expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'ollama', model: 'qwen3-coder:latest' })))
       .toBe(new OllamaCoderBackend({ model: 'qwen3-coder:latest', fetchImpl }).id);
+    // `admission` é exigida por construção, mas o `.id` é derivado do modelo sem
+    // tocá-la; um stub que nunca é chamado basta para pinar o formato do id.
+    const admission = { admit: async () => { throw new Error('não usado neste teste'); } };
     expect(declaredCoderBackendId(itemWithSpec({ coder_backend: 'openai', model: 'gpt-5.6-terra' })))
-      .toBe(new GptCoderBackend({ model: 'gpt-5.6-terra', fetchImpl }).id);
+      .toBe(new GptCoderBackend({ model: 'gpt-5.6-terra', fetchImpl, admission }).id);
   });
 
   test('identidade prevista distingue coder remoto atrás do túnel', () => {
