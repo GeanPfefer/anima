@@ -191,12 +191,20 @@ describe('resolveExecutorRoute — seleção explícita', () => {
   });
 
   test('backend selecionável de nuvem (openai) resolve o worktree com GPT', () => {
-    const selection = resolveExecutorRoute({ ...anima, coderBackend: 'openai', model: 'gpt-x' }, { repoRoot: REPO_ROOT });
+    const selection = resolveExecutorRoute({ ...anima, coderBackend: 'openai', model: 'gpt-x' }, {
+      repoRoot: REPO_ROOT,
+      authorizeOpenAIPaidCall: async () => undefined,
+    });
     expect(selection.ok).toBe(true);
     if (selection.ok) {
       expect(selection.route.adapter.id).toBe('worktree-v1');
       expect(selection.route.candidate.modelRef).toBe('openai:gpt-x');
     }
+  });
+
+  test('backend OpenAI sem gate financeiro ligado falha antes do dispatch', () => {
+    const selection = resolveExecutorRoute({ ...anima, coderBackend: 'openai', model: 'gpt-x' }, { repoRoot: REPO_ROOT });
+    expect(selection).toMatchObject({ ok: false, error: { code: 'coder_backend_invalid' } });
   });
 });
 

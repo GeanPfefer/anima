@@ -77,6 +77,7 @@ export async function persistHostObservedCoderEvidence(
       ...(observation.modelSelection !== undefined ? { modelSelection: observation.modelSelection } : {}),
       ...(observation.transcripts ? { transcripts: observation.transcripts } : {}),
       ...(observation.providerUsage ? { providerUsage: observation.providerUsage } : {}),
+      ...(observation.providerCallCount !== undefined ? { providerCallCount: observation.providerCallCount } : {}),
       observedAt,
     });
 
@@ -119,6 +120,7 @@ export async function persistHostObservedCoderEvidence(
     totalTokens: usages.reduce((sum, value) => sum + value.totalTokens, 0),
     cachedInputTokens: usages.reduce((sum, value) => sum + (value.cachedInputTokens ?? 0), 0),
   } : undefined;
+  const providerCallCount = validated.reduce((sum, turn) => sum + (turn.providerCallCount ?? 0), 0);
   const built = buildHostObservedCoderEvidence({
     workItemId: correlation.workItemId,
     attemptId: correlation.attemptId,
@@ -128,6 +130,7 @@ export async function persistHostObservedCoderEvidence(
     outcome: finalTurn.outcome,
     ...(transcripts.length ? { transcripts } : {}),
     ...(providerUsage ? { providerUsage } : {}),
+    ...(providerCallCount > 0 ? { providerCallCount } : {}),
     ...(placement !== undefined ? { placement, nodeId, model } : {}),
     ...(finalTurn.modelSelection !== undefined ? { modelSelection: finalTurn.modelSelection } : {}),
     observedAt,

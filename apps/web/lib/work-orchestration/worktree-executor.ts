@@ -221,6 +221,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       let retryFeedback: HostValidationFeedback | null = null;
       let editResult: Awaited<ReturnType<CoderBackend['edit']>>;
       let providerUsage: import('@anima/core').ProviderReportedUsageV1 | undefined;
+      let providerCallCount: number | undefined;
       let changed: readonly string[] = [];
       let changedByAttempt: readonly string[] = [];
       let diffFiles: Awaited<ReturnType<GitWorktree['diffNumstat']>> = [];
@@ -251,6 +252,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             outcome,
             ...(transcript ? { transcripts: [transcript] } : {}),
             ...(providerUsage ? { providerUsage } : {}),
+            ...(providerCallCount !== undefined ? { providerCallCount } : {}),
             ...(this.options.backend.observation ?? {}),
           });
         };
@@ -258,6 +260,10 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         try {
           editResult = await this.options.backend.edit(
             {
+              workItemId: request.workItemId,
+              attemptId: request.attemptId,
+              approvedProposalVersion: request.approvedProposalVersion,
+              maxDurationMs: (request.limits.maxDurationMinutes ?? 30) * 60_000,
               objective: request.objective,
               onTranscript: value => { transcript = value; },
               includedScope: request.includedScope,
@@ -273,6 +279,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             signal,
           );
           providerUsage = editResult.providerUsage;
+          providerCallCount = editResult.providerCallCount;
           observeCoder(false);
         } catch (error) {
           observeCoder(true);

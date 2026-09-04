@@ -44,6 +44,11 @@ describe('buildHostObservedCoderEvidence', () => {
     expect(build({ providerUsage: { schemaVersion: 1, inputTokens: 10, outputTokens: 4, totalTokens: 99 } })).toMatchObject({ ok: false, defect: 'invalid_correlation' });
   });
 
+  test('preserva contagem de chamadas observada pelo host', () => {
+    expect(build({ providerCallCount: 2 })).toMatchObject({ ok: true, value: { providerCallCount: 2 } });
+    expect(build({ providerCallCount: -1 })).toMatchObject({ ok: false, defect: 'invalid_correlation' });
+  });
+
   test('cancelled é um desfecho distinto (medição parcial), não colapsa em failed', () => {
     const cancelled = build({ outcome: 'cancelled', durationMs: 300 });
     expect(cancelled.ok && cancelled.value.outcome).toBe('cancelled');

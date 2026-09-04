@@ -38,6 +38,10 @@ export type HostValidationFeedback =
     };
 
 export interface CoderEditRequest {
+  readonly workItemId?: string;
+  readonly attemptId?: string;
+  readonly approvedProposalVersion?: number;
+  readonly maxDurationMs?: number;
   readonly onTranscript?: (transcript: import('@anima/core').CoderTranscript) => void;
   readonly objective: string;
   readonly includedScope: readonly string[];
@@ -75,6 +79,7 @@ export interface CoderEditResult {
   readonly touchedResources: readonly string[];
   readonly notes?: readonly string[];
   readonly providerUsage?: import('@anima/core').ProviderReportedUsageV1;
+  readonly providerCallCount?: number;
 }
 
 export interface CoderBackend {

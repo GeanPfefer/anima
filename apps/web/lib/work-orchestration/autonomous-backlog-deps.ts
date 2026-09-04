@@ -9,6 +9,7 @@ import { readMachinePressure, readResourceAdmission } from './resource-governor'
 import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteRuntimeFor } from './coder-placement';
 import { leaseDeadlineSignal, onDemandBurstForced, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
 import { readLivePaidNodeCount } from './paid-compute-lease-reconciler-deps';
+import { createOpenAIPaidCallAuthorizer } from './openai-paid-compute';
 
 // ============================================================
 // Dependências do driver de backlog para o PROJETO real (worktree/qwen3-coder),
@@ -143,6 +144,7 @@ export function buildProjectBacklogCycleDeps(
         ...(contract.coderBackend === null || contract.coderBackend === 'ollama' ? { ollamaRuntimeOverride } : {}),
         gateObserver: outcome => gateObservations.push(outcome),
         coderObserver: outcome => coderObservations.push(outcome),
+        ...(contract.coderBackend === 'openai' ? { authorizeOpenAIPaidCall: createOpenAIPaidCallAuthorizer(client) } : {}),
       });
       if (!selection.ok) return notExecutable(entry, selection.error.code, selection.error.message);
 

@@ -63,6 +63,7 @@ export interface HostObservedCoderEvidenceV1 {
   readonly modelSelection?: CoderModelSelectionEvidenceV1;
   readonly transcripts?: readonly CoderTranscript[];
   readonly providerUsage?: ProviderReportedUsageV1;
+  readonly providerCallCount?: number;
   readonly observedAt: string;
 }
 
@@ -79,6 +80,7 @@ export interface ObservedCoderInput {
   readonly modelSelection?: CoderModelSelectionEvidenceV1;
   readonly transcripts?: readonly CoderTranscript[];
   readonly providerUsage?: ProviderReportedUsageV1;
+  readonly providerCallCount?: number;
 }
 
 export interface BuildHostObservedCoderEvidenceInput {
@@ -94,6 +96,7 @@ export interface BuildHostObservedCoderEvidenceInput {
   readonly modelSelection?: CoderModelSelectionEvidenceV1;
   readonly transcripts?: readonly CoderTranscript[];
   readonly providerUsage?: ProviderReportedUsageV1;
+  readonly providerCallCount?: number;
   readonly observedAt: string;
 }
 
@@ -165,6 +168,7 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
   }
   if (input.transcripts !== undefined && !validCoderTranscripts(input.transcripts)) return fail('invalid_correlation', 'Invalid coder transcript');
   if (input.providerUsage !== undefined && !validUsage(input.providerUsage)) return fail('invalid_correlation', 'Invalid provider-reported usage');
+  if (input.providerCallCount !== undefined && (!isInt(input.providerCallCount) || input.providerCallCount < 0)) return fail('invalid_correlation', 'Invalid host-observed provider call count');
   return {
     ok: true,
     value: {
@@ -179,6 +183,7 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       ...(input.transcripts !== undefined ? { transcripts: input.transcripts } : {}),
       ...(input.providerUsage !== undefined ? { providerUsage: input.providerUsage } : {}),
+      ...(input.providerCallCount !== undefined ? { providerCallCount: input.providerCallCount } : {}),
       observedAt: input.observedAt,
     },
   };
@@ -227,6 +232,7 @@ export function parseHostObservedCoderEvidence(value: Json | undefined): HostObs
     })(),
     ...(root.transcripts !== undefined ? { transcripts: root.transcripts as unknown as readonly CoderTranscript[] } : {}),
     ...(root.providerUsage !== undefined ? { providerUsage: root.providerUsage as unknown as ProviderReportedUsageV1 } : {}),
+    ...(root.providerCallCount !== undefined ? { providerCallCount: root.providerCallCount as number } : {}),
     observedAt: root.observedAt as string,
   });
   return built.ok ? built.value : null;

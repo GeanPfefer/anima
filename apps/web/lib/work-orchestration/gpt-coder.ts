@@ -5,8 +5,13 @@ export interface OpenAIUsage { readonly inputTokens: number; readonly outputToke
 export interface GptCoderOptions {
   readonly model?: string; readonly apiKey?: string; readonly url?: string; readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number; readonly maxReadRounds?: number; readonly onUsage?: (usage: OpenAIUsage) => void;
+  readonly authorizePaidCall?: (input: OpenAIPaidCallInput) => Promise<void>;
 }
-export type OpenAICoderErrorCode = 'openai_auth' | 'openai_rate_limit' | 'openai_timeout' | 'openai_cancelled' | 'openai_api' | 'openai_malformed_response';
+export interface OpenAIPaidCallInput {
+  readonly workItemId: string; readonly attemptId: string; readonly approvedProposalVersion: number;
+  readonly providerId: 'openai'; readonly model: string; readonly callIndex: number; readonly maxDurationMs: number;
+}
+export type OpenAICoderErrorCode = 'openai_auth' | 'openai_paid_authorization' | 'openai_rate_limit' | 'openai_timeout' | 'openai_cancelled' | 'openai_api' | 'openai_malformed_response';
 export class OpenAICoderError extends Error {
   constructor(readonly code: OpenAICoderErrorCode, message: string, readonly status?: number) { super(message); this.name = 'OpenAICoderError'; }
 }
@@ -37,12 +42,23 @@ export class GptCoderBackend implements CoderBackend {
   readonly observation: NonNullable<CoderBackend['observation']>;
   private readonly delegate: OllamaCoderBackend;
   private readonly usages: OpenAIUsage[] = [];
+  private activePaidContext: Omit<OpenAIPaidCallInput, 'providerId' | 'model' | 'callIndex'> | null = null;
+  private callIndex = 0;
   constructor(options: GptCoderOptions = {}) {
     const model = options.model ?? process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
     const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
     const url = options.url ?? 'https://api.openai.com/v1/responses'; const fetchImpl = options.fetchImpl ?? fetch;
     const transport: CoderProtocolTransport = async ({ messages, signal, timeoutMs }) => {
       if (!apiKey) throw new OpenAICoderError('openai_auth', 'A chave da OpenAI não está configurada no servidor.');
+      this.callIndex += 1;
+      if (options.authorizePaidCall) {
+        if (!this.activePaidContext) throw new OpenAICoderError('openai_paid_authorization', 'A chamada paga não possui correlação de work item/attempt.');
+        try {
+          await options.authorizePaidCall({ ...this.activePaidContext, providerId: 'openai', model, callIndex: this.callIndex });
+        } catch (error) {
+          throw new OpenAICoderError('openai_paid_authorization', error instanceof Error ? error.message : 'A autorização de compute pago recusou a chamada.');
+        }
+      }
       const bounded = combinedSignal(signal, timeoutMs); let response: Response;
       try {
         response = await fetchImpl(url, { method: 'POST', signal: bounded.signal, headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, store: false, input: messages }) });
@@ -64,14 +80,21 @@ export class GptCoderBackend implements CoderBackend {
   }
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
     this.usages.length = 0;
-    const result = await this.delegate.edit(request, workspace, signal);
-    if (!this.usages.length) return result;
+    this.callIndex = 0;
+    this.activePaidContext = request.workItemId && request.attemptId && request.approvedProposalVersion && request.maxDurationMs
+      ? { workItemId: request.workItemId, attemptId: request.attemptId, approvedProposalVersion: request.approvedProposalVersion, maxDurationMs: request.maxDurationMs }
+      : null;
+    let result: CoderEditResult;
+    try { result = await this.delegate.edit(request, workspace, signal); }
+    finally { this.activePaidContext = null; }
+    const providerCallCount = this.callIndex;
+    if (!this.usages.length) return { ...result, providerCallCount };
     return { ...result, providerUsage: {
       schemaVersion: 1,
       inputTokens: this.usages.reduce((sum, value) => sum + value.inputTokens, 0),
       outputTokens: this.usages.reduce((sum, value) => sum + value.outputTokens, 0),
       totalTokens: this.usages.reduce((sum, value) => sum + value.totalTokens, 0),
       cachedInputTokens: this.usages.reduce((sum, value) => sum + (value.cachedInputTokens ?? 0), 0),
-    } };
+    }, providerCallCount };
   }
 }

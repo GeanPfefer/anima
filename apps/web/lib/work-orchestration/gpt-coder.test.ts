@@ -27,6 +27,7 @@ describe('GptCoderBackend — mesmo protocolo host-mediated do Ollama', () => {
     expect(result.touchedResources).toEqual(['src/a.ts']); expect(backend.id).toBe('openai:gpt-test');
     expect(backend.observation).toEqual({ placement: 'remote', nodeId: 'openai-api', model: 'gpt-test' });
     expect(result.providerUsage).toEqual({ schemaVersion: 1, inputTokens: 40, outputTokens: 20, totalTokens: 60, cachedInputTokens: 8 });
+    expect(result.providerCallCount).toBe(2);
     expect(usage).toEqual([{ inputTokens: 20, outputTokens: 10, totalTokens: 30, cachedInputTokens: 4 }, { inputTokens: 20, outputTokens: 10, totalTokens: 30, cachedInputTokens: 4 }]);
     expect(JSON.parse(calls[0]!.body)).toMatchObject({ model: 'gpt-test', store: false });
     expect(JSON.stringify(JSON.parse(calls[0]!.body))).not.toContain('secret-test-key');
@@ -54,5 +55,19 @@ describe('GptCoderBackend — mesmo protocolo host-mediated do Ollama', () => {
     const controller = new AbortController(); controller.abort();
     const cancelled = (async () => { throw new Error('aborted'); }) as typeof fetch;
     await expect(new GptCoderBackend({ apiKey: 'x', fetchImpl: cancelled }).edit(request, workspace({}), controller.signal)).rejects.toMatchObject({ code: 'openai_cancelled' });
+  });
+
+  test('autoriza cada chamada paga com correlação e bloqueia antes do fetch', async () => {
+    const authorizePaidCall = jest.fn(async () => { throw new Error('authorization_missing'); });
+    const fetchImpl = jest.fn();
+    const backend = new GptCoderBackend({ model: 'gpt-test', apiKey: 'x', fetchImpl, authorizePaidCall });
+    await expect(backend.edit({
+      ...request, workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2, maxDurationMs: 60_000,
+    }, workspace({ 'src/a.ts': 'x' }), new AbortController().signal)).rejects.toMatchObject({ code: 'openai_paid_authorization' });
+    expect(authorizePaidCall).toHaveBeenCalledWith(expect.objectContaining({
+      workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2,
+      providerId: 'openai', model: 'gpt-test', callIndex: 1, maxDurationMs: 60_000,
+    }));
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
