@@ -30,6 +30,9 @@ CREATE TEMP TABLE role_item AS SELECT (public.create_work_proposal(
   '{"schema_version":1,"data":{"summary":"s","objective":"o","included_scope":["src/a.ts"],"excluded_scope":["deploy"],"expected_effects":["ok"],"risks":[]}}'::jsonb
 )).id;
 SELECT public.resolve_approval((SELECT id FROM role_item),1,'approve','{}');
+-- Attempt real (uuid) + execution_started: a reserva provider_api agora exige
+-- correlação autoritativa attempt ↔ work item ↔ versão de proposta aprovada.
+SELECT public.start_commanded_work_attempt((SELECT id FROM role_item),1,'cc000000-0000-0000-0000-0000000000a1'::uuid,'resident-host');
 
 CREATE TEMP TABLE role_auth AS SELECT ((public.grant_paid_compute_authorization(
   'openai',NULL,'provider_api:gpt-test',(SELECT id FROM role_item),60000,'USD',0.25,
@@ -38,7 +41,7 @@ SELECT isnt((SELECT id FROM role_auth),NULL,'grant admite identidade autenticada
 
 SELECT is((public.reserve_paid_compute_budget(
   (SELECT id FROM role_auth),'k1','openai','openai-api','provider_api:gpt-test',(SELECT id FROM role_item),
-  'attempt-1','provider-api:attempt-1','USD',0.25))->>'action','reserved','reserve admitida via claims JSON');
+  'cc000000-0000-0000-0000-0000000000a1','provider-api:attempt-1','USD',0.25))->>'action','reserved','reserve admitida via claims JSON');
 
 SELECT is((public.void_paid_compute_budget_reservation(
   (SELECT reservation_id FROM public.paid_compute_budget_events WHERE event_type='reserved'),'provider_not_called'))->>'action','voided','void admitido via claims JSON');
