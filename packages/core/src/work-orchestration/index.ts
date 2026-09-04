@@ -38,6 +38,7 @@ export * from './host-observed-coder-evidence';
 export * from './coder-model-selection';
 export * from './node-lifecycle';
 export * from './paid-compute-authorization';
+export * from './paid-compute-settlement';
 export * from './node-lease';
 export * from './node-provisioner';
 export * from './provisioning-decision';

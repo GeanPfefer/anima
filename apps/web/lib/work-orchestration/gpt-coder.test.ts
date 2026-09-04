@@ -90,6 +90,20 @@ describe('GptCoderBackend — mesmo protocolo host-mediated do Ollama, fail-clos
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  test('preserva os ids de request do provider na usage (auditoria/idempotência)', async () => {
+    const original = 'x = 1\n'; let n = 0;
+    const fetchImpl = (async () => {
+      n += 1;
+      const content = n === 1
+        ? JSON.stringify({ action: 'read', reads: [{ path: 'src/a.ts', lineRange: [1, 1], maxLines: 10 }] })
+        : JSON.stringify({ action: 'edit', operations: [{ kind: 'replace_exact', path: 'src/a.ts', expected_file_sha256: sha256(original), before: '1', after: '2', expected_occurrences: 1 }] });
+      return response({ id: `resp_${n}`, output_text: content, usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } });
+    }) as typeof fetch;
+    const result = await new GptCoderBackend({ apiKey: 'x', fetchImpl, admission: grant })
+      .edit(request, workspace({ 'src/a.ts': original }), new AbortController().signal);
+    expect(result.providerUsage?.providerRequestIds).toEqual(['resp_1', 'resp_2']);
+  });
+
   // A intenção passada à admissão carrega a correlação exata do attempt.
   test('correlaciona cada chamada paga com o envelope do attempt', async () => {
     const admit = jest.fn(grant.admit);

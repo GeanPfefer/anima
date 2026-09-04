@@ -39,6 +39,10 @@ export interface ProviderReportedUsageV1 {
   readonly outputTokens: number;
   readonly totalTokens: number;
   readonly cachedInputTokens?: number;
+  /** Ids estáveis das requisições/respostas do provider, para correlação,
+   * idempotência/accounting e auditoria. Nunca segredos. Ausente ⇒ o provider
+   * não os forneceu (não fabricamos). */
+  readonly providerRequestIds?: readonly string[];
 }
 
 const CODER_OUTCOMES: ReadonlySet<HostObservedCoderOutcome> = new Set<HostObservedCoderOutcome>([
@@ -120,7 +124,8 @@ const positiveVersion = (value: unknown): value is number => isInt(value) && (va
 const validUsage = (value: ProviderReportedUsageV1): boolean => value.schemaVersion === 1
   && [value.inputTokens, value.outputTokens, value.totalTokens].every(v => isInt(v) && v >= 0)
   && value.totalTokens === value.inputTokens + value.outputTokens
-  && (value.cachedInputTokens === undefined || (isInt(value.cachedInputTokens) && value.cachedInputTokens >= 0 && value.cachedInputTokens <= value.inputTokens));
+  && (value.cachedInputTokens === undefined || (isInt(value.cachedInputTokens) && value.cachedInputTokens >= 0 && value.cachedInputTokens <= value.inputTokens))
+  && (value.providerRequestIds === undefined || (Array.isArray(value.providerRequestIds) && value.providerRequestIds.every(nonBlank)));
 
 const fail = (defect: HostObservedCoderEvidenceDefect, explanation: string): HostObservedCoderEvidenceResult =>
   ({ ok: false, defect, explanation });

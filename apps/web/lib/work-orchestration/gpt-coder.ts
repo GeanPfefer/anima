@@ -53,6 +53,7 @@ export class GptCoderBackend implements CoderBackend {
   readonly observation: NonNullable<CoderBackend['observation']>;
   private readonly delegate: OllamaCoderBackend;
   private readonly usages: OpenAIUsage[] = [];
+  private readonly requestIds: string[] = [];
   private activePaidContext: CoderPaidContext | null = null;
   private callIndex = 0;
   constructor(options: GptCoderOptions) {
@@ -95,6 +96,10 @@ export class GptCoderBackend implements CoderBackend {
         throw new OpenAICoderError(code, `A OpenAI recusou a chamada (HTTP ${response.status}).`, response.status);
       }
       const body: unknown = await response.json().catch(() => null); const usage = parseUsage(body); if (usage) { this.usages.push(usage); options.onUsage?.(usage); }
+      // Id estável da resposta do provider (Responses API `id`): preservado para
+      // correlação/idempotência/auditoria. Nunca é segredo.
+      const requestId = (body as { id?: unknown } | null)?.id;
+      if (typeof requestId === 'string' && requestId.trim().length > 0) this.requestIds.push(requestId);
       const content = extractText(body); if (!content) throw new OpenAICoderError('openai_malformed_response', 'A OpenAI retornou uma resposta sem ação estruturada válida.');
       return { content };
     };
@@ -104,6 +109,7 @@ export class GptCoderBackend implements CoderBackend {
   }
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
     this.usages.length = 0;
+    this.requestIds.length = 0;
     this.callIndex = 0;
     this.activePaidContext = request.workItemId && request.attemptId && request.approvedProposalVersion && request.maxDurationMs
       ? { workItemId: request.workItemId, attemptId: request.attemptId, approvedProposalVersion: request.approvedProposalVersion, maxDurationMs: request.maxDurationMs }
@@ -119,6 +125,7 @@ export class GptCoderBackend implements CoderBackend {
       outputTokens: this.usages.reduce((sum, value) => sum + value.outputTokens, 0),
       totalTokens: this.usages.reduce((sum, value) => sum + value.totalTokens, 0),
       cachedInputTokens: this.usages.reduce((sum, value) => sum + (value.cachedInputTokens ?? 0), 0),
+      ...(this.requestIds.length ? { providerRequestIds: [...this.requestIds] } : {}),
     }, providerCallCount };
   }
 }
