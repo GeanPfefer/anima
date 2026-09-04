@@ -1,9 +1,11 @@
 import type { CreateWorkProposalCommand, RequestProposalRevisionCommand, WorkItem } from '@anima/core';
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
-import { parseProposal, scopeTestCommandToWorkspace, type ProjectWorkPlanner } from './project-work-planner-shared';
+import { parseProposal, scopeTestCommandToWorkspace, type PlannerProposalResult, type ProjectWorkPlanner } from './project-work-planner-shared';
 import { OpenAIProjectWorkPlanner } from './project-work-planner-openai';
 import { LocalOllamaProjectWorkPlanner } from './project-work-planner-local';
+import { OpenAIAdmissionDenied } from './openai-paid-transport';
+import { createInteractiveOpenAIAdmission } from './openai-interactive-admission';
 
 // ============================================================
 // Orquestrador do planejamento de trabalho de projeto. AUTORIDADE DO HOST: dado o
@@ -51,14 +53,50 @@ export function shouldRunProjectPlanner(
   return chatProvider === 'openai';
 }
 
+/**
+ * Planejador OpenAI com FALLBACK AUTOMÁTICO para o planejador local (política
+ * auto-local). Tenta o caminho pago; se a admissão financeira recusar
+ * (`OpenAIAdmissionDenied`) — hoje sempre, pois não há autoridade paga interativa —
+ * usa o planejador local. Nunca é chamada paga silenciosa; se o local também não
+ * puder operar, o erro observável do local sobe (bloqueio sem gasto). O `id` reflete
+ * o planejador que REALMENTE produziu a proposta (proveniência honesta).
+ */
+export class AdmissionGatedOpenAIPlanner implements ProjectWorkPlanner {
+  private lastId: string;
+  constructor(
+    private readonly openai: OpenAIProjectWorkPlanner,
+    private readonly local: LocalOllamaProjectWorkPlanner,
+  ) {
+    this.lastId = openai.id;
+  }
+  get id(): string { return this.lastId; }
+  async proposeArguments(message: string): Promise<PlannerProposalResult> {
+    try {
+      const result = await this.openai.proposeArguments(message);
+      this.lastId = this.openai.id;
+      return result;
+    } catch (error) {
+      if (error instanceof OpenAIAdmissionDenied) {
+        console.info('[project-work-planner] OpenAI paga não admitida; usando planejador local', { reason: error.reason });
+        this.lastId = this.local.id;
+        return this.local.proposeArguments(message);
+      }
+      throw error;
+    }
+  }
+}
+
 /** Cria o planejador configurado. O provedor é config de deploy, nunca escolha
- * por-proposta do usuário. */
+ * por-proposta do usuário. O caminho `openai` é sempre gated por admissão financeira
+ * com fallback local. */
 export function createConfiguredProjectPlanner(
   env: Record<string, string | undefined> = process.env,
 ): ProjectWorkPlanner {
-  return resolveConfiguredProjectPlannerProvider(env) === 'local'
-    ? new LocalOllamaProjectWorkPlanner()
-    : new OpenAIProjectWorkPlanner();
+  if (resolveConfiguredProjectPlannerProvider(env) === 'local') return new LocalOllamaProjectWorkPlanner();
+  return new AdmissionGatedOpenAIPlanner(
+    new OpenAIProjectWorkPlanner({ admission: createInteractiveOpenAIAdmission() }),
+    new LocalOllamaProjectWorkPlanner(),
+  );
 }
 
 /**

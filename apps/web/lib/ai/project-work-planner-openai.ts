@@ -1,5 +1,10 @@
 import { executeProjectTool, OPENAI_PROJECT_TOOLS } from './project-tools';
 import {
+  fetchAdmittedOpenAIResponses,
+  OpenAIAdmissionDenied,
+  type OpenAIAdmissionControl,
+} from './openai-paid-transport';
+import {
   buildPlannerUserPrompt,
   FORCE_SUBMISSION_AFTER_EVIDENCE,
   includedScopeAnchoredInProject,
@@ -15,8 +20,11 @@ import {
 } from './project-work-planner-shared';
 
 // ============================================================
-// Planejador OpenAI (Responses API + tools de investigação read-only). Extraído
-// sem mudança de comportamento do planejador original. Produz somente os
+// Planejador OpenAI (Responses API + tools de investigação read-only). Toda ida ao
+// provider passa pela BORDA FINANCEIRA ÚNICA (`fetchAdmittedOpenAIResponses`): a
+// admissão roda antes do fetch e a chave/URL vivem só na borda. Uma recusa de
+// admissão (`OpenAIAdmissionDenied`) PROPAGA — o orquestrador (`project-work-planner`)
+// cai no planejador LOCAL, nunca numa chamada paga silenciosa. Produz apenas os
 // ARGUMENTOS BRUTOS do submit; o host valida e monta o execution_spec.
 // ============================================================
 
@@ -31,8 +39,14 @@ type OpenAIResponse = { output?: OutputItem[]; error?: { message?: string } };
 
 
 export interface OpenAIPlannerDeps {
+  /** Admissão financeira OBRIGATÓRIA (borda única). Sem autoridade, `admit` recusa
+   * e a recusa propaga para o orquestrador cair no planejador local. */
+  readonly admission: OpenAIAdmissionControl;
+  /** Dono da chamada, carregado no envelope. Interativo: amarra o usuário. */
+  readonly userId?: string;
   readonly fetchImpl?: typeof fetch;
   readonly executeTool?: (name: string, rawArguments: string) => Promise<string>;
+  /** Chave explícita só para teste determinístico; produção lê do env NA BORDA. */
   readonly apiKey?: string;
   readonly model?: string;
 }
@@ -42,38 +56,45 @@ export class OpenAIProjectWorkPlanner implements ProjectWorkPlanner {
   private readonly fetchImpl: typeof fetch;
   private readonly executeTool: (name: string, rawArguments: string) => Promise<string>;
 
-  constructor(private readonly deps: OpenAIPlannerDeps = {}) {
+  constructor(private readonly deps: OpenAIPlannerDeps) {
     this.fetchImpl = deps.fetchImpl ?? fetch;
     this.executeTool = deps.executeTool ?? executeProjectTool;
   }
 
   async proposeArguments(message: string): Promise<PlannerProposalResult> {
-    const apiKey = this.deps.apiKey ?? process.env.OPENAI_API_KEY;
-    if (!apiKey) return { ok: false, message: 'A chave da OpenAI não está configurada.' };
     const model = this.deps.model ?? process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
-    const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+    const intent = { consumer: 'planner' as const, userId: this.deps.userId ?? 'unknown', model };
 
     let input: unknown[] = [{ role: 'user', content: buildPlannerUserPrompt(message) }];
     let localEvidenceCalls = 0;
     let totalCalls = 0;
 
     while (totalCalls <= PLANNER_TOOL_CALL_LIMIT) {
-      const response = await this.fetchImpl('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        signal: timeoutSignal(90_000),
-        headers,
-        body: JSON.stringify({
-          model,
-          store: false,
-          stream: false,
-          instructions: PLANNER_SYSTEM_INSTRUCTIONS,
-          input,
-          tools: [...OPENAI_PROJECT_TOOLS, SUBMIT_TOOL_RESPONSES],
-          tool_choice: localEvidenceCalls >= FORCE_SUBMISSION_AFTER_EVIDENCE
-            ? { type: 'function', name: SUBMIT_TOOL_NAME }
-            : 'auto',
-        }),
-      }).catch(() => null);
+      let response: Response | null;
+      try {
+        ({ response } = await fetchAdmittedOpenAIResponses({
+          admission: this.deps.admission,
+          intent,
+          body: {
+            model,
+            store: false,
+            stream: false,
+            instructions: PLANNER_SYSTEM_INSTRUCTIONS,
+            input,
+            tools: [...OPENAI_PROJECT_TOOLS, SUBMIT_TOOL_RESPONSES],
+            tool_choice: localEvidenceCalls >= FORCE_SUBMISSION_AFTER_EVIDENCE
+              ? { type: 'function', name: SUBMIT_TOOL_NAME }
+              : 'auto',
+          },
+          signal: timeoutSignal(90_000),
+          fetchImpl: this.fetchImpl,
+          ...(this.deps.apiKey !== undefined ? { apiKey: this.deps.apiKey } : {}),
+        }));
+      } catch (error) {
+        // Recusa de admissão paga PROPAGA: o orquestrador cai no planejador local.
+        if (error instanceof OpenAIAdmissionDenied) throw error;
+        response = null;
+      }
 
       if (!response?.ok) {
         const details = response ? await response.json().catch(() => null) as OpenAIResponse | null : null;

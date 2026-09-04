@@ -6,7 +6,7 @@ import {
   resolveConfiguredProjectPlannerProvider,
   createConfiguredProjectPlanner,
   shouldRunProjectPlanner,
-  OpenAIProjectWorkPlanner,
+  AdmissionGatedOpenAIPlanner,
   LocalOllamaProjectWorkPlanner,
   type ProjectWorkPlanner,
 } from './project-work-planner';
@@ -67,7 +67,8 @@ describe('resolveConfiguredProjectPlannerProvider — config de deploy', () => {
     expect(resolveConfiguredProjectPlannerProvider({ ANIMA_PROJECT_PLANNER_PROVIDER: '' })).toBe('openai');
   });
   test('a factory cria o tipo certo conforme a config', () => {
-    expect(createConfiguredProjectPlanner({})).toBeInstanceOf(OpenAIProjectWorkPlanner);
+    // Default openai vem gated por admissão financeira (com fallback local).
+    expect(createConfiguredProjectPlanner({})).toBeInstanceOf(AdmissionGatedOpenAIPlanner);
     expect(createConfiguredProjectPlanner({ ANIMA_PROJECT_PLANNER_PROVIDER: 'local' })).toBeInstanceOf(LocalOllamaProjectWorkPlanner);
   });
 });

@@ -5,8 +5,14 @@ jest.mock('./project-tools', () => ({
 }));
 
 import type { CreateWorkProposalCommand } from '@anima/core';
+import type { OpenAIAdmissionControl } from './openai-paid-transport';
 import { OpenAIProjectWorkPlanner, planExecutableProjectWork } from './project-work-planner';
 import { executeProjectTool } from './project-tools';
+
+// Admissão financeira em memória que CONCEDE: exercita o caminho OpenAI do planner
+// sem depender de fail-open nem gastar. A recusa e o fallback local são cobertos
+// pela suite selectable.
+const grant: OpenAIAdmissionControl = { admit: async intent => ({ consumer: intent.consumer, authorizationRef: 'test', reservationId: null }) };
 
 const base: CreateWorkProposalCommand = {
   sourceMessageId: 'message-1',
@@ -56,7 +62,7 @@ describe('planejador executável do projeto', () => {
   afterAll(() => { process.env = originalEnv; });
 
   test('fixa alvo, permissões e limites no servidor após investigação local', async () => {
-    const result = await planExecutableProjectWork('adicione o teste', base);
+    const result = await planExecutableProjectWork('adicione o teste', base, new OpenAIProjectWorkPlanner({ admission: grant }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.command.capability).toBe('programming');
@@ -120,6 +126,7 @@ describe('planejador executável do projeto', () => {
       });
 
     const planner = new OpenAIProjectWorkPlanner({
+      admission: grant,
       apiKey: 'test-key',
       model: 'gpt-test',
       fetchImpl: fetchImpl as unknown as typeof fetch,
@@ -186,6 +193,7 @@ describe('planejador executável do projeto', () => {
       });
 
     const planner = new OpenAIProjectWorkPlanner({
+      admission: grant,
       apiKey: 'test-key',
       model: 'gpt-test',
       fetchImpl: fetchImpl as unknown as typeof fetch,
@@ -239,6 +247,7 @@ describe('planejador executável do projeto', () => {
       });
 
     const planner = new OpenAIProjectWorkPlanner({
+      admission: grant,
       apiKey: 'test-key',
       model: 'gpt-test',
       fetchImpl: fetchImpl as unknown as typeof fetch,

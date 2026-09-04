@@ -874,6 +874,7 @@ ${contextBlock}`;
         systemPrompt,
         messages: [...pastMessages, { role: 'user', content: message }],
         developmentMode,
+        userId: user.id,
       });
     } catch (error) {
       const providerError = error instanceof ChatProviderError
@@ -946,6 +947,9 @@ ${contextBlock}`;
     'X-AI-Provider':          providerResult.provider,
     'X-AI-Model':             providerResult.model,
   };
+  // Observabilidade da política auto-local: quando a OpenAI paga não foi admitida,
+  // o provider vira 'ollama' e o motivo do fallback é exposto (nunca gasto silencioso).
+  if (providerResult.fallback) responseHeaders['X-AI-Fallback-Reason'] = providerResult.fallback.reason;
   responseHeaders['X-Source-Message-Id'] = sourceMessage.id;
   responseHeaders['X-Work-Orchestration'] = encodeURIComponent(JSON.stringify(orchestrationMetadata));
 

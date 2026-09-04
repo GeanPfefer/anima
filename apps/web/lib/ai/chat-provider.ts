@@ -3,6 +3,12 @@ import {
   OPENAI_PROJECT_TOOLS,
   PROJECT_TOOL_CALL_LIMIT,
 } from './project-tools';
+import {
+  fetchAdmittedOpenAIResponses,
+  OpenAIAdmissionDenied,
+  type OpenAIAdmissionControl,
+} from './openai-paid-transport';
+import { createInteractiveOpenAIAdmission } from './openai-interactive-admission';
 
 export type ChatProviderId = 'openai' | 'ollama';
 
@@ -19,10 +25,20 @@ export type ChatProviderRequest = {
   // No chat pessoal (default) NENHUMA ferramenta de repositório é anexada e o
   // modelo não recebe instrução para investigar o código.
   developmentMode?: boolean;
+  // Dono da chamada, carregado no envelope da admissão OpenAI paga. Interativo:
+  // amarra o usuário, nunca um work item forjado.
+  userId?: string;
   structuredOutput?: {
     readonly name: string;
     readonly schema: Record<string, unknown>;
   };
+};
+
+/** Dependências injetáveis (teste + futura autoridade). Produção usa a admissão
+ * interativa (que hoje recusa ⇒ fallback local) e o `fetch` global. */
+export type ChatProviderDeps = {
+  readonly admission?: OpenAIAdmissionControl;
+  readonly fetchImpl?: typeof fetch;
 };
 
 // Instrução de desenvolvimento — anexada SOMENTE no modo de desenvolvimento.
@@ -35,6 +51,10 @@ export type ChatProviderStream = {
   provider: ChatProviderId;
   model: string;
   stream: ReadableStream<Uint8Array>;
+  // Presente quando a OpenAI paga NÃO foi admitida e a resposta veio do provider
+  // LOCAL. Observabilidade da política: nunca é fallback pago silencioso, e o
+  // consumidor pode expor o motivo (ex.: header) além do provider já ser 'ollama'.
+  fallback?: { readonly from: 'openai'; readonly reason: string };
 };
 
 // OpenAI Structured Outputs aceita um subconjunto de JSON Schema. A API provou
@@ -150,12 +170,14 @@ async function streamOllama(request: ChatProviderRequest): Promise<ChatProviderS
   };
 }
 
-async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderStream> {
-  const apiKey = process.env.OPENAI_API_KEY;
+async function streamOpenAI(
+  request: ChatProviderRequest,
+  admission: OpenAIAdmissionControl,
+  fetchImpl?: typeof fetch,
+): Promise<ChatProviderStream> {
   const model = process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
-  if (!apiKey) {
-    throw new ChatProviderError('A chave da OpenAI não está configurada no servidor.', 503);
-  }
+  // Envelope da chamada paga interativa: amarra o usuário, nunca um work item.
+  const intent = { consumer: 'chat' as const, userId: request.userId ?? 'unknown', model };
 
   type OutputItem = {
     type?: string;
@@ -186,34 +208,41 @@ async function streamOpenAI(request: ChatProviderRequest): Promise<ChatProviderS
   let forceFinal = false;
   // Teto rígido de iterações: proteção extra contra laço (limite + a final).
   for (let iteration = 0; iteration <= PROJECT_TOOL_CALL_LIMIT + 1; iteration++) {
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      signal: timeoutSignal(90_000),
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        store: false,
-        instructions,
-        input,
-        ...(request.structuredOutput ? {
-          text: {
-            format: {
-              type: 'json_schema',
-              name: request.structuredOutput.name,
-              strict: true,
-              schema: openAIStructuredOutputSchema(request.structuredOutput.schema),
+    // Toda ida ao provider passa pela borda financeira única: a admissão roda ANTES
+    // do fetch. Recusa (OpenAIAdmissionDenied) propaga para o chamador cair no local;
+    // erro de transporte vira `null` e é tratado como antes.
+    let response: Response | null;
+    try {
+      ({ response } = await fetchAdmittedOpenAIResponses({
+        admission,
+        intent,
+        body: {
+          model,
+          stream: false,
+          store: false,
+          instructions,
+          input,
+          ...(request.structuredOutput ? {
+            text: {
+              format: {
+                type: 'json_schema',
+                name: request.structuredOutput.name,
+                strict: true,
+                schema: openAIStructuredOutputSchema(request.structuredOutput.schema),
+              },
             },
-          },
-        } : {}),
-        // Ferramentas SÓ no modo de desenvolvimento e ENQUANTO abaixo do limite.
-        // Na resposta final forçada, nenhuma ferramenta é oferecida.
-        ...(developmentMode && !forceFinal ? { tools: OPENAI_PROJECT_TOOLS, tool_choice: 'auto' } : {}),
-      }),
-    }).catch(() => null);
+          } : {}),
+          // Ferramentas SÓ no modo de desenvolvimento e ENQUANTO abaixo do limite.
+          // Na resposta final forçada, nenhuma ferramenta é oferecida.
+          ...(developmentMode && !forceFinal ? { tools: OPENAI_PROJECT_TOOLS, tool_choice: 'auto' } : {}),
+        },
+        signal: timeoutSignal(90_000),
+        ...(fetchImpl ? { fetchImpl } : {}),
+      }));
+    } catch (error) {
+      if (error instanceof OpenAIAdmissionDenied) throw error;
+      response = null;
+    }
 
     if (!response?.ok) {
       const details = response
@@ -271,6 +300,23 @@ export function parseChatProvider(value: unknown): ChatProviderId {
   return process.env.ANIMA_AI_PROVIDER === 'ollama' ? 'ollama' : 'openai';
 }
 
-export function streamChatProvider(request: ChatProviderRequest): Promise<ChatProviderStream> {
-  return request.provider === 'openai' ? streamOpenAI(request) : streamOllama(request);
+export async function streamChatProvider(
+  request: ChatProviderRequest,
+  deps: ChatProviderDeps = {},
+): Promise<ChatProviderStream> {
+  if (request.provider !== 'openai') return streamOllama(request);
+  const admission = deps.admission ?? createInteractiveOpenAIAdmission();
+  try {
+    return await streamOpenAI(request, admission, deps.fetchImpl);
+  } catch (error) {
+    // Política auto-local: OpenAI paga NÃO admitida ⇒ provider LOCAL (observável via
+    // `provider:'ollama'` + `fallback`). Nunca chamada paga silenciosa. Se o local
+    // também não puder operar, o erro observável do Ollama sobe — bloqueio sem gasto.
+    if (error instanceof OpenAIAdmissionDenied) {
+      console.info('[chat-provider] OpenAI paga não admitida; usando provider local', { reason: error.reason, consumer: 'chat' });
+      const local = await streamOllama(request);
+      return { ...local, fallback: { from: 'openai', reason: error.reason } };
+    }
+    throw error;
+  }
 }

@@ -10,7 +10,11 @@ jest.mock('./project-tools', () => ({
 }));
 
 import { streamChatProvider, ChatProviderError } from './chat-provider';
+import type { OpenAIAdmissionControl } from './openai-paid-transport';
 import { executeProjectTool } from './project-tools';
+
+// Admissão que concede: estes testes exercitam o laço de ferramentas do caminho OpenAI.
+const grant: OpenAIAdmissionControl = { admit: async intent => ({ consumer: intent.consumer, authorizationRef: 'test', reservationId: null }) };
 
 const functionCall = (id: string) => ({
   ok: true,
@@ -50,7 +54,7 @@ describe('chat provider — limite de ferramentas sem erro vazio (correção 2)'
       .mockResolvedValueOnce(functionCall('c3')) // esta excede o limite (2)
       .mockResolvedValueOnce(finalText('Resposta final com o contexto obtido.'));
 
-    const result = await streamChatProvider(request);
+    const result = await streamChatProvider(request, { admission: grant });
     expect(await read(result.stream)).toBe('Resposta final com o contexto obtido.');
   });
 
@@ -61,7 +65,7 @@ describe('chat provider — limite de ferramentas sem erro vazio (correção 2)'
       .mockResolvedValueOnce(functionCall('c3'))
       .mockResolvedValueOnce(finalText('Final.'));
 
-    await streamChatProvider(request);
+    await streamChatProvider(request, { admission: grant });
     // Executadas só as 2 dentro do limite; a 3ª (que estouraria) não roda.
     expect((executeProjectTool as jest.Mock).mock.calls).toHaveLength(2);
     // A última requisição (final forçada) não oferece ferramentas.
@@ -76,7 +80,7 @@ describe('chat provider — limite de ferramentas sem erro vazio (correção 2)'
       .mockResolvedValueOnce(functionCall('c3'))
       .mockResolvedValueOnce(finalText('')); // resposta final vazia
 
-    const error = await streamChatProvider(request).catch((e: unknown) => e);
+    const error = await streamChatProvider(request, { admission: grant }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ChatProviderError);
     // Recuperável e claro; e explicitamente NÃO 422 silencioso.
     expect((error as ChatProviderError).status).toBe(502);
