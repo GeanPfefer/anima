@@ -2,6 +2,7 @@ import { MAX_LEVEL, MIN_LEVEL, getEraForLevel } from './levels';
 
 describe('getEraForLevel', () => {
   it.each([
+    [MIN_LEVEL - 1, 'Despertar'],
     [MIN_LEVEL, 'Despertar'],
     [10, 'Despertar'],
     [11, 'Construção'],
@@ -12,6 +13,7 @@ describe('getEraForLevel', () => {
     [45, 'Maestria'],
     [46, 'Lenda'],
     [MAX_LEVEL, 'Lenda'],
+    [MAX_LEVEL + 1, 'Lenda'],
   ] as const)('retorna a era correta para o nível %i', (level, expectedEra) => {
     expect(getEraForLevel(level).name).toBe(expectedEra);
   });

@@ -47,7 +47,10 @@ export function getXPToNextLevel(totalXP: number): number {
 }
 
 export function getEraForLevel(level: number): Era {
-  return ERAS.find((e) => level >= e.minLevel && level <= e.maxLevel) ?? ERAS[0]!;
+  const era = ERAS.find((e) => level >= e.minLevel && level <= e.maxLevel);
+  if (era) return era;
+
+  return level < ERAS[0]!.minLevel ? ERAS[0]! : ERAS[ERAS.length - 1]!;
 }
 
 /** Nível do personagem = média aritmética dos níveis de todos os pilares ativos. */
