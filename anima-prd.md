@@ -1,4 +1,13 @@
 # Anima — Product Requirements Document
+> Backend coder OpenAI host-mediated concluído localmente (2026-09-03): o adapter
+> reutiliza o protocolo READ→EDIT do Ollama, com scope/stale/no-op/`in_lines`,
+> feedback de ambiguidade bounded, timeout/cancelamento, erros tipados, transcript e
+> usage provider-reported agregado; provider/model remotos são observados pelo host.
+> Config inválida agora falha fechada e Ollama permanece default. Prova paga real
+> ainda NÃO executada: o ledger `paid_compute_authorizations` governa nodes pagos,
+> mas ainda não está conectado ao consumo do `coder_backend=openai`; chamar a API
+> antes desse wiring bypassaria a governança financeira. Chave presente sem exposição,
+> zero chamadas/tokens/custo nesta sessão. [Registro](docs/registros/2026-09-03-backend-openai-host-mediated.md).
 > Recovery com saldo esgotado: `7b132de5` está BLOCKED/attempt_budget_exhausted,
 > retryable:true. Envelope correction→replan consumiu 3/3; árvore PIN-02 soma 5
 > attempts históricas. addf467 não renova autoridade. Human Recovery Authority

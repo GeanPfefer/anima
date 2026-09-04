@@ -34,9 +34,14 @@ describe('buildHostObservedCoderEvidence', () => {
     expect(result.value).toMatchObject({
       schemaVersion: 1, backendId: 'ollama-coder', durationMs: 84_000, outcome: 'succeeded',
     });
-    // A evidência NÃO carrega provider/model/tokens: só o que o host observou.
+    // Identidade de placement e usage só aparecem quando suas proveniências são declaradas.
     expect(result.value).not.toHaveProperty('model');
     expect(result.value).not.toHaveProperty('tokens');
+  });
+
+  test('preserva usage provider-reported e recusa totais incoerentes', () => {
+    expect(build({ providerUsage: { schemaVersion: 1, inputTokens: 10, outputTokens: 4, totalTokens: 14, cachedInputTokens: 2 } })).toMatchObject({ ok: true, value: { providerUsage: { totalTokens: 14 } } });
+    expect(build({ providerUsage: { schemaVersion: 1, inputTokens: 10, outputTokens: 4, totalTokens: 99 } })).toMatchObject({ ok: false, defect: 'invalid_correlation' });
   });
 
   test('cancelled é um desfecho distinto (medição parcial), não colapsa em failed', () => {

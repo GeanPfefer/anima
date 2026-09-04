@@ -22,6 +22,7 @@ import {
   writeChangeSet,
   type ContextBudget,
   type ManifestInputFile,
+  type OllamaChatResult,
   type ServedRead,
 } from './ollama-protocol';
 
@@ -66,6 +67,8 @@ export interface OllamaCoderOptions {
   readonly maxReadRounds?: number;
   /** Limite de contexto declarado pelo modelo, quando descoberto. Opcional. */
   readonly declaredContextLength?: number;
+  readonly protocolTransport?: CoderProtocolTransport;
+  readonly providerLabel?: string;
   /**
    * Seam EXPERIMENTAL do Plano 003 / ADR-004.
    * Ausente por padrao: replace_anchor nao e anunciado nem aceito.
@@ -80,6 +83,11 @@ export interface OllamaCoderOptions {
     readonly readGuidance?: 'narrow-target-v1' | 'after-scope-v1';
   };
 }
+
+export interface CoderProtocolMessage { readonly role: 'system' | 'user' | 'assistant'; readonly content: string }
+export interface CoderProtocolTransportInput { readonly messages: readonly CoderProtocolMessage[]; readonly signal: AbortSignal; readonly timeoutMs: number }
+export interface CoderProtocolTransportResult { readonly content: string }
+export type CoderProtocolTransport = (input: CoderProtocolTransportInput) => Promise<CoderProtocolTransportResult>;
 
 const SYSTEM = [
   'Você edita um repositório por um PROTOCOLO LIMITADO em JSON. Nunca recebe nem devolve arquivos inteiros.',
@@ -127,6 +135,7 @@ export class OllamaCoderBackend implements CoderBackend {
   private readonly timeoutMs: number;
   private readonly maxReadRounds: number;
   private readonly budget: ContextBudget;
+  private readonly providerLabel: string;
 
   constructor(private readonly options: OllamaCoderOptions) {
     this.id = options.backendId ?? coderBackendId('ollama', options.model);
@@ -140,6 +149,7 @@ export class OllamaCoderBackend implements CoderBackend {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 120_000;
     this.maxReadRounds = Math.max(1, Math.min(options.maxReadRounds ?? 3, 6));
+    this.providerLabel = options.providerLabel ?? `Ollama ${options.model}`;
     this.budget = resolveContextBudget({
       declaredContextLength: options.declaredContextLength ?? null,
       operationalCap: options.operationalContextCap ?? 8192,
@@ -260,7 +270,7 @@ export class OllamaCoderBackend implements CoderBackend {
             signal,
           );
           return {
-            summary: `Modelo Ollama ${this.options.model} aplicou ${touched.length} edição(ões) pelo experimento R2 de âncora host-mediada, para revisão.`,
+            summary: `Modelo ${this.providerLabel} aplicou ${touched.length} edição(ões) pelo experimento R2 de âncora host-mediada, para revisão.`,
             touchedResources: touched,
           };
         }
@@ -299,7 +309,7 @@ export class OllamaCoderBackend implements CoderBackend {
         ); } catch (error) { transcript.application(steps, 'write_failed'); throw error; }
         transcript.application(steps, 'applied');
         return {
-          summary: `Modelo Ollama ${this.options.model} aplicou ${touched.length} edição(ões) estruturada(s) por protocolo limitado, para revisão.`,
+          summary: `Modelo ${this.providerLabel} aplicou ${touched.length} edição(ões) estruturada(s) por protocolo limitado, para revisão.`,
           touchedResources: touched,
         };
       }
@@ -374,8 +384,11 @@ export class OllamaCoderBackend implements CoderBackend {
       : SYSTEM;
     const messages = [{ role: 'system' as const, content: system }, { role: 'user' as const, content: prompt }];
     assertPromptWithinBudget(system + prompt, this.budget);
-    const first = await callOllamaChat({ url: this.url, model: this.options.model, messages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
-    assertNotTruncated(system + prompt, first.meta);
+    const invoke = async (callMessages: readonly CoderProtocolMessage[]): Promise<CoderProtocolTransportResult | OllamaChatResult> => this.options.protocolTransport
+      ? this.options.protocolTransport({ messages: callMessages, signal, timeoutMs: this.timeoutMs })
+      : callOllamaChat({ url: this.url, model: this.options.model, messages: callMessages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
+    const first = await invoke(messages);
+    if ('meta' in first) assertNotTruncated(system + prompt, first.meta);
     try {
       return parseProtocolResponse(first.content);
     } catch (error) {
@@ -395,8 +408,8 @@ export class OllamaCoderBackend implements CoderBackend {
       // o que a Fase 1 evita. Não cresce o orçamento; só mede o que de fato é enviado.
       const repairText = system + prompt + assistantEcho + repairInstruction;
       assertPromptWithinBudget(repairText, this.budget);
-      const repaired = await callOllamaChat({ url: this.url, model: this.options.model, messages: repairMessages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
-      assertNotTruncated(repairText, repaired.meta);
+      const repaired = await invoke(repairMessages);
+      if ('meta' in repaired) assertNotTruncated(repairText, repaired.meta);
       return parseProtocolResponse(repaired.content);
     }
   }

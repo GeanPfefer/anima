@@ -76,6 +76,7 @@ export async function persistHostObservedCoderEvidence(
       } : {}),
       ...(observation.modelSelection !== undefined ? { modelSelection: observation.modelSelection } : {}),
       ...(observation.transcripts ? { transcripts: observation.transcripts } : {}),
+      ...(observation.providerUsage ? { providerUsage: observation.providerUsage } : {}),
       observedAt,
     });
 
@@ -110,6 +111,14 @@ export async function persistHostObservedCoderEvidence(
   const finalTurn = validated.at(-1)!;
 
   const transcripts = validated.flatMap(turn => turn.transcripts ?? []);
+  const usages = validated.flatMap(turn => turn.providerUsage ? [turn.providerUsage] : []);
+  const providerUsage = usages.length ? {
+    schemaVersion: 1 as const,
+    inputTokens: usages.reduce((sum, value) => sum + value.inputTokens, 0),
+    outputTokens: usages.reduce((sum, value) => sum + value.outputTokens, 0),
+    totalTokens: usages.reduce((sum, value) => sum + value.totalTokens, 0),
+    cachedInputTokens: usages.reduce((sum, value) => sum + (value.cachedInputTokens ?? 0), 0),
+  } : undefined;
   const built = buildHostObservedCoderEvidence({
     workItemId: correlation.workItemId,
     attemptId: correlation.attemptId,
@@ -118,6 +127,7 @@ export async function persistHostObservedCoderEvidence(
     durationMs,
     outcome: finalTurn.outcome,
     ...(transcripts.length ? { transcripts } : {}),
+    ...(providerUsage ? { providerUsage } : {}),
     ...(placement !== undefined ? { placement, nodeId, model } : {}),
     ...(finalTurn.modelSelection !== undefined ? { modelSelection: finalTurn.modelSelection } : {}),
     observedAt,

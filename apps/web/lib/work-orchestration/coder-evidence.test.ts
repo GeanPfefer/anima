@@ -76,6 +76,15 @@ describe('persistHostObservedCoderEvidence (fail-open)', () => {
     });
   });
 
+  test('agrega usage provider-reported sem misturar com duração host-observed', async () => {
+    const { sink, calls } = capturing();
+    await persistHostObservedCoderEvidence(correlation, [
+      { ...succeeded, providerUsage: { schemaVersion: 1, inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
+      { ...succeeded, durationMs: 1, providerUsage: { schemaVersion: 1, inputTokens: 3, outputTokens: 4, totalTokens: 7, cachedInputTokens: 1 } },
+    ], sink, at);
+    expect(calls[0]?.providerUsage).toEqual({ schemaVersion: 1, inputTokens: 13, outputTokens: 6, totalTokens: 19, cachedInputTokens: 1 });
+  });
+
   test('nenhuma edição de coder observada ⇒ skipped e o sink NUNCA é chamado', async () => {
     const { sink, calls } = capturing();
     const outcome = await persistHostObservedCoderEvidence(correlation, null, sink, at);

@@ -10,15 +10,16 @@ describe('resolveConfiguredCoderBackend — config de deploy do backend de códi
     expect(resolveConfiguredCoderBackend({ ANIMA_WORKTREE_CODER_BACKEND: 'deepseek-harness' })).toBe('deepseek-harness');
     expect(resolveConfiguredCoderBackend({ ANIMA_WORKTREE_CODER_BACKEND: 'openai' })).toBe('openai');
     expect(resolveConfiguredCoderBackend({ ANIMA_WORKTREE_CODER_BACKEND: 'ollama' })).toBe('ollama');
+    expect(resolveConfiguredCoderBackend({ ANIMA_CODER_PROVIDER: 'openai' })).toBe('openai');
   });
 
   test('trim de espaços em volta do valor', () => {
     expect(resolveConfiguredCoderBackend({ ANIMA_WORKTREE_CODER_BACKEND: '  deepseek-harness  ' })).toBe('deepseek-harness');
   });
 
-  test('valor não reconhecido cai no default seguro ollama', () => {
-    expect(resolveConfiguredCoderBackend({ ANIMA_WORKTREE_CODER_BACKEND: 'scripted' })).toBe('ollama');
-    expect(resolveConfiguredCoderBackend({ ANIMA_WORKTREE_CODER_BACKEND: 'gpt' })).toBe('ollama');
+  test('valor não reconhecido falha fechado; vazio preserva o default gratuito', () => {
+    expect(() => resolveConfiguredCoderBackend({ ANIMA_WORKTREE_CODER_BACKEND: 'scripted' })).toThrow(/não é permitido/);
+    expect(() => resolveConfiguredCoderBackend({ ANIMA_CODER_PROVIDER: 'gpt' })).toThrow(/não é permitido/);
     expect(resolveConfiguredCoderBackend({ ANIMA_WORKTREE_CODER_BACKEND: '' })).toBe('ollama');
   });
 

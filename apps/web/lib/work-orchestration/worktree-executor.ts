@@ -220,6 +220,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       let retryIndex = 0;
       let retryFeedback: HostValidationFeedback | null = null;
       let editResult: Awaited<ReturnType<CoderBackend['edit']>>;
+      let providerUsage: import('@anima/core').ProviderReportedUsageV1 | undefined;
       let changed: readonly string[] = [];
       let changedByAttempt: readonly string[] = [];
       let diffFiles: Awaited<ReturnType<GitWorktree['diffNumstat']>> = [];
@@ -249,6 +250,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             durationMs: Date.now() - coderStartedAt,
             outcome,
             ...(transcript ? { transcripts: [transcript] } : {}),
+            ...(providerUsage ? { providerUsage } : {}),
             ...(this.options.backend.observation ?? {}),
           });
         };
@@ -270,6 +272,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             workspace,
             signal,
           );
+          providerUsage = editResult.providerUsage;
           observeCoder(false);
         } catch (error) {
           observeCoder(true);

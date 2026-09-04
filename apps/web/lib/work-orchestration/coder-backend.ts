@@ -74,6 +74,7 @@ export interface CoderEditResult {
   readonly summary: string;
   readonly touchedResources: readonly string[];
   readonly notes?: readonly string[];
+  readonly providerUsage?: import('@anima/core').ProviderReportedUsageV1;
 }
 
 export interface CoderBackend {
@@ -105,13 +106,17 @@ export const WORKTREE_CODER_BACKENDS: readonly CoderProvider[] = ['ollama', 'ope
  * (`ANIMA_WORKTREE_CODER_BACKEND`), nunca de escolha por-proposta do usuário: qual
  * coder roda é detalhe de INFRAESTRUTURA (como o modelo, já resolvido por env), não
  * microgerência do usuário — o usuário autoriza o TRABALHO. Default: `ollama` (o
- * DeepSeek Harness NÃO é default). Valor não reconhecido cai no default seguro. É a
+ * DeepSeek Harness NÃO é default). Valor ausente/vazio usa o default seguro;
+ * valor não reconhecido falha fechado para não executar um provider diferente do
+ * configurado. É a
  * superfície dev/admin coerente para escolher a capacidade já implementada sem um
  * dropdown cru de infraestrutura no chat.
  */
 export function resolveConfiguredCoderBackend(env: Record<string, string | undefined> = process.env): CoderProvider {
-  const raw = env.ANIMA_WORKTREE_CODER_BACKEND?.trim();
-  return raw !== undefined && (WORKTREE_CODER_BACKENDS as readonly string[]).includes(raw) ? (raw as CoderProvider) : 'ollama';
+  const raw = (env.ANIMA_CODER_PROVIDER ?? env.ANIMA_WORKTREE_CODER_BACKEND)?.trim();
+  if (raw === undefined || raw === '') return 'ollama';
+  if ((WORKTREE_CODER_BACKENDS as readonly string[]).includes(raw)) return raw as CoderProvider;
+  throw new Error(`Backend de código configurado não é permitido: "${raw}".`);
 }
 
 /** Extrai `{"files":[{path,content}]}` da resposta de um modelo, aceitando só

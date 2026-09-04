@@ -155,7 +155,7 @@ const backendFor = (
 
   if (kind === 'openai') {
     return new GptCoderBackend({
-      model: contract.model ?? process.env.OPENAI_MODEL,
+      model: contract.model ?? process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL,
     });
   }
 

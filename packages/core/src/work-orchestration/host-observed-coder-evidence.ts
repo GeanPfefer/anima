@@ -33,6 +33,13 @@ import type { Json } from '@anima/types';
 const MAX_BACKEND_ID = 200;
 
 export type HostObservedCoderOutcome = 'succeeded' | 'failed' | 'cancelled';
+export interface ProviderReportedUsageV1 {
+  readonly schemaVersion: 1;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly cachedInputTokens?: number;
+}
 
 const CODER_OUTCOMES: ReadonlySet<HostObservedCoderOutcome> = new Set<HostObservedCoderOutcome>([
   'succeeded', 'failed', 'cancelled',
@@ -55,6 +62,7 @@ export interface HostObservedCoderEvidenceV1 {
   /** Seleção governada de modelo (downgrade observável) quando o preferido não coube. */
   readonly modelSelection?: CoderModelSelectionEvidenceV1;
   readonly transcripts?: readonly CoderTranscript[];
+  readonly providerUsage?: ProviderReportedUsageV1;
   readonly observedAt: string;
 }
 
@@ -70,6 +78,7 @@ export interface ObservedCoderInput {
   readonly model?: string;
   readonly modelSelection?: CoderModelSelectionEvidenceV1;
   readonly transcripts?: readonly CoderTranscript[];
+  readonly providerUsage?: ProviderReportedUsageV1;
 }
 
 export interface BuildHostObservedCoderEvidenceInput {
@@ -84,6 +93,7 @@ export interface BuildHostObservedCoderEvidenceInput {
   readonly model?: string;
   readonly modelSelection?: CoderModelSelectionEvidenceV1;
   readonly transcripts?: readonly CoderTranscript[];
+  readonly providerUsage?: ProviderReportedUsageV1;
   readonly observedAt: string;
 }
 
@@ -104,6 +114,10 @@ export type HostObservedCoderEvidenceResult =
 const nonBlank = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 const isInt = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value);
 const positiveVersion = (value: unknown): value is number => isInt(value) && (value as number) > 0;
+const validUsage = (value: ProviderReportedUsageV1): boolean => value.schemaVersion === 1
+  && [value.inputTokens, value.outputTokens, value.totalTokens].every(v => isInt(v) && v >= 0)
+  && value.totalTokens === value.inputTokens + value.outputTokens
+  && (value.cachedInputTokens === undefined || (isInt(value.cachedInputTokens) && value.cachedInputTokens >= 0 && value.cachedInputTokens <= value.inputTokens));
 
 const fail = (defect: HostObservedCoderEvidenceDefect, explanation: string): HostObservedCoderEvidenceResult =>
   ({ ok: false, defect, explanation });
@@ -150,6 +164,7 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
     return fail('invalid_model_selection', 'A evidência de seleção de modelo está malformada.');
   }
   if (input.transcripts !== undefined && !validCoderTranscripts(input.transcripts)) return fail('invalid_correlation', 'Invalid coder transcript');
+  if (input.providerUsage !== undefined && !validUsage(input.providerUsage)) return fail('invalid_correlation', 'Invalid provider-reported usage');
   return {
     ok: true,
     value: {
@@ -163,6 +178,7 @@ export function buildHostObservedCoderEvidence(input: BuildHostObservedCoderEvid
       ...(hasPlacementIdentity ? { placement: input.placement!, nodeId: input.nodeId!, model: input.model! } : {}),
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       ...(input.transcripts !== undefined ? { transcripts: input.transcripts } : {}),
+      ...(input.providerUsage !== undefined ? { providerUsage: input.providerUsage } : {}),
       observedAt: input.observedAt,
     },
   };
@@ -210,6 +226,7 @@ export function parseHostObservedCoderEvidence(value: Json | undefined): HostObs
       return selection ? { modelSelection: selection } : {};
     })(),
     ...(root.transcripts !== undefined ? { transcripts: root.transcripts as unknown as readonly CoderTranscript[] } : {}),
+    ...(root.providerUsage !== undefined ? { providerUsage: root.providerUsage as unknown as ProviderReportedUsageV1 } : {}),
     observedAt: root.observedAt as string,
   });
   return built.ok ? built.value : null;
