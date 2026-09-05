@@ -5,6 +5,10 @@
 > por `execution_started`; contadores globais permanecem intactos, replay não duplica
 > e qualquer partida posterior volta ao INTEL-04. O recovery antigo de `failed`
 > permanece inalterado. Prova: pgTAP focado + regressões 63/63, core 50/50, web 37/37.
+> Prova viva em `ce90eb14`: grant `3e3ba0ba` readmitiu o mesmo item e foi consumido
+> pelo attempt `a719efd0`; o coder não chegou ao provider porque a criação da worktree
+> falhou na fronteira de permissão Git do host. Item agora `failed/retryable:true`, sem
+> diff, gate ou Verifier; não repetir sem nova decisão humana.
 > Compute Economics Observations/Cohorts V1 concluído em branch isolada (2026-09-04):
 > `EconomicObservationV1` normaliza evidência de attempts para coortes comparáveis por
 > capability/taskClass/provider/model/placement, preserva proveniência, separa exposição
