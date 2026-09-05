@@ -8,6 +8,7 @@ import { readAuthorizedBaseSha, readExecutionContract } from '@/lib/work-orchest
 import { grantPaidComputeAuthorization } from '@/lib/work-orchestration/paid-compute-authorization-store';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
+import { parseProveOpenaiStrongE2eArgs } from './prove-openai-strong-e2e-args';
 
 // ============================================================
 // Prova viva END-TO-END com COMPUTE FORTE (OpenAI) do ciclo de auto-desenvolvimento
@@ -37,22 +38,13 @@ import { createWorkOrchestrationService } from '@/lib/work-orchestration/server'
 
 const CEILING_USD = 0.25;
 
-const TASK_MESSAGE = [
-  'Adicione uma função pura de diagnóstico da configuração atual do Project Work Planner em apps/web/lib/ai.',
-  'A função deve expor o provider efetivo do planejador ("openai" ou "local") e, quando o provider efetivo for "local", também o modelo local efetivo.',
-  'Reutilize os defaults e as funções de configuração já existentes (por exemplo resolveConfiguredProjectPlannerProvider e a resolução do modelo local já usada pelo planejador local).',
-  'A função deve ser PURA: não faz I/O, não faz chamadas HTTP e NUNCA retorna, lê ou incorpora API keys, tokens, cabeçalhos de autorização ou qualquer segredo.',
-  'Não altere a seleção de provider nem o comportamento existente do planner.',
-  'Adicione testes focados cobrindo: (1) a configuração default; (2) provider local com modelo explícito; (3) ausência de segredos no retorno.',
-  'Use somente os arquivos mínimos necessários em apps/web/lib/ai e valide com um teste focado.',
-].join(' ');
-
 function redact(value: string): string {
   // Nunca deixa vazar um segredo estilo OpenAI em log/evidência, mesmo por acidente.
   return value.replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-***REDACTED***');
 }
 
 async function main(): Promise<void> {
+  const taskMessage = parseProveOpenaiStrongE2eArgs(process.argv.slice(2));
   const identityResult = await resolveCliIdentity();
   if (!identityResult.ok) throw new Error(identityResult.error);
   const { client, userId } = identityResult.identity;
@@ -65,7 +57,7 @@ async function main(): Promise<void> {
 
   // 1) Mensagem real do usuário (Camada 1: memória bruta), fonte da proposta.
   const source = await client.from('ai_conversations').insert({
-    user_id: userId, role: 'user', content: TASK_MESSAGE,
+    user_id: userId, role: 'user', content: taskMessage,
   }).select('id').single();
   if (source.error || !source.data) throw new Error(`Falha ao persistir mensagem de origem: ${source.error?.message ?? 'sem linha'}`);
   const sourceMessageId = source.data.id;
@@ -111,7 +103,7 @@ async function main(): Promise<void> {
     sourceMessageId, impactLevel: 'low', capability: 'programming',
     intent: {}, proposal: placeholder.proposal,
   };
-  const planned = await planExecutableProjectWork(TASK_MESSAGE, planningBase, planner);
+  const planned = await planExecutableProjectWork(taskMessage, planningBase, planner);
   if (!planned.ok) {
     console.log(JSON.stringify({
       stage: 'planner_failed', plannerProvider: planner.id, model,
