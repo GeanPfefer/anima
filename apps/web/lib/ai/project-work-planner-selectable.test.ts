@@ -4,6 +4,7 @@ import {
   planExecutableProjectWork,
   planExecutableProjectWorkRevision,
   resolveConfiguredProjectPlannerProvider,
+  resolveConfiguredProjectPlannerConfig,
   createConfiguredProjectPlanner,
   shouldRunProjectPlanner,
   AdmissionGatedOpenAIPlanner,
@@ -70,6 +71,20 @@ describe('resolveConfiguredProjectPlannerProvider — config de deploy', () => {
     // Default openai vem gated por admissão financeira (com fallback local).
     expect(createConfiguredProjectPlanner({})).toBeInstanceOf(AdmissionGatedOpenAIPlanner);
     expect(createConfiguredProjectPlanner({ ANIMA_PROJECT_PLANNER_PROVIDER: 'local' })).toBeInstanceOf(LocalOllamaProjectWorkPlanner);
+  });
+  test('expõe apenas a configuração efetiva não sensível', () => {
+    expect(resolveConfiguredProjectPlannerConfig({
+      ANIMA_PROJECT_PLANNER_PROVIDER: 'openai',
+      OPENAI_API_KEY: 'secret',
+    })).toEqual({ provider: 'openai' });
+    expect(resolveConfiguredProjectPlannerConfig({
+      ANIMA_PROJECT_PLANNER_PROVIDER: 'local',
+      ANIMA_PROJECT_PLANNER_MODEL: 'llama3.2',
+      OLLAMA_URL: 'http://private-host',
+    })).toEqual({ provider: 'local', model: 'llama3.2' });
+    expect(resolveConfiguredProjectPlannerConfig({
+      ANIMA_PROJECT_PLANNER_PROVIDER: 'local',
+    })).toEqual({ provider: 'local', model: 'qwen3-coder:latest' });
   });
 });
 

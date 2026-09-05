@@ -36,6 +36,20 @@ export function resolveConfiguredProjectPlannerProvider(
   return env.ANIMA_PROJECT_PLANNER_PROVIDER?.trim() === 'local' ? 'local' : 'openai';
 }
 
+/** Configuração efetiva e não sensível do planejador para exposição em status. */
+export function resolveConfiguredProjectPlannerConfig(
+  env: Record<string, string | undefined>,
+): { provider: 'openai' } | { provider: 'local'; model: string } {
+  const provider = resolveConfiguredProjectPlannerProvider(env);
+  if (provider === 'local') {
+    return {
+      provider,
+      model: env.ANIMA_PROJECT_PLANNER_MODEL ?? 'qwen3-coder:latest',
+    };
+  }
+  return { provider };
+}
+
 /**
  * O planejador deve rodar nesta requisição? Preserva o default de produção: com o
  * planejador OpenAI (default) o gatilho continua exigindo o provedor de chat
