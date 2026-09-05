@@ -15,6 +15,7 @@ import {
   type WorkRoutingAdjustmentV1,
   type WorkRoutingDecisionV1,
   type WorkHandoffV1,
+  type ComputeRouteDecisionV1,
 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -106,6 +107,8 @@ export interface SupervisorTurnDependencies {
   readonly ownerInstanceId: string;
   readonly newId: () => string;
   readonly signal: AbortSignal;
+  /** Decisão de compute já tomada a montante da resolução do executor. */
+  readonly computeRoutingDecision?: ComputeRouteDecisionV1;
   readonly reader?: SupervisorReader;
   readonly requestedWork?: {
     readonly workItemId: string;
@@ -292,6 +295,21 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   const claimId = newId();
   const leaseSeconds = (eligibility.spec.limits.maxDurationMinutes ?? 30) * 60 + 300;
   const attemptId = newId();
+  if (dependencies.computeRoutingDecision) {
+    const compute = dependencies.computeRoutingDecision;
+    if (compute.status !== 'selected' || compute.workItemId !== selection.workItemId
+      || compute.approvedProposalVersion !== selection.approvedProposalVersion) {
+      return { ...started, outcome: 'routing_refused', refusal: { code: 'compute_routing_invalid', message: 'A decisão de compute não corresponde à tentativa selecionada.' } };
+    }
+    const persisted = await client.rpc('record_compute_routing_decision', {
+      p_work_item_id: selection.workItemId,
+      p_expected_proposal_version: selection.approvedProposalVersion,
+      p_decision_id: newId(),
+      p_attempt_id: attemptId,
+      p_decision: compute as unknown as Json,
+    });
+    if (persisted.error) return { ...started, outcome: 'routing_refused', refusal: refusalOf(persisted.error) };
+  }
   const classificationRead = await client.rpc('current_work_intelligence_classification', {
     p_work_item_id: selection.workItemId,
   });

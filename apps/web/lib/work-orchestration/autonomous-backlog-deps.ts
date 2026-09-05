@@ -1,5 +1,5 @@
-import type { AutonomousQueueEntry, ObservedCoderInput, ObservedGateInput } from '@anima/core';
-import type { Database } from '@anima/types';
+import { decideComputeRoute, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ComputeRouteDecisionV1, type LocalFailureSignalV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
+import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
 import { persistPostTurnHostObservations } from './post-turn-observation';
@@ -9,7 +9,9 @@ import { readMachinePressure, readResourceAdmission } from './resource-governor'
 import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteRuntimeFor } from './coder-placement';
 import { leaseDeadlineSignal, onDemandBurstForced, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
 import { readLivePaidNodeCount } from './paid-compute-lease-reconciler-deps';
-import { createOpenAICoderAdmission } from './openai-paid-compute';
+import { createOpenAICoderAdmission, openAIProviderResourceClass } from './openai-paid-compute';
+import { readActivePaidComputeAuthorization } from './paid-compute-authorization-store';
+import { resolveCoderCapacityPolicy } from './coder-model-policy';
 
 // ============================================================
 // Dependências do driver de backlog para o PROJETO real (worktree/qwen3-coder),
@@ -49,6 +51,72 @@ export function resumeLatestRetryCheckpoint(contract: ExecutionContract, events:
   return { ...contract, resumeCheckpointCommitSha: commit };
 }
 
+/** Feature gate explícito de OPERADOR do Compute Router V1. Ausência ⇒ OFF.
+ * Enquanto OFF, o Router é semanticamente invisível: nenhuma decisão, nenhum lookup
+ * de authority/economics, nenhum evento `compute_routing_decided`. */
+const computeRouterEnabled = (): boolean => process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED === '1';
+
+/**
+ * Decisão do Compute Router V1 para uma entrada da fila. O núcleo é PURO
+ * (`decideComputeRoute`); a única impureza é a LEITURA (read-only) da autoridade paga
+ * — apenas quando há `OPENAI_API_KEY` de operador — e da política de capacidade local.
+ * Só é chamada com o Router LIGADO; nunca no caminho legado. NÃO persiste, NÃO inicia
+ * tentativa, NÃO cria autoridade e NÃO gasta. O Router decide EXCLUSIVAMENTE entre
+ * Ollama local e OpenAI API — o ciclo de vida de cloud/on-demand fica fora dele.
+ */
+async function routeCompute(
+  client: SupabaseClient<Database>,
+  entry: AutonomousQueueEntry,
+  contract: ExecutionContract,
+  historyData: readonly { readonly event_type: string; readonly payload: unknown }[],
+  admittedPressure: ReturnType<typeof readMachinePressure>,
+): Promise<ComputeRouteDecisionV1> {
+  const localModel = contract.coderBackend === 'ollama' && contract.model
+    ? contract.model : process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
+  const openAIModel = process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
+  const policy = resolveCoderCapacityPolicy();
+  const modelSelection = policy ? selectGovernedCoderModel(localModel, policy) : null;
+  const historyText = JSON.stringify(historyData);
+  const localFailure: LocalFailureSignalV1 =
+    /ollama_read_round_limit|context_limit|context_window_exceeded/.test(historyText) ? 'model_capability'
+    : /ollama_no_effective_edits|no_progress|loop_detected/.test(historyText) ? 'no_progress'
+    : /ollama_timeout|ollama_transport_error|provider_unavailable/.test(historyText) ? 'temporary_infrastructure'
+    : 'none';
+  // OpenAI só é candidata quando há credencial de operador. Sem ela, o Router decide
+  // exclusivamente sobre o compute local (nunca "espera autorização" no vazio).
+  const openAIAvailable = typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.trim().length > 0;
+  const authorization = openAIAvailable ? await readActivePaidComputeAuthorization(client, {
+    providerId: 'openai', nodeId: 'openai-api', resourceClass: openAIProviderResourceClass(openAIModel),
+    workItemId: entry.workItemId, now: new Date(),
+  }) : null;
+  const authorityDecision = evaluatePaidComputeAuthorization({
+    billingMode: 'paid', providerId: 'openai', nodeId: 'openai-api',
+    resourceClass: openAIProviderResourceClass(openAIModel), workItemId: entry.workItemId,
+    requestedDurationMs: 30 * 60_000, estimatedCost: authorization?.maxCostEstimate ?? null,
+  }, authorization, new Date());
+  return decideComputeRoute({
+    schemaVersion: 1, workItemId: entry.workItemId, approvedProposalVersion: entry.approvedProposalVersion,
+    capability: entry.capability, taskClass: null,
+    preferred: contract.coderBackend === 'openai' ? { provider: 'openai', model: openAIModel } : null,
+    local: {
+      provider: 'ollama', model: modelSelection?.ok ? modelSelection.evidence.selected : localModel,
+      available: true, supportsCapability: entry.capability === 'programming',
+      modelFits: modelSelection === null || modelSelection.ok, resourceClass: policy ? `local:${policy.capacityGb}gb` : null,
+    },
+    resourceGovernor: admittedPressure === 'low' ? 'permit' : admittedPressure === 'unknown' ? 'unavailable' : 'deny',
+    localFailure,
+    openai: {
+      provider: 'openai', model: openAIModel, available: openAIAvailable,
+      supportsCapability: entry.capability === 'programming', modelFits: true, resourceClass: openAIProviderResourceClass(openAIModel),
+    },
+    paidAuthority: authorityDecision.authorized && authorityDecision.requiresPayment && authorization?.maxCostEstimate ? {
+      status: 'authorized', authorizationId: authorization.authorizationId,
+      remainingExposure: { status: 'known', value: authorization.maxCostEstimate },
+    } : { status: 'missing', authorizationId: null, remainingExposure: { status: 'unavailable', reason: 'cost_unknown' } },
+    economics: null,
+  });
+}
+
 /**
  * Monta as dependências de execução real de uma volta do backlog para um cliente
  * autenticado. A SELEÇÃO/EXCLUSÃO continuam server-side; a volta usa o executor de
@@ -81,6 +149,11 @@ export function buildProjectBacklogCycleDeps(
       const admission = readResourceAdmission();
       admittedPressure = admission.pressure;
       if (admission.verdict === 'permit') return true;
+      // Com o Router LIGADO e credencial de operador, provider_api pode executar sem
+      // consumir RAM local: apenas ADMITE avaliar a fila (a autoridade paga continua
+      // obrigatória e a decisão é persistida na volta). Router OFF ⇒ caminho legado.
+      if (computeRouterEnabled()
+        && typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.trim().length > 0) return true;
       const model = process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
       if (readResidentOnDemandNodeConfig(model)) return true;
       const node = readExplicitCoderNodeV0(model);
@@ -102,9 +175,32 @@ export function buildProjectBacklogCycleDeps(
       const history = await client.from('work_events').select('event_type,payload')
         .eq('work_item_id', entry.workItemId).order('seq', { ascending: false }).limit(40);
       if (!history.error) contract = resumeLatestRetryCheckpoint(contract, history.data ?? []);
-      const model = contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
+
+      // ── Compute Router V1 — atrás do feature gate explícito de operador ──────────
+      // DESLIGADO ⇒ `computeDecision` permanece null e NADA do Router roda: nenhuma
+      // decisão, nenhum lookup de authority/economics, nenhum evento. O caminho legado
+      // abaixo é idêntico ao anterior. LIGADO ⇒ decide entre Ollama local e OpenAI API;
+      // uma decisão não-selecionada vira EVIDÊNCIA (sem tentativa) e a volta para.
+      let computeDecision: ComputeRouteDecisionV1 | null = null;
+      if (computeRouterEnabled()) {
+        const decision = await routeCompute(client, entry, contract, history.error ? [] : history.data ?? [], admittedPressure);
+        if (decision.status !== 'selected') {
+          await client.rpc('record_compute_routing_decision', {
+            p_work_item_id: entry.workItemId, p_expected_proposal_version: entry.approvedProposalVersion,
+            p_decision_id: crypto.randomUUID(), p_attempt_id: null, p_decision: decision as unknown as Json,
+          });
+          return notExecutable(entry, decision.reasonCode, decision.reason);
+        }
+        computeDecision = decision;
+        contract = { ...contract, coderBackend: decision.selectedProvider, model: decision.selectedModel };
+      }
+
+      // Router→OpenAI dispensa o placement local (Ollama/burst on-demand): o admission
+      // OpenAI resolve o executor. Router OFF ou Router→Ollama seguem o placement legado.
+      const routedToOpenAI = computeDecision?.selectedProvider === 'openai';
+      const model = computeDecision ? computeDecision.selectedModel! : contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
       const node = readExplicitCoderNodeV0(model);
-      let placement = decideCoderPlacement({
+      let placement = routedToOpenAI ? null : decideCoderPlacement({
         pressure: admittedPressure,
         model,
         nodes: node ? [node] : [],
@@ -114,7 +210,7 @@ export function buildProjectBacklogCycleDeps(
       let ollamaRuntimeOverride;
       // On-demand engata sob defer (pressão moderada/alta) OU quando o lever de prova/ops
       // força a pré-condição; `unknown` permanece fail-closed (sensor indisponível).
-      if ((placement.placement === 'defer' || onDemandBurstForced()) && admittedPressure !== 'unknown') {
+      if (placement && (placement.placement === 'defer' || onDemandBurstForced()) && admittedPressure !== 'unknown') {
         const onDemand = readResidentOnDemandNodeConfig(model);
         if (onDemand) {
           onDemandSession = await prepareResidentOnDemandCoderNode({
@@ -136,8 +232,8 @@ export function buildProjectBacklogCycleDeps(
           } };
         }
       }
-      if (placement.placement === 'defer') return notExecutable(entry, 'coder_placement_deferred', `Placement do coder adiou a execução: ${placement.reason}.`);
-      ollamaRuntimeOverride ??= placement.placement === 'remote' ? remoteRuntimeFor(placement.node, model) : localRuntimeFor(model);
+      if (placement?.placement === 'defer') return notExecutable(entry, 'coder_placement_deferred', `Placement do coder adiou a execução: ${placement.reason}.`);
+      if (placement) ollamaRuntimeOverride ??= placement.placement === 'remote' ? remoteRuntimeFor(placement.node, model) : localRuntimeFor(model);
       const gateObservations: ObservedGateInput[] = [];
       const coderObservations: ObservedCoderInput[] = [];
       const selection = resolveExecutorRoute(contract, {
@@ -158,6 +254,7 @@ export function buildProjectBacklogCycleDeps(
           client, routes: [selection.route], ownerInstanceId,
           newId: () => crypto.randomUUID(), signal: turnDeadline?.signal ?? signal,
           requestedWork: { workItemId: entry.workItemId, expectedProposalVersion: entry.approvedProposalVersion },
+          ...(computeDecision ? { computeRoutingDecision: computeDecision } : {}),
         });
       } finally {
         turnDeadline?.dispose();
