@@ -35,11 +35,14 @@ describe('economic history adapter', () => {
   });
 
   test('prova OpenAI real preserva usage, inconclusive e custo unsettled', () => {
-    const result = projectEconomicHistory(query, [coder()], [opinion()], [{ id: 'work-1', capability: 'programming', intent: {} }]);
+    const result = projectEconomicHistory(query, [coder()], [opinion()], [{ id: 'work-1', capability: 'programming', intent: {} }], [
+      { attempt_id: 'attempt-1', event_type: 'reserved', amount: 0.25, currency: 'USD' },
+    ]);
     expect(result.observations).toHaveLength(1);
     expect(result.observations[0]).toMatchObject({
       cohort: { taskClass: 'unknown', provider: 'openai', model: 'gpt-5.6-terra', placement: 'api' },
-      runtimeMs: 14_900, reachedReview: true, verified: false, outcomeClass: 'review_inconclusive', cost: null, reservedExposure: null,
+      runtimeMs: 14_900, reachedReview: true, verified: false, outcomeClass: 'review_inconclusive', cost: null,
+      reservedExposure: { kind: 'reserved_exposure', money: { amount: 0.25, currency: 'USD' } },
       usage: { hostObservedCallCount: 3, providerReported: { inputTokens: 4_123, outputTokens: 1_142, cachedInputTokens: 1_121 } },
     });
     expect(result.openai).toMatchObject({ attempts: 1, verified: 0, dataQuality: 'insufficient_sample' });

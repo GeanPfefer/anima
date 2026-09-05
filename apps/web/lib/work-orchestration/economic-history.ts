@@ -23,6 +23,12 @@ type EventRow = {
   readonly created_at: string;
 };
 type ItemRow = { readonly id: string; readonly capability: WorkCapability; readonly intent?: Json };
+type BudgetRow = {
+  readonly attempt_id: string | null;
+  readonly event_type: string;
+  readonly amount: number;
+  readonly currency: string;
+};
 
 export interface EconomicHistoryQueryV1 {
   readonly capability: WorkCapability;
@@ -76,10 +82,22 @@ export function projectEconomicHistory(
   coderEvents: readonly EventRow[],
   verifierEvents: readonly EventRow[],
   items: readonly ItemRow[],
+  budgetEvents: readonly BudgetRow[] = [],
 ): EconomicHistoryProjectionV1 {
   const taskClass = query.taskClass?.trim() || 'unknown';
   const itemById = new Map(items.map(item => [item.id, item]));
   const latestOpinionByAttempt = new Map<string, { opinion: NonNullable<ReturnType<typeof opinionFrom>>; createdAt: string }>();
+  const exposureByAttempt = new Map<string, { currency: string; amount: number } | null>();
+  for (const event of budgetEvents) {
+    if (!event.attempt_id || !Number.isFinite(event.amount) || event.amount < 0 || event.currency.trim().length === 0) continue;
+    const current = exposureByAttempt.get(event.attempt_id);
+    if (current === null || (current && current.currency !== event.currency)) {
+      exposureByAttempt.set(event.attempt_id, null);
+      continue;
+    }
+    const delta = event.event_type === 'reserved' ? event.amount : event.event_type === 'voided' ? -event.amount : 0;
+    exposureByAttempt.set(event.attempt_id, { currency: event.currency, amount: Math.max(0, (current?.amount ?? 0) + delta) });
+  }
   for (const event of [...verifierEvents].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
     const opinion = opinionFrom(event);
     if (opinion) latestOpinionByAttempt.set(opinion.attemptId, { opinion, createdAt: event.created_at });
@@ -100,6 +118,7 @@ export function projectEconomicHistory(
     const started = new Date(finished.getTime() - evidence.durationMs);
     const verified = opinion?.verdict === 'verified';
     const reachedReview = opinion !== null;
+    const exposure = exposureByAttempt.get(evidence.attemptId) ?? null;
     const failureCategory = opinion?.verdict === 'inconclusive' ? 'review_inconclusive'
       : evidence.outcome === 'failed' ? 'unknown'
         : evidence.outcome === 'cancelled' ? 'infrastructure' : null;
@@ -129,7 +148,9 @@ export function projectEconomicHistory(
         } : null,
       } : null,
       cost: null,
-      reservedExposure: null,
+      reservedExposure: exposure && exposure.amount > 0 ? {
+        kind: 'reserved_exposure', money: exposure, provenance: 'persisted',
+      } : null,
       local: provider === 'ollama' ? { runtimeMs: evidence.durationMs, monetaryCost: null } : null,
       cloud: null,
       provenance: {
@@ -170,5 +191,12 @@ export async function readEconomicHistory(
   if (verifier.error) return null;
   const items = await client.from('work_items').select('id,capability,intent').in('id', workItemIds).limit(ECONOMIC_HISTORY_LIMIT);
   if (items.error) return null;
-  return projectEconomicHistory(query, coder.data ?? [], verifier.data ?? [], items.data ?? []);
+  const attemptIds = (coder.data ?? []).flatMap(event => {
+    const evidence = evidenceFrom(event);
+    return evidence ? [evidence.attemptId] : [];
+  });
+  const budgets = attemptIds.length === 0 ? { data: [], error: null } : await client.from('paid_compute_budget_events')
+    .select('attempt_id,event_type,amount,currency').in('attempt_id', attemptIds).limit(ECONOMIC_HISTORY_LIMIT);
+  if (budgets.error) return null;
+  return projectEconomicHistory(query, coder.data ?? [], verifier.data ?? [], items.data ?? [], budgets.data ?? []);
 }
