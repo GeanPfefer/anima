@@ -28,7 +28,9 @@ describe('Compute Router V1', () => {
   test('10 comparable economics favors local on lower cost', () => expect(decideComputeRoute(input({ economics: { local: metrics('ollama', 1), openai: metrics('openai', 2) } }))).toMatchObject({ selectedProvider: 'ollama', reasonCode: 'economics_favors_local' }));
   test('11 unavailable economics falls back deterministically', () => {
     const incomplete = calculateCohortMetrics([]);
-    expect(decideComputeRoute(input({ economics: { local: incomplete, openai: incomplete } }))).toMatchObject({ selectedProvider: 'ollama', reasonCode: 'local_sufficient', economicsBasis: { used: false } });
+    expect(decideComputeRoute(input({ economics: { local: incomplete, openai: incomplete } }))).toMatchObject({ selectedProvider: 'ollama', reasonCode: 'local_sufficient', economicsBasis: {
+      used: false, localSampleSize: 0, openaiSampleSize: 0, localDataQuality: 'insufficient', openaiDataQuality: 'insufficient',
+    } });
   });
   test('12 expired authority never selects paid', () => expect(decideComputeRoute(input({ resourceGovernor: 'deny', paidAuthority: { ...input().paidAuthority, status: 'expired', authorizationId: null } }))).toMatchObject({ status: 'waiting_for_human_authorization', selectedProvider: null }));
   test('13 incompatible paid model/resource never selects paid', () => expect(decideComputeRoute(input({ resourceGovernor: 'deny', openai: { ...input().openai, modelFits: false } }))).toMatchObject({ status: 'blocked', selectedProvider: null }));

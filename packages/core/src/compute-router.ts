@@ -82,6 +82,10 @@ export interface ComputeRouteDecisionV1 {
     readonly reason: 'comparable_cost_per_verified' | 'not_provided' | 'insufficient_or_unavailable';
     readonly localCostPerVerified: EconomicValueV1<MoneyV1> | null;
     readonly openaiCostPerVerified: EconomicValueV1<MoneyV1> | null;
+    readonly localSampleSize: number | null;
+    readonly openaiSampleSize: number | null;
+    readonly localDataQuality: CohortMetricsV1['dataQuality'] | null;
+    readonly openaiDataQuality: CohortMetricsV1['dataQuality'] | null;
   };
 }
 
@@ -94,13 +98,16 @@ const candidateReasons = (candidate: ComputeRouteCandidateV1): string[] => {
 };
 
 const economicsBasis = (signal: ComputeEconomicsSignalV1 | null): ComputeRouteDecisionV1['economicsBasis'] => {
-  if (!signal) return { used: false, reason: 'not_provided', localCostPerVerified: null, openaiCostPerVerified: null };
+  if (!signal) return { used: false, reason: 'not_provided', localCostPerVerified: null, openaiCostPerVerified: null,
+    localSampleSize: null, openaiSampleSize: null, localDataQuality: null, openaiDataQuality: null };
   const local = signal.local.costPerVerified;
   const openai = signal.openai.costPerVerified;
   const comparable = signal.local.dataQuality === 'complete' && signal.openai.dataQuality === 'complete'
     && local.status === 'known' && openai.status === 'known'
     && local.value.currency === openai.value.currency;
-  return { used: comparable, reason: comparable ? 'comparable_cost_per_verified' : 'insufficient_or_unavailable', localCostPerVerified: local, openaiCostPerVerified: openai };
+  return { used: comparable, reason: comparable ? 'comparable_cost_per_verified' : 'insufficient_or_unavailable', localCostPerVerified: local, openaiCostPerVerified: openai,
+    localSampleSize: signal.local.totalAttempts, openaiSampleSize: signal.openai.totalAttempts,
+    localDataQuality: signal.local.dataQuality, openaiDataQuality: signal.openai.dataQuality };
 };
 
 export function decideComputeRoute(input: DecideComputeRouteInputV1): ComputeRouteDecisionV1 {

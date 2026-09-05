@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import type { AutonomousQueueEntry, ProposalVersion, WorkItemId } from '@anima/core';
+import { calculateCohortMetrics, type AutonomousQueueEntry, type EconomicAttemptV1, type ProposalVersion, type WorkItemId } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -15,6 +15,10 @@ jest.mock('./supervisor', () => ({
   runSupervisorTurn: jest.fn(async () => ({ outcome: 'turn_recorded', attemptId: 'attempt-x' })),
 }));
 jest.mock('./post-turn-observation', () => ({ persistPostTurnHostObservations: jest.fn(async () => undefined) }));
+jest.mock('./economic-history', () => ({
+  readEconomicHistory: jest.fn(async () => null),
+  economicTaskClass: jest.fn(() => 'unknown'),
+}));
 
 // Prova de "cloud inalterado sob Router ON→Ollama": o provisioner on-demand é o mesmo seam.
 jest.mock('./local-process-node-provisioner', () => ({
@@ -30,11 +34,13 @@ import { buildProjectBacklogCycleDeps } from './autonomous-backlog-deps';
 import { runSupervisorTurn } from './supervisor';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
 import { readResourceAdmission, readMachinePressure } from './resource-governor';
+import { readEconomicHistory } from './economic-history';
 
 const runTurnMock = runSupervisorTurn as unknown as jest.Mock;
 const ProvisionerMock = LocalProcessNodeProvisioner as unknown as jest.Mock;
 const admissionMock = readResourceAdmission as unknown as jest.Mock;
 const pressureMock = readMachinePressure as unknown as jest.Mock;
+const economicHistoryMock = readEconomicHistory as unknown as jest.Mock;
 
 const entry: AutonomousQueueEntry = {
   workItemId: '00000000-0000-0000-0000-0000000000b1' as WorkItemId,
@@ -118,6 +124,12 @@ const capabilityBreakingHistory: readonly HistoryEvent[] = [
   { event_type: 'execution_failed', payload: { data: { reason: 'ollama_read_round_limit' } } },
 ];
 
+const completeMetrics = (provider: 'ollama' | 'openai', cost: number) => calculateCohortMetrics([1, 2].map((): EconomicAttemptV1 => ({
+  cohort: { provider, model: provider === 'openai' ? 'gpt-5.6-terra' : 'qwen3-coder:latest', capability: 'programming', taskClass: 'unknown', placement: provider === 'openai' ? 'api' : 'local' },
+  terminalResult: 'completed', reachedReview: true, verified: true, durationMs: 100, timeToReviewMs: 100,
+  cost: { status: 'known', value: { currency: 'USD', amount: cost / 2 } },
+})));
+
 const ROUTER_ENV = [
   'ANIMA_COMPUTE_ROUTER_V1_ENABLED', 'OPENAI_API_KEY', 'ANIMA_CODER_MODEL', 'OPENAI_MODEL',
   'ANIMA_WORKTREE_CODER_MODEL', 'ANIMA_CODER_VRAM_GB', 'ANIMA_CODER_MODEL_ALLOWLIST',
@@ -133,6 +145,8 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
     ProvisionerMock.mockClear();
     admissionMock.mockReturnValue({ verdict: 'permit', pressure: 'low' });
     pressureMock.mockReturnValue('low');
+    economicHistoryMock.mockReset();
+    economicHistoryMock.mockResolvedValue(null);
   });
   afterEach(() => {
     for (const k of ROUTER_ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
@@ -149,6 +163,7 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
     const turn = await deps.runTurn(entry, new AbortController().signal);
     expect(turn.outcome).toBe('turn_recorded');
     expect(spy.authQueried).toBe(0);
+    expect(economicHistoryMock).not.toHaveBeenCalled();
     expect(spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision')).toHaveLength(0);
     expect(runTurnMock).toHaveBeenCalledTimes(1);
     expect(runTurnMock.mock.calls[0][0].computeRoutingDecision).toBeUndefined();
@@ -166,9 +181,27 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
     const turn = await deps.runTurn(entry, new AbortController().signal);
     expect(turn.outcome).toBe('turn_recorded');
     expect(spy.authQueried).toBe(0);
+    expect(economicHistoryMock).toHaveBeenCalledTimes(1);
     expect(spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision')).toHaveLength(0);
     const decision = runTurnMock.mock.calls[0][0].computeRoutingDecision;
     expect(decision).toMatchObject({ status: 'selected', selectedProvider: 'ollama', reasonCode: 'local_sufficient', placement: 'local' });
+  });
+
+  test('Router ON entrega coortes econômicas completas ao Router', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED = '1';
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    economicHistoryMock.mockResolvedValue({ signal: {
+      local: completeMetrics('ollama', 4), openai: completeMetrics('openai', 2),
+    } });
+    const deps = buildProjectBacklogCycleDeps(makeClient({ authRows: [validAuthRow()] }, spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    await deps.runTurn(entry, new AbortController().signal);
+    expect(runTurnMock.mock.calls[0][0].computeRoutingDecision).toMatchObject({
+      selectedProvider: 'openai', reasonCode: 'economics_favors_openai', economicsBasis: {
+        used: true, localSampleSize: 2, openaiSampleSize: 2, localDataQuality: 'complete', openaiDataQuality: 'complete',
+      },
+    });
   });
 
   // C — Router ON + local incapaz + autoridade paga válida ⇒ OpenAI. Prova determinística

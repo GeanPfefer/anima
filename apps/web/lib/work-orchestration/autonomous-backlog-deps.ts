@@ -12,6 +12,7 @@ import { readLivePaidNodeCount } from './paid-compute-lease-reconciler-deps';
 import { createOpenAICoderAdmission, openAIProviderResourceClass } from './openai-paid-compute';
 import { readActivePaidComputeAuthorization } from './paid-compute-authorization-store';
 import { resolveCoderCapacityPolicy } from './coder-model-policy';
+import { economicTaskClass, readEconomicHistory } from './economic-history';
 
 // ============================================================
 // Dependências do driver de backlog para o PROJETO real (worktree/qwen3-coder),
@@ -70,6 +71,7 @@ async function routeCompute(
   contract: ExecutionContract,
   historyData: readonly { readonly event_type: string; readonly payload: unknown }[],
   admittedPressure: ReturnType<typeof readMachinePressure>,
+  taskClass: string,
 ): Promise<ComputeRouteDecisionV1> {
   const localModel = contract.coderBackend === 'ollama' && contract.model
     ? contract.model : process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
@@ -94,9 +96,15 @@ async function routeCompute(
     resourceClass: openAIProviderResourceClass(openAIModel), workItemId: entry.workItemId,
     requestedDurationMs: 30 * 60_000, estimatedCost: authorization?.maxCostEstimate ?? null,
   }, authorization, new Date());
+  const economics = await readEconomicHistory(client, {
+    capability: entry.capability,
+    taskClass,
+    localModel: modelSelection?.ok ? modelSelection.evidence.selected : localModel,
+    openAIModel,
+  });
   return decideComputeRoute({
     schemaVersion: 1, workItemId: entry.workItemId, approvedProposalVersion: entry.approvedProposalVersion,
-    capability: entry.capability, taskClass: null,
+    capability: entry.capability, taskClass,
     preferred: contract.coderBackend === 'openai' ? { provider: 'openai', model: openAIModel } : null,
     local: {
       provider: 'ollama', model: modelSelection?.ok ? modelSelection.evidence.selected : localModel,
@@ -113,7 +121,7 @@ async function routeCompute(
       status: 'authorized', authorizationId: authorization.authorizationId,
       remainingExposure: { status: 'known', value: authorization.maxCostEstimate },
     } : { status: 'missing', authorizationId: null, remainingExposure: { status: 'unavailable', reason: 'cost_unknown' } },
-    economics: null,
+    economics: economics?.signal ?? null,
   });
 }
 
@@ -183,7 +191,7 @@ export function buildProjectBacklogCycleDeps(
       // uma decisão não-selecionada vira EVIDÊNCIA (sem tentativa) e a volta para.
       let computeDecision: ComputeRouteDecisionV1 | null = null;
       if (computeRouterEnabled()) {
-        const decision = await routeCompute(client, entry, contract, history.error ? [] : history.data ?? [], admittedPressure);
+        const decision = await routeCompute(client, entry, contract, history.error ? [] : history.data ?? [], admittedPressure, economicTaskClass(item.data.intent));
         if (decision.status !== 'selected') {
           await client.rpc('record_compute_routing_decision', {
             p_work_item_id: entry.workItemId, p_expected_proposal_version: entry.approvedProposalVersion,
