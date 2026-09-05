@@ -48,7 +48,7 @@ CREATE FUNCTION public.authorize_work_resume(
 DECLARE
   u uuid:=auth.uid(); i public.work_items; b public.work_events;
   old public.work_budget_resume_authorizations; grant_id uuid:=gen_random_uuid();
-  reason text; request_id uuid; active_attempt boolean;
+  reason text; request_id uuid; active_attempt boolean; budget_decision jsonb;
 BEGIN
   IF u IS NULL OR NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist WHERE user_id=u)
     THEN RAISE EXCEPTION 'authentication_or_allowlist_required' USING ERRCODE='42501'; END IF;
@@ -86,6 +86,11 @@ BEGIN
       AND t.payload#>>'{data,attempt_id}'=s.payload#>>'{data,attempt_id}')) INTO active_attempt;
   IF active_attempt OR EXISTS(SELECT 1 FROM public.work_claims c WHERE c.work_item_id=i.id AND c.released_at IS NULL)
     THEN RAISE EXCEPTION 'execution_active' USING ERRCODE='55000'; END IF;
+
+  budget_decision:=private.autonomous_work_budget_decision(u,i.id,now());
+  IF coalesce((budget_decision->>'admitted')::boolean,false)
+    OR budget_decision->>'reason' IS DISTINCT FROM reason
+    THEN RAISE EXCEPTION 'budget_block_no_longer_current' USING ERRCODE='55000'; END IF;
 
   INSERT INTO public.work_budget_resume_authorizations(id,user_id,work_item_id,request_id,proposal_version,blocked_event_id,budget_reason,authority)
   VALUES(grant_id,u,i.id,request_id,i.proposal_version,b.id,reason,p_authorization);
