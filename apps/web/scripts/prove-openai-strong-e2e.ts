@@ -8,6 +8,7 @@ import { readAuthorizedBaseSha, readExecutionContract } from '@/lib/work-orchest
 import { grantPaidComputeAuthorization } from '@/lib/work-orchestration/paid-compute-authorization-store';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
+import { readFile as readFileFromDisk } from 'node:fs/promises';
 
 // ============================================================
 // Prova viva END-TO-END com COMPUTE FORTE (OpenAI) do ciclo de auto-desenvolvimento
@@ -37,15 +38,33 @@ import { createWorkOrchestrationService } from '@/lib/work-orchestration/server'
 
 const CEILING_USD = 0.25;
 
-const TASK_MESSAGE = [
-  'Adicione uma função pura de diagnóstico da configuração atual do Project Work Planner em apps/web/lib/ai.',
-  'A função deve expor o provider efetivo do planejador ("openai" ou "local") e, quando o provider efetivo for "local", também o modelo local efetivo.',
-  'Reutilize os defaults e as funções de configuração já existentes (por exemplo resolveConfiguredProjectPlannerProvider e a resolução do modelo local já usada pelo planejador local).',
-  'A função deve ser PURA: não faz I/O, não faz chamadas HTTP e NUNCA retorna, lê ou incorpora API keys, tokens, cabeçalhos de autorização ou qualquer segredo.',
-  'Não altere a seleção de provider nem o comportamento existente do planner.',
-  'Adicione testes focados cobrindo: (1) a configuração default; (2) provider local com modelo explícito; (3) ausência de segredos no retorno.',
-  'Use somente os arquivos mínimos necessários em apps/web/lib/ai e valide com um teste focado.',
-].join(' ');
+export type TaskMessageFileReader = (path: string) => Promise<string>;
+
+const defaultTaskMessageFileReader: TaskMessageFileReader = path => readFileFromDisk(path, 'utf8');
+
+export async function resolveTaskMessage(
+  taskFilePath = process.env.ANIMA_STRONG_E2E_TASK_FILE,
+  readFile: TaskMessageFileReader = defaultTaskMessageFileReader,
+): Promise<string> {
+  if (!taskFilePath?.trim()) {
+    throw new Error('Defina ANIMA_STRONG_E2E_TASK_FILE com o caminho da mensagem da tarefa.');
+  }
+
+  let content: string;
+  try {
+    content = await readFile(taskFilePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Não foi possível ler a mensagem da tarefa em ${taskFilePath}: ${message}`);
+  }
+
+  const taskMessage = content.trim();
+  if (!taskMessage) {
+    throw new Error(`A mensagem da tarefa em ${taskFilePath} está vazia.`);
+  }
+
+  return taskMessage;
+}
 
 function redact(value: string): string {
   // Nunca deixa vazar um segredo estilo OpenAI em log/evidência, mesmo por acidente.
@@ -61,11 +80,12 @@ async function main(): Promise<void> {
   if (!baseSha) throw new Error('HEAD não pôde ser resolvido como base autorizada.');
 
   const model = process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
+  const taskMessage = await resolveTaskMessage();
   const service = createWorkOrchestrationService(client);
 
   // 1) Mensagem real do usuário (Camada 1: memória bruta), fonte da proposta.
   const source = await client.from('ai_conversations').insert({
-    user_id: userId, role: 'user', content: TASK_MESSAGE,
+    user_id: userId, role: 'user', content: taskMessage,
   }).select('id').single();
   if (source.error || !source.data) throw new Error(`Falha ao persistir mensagem de origem: ${source.error?.message ?? 'sem linha'}`);
   const sourceMessageId = source.data.id;
@@ -111,7 +131,7 @@ async function main(): Promise<void> {
     sourceMessageId, impactLevel: 'low', capability: 'programming',
     intent: {}, proposal: placeholder.proposal,
   };
-  const planned = await planExecutableProjectWork(TASK_MESSAGE, planningBase, planner);
+  const planned = await planExecutableProjectWork(taskMessage, planningBase, planner);
   if (!planned.ok) {
     console.log(JSON.stringify({
       stage: 'planner_failed', plannerProvider: planner.id, model,
