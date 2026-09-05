@@ -8,6 +8,7 @@ import { readAuthorizedBaseSha, readExecutionContract } from '@/lib/work-orchest
 import { grantPaidComputeAuthorization } from '@/lib/work-orchestration/paid-compute-authorization-store';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
+import { redactSecrets as redact } from './prove-e2e-redact';
 
 // ============================================================
 // Prova viva END-TO-END com COMPUTE FORTE (OpenAI) do ciclo de auto-desenvolvimento
@@ -46,11 +47,6 @@ const TASK_MESSAGE = [
   'Adicione testes focados cobrindo: (1) a configuração default; (2) provider local com modelo explícito; (3) ausência de segredos no retorno.',
   'Use somente os arquivos mínimos necessários em apps/web/lib/ai e valide com um teste focado.',
 ].join(' ');
-
-function redact(value: string): string {
-  // Nunca deixa vazar um segredo estilo OpenAI em log/evidência, mesmo por acidente.
-  return value.replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-***REDACTED***');
-}
 
 async function main(): Promise<void> {
   const identityResult = await resolveCliIdentity();
