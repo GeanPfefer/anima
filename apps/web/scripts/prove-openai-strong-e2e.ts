@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { projectAutonomousQueue, type CreateWorkProposalCommand } from '@anima/core';
 import { resolveCliIdentity } from '@/cli/identity';
 import { OpenAIProjectWorkPlanner, planExecutableProjectWork } from '@/lib/ai/project-work-planner';
@@ -38,7 +39,7 @@ import { redactSecrets as redact } from './prove-e2e-redact';
 
 const CEILING_USD = 0.25;
 
-const TASK_MESSAGE = [
+const DEFAULT_TASK_MESSAGE = [
   'Adicione uma função pura de diagnóstico da configuração atual do Project Work Planner em apps/web/lib/ai.',
   'A função deve expor o provider efetivo do planejador ("openai" ou "local") e, quando o provider efetivo for "local", também o modelo local efetivo.',
   'Reutilize os defaults e as funções de configuração já existentes (por exemplo resolveConfiguredProjectPlannerProvider e a resolução do modelo local já usada pelo planejador local).',
@@ -48,7 +49,45 @@ const TASK_MESSAGE = [
   'Use somente os arquivos mínimos necessários em apps/web/lib/ai e valide com um teste focado.',
 ].join(' ');
 
+type ReadTaskFile = (path: string) => string;
+
+export function resolveTaskMessage(argv: string[], readFile: ReadTaskFile = path => readFileSync(path, 'utf8')): string {
+  let taskMessage: string | undefined;
+  let taskFile: string | undefined;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    const inlineValue = argument.startsWith('--task=') ? argument.slice('--task='.length) : undefined;
+    const fileValue = argument.startsWith('--task-file=') ? argument.slice('--task-file='.length) : undefined;
+
+    if (argument === '--task' || inlineValue !== undefined) {
+      if (taskMessage !== undefined) throw new Error('A opção --task só pode ser informada uma vez.');
+      taskMessage = inlineValue ?? argv[++index] ?? '';
+      continue;
+    }
+
+    if (argument === '--task-file' || fileValue !== undefined) {
+      if (taskFile !== undefined) throw new Error('A opção --task-file só pode ser informada uma vez.');
+      taskFile = fileValue ?? argv[++index] ?? '';
+    }
+  }
+
+  if (taskMessage !== undefined && taskFile !== undefined) {
+    throw new Error('Use somente uma entre --task e --task-file.');
+  }
+  if (taskMessage !== undefined) {
+    if (!taskMessage.trim()) throw new Error('A opção --task exige uma mensagem não vazia.');
+    return taskMessage;
+  }
+  if (taskFile !== undefined) {
+    if (!taskFile) throw new Error('A opção --task-file exige um caminho.');
+    return readFile(taskFile);
+  }
+  return DEFAULT_TASK_MESSAGE;
+}
+
 async function main(): Promise<void> {
+  const taskMessage = resolveTaskMessage(process.argv.slice(2));
   const identityResult = await resolveCliIdentity();
   if (!identityResult.ok) throw new Error(identityResult.error);
   const { client, userId } = identityResult.identity;
@@ -61,7 +100,7 @@ async function main(): Promise<void> {
 
   // 1) Mensagem real do usuário (Camada 1: memória bruta), fonte da proposta.
   const source = await client.from('ai_conversations').insert({
-    user_id: userId, role: 'user', content: TASK_MESSAGE,
+    user_id: userId, role: 'user', content: taskMessage,
   }).select('id').single();
   if (source.error || !source.data) throw new Error(`Falha ao persistir mensagem de origem: ${source.error?.message ?? 'sem linha'}`);
   const sourceMessageId = source.data.id;
@@ -179,7 +218,9 @@ async function main(): Promise<void> {
   }, null, 2)));
 }
 
-void main().catch(error => {
-  console.error(redact(error instanceof Error ? error.stack ?? error.message : String(error)));
-  process.exitCode = 1;
-});
+if (process.argv[1]?.replace(/\\/g, '/').match(/\/prove-openai-strong-e2e\.(?:ts|js)$/)) {
+  void main().catch(error => {
+    console.error(redact(error instanceof Error ? error.stack ?? error.message : String(error)));
+    process.exitCode = 1;
+  });
+}

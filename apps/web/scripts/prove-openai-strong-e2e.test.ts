@@ -15,3 +15,30 @@ describe('redactSecrets', () => {
     expect(redactSecrets('planejamento concluído')).toBe('planejamento concluído');
   });
 });
+
+
+import { resolveTaskMessage } from './prove-openai-strong-e2e';
+
+describe('resolveTaskMessage', () => {
+  it('usa a mensagem default quando não há argumentos de tarefa', () => {
+    expect(resolveTaskMessage([])).toContain('Adicione uma função pura de diagnóstico');
+  });
+
+  it('aceita a mensagem informada diretamente por --task', () => {
+    expect(resolveTaskMessage(['--task', 'corrija o planner'])).toBe('corrija o planner');
+    expect(resolveTaskMessage(['--task=adicione testes'])).toBe('adicione testes');
+  });
+
+  it('lê a mensagem de --task-file pelo leitor injetado', () => {
+    const readFile = jest.fn(() => 'mensagem do arquivo');
+
+    expect(resolveTaskMessage(['--task-file', 'tarefa.txt'], readFile)).toBe('mensagem do arquivo');
+    expect(readFile).toHaveBeenCalledWith('tarefa.txt');
+  });
+
+  it('rejeita fontes de tarefa conflitantes', () => {
+    expect(() => resolveTaskMessage(['--task', 'direta', '--task-file', 'tarefa.txt'])).toThrow(
+      'Use somente uma entre --task e --task-file.',
+    );
+  });
+});
