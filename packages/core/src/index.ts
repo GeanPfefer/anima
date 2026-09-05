@@ -12,3 +12,4 @@ export * from './project-backlog-proposal';
 export * from './project-intake';
 export * from './compute-economics';
 export * from './compute-router';
+export * from './economic-observations';

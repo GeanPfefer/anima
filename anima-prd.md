@@ -1,4 +1,10 @@
 # Anima — Product Requirements Document
+> Compute Economics Observations/Cohorts V1 concluído em branch isolada (2026-09-04):
+> `EconomicObservationV1` normaliza evidência de attempts para coortes comparáveis por
+> capability/taskClass/provider/model/placement, preserva proveniência, separa exposição
+> reservada de custo settled/derived e falha fechado em inconsistências. A agregação alimenta
+> o Compute Economics existente sem converter custo desconhecido em zero. Core puro; sem DB,
+> Router ou infraestrutura. [Registro](docs/registros/2026-09-04-compute-economics-observations-v1.md).
 > Backend coder OpenAI host-mediated concluído localmente (2026-09-03): o adapter
 > reutiliza o protocolo READ→EDIT do Ollama, com scope/stale/no-op/`in_lines`,
 > feedback de ambiguidade bounded, timeout/cancelamento, erros tipados, transcript e
