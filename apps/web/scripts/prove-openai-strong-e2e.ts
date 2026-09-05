@@ -8,6 +8,8 @@ import { readAuthorizedBaseSha, readExecutionContract } from '@/lib/work-orchest
 import { grantPaidComputeAuthorization } from '@/lib/work-orchestration/paid-compute-authorization-store';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { redactSecrets as redact } from './prove-e2e-redact';
 
 // ============================================================
@@ -38,17 +40,52 @@ import { redactSecrets as redact } from './prove-e2e-redact';
 
 const CEILING_USD = 0.25;
 
-const TASK_MESSAGE = [
-  'Adicione uma função pura de diagnóstico da configuração atual do Project Work Planner em apps/web/lib/ai.',
-  'A função deve expor o provider efetivo do planejador ("openai" ou "local") e, quando o provider efetivo for "local", também o modelo local efetivo.',
-  'Reutilize os defaults e as funções de configuração já existentes (por exemplo resolveConfiguredProjectPlannerProvider e a resolução do modelo local já usada pelo planejador local).',
-  'A função deve ser PURA: não faz I/O, não faz chamadas HTTP e NUNCA retorna, lê ou incorpora API keys, tokens, cabeçalhos de autorização ou qualquer segredo.',
-  'Não altere a seleção de provider nem o comportamento existente do planner.',
-  'Adicione testes focados cobrindo: (1) a configuração default; (2) provider local com modelo explícito; (3) ausência de segredos no retorno.',
-  'Use somente os arquivos mínimos necessários em apps/web/lib/ai e valide com um teste focado.',
-].join(' ');
+export interface TaskMessageSource {
+  message?: string;
+  filePath?: string;
+  file?: string;
+  messageFile?: string;
+}
+
+const taskMessageError = 'A mensagem da tarefa deve ser fornecida diretamente ou por arquivo UTF-8.';
+const taskMessageFileError = 'Não foi possível carregar a mensagem da tarefa a partir do arquivo UTF-8.';
+
+export async function resolveTaskMessage(
+  source?: string | TaskMessageSource,
+  filePath?: string,
+): Promise<string> {
+  const message = typeof source === 'string' ? source : source?.message;
+  const messageFile = filePath ?? (typeof source === 'string'
+    ? undefined
+    : source?.filePath ?? source?.file ?? source?.messageFile);
+
+  if (message !== undefined && messageFile !== undefined) throw new Error(taskMessageError);
+  if (message !== undefined) {
+    if (message.trim().length === 0) throw new Error(taskMessageError);
+    return message;
+  }
+  if (messageFile === undefined || messageFile.trim().length === 0) throw new Error(taskMessageError);
+
+  try {
+    const contents = new TextDecoder('utf-8', { fatal: true }).decode(await readFile(messageFile));
+    if (contents.trim().length === 0) throw new Error(taskMessageError);
+    return contents;
+  } catch (error) {
+    if (error instanceof Error && error.message === taskMessageError) throw error;
+    throw new Error(taskMessageFileError);
+  }
+}
+
+function readCliOption(option: string): string | undefined {
+  const index = process.argv.indexOf(option);
+  return index === -1 ? undefined : process.argv[index + 1];
+}
 
 async function main(): Promise<void> {
+  const taskMessage = await resolveTaskMessage({
+    message: readCliOption('--task-message'),
+    filePath: readCliOption('--task-file'),
+  });
   const identityResult = await resolveCliIdentity();
   if (!identityResult.ok) throw new Error(identityResult.error);
   const { client, userId } = identityResult.identity;
@@ -61,7 +98,7 @@ async function main(): Promise<void> {
 
   // 1) Mensagem real do usuário (Camada 1: memória bruta), fonte da proposta.
   const source = await client.from('ai_conversations').insert({
-    user_id: userId, role: 'user', content: TASK_MESSAGE,
+    user_id: userId, role: 'user', content: taskMessage,
   }).select('id').single();
   if (source.error || !source.data) throw new Error(`Falha ao persistir mensagem de origem: ${source.error?.message ?? 'sem linha'}`);
   const sourceMessageId = source.data.id;
@@ -107,7 +144,7 @@ async function main(): Promise<void> {
     sourceMessageId, impactLevel: 'low', capability: 'programming',
     intent: {}, proposal: placeholder.proposal,
   };
-  const planned = await planExecutableProjectWork(TASK_MESSAGE, planningBase, planner);
+  const planned = await planExecutableProjectWork(taskMessage, planningBase, planner);
   if (!planned.ok) {
     console.log(JSON.stringify({
       stage: 'planner_failed', plannerProvider: planner.id, model,
@@ -179,7 +216,10 @@ async function main(): Promise<void> {
   }, null, 2)));
 }
 
-void main().catch(error => {
-  console.error(redact(error instanceof Error ? error.stack ?? error.message : String(error)));
-  process.exitCode = 1;
-});
+const invokedPath = process.argv[1];
+if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
+  void main().catch(error => {
+    console.error(redact(error instanceof Error ? error.stack ?? error.message : String(error)));
+    process.exitCode = 1;
+  });
+}
