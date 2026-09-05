@@ -53,7 +53,7 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work accept <id>` | Aceita o RESULTADO em review (`review → completed`) via `reviewResult` |
 | `anima work withdraw <id> --reason "..."` | Retira um plano APROVADO não iniciado (`approved → cancelled`) via `withdraw_approved_work` |
 | `anima work retry <id>` | Solicita o retry governado (ato humano) de um item `failed`/RETRY_READY via `request_work_retry` |
-| `anima work authorize-resume <id> [--plan f]` | Autoridade humana: +1 tentativa após o saldo transferido se esgotar; materializa um sucessor `proposed` via `authorize_work_resume` — NÃO aprova |
+| `anima work authorize-resume <id> [--plan f]` | Autoridade humana de +1: recovery antigo de `failed` cria successor; bloqueio pré-attempt por orçamento readmite o mesmo item |
 | `anima help` | Ajuda |
 
 `work retry` reusa a MESMA capability da rota web `retries`: lê `current_work_retry_readiness`
@@ -71,6 +71,13 @@ humana (`--plan arquivo.json`) carrega requestId idempotente, diagnóstico/plano
 teto e modelos; sem `--plan`, replaya a concessão já persistida. Append-only: o consumo
 anterior nunca é reescrito e não há segunda extensão automática — nova falha volta ao
 humano. NÃO aprova nem executa (aprovação segue sendo `anima work approve`).
+
+O mesmo comando aceita a variante fechada `kind=budget_blocked_attempt_v1` somente
+quando o item está `blocked` pelo último `work_blocked` pré-attempt com
+`resolution=awaits_budget_window` e razão de tentativas allowlisted. Nesse caso não
+há successor: a concessão item+versão+evento readmite o mesmo item, e a guarda de
+`execution_started` consome atomicamente o token de +1. O consumo global de 24h não
+é resetado; replay é idempotente e uma segunda partida volta ao budget normal.
 
 `work withdraw` retira canonicamente um plano aprovado que ficou obsoleto ANTES da
 execução (base mudou, o contrato de domínio evoluiu, um sucessor melhor o substitui).

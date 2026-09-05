@@ -1,4 +1,4 @@
-import { readHumanResumeAuthorization, type HumanResumeAuthorization } from './human-resume';
+import { readHumanBudgetBlockedResumeAuthorization, readHumanResumeAuthorization, type HumanResumeAuthorization } from './human-resume';
 
 // Autoridade humana de retomada (V1): um codec PURO e fail-closed. A prova aqui é
 // determinística — vocabulário fechado, faixas fixas, sem I/O. O contrato inteiro
@@ -162,5 +162,20 @@ describe('readHumanResumeAuthorization — validação fail-closed', () => {
     expect(parsed.additionalAttempts).toBe(1);
     expect(parsed.compute.placement).toBe('local');
     expect(parsed.compute.paid).toBe(false);
+  });
+});
+
+describe('readHumanBudgetBlockedResumeAuthorization', () => {
+  const valid = () => ({ schemaVersion: 1, kind: 'budget_blocked_attempt_v1', requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    reason: 'Autorizo uma tentativa adicional estritamente para este bloqueio.', additionalAttempts: 1,
+    expectedBudgetReason: 'user_attempt_budget_exhausted' });
+  test('aceita somente +1 para razão de tentativas allowlisted', () => {
+    expect(readHumanBudgetBlockedResumeAuthorization(valid())).toEqual(valid());
+    expect(readHumanBudgetBlockedResumeAuthorization({ ...valid(), additionalAttempts: 2 })).toBeNull();
+    expect(readHumanBudgetBlockedResumeAuthorization({ ...valid(), expectedBudgetReason: 'user_runtime_budget_exhausted' })).toBeNull();
+  });
+  test('recusa campos extras e request inválida', () => {
+    expect(readHumanBudgetBlockedResumeAuthorization({ ...valid(), wildcard: true })).toBeNull();
+    expect(readHumanBudgetBlockedResumeAuthorization({ ...valid(), requestId: 'x' })).toBeNull();
   });
 });

@@ -1,4 +1,10 @@
 # Anima — Product Requirements Document
+> Human recovery de bloqueio pré-attempt por orçamento implementado em 2026-09-05:
+> `authorize_work_resume` aceita uma variante estrita, por item/versão/último evento,
+> que concede exatamente +1 e readmite o mesmo item. O token é consumido atomicamente
+> por `execution_started`; contadores globais permanecem intactos, replay não duplica
+> e qualquer partida posterior volta ao INTEL-04. O recovery antigo de `failed`
+> permanece inalterado. Prova: pgTAP focado + regressões 63/63, core 50/50, web 37/37.
 > Compute Economics Observations/Cohorts V1 concluído em branch isolada (2026-09-04):
 > `EconomicObservationV1` normaliza evidência de attempts para coortes comparáveis por
 > capability/taskClass/provider/model/placement, preserva proveniência, separa exposição

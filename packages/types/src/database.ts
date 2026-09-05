@@ -1230,6 +1230,66 @@ export type Database = {
           },
         ]
       }
+      work_budget_resume_authorizations: {
+        Row: {
+          additional_attempts: number
+          authority: Json
+          blocked_event_id: string
+          budget_reason: string
+          consumed_at: string | null
+          consumed_attempt_id: string | null
+          created_at: string
+          id: string
+          proposal_version: number
+          request_id: string
+          user_id: string
+          work_item_id: string
+        }
+        Insert: {
+          additional_attempts?: number
+          authority: Json
+          blocked_event_id: string
+          budget_reason: string
+          consumed_at?: string | null
+          consumed_attempt_id?: string | null
+          created_at?: string
+          id?: string
+          proposal_version: number
+          request_id: string
+          user_id: string
+          work_item_id: string
+        }
+        Update: {
+          additional_attempts?: number
+          authority?: Json
+          blocked_event_id?: string
+          budget_reason?: string
+          consumed_at?: string | null
+          consumed_attempt_id?: string | null
+          created_at?: string
+          id?: string
+          proposal_version?: number
+          request_id?: string
+          user_id?: string
+          work_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_budget_resume_authorizations_blocked_event_id_fkey"
+            columns: ["blocked_event_id"]
+            isOneToOne: true
+            referencedRelation: "work_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_budget_resume_authorizations_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: true
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_claims: {
         Row: {
           acquired_at: string
@@ -1970,7 +2030,7 @@ export type Database = {
       }
       apply_work_control_at_checkpoint: {
         Args: {
-          p_attempt_id: string
+          p_attempt_id: string | null
           p_expected_proposal_version: number
           p_work_item_id: string
         }
@@ -1997,15 +2057,24 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      authorize_work_resume: {
-        Args: {
-          p_authorization: Json
-          p_expected_proposal_version: number
-          p_failure_event_id: string
-          p_work_item_id: string
-        }
-        Returns: Json
-      }
+      authorize_work_resume:
+        | {
+            Args: {
+              p_authorization: Json
+              p_expected_proposal_version: number
+              p_work_item_id: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_authorization: Json
+              p_expected_proposal_version: number
+              p_failure_event_id: string
+              p_work_item_id: string
+            }
+            Returns: Json
+          }
       auto_approve_autonomous_work: {
         Args: {
           envelope: Json

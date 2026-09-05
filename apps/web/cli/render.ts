@@ -135,6 +135,13 @@ export function renderHuman(payload: CliPayload): string {
       return `Sucessor: ${payload.successorWorkItemId}\nLineage: ${payload.lineageId}\nReplan: ${payload.replanId}${payload.replayed ? ' (replay)' : ''}\nBudget transferido: ${payload.allocatedAttempts}\nEstratégia: ${payload.strategy.map(s=>`${s.kind}: ${s.symbols.join(', ')}`).join(' | ')}\nAprovação humana permanece separada.`;
 
     case 'work-authorize-resume':
+      if ('workItemId' in payload) return [
+        `Autoridade humana de +1 tentativa registrada${payload.replayed ? ' (replay idempotente)' : ''}.`,
+        `Concessão: ${payload.authorizationId}`,
+        `Mesmo item readmitido: ${payload.workItemId}`,
+        `Razão de orçamento: ${payload.budgetReason} ${DOT} token ${payload.consumed ? 'consumido' : 'disponível'}.`,
+        'A concessão não executa nem integra; a primeira tentativa autônoma correlacionada consome o token.',
+      ].join('\n');
       return [
         `Autoridade humana de retomada registrada${payload.replayed ? ' (replay idempotente)' : ''}.`,
         `Concessão: ${payload.authorizationId}`,

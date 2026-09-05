@@ -17,6 +17,14 @@ export interface HumanResumeAuthorization {
   readonly planRevision: 'inspect_existing_exports_and_current_reads_v1';
   readonly compute: { readonly placement: 'local'; readonly preferred: string; readonly fallback: string; readonly paid: false };
 }
+export interface HumanBudgetBlockedResumeAuthorization {
+  readonly schemaVersion: 1;
+  readonly kind: 'budget_blocked_attempt_v1';
+  readonly requestId: string;
+  readonly reason: string;
+  readonly additionalAttempts: 1;
+  readonly expectedBudgetReason: 'item_attempt_budget_exhausted' | 'user_attempt_budget_exhausted';
+}
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const keys = (v: Record<string, unknown>, names: string) => Object.keys(v).sort().join(',') === names.split(',').sort().join(',');
 export function readHumanResumeAuthorization(v: unknown): HumanResumeAuthorization | null {
@@ -36,4 +44,14 @@ export function readHumanResumeAuthorization(v: unknown): HumanResumeAuthorizati
   if (!obj(c) || !keys(c,'placement,preferred,fallback,paid') || c.placement !== 'local' || c.paid !== false
     || [c.preferred,c.fallback].some(s => typeof s !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(s))) return null;
   return v as unknown as HumanResumeAuthorization;
+}
+
+export function readHumanBudgetBlockedResumeAuthorization(v: unknown): HumanBudgetBlockedResumeAuthorization | null {
+  if (!obj(v) || !keys(v,'schemaVersion,kind,requestId,reason,additionalAttempts,expectedBudgetReason')
+    || v.schemaVersion !== 1 || v.kind !== 'budget_blocked_attempt_v1'
+    || typeof v.requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(v.requestId)
+    || typeof v.reason !== 'string' || v.reason.trim().length < 10 || v.reason.length > 500
+    || v.additionalAttempts !== 1
+    || !['item_attempt_budget_exhausted','user_attempt_budget_exhausted'].includes(String(v.expectedBudgetReason))) return null;
+  return v as unknown as HumanBudgetBlockedResumeAuthorization;
 }

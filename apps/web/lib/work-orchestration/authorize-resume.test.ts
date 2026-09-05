@@ -36,16 +36,21 @@ interface FakeOptions {
   readonly readiness?: Readiness;
   readonly rpc?: { data?: unknown; error?: { message: string; code: string } | null };
   readonly stored?: { data?: { authority: unknown } | null; error?: { message: string } | null };
+  readonly budgetStored?: { data?: { authority: unknown } | null; error?: { message: string } | null };
+  readonly item?: { data?: { proposal_version: number } | null; error?: { message: string } | null };
 }
 const calls: { rpcArgs: unknown } = { rpcArgs: null };
 
 const fakeClient = (opts: FakeOptions): SupabaseClient<Database> => {
   calls.rpcArgs = null;
   return {
-    from: (_table: string) => ({
+    from: (table: string) => ({
       select: (_cols: string) => ({
         eq: (_col: string, _val: string) => ({
-          maybeSingle: async () => opts.stored ?? { data: null, error: null },
+          maybeSingle: async () => table === 'work_budget_resume_authorizations'
+            ? opts.budgetStored ?? { data: null, error: null }
+            : table === 'work_items' ? opts.item ?? { data: { proposal_version: 2 }, error: null }
+            : opts.stored ?? { data: null, error: null },
         }),
       }),
     }),
@@ -68,6 +73,21 @@ const okData = {
 };
 
 describe('authorizeResume — fail-closed sobre a RPC', () => {
+  const budgetAuthorization = { schemaVersion:1,kind:'budget_blocked_attempt_v1',requestId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    reason:'Autorizo uma tentativa adicional para este item bloqueado.',additionalAttempts:1,expectedBudgetReason:'user_attempt_budget_exhausted' };
+
+  test('blocked pré-attempt usa o overload canônico e readmite o mesmo item', async () => {
+    const response={authorizationId:'g1',workItemId:WORK_ID,additionalAttempts:1,budgetReason:'user_attempt_budget_exhausted',consumed:false,replayed:false,mode:'budget_blocked_attempt'};
+    const client=fakeClient({rpc:{data:response,error:null}});
+    await expect(authorizeResume(client,WORK_ID,budgetAuthorization)).resolves.toMatchObject(response);
+    expect(calls.rpcArgs).toEqual({p_work_item_id:WORK_ID,p_expected_proposal_version:2,p_authorization:budgetAuthorization});
+  });
+
+  test('replay de blocked lê a autoridade específica persistida', async () => {
+    const response={authorizationId:'g1',workItemId:WORK_ID,additionalAttempts:1,budgetReason:'user_attempt_budget_exhausted',consumed:true,replayed:true,mode:'budget_blocked_attempt'};
+    const client=fakeClient({budgetStored:{data:{authority:budgetAuthorization},error:null},rpc:{data:response,error:null}});
+    await expect(authorizeResume(client,WORK_ID)).resolves.toMatchObject({ok:true,replayed:true,consumed:true});
+  });
   test('autorização fornecida inválida é rejeitada ANTES de qualquer RPC', async () => {
     const client = fakeClient({});
     const r = await authorizeResume(client, WORK_ID, { schemaVersion: 1 });
