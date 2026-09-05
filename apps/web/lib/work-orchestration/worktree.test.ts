@@ -2,7 +2,7 @@
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GitWorktree, parseGateCommand, runGate, runProcess, safeJoin } from './worktree';
+import { GitWorktree, isTransientWorktreeError, parseGateCommand, runGate, runProcess, safeJoin } from './worktree';
 
 // Operações git reais podem ficar lentas sob carga paralela; folga o timeout
 // para não flakar por contenção (o padrão de 5s do jest é curto demais aqui).
@@ -71,6 +71,26 @@ describe('runProcess — timeout e cancelamento', () => {
     const result = await pending;
     expect(result.cancelled).toBe(true);
   }, 15_000);
+});
+
+describe('isTransientWorktreeError — resiliência da criação de worktree', () => {
+  // Falhas de filesystem transitórias na criação (Windows: AV/indexador segura o TEMP
+  // recém-criado; locks de ref) DEVEM re-tentar. É a causa observada do attempt
+  // a719efd0: `git worktree add` recusado com "fatal: cannot create directory ...".
+  test('retenta em "cannot create directory: Permission denied"', () =>
+    expect(isTransientWorktreeError("Preparing worktree (new branch 'anima-work/x')\nfatal: cannot create directory at 'C:/Users/x/AppData/Local/Temp/anima-wt-ab/tree': Permission denied")).toBe(true));
+  test('retenta em "Access is denied" (Windows)', () =>
+    expect(isTransientWorktreeError('fatal: cannot create leading directories: Access is denied')).toBe(true));
+  test('retenta em lock de ref', () =>
+    expect(isTransientWorktreeError("fatal: cannot lock ref 'refs/heads/anima-work/x': Unable to create '.git/.../x.lock': File exists")).toBe(true));
+  test('retenta em arquivo em uso por outro processo (Windows)', () =>
+    expect(isTransientWorktreeError('error: the file is being used by another process')).toBe(true));
+  // Erros DETERMINÍSTICOS não re-tentam: repetir só reproduziria a mesma falha.
+  test('NÃO retenta em SHA inválido', () =>
+    expect(isTransientWorktreeError("fatal: invalid reference: deadbeef")).toBe(false));
+  test('NÃO retenta em referência inexistente', () =>
+    expect(isTransientWorktreeError("fatal: not a valid object name 'nope'")).toBe(false));
+  test('NÃO retenta em erro vazio', () => expect(isTransientWorktreeError('')).toBe(false));
 });
 
 describe('GitWorktree — ciclo de vida', () => {

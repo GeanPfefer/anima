@@ -113,6 +113,42 @@ export function runGate(command: string, cwd: string, timeoutMs: number, signal?
 const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promise<CommandResult> =>
   runProcess('git', ['-C', repo, ...args], { cwd: repo, timeoutMs: 60_000, signal });
 
+/**
+ * A falha de `git worktree add` é RECUPERÁVEL por nova tentativa? A criação da
+ * worktree escreve num diretório TEMP recém-criado e nos arquivos administrativos de
+ * `.git/worktrees`; no Windows, o antivírus/indexador ocasionalmente segura esse
+ * diretório recém-criado por alguns milissegundos, e o git falha fechado com um erro
+ * de FILESYSTEM transitório ("cannot create directory: Permission denied", "Access is
+ * denied", lock de ref, arquivo em uso). Esses casos somem numa nova tentativa. Erros
+ * DETERMINÍSTICOS (SHA inválido, argumento malformado) NÃO casam aqui e sobem na hora,
+ * sem re-tentar. Puro e testável — não amplia nenhuma permissão. */
+export function isTransientWorktreeError(stderr: string): boolean {
+  const text = stderr.toLowerCase();
+  return (
+    text.includes('permission denied') ||
+    text.includes('access is denied') ||
+    text.includes('operation not permitted') ||
+    text.includes('cannot create directory') ||
+    text.includes('could not create') ||
+    text.includes('unable to create') ||
+    text.includes('cannot lock ref') ||
+    text.includes('being used by another process') ||
+    text.includes('used by another process') ||
+    text.includes('resource temporarily unavailable') ||
+    text.includes('resource busy') ||
+    text.includes('device or resource busy')
+  );
+}
+
+/** Espera cancelável — o AbortSignal da tentativa encurta o backoff sem lançar. */
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise<void>(resolve => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    const onAbort = (): void => { clearTimeout(timer); resolve(); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+
 /** Uma worktree git descartável ancorada num SHA. Cria uma branch nova e um
  * diretório temporário; o repositório e o workspace original nunca mudam. */
 export class GitWorktree {
@@ -134,19 +170,40 @@ export class GitWorktree {
     readonly startSha?: string;
     readonly signal?: AbortSignal;
   }): Promise<GitWorktree> {
-    const base = await mkdtemp(join(tmpdir(), 'anima-wt-'));
-    const root = join(base, 'tree');
     const start = input.startSha ?? input.sha;
     // Checkout completo do estado inicial numa branch nova. Numa retomada, esse
     // estado é o commit do checkpoint da tentativa anterior; a nova branch parte
     // dele, mas o diff da tentativa continua contra a base autorizada. node_modules
     // é ignorado pelo git, então é religado depois por linkNodeModules().
-    const created = await git(input.repoRoot, ['worktree', 'add', '-b', input.branch, root, start], input.signal);
-    if (created.exitCode !== 0) {
+    //
+    // A criação é RESILIENTE a falha de filesystem TRANSITÓRIA (Windows: AV/indexador
+    // segura o diretório TEMP recém-criado por instantes, e o git falha fechado com
+    // "cannot create directory: Permission denied"). Re-tenta um número BOUNDED de vezes,
+    // sempre com um diretório TEMP NOVO e após limpar o estado parcial (prune + apagar a
+    // branch), com backoff curto e cancelável. Não amplia permissão nenhuma: é o mesmo
+    // comando, apenas repetido. Erro determinístico não casa `isTransientWorktreeError` e
+    // sobe na primeira tentativa. O caminho de SUCESSO é idêntico ao anterior.
+    const maxAttempts = 3;
+    let lastError = '';
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const base = await mkdtemp(join(tmpdir(), 'anima-wt-'));
+      const root = join(base, 'tree');
+      const created = await git(input.repoRoot, ['worktree', 'add', '-b', input.branch, root, start], input.signal);
+      if (created.exitCode === 0) {
+        return new GitWorktree(input.repoRoot, root, input.branch, base, input.sha, start);
+      }
+      lastError = created.stderr.trim() || created.stdout.trim() || String(created.exitCode);
       await rm(base, { recursive: true, force: true }).catch(() => {});
-      throw new Error(`Falha ao criar worktree: ${created.stderr.trim() || created.stdout.trim() || created.exitCode}`);
+      const canRetry = attempt < maxAttempts && !input.signal?.aborted && isTransientWorktreeError(lastError);
+      if (!canRetry) break;
+      // Limpa qualquer estado parcial que uma criação abortada possa ter deixado antes
+      // de repetir com o MESMO nome de branch (idempotência): entrada administrativa órfã
+      // (`prune`, pois o diretório TEMP já foi removido) e a branch, se chegou a existir.
+      await git(input.repoRoot, ['worktree', 'prune'], input.signal).catch(() => {});
+      await git(input.repoRoot, ['branch', '-D', input.branch], input.signal).catch(() => {});
+      await sleep(150 * attempt, input.signal);
     }
-    return new GitWorktree(input.repoRoot, root, input.branch, base, input.sha, start);
+    throw new Error(`Falha ao criar worktree: ${lastError}`);
   }
 
   /** Resolve um caminho relativo dentro da raiz, com as guardas de segurança. */
