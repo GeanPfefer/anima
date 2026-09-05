@@ -1,4 +1,6 @@
 import { projectAutonomousQueue, type CreateWorkProposalCommand } from '@anima/core';
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { resolveCliIdentity } from '@/cli/identity';
 import { OpenAIProjectWorkPlanner, planExecutableProjectWork } from '@/lib/ai/project-work-planner';
 import { createOpenAIPlannerAdmission } from '@/lib/work-orchestration/openai-paid-compute';
@@ -37,22 +39,49 @@ import { createWorkOrchestrationService } from '@/lib/work-orchestration/server'
 
 const CEILING_USD = 0.25;
 
-const TASK_MESSAGE = [
-  'Adicione uma função pura de diagnóstico da configuração atual do Project Work Planner em apps/web/lib/ai.',
-  'A função deve expor o provider efetivo do planejador ("openai" ou "local") e, quando o provider efetivo for "local", também o modelo local efetivo.',
-  'Reutilize os defaults e as funções de configuração já existentes (por exemplo resolveConfiguredProjectPlannerProvider e a resolução do modelo local já usada pelo planejador local).',
-  'A função deve ser PURA: não faz I/O, não faz chamadas HTTP e NUNCA retorna, lê ou incorpora API keys, tokens, cabeçalhos de autorização ou qualquer segredo.',
-  'Não altere a seleção de provider nem o comportamento existente do planner.',
-  'Adicione testes focados cobrindo: (1) a configuração default; (2) provider local com modelo explícito; (3) ausência de segredos no retorno.',
-  'Use somente os arquivos mínimos necessários em apps/web/lib/ai e valide com um teste focado.',
-].join(' ');
+export async function resolveTaskMessage(
+  args: string[] = process.argv.slice(2),
+  readTaskFile: (filePath: string) => Promise<string> = filePath => readFile(filePath, 'utf8'),
+): Promise<string> {
+  let inlineMessage: string | undefined;
+  let messageFile: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument !== '--message' && argument !== '--message-file') {
+      throw new Error(`Argumento não reconhecido: ${argument}. Use --message ou --message-file.`);
+    }
+
+    const value = args[index + 1];
+    if (!value || value.startsWith('--')) {
+      throw new Error(`O argumento ${argument} exige um valor.`);
+    }
+    index += 1;
+
+    if (argument === '--message') {
+      if (inlineMessage !== undefined) throw new Error('--message só pode ser informado uma vez.');
+      inlineMessage = value;
+    } else {
+      if (messageFile !== undefined) throw new Error('--message-file só pode ser informado uma vez.');
+      messageFile = value;
+    }
+  }
+
+  if ((inlineMessage === undefined) === (messageFile === undefined)) {
+    throw new Error('Informe exclusivamente uma mensagem com --message ou um arquivo com --message-file.');
+  }
+
+  const taskMessage = inlineMessage ?? await readTaskFile(messageFile!);
+  if (!taskMessage.trim()) throw new Error('A mensagem da tarefa não pode estar vazia.');
+  return taskMessage;
+}
 
 function redact(value: string): string {
   // Nunca deixa vazar um segredo estilo OpenAI em log/evidência, mesmo por acidente.
   return value.replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-***REDACTED***');
 }
 
-async function main(): Promise<void> {
+export async function main(taskMessage: string): Promise<void> {
   const identityResult = await resolveCliIdentity();
   if (!identityResult.ok) throw new Error(identityResult.error);
   const { client, userId } = identityResult.identity;
@@ -65,7 +94,7 @@ async function main(): Promise<void> {
 
   // 1) Mensagem real do usuário (Camada 1: memória bruta), fonte da proposta.
   const source = await client.from('ai_conversations').insert({
-    user_id: userId, role: 'user', content: TASK_MESSAGE,
+    user_id: userId, role: 'user', content: taskMessage,
   }).select('id').single();
   if (source.error || !source.data) throw new Error(`Falha ao persistir mensagem de origem: ${source.error?.message ?? 'sem linha'}`);
   const sourceMessageId = source.data.id;
@@ -111,7 +140,7 @@ async function main(): Promise<void> {
     sourceMessageId, impactLevel: 'low', capability: 'programming',
     intent: {}, proposal: placeholder.proposal,
   };
-  const planned = await planExecutableProjectWork(TASK_MESSAGE, planningBase, planner);
+  const planned = await planExecutableProjectWork(taskMessage, planningBase, planner);
   if (!planned.ok) {
     console.log(JSON.stringify({
       stage: 'planner_failed', plannerProvider: planner.id, model,
@@ -183,7 +212,9 @@ async function main(): Promise<void> {
   }, null, 2)));
 }
 
-void main().catch(error => {
-  console.error(redact(error instanceof Error ? error.stack ?? error.message : String(error)));
-  process.exitCode = 1;
-});
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  void resolveTaskMessage().then(main).catch(error => {
+    console.error(redact(error instanceof Error ? error.stack ?? error.message : String(error)));
+    process.exitCode = 1;
+  });
+}
