@@ -29,13 +29,16 @@ export interface ComputeCohortKeyV1 {
   readonly model: string;
   readonly capability: string;
   readonly taskClass: string;
+  /** Optional for backwards compatibility; observation cohorts always supply it. */
+  readonly placement?: string;
+  readonly configVersion?: string;
 }
 
 export interface AttemptOutcomeV1 {
   readonly terminalResult: string;
   readonly reachedReview: boolean;
   readonly verified: boolean;
-  readonly durationMs: number;
+  readonly durationMs: number | null;
   /** Host-observed elapsed time from attempt start until review was reached. */
   readonly timeToReviewMs: number | null;
 }
@@ -135,7 +138,9 @@ const nonNegativeInteger = (value: number): boolean => Number.isInteger(value) &
 const validMoney = (money: MoneyV1): boolean => money.currency.trim().length > 0 && finiteNonNegative(money.amount);
 const sameCohort = (left: ComputeCohortKeyV1, right: ComputeCohortKeyV1): boolean =>
   left.provider === right.provider && left.model === right.model
-  && left.capability === right.capability && left.taskClass === right.taskClass;
+  && left.capability === right.capability && left.taskClass === right.taskClass
+  && (left.placement ?? 'unknown') === (right.placement ?? 'unknown')
+  && (left.configVersion ?? null) === (right.configVersion ?? null);
 
 export function calculateApiAttemptCost(
   attempt: ApiAttemptV1,
@@ -191,7 +196,7 @@ export function calculateCohortMetrics(
   const totalAttempts = attempts.length;
   const verifiedResults = attempts.filter((attempt) => attempt.verified).length;
   const reviewed = attempts.filter((attempt) => attempt.reachedReview && attempt.timeToReviewMs !== null);
-  const invalidObservation = attempts.some((attempt) => !finiteNonNegative(attempt.durationMs)
+  const invalidObservation = attempts.some((attempt) => (attempt.durationMs !== null && !finiteNonNegative(attempt.durationMs))
     || (attempt.timeToReviewMs !== null && !finiteNonNegative(attempt.timeToReviewMs))
     || (attempt.verified && !attempt.reachedReview));
   const knownCosts = attempts.filter((attempt): attempt is EconomicAttemptV1 & { cost: { status: 'known'; value: MoneyV1 } } => attempt.cost.status === 'known');
