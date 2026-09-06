@@ -85,7 +85,16 @@ export interface OllamaCoderOptions {
 }
 
 export interface CoderProtocolMessage { readonly role: 'system' | 'user' | 'assistant'; readonly content: string }
-export interface CoderProtocolTransportInput { readonly messages: readonly CoderProtocolMessage[]; readonly signal: AbortSignal; readonly timeoutMs: number }
+export interface CoderProtocolTransportInput {
+  readonly messages: readonly CoderProtocolMessage[];
+  readonly signal: AbortSignal;
+  readonly timeoutMs: number;
+  /** Teto duro de tokens gerados nesta chamada — a MESMA reserva de saída (`numPredict`)
+   * que o transport Ollama envia como `num_predict`. O transport do provider DEVE aplicá-lo
+   * (ex.: `max_output_tokens` na Responses API da OpenAI) para que a invariante
+   * `input + saída reservada <= janela` valha no request REAL, não só no cálculo. */
+  readonly maxOutputTokens: number;
+}
 export interface CoderProtocolTransportResult { readonly content: string }
 export type CoderProtocolTransport = (input: CoderProtocolTransportInput) => Promise<CoderProtocolTransportResult>;
 
@@ -157,6 +166,11 @@ export class OllamaCoderBackend implements CoderBackend {
       numPredict: options.numPredict ?? 1536,
     });
   }
+
+  /** Orçamento de contexto EFETIVO (num_ctx, input, reserva de saída, num_predict) já
+   * resolvido no construtor. Exposto para observabilidade host-side e prova; permanece
+   * bounded — nunca cresce além do teto operacional selecionado. */
+  get contextBudget(): ContextBudget { return this.budget; }
 
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
     const transcript = new OllamaTranscript(request.hostValidationFeedback);
@@ -385,7 +399,9 @@ export class OllamaCoderBackend implements CoderBackend {
     const messages = [{ role: 'system' as const, content: system }, { role: 'user' as const, content: prompt }];
     assertPromptWithinBudget(system + prompt, this.budget);
     const invoke = async (callMessages: readonly CoderProtocolMessage[]): Promise<CoderProtocolTransportResult | OllamaChatResult> => this.options.protocolTransport
-      ? this.options.protocolTransport({ messages: callMessages, signal, timeoutMs: this.timeoutMs })
+      // A MESMA reserva de geração usada pelo Ollama (`num_predict`) vai ao transport do
+      // provider como teto duro de saída — o Ollama já a aplica em callOllamaChat.
+      ? this.options.protocolTransport({ messages: callMessages, signal, timeoutMs: this.timeoutMs, maxOutputTokens: this.budget.numPredict })
       : callOllamaChat({ url: this.url, model: this.options.model, messages: callMessages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
     const first = await invoke(messages);
     if ('meta' in first) assertNotTruncated(system + prompt, first.meta);

@@ -5,6 +5,45 @@ import {
 } from '@/lib/ai/openai-paid-transport';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend, type CoderProtocolTransport } from './ollama-coder';
+import type { ContextBudget } from './ollama-protocol';
+
+// ============================================================
+// Orçamento de contexto do coder OpenAI — provider/model-aware, BOUNDED.
+//
+// O protocolo host-mediated é compartilhado com o Ollama, mas o TETO operacional de
+// contexto (`operationalContextCap`) NÃO deve ser: o default 8192 do Ollama existe para
+// proteger a RAM/latência da máquina LOCAL (o próprio código nota que 32768 já derrubou
+// esta máquina). Modelos OpenAI rodam REMOTOS — sem esse teto físico local — e uma janela
+// de 8192 recusa prompts que a janela real do modelo aceita (foi a barreira real:
+// prompt ~7613 > input 6656). Este teto é explícito e calculável, provider/model-aware,
+// com override de operação por env; NUNCA ilimitado e NUNCA herda o teto local do Ollama.
+// ============================================================
+
+/** Teto conservador padrão para modelos OpenAI (janela ampla, mas bounded). */
+export const OPENAI_CODER_CONTEXT_CAP_DEFAULT = 128_000;
+/** Reserva de saída e num_predict do coder OpenAI (o num_predict só alimenta o cálculo
+ * local do orçamento; a Responses API não o recebe). */
+export const OPENAI_CODER_OUTPUT_RESERVE_TOKENS = 16_384;
+export const OPENAI_CODER_NUM_PREDICT = 16_384;
+/** Janelas conhecidas por modelo OpenAI. Extensível; ausência ⇒ default conservador. */
+const OPENAI_CODER_CONTEXT_CAP_BY_MODEL: Readonly<Record<string, number>> = {};
+
+/**
+ * Resolve o teto operacional de contexto do coder OpenAI. Precedência explícita:
+ * env de operação (`ANIMA_OPENAI_CODER_CONTEXT_CAP`) → janela conhecida por-modelo →
+ * default conservador. Sempre bounded (>= 1024); nunca herda o 8192 do Ollama local.
+ */
+export function resolveOpenAICoderContextCap(
+  model: string,
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env.ANIMA_OPENAI_CODER_CONTEXT_CAP?.trim();
+  const override = raw ? Number(raw) : Number.NaN;
+  if (Number.isFinite(override) && override >= 1024) return Math.floor(override);
+  const known = OPENAI_CODER_CONTEXT_CAP_BY_MODEL[model];
+  if (typeof known === 'number' && known >= 1024) return Math.floor(known);
+  return OPENAI_CODER_CONTEXT_CAP_DEFAULT;
+}
 
 export interface OpenAIUsage { readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number; readonly cachedInputTokens?: number }
 export interface GptCoderOptions {
@@ -63,7 +102,7 @@ export class GptCoderBackend implements CoderBackend {
     // O transport NUNCA fala com o provider sem admissão: `fetchAdmittedOpenAIResponses`
     // roda `admit()` antes de qualquer rede. A chave e a URL vivem SÓ na borda; aqui
     // nem a credencial é lida. Correlação ausente ⇒ erro ANTES de qualquer fetch.
-    const transport: CoderProtocolTransport = async ({ messages, signal, timeoutMs }) => {
+    const transport: CoderProtocolTransport = async ({ messages, signal, timeoutMs, maxOutputTokens }) => {
       this.callIndex += 1;
       const context = this.activePaidContext;
       if (!context) throw new OpenAICoderError('openai_paid_authorization', 'A chamada paga não possui correlação de work item/attempt.');
@@ -76,7 +115,10 @@ export class GptCoderBackend implements CoderBackend {
             approvedProposalVersion: context.approvedProposalVersion, model,
             callIndex: this.callIndex, maxDurationMs: context.maxDurationMs,
           },
-          body: { model, store: false, input: messages },
+          // `max_output_tokens` = a reserva de saída do orçamento (numPredict): a contenção
+          // de geração equivalente ao `num_predict` do Ollama, honrando a invariante no
+          // request REAL enviado à OpenAI. `num_ctx`/`num_predict` NUNCA vão à OpenAI.
+          body: { model, store: false, input: messages, max_output_tokens: maxOutputTokens },
           signal: bounded.signal,
           fetchImpl,
           ...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
@@ -105,8 +147,21 @@ export class GptCoderBackend implements CoderBackend {
     };
     this.id = coderBackendId('openai', model);
     this.observation = { placement: 'remote', nodeId: 'openai-api', model };
-    this.delegate = new OllamaCoderBackend({ model, backendId: this.id, providerLabel: `OpenAI ${model}`, protocolTransport: transport, fetchImpl, timeoutMs: options.timeoutMs ?? 90_000, maxReadRounds: options.maxReadRounds });
+    // Teto operacional provider/model-aware: a janela REAL do modelo OpenAI, não o 8192
+    // local do Ollama. O orçamento permanece bounded/fail-closed (o protocolo ainda recusa
+    // um prompt que não caiba na janela selecionada).
+    this.delegate = new OllamaCoderBackend({
+      model, backendId: this.id, providerLabel: `OpenAI ${model}`, protocolTransport: transport, fetchImpl,
+      timeoutMs: options.timeoutMs ?? 90_000, maxReadRounds: options.maxReadRounds,
+      operationalContextCap: resolveOpenAICoderContextCap(model),
+      outputReserveTokens: OPENAI_CODER_OUTPUT_RESERVE_TOKENS,
+      numPredict: OPENAI_CODER_NUM_PREDICT,
+    });
   }
+
+  /** Orçamento de contexto EFETIVO do coder OpenAI (delegado ao protocolo compartilhado).
+   * Provider/model-aware e bounded; exposto para observabilidade e prova. */
+  get contextBudget(): ContextBudget { return this.delegate.contextBudget; }
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
     this.usages.length = 0;
     this.requestIds.length = 0;
