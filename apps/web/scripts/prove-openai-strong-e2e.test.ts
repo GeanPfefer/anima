@@ -20,25 +20,33 @@ describe('redactSecrets', () => {
 import { resolveTaskMessage } from './prove-openai-strong-e2e';
 
 describe('resolveTaskMessage', () => {
-  it('usa a mensagem default quando não há argumentos de tarefa', () => {
-    expect(resolveTaskMessage([])).toContain('Adicione uma função pura de diagnóstico');
+  it('exige uma fonte de mensagem', () => {
+    expect(() => resolveTaskMessage([])).toThrow('Informe uma mensagem usando --message ou --message-file.');
   });
 
-  it('aceita a mensagem informada diretamente por --task', () => {
-    expect(resolveTaskMessage(['--task', 'corrija o planner'])).toBe('corrija o planner');
-    expect(resolveTaskMessage(['--task=adicione testes'])).toBe('adicione testes');
+  it('aceita mensagem direta nas formas separada e inline sem alterar seu conteúdo', () => {
+    expect(resolveTaskMessage(['--message', '  corrija o planner  '])).toBe('  corrija o planner  ');
+    expect(resolveTaskMessage(['--message=adicione testes'])).toBe('adicione testes');
   });
 
-  it('lê a mensagem de --task-file pelo leitor injetado', () => {
-    const readFile = jest.fn(() => 'mensagem do arquivo');
+  it('lê mensagem de arquivo nas formas separada e inline sem alterar seu conteúdo', () => {
+    const readFile = jest.fn(() => '  mensagem do arquivo  ');
 
-    expect(resolveTaskMessage(['--task-file', 'tarefa.txt'], readFile)).toBe('mensagem do arquivo');
+    expect(resolveTaskMessage(['--message-file', 'tarefa.txt'], readFile)).toBe('  mensagem do arquivo  ');
+    expect(resolveTaskMessage(['--message-file=tarefa.txt'], readFile)).toBe('  mensagem do arquivo  ');
     expect(readFile).toHaveBeenCalledWith('tarefa.txt');
   });
 
-  it('rejeita fontes de tarefa conflitantes', () => {
-    expect(() => resolveTaskMessage(['--task', 'direta', '--task-file', 'tarefa.txt'])).toThrow(
-      'Use somente uma entre --task e --task-file.',
+  it('rejeita fontes conflitantes, conteúdo vazio e falha de leitura sem expor detalhes', () => {
+    expect(() => resolveTaskMessage(['--message', 'direta', '--message-file', 'tarefa.txt'])).toThrow(
+      'Use somente uma entre --message e --message-file.',
     );
+    expect(() => resolveTaskMessage(['--message', '   '])).toThrow('A opção --message exige uma mensagem não vazia.');
+    expect(() => resolveTaskMessage(['--message-file', 'tarefa.txt'], jest.fn(() => '  '))).toThrow(
+      'O arquivo informado em --message-file contém uma mensagem vazia.',
+    );
+    expect(() => resolveTaskMessage(['--message-file', 'segredo.txt'], jest.fn(() => {
+      throw new Error('conteúdo secreto');
+    }))).toThrow('Não foi possível ler a mensagem informada em --message-file.');
   });
 });

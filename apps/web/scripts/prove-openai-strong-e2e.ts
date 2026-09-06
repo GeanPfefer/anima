@@ -52,38 +52,46 @@ const DEFAULT_TASK_MESSAGE = [
 type ReadTaskFile = (path: string) => string;
 
 export function resolveTaskMessage(argv: string[], readFile: ReadTaskFile = path => readFileSync(path, 'utf8')): string {
-  let taskMessage: string | undefined;
-  let taskFile: string | undefined;
+  let message: string | undefined;
+  let messageFile: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    const inlineValue = argument.startsWith('--task=') ? argument.slice('--task='.length) : undefined;
-    const fileValue = argument.startsWith('--task-file=') ? argument.slice('--task-file='.length) : undefined;
+    if (argument === undefined) continue;
+    const inlineMessage = argument.startsWith('--message=') ? argument.slice('--message='.length) : undefined;
+    const inlineFile = argument.startsWith('--message-file=') ? argument.slice('--message-file='.length) : undefined;
 
-    if (argument === '--task' || inlineValue !== undefined) {
-      if (taskMessage !== undefined) throw new Error('A opção --task só pode ser informada uma vez.');
-      taskMessage = inlineValue ?? argv[++index] ?? '';
+    if (argument === '--message' || inlineMessage !== undefined) {
+      if (message !== undefined) throw new Error('A opção --message só pode ser informada uma vez.');
+      message = inlineMessage ?? argv[++index] ?? '';
       continue;
     }
 
-    if (argument === '--task-file' || fileValue !== undefined) {
-      if (taskFile !== undefined) throw new Error('A opção --task-file só pode ser informada uma vez.');
-      taskFile = fileValue ?? argv[++index] ?? '';
+    if (argument === '--message-file' || inlineFile !== undefined) {
+      if (messageFile !== undefined) throw new Error('A opção --message-file só pode ser informada uma vez.');
+      messageFile = inlineFile ?? argv[++index] ?? '';
     }
   }
 
-  if (taskMessage !== undefined && taskFile !== undefined) {
-    throw new Error('Use somente uma entre --task e --task-file.');
+  if (message !== undefined && messageFile !== undefined) {
+    throw new Error('Use somente uma entre --message e --message-file.');
   }
-  if (taskMessage !== undefined) {
-    if (!taskMessage.trim()) throw new Error('A opção --task exige uma mensagem não vazia.');
-    return taskMessage;
+  if (message !== undefined) {
+    if (!message.trim()) throw new Error('A opção --message exige uma mensagem não vazia.');
+    return message;
   }
-  if (taskFile !== undefined) {
-    if (!taskFile) throw new Error('A opção --task-file exige um caminho.');
-    return readFile(taskFile);
+  if (messageFile !== undefined) {
+    if (!messageFile) throw new Error('A opção --message-file exige um caminho.');
+    let fileMessage: string;
+    try {
+      fileMessage = readFile(messageFile);
+    } catch {
+      throw new Error('Não foi possível ler a mensagem informada em --message-file.');
+    }
+    if (!fileMessage.trim()) throw new Error('O arquivo informado em --message-file contém uma mensagem vazia.');
+    return fileMessage;
   }
-  return DEFAULT_TASK_MESSAGE;
+  throw new Error('Informe uma mensagem usando --message ou --message-file.');
 }
 
 async function main(): Promise<void> {
@@ -146,7 +154,7 @@ async function main(): Promise<void> {
     sourceMessageId, impactLevel: 'low', capability: 'programming',
     intent: {}, proposal: placeholder.proposal,
   };
-  const planned = await planExecutableProjectWork(TASK_MESSAGE, planningBase, planner);
+  const planned = await planExecutableProjectWork(taskMessage, planningBase, planner);
   if (!planned.ok) {
     console.log(JSON.stringify({
       stage: 'planner_failed', plannerProvider: planner.id, model,
