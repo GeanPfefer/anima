@@ -2,7 +2,19 @@
 import type { OpenAIAdmissionControl } from '@/lib/ai/openai-paid-transport';
 import { OpenAIAdmissionDenied } from '@/lib/ai/openai-paid-transport';
 import type { CoderWorkspace } from './coder-backend';
-import { GptCoderBackend, resolveOpenAICoderContextCap, OPENAI_CODER_CONTEXT_CAP_DEFAULT, OPENAI_CODER_OUTPUT_RESERVE_TOKENS, OPENAI_CODER_NUM_PREDICT, type OpenAIUsage } from './gpt-coder';
+import {
+  GptCoderBackend,
+  resolveOpenAICoderContextCap,
+  resolveOpenAICoderDeclaredContextLength,
+  resolveOpenAICoderContext,
+  OpenAICoderContextConfigError,
+  OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS,
+  OPENAI_CODER_CONTEXT_SAFE_MAX_TOKENS,
+  OPENAI_CODER_CONTEXT_MIN_TOKENS,
+  OPENAI_CODER_OUTPUT_RESERVE_TOKENS,
+  OPENAI_CODER_NUM_PREDICT,
+  type OpenAIUsage,
+} from './gpt-coder';
 import { OllamaCoderBackend } from './ollama-coder';
 import { assertPromptWithinBudget, resolveContextBudget, sha256 } from './ollama-protocol';
 
@@ -118,32 +130,41 @@ describe('GptCoderBackend — mesmo protocolo host-mediated do Ollama, fail-clos
   });
 });
 
-describe('orçamento de contexto provider-aware do coder OpenAI (não herda o 8192 local)', () => {
-  const gptBudget = new GptCoderBackend({ model: 'gpt-5.6-terra', admission: grant }).contextBudget;
+describe('orçamento de contexto bounded do coder OpenAI (não herda o 8192 local)', () => {
+  const gpt = new GptCoderBackend({ model: 'gpt-5.6-terra', admission: grant });
+  const gptBudget = gpt.contextBudget;
   const localBudget = new OllamaCoderBackend({ model: 'qwen3-coder' }).contextBudget;
   // ~7715 tokens (ceil(27000/3.5)): ACIMA do input local (6656), ABAIXO do input OpenAI.
   const midPrompt = 'a'.repeat(27_000);
   // Acima até do input OpenAI: o guard fail-closed deve permanecer.
   const hugePrompt = 'a'.repeat(400_000);
 
-  test('teto do coder OpenAI é a janela do modelo, NÃO o 8192 local do Ollama', () => {
-    expect(resolveOpenAICoderContextCap('gpt-5.6-terra')).toBe(OPENAI_CODER_CONTEXT_CAP_DEFAULT);
-    expect(resolveOpenAICoderContextCap('gpt-5.6-terra')).not.toBe(8192);
-    expect(OPENAI_CODER_CONTEXT_CAP_DEFAULT).toBeGreaterThan(8192);
-  });
-
-  test('env de operação ANIMA_OPENAI_CODER_CONTEXT_CAP tem precedência e é bounded (>=1024)', () => {
-    expect(resolveOpenAICoderContextCap('m', { ANIMA_OPENAI_CODER_CONTEXT_CAP: '200000' })).toBe(200_000);
-    expect(resolveOpenAICoderContextCap('m', { ANIMA_OPENAI_CODER_CONTEXT_CAP: '512' })).toBe(OPENAI_CODER_CONTEXT_CAP_DEFAULT);
-    expect(resolveOpenAICoderContextCap('m', { ANIMA_OPENAI_CODER_CONTEXT_CAP: 'x' })).toBe(OPENAI_CODER_CONTEXT_CAP_DEFAULT);
+  test('teto do coder OpenAI é a política conservadora bounded, NÃO o 8192 local do Ollama', () => {
+    expect(resolveOpenAICoderContextCap()).toBe(OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS);
+    expect(resolveOpenAICoderContextCap()).not.toBe(8192);
+    expect(OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS).toBeGreaterThan(8192);
+    expect(OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS).toBeLessThanOrEqual(OPENAI_CODER_CONTEXT_SAFE_MAX_TOKENS);
   });
 
   test('GptCoderBackend expõe orçamento amplo (não herda 6656) com reserva de saída correta', () => {
-    expect(gptBudget.numCtx).toBe(OPENAI_CODER_CONTEXT_CAP_DEFAULT);
+    expect(gptBudget.numCtx).toBe(OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS);
     expect(gptBudget.outputReserveTokens).toBe(OPENAI_CODER_OUTPUT_RESERVE_TOKENS);
-    expect(gptBudget.inputBudgetTokens).toBe(OPENAI_CODER_CONTEXT_CAP_DEFAULT - OPENAI_CODER_OUTPUT_RESERVE_TOKENS);
+    expect(gptBudget.inputBudgetTokens).toBe(OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS - OPENAI_CODER_OUTPUT_RESERVE_TOKENS);
     expect(gptBudget.inputBudgetTokens).not.toBe(6656);
-    expect(gptBudget.inputBudgetTokens).toBeGreaterThan(100_000);
+    expect(gptBudget.inputBudgetTokens).toBeGreaterThan(7715); // ultrapassa a barreira real do seq2
+  });
+
+  test('contextResolution expõe efetivo finito, bounded e coerente com o orçamento', () => {
+    const resolution = gpt.contextResolution;
+    expect(resolution.effectiveContextCap).toBe(gptBudget.numCtx);
+    expect(Number.isFinite(resolution.effectiveContextCap)).toBe(true);
+    expect(resolution.effectiveContextCap).toBeLessThanOrEqual(resolution.safeAbsoluteMax);
+    expect(resolution.safeAbsoluteMax).toBe(OPENAI_CODER_CONTEXT_SAFE_MAX_TOKENS);
+    // Sem capacidade declarada configurada, só a política conservadora atua.
+    expect(resolution.declaredContextLength).toBeNull();
+    expect(resolution.operationalCap).toBe(OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS);
+    // input + reserva de saída <= teto efetivo (invariante do orçamento).
+    expect(gptBudget.inputBudgetTokens + gptBudget.outputReserveTokens).toBeLessThanOrEqual(resolution.effectiveContextCap);
   });
 
   test('backend local Ollama mantém a política bounded (num_ctx 8192, input 6656)', () => {
@@ -154,18 +175,136 @@ describe('orçamento de contexto provider-aware do coder OpenAI (não herda o 81
   test('prompt acima do antigo limite (6656) mas dentro do orçamento OpenAI é ADMITIDO', () => {
     // Sob o orçamento LOCAL o mesmo prompt era rejeitado — era a barreira real do seq2.
     expect(() => assertPromptWithinBudget(midPrompt, localBudget)).toThrow('excede o orçamento de input');
-    // Sob o orçamento OpenAI provider-aware, passa ANTES de qualquer chamada.
+    // Sob o orçamento OpenAI bounded, passa ANTES de qualquer chamada.
     expect(() => assertPromptWithinBudget(midPrompt, gptBudget)).not.toThrow();
   });
 
   test('prompt realmente acima do orçamento OpenAI continua REJEITADO (fail-closed preservado)', () => {
     expect(() => assertPromptWithinBudget(hugePrompt, gptBudget)).toThrow('excede o orçamento de input');
   });
+});
 
-  test('declared context menor que operational cap usa o menor (bounded, sem crescer sem teto)', () => {
-    const budget = resolveContextBudget({ declaredContextLength: 4096, operationalCap: 8192, outputReserveTokens: 1536, numPredict: 1536 });
-    expect(budget.numCtx).toBe(4096);
-    expect(budget.inputBudgetTokens).toBe(4096 - 1536);
+describe('resolver de contexto do coder OpenAI — bounded, safe-max e model-aware honesto', () => {
+  const CAP = OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS;
+  const MAX = OPENAI_CODER_CONTEXT_SAFE_MAX_TOKENS;
+
+  describe('operationalCap: override estritamente bounded', () => {
+    test('env ausente ⇒ política conservadora default', () => {
+      expect(resolveOpenAICoderContextCap({})).toBe(CAP);
+    });
+    test('string vazia / whitespace ⇒ default (não é erro)', () => {
+      expect(resolveOpenAICoderContextCap({ ANIMA_OPENAI_CODER_CONTEXT_CAP: '' })).toBe(CAP);
+      expect(resolveOpenAICoderContextCap({ ANIMA_OPENAI_CODER_CONTEXT_CAP: '   ' })).toBe(CAP);
+    });
+    test('valor válido tem precedência', () => {
+      expect(resolveOpenAICoderContextCap({ ANIMA_OPENAI_CODER_CONTEXT_CAP: '50000' })).toBe(50_000);
+    });
+    test('float é truncado (floor) para inteiro válido', () => {
+      expect(resolveOpenAICoderContextCap({ ANIMA_OPENAI_CODER_CONTEXT_CAP: '64000.9' })).toBe(64_000);
+    });
+    test('exatamente no teto absoluto seguro é aceito', () => {
+      expect(resolveOpenAICoderContextCap({ ANIMA_OPENAI_CODER_CONTEXT_CAP: String(MAX) })).toBe(MAX);
+    });
+    test('mínimo exato é aceito', () => {
+      expect(resolveOpenAICoderContextCap({ ANIMA_OPENAI_CODER_CONTEXT_CAP: String(OPENAI_CODER_CONTEXT_MIN_TOKENS) })).toBe(OPENAI_CODER_CONTEXT_MIN_TOKENS);
+    });
+    test.each([
+      ['NaN', 'x'],
+      ['zero', '0'],
+      ['negativo', '-5'],
+      ['abaixo do mínimo', '512'],
+      ['acima do máximo', String(MAX + 1)],
+      ['absurdamente gigante', '1e12'],
+      ['Infinity', 'Infinity'],
+      ['overflow prático', '99999999999999999999'],
+    ])('override inválido (%s) recusa fail-closed', (_label, value) => {
+      expect(() => resolveOpenAICoderContextCap({ ANIMA_OPENAI_CODER_CONTEXT_CAP: value })).toThrow(OpenAICoderContextConfigError);
+    });
+  });
+
+  describe('declaredContextLength: registry dirigido por configuração explícita e validada', () => {
+    test('sem configuração ⇒ null (nada fabricado, modelo desconhecido)', () => {
+      expect(resolveOpenAICoderDeclaredContextLength('gpt-5.6-terra', {})).toBeNull();
+    });
+    test('modelo conhecido por correspondência exata', () => {
+      expect(resolveOpenAICoderDeclaredContextLength('gpt-5.6-terra', { ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.6-terra=150000' })).toBe(150_000);
+    });
+    test('modelo desconhecido (não casa nenhuma entrada) ⇒ null', () => {
+      expect(resolveOpenAICoderDeclaredContextLength('outro-modelo', { ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.6-terra=150000' })).toBeNull();
+    });
+    test('alias/prefixo suportado casa por prefixo', () => {
+      expect(resolveOpenAICoderDeclaredContextLength('gpt-5.6-terra', { ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.*=120000' })).toBe(120_000);
+    });
+    test('alias não suportado (prefixo não casa) ⇒ null', () => {
+      expect(resolveOpenAICoderDeclaredContextLength('gpt-4o', { ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.*=120000' })).toBeNull();
+    });
+    test('exata vence prefixo; prefixo mais longo vence o mais curto', () => {
+      expect(resolveOpenAICoderDeclaredContextLength('gpt-5.6-terra', { ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.*=100000,gpt-5.6-terra=150000' })).toBe(150_000);
+      expect(resolveOpenAICoderDeclaredContextLength('gpt-5.6-terra', { ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.*=100000,gpt-5.6*=130000' })).toBe(130_000);
+    });
+    test('entrada malformada / valor fora do contrato recusa fail-closed', () => {
+      expect(() => resolveOpenAICoderDeclaredContextLength('gpt-5.6-terra', { ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.6-terra' })).toThrow(OpenAICoderContextConfigError);
+      expect(() => resolveOpenAICoderDeclaredContextLength('gpt-5.6-terra', { ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.6-terra=999999999' })).toThrow(OpenAICoderContextConfigError);
+    });
+  });
+
+  describe('teto efetivo (min(declared ?? cap, cap)) via composição resolver + resolveContextBudget', () => {
+    const effective = (env: Record<string, string | undefined>) => {
+      const ctx = resolveOpenAICoderContext('gpt-5.6-terra', env);
+      const budget = resolveContextBudget({
+        declaredContextLength: ctx.declaredContextLength,
+        operationalCap: ctx.operationalCap,
+        outputReserveTokens: OPENAI_CODER_OUTPUT_RESERVE_TOKENS,
+        numPredict: OPENAI_CODER_NUM_PREDICT,
+      });
+      return { ctx, budget };
+    };
+
+    test('efetivo é finito, ≤ safeAbsoluteMax e = operationalCap quando não há declarada', () => {
+      const { ctx, budget } = effective({});
+      expect(Number.isFinite(budget.numCtx)).toBe(true);
+      expect(budget.numCtx).toBeLessThanOrEqual(ctx.safeAbsoluteMax);
+      expect(budget.numCtx).toBe(ctx.operationalCap);
+      expect(budget.inputBudgetTokens + budget.outputReserveTokens).toBeLessThanOrEqual(budget.numCtx);
+    });
+
+    test('declaredContextLength menor que operationalCap ⇒ efetivo = declarada (≤ declarada)', () => {
+      const { ctx, budget } = effective({ ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.6-terra=20000' });
+      expect(ctx.declaredContextLength).toBe(20_000);
+      expect(budget.numCtx).toBe(20_000);
+      expect(budget.numCtx).toBeLessThanOrEqual(ctx.declaredContextLength!);
+    });
+
+    test('operationalCap menor que declaredContextLength ⇒ efetivo = operationalCap', () => {
+      const { ctx, budget } = effective({
+        ANIMA_OPENAI_CODER_CONTEXT_CAP: '32000',
+        ANIMA_OPENAI_CODER_DECLARED_CONTEXT: 'gpt-5.6-terra=150000',
+      });
+      expect(ctx.operationalCap).toBe(32_000);
+      expect(budget.numCtx).toBe(32_000);
+      expect(budget.numCtx).toBeLessThanOrEqual(ctx.declaredContextLength!);
+    });
+
+    test('override no teto absoluto seguro ⇒ efetivo bounded ao safe-max', () => {
+      const { ctx, budget } = effective({ ANIMA_OPENAI_CODER_CONTEXT_CAP: String(MAX) });
+      expect(budget.numCtx).toBe(MAX);
+      expect(budget.numCtx).toBeLessThanOrEqual(ctx.safeAbsoluteMax);
+    });
+  });
+
+  describe('degradação bounded quando o cap é ≤ reserva de saída', () => {
+    test('cap pequeno reparte com segurança (input + reserva = numCtx, sem estourar)', () => {
+      const budget = resolveContextBudget({ declaredContextLength: null, operationalCap: 8192, outputReserveTokens: OPENAI_CODER_OUTPUT_RESERVE_TOKENS, numPredict: OPENAI_CODER_NUM_PREDICT });
+      expect(budget.numCtx).toBe(8192);
+      expect(budget.outputReserveTokens).toBe(4096); // clampado a floor(numCtx/2)
+      expect(budget.inputBudgetTokens).toBe(4096);
+      expect(budget.inputBudgetTokens + budget.outputReserveTokens).toBe(budget.numCtx);
+    });
+    test('declared context menor que operational cap usa o menor (bounded, sem crescer sem teto)', () => {
+      const budget = resolveContextBudget({ declaredContextLength: 4096, operationalCap: 8192, outputReserveTokens: 1536, numPredict: 1536 });
+      expect(budget.numCtx).toBe(4096);
+      expect(budget.inputBudgetTokens).toBe(4096 - 1536);
+    });
   });
 });
 

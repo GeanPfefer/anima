@@ -8,41 +8,147 @@ import { OllamaCoderBackend, type CoderProtocolTransport } from './ollama-coder'
 import type { ContextBudget } from './ollama-protocol';
 
 // ============================================================
-// Orçamento de contexto do coder OpenAI — provider/model-aware, BOUNDED.
+// Orçamento de contexto do coder OpenAI — BOUNDED por contrato explícito.
 //
 // O protocolo host-mediated é compartilhado com o Ollama, mas o TETO operacional de
 // contexto (`operationalContextCap`) NÃO deve ser: o default 8192 do Ollama existe para
 // proteger a RAM/latência da máquina LOCAL (o próprio código nota que 32768 já derrubou
 // esta máquina). Modelos OpenAI rodam REMOTOS — sem esse teto físico local — e uma janela
 // de 8192 recusa prompts que a janela real do modelo aceita (foi a barreira real:
-// prompt ~7613 > input 6656). Este teto é explícito e calculável, provider/model-aware,
-// com override de operação por env; NUNCA ilimitado e NUNCA herda o teto local do Ollama.
+// prompt ~7613 > input 6656). NUNCA ilimitado e NUNCA herda o teto local do Ollama.
+//
+// Três grandezas explícitas e bounded, sem catálogo hardcoded frágil nem semântica
+// model-aware prometida e não cumprida:
+//   • operationalCap — teto operacional conservador (POLÍTICA), independente da
+//     capacidade máxima de qualquer modelo; NÃO afirma a janela real do modelo.
+//   • declaredContextLength — capacidade REAL declarada do modelo, e só quando um
+//     operador a configura explicitamente (`ANIMA_OPENAI_CODER_DECLARED_CONTEXT`);
+//     nada é fabricado.
+//   • safeAbsoluteMaximum — teto absoluto seguro (contrato). Nenhum valor operacional
+//     — env, default ou declarado — pode ultrapassá-lo.
+// O teto EFETIVO (numCtx) = min(declaredContextLength ?? operationalCap, operationalCap),
+// resolvido em `resolveContextBudget`; por construção é finito, ≤ safeAbsoluteMaximum e,
+// quando há capacidade declarada, ≤ declaredContextLength. Um modelo DESCONHECIDO recebe
+// apenas a política conservadora — nunca implicitamente uma janela maior do que se pode
+// justificar.
 // ============================================================
 
-/** Teto conservador padrão para modelos OpenAI (janela ampla, mas bounded). */
-export const OPENAI_CODER_CONTEXT_CAP_DEFAULT = 128_000;
-/** Reserva de saída e num_predict do coder OpenAI (o num_predict só alimenta o cálculo
- * local do orçamento; a Responses API não o recebe). */
+/** Piso operacional absoluto: nenhum teto de contexto abaixo disto é aceito. */
+export const OPENAI_CODER_CONTEXT_MIN_TOKENS = 1024;
+/** Teto absoluto seguro (contrato explícito). Deliberadamente MUITO abaixo de ilimitado:
+ * contém custo/latência mesmo diante de override ou metadata mal declarados. Nenhum teto
+ * operacional — env, default ou capacidade declarada — o ultrapassa. */
+export const OPENAI_CODER_CONTEXT_SAFE_MAX_TOKENS = 200_000;
+/** Política operacional conservadora (default). NÃO é a janela máxima de nenhum modelo:
+ * é um teto operacional bounded, independente da capacidade máxima, dimensionado para
+ * cobrir prompts reais do protocolo READ→EDIT (que mantém o prompt pequeno) sem crescer
+ * sem teto e sem herdar o 8192 local do Ollama. */
+export const OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS = 64_000;
+/** Reserva de saída e num_predict do coder OpenAI. O num_predict alimenta o cálculo local
+ * do orçamento e vai à Responses API como `max_output_tokens` (contenção real de geração),
+ * NUNCA como campo Ollama. */
 export const OPENAI_CODER_OUTPUT_RESERVE_TOKENS = 16_384;
 export const OPENAI_CODER_NUM_PREDICT = 16_384;
-/** Janelas conhecidas por modelo OpenAI. Extensível; ausência ⇒ default conservador. */
-const OPENAI_CODER_CONTEXT_CAP_BY_MODEL: Readonly<Record<string, number>> = {};
+
+/** Configuração de contexto inválida (env/metadata): fail-closed na construção. */
+export class OpenAICoderContextConfigError extends Error {
+  constructor(message: string) { super(message); this.name = 'OpenAICoderContextConfigError'; }
+}
 
 /**
- * Resolve o teto operacional de contexto do coder OpenAI. Precedência explícita:
- * env de operação (`ANIMA_OPENAI_CODER_CONTEXT_CAP`) → janela conhecida por-modelo →
- * default conservador. Sempre bounded (>= 1024); nunca herda o 8192 do Ollama local.
+ * Valida um número de tokens de contexto contra o contrato [MIN, SAFE_MAX]. Recusa
+ * fail-closed qualquer valor não-finito, NaN, fora do inteiro seguro, abaixo do mínimo ou
+ * acima do teto absoluto seguro (inclui overflow prático e valores absurdamente grandes).
+ * Floats são truncados (floor) antes de validar.
+ */
+function boundedContextTokens(raw: number, source: string): number {
+  if (!Number.isFinite(raw)) {
+    throw new OpenAICoderContextConfigError(`${source}: valor não finito (NaN/Infinity) não é permitido.`);
+  }
+  const floored = Math.floor(raw);
+  if (!Number.isSafeInteger(floored)) {
+    throw new OpenAICoderContextConfigError(`${source}: valor fora do inteiro seguro.`);
+  }
+  if (floored < OPENAI_CODER_CONTEXT_MIN_TOKENS) {
+    throw new OpenAICoderContextConfigError(`${source}: ${floored} é menor que o mínimo ${OPENAI_CODER_CONTEXT_MIN_TOKENS}.`);
+  }
+  if (floored > OPENAI_CODER_CONTEXT_SAFE_MAX_TOKENS) {
+    throw new OpenAICoderContextConfigError(`${source}: ${floored} excede o teto absoluto seguro ${OPENAI_CODER_CONTEXT_SAFE_MAX_TOKENS}.`);
+  }
+  return floored;
+}
+
+/**
+ * Teto operacional do coder OpenAI. Precedência: override de operação
+ * (`ANIMA_OPENAI_CODER_CONTEXT_CAP`, estritamente bounded) → política conservadora default.
+ * NUNCA herda o 8192 do Ollama; SEMPRE finito e ≤ teto absoluto seguro. Ausência/whitespace
+ * ⇒ default; override presente porém inválido ⇒ recusa fail-closed (misconfiguração de
+ * operador é ruidosa, não silenciosa).
  */
 export function resolveOpenAICoderContextCap(
-  model: string,
   env: Record<string, string | undefined> = process.env,
 ): number {
   const raw = env.ANIMA_OPENAI_CODER_CONTEXT_CAP?.trim();
-  const override = raw ? Number(raw) : Number.NaN;
-  if (Number.isFinite(override) && override >= 1024) return Math.floor(override);
-  const known = OPENAI_CODER_CONTEXT_CAP_BY_MODEL[model];
-  if (typeof known === 'number' && known >= 1024) return Math.floor(known);
-  return OPENAI_CODER_CONTEXT_CAP_DEFAULT;
+  if (!raw) return OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS;
+  return boundedContextTokens(Number(raw), 'ANIMA_OPENAI_CODER_CONTEXT_CAP');
+}
+
+/**
+ * Capacidade de contexto DECLARADA por modelo — dirigida por configuração explícita e
+ * validada (`ANIMA_OPENAI_CODER_DECLARED_CONTEXT`), NÃO por um catálogo hardcoded frágil.
+ * Vazia por padrão: nada é fabricado. Formato: entradas `modelo=tokens` separadas por
+ * vírgula; uma chave terminada em `*` casa por PREFIXO (o prefixo mais longo vence;
+ * correspondência exata tem prioridade). Cada valor é bounded pelo MESMO contrato
+ * [MIN, SAFE_MAX]. Retorna null quando o modelo não tem capacidade declarada — e então só
+ * a política operacional conservadora atua.
+ */
+export function resolveOpenAICoderDeclaredContextLength(
+  model: string,
+  env: Record<string, string | undefined> = process.env,
+): number | null {
+  const raw = env.ANIMA_OPENAI_CODER_DECLARED_CONTEXT?.trim();
+  if (!raw) return null;
+  let exact: number | null = null;
+  let prefix: { readonly length: number; readonly tokens: number } | null = null;
+  for (const entry of raw.split(',')) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) {
+      throw new OpenAICoderContextConfigError(`ANIMA_OPENAI_CODER_DECLARED_CONTEXT: entrada inválida "${trimmed}" (esperado modelo=tokens).`);
+    }
+    const key = trimmed.slice(0, eq).trim();
+    if (!key) throw new OpenAICoderContextConfigError('ANIMA_OPENAI_CODER_DECLARED_CONTEXT: chave de modelo vazia.');
+    const tokens = boundedContextTokens(Number(trimmed.slice(eq + 1).trim()), `ANIMA_OPENAI_CODER_DECLARED_CONTEXT[${key}]`);
+    if (key.endsWith('*')) {
+      const stem = key.slice(0, -1);
+      if (stem && model.startsWith(stem) && (prefix === null || stem.length > prefix.length)) {
+        prefix = { length: stem.length, tokens };
+      }
+    } else if (key === model) {
+      exact = tokens;
+    }
+  }
+  return exact ?? prefix?.tokens ?? null;
+}
+
+/** Resolução completa do orçamento de contexto do coder OpenAI: teto operacional,
+ * capacidade declarada (quando configurada) e teto absoluto seguro — as três grandezas que
+ * o protocolo compartilhado combina em `min(declared ?? cap, cap)`. */
+export interface OpenAICoderContextResolution {
+  readonly operationalCap: number;
+  readonly declaredContextLength: number | null;
+  readonly safeAbsoluteMax: number;
+}
+export function resolveOpenAICoderContext(
+  model: string,
+  env: Record<string, string | undefined> = process.env,
+): OpenAICoderContextResolution {
+  return {
+    operationalCap: resolveOpenAICoderContextCap(env),
+    declaredContextLength: resolveOpenAICoderDeclaredContextLength(model, env),
+    safeAbsoluteMax: OPENAI_CODER_CONTEXT_SAFE_MAX_TOKENS,
+  };
 }
 
 export interface OpenAIUsage { readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number; readonly cachedInputTokens?: number }
@@ -91,6 +197,7 @@ export class GptCoderBackend implements CoderBackend {
   readonly id: string;
   readonly observation: NonNullable<CoderBackend['observation']>;
   private readonly delegate: OllamaCoderBackend;
+  private readonly contextResolutionValue: OpenAICoderContextResolution;
   private readonly usages: OpenAIUsage[] = [];
   private readonly requestIds: string[] = [];
   private activePaidContext: CoderPaidContext | null = null;
@@ -147,21 +254,32 @@ export class GptCoderBackend implements CoderBackend {
     };
     this.id = coderBackendId('openai', model);
     this.observation = { placement: 'remote', nodeId: 'openai-api', model };
-    // Teto operacional provider/model-aware: a janela REAL do modelo OpenAI, não o 8192
-    // local do Ollama. O orçamento permanece bounded/fail-closed (o protocolo ainda recusa
-    // um prompt que não caiba na janela selecionada).
+    // Teto operacional bounded por contrato: a janela conservadora (ou a declarada, quando
+    // configurada) do modelo OpenAI, NÃO o 8192 local do Ollama. `declaredContextLength`
+    // participa do OpenAI path e limita ainda mais o efetivo. O orçamento permanece
+    // bounded/fail-closed (o protocolo ainda recusa um prompt que não caiba na janela).
+    const context = resolveOpenAICoderContext(model);
+    this.contextResolutionValue = context;
     this.delegate = new OllamaCoderBackend({
       model, backendId: this.id, providerLabel: `OpenAI ${model}`, protocolTransport: transport, fetchImpl,
       timeoutMs: options.timeoutMs ?? 90_000, maxReadRounds: options.maxReadRounds,
-      operationalContextCap: resolveOpenAICoderContextCap(model),
+      operationalContextCap: context.operationalCap,
+      ...(context.declaredContextLength !== null ? { declaredContextLength: context.declaredContextLength } : {}),
       outputReserveTokens: OPENAI_CODER_OUTPUT_RESERVE_TOKENS,
       numPredict: OPENAI_CODER_NUM_PREDICT,
     });
   }
 
   /** Orçamento de contexto EFETIVO do coder OpenAI (delegado ao protocolo compartilhado).
-   * Provider/model-aware e bounded; exposto para observabilidade e prova. */
+   * Bounded; exposto para observabilidade e prova. `numCtx` é o teto efetivo. */
   get contextBudget(): ContextBudget { return this.delegate.contextBudget; }
+
+  /** Resolução de contexto (teto operacional, capacidade declarada, teto absoluto seguro)
+   * mais o teto EFETIVO já aplicado — para observabilidade e prova de que o efetivo é
+   * finito, ≤ safeAbsoluteMax e ≤ declaredContextLength quando esta existe. */
+  get contextResolution(): OpenAICoderContextResolution & { readonly effectiveContextCap: number } {
+    return { ...this.contextResolutionValue, effectiveContextCap: this.delegate.contextBudget.numCtx };
+  }
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
     this.usages.length = 0;
     this.requestIds.length = 0;
