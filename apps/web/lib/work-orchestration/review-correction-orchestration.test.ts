@@ -1,5 +1,5 @@
 import { validateCorrectionSuccessor, type WorkEvent, type WorkItem } from '@anima/core';
-import { planCorrectionFromReview, type ReviewCorrectionFacts } from './review-correction-orchestration';
+import { deriveExplicitReworkScope, planCorrectionFromReview, type ReviewCorrectionFacts } from './review-correction-orchestration';
 
 const ATTEMPT = '0aaf828c-fa1d-4c76-8503-64df7a5041c9';
 const BASE_SHA = 'a'.repeat(40);
@@ -65,6 +65,10 @@ const okPlan = (result: ReturnType<typeof planCorrectionFromReview>) => {
 };
 
 describe('planCorrectionFromReview — correção governada por retomada', () => {
+  test('rework explícito é limitado ao escopo e basename ambíguo não concede autoridade', () => {
+    expect(deriveExplicitReworkScope(`Corrigir ${TEST} e fora.ts`, [IMPL, TEST])).toEqual([TEST]);
+    expect(deriveExplicitReworkScope('Corrigir shared.ts', ['a/shared.ts', 'b/shared.ts'])).toEqual([]);
+  });
   test('deriva candidato válido, escopo=restante, retomando do checkpoint revisado', () => {
     const plan = okPlan(planCorrectionFromReview(facts()));
     expect(validateCorrectionSuccessor(original, plan.candidate)).toMatchObject({ valid: true });
@@ -100,10 +104,18 @@ describe('planCorrectionFromReview — correção governada por retomada', () =>
     test('checkpoint de OUTRA tentativa não serve (correlação)', () => {
       expect(planCorrectionFromReview(facts({ events: [gitEvidenceEvent({ attemptId: 'outra' }), resultEvent(), reviewEvent()] }))).toMatchObject({ ok: false, reason: 'checkpoint_evidence_missing' });
     });
-    test('checkpoint tocou TODO o escopo ⇒ derivação recusa (nada restante)', () => {
+    test('checkpoint tocou TODO o escopo + review sem path explícito ⇒ recusa fail-closed', () => {
       const result = planCorrectionFromReview(facts({ events: [gitEvidenceEvent({ changedFiles: [IMPL, TEST] }), resultEvent(), reviewEvent()] }));
       expect(result).toMatchObject({ ok: false, reason: 'derivation_refused' });
       if (!result.ok) expect(result.refusals).toContain('remaining_scope_empty');
+    });
+
+    test('checkpoint tocou TODO o escopo + paths explicitamente pedidos ⇒ reabre ambos', () => {
+      const result = okPlan(planCorrectionFromReview(facts({ events: [
+        gitEvidenceEvent({ changedFiles: [IMPL, TEST] }), resultEvent(),
+        reviewEvent({ requestedChanges: `Retrabalhar ${TEST} e ${IMPL}.` }),
+      ] })));
+      expect(result.candidate.proposal.data.includedScope).toEqual([IMPL, TEST]);
     });
   });
 });

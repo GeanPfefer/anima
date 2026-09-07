@@ -46,6 +46,7 @@ const input = (overrides: Partial<ResumeCorrectionInput> = {}): ResumeCorrection
   requestedChanges: 'Ampliar os testes para provar deduplicação ordenada e preservação da primeira ocorrência.',
   checkpoint,
   preservedFiles: [IMPL],
+  reworkFiles: [],
   recoverySequence: 1,
   idempotencyKey: KEY,
   ...overrides,
@@ -73,6 +74,25 @@ describe('deriveResumeCorrectionSuccessor — correção governada por retomada'
     const candidate = ok(deriveResumeCorrectionSuccessor(input()));
     expect(candidate.proposal.data.excludedScope).toEqual(expect.arrayContaining(['supabase/', IMPL]));
     expect(candidate.proposal.data.includedScope).not.toContain(IMPL);
+  });
+
+  test('remaining vazio + rework explícito de todos os arquivos tocados é derivável, sem duplicação', () => {
+    const candidate = ok(deriveResumeCorrectionSuccessor(input({ preservedFiles: [IMPL, TEST], reworkFiles: [TEST, IMPL, TEST] })));
+    expect(candidate.proposal.data.includedScope).toEqual([IMPL, TEST]);
+    expect(validateCorrectionSuccessor(original, candidate)).toMatchObject({ valid: true });
+  });
+
+  test('arquivo tocado explicitamente autorizado reabre; tocado não autorizado permanece preservado', () => {
+    const candidate = ok(deriveResumeCorrectionSuccessor(input({ preservedFiles: [IMPL, TEST], reworkFiles: [TEST] })));
+    expect(candidate.proposal.data.includedScope).toEqual([TEST]);
+    expect(candidate.proposal.data.excludedScope).toContain(IMPL);
+    expect(candidate.proposal.data.excludedScope).not.toContain(TEST);
+  });
+
+  test('rework fora do escopo aprovado recusa fail-closed', () => {
+    expect(deriveResumeCorrectionSuccessor(input({ reworkFiles: ['fora/do/escopo.ts'] }))).toMatchObject({
+      ok: false, refusals: expect.arrayContaining(['rework_files_out_of_scope']),
+    });
   });
 
   test('RETOMA do checkpoint: espelha o spec + resume_from_checkpoint + base_sha do checkpoint', () => {
@@ -124,7 +144,7 @@ describe('deriveResumeCorrectionSuccessor — correção governada por retomada'
       expect(refusals({ preservedFiles: ['fora/do/escopo.ts'] })).toContain('preserved_files_out_of_scope');
     });
     test('checkpoint tocou TODO o escopo — nada restante para corrigir', () => {
-      expect(refusals({ preservedFiles: [IMPL, TEST] })).toContain('remaining_scope_empty');
+      expect(refusals({ preservedFiles: [IMPL, TEST], reworkFiles: [] })).toContain('remaining_scope_empty');
     });
     test('lineage inválida (sequência/idempotência)', () => {
       expect(refusals({ recoverySequence: 0 })).toContain('lineage_input_invalid');
@@ -134,10 +154,16 @@ describe('deriveResumeCorrectionSuccessor — correção governada por retomada'
 });
 
 describe('validateCorrectionSuccessor — rejeita ampliação de envelope', () => {
-  test('recusa se o candidato não reduz o escopo (subconjunto não-estrito)', () => {
+  test('aceita escopo original completo na correction quando o rework o autoriza', () => {
+    const candidate = ok(deriveResumeCorrectionSuccessor(input({ preservedFiles: [IMPL, TEST], reworkFiles: [IMPL, TEST] })));
+    expect(validateCorrectionSuccessor(original, candidate)).toMatchObject({ valid: true });
+  });
+  test('recusa escopo ampliado sem composição explícita coerente', () => {
     const candidate = ok(deriveResumeCorrectionSuccessor(input()));
-    const notReduced = { ...candidate, proposal: { ...candidate.proposal, data: { ...candidate.proposal.data, includedScope: [IMPL, TEST] } } };
-    expect(validateCorrectionSuccessor(original, notReduced)).toMatchObject({ valid: false });
+    const forged = { ...candidate, proposal: { ...candidate.proposal, data: { ...candidate.proposal.data, includedScope: [IMPL, TEST] } } };
+    const result = validateCorrectionSuccessor(original, forged);
+    expect(result).toMatchObject({ valid: false });
+    if (!result.valid) expect(result.gaps).toContain('correction_scope_invalid');
   });
   test('recusa se a capacidade for ampliada', () => {
     const candidate = ok(deriveResumeCorrectionSuccessor(input()));
@@ -151,7 +177,7 @@ describe('validateCorrectionSuccessor — rejeita ampliação de envelope', () =
 describe('deriveResumeCorrectionSuccessor — requisitos de prova heterogêneos (Verifier v2)', () => {
   const SHORT_COMMIT = COMMIT_SHA.slice(0, 12);
   const FUNCTIONAL = 'As validações declaradas da unidade (gates) passam sobre a correção retomada.';
-  const SCOPE_REMAINING = `A revisão é cumprida adicionando trabalho apenas a ${TEST}.`;
+const SCOPE_REMAINING = `A revisão é cumprida alterando apenas ${TEST} (rework explícito: nenhum; restante: ${TEST}).`;
   const SCOPE_INTACT = `A implementação já verificada (${IMPL}) permanece intacta, retomada do checkpoint ${SHORT_COMMIT}.`;
 
   test('o aceite carrega critério funcional (gate) + critérios de escopo', () => {

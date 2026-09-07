@@ -243,6 +243,11 @@ export function deriveDecompositionSuccessor(input: DecompositionInput): Decompo
 interface SuccessorProofRequirements {
   readonly functional: string | null;
   readonly scopeCriteria: readonly string[];
+  readonly correctionScope?: {
+    readonly reworkScope: readonly string[];
+    readonly remainingScope: readonly string[];
+    readonly effectiveScope: readonly string[];
+  };
 }
 
 function buildSuccessorIntent(
@@ -269,6 +274,13 @@ function buildSuccessorIntent(
   // às suas fontes de prova, para que o Verifier v2 possa classificar cada um pelo
   // requisito certo (gate para funcional, escopo para invariante) — sem afrouxar nada.
   if (proof) {
+    if (proof.correctionScope) {
+      executionSpec['correction_scope'] = {
+        rework_scope: [...proof.correctionScope.reworkScope],
+        remaining_scope: [...proof.correctionScope.remainingScope],
+        effective_scope: [...proof.correctionScope.effectiveScope],
+      };
+    }
     const rawCriteria = executionSpec['validation_criteria'];
     if (Array.isArray(rawCriteria)) {
       const enriched: Json[] = rawCriteria.map(entry => {
@@ -308,11 +320,11 @@ const dedupe = <T>(values: readonly T[]): readonly T[] => [...new Set(values)];
 // Invariantes (verificados a jusante por `validateCorrectionSuccessor`):
 //   * o original permanece `changes_requested` (nada é reaberto/reescrito);
 //   * capacidade, impacto, alvo, permissões e budget NUNCA aumentam;
-//   * o escopo é um subconjunto ESTRITO do original (só o restante);
-//   * a implementação preservada entra em EXCLUÍDO (não é tocada);
+//   * o escopo é subconjunto do original: rework explícito U restante;
+//   * arquivos tocados sem autorização de rework entram em EXCLUÍDO;
 //   * o `execution_spec` é espelhado + `resume_from_checkpoint`/`base_sha` do checkpoint.
 //
-// Fail-closed: sem checkpoint retomável, sem escopo restante, ou pedido vazio,
+// Fail-closed: sem checkpoint retomável, sem escopo efetivo, ou pedido vazio,
 // RECUSA — em vez de fabricar uma correção que amplia o envelope. Puro (sem I/O).
 // ============================================================
 
@@ -326,6 +338,9 @@ export interface ResumeCorrectionInput {
   readonly checkpoint: DecompositionCheckpoint;
   /** Arquivos que o checkpoint tocou (a implementação preservada) — a excluir. */
   readonly preservedFiles: readonly string[];
+  /** Subconjunto explicitamente autorizado pelo pedido humano para REWORK. Pode
+   * reabrir arquivos tocados, mas nunca paths fora do escopo original. */
+  readonly reworkFiles: readonly string[];
   readonly recoverySequence: number;
   readonly idempotencyKey: string;
 }
@@ -336,6 +351,7 @@ export type ResumeCorrectionRefusal =
   | 'checkpoint_incomplete'
   | 'spec_unreadable'
   | 'preserved_files_out_of_scope'
+  | 'rework_files_out_of_scope'
   | 'remaining_scope_empty'
   | 'lineage_input_invalid';
 
@@ -345,12 +361,12 @@ export type ResumeCorrectionResult =
 
 /**
  * Deriva a MENOR unidade sucessora de correção que RETOMA do checkpoint e reduz o
- * escopo ao restante (arquivos não tocados). Construída para PASSAR em
+ * escopo a rework explícito U restante (arquivos não tocados). Construída para PASSAR em
  * `validateCorrectionSuccessor`; o chamador ainda a submete à validação antes de
  * persistir (defesa em profundidade). Fail-closed em toda lacuna.
  */
 export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): ResumeCorrectionResult {
-  const { original, requestedChanges, checkpoint, preservedFiles } = input;
+  const { original, requestedChanges, checkpoint, preservedFiles, reworkFiles } = input;
   const refusals: ResumeCorrectionRefusal[] = [];
 
   if (original.state !== 'changes_requested') refusals.push('original_not_changes_requested');
@@ -370,16 +386,24 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
   // (tocada) é casada por caminho tolerante e sai do escopo (byte-idêntico).
   const originalScope = original.proposal.data.includedScope;
   const preserved = new Set(preservedFiles.map(pathKey));
+  const rework = new Set(reworkFiles.map(pathKey));
   const everyPreservedInScope = preservedFiles.length > 0
     && [...preserved].every(file => originalScope.some(entry => pathKey(entry) === file));
   if (!everyPreservedInScope) refusals.push('preserved_files_out_of_scope');
+  const everyReworkInScope = [...rework].every(file => originalScope.some(entry => pathKey(entry) === file));
+  if (!everyReworkInScope) refusals.push('rework_files_out_of_scope');
 
   const remainingScope = originalScope.filter(entry => !preserved.has(pathKey(entry)));
-  if (remainingScope.length === 0) refusals.push('remaining_scope_empty');
+  // Escopo efetivo = rework explicitamente autorizado U restante ainda não
+  // tocado. A ordem e a grafia vêm sempre do escopo original, o que torna a
+  // composição determinística e elimina duplicatas sem ampliar o envelope.
+  const effectiveScope = originalScope.filter(entry => rework.has(pathKey(entry)) || !preserved.has(pathKey(entry)));
+  if (effectiveScope.length === 0) refusals.push('remaining_scope_empty');
 
   if (refusals.length > 0) return { ok: false, refusals: dedupe(refusals) };
 
-  const preservedScope = originalScope.filter(entry => preserved.has(pathKey(entry)));
+  const reworkScope = originalScope.filter(entry => rework.has(pathKey(entry)));
+  const preservedScope = originalScope.filter(entry => preserved.has(pathKey(entry)) && !rework.has(pathKey(entry)));
   const shortCommit = checkpoint.commitSha.slice(0, 12);
   const feedback = requestedChanges.trim();
 
@@ -392,7 +416,7 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
   //    cobre ambos; a prova é a contenção de escopo observada pelo host, não um gate.
   // Textos EXATOS reusados nos `covers` (o Verifier casa por identidade).
   const functionalCriterion = 'As validações declaradas da unidade (gates) passam sobre a correção retomada.';
-  const scopeRemainingCriterion = `A revisão é cumprida adicionando trabalho apenas a ${remainingScope.join(', ')}.`;
+  const scopeRemainingCriterion = `A revisão é cumprida alterando apenas ${effectiveScope.join(', ')} (rework explícito: ${reworkScope.join(', ') || 'nenhum'}; restante: ${remainingScope.join(', ') || 'nenhum'}).`;
   const scopeIntactCriterion = `A implementação já verificada (${preservedScope.join(', ')}) permanece intacta, retomada do checkpoint ${shortCommit}.`;
   const hasGate = spec.validationCriteria.some(criterion => typeof criterion.command === 'string' && criterion.command.trim().length > 0);
   const scopeCriteria = [scopeRemainingCriterion, scopeIntactCriterion];
@@ -401,17 +425,18 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
     schemaVersion: 1,
     data: {
       summary: clip(
-        `Correção por retomada: cumprir a revisão em ${remainingScope.join(', ')} sem tocar a implementação preservada`,
+        `Correção por retomada: cumprir a revisão em ${effectiveScope.join(', ')} sem tocar os arquivos preservados`,
         200,
       ),
       objective: clip(
         `Retomando do checkpoint durável ${shortCommit} (implementação já verificada preservada em `
-        + `${preservedScope.join(', ')}), cumprir a correção solicitada na revisão: ${feedback}. `
-        + `Alterar SOMENTE ${remainingScope.join(', ')}; não modificar os arquivos preservados nem ampliar `
+        + `${preservedScope.join(', ') || 'nenhum'}; rework explicitamente autorizado em ${reworkScope.join(', ') || 'nenhum'}), `
+        + `cumprir a correção solicitada na revisão: ${feedback}. `
+        + `Alterar SOMENTE ${effectiveScope.join(', ')}; não modificar os arquivos preservados nem ampliar `
         + `objetivo, capacidade, impacto, permissões ou budget da unidade original.`,
         1000,
       ),
-      includedScope: [...remainingScope],
+      includedScope: [...effectiveScope],
       // A implementação preservada passa a ser EXCLUÍDA de forma explícita e honesta.
       excludedScope: [...new Set([...original.proposal.data.excludedScope, ...preservedScope])],
       // Aceite com PROVAS heterogêneas: funcional (gate, quando há) + escopo (invariante).
@@ -426,12 +451,14 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
   const intent = buildSuccessorIntent(original.intent, checkpoint, {
     functional: hasGate ? functionalCriterion : null,
     scopeCriteria,
+    correctionScope: { reworkScope, remainingScope, effectiveScope },
   });
   if (!intent) return { ok: false, refusals: ['spec_unreadable'] };
 
   const recoveryReason = clip(
-    `Correção governada por retomada: cumprir a revisão no escopo restante (${remainingScope.length} arquivo(s)) `
-    + `a partir do checkpoint ${shortCommit}, preservando a implementação já verificada.`,
+    `Correção governada por retomada: cumprir a revisão no escopo efetivo (${effectiveScope.length} arquivo(s); `
+    + `rework ${reworkScope.length}, restante ${remainingScope.length}) a partir do checkpoint ${shortCommit}, `
+    + `preservando os arquivos não reabertos.`,
     400,
   );
 

@@ -64,6 +64,23 @@ const dataOf = (event: WorkEvent): Record<string, Json | undefined> | null => {
 const readString = (record: Record<string, Json | undefined> | null, key: string): string =>
   typeof record?.[key] === 'string' ? record[key] as string : '';
 
+/** Extrai somente paths explicitamente nomeados no REQUEST_CHANGES e já contidos
+ * no escopo aprovado. Basename é aceito apenas quando identifica uma única
+ * entrada do escopo, preservando fail-closed diante de ambiguidade. */
+export function deriveExplicitReworkScope(requestedChanges: string, approvedScope: readonly string[]): readonly string[] {
+  const text = requestedChanges.toLowerCase().replace(/\\/g, '/');
+  const basenameCounts = new Map<string, number>();
+  for (const path of approvedScope) {
+    const basename = path.toLowerCase().replace(/\\/g, '/').split('/').at(-1) ?? '';
+    basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
+  }
+  return approvedScope.filter(path => {
+    const normalized = path.toLowerCase().replace(/\\/g, '/');
+    const basename = normalized.split('/').at(-1) ?? '';
+    return text.includes(normalized) || (basename.length > 0 && basenameCounts.get(basename) === 1 && text.includes(basename));
+  });
+}
+
 /**
  * PURA e fail-closed. Deriva o candidato de correção por retomada a partir dos
  * fatos observados: o pedido da última revisão + o checkpoint git da tentativa
@@ -104,6 +121,7 @@ export function planCorrectionFromReview(facts: ReviewCorrectionFacts): ReviewCo
     requestedChanges,
     checkpoint: { baseSha: gitEvidence.baseSha, branch: worktreeBranchFor(reviewedAttemptId), commitSha: gitEvidence.observedCommitSha },
     preservedFiles: gitEvidence.observedChangedFiles,
+    reworkFiles: deriveExplicitReworkScope(requestedChanges, original.proposal.data.includedScope),
     recoverySequence,
     idempotencyKey,
   });
