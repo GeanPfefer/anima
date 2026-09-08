@@ -60,10 +60,13 @@ export function assessPaidComputePreflight(input: PaidComputePreflightInput = {}
     cond('api_key_present', present(env.ANIMA_RUNPOD_API_KEY), 'ANIMA_RUNPOD_API_KEY presente (valor nunca exposto)'),
     cond('image_configured', present(env.ANIMA_RUNPOD_IMAGE), 'ANIMA_RUNPOD_IMAGE'),
     cond('gpu_class_configured', present(env.ANIMA_RUNPOD_GPU_TYPE_IDS), 'ANIMA_RUNPOD_GPU_TYPE_IDS'),
+    cond('ssh_private_key_configured', present(env.ANIMA_RUNPOD_SSH_PRIVATE_KEY), 'ANIMA_RUNPOD_SSH_PRIVATE_KEY (path host-side; valor nunca persiste)'),
+    cond('ssh_public_key_configured', present(env.ANIMA_RUNPOD_SSH_PUBLIC_KEY), 'ANIMA_RUNPOD_SSH_PUBLIC_KEY (somente chave pública)'),
+    cond('ssh_known_hosts_configured', present(env.ANIMA_RUNPOD_SSH_KNOWN_HOSTS), 'ANIMA_RUNPOD_SSH_KNOWN_HOSTS dedicado'),
   ];
   // Estruturalmente disponíveis (o adapter implementa; nada a configurar):
   const structural: PreflightCondition[] = [
-    cond('inference_endpoint', true, `porta de inferência ${env.ANIMA_RUNPOD_INFERENCE_PORT?.trim() || '11434'} + health ${env.ANIMA_RUNPOD_HEALTH_PATH?.trim() || '/'}`),
+    cond('inference_endpoint', true, `Ollama ${env.ANIMA_RUNPOD_INFERENCE_PORT?.trim() || '11434'} somente no loopback remoto; consumo via túnel SSH local`),
     cond('teardown_path', true, 'stop + destroy implementados na porta NodeProvisioner'),
     cond('recovery_reconciler', true, 'locate + reconcilePaidComputeLeases (órfão após restart)'),
     cond('lease_bounded_by_authority', true, 'deriveBoundedLease clampa deadline à validUntil da autorização'),

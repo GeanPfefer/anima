@@ -10,6 +10,7 @@ const RUNPOD_ENV = {
   ANIMA_ON_DEMAND_NODE_ENABLED: 'true', ANIMA_ON_DEMAND_NODE_PROVISIONER: 'runpod',
   ANIMA_ON_DEMAND_NODE_ID: 'burst-a', ANIMA_ON_DEMAND_NODE_BILLING_MODE: 'paid',
   ANIMA_RUNPOD_API_KEY: 'rp_key', ANIMA_RUNPOD_IMAGE: 'ollama/ollama', ANIMA_RUNPOD_GPU_TYPE_IDS: 'NVIDIA A40',
+  ANIMA_RUNPOD_SSH_PRIVATE_KEY: 'test-key', ANIMA_RUNPOD_SSH_KNOWN_HOSTS: 'test-known', ANIMA_RUNPOD_SSH_PUBLIC_KEY: 'ssh-ed25519 TEST',
 } as const;
 
 const dummyClient = {} as SupabaseClient<Database>;

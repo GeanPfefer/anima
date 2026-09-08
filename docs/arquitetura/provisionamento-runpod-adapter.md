@@ -33,8 +33,10 @@ Config do adapter RunPod (a **API key só vem daqui**; nunca banco/log/UI):
 | `ANIMA_RUNPOD_CONTAINER_DISK_GB` | `50` | disco efêmero |
 | `ANIMA_RUNPOD_VOLUME_GB` | `0` | volume persistente |
 | `ANIMA_RUNPOD_NETWORK_VOLUME_ID` | — | volume de rede p/ cache de modelo |
-| `ANIMA_RUNPOD_INFERENCE_PORT` | `11434` | porta HTTP de inferência exposta |
-| `ANIMA_RUNPOD_HEALTH_PATH` | `/` | caminho do health-check externo |
+| `ANIMA_RUNPOD_INFERENCE_PORT` | `11434` | porta Ollama interna, ligada somente ao loopback do Pod |
+| `ANIMA_RUNPOD_SSH_PRIVATE_KEY` | — (fail-closed) | caminho host-side da identidade SSH; nunca vai ao Pod/DB/log |
+| `ANIMA_RUNPOD_SSH_PUBLIC_KEY` | — (fail-closed) | chave pública instalada no Pod temporário |
+| `ANIMA_RUNPOD_SSH_KNOWN_HOSTS` | — (fail-closed) | arquivo dedicado de host keys; `accept-new` só aceita a primeira identidade e recusa mudanças |
 | `ANIMA_RUNPOD_POD_ENV_JSON` | `{}` | env estático do pod (JSON) — **nunca** a API key |
 
 Sem `API_KEY`/`IMAGE`/`GPU_TYPE_IDS` a config é `null` (fail-closed) e o burst nem é admitido.
@@ -43,16 +45,18 @@ Sem `API_KEY`/`IMAGE`/`GPU_TYPE_IDS` a config é `null` (fail-closed) e o burst 
 
 - **provision(req)** → `GET /pods` (idempotência por nome `anima-<nodeId>`: reusa pod
   não-terminal, NÃO cria segundo) → se ausente `POST /pods` → poll `GET /pods/{id}` até
-  `RUNNING` com endpoint resolvível → `ProvisionedNodeHandle{ providerRef=<podId>, endpoint }`.
-- **inspect(handle)** → `GET /pods/{id}` (status do provider) **E** health-check EXTERNO ao
-  endpoint real (a Goma não confia só no provider). `reachable` = provider RUNNING; `healthy`
-  = endpoint respondeu 2xx.
+  `RUNNING` com `22/tcp` mapeado → túnel SSH Goma-loopback→Pod-loopback →
+  `ProvisionedNodeHandle{ providerRef=<podId>, endpoint=http://127.0.0.1:<efêmera> }`.
+- **inspect(handle)** → `GET /pods/{id}` (status do provider) **E** health semântico pelo túnel:
+  `/api/tags` deve listar `qwen3-coder:latest` e uma chamada curta/bounded de `/api/chat` deve
+  responder. A Goma não confia só no provider nem em flag de ambiente.
 - **stop(handle)** → `POST /pods/{id}/stop` (libera GPU, mas preserva o Pod e pode manter cobrança
   de storage). `404` = idempotente (nada a parar).
 - **destroy(handle)** → `DELETE /pods/{id}`. `404` = idempotente (já destruído).
 
-Endpoint resolvido: `http://<publicIp>:<portMapped>` quando há exposição TCP; senão a convenção
-de proxy HTTP do RunPod `https://<podId>-<port>.proxy.runpod.net`.
+Ollama não é publicado por proxy HTTP nem porta TCP. Só `22/tcp` fica exposto, autenticado pela
+identidade SSH; o endpoint consumido pelo coder é sempre loopback da Goma. `stop`, `destroy` e
+`disposeAll` encerram o processo de túnel rastreado.
 
 `providerRef` (pod id) é suficiente para `stop`/`destroy` após restart do host.
 Como a lease on-demand não declara intenção de manter capacidade aquecida, seu término normal é

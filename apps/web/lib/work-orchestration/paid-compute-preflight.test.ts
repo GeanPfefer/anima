@@ -6,6 +6,7 @@ const FULL = {
   ANIMA_ON_DEMAND_NODE_ENABLED: 'true', ANIMA_ON_DEMAND_NODE_PROVISIONER: 'runpod',
   ANIMA_ON_DEMAND_NODE_BILLING_MODE: 'paid', ANIMA_ON_DEMAND_NODE_ID: 'burst-a',
   ANIMA_RUNPOD_API_KEY: API_KEY, ANIMA_RUNPOD_IMAGE: 'ollama/ollama', ANIMA_RUNPOD_GPU_TYPE_IDS: 'NVIDIA A40',
+  ANIMA_RUNPOD_SSH_PRIVATE_KEY: 'C:/secure/id_ed25519', ANIMA_RUNPOD_SSH_PUBLIC_KEY: 'ssh-ed25519 PUBLIC', ANIMA_RUNPOD_SSH_KNOWN_HOSTS: 'C:/secure/known_hosts_runpod',
 } as const;
 
 describe('assessPaidComputePreflight (READ-ONLY / NO-SPEND)', () => {

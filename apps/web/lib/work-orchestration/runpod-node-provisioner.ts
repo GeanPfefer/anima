@@ -9,6 +9,7 @@ import type {
   ProvisionOutcome,
   StopOutcome,
 } from '@anima/core';
+import { SshRunPodTunnelManager, type RunPodTunnel, type RunPodTunnelManager } from './runpod-ssh-tunnel';
 
 // ============================================================
 // PRIMEIRO ADAPTER DE PROVIDER REAL (RunPod) — TEST-ONLY / env-gated / SEM efeito real.
@@ -80,6 +81,9 @@ export interface RunPodProvisionerConfig {
   /** Porta HTTP que serve inferência dentro do pod (ex.: 11434 do Ollama). */
   readonly inferencePort: number;
   readonly healthPath: string;
+  readonly sshPrivateKeyPath: string;
+  readonly sshKnownHostsPath: string;
+  readonly sshPublicKey: string;
   /** Env estático passado ao pod. NUNCA contém a API key do control-plane. */
   readonly podEnv: Readonly<Record<string, string>>;
 }
@@ -90,6 +94,7 @@ export interface RunPodProvisionerOptions {
   readonly healthTimeoutMs?: number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
+  readonly tunnelManager?: RunPodTunnelManager;
 }
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
@@ -110,7 +115,10 @@ export function readRunPodProvisionerConfig(
   const apiKey = env.ANIMA_RUNPOD_API_KEY?.trim();
   const imageName = env.ANIMA_RUNPOD_IMAGE?.trim();
   const gpuTypeIds = (env.ANIMA_RUNPOD_GPU_TYPE_IDS ?? '').split(',').map(v => v.trim()).filter(Boolean);
-  if (!apiKey || !imageName || gpuTypeIds.length === 0) return null;
+  const sshPrivateKeyPath = env.ANIMA_RUNPOD_SSH_PRIVATE_KEY?.trim();
+  const sshKnownHostsPath = env.ANIMA_RUNPOD_SSH_KNOWN_HOSTS?.trim();
+  const sshPublicKey = env.ANIMA_RUNPOD_SSH_PUBLIC_KEY?.trim();
+  if (!apiKey || !imageName || gpuTypeIds.length === 0 || !sshPrivateKeyPath || !sshKnownHostsPath || !sshPublicKey) return null;
   let podEnv: Record<string, string> = {};
   if (env.ANIMA_RUNPOD_POD_ENV_JSON) {
     const parsed = asObject(parseJson(env.ANIMA_RUNPOD_POD_ENV_JSON));
@@ -131,6 +139,9 @@ export function readRunPodProvisionerConfig(
     networkVolumeId: env.ANIMA_RUNPOD_NETWORK_VOLUME_ID?.trim() || null,
     inferencePort: positiveInt(env.ANIMA_RUNPOD_INFERENCE_PORT, 11434),
     healthPath: env.ANIMA_RUNPOD_HEALTH_PATH?.trim() || '/',
+    sshPrivateKeyPath,
+    sshKnownHostsPath,
+    sshPublicKey,
     podEnv,
   };
 }
@@ -190,6 +201,8 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
   private readonly healthTimeoutMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
+  private readonly tunnels: RunPodTunnelManager;
+  private readonly openTunnels = new Map<string, RunPodTunnel>();
 
   constructor(
     private readonly config: RunPodProvisionerConfig,
@@ -201,6 +214,10 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     this.healthTimeoutMs = options.healthTimeoutMs ?? 5_000;
     this.sleep = options.sleep ?? ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
     this.now = options.now ?? (() => Date.now());
+    this.tunnels = options.tunnelManager ?? new SshRunPodTunnelManager({
+      privateKeyPath: config.sshPrivateKeyPath,
+      knownHostsPath: config.sshKnownHostsPath,
+    });
   }
 
   private lastPriceHint: NodePriceHintV0 | null = null;
@@ -232,7 +249,8 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     const found = await this.findPodByName(this.nameFor(nodeId), signal);
     if (!found.ok) return { ok: false, reason: found.reason };
     if (!found.pod) return { ok: true, found: false };
-    return { ok: true, found: true, handle: { nodeId, providerId: this.providerId, endpoint: this.endpointOf(found.pod), providerRef: found.pod.id } };
+    // Reconciliação só precisa da identidade para stop/destroy; não abre transporte novo.
+    return { ok: true, found: true, handle: { nodeId, providerId: this.providerId, endpoint: '', providerRef: found.pod.id } };
   }
 
   async provision(request: NodeProvisionRequest, signal: AbortSignal, observer?: NodeProvisionObserver): Promise<ProvisionOutcome> {
@@ -261,11 +279,13 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
 
     const ready = await this.awaitEndpoint(podId, signal);
     if (!ready.ok) return { ok: false, reason: ready.reason };
+    const endpoint = await this.openTunnel(ready.pod, signal);
+    if (endpoint === null) return { ok: false, reason: 'provider_unreachable' };
     // Preço só como HINT/observação (Missão 8); a autorização humana é o gate real de gasto.
     this.lastPriceHint = ready.pod.costPerHr !== null ? { currency: 'USD', perHour: ready.pod.costPerHr } : null;
     return {
       ok: true,
-      handle: { nodeId: request.nodeId, providerId: this.providerId, endpoint: ready.endpoint, providerRef: podId },
+      handle: { nodeId: request.nodeId, providerId: this.providerId, endpoint, providerRef: podId },
     };
   }
 
@@ -287,6 +307,7 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
   }
 
   async stop(handle: ProvisionedNodeHandle, signal: AbortSignal): Promise<StopOutcome> {
+    await this.closeTunnel(handle.providerRef);
     const response = await this.call('POST', `/pods/${encodeURIComponent(handle.providerRef)}/stop`, signal);
     if (response.kind === 'network') return { ok: false, reason: 'provider_unreachable' };
     if (response.status === 404) return { ok: true }; // idempotente: já não existe → nada cobrando
@@ -295,6 +316,7 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
   }
 
   async destroy(handle: ProvisionedNodeHandle, signal: AbortSignal): Promise<StopOutcome> {
+    await this.closeTunnel(handle.providerRef);
     const response = await this.call('DELETE', `/pods/${encodeURIComponent(handle.providerRef)}`, signal);
     if (response.kind === 'network') return { ok: false, reason: 'provider_unreachable' };
     if (response.status === 404) return { ok: true }; // idempotente: já destruído
@@ -353,8 +375,10 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
       containerDiskInGb: this.config.containerDiskInGb,
       ...(this.config.volumeInGb > 0 ? { volumeInGb: this.config.volumeInGb } : {}),
       ...(this.config.networkVolumeId ? { networkVolumeId: this.config.networkVolumeId } : {}),
-      ports: [`${this.config.inferencePort}/http`],
-      env: this.config.podEnv,
+      ports: ['22/tcp'],
+      dockerEntrypoint: ['bash', '-lc'],
+      dockerStartCmd: [this.bootstrapCommand(request.model)],
+      env: { ...this.config.podEnv, PUBLIC_KEY: this.config.sshPublicKey },
     };
     const response = await this.call('POST', '/pods', signal, payload);
     if (response.kind === 'network') return { ok: false, reason: 'provider_unreachable' };
@@ -381,11 +405,53 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     return { kind: 'ok', pod };
   }
 
-  private endpointOf(pod: PodView): string {
-    const mapped = pod.portMappings[String(this.config.inferencePort)];
-    if (pod.publicIp && typeof mapped === 'number') return `http://${pod.publicIp}:${mapped}`;
-    // Sem exposição TCP: convenção de proxy HTTP do RunPod para portas http.
-    return `https://${pod.id}-${this.config.inferencePort}.proxy.runpod.net`;
+  private async openTunnel(pod: PodView, signal: AbortSignal): Promise<string | null> {
+    const existing = this.openTunnels.get(pod.id);
+    if (existing) return existing.endpoint;
+    const port = pod.portMappings['22'];
+    if (!pod.publicIp || typeof port !== 'number') return null;
+    try {
+      const tunnel = await this.tunnels.open({ publicIp: pod.publicIp, port }, signal);
+      this.openTunnels.set(pod.id, tunnel);
+      return tunnel.endpoint;
+    } catch { return null; }
+  }
+
+  private async closeTunnel(providerRef: string): Promise<void> {
+    const tunnel = this.openTunnels.get(providerRef);
+    if (!tunnel) return;
+    this.openTunnels.delete(providerRef);
+    await tunnel.close();
+  }
+
+  async disposeAll(): Promise<void> {
+    this.openTunnels.clear();
+    await this.tunnels.closeAll();
+  }
+
+  private bootstrapCommand(model: string): string {
+    const safeModel = /^[A-Za-z0-9._:/-]+$/.test(model) ? model : '';
+    if (!safeModel) return 'exit 64';
+    return [
+      'set -euo pipefail',
+      'command -v nvidia-smi >/dev/null',
+      'nvidia-smi >/dev/null',
+      'apt-get update -qq',
+      'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server curl ca-certificates',
+      'command -v ollama >/dev/null || (curl -fsSL https://ollama.com/install.sh | sh)',
+      'install -d -m 700 /root/.ssh /run/sshd',
+      'test -n "${PUBLIC_KEY:-}"',
+      'printf "%s\\n" "$PUBLIC_KEY" > /root/.ssh/authorized_keys',
+      'chmod 600 /root/.ssh/authorized_keys',
+      '/usr/sbin/sshd',
+      'export OLLAMA_HOST=127.0.0.1:11434',
+      'ollama serve >/tmp/ollama.log 2>&1 &',
+      'for i in $(seq 1 60); do curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done',
+      'curl -fsS http://127.0.0.1:11434/api/tags >/dev/null',
+      `if ollama show ${safeModel} >/dev/null 2>&1; then echo ANIMA_MODEL_CACHE=warm; else echo ANIMA_MODEL_CACHE=cold; timeout 1800 ollama pull ${safeModel}; fi`,
+      `ollama show ${safeModel} >/dev/null`,
+      'wait',
+    ].join('; ');
   }
 
   private async awaitEndpoint(
@@ -400,8 +466,7 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
       if (pod.kind === 'error') return { ok: false, reason: pod.code };
       if (TERMINAL.has(pod.pod.desiredStatus)) return { ok: false, reason: 'provision_failed' };
       if (pod.pod.desiredStatus === 'RUNNING') {
-        const endpoint = this.endpointOf(pod.pod);
-        if (endpoint) return { ok: true, endpoint, pod: pod.pod };
+        if (pod.pod.publicIp && typeof pod.pod.portMappings['22'] === 'number') return { ok: true, endpoint: '', pod: pod.pod };
       }
       if (this.now() >= deadline) return { ok: false, reason: 'capacity_unavailable' };
       await this.sleep(this.pollIntervalMs);
@@ -415,12 +480,27 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     signal.addEventListener('abort', onAbort, { once: true });
     const timer = setTimeout(() => controller.abort(), this.healthTimeoutMs);
     try {
-      const response = await this.http.send({
+      const tags = await this.http.send({
         method: 'GET',
-        url: `${endpoint.replace(/\/+$/, '')}${this.config.healthPath}`,
+        url: `${endpoint.replace(/\/+$/, '')}/api/tags`,
         signal: controller.signal,
       });
-      return response.status >= 200 && response.status < 300 ? { ok: true } : { ok: false, detail: `health ${response.status}` };
+      if (tags.status < 200 || tags.status >= 300) return { ok: false, detail: `tags ${tags.status}` };
+      const parsed = asObject(parseJson(tags.body));
+      const models = Array.isArray(parsed?.models) ? parsed.models : [];
+      const expected = this.config.podEnv.ANIMA_OLLAMA_MODEL ?? 'qwen3-coder:latest';
+      const present = models.some(value => {
+        const model = asObject(value);
+        return model?.name === expected || model?.model === expected;
+      });
+      if (!present) return { ok: false, detail: 'model missing' };
+      const chat = await this.http.send({
+        method: 'POST', url: `${endpoint.replace(/\/+$/, '')}/api/chat`,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: expected, messages: [{ role: 'user', content: 'Reply only OK.' }], stream: false, options: { num_predict: 8 } }),
+        signal: controller.signal,
+      });
+      return chat.status >= 200 && chat.status < 300 ? { ok: true } : { ok: false, detail: `chat ${chat.status}` };
     } catch {
       return { ok: false, detail: 'health unreachable' };
     } finally {

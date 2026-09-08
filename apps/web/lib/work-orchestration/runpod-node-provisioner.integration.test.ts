@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { NodeLeaseV0, NodeProvisionRequest } from '@anima/core';
 import { RunPodNodeProvisioner, fetchHttpClient, type RunPodProvisionerConfig } from './runpod-node-provisioner';
+import type { RunPodTunnelManager } from './runpod-ssh-tunnel';
 
 // ============================================================
 // PROVA DO BOUNDARY (Missão 11) — test server local que EMULA a API do RunPod + o endpoint de
@@ -29,7 +30,8 @@ beforeAll(async () => {
     const port = (server.address() as AddressInfo).port;
     const jsonRes = (status: number, value: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)); };
 
-    if (url === '/' && method === 'GET') { res.writeHead(200); res.end('ok'); return; } // endpoint de inferência (health)
+    if (url === '/api/tags' && method === 'GET') { jsonRes(200, { models: [{ name: 'qwen3-coder:latest' }] }); return; }
+    if (url === '/api/chat' && method === 'POST') { jsonRes(200, { message: { content: 'OK' } }); return; }
     if (url === '/v1/pods' && method === 'GET') { jsonRes(200, []); return; }
     if (url === '/v1/pods' && method === 'POST') {
       let body = ''; req.on('data', c => { body += c; });
@@ -37,7 +39,7 @@ beforeAll(async () => {
       return;
     }
     const m = /^\/v1\/pods\/([^/]+)(\/stop)?$/.exec(url);
-    if (m && !m[2] && method === 'GET') { jsonRes(200, { id: m[1], desiredStatus: 'RUNNING', publicIp: '127.0.0.1', portMappings: { '11434': port }, costPerHr: 0.5 }); return; }
+    if (m && !m[2] && method === 'GET') { jsonRes(200, { id: m[1], desiredStatus: 'RUNNING', publicIp: '127.0.0.1', portMappings: { '22': 2222 }, costPerHr: 0.5 }); return; }
     if (m && m[2] === '/stop' && method === 'POST') { stopped.push(m[1]!); jsonRes(200, {}); return; }
     if (m && !m[2] && method === 'DELETE') { destroyed.push(m[1]!); jsonRes(200, {}); return; }
     jsonRes(404, {});
@@ -52,6 +54,7 @@ const config = (): RunPodProvisionerConfig => ({
   apiBase: base, apiKey: API_KEY, imageName: 'ollama/ollama:latest', gpuTypeIds: ['NVIDIA A40'],
   gpuCount: 1, cloudType: 'SECURE', containerDiskInGb: 50, volumeInGb: 0, networkVolumeId: null,
   inferencePort: 11434, healthPath: '/', podEnv: { OLLAMA_KEEP_ALIVE: '30m' },
+  sshPrivateKeyPath: 'test-key', sshKnownHostsPath: 'test-known', sshPublicKey: 'ssh-ed25519 TEST',
 });
 
 const request: NodeProvisionRequest = {
@@ -62,7 +65,8 @@ const request: NodeProvisionRequest = {
 test('boundary real: provision→inspect→stop→destroy contra servidor local (sem cloud)', async () => {
   const spy = jest.spyOn(console, 'log').mockImplementation((...a) => { serverLog += a.join(' '); });
   try {
-    const provisioner = new RunPodNodeProvisioner(config(), fetchHttpClient, { pollIntervalMs: 1, sleep: async () => undefined });
+    const tunnelManager: RunPodTunnelManager = { open: async () => ({ endpoint: base.replace(/\/v1$/, ''), close: async () => undefined }), closeAll: async () => undefined };
+    const provisioner = new RunPodNodeProvisioner(config(), fetchHttpClient, { pollIntervalMs: 1, sleep: async () => undefined, tunnelManager });
     const signal = new AbortController().signal;
 
     const outcome = await provisioner.provision(request, signal);
@@ -74,7 +78,7 @@ test('boundary real: provision→inspect→stop→destroy contra servidor local 
 
     // Requests corretos: create com nome determinístico + envelope (imagem, ports, env do pod).
     expect(created).toHaveLength(1);
-    expect(created[0]).toMatchObject({ name: 'anima-node-int', imageName: 'ollama/ollama:latest', computeType: 'GPU', ports: ['11434/http'], env: { OLLAMA_KEEP_ALIVE: '30m' } });
+    expect(created[0]).toMatchObject({ name: 'anima-node-int', imageName: 'ollama/ollama:latest', computeType: 'GPU', ports: ['22/tcp'], env: { OLLAMA_KEEP_ALIVE: '30m', PUBLIC_KEY: 'ssh-ed25519 TEST' } });
 
     // inspect faz o health EXTERNO (Goma verifica por fora) contra o endpoint real.
     const report = await provisioner.inspect(outcome.handle, signal);

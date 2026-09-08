@@ -9,6 +9,7 @@ import {
   type HttpResponse,
   type RunPodProvisionerConfig,
 } from './runpod-node-provisioner';
+import type { RunPodTunnelManager } from './runpod-ssh-tunnel';
 
 const API_KEY = 'rp_secret_KEY_abc123';
 const BASE = 'https://runpod.test/v1';
@@ -16,7 +17,8 @@ const BASE = 'https://runpod.test/v1';
 const config = (over: Partial<RunPodProvisionerConfig> = {}): RunPodProvisionerConfig => ({
   apiBase: BASE, apiKey: API_KEY, imageName: 'ollama/ollama:latest', gpuTypeIds: ['NVIDIA A40'],
   gpuCount: 1, cloudType: 'SECURE', containerDiskInGb: 50, volumeInGb: 0, networkVolumeId: null,
-  inferencePort: 11434, healthPath: '/', podEnv: {}, ...over,
+  inferencePort: 11434, healthPath: '/', podEnv: {},
+  sshPrivateKeyPath: 'test-key', sshKnownHostsPath: 'test-known-hosts', sshPublicKey: 'ssh-ed25519 TEST', ...over,
 });
 
 interface Recorded { method: string; url: string; hasAuth: boolean; body?: string }
@@ -37,14 +39,15 @@ function fakeHttp(handler: (req: HttpRequestInput, prior: readonly Recorded[]) =
 }
 
 const json = (status: number, value: unknown): HttpResponse => ({ status, body: JSON.stringify(value) });
-const runningPod = (over: Record<string, unknown> = {}) => ({ id: 'pod-1', name: 'anima-node-1', desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '11434': 20000 }, costPerHr: 0.44, ...over });
+const runningPod = (over: Record<string, unknown> = {}) => ({ id: 'pod-1', name: 'anima-node-1', desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '22': 20022 }, costPerHr: 0.44, ...over });
 
-const opts = { pollIntervalMs: 1, maxProvisionMs: 1_000, healthTimeoutMs: 50, sleep: async () => undefined, now: () => 1_000 } as const;
+const tunnelManager: RunPodTunnelManager = { open: async () => ({ endpoint: 'http://127.0.0.1:21434', close: async () => undefined }), closeAll: async () => undefined };
+const opts = { pollIntervalMs: 1, maxProvisionMs: 1_000, healthTimeoutMs: 50, sleep: async () => undefined, now: () => 1_000, tunnelManager } as const;
 const request: NodeProvisionRequest = {
   nodeId: 'node-1', providerId: 'runpod', model: 'qwen3-coder:latest', resourceClass: 'gpu-a40',
   lease: { schemaVersion: 1, nodeId: 'node-1', providerId: 'runpod', billingMode: 'paid', workItemId: 'w1', attemptId: 'a1', maxActiveDurationMs: 1800000, idleTimeoutMs: 60000, leaseExpiresAt: '2030-01-01T00:00:00Z', authorizationRef: 'auth-1', priceHint: null } as NodeLeaseV0,
 };
-const handle: ProvisionedNodeHandle = { nodeId: 'node-1', providerId: 'runpod', endpoint: 'http://1.2.3.4:20000', providerRef: 'pod-1' };
+const handle: ProvisionedNodeHandle = { nodeId: 'node-1', providerId: 'runpod', endpoint: 'http://127.0.0.1:21434', providerRef: 'pod-1' };
 const signal = () => new AbortController().signal;
 
 describe('readRunPodProvisionerConfig', () => {
@@ -59,6 +62,7 @@ describe('readRunPodProvisionerConfig', () => {
     const cfg = readRunPodProvisionerConfig({
       ANIMA_RUNPOD_API_KEY: 'k', ANIMA_RUNPOD_IMAGE: 'ollama/ollama', ANIMA_RUNPOD_GPU_TYPE_IDS: 'A40, A100',
       ANIMA_RUNPOD_CLOUD_TYPE: 'community', ANIMA_RUNPOD_INFERENCE_PORT: '11434', ANIMA_RUNPOD_API_BASE: 'https://x/v1/',
+      ANIMA_RUNPOD_SSH_PRIVATE_KEY: 'key', ANIMA_RUNPOD_SSH_KNOWN_HOSTS: 'known', ANIMA_RUNPOD_SSH_PUBLIC_KEY: 'ssh-ed25519 pub',
     });
     expect(cfg).toMatchObject({ imageName: 'ollama/ollama', gpuTypeIds: ['A40', 'A100'], cloudType: 'COMMUNITY', inferencePort: 11434, apiBase: 'https://x/v1' });
   });
@@ -89,7 +93,7 @@ describe('RunPodNodeProvisioner', () => {
     const outcome = await p.provision(request, signal());
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.handle).toMatchObject({ nodeId: 'node-1', providerId: 'runpod', providerRef: 'pod-1', endpoint: 'http://1.2.3.4:20000' });
+    expect(outcome.handle).toMatchObject({ nodeId: 'node-1', providerId: 'runpod', providerRef: 'pod-1', endpoint: 'http://127.0.0.1:21434' });
     expect(p.priceHint()).toEqual({ currency: 'USD', perHour: 0.44 });
     // toda chamada carregou o Bearer; o corpo do POST tem o envelope (sem chave).
     expect(calls.every(c => c.hasAuth)).toBe(true);
@@ -212,14 +216,16 @@ describe('RunPodNodeProvisioner', () => {
   test('inspect: RUNNING + health externo 200 → healthy (Goma verifica por fora, Missão 7)', async () => {
     const { client, calls } = fakeHttp((req) => {
       if (req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
-      if (req.url === 'http://1.2.3.4:20000/') return json(200, 'ok');
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
+      if (req.url === 'http://127.0.0.1:21434/api/chat') return json(200, { message: { content: 'OK' } });
       return json(404, {});
     });
     const report = await new RunPodNodeProvisioner(config(), client, opts).inspect(handle, signal());
     expect(report).toMatchObject({ nodeId: 'node-1', reachable: true, healthy: true });
     // fez as DUAS verificações: status do provider E endpoint externo.
     expect(calls.some(c => c.url.endsWith('/pods/pod-1'))).toBe(true);
-    expect(calls.some(c => c.url === 'http://1.2.3.4:20000/')).toBe(true);
+    expect(calls.some(c => c.url === 'http://127.0.0.1:21434/api/tags')).toBe(true);
+    expect(calls.some(c => c.url === 'http://127.0.0.1:21434/api/chat')).toBe(true);
   });
 
   test('inspect: provider RUNNING mas endpoint externo cai → healthy=false', async () => {
@@ -229,6 +235,48 @@ describe('RunPodNodeProvisioner', () => {
     });
     const report = await new RunPodNodeProvisioner(config(), client, opts).inspect(handle, signal());
     expect(report).toMatchObject({ reachable: true, healthy: false });
+  });
+
+  test('inspect: /api/tags sem qwen3-coder falha fechado antes de chat', async () => {
+    const { client, calls } = fakeHttp((req) => {
+      if (req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url.endsWith('/api/tags')) return json(200, { models: [{ name: 'outro:latest' }] });
+      return json(500, {});
+    });
+    const report = await new RunPodNodeProvisioner(config(), client, opts).inspect(handle, signal());
+    expect(report).toMatchObject({ reachable: true, healthy: false, detail: 'model missing' });
+    expect(calls.some(c => c.url.endsWith('/api/chat'))).toBe(false);
+  });
+
+  test('túnel falho impede runtime e não expõe Ollama por HTTP público', async () => {
+    const { client, calls } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
+      if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1' });
+      return json(200, runningPod());
+    });
+    const failedTunnel: RunPodTunnelManager = { open: async () => { throw new Error('no route'); }, closeAll: async () => undefined };
+    expect(await new RunPodNodeProvisioner(config(), client, { ...opts, tunnelManager: failedTunnel }).provision(request, signal()))
+      .toEqual({ ok: false, reason: 'provider_unreachable' });
+    const payload = JSON.parse(calls.find(c => c.method === 'POST')!.body!) as { ports: string[]; dockerStartCmd: string[] };
+    expect(payload.ports).toEqual(['22/tcp']);
+    expect(payload.dockerStartCmd.join(' ')).toContain('ANIMA_MODEL_CACHE=warm');
+    expect(payload.dockerStartCmd.join(' ')).toContain('timeout 1800 ollama pull qwen3-coder:latest');
+  });
+
+  test('stop encerra o túnel antes do provider call', async () => {
+    let closed = 0;
+    const managed: RunPodTunnelManager = { open: async () => ({ endpoint: handle.endpoint, close: async () => { closed += 1; } }), closeAll: async () => undefined };
+    const { client } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, [runningPod()]);
+      if (req.method === 'GET') return json(200, runningPod());
+      return json(200, {});
+    });
+    const provisioner = new RunPodNodeProvisioner(config(), client, { ...opts, tunnelManager: managed });
+    const provisioned = await provisioner.provision(request, signal());
+    expect(provisioned.ok).toBe(true);
+    if (!provisioned.ok) return;
+    expect((await provisioner.stop(provisioned.handle, signal())).ok).toBe(true);
+    expect(closed).toBe(1);
   });
 
   test('inspect: pod inexistente → diagnóstico claro (Missão 4)', async () => {

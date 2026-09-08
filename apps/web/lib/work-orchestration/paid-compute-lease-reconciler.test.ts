@@ -59,7 +59,7 @@ function statefulRunpod() {
         return json(201, { id, name, desiredStatus: 'RUNNING', publicIp: '10.0.0.1', portMappings: { '11434': 20000 }, costPerHr: 0.5 });
       }
       const m = /\/pods\/([^/]+)(\/stop)?$/.exec(url);
-      if (m && !m[2] && method === 'GET') { const p = pods.get(m[1]!); return p ? json(200, { ...p, publicIp: '10.0.0.1', portMappings: { '11434': 20000 } }) : json(404, {}); }
+      if (m && !m[2] && method === 'GET') { const p = pods.get(m[1]!); return p ? json(200, { ...p, publicIp: '10.0.0.1', portMappings: { '22': 20022 } }) : json(404, {}); }
       if (m && m[2] === '/stop' && method === 'POST') { const p = pods.get(m[1]!); if (p) p.desiredStatus = 'EXITED'; return json(p ? 200 : 404, {}); }
       if (m && !m[2] && method === 'DELETE') { const had = pods.delete(m[1]!); return json(had ? 200 : 404, {}); }
       return json(404, {});
@@ -68,9 +68,10 @@ function statefulRunpod() {
   const config: RunPodProvisionerConfig = {
     apiBase: 'https://runpod.fake/v1', apiKey: API_KEY, imageName: 'ollama/ollama', gpuTypeIds: ['A40'],
     gpuCount: 1, cloudType: 'SECURE', containerDiskInGb: 50, volumeInGb: 0, networkVolumeId: null,
-    inferencePort: 11434, healthPath: '/', podEnv: {},
+    inferencePort: 11434, healthPath: '/', podEnv: {}, sshPrivateKeyPath: 'key', sshKnownHostsPath: 'known', sshPublicKey: 'ssh-ed25519 TEST',
   };
-  const newProvisioner = () => new RunPodNodeProvisioner(config, client, { pollIntervalMs: 1, sleep: async () => undefined });
+  const newProvisioner = () => new RunPodNodeProvisioner(config, client, { pollIntervalMs: 1, sleep: async () => undefined,
+    tunnelManager: { open: async () => ({ endpoint: 'http://127.0.0.1:21434', close: async () => undefined }), closeAll: async () => undefined } });
   return { pods, calls, client, config, newProvisioner };
 }
 
