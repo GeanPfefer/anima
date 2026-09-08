@@ -47,6 +47,9 @@ export class SshRunPodTunnelManager implements RunPodTunnelManager {
     const localPort = await freeLoopbackPort();
     const child = spawn(this.options.sshCommand ?? 'ssh', [
       '-N', '-T', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes',
+      // Identidade DEDICADA: só a chave privada informada é ofertada (nunca as do ssh-agent),
+      // evitando "too many authentication failures" e mantendo o transporte previsível.
+      '-o', 'IdentitiesOnly=yes',
       '-o', `ConnectTimeout=${Math.max(1, Math.ceil((this.options.connectTimeoutMs ?? 15_000) / 1_000))}`,
       '-o', 'StrictHostKeyChecking=accept-new', '-o', `UserKnownHostsFile=${this.options.knownHostsPath}`,
       '-i', this.options.privateKeyPath, '-p', String(target.port),
