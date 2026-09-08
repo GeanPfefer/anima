@@ -106,7 +106,11 @@ describe('buildPaidComputeLeaseReconcilerDeps', () => {
   test('resolveProvisioner: runpod só com config; local-process sempre; desconhecido null', () => {
     const deps = buildPaidComputeLeaseReconcilerDeps(fakeClient(), {});
     expect(deps.resolveProvisioner('runpod')).toBeNull(); // sem env config
-    const configured = buildPaidComputeLeaseReconcilerDeps(fakeClient(), { ANIMA_RUNPOD_API_KEY: 'k', ANIMA_RUNPOD_IMAGE: 'i', ANIMA_RUNPOD_GPU_TYPE_IDS: 'A40' });
+    const configured = buildPaidComputeLeaseReconcilerDeps(fakeClient(), {
+      ANIMA_RUNPOD_API_KEY: 'k', ANIMA_RUNPOD_IMAGE: 'i', ANIMA_RUNPOD_GPU_TYPE_IDS: 'A40',
+      ANIMA_RUNPOD_SSH_PRIVATE_KEY: '/tmp/id', ANIMA_RUNPOD_SSH_PUBLIC_KEY: 'ssh-ed25519 AAAA',
+      ANIMA_RUNPOD_SSH_KNOWN_HOSTS: '/tmp/kh',
+    });
     expect(configured.resolveProvisioner('runpod')).toBeInstanceOf(RunPodNodeProvisioner);
     expect(deps.resolveProvisioner('local-process')).toBeInstanceOf(LocalProcessNodeProvisioner);
     expect(deps.resolveProvisioner('other')).toBeNull();
