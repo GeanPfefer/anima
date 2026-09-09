@@ -482,12 +482,16 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
       'nvidia-smi >/dev/null',
       'apt-get update -qq',
       'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server curl ca-certificates',
-      'command -v ollama >/dev/null || (curl -fsSL https://ollama.com/install.sh | sh)',
+      // sshd ANTES da instalação do Ollama: o RunPod só publica portMappings['22'] quando o sshd
+      // escuta; instalar o Ollama primeiro (curl|sh, lento) atrasava o mapeamento além do teto de
+      // awaitEndpoint. Com o sshd cedo, a porta mapeia rápido e o túnel conecta; o pull do modelo
+      // corre depois e é coberto por awaitModelReady.
       'install -d -m 700 /root/.ssh /run/sshd',
       'test -n "${PUBLIC_KEY:-}"',
       'printf "%s\\n" "$PUBLIC_KEY" > /root/.ssh/authorized_keys',
       'chmod 600 /root/.ssh/authorized_keys',
       '/usr/sbin/sshd',
+      'command -v ollama >/dev/null || (curl -fsSL https://ollama.com/install.sh | sh)',
       'export OLLAMA_HOST=127.0.0.1:11434',
       'ollama serve >/tmp/ollama.log 2>&1 &',
       'for i in $(seq 1 60); do curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done',
