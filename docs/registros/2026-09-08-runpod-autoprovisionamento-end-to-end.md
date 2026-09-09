@@ -98,3 +98,47 @@ Sem service_role. Sem migrations novas nesta sessão. Barreira de RAM da Goma co
 remoto forçado (`ANIMA_ON_DEMAND_FORCE_BURST=true`) — o qwen3-coder 30B NÃO roda local.
 Barreira de typecheck preexistente (`autonomous-backlog-deps.ts:198`, `p_attempt_id: null`) é WIP
 externo, só atingível com Compute Router LIGADO (OFF por padrão): inerte em runtime; NÃO corrigida.
+
+## Retomada 2026-09-09 (UTC) — API key presente; prova viva TENTADA; barreira = permissão de WRITE
+
+A `ANIMA_RUNPOD_API_KEY` foi provisionada pelo humano na Goma (Windows User env + `.env.local`).
+Valor NUNCA exibido/registrado.
+
+- **Preflight reconciliado (sem divergência real):** `assessPaidComputePreflight` é checagem de
+  INFRA PURA e NÃO lê o DB — `human_paid_authorization` só fica `ok` se o caller passar
+  `humanAuthorizationValid`. O `verify-runpod-preflight.ts` roda sem esse flag ⇒ o item aparece em
+  `missing`; NÃO significa autorização ausente. Prova pelo CAMINHO DE RUNTIME (Bearer do dono
+  `e570e43b`): `readActivePaidComputeAuthorization` encontra `fd534be7` (matchesGranted=true),
+  `evaluatePaidComputeAuthorization` → `authorized=true, requiresPayment=true, ref=fd534be7`,
+  exposição reservada estimada US$0,25; preflight COM o flag real ⇒ `paidExecutionAuthorized=true,
+  missing=[]`. Conclusão: SAME_AUTHORIZATION_PASSES_RUNTIME. Nenhuma nova autorização criada.
+- **Fix de adapter (cotação viva):** o RunPod real devolve `availableGpuCounts: null` mesmo com
+  estoque (`A40 SECURE stockStatus 'High'`); `runpod-price-quote.ts` rejeitava por exigir array.
+  Corrigido para decidir disponibilidade pelo `stockStatus` quando `availableGpuCounts` é null;
+  caso negativo (`None`/nulo) preservado. +1 teste. Suites `runpod|paid-compute|resident-on-demand`
+  = 12/121 PASS.
+- **RUNPOD_NEW_KEY_LIVE_READ = PASS:** chamada autenticada READ-ONLY (GraphQL gpuTypes) com a NOVA
+  key: A40 (`id "NVIDIA A40"`, 48 GB) SECURE `stockStatus High`, `uninterruptablePrice US$0,49/h`.
+  Exposição p/ lease 30 min = US$0,245 ≤ teto US$1,50. Chave autenticou; nunca impressa; US$0.
+- **Prova viva TENTADA e PARADA na barreira (nenhum Pod, US$0):** o driver
+  `prove-runpod-autoprov-8a2515d8.ts` chegou ao `provision` e falhou com `auth_invalid` ⇒ refusal
+  `coder_node_unavailable`. Diagnóstico determinístico: `GET /pods` → **200** (read OK);
+  `POST /pods` (corpo `{}`) → **403** (uma key com WRITE daria 400/422 por payload inválido; 403 =
+  rejeitada antes disso). **Veredito: a nova key é READ-ONLY — sem permissão de WRITE (criar Pod).**
+  Nenhum Pod criado (`GET /pods count=0` antes e depois). Zero gasto.
+- **Ledger honesto:** a reserva `94d64828…` (US$0,25) criada ANTES do provision foi ESTORNADA com
+  razão `provider_rejected_before_create` (provider chamado, 403, nenhum recurso criado). Auditoria:
+  `reserved=0.25, voided=0.25, committed=0, remaining=1.50`.
+
+`RUNPOD_AUTOPROVISION_END_TO_END = NOT_RUN` (barreira: a API key não tem permissão de WRITE/create).
+
+### Barreira humana e retomada exata (Cloud GPU Test #2)
+1. No RunPod (console → Settings → API Keys), tornar a key **Read/Write** (ou criar uma nova
+   Read/Write; permissão de criar/gerenciar Pods). NÃO revogar ainda a `runpod-mcp` antiga — a nova
+   key, sendo read-only, NÃO substitui a antiga para o autoprov. Persistir a nova em
+   `apps/web/.env.local` (`ANIMA_RUNPOD_API_KEY=…`), sem colar em chat/log.
+2. Revalidar write sem gasto: `node --experimental-transform-types --import ./scripts/ts-resolve.mjs`
+   `--env-file-if-exists=.env.local scripts/probe-runpod-write-permission.ts` (esperado:
+   `postPods_emptyBody_status` 400/422 ⇒ `KEY_HAS_WRITE…`).
+3. Rodar `scripts/prove-runpod-autoprov-8a2515d8.ts` (guard fail-closed; autoridade fd534be7 válida,
+   teto US$1,50, remaining US$1,50). Teardown obrigatório via `finish` + `runpod-pods-admin.ts destroy`.
