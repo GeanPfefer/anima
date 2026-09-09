@@ -45,8 +45,12 @@ export async function readRunPodLivePriceQuote(
     if (!root || Array.isArray(root.errors) || !Array.isArray(types) || types.length !== 1) return { ok: false, reason: 'quote_unavailable' };
     const type = obj(types[0]); const lowest = obj(type?.lowestPrice);
     const price = lowest?.uninterruptablePrice; const stock = lowest?.stockStatus; const counts = lowest?.availableGpuCounts;
+    // `availableGpuCounts` pode vir null/ausente na resposta REAL do RunPod mesmo com estoque
+    // (ex.: A40 SECURE com stockStatus 'High'): quando é array, exige conter gpuCount; quando
+    // null/ausente, a disponibilidade é decidida pelo stockStatus (string diferente de 'None').
+    const countsGate = counts == null ? true : (Array.isArray(counts) && counts.includes(config.gpuCount));
     if (type?.id !== gpuTypeId || typeof price !== 'number' || !Number.isFinite(price) || price <= 0
-      || stock === 'None' || !Array.isArray(counts) || !counts.includes(config.gpuCount)) return { ok: false, reason: 'quote_unavailable' };
+      || typeof stock !== 'string' || stock === 'None' || !countsGate) return { ok: false, reason: 'quote_unavailable' };
     prices.push(price);
   }
   const quotedAt = now();

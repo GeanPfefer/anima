@@ -21,6 +21,15 @@ test('consulta somente query GraphQL e escolhe o maior preço entre GPUs elegív
   expect(calls.every(c => !c.body?.includes(key))).toBe(true);
 });
 
+test('availableGpuCounts null com estoque válido cota (resposta real do RunPod)', async () => {
+  const body = JSON.stringify({ data: { gpuTypes: [{ id: 'A40', lowestPrice: {
+    stockStatus: 'High', uninterruptablePrice: 0.49, availableGpuCounts: null,
+  } }] } });
+  const result = await readRunPodLivePriceQuote({ ...config, gpuTypeIds: ['A40'] }, signal(),
+    client(() => ({ status: 200, body })), () => new Date('2026-09-08T12:00:00Z'));
+  expect(result).toMatchObject({ ok: true, quote: { perHour: 0.49, currency: 'USD' } });
+});
+
 test.each([
   ['auth', 401, '{}', 'auth_invalid'], ['rate', 429, '{}', 'rate_limited'],
   ['server com segredo', 500, key, 'provider_unreachable'],
