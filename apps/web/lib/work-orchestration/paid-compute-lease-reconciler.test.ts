@@ -62,6 +62,7 @@ function statefulRunpod() {
       if (m && !m[2] && method === 'GET') { const p = pods.get(m[1]!); return p ? json(200, { ...p, publicIp: '10.0.0.1', portMappings: { '22': 20022 } }) : json(404, {}); }
       if (m && m[2] === '/stop' && method === 'POST') { const p = pods.get(m[1]!); if (p) p.desiredStatus = 'EXITED'; return json(p ? 200 : 404, {}); }
       if (m && !m[2] && method === 'DELETE') { const had = pods.delete(m[1]!); return json(had ? 200 : 404, {}); }
+      if (url.endsWith('/api/tags')) return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
       return json(404, {});
     },
   };

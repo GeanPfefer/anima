@@ -87,6 +87,7 @@ describe('RunPodNodeProvisioner', () => {
       if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
       if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1', desiredStatus: 'CREATED' });
       if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
       return json(404, {});
     });
     const p = new RunPodNodeProvisioner(config(), client, opts);
@@ -95,11 +96,58 @@ describe('RunPodNodeProvisioner', () => {
     if (!outcome.ok) return;
     expect(outcome.handle).toMatchObject({ nodeId: 'node-1', providerId: 'runpod', providerRef: 'pod-1', endpoint: 'http://127.0.0.1:21434' });
     expect(p.priceHint()).toEqual({ currency: 'USD', perHour: 0.44 });
-    // toda chamada carregou o Bearer; o corpo do POST tem o envelope (sem chave).
-    expect(calls.every(c => c.hasAuth)).toBe(true);
+    // toda chamada à API do RunPod carregou o Bearer; o corpo do POST tem o envelope (sem chave).
+    // (o probe de modelo bate no endpoint loopback do Ollama pelo túnel, que NÃO leva Bearer.)
+    expect(calls.filter(c => c.url.startsWith(BASE)).every(c => c.hasAuth)).toBe(true);
+    expect(calls.some(c => c.url === 'http://127.0.0.1:21434/api/tags' && !c.hasAuth)).toBe(true);
     const post = calls.find(c => c.method === 'POST');
     expect(post?.body).toContain('anima-node-1');
     expect(JSON.stringify(calls)).not.toContain(API_KEY);
+  });
+
+  test('cold-start: túnel só aceita após N tentativas → openTunnel faz retry bounded e conclui', async () => {
+    let tries = 0;
+    const flakyTunnel: RunPodTunnelManager = {
+      open: async () => { tries += 1; if (tries < 3) throw new Error('tunnel_failed'); return { endpoint: 'http://127.0.0.1:21434', close: async () => undefined }; },
+      closeAll: async () => undefined,
+    };
+    const { client } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
+      if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1' });
+      if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
+      return json(404, {});
+    });
+    const outcome = await new RunPodNodeProvisioner(config(), client, { ...opts, tunnelManager: flakyTunnel }).provision(request, signal());
+    expect(outcome.ok).toBe(true);
+    expect(tries).toBe(3); // tentou de novo até o sshd aceitar (cold-start)
+  });
+
+  test('cold-start: modelo só aparece após o pull → provision espera /api/tags conter o modelo', async () => {
+    let tagCalls = 0;
+    const { client } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
+      if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1' });
+      if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url === 'http://127.0.0.1:21434/api/tags') { tagCalls += 1; return json(200, { models: tagCalls < 2 ? [] : [{ name: 'qwen3-coder:latest' }] }); }
+      return json(404, {});
+    });
+    const outcome = await new RunPodNodeProvisioner(config(), client, opts).provision(request, signal());
+    expect(outcome.ok).toBe(true);
+    expect(tagCalls).toBeGreaterThanOrEqual(2); // esperou o pull terminar antes de reportar pronto
+  });
+
+  test('cold-start: modelo nunca fica pronto (deadline) → provision_failed (caller faz teardown)', async () => {
+    let t = 0;
+    const { client } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
+      if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1' });
+      if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'outro:latest' }] });
+      return json(404, {});
+    });
+    const p = new RunPodNodeProvisioner(config(), client, { ...opts, modelReadyTimeoutMs: 500, now: () => (t += 400) });
+    expect(await p.provision(request, signal())).toEqual({ ok: false, reason: 'provision_failed' });
   });
 
   test('idempotência: replay reusa pod existente por nome, NÃO cria segundo (Missão 4)', async () => {
@@ -108,6 +156,7 @@ describe('RunPodNodeProvisioner', () => {
       if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, [runningPod({ desiredStatus: 'RUNNING' })]);
       if (req.method === 'POST' && req.url.endsWith('/pods')) { posts += 1; return json(201, { id: 'pod-2', name: 'anima-node-1' }); }
       if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
       return json(404, {});
     });
     const p = new RunPodNodeProvisioner(config(), client, opts);
@@ -127,6 +176,7 @@ describe('RunPodNodeProvisioner', () => {
         posts += 1; exists = true; return 'network'; // provider criou, resposta se perdeu
       }
       if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
       return json(404, {});
     });
     const provisioner = new RunPodNodeProvisioner(config(), client, opts);
@@ -166,6 +216,7 @@ describe('RunPodNodeProvisioner', () => {
       if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, [runningPod({ name: 'anima-node-1' })]);
       if (req.method === 'POST' && req.url.endsWith('/pods')) { posts += 1; return json(201, { id: 'pod-2', name: 'anima-node-1' }); }
       if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
       return json(404, {});
     });
     const observer = { providerIdentified: async (identity: { providerRef: string }) => { identifiedRef = identity.providerRef; return true; } };
@@ -255,7 +306,8 @@ describe('RunPodNodeProvisioner', () => {
       return json(200, runningPod());
     });
     const failedTunnel: RunPodTunnelManager = { open: async () => { throw new Error('no route'); }, closeAll: async () => undefined };
-    expect(await new RunPodNodeProvisioner(config(), client, { ...opts, tunnelManager: failedTunnel }).provision(request, signal()))
+    // tunnelReadyTimeoutMs:0 ⇒ uma única tentativa (sem retry) antes de desistir, com now constante.
+    expect(await new RunPodNodeProvisioner(config(), client, { ...opts, tunnelManager: failedTunnel, tunnelReadyTimeoutMs: 0 }).provision(request, signal()))
       .toEqual({ ok: false, reason: 'provider_unreachable' });
     const payload = JSON.parse(calls.find(c => c.method === 'POST')!.body!) as { ports: string[]; dockerStartCmd: string[] };
     expect(payload.ports).toEqual(['22/tcp']);
@@ -268,6 +320,7 @@ describe('RunPodNodeProvisioner', () => {
     const managed: RunPodTunnelManager = { open: async () => ({ endpoint: handle.endpoint, close: async () => { closed += 1; } }), closeAll: async () => undefined };
     const { client } = fakeHttp((req) => {
       if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, [runningPod()]);
+      if (req.url.endsWith('/api/tags')) return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
       if (req.method === 'GET') return json(200, runningPod());
       return json(200, {});
     });

@@ -92,6 +92,12 @@ export interface RunPodProvisionerOptions {
   readonly pollIntervalMs?: number;
   readonly maxProvisionMs?: number;
   readonly healthTimeoutMs?: number;
+  /** Teto para o túnel SSH aceitar conexão (o `sshd` só sobe no meio do bootstrap; a 1ª tentativa
+   * quase sempre falha em cold-start). Retry bounded até este teto. */
+  readonly tunnelReadyTimeoutMs?: number;
+  /** Teto para o modelo ficar servível no endpoint (o bootstrap faz `ollama pull` dentro do Pod;
+   * pode levar minutos p/ ~19 GB). Após provision o modelo já está presente ⇒ health passa. */
+  readonly modelReadyTimeoutMs?: number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
   readonly tunnelManager?: RunPodTunnelManager;
@@ -199,6 +205,8 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
   private readonly pollIntervalMs: number;
   private readonly maxProvisionMs: number;
   private readonly healthTimeoutMs: number;
+  private readonly tunnelReadyTimeoutMs: number;
+  private readonly modelReadyTimeoutMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private readonly tunnels: RunPodTunnelManager;
@@ -210,8 +218,10 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     options: RunPodProvisionerOptions = {},
   ) {
     this.pollIntervalMs = options.pollIntervalMs ?? 5_000;
-    this.maxProvisionMs = options.maxProvisionMs ?? 180_000;
+    this.maxProvisionMs = options.maxProvisionMs ?? positiveInt(process.env.ANIMA_RUNPOD_MAX_PROVISION_MS, 300_000);
     this.healthTimeoutMs = options.healthTimeoutMs ?? 5_000;
+    this.tunnelReadyTimeoutMs = options.tunnelReadyTimeoutMs ?? positiveInt(process.env.ANIMA_RUNPOD_TUNNEL_READY_TIMEOUT_MS, 180_000);
+    this.modelReadyTimeoutMs = options.modelReadyTimeoutMs ?? positiveInt(process.env.ANIMA_RUNPOD_MODEL_READY_TIMEOUT_MS, 900_000);
     this.sleep = options.sleep ?? ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
     this.now = options.now ?? (() => Date.now());
     this.tunnels = options.tunnelManager ?? new SshRunPodTunnelManager({
@@ -281,6 +291,10 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     if (!ready.ok) return { ok: false, reason: ready.reason };
     const endpoint = await this.openTunnel(ready.pod, signal);
     if (endpoint === null) return { ok: false, reason: 'provider_unreachable' };
+    // COLD-START: o bootstrap dentro do Pod faz `ollama pull` do modelo (minutos p/ ~19 GB). O
+    // provision só retorna PRONTO quando o modelo já é servível pelo endpoint — assim o health
+    // subsequente (inspect) passa em vez de derrubar um Pod que ainda estava puxando o modelo.
+    if (!await this.awaitModelReady(endpoint, request.model, signal)) return { ok: false, reason: 'provision_failed' };
     // Preço só como HINT/observação (Missão 8); a autorização humana é o gate real de gasto.
     this.lastPriceHint = ready.pod.costPerHr !== null ? { currency: 'USD', perHour: ready.pod.costPerHr } : null;
     return {
@@ -410,11 +424,41 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     if (existing) return existing.endpoint;
     const port = pod.portMappings['22'];
     if (!pod.publicIp || typeof port !== 'number') return null;
-    try {
-      const tunnel = await this.tunnels.open({ publicIp: pod.publicIp, port }, signal);
-      this.openTunnels.set(pod.id, tunnel);
-      return tunnel.endpoint;
-    } catch { return null; }
+    // O `sshd` só sobe no MEIO do bootstrap (após apt-get install + ollama install), então a 1ª
+    // tentativa quase sempre falha em cold-start. Retry BOUNDED até o teto, cancelável.
+    const deadline = this.now() + this.tunnelReadyTimeoutMs;
+    for (;;) {
+      if (signal.aborted) return null;
+      try {
+        const tunnel = await this.tunnels.open({ publicIp: pod.publicIp, port }, signal);
+        this.openTunnels.set(pod.id, tunnel);
+        return tunnel.endpoint;
+      } catch { /* sshd ainda não aceita conexão; retry bounded */ }
+      if (this.now() >= deadline) return null;
+      await this.sleep(this.pollIntervalMs);
+    }
+  }
+
+  /** Espera o modelo ficar servível no endpoint (`/api/tags` contém o modelo). O bootstrap faz o
+   * `ollama pull` DENTRO do Pod; sem esta espera, o health imediato reprovaria por "model missing".
+   * BOUNDED pelo `modelReadyTimeoutMs`, cancelável; falha ⇒ o caller faz teardown do recurso. */
+  private async awaitModelReady(endpoint: string, model: string, signal: AbortSignal): Promise<boolean> {
+    const base = endpoint.replace(/\/+$/, '');
+    const expected = this.config.podEnv.ANIMA_OLLAMA_MODEL ?? model;
+    const deadline = this.now() + this.modelReadyTimeoutMs;
+    for (;;) {
+      if (signal.aborted) return false;
+      try {
+        const tags = await this.http.send({ method: 'GET', url: `${base}/api/tags`, signal });
+        if (tags.status >= 200 && tags.status < 300) {
+          const parsed = asObject(parseJson(tags.body));
+          const models = Array.isArray(parsed?.models) ? parsed.models : [];
+          if (models.some(value => { const m = asObject(value); return m?.name === expected || m?.model === expected; })) return true;
+        }
+      } catch { /* ollama ainda subindo / túnel aquecendo; retry bounded */ }
+      if (this.now() >= deadline) return false;
+      await this.sleep(this.pollIntervalMs);
+    }
   }
 
   private async closeTunnel(providerRef: string): Promise<void> {
