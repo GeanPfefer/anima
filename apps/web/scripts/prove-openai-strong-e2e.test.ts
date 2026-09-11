@@ -49,4 +49,12 @@ describe('resolveTaskMessage', () => {
       throw new Error('conteúdo secreto');
     }))).toThrow('Não foi possível ler a mensagem informada em --message-file.');
   });
+
+  it('rejeita opções legadas, flags desconhecidas e argumentos posicionais', () => {
+    for (const argument of ['--task', '--task-file', '--desconhecida', 'tarefa antiga']) {
+      expect(() => resolveTaskMessage([argument, 'valor', '--message', 'válida'])).toThrow(
+        `Argumento não suportado: ${argument}. Use somente --message ou --message-file.`,
+      );
+    }
+  });
 });

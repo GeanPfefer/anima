@@ -39,16 +39,6 @@ import { redactSecrets as redact } from './prove-e2e-redact';
 
 const CEILING_USD = 0.25;
 
-const DEFAULT_TASK_MESSAGE = [
-  'Adicione uma função pura de diagnóstico da configuração atual do Project Work Planner em apps/web/lib/ai.',
-  'A função deve expor o provider efetivo do planejador ("openai" ou "local") e, quando o provider efetivo for "local", também o modelo local efetivo.',
-  'Reutilize os defaults e as funções de configuração já existentes (por exemplo resolveConfiguredProjectPlannerProvider e a resolução do modelo local já usada pelo planejador local).',
-  'A função deve ser PURA: não faz I/O, não faz chamadas HTTP e NUNCA retorna, lê ou incorpora API keys, tokens, cabeçalhos de autorização ou qualquer segredo.',
-  'Não altere a seleção de provider nem o comportamento existente do planner.',
-  'Adicione testes focados cobrindo: (1) a configuração default; (2) provider local com modelo explícito; (3) ausência de segredos no retorno.',
-  'Use somente os arquivos mínimos necessários em apps/web/lib/ai e valide com um teste focado.',
-].join(' ');
-
 type ReadTaskFile = (path: string) => string;
 
 export function resolveTaskMessage(argv: string[], readFile: ReadTaskFile = path => readFileSync(path, 'utf8')): string {
@@ -70,7 +60,10 @@ export function resolveTaskMessage(argv: string[], readFile: ReadTaskFile = path
     if (argument === '--message-file' || inlineFile !== undefined) {
       if (messageFile !== undefined) throw new Error('A opção --message-file só pode ser informada uma vez.');
       messageFile = inlineFile ?? argv[++index] ?? '';
+      continue;
     }
+
+    throw new Error(`Argumento não suportado: ${argument}. Use somente --message ou --message-file.`);
   }
 
   if (message !== undefined && messageFile !== undefined) {
