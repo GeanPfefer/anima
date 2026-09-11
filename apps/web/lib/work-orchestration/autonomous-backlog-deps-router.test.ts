@@ -154,19 +154,23 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
 
   // A — Router OFF é semanticamente INVISÍVEL: nenhuma decisão, nenhum lookup de
   // authority, nenhum evento `compute_routing_decided`; o Supervisor roda SEM decisão.
-  test('A · Router OFF preserva o legado: zero authority lookup, zero routing event, sem decisão ao Supervisor', async () => {
+  // O placement legado permanece para Ollama/local, mas não bloqueia um contrato OpenAI.
+  test('A · Router OFF preserva Ollama/local e aceita coderBackend openai sem routing', async () => {
     const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
     process.env.OPENAI_API_KEY = 'sk-should-be-ignored-when-off';
     const deps = buildProjectBacklogCycleDeps(makeClient({}, spy), 'router-test');
     expect(deps.hostPermitsAutonomousWork()).toBe(true);
 
-    const turn = await deps.runTurn(entry, new AbortController().signal);
-    expect(turn.outcome).toBe('turn_recorded');
+    const ollamaTurn = await deps.runTurn(entry, new AbortController().signal);
+    const openAITurn = await deps.runTurn({ ...entry, coderBackend: 'openai' }, new AbortController().signal);
+    expect(ollamaTurn.outcome).toBe('turn_recorded');
+    expect(openAITurn.outcome).toBe('turn_recorded');
     expect(spy.authQueried).toBe(0);
     expect(economicHistoryMock).not.toHaveBeenCalled();
     expect(spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision')).toHaveLength(0);
-    expect(runTurnMock).toHaveBeenCalledTimes(1);
+    expect(runTurnMock).toHaveBeenCalledTimes(2);
     expect(runTurnMock.mock.calls[0][0].computeRoutingDecision).toBeUndefined();
+    expect(runTurnMock.mock.calls[1][0].computeRoutingDecision).toBeUndefined();
   });
 
   // B — Router ON + local admissível ⇒ Ollama. Decisão selecionada NÃO é persistida no

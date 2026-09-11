@@ -203,9 +203,9 @@ export function buildProjectBacklogCycleDeps(
         contract = { ...contract, coderBackend: decision.selectedProvider, model: decision.selectedModel };
       }
 
-      // Router→OpenAI dispensa o placement local (Ollama/burst on-demand): o admission
-      // OpenAI resolve o executor. Router OFF ou Router→Ollama seguem o placement legado.
-      const routedToOpenAI = computeDecision?.selectedProvider === 'openai';
+      // OpenAI dispensa o placement local (Ollama/burst on-demand): o admission
+      // OpenAI resolve o executor. Ollama segue o placement legado, inclusive com Router OFF.
+      const routedToOpenAI = contract.coderBackend === 'openai';
       const model = computeDecision ? computeDecision.selectedModel! : contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
       const node = readExplicitCoderNodeV0(model);
       let placement = routedToOpenAI ? null : decideCoderPlacement({
