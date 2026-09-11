@@ -31,6 +31,8 @@ export interface PostTurnObservationInput {
   readonly gateObservations: readonly ObservedGateInput[];
   /** Durações wall-clock do coder cronometradas pelo host ao redor de `backend.edit()`. */
   readonly coderObservations: readonly ObservedCoderInput[];
+  /** Settlement injectado pelo seam depois de toda a evidência terminal persistir. */
+  readonly settleActualCost?: () => Promise<void>;
 }
 
 /**
@@ -81,6 +83,10 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
       hostEvidenceSinkFor(client),
     ).catch(() => undefined);
   }
+
+  // Settlement é posterior à persistência de toda evidência terminal. O adaptador
+  // só chama o ledger quando conseguir provar uso, preço e reserva consistentes.
+  await input.settleActualCost?.().catch(() => undefined);
 
   // (2) PARECER do Verifier sobre o estado FRESCO — só no terminal `result` (sem
   // handoff durável de sucesso não há parecer). Inclui as evidências observadas
