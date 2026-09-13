@@ -12,9 +12,24 @@ jest.mock('./resource-governor', () => ({
 // O Supervisor é mockado para capturar a DECISÃO de compute que o wiring lhe entrega
 // (e provar que decisões selecionadas NÃO são persistidas no wiring — só na tentativa).
 jest.mock('./supervisor', () => ({
-  runSupervisorTurn: jest.fn(async () => ({ outcome: 'turn_recorded', attemptId: 'attempt-x' })),
+  runSupervisorTurn: jest.fn(async (input: { routes: Array<{ adapter: object }> }) => {
+    const adapter = input.routes[0]?.adapter as {
+      options?: { onCoderObserved?: (observation: object) => void };
+    };
+    adapter.options?.onCoderObserved?.({
+      backendId: 'openai', durationMs: 10, outcome: 'completed', placement: 'remote', model: 'gpt-5.6-terra',
+      providerUsage: { schemaVersion: 1, inputTokens: 1000, outputTokens: 1000, totalTokens: 2000, cachedInputTokens: 0 },
+      providerCallCount: 2,
+    });
+    return { outcome: 'turn_recorded', attemptId: 'attempt-x', selection: {
+      workItemId: '00000000-0000-0000-0000-0000000000b1', approvedProposalVersion: 1,
+    } };
+  }),
 }));
-jest.mock('./post-turn-observation', () => ({ persistPostTurnHostObservations: jest.fn(async () => undefined) }));
+jest.mock('./post-turn-observation', () => ({
+  ...jest.requireActual('./post-turn-observation'),
+  persistPostTurnHostObservations: jest.fn(async () => undefined),
+}));
 jest.mock('./economic-history', () => ({
   readEconomicHistory: jest.fn(async () => null),
   economicTaskClass: jest.fn(() => 'unknown'),
@@ -35,12 +50,14 @@ import { runSupervisorTurn } from './supervisor';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
 import { readResourceAdmission, readMachinePressure } from './resource-governor';
 import { readEconomicHistory } from './economic-history';
+import { persistPostTurnHostObservations } from './post-turn-observation';
 
 const runTurnMock = runSupervisorTurn as unknown as jest.Mock;
 const ProvisionerMock = LocalProcessNodeProvisioner as unknown as jest.Mock;
 const admissionMock = readResourceAdmission as unknown as jest.Mock;
 const pressureMock = readMachinePressure as unknown as jest.Mock;
 const economicHistoryMock = readEconomicHistory as unknown as jest.Mock;
+const persistPostTurnMock = persistPostTurnHostObservations as jest.MockedFunction<typeof persistPostTurnHostObservations>;
 
 const entry: AutonomousQueueEntry = {
   workItemId: '00000000-0000-0000-0000-0000000000b1' as WorkItemId,
@@ -57,8 +74,13 @@ type HistoryEvent = { readonly event_type: string; readonly payload: unknown };
 interface ClientConfig {
   readonly historyEvents?: readonly HistoryEvent[];
   readonly authRows?: readonly unknown[];
+  readonly reservationRow?: { readonly reservation_id: string; readonly currency: string; readonly amount: number };
 }
-interface ClientSpy { rpcCalls: { fn: string; args: Record<string, unknown> }[]; authQueried: number }
+interface ClientSpy {
+  rpcCalls: { fn: string; args: Record<string, unknown> }[];
+  authQueried: number;
+  budgetFilters?: Array<{ column: string; value: unknown }>;
+}
 
 const workItemIntent = {
   execution_spec: {
@@ -115,6 +137,17 @@ function makeClient(cfg: ClientConfig, spy: ClientSpy): SupabaseClient<Database>
       };
       return chain;
     }
+    if (table === 'paid_compute_budget_events') {
+      const chain: Record<string, unknown> = {
+        select: () => chain,
+        eq: (column: string, value: unknown) => {
+          (spy.budgetFilters ??= []).push({ column, value });
+          return chain;
+        },
+        maybeSingle: async () => ({ data: cfg.reservationRow ?? null, error: null }),
+      };
+      return chain;
+    }
     throw new Error(`tabela inesperada: ${table}`);
   };
   return { from, rpc } as unknown as SupabaseClient<Database>;
@@ -147,6 +180,7 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
     pressureMock.mockReturnValue('low');
     economicHistoryMock.mockReset();
     economicHistoryMock.mockResolvedValue(null);
+    persistPostTurnMock.mockClear();
   });
   afterEach(() => {
     for (const k of ROUTER_ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
@@ -223,6 +257,67 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
       status: 'selected', selectedProvider: 'openai', placement: 'provider_api',
       reasonCode: 'local_model_incapable', authorizationId: '00000000-0000-0000-0000-0000000000f1',
     });
+  });
+
+  test('settlement vivo A · pricing conhecido propaga reservation, usage e cohort completos', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED = '1';
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    process.env.ANIMA_CODER_MODEL = 'gpt-test';
+    const knownPricing = {
+      schemaVersion: 1 as const, provider: 'openai', model: 'gpt-test', currency: 'USD',
+      inputPerMillion: 1, outputPerMillion: 2, sourceRef: 'fixture-price-v1',
+    };
+    const deps = buildProjectBacklogCycleDeps(
+      makeClient({
+        historyEvents: capabilityBreakingHistory,
+        authRows: [validAuthRow()],
+        reservationRow: { reservation_id: 'reservation-live', currency: 'USD', amount: 1 },
+      }, spy),
+      'router-test',
+      { openAIPricing: model => model === 'gpt-test' ? knownPricing : null },
+    );
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+
+    await deps.runTurn(entry, new AbortController().signal);
+
+    expect(spy.budgetFilters).toContainEqual({ column: 'lease_id', value: 'provider-api:attempt-x' });
+    expect(persistPostTurnMock).toHaveBeenCalledWith(expect.objectContaining({
+      openAIActualCostSettlement: {
+        reservation: { reservationId: 'reservation-live', attemptId: 'attempt-x', currency: 'USD', reservedAmount: 1 },
+        attemptId: 'attempt-x',
+        model: 'gpt-test',
+        cohort: { provider: 'openai', model: 'gpt-test', capability: 'programming', taskClass: 'unknown', placement: 'provider_api' },
+        usage: { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 1000, providerCallCount: 2, terminalEvidence: true },
+        pricing: knownPricing,
+      },
+    }));
+  });
+
+  test('settlement vivo B · gpt-5.6-terra sem pricing permanece cost_unknown', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED = '1';
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    process.env.ANIMA_CODER_MODEL = 'gpt-5.6-terra';
+    const deps = buildProjectBacklogCycleDeps(
+      makeClient({
+        historyEvents: capabilityBreakingHistory,
+        authRows: [validAuthRow()],
+        reservationRow: { reservation_id: 'reservation-terra', currency: 'USD', amount: 1 },
+      }, spy),
+      'router-test',
+    );
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+
+    await deps.runTurn(entry, new AbortController().signal);
+
+    expect(persistPostTurnMock).toHaveBeenCalledWith(expect.objectContaining({
+      openAIActualCostSettlement: expect.objectContaining({
+        reservation: expect.objectContaining({ reservationId: 'reservation-terra' }),
+        model: 'gpt-5.6-terra',
+        pricing: null,
+      }),
+    }));
   });
 
   // D — Router ON + local incapaz + SEM autoridade ⇒ waiting. Persiste a decisão como

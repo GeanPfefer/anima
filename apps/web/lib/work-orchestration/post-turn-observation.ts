@@ -1,10 +1,16 @@
-import type { ObservedCoderInput, ObservedGateInput } from '@anima/core';
+import type { ComputeCohortKeyV1, ObservedCoderInput, ObservedGateInput, ProviderPricingV1 } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from './gate-evidence';
 import { coderEvidenceSinkFor, persistHostObservedCoderEvidence } from './coder-evidence';
 import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from './host-evidence';
 import { computeAndPersistVerifierOpinion, verifierOpinionSinkFor } from './verifier-opinion';
+import {
+  settleOpenAIActualCostReservation,
+  type OpenAIComputeReservationV1,
+  type OpenAIProviderUsageV1,
+} from './openai-actual-cost-settlement';
+import { settlePaidComputeBudgetReservation } from './paid-compute-authorization-store';
 import { projectRoot, type ExecutionContract } from './executor-selection';
 import { createWorkOrchestrationService } from './server';
 import type { SupervisorTurnResult } from './supervisor';
@@ -22,6 +28,24 @@ import { worktreeBranchFor } from './worktree-executor';
 // jamais um erro que contamine o turno. Não aceita, autoriza, integra nem aplica.
 // ============================================================
 
+/**
+ * Fatos autoritativos, correlacionados à tentativa, para liquidar a reserva paga OpenAI
+ * do custo real pós-turno. Montados pelo CALLER VIVO (`buildProjectBacklogCycleDeps(...).runTurn`)
+ * a partir das fontes canônicas — reserva do ledger, usage provider-reported observada pelo host,
+ * modelo/cohort do roteamento — e do pricing versionado quando existir. `null` em qualquer campo
+ * mantém o comportamento FAIL-CLOSED: sem reserva/usage/pricing confiável a rotina não liquida.
+ */
+export interface OpenAIActualCostSettlementFacts {
+  readonly reservation: OpenAIComputeReservationV1 | null;
+  readonly attemptId: string;
+  readonly model: string;
+  readonly cohort: ComputeCohortKeyV1;
+  readonly usage: OpenAIProviderUsageV1 | null;
+  /** `null` enquanto não houver ProviderPricingV1 versionado/confiável (ex.: gpt-5.6-terra):
+   *  o custo permanece indeterminável (`cost_unknown`) e a reserva NÃO é liquidada. */
+  readonly pricing: ProviderPricingV1 | null;
+}
+
 export interface PostTurnObservationInput {
   readonly client: SupabaseClient<Database>;
   readonly result: SupervisorTurnResult;
@@ -31,6 +55,57 @@ export interface PostTurnObservationInput {
   readonly gateObservations: readonly ObservedGateInput[];
   /** Durações wall-clock do coder cronometradas pelo host ao redor de `backend.edit()`. */
   readonly coderObservations: readonly ObservedCoderInput[];
+  /** Fatos de settlement montados pelo caller vivo quando a volta rodou o coder OpenAI pago.
+   *  Ausente ⇒ nenhuma liquidação é tentada (não é caminho pago). */
+  readonly openAIActualCostSettlement?: OpenAIActualCostSettlementFacts | null;
+}
+
+/**
+ * Monta os fatos de settlement OpenAI a partir das fontes canônicas, correlacionados à
+ * tentativa. READ-ONLY: lê a reserva do ledger pelo lease `provider-api:<attemptId>` e projeta
+ * o usage provider-reported observado pelo host. NÃO liquida, NÃO inventa custo. `pricing` é
+ * responsabilidade do caller (hoje `null` para modelos sem tabela versionada ⇒ fail-closed).
+ */
+export async function resolveOpenAIActualCostSettlementFacts(
+  client: SupabaseClient<Database>,
+  input: {
+    readonly attemptId: string;
+    readonly model: string;
+    readonly cohort: ComputeCohortKeyV1;
+    readonly coderObservations: readonly ObservedCoderInput[];
+    readonly pricing: ProviderPricingV1 | null;
+  },
+): Promise<OpenAIActualCostSettlementFacts> {
+  // Reserva correlacionada: o transporte pago abre a reserva com lease `provider-api:<attemptId>`.
+  const reservationRow = await client
+    .from('paid_compute_budget_events')
+    .select('reservation_id,currency,amount')
+    .eq('lease_id', `provider-api:${input.attemptId}`)
+    .eq('event_type', 'reserved')
+    .maybeSingle();
+  const reservation: OpenAIComputeReservationV1 | null = reservationRow.error || !reservationRow.data
+    ? null
+    : {
+        reservationId: reservationRow.data.reservation_id,
+        attemptId: input.attemptId,
+        currency: reservationRow.data.currency,
+        reservedAmount: Number(reservationRow.data.amount),
+      };
+
+  // Usage TERMINAL provider-reported observado pelo host ao redor do coder. Sem usage completo
+  // (tokens + contagem de chamadas) o custo não é determinável ⇒ usage `null` (fail-closed).
+  const observed = input.coderObservations.find(o => o.providerUsage !== undefined && o.providerCallCount !== undefined);
+  const usage: OpenAIProviderUsageV1 | null = observed?.providerUsage && observed.providerCallCount !== undefined
+    ? {
+        inputTokens: observed.providerUsage.inputTokens,
+        cachedInputTokens: observed.providerUsage.cachedInputTokens ?? 0,
+        outputTokens: observed.providerUsage.outputTokens,
+        providerCallCount: observed.providerCallCount,
+        terminalEvidence: true,
+      }
+    : null;
+
+  return { reservation, attemptId: input.attemptId, model: input.model, cohort: input.cohort, usage, pricing: input.pricing };
 }
 
 /**
@@ -58,6 +133,32 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // duração wall-clock de todas as chamadas `backend.edit()` observadas.
   if (coderObservations.length > 0) {
     await persistHostObservedCoderEvidence(correlation, coderObservations, coderEvidenceSinkFor(client)).catch(() => undefined);
+  }
+
+  // (0c) LIQUIDAÇÃO viva da reserva OpenAI pelo custo real pós-turno. Os fatos vêm do CALLER
+  // VIVO (nunca inventados aqui); a primitive é fail-closed e idempotente por reserva. O adapter
+  // traduz o audit para o CONTRATO do store — { reservationId, settled: actualCost, costSource } —
+  // e só é invocado quando a primitive computa um custo liquidável. Sem reserva/usage/pricing
+  // confiável a primitive devolve `settled:false` e a reserva permanece ABERTA (`cost_unknown`).
+  if (contract?.coderBackend === 'openai' && input.openAIActualCostSettlement) {
+    const facts = input.openAIActualCostSettlement;
+    await settleOpenAIActualCostReservation({
+      reservation: facts.reservation,
+      attemptId: facts.attemptId,
+      model: facts.model,
+      cohort: facts.cohort,
+      usage: facts.usage,
+      pricing: facts.pricing,
+      settlePaidComputeBudgetReservation: async audit => {
+        // Custo derivado de usage provider-reported × ProviderPricingV1 versionado ⇒ `estimated`
+        // (fórmula com sourceRef/effectiveFrom auditáveis), nunca fatura confirmada pelo provider.
+        await settlePaidComputeBudgetReservation(client, {
+          reservationId: audit.reservationId,
+          settled: audit.actualCost,
+          costSource: 'estimated',
+        });
+      },
+    });
   }
 
   // (1) GIT observado pelo host. Só o caminho worktree deixa uma branch real; o

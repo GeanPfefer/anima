@@ -1,8 +1,8 @@
-import { decideComputeRoute, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ComputeRouteDecisionV1, type LocalFailureSignalV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
+import { decideComputeRoute, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ComputeRouteDecisionV1, type LocalFailureSignalV1, type ObservedCoderInput, type ObservedGateInput, type ProviderPricingV1 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
-import { persistPostTurnHostObservations } from './post-turn-observation';
+import { persistPostTurnHostObservations, resolveOpenAIActualCostSettlementFacts } from './post-turn-observation';
 import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
 import { readMachinePressure, readResourceAdmission } from './resource-governor';
@@ -26,6 +26,11 @@ export interface ProjectBacklogCycleDeps {
   readonly readBacklog: () => ReturnType<typeof readAutonomousBacklogCandidates>;
   readonly hostPermitsAutonomousWork: () => boolean;
   readonly runTurn: (entry: AutonomousQueueEntry, signal: AbortSignal) => Promise<SupervisorTurnResult>;
+}
+
+export interface ProjectBacklogCycleOptions {
+  /** Fonte versionada de preço do provider. Ausente/desconhecida mantém cost_unknown. */
+  readonly openAIPricing?: (model: string) => ProviderPricingV1 | null;
 }
 
 type RetryCheckpointEvent = { readonly event_type: string; readonly payload: unknown };
@@ -133,6 +138,7 @@ async function routeCompute(
 export function buildProjectBacklogCycleDeps(
   client: SupabaseClient<Database>,
   ownerInstanceId: string,
+  options: ProjectBacklogCycleOptions = {},
 ): ProjectBacklogCycleDeps {
   let admittedPressure: ReturnType<typeof readMachinePressure> = 'unknown';
   // Base de um resultado sintético do Supervisor para quando o contrato do item não
@@ -272,7 +278,23 @@ export function buildProjectBacklogCycleDeps(
 
       // Observação host-side pós-volta (evidência de gate/coder/git + parecer do
       // Verifier) — a MESMA da rota supervisor-turn. Fail-open: nunca altera o desfecho.
-      await persistPostTurnHostObservations({ client, result: turn, contract, gateObservations, coderObservations });
+      // Caller VIVO do settlement OpenAI: numa volta paga, monta os fatos correlacionados
+      // (reserva do ledger pelo lease `provider-api:<attemptId>` + usage provider-reported
+      // observado + cohort/modelo do roteamento) e os entrega ao pós-turno. `pricing` fica
+      // `null` enquanto não houver tabela versionada do modelo ⇒ liquidação FAIL-CLOSED.
+      const openAIActualCostSettlement = contract.coderBackend === 'openai' && turn.attemptId
+        ? await resolveOpenAIActualCostSettlementFacts(client, {
+            attemptId: turn.attemptId,
+            model,
+            cohort: {
+              provider: 'openai', model, capability: entry.capability,
+              taskClass: economicTaskClass(item.data.intent), placement: 'provider_api',
+            },
+            coderObservations,
+            pricing: options.openAIPricing?.(model) ?? null,
+          })
+        : null;
+      await persistPostTurnHostObservations({ client, result: turn, contract, gateObservations, coderObservations, openAIActualCostSettlement });
       return turn;
     },
   };
