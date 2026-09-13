@@ -66,3 +66,6 @@ export * from './resource-advisory';
 export * from './coder-transcript';
 
 export * from './human-resume';
+
+export * from './cloud-resource-requirements';
+export * from './paid-compute-node-settlement';

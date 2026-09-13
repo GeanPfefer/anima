@@ -3023,6 +3023,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      settle_paid_compute_budget_reservation: {
+        Args: {
+          cost_source: string
+          reservation_id: string
+          settled_amount: number
+          settled_currency: string
+        }
+        Returns: Json
+      }
       void_paid_compute_budget_reservation: {
         Args: { reason: string; reservation_id: string }
         Returns: Json

@@ -1,4 +1,4 @@
-import { parsePaidComputeAuthorization, type PaidComputeAuthorizationV1 } from '@anima/core';
+import { parsePaidComputeAuthorization, type NodeCostSourceV1, type PaidComputeAuthorizationV1 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -64,12 +64,19 @@ export interface PaidComputeBudgetAuditView {
   readonly ceiling: { readonly currency: string; readonly amount: number } | null;
   readonly reserved: number;
   readonly voided: number;
+  /** Excesso total liberado por settlement (Σ dos eventos `settled`). Reduz o committed. */
+  readonly settledExcess: number;
   readonly committed: number;
   readonly remaining: number | null;
   readonly reservations: readonly {
     readonly reservationId: string; readonly leaseId: string; readonly workItemId: string;
     readonly nodeId: string; readonly amount: number; readonly currency: string;
     readonly createdAt: string; readonly voided: boolean; readonly voidReason: string | null;
+    /** Liquidada? Quando true, `settledCost` é o custo efetivo/estimado (S) e `costSource` a fonte. */
+    readonly settled: boolean;
+    readonly settledCost: number | null;
+    readonly releasedExcess: number | null;
+    readonly costSource: NodeCostSourceV1 | null;
   }[];
 }
 
@@ -150,20 +157,69 @@ export async function listPaidComputeBudgetAudit(
     const reserves = rows.filter(e => e.event_type === 'reserved');
     const reserved = reserves.reduce((sum, e) => sum + Number(e.amount), 0);
     const voided = rows.filter(e => e.event_type === 'voided').reduce((sum, e) => sum + Number(e.amount), 0);
-    const committed = reserved - voided;
+    // Um evento `settled` grava o EXCESSO liberado (R − S). committed passa a refletir o custo
+    // efetivo/estimado (Σ_aberta R + Σ_liquidada S), não a exposição máxima.
+    const settledExcess = rows.filter(e => e.event_type === 'settled').reduce((sum, e) => sum + Number(e.amount), 0);
+    const committed = reserved - voided - settledExcess;
     const ceiling = auth.max_cost_currency === null || auth.max_cost_amount === null
       ? null : { currency: auth.max_cost_currency, amount: Number(auth.max_cost_amount) };
+    const asCostSource = (reason: string | null): NodeCostSourceV1 | null =>
+      reason === 'estimated' || reason === 'provider_confirmed' ? reason : null;
     return {
-      authorizationId: auth.id, ceiling, reserved, voided, committed,
+      authorizationId: auth.id, ceiling, reserved, voided, settledExcess, committed,
       remaining: ceiling === null ? null : Math.max(0, ceiling.amount - committed),
       reservations: reserves.map(e => {
         const voidEvent = rows.find(v => v.event_type === 'voided' && v.reservation_id === e.reservation_id);
+        const settleEvent = rows.find(s => s.event_type === 'settled' && s.reservation_id === e.reservation_id);
+        const released = settleEvent ? Number(settleEvent.amount) : null;
         return { reservationId: e.reservation_id, leaseId: e.lease_id, workItemId: e.work_item_id,
           nodeId: e.node_id, amount: Number(e.amount), currency: e.currency, createdAt: e.created_at,
-          voided: voidIds.has(e.reservation_id), voidReason: voidEvent?.reason ?? null };
+          voided: voidIds.has(e.reservation_id), voidReason: voidEvent?.reason ?? null,
+          settled: settleEvent !== undefined,
+          settledCost: released === null ? null : Number(e.amount) - released,
+          releasedExcess: released,
+          costSource: asCostSource(settleEvent?.reason ?? null) };
       }),
     };
   }) };
+}
+
+/** Lê o ledger canônico de UMA autoridade, sem depender das janelas paginadas da tela de audit. */
+export async function readPaidComputeBudgetAudit(
+  client: SupabaseClient<Database>, authorizationId: string,
+): Promise<{ readonly ok: true; readonly budget: PaidComputeBudgetAuditView | null } | PaidComputeStoreError> {
+  const [auth, events] = await Promise.all([
+    client.from('paid_compute_authorizations').select('id,max_cost_currency,max_cost_amount').eq('id', authorizationId).maybeSingle(),
+    client.from('paid_compute_budget_events').select('*').eq('authorization_id', authorizationId).order('created_at', { ascending: true }),
+  ]);
+  if (auth.error) return mapPgError(auth.error);
+  if (events.error) return mapPgError(events.error);
+  if (auth.data === null) return { ok: true, budget: null };
+  const rows = events.data ?? [];
+  const voidIds = new Set(rows.filter(e => e.event_type === 'voided').map(e => e.reservation_id));
+  const reserves = rows.filter(e => e.event_type === 'reserved');
+  const reserved = reserves.reduce((sum, e) => sum + Number(e.amount), 0);
+  const voided = rows.filter(e => e.event_type === 'voided').reduce((sum, e) => sum + Number(e.amount), 0);
+  const settledExcess = rows.filter(e => e.event_type === 'settled').reduce((sum, e) => sum + Number(e.amount), 0);
+  const committed = reserved - voided - settledExcess;
+  const ceiling = auth.data.max_cost_currency === null || auth.data.max_cost_amount === null
+    ? null : { currency: auth.data.max_cost_currency, amount: Number(auth.data.max_cost_amount) };
+  const asCostSource = (reason: string | null): NodeCostSourceV1 | null =>
+    reason === 'estimated' || reason === 'provider_confirmed' ? reason : null;
+  return { ok: true, budget: {
+    authorizationId: auth.data.id, ceiling, reserved, voided, settledExcess, committed,
+    remaining: ceiling === null ? null : Math.max(0, ceiling.amount - committed),
+    reservations: reserves.map(e => {
+      const voidEvent = rows.find(v => v.event_type === 'voided' && v.reservation_id === e.reservation_id);
+      const settleEvent = rows.find(s => s.event_type === 'settled' && s.reservation_id === e.reservation_id);
+      const released = settleEvent ? Number(settleEvent.amount) : null;
+      return { reservationId: e.reservation_id, leaseId: e.lease_id, workItemId: e.work_item_id,
+        nodeId: e.node_id, amount: Number(e.amount), currency: e.currency, createdAt: e.created_at,
+        voided: voidIds.has(e.reservation_id), voidReason: voidEvent?.reason ?? null,
+        settled: settleEvent !== undefined, settledCost: released === null ? null : Number(e.amount) - released,
+        releasedExcess: released, costSource: asCostSource(settleEvent?.reason ?? null) };
+    }),
+  } };
 }
 
 /** Concede uma autorização (ato humano; RPC exige role authenticated). */
@@ -228,6 +284,40 @@ export async function reservePaidComputeBudget(
     return { ok: true, action: value.action, reservationId: value.reservation_id };
   }
   return { ok: false, code: 'unavailable', message: 'Reserva financeira sem confirmação durável.' };
+}
+
+export type BudgetSettlementResult =
+  | { readonly ok: true; readonly action: 'settled' | 'replayed'; readonly settledAmount: number; readonly releasedExcess: number; readonly currency: string; readonly costSource: NodeCostSourceV1 }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+/**
+ * Liquida uma reserva do ledger (append-only): registra o custo efetivo/estimado e libera o
+ * excesso da reserva conservadora de volta ao envelope da sessão. `settled` é o custo liquidado S
+ * (a RPC grava o excesso R−S e impõe 0 ≤ S ≤ R); `costSource` distingue estimativa de custo
+ * confirmado pelo provider. A RPC serializa na linha da autorização e é idempotente por reserva.
+ * NÃO exige autoridade vigente (liberar excesso / registrar custo real é seguro pós-hoc).
+ */
+export async function settlePaidComputeBudgetReservation(
+  client: SupabaseClient<Database>,
+  input: {
+    readonly reservationId: string;
+    readonly settled: { readonly currency: string; readonly amount: number };
+    readonly costSource: NodeCostSourceV1;
+  },
+): Promise<BudgetSettlementResult> {
+  const { data, error } = await client.rpc('settle_paid_compute_budget_reservation', {
+    reservation_id: input.reservationId, settled_currency: input.settled.currency,
+    settled_amount: input.settled.amount, cost_source: input.costSource,
+  });
+  if (error) return mapPgError(error);
+  const value = data as { action?: string; settled_amount?: number; released?: number; currency?: string; cost_source?: string } | null;
+  if ((value?.action === 'settled' || value?.action === 'replayed')
+    && typeof value.settled_amount === 'number' && typeof value.released === 'number'
+    && typeof value.currency === 'string'
+    && (value.cost_source === 'estimated' || value.cost_source === 'provider_confirmed')) {
+    return { ok: true, action: value.action, settledAmount: value.settled_amount, releasedExcess: value.released, currency: value.currency, costSource: value.cost_source };
+  }
+  return { ok: false, code: 'unavailable', message: 'Settlement financeiro sem confirmação durável.' };
 }
 
 /** Anula uma reserva somente quando existe prova de que nenhum efeito financeiro ocorreu. */

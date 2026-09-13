@@ -4,8 +4,29 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   grantPaidComputeAuthorization,
   listPaidComputeAuthorizations,
+  listPaidComputeBudgetAudit,
   revokePaidComputeAuthorization,
+  settlePaidComputeBudgetReservation,
 } from './paid-compute-authorization-store';
+
+type BudgetEventRow = Database['public']['Tables']['paid_compute_budget_events']['Row'];
+const budgetEvent = (over: Partial<BudgetEventRow>): BudgetEventRow => ({
+  id: 'e', user_id: 'user-1', authorization_id: 'auth-1', reservation_id: 'r1', idempotency_key: 'k',
+  event_type: 'reserved', provider_id: 'runpod', node_id: 'n', resource_class: null,
+  work_item_id: 'w1', attempt_id: null, lease_id: 'lease-1', currency: 'USD', amount: 0.245,
+  reason: null, created_at: '2026-09-10T00:00:00.000Z', ...over,
+});
+
+const auditClient = (
+  auths: Array<{ id: string; max_cost_currency: string | null; max_cost_amount: number | null }>,
+  events: BudgetEventRow[],
+): SupabaseClient<Database> => ({
+  from: (table: string) => {
+    const rows = table === 'paid_compute_authorizations' ? auths : events;
+    const chain: Record<string, unknown> = { select: () => chain, order: () => chain, limit: async () => ({ data: rows, error: null }) };
+    return chain;
+  },
+} as unknown as SupabaseClient<Database>);
 
 type Row = Database['public']['Tables']['paid_compute_authorizations']['Row'];
 
@@ -94,5 +115,45 @@ describe('paid-compute-authorization-store', () => {
   test('revoke de item inexistente/alheio → not_found', async () => {
     const { client } = rpcClient({ data: null, error: { code: 'P0002', message: 'authorization not found' } });
     expect(await revokePaidComputeAuthorization(client, 'r1')).toMatchObject({ ok: false, code: 'not_found' });
+  });
+
+  test('settle repassa custo/fonte à RPC e devolve custo liquidado + excesso liberado', async () => {
+    const { client, calls } = rpcClient({ data: { action: 'settled', settled_amount: 0.0825, released: 0.1625, currency: 'USD', cost_source: 'estimated' }, error: null });
+    const result = await settlePaidComputeBudgetReservation(client, { reservationId: 'r1', settled: { currency: 'USD', amount: 0.0825 }, costSource: 'estimated' });
+    expect(result).toEqual({ ok: true, action: 'settled', settledAmount: 0.0825, releasedExcess: 0.1625, currency: 'USD', costSource: 'estimated' });
+    expect(calls[0]!.name).toBe('settle_paid_compute_budget_reservation');
+    expect(calls[0]!.args).toMatchObject({ reservation_id: 'r1', settled_currency: 'USD', settled_amount: 0.0825, cost_source: 'estimated' });
+  });
+
+  test('settle mapeia invariante violada (SQLSTATE 22023) para invalid_input', async () => {
+    const { client } = rpcClient({ data: null, error: { code: '22023', message: 'settlement exceeds reservation' } });
+    expect(await settlePaidComputeBudgetReservation(client, { reservationId: 'r1', settled: { currency: 'USD', amount: 99 }, costSource: 'estimated' }))
+      .toMatchObject({ ok: false, code: 'invalid_input' });
+  });
+});
+
+describe('listPaidComputeBudgetAudit — settlement reflete custo efetivo, não exposição máxima', () => {
+  test('reserva liquidada: committed cai para o custo efetivo e o excesso é exposto por reserva', async () => {
+    const result = await listPaidComputeBudgetAudit(auditClient(
+      [{ id: 'auth-1', max_cost_currency: 'USD', max_cost_amount: 1.5 }],
+      [
+        budgetEvent({ event_type: 'reserved', reservation_id: 'r1', lease_id: 'lease-a', amount: 0.245 }),
+        budgetEvent({ event_type: 'settled', reservation_id: 'r1', lease_id: 'lease-a', amount: 0.1625, reason: 'estimated' }),
+        budgetEvent({ event_type: 'reserved', reservation_id: 'r2', lease_id: 'lease-b', amount: 0.245 }),
+      ],
+    ));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const b = result.budgets[0]!;
+    // committed = 0.49 reservado − 0 voidado − 0.1625 excesso liberado = 0.3275.
+    expect(b.reserved).toBeCloseTo(0.49, 6);
+    expect(b.settledExcess).toBeCloseTo(0.1625, 6);
+    expect(b.committed).toBeCloseTo(0.3275, 6);
+    expect(b.remaining).toBeCloseTo(1.5 - 0.3275, 6);
+    const settled = b.reservations.find(r => r.reservationId === 'r1')!;
+    expect(settled).toMatchObject({ settled: true, costSource: 'estimated', releasedExcess: 0.1625 });
+    expect(settled.settledCost).toBeCloseTo(0.0825, 6);
+    const open = b.reservations.find(r => r.reservationId === 'r2')!;
+    expect(open).toMatchObject({ settled: false, settledCost: null, costSource: null });
   });
 });
