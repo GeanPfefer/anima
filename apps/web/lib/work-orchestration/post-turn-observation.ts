@@ -6,7 +6,7 @@ import { coderEvidenceSinkFor, persistHostObservedCoderEvidence } from './coder-
 import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from './host-evidence';
 import { computeAndPersistVerifierOpinion, verifierOpinionSinkFor } from './verifier-opinion';
 import { settleOpenAIActualCostReservation } from './openai-actual-cost-settlement';
-import { settlePaidComputeBudgetReservation } from './openai-paid-compute';
+import { settlePaidComputeBudgetReservation } from './paid-compute-authorization-store';
 import { projectRoot, type ExecutionContract } from './executor-selection';
 import { createWorkOrchestrationService } from './server';
 import type { SupervisorTurnResult } from './supervisor';
@@ -69,9 +69,23 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // pode prosseguir silenciosamente. A liquidação subjacente é idempotente para
   // replay do pós-turno.
   if (contract?.coderBackend === 'openai') {
+    const settlement = (result as unknown as {
+      readonly openAIActualCostSettlement: {
+        readonly reservation: Parameters<typeof settleOpenAIActualCostReservation>[0]['reservation'];
+        readonly attemptId: Parameters<typeof settleOpenAIActualCostReservation>[0]['attemptId'];
+        readonly model: Parameters<typeof settleOpenAIActualCostReservation>[0]['model'];
+        readonly cohort: Parameters<typeof settleOpenAIActualCostReservation>[0]['cohort'];
+        readonly usage: Parameters<typeof settleOpenAIActualCostReservation>[0]['usage'];
+        readonly pricing: Parameters<typeof settleOpenAIActualCostReservation>[0]['pricing'];
+      };
+    }).openAIActualCostSettlement;
     await settleOpenAIActualCostReservation({
-      client,
-      ...correlation,
+      reservation: settlement.reservation,
+      attemptId: settlement.attemptId,
+      model: settlement.model,
+      cohort: settlement.cohort,
+      usage: settlement.usage,
+      pricing: settlement.pricing,
       settlePaidComputeBudgetReservation: reservation => settlePaidComputeBudgetReservation(client, reservation),
     });
   }
