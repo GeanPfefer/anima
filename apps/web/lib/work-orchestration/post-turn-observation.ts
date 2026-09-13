@@ -5,6 +5,8 @@ import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from './gate-evi
 import { coderEvidenceSinkFor, persistHostObservedCoderEvidence } from './coder-evidence';
 import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from './host-evidence';
 import { computeAndPersistVerifierOpinion, verifierOpinionSinkFor } from './verifier-opinion';
+import { settleOpenAIActualCostReservation } from './openai-actual-cost-settlement';
+import { settlePaidComputeBudgetReservation } from './openai-paid-compute';
 import { projectRoot, type ExecutionContract } from './executor-selection';
 import { createWorkOrchestrationService } from './server';
 import type { SupervisorTurnResult } from './supervisor';
@@ -58,6 +60,20 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // duração wall-clock de todas as chamadas `backend.edit()` observadas.
   if (coderObservations.length > 0) {
     await persistHostObservedCoderEvidence(correlation, coderObservations, coderEvidenceSinkFor(client)).catch(() => undefined);
+  }
+
+  // (0c) Liquidação viva da reserva OpenAI. O backend vem exclusivamente do
+  // contrato materializado da tentativa; a rotina reutilizada relê reservation,
+  // attempt, usage, pricing e cohort autoritativos antes de liquidar. Ao contrário
+  // da telemetria, não pode falhar aberta: uma tentativa OpenAI sem liquidação não
+  // pode prosseguir silenciosamente. A liquidação subjacente é idempotente para
+  // replay do pós-turno.
+  if (contract?.coderBackend === 'openai') {
+    await settleOpenAIActualCostReservation({
+      client,
+      ...correlation,
+      settlePaidComputeBudgetReservation: reservation => settlePaidComputeBudgetReservation(client, reservation),
+    });
   }
 
   // (1) GIT observado pelo host. Só o caminho worktree deixa uma branch real; o
