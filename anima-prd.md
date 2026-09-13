@@ -1,4 +1,9 @@
 # Anima — Product Requirements Document
+> Recovery seq. 4 do binding OpenAI materializada e provada localmente em 2026-09-13:
+> base coerente `ccb7dcc`, binding/testes em `0bea4c8`, successor `5895b59c…`
+> `proposed` v2. Primitive 2/2, store 10/10, adapter 2/2, caller 8/8,
+> C1 4/4 e web typecheck verdes. Sem compute pago, RunPod, push ou mudança em
+> `origin/main`. Próxima fronteira: uma attempt governada é necessária para `review`.
 > Human recovery de bloqueio pré-attempt por orçamento implementado em 2026-09-05:
 > `authorize_work_resume` aceita uma variante estrita, por item/versão/último evento,
 > que concede exatamente +1 e readmite o mesmo item. O token é consumido atomicamente

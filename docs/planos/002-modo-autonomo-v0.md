@@ -2161,3 +2161,14 @@ classificado e executado. Sua attempt `311ec98b…` falhou novamente em
 protocolo é mudança material e exige proposta/decisão própria. Nenhuma mutação
 foi feita nesta reconciliação.
 [Registro](../registros/2026-08-26-reconciliacao-real-do-successor-item1.md).
+# Recovery seq. 4 do binding OpenAI (2026-09-13)
+
+O split de base do actual-cost settlement foi fechado localmente: `b14a32c`
+contém o store/RPC, `ccb7dcc` acrescenta a primitive provada e `0bea4c8`
+conclui o adapter e o caller vivo. O successor canônico `5895b59c…` é seq. 4,
+`proposed` v2, sem authority/claim/attempt. Gates: primitive 2/2, store 10/10,
+adapter 2/2, caller 8/8, C1 4/4 e web typecheck verdes. O modelo real
+`gpt-5.6-terra` continua sem pricing versionado e portanto permanece
+`cost_unknown`; nenhuma liquidação é inventada. Parada obrigatória antes de
+compute pago: uma attempt correlacionada ainda é necessária para chegar a
+`review` pelo lifecycle vigente.
