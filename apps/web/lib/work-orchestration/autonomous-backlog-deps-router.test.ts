@@ -35,8 +35,10 @@ import { runSupervisorTurn } from './supervisor';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
 import { readResourceAdmission, readMachinePressure } from './resource-governor';
 import { readEconomicHistory } from './economic-history';
+import { persistPostTurnHostObservations } from './post-turn-observation';
 
 const runTurnMock = runSupervisorTurn as unknown as jest.Mock;
+const postTurnObservationMock = persistPostTurnHostObservations as unknown as jest.Mock;
 const ProvisionerMock = LocalProcessNodeProvisioner as unknown as jest.Mock;
 const admissionMock = readResourceAdmission as unknown as jest.Mock;
 const pressureMock = readMachinePressure as unknown as jest.Mock;
@@ -142,6 +144,7 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
   beforeEach(() => {
     for (const k of ROUTER_ENV) { saved[k] = process.env[k]; delete process.env[k]; }
     runTurnMock.mockClear();
+    postTurnObservationMock.mockClear();
     ProvisionerMock.mockClear();
     admissionMock.mockReturnValue({ verdict: 'permit', pressure: 'low' });
     pressureMock.mockReturnValue('low');
@@ -167,6 +170,9 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
     expect(spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision')).toHaveLength(0);
     expect(runTurnMock).toHaveBeenCalledTimes(1);
     expect(runTurnMock.mock.calls[0][0].computeRoutingDecision).toBeUndefined();
+    expect(postTurnObservationMock).toHaveBeenCalledWith(expect.objectContaining({
+      client: expect.anything(), result: turn, gateObservations: [], coderObservations: [],
+    }));
   });
 
   // B — Router ON + local admissível ⇒ Ollama. Decisão selecionada NÃO é persistida no

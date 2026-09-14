@@ -86,15 +86,20 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // handoff durável de sucesso não há parecer). Inclui as evidências observadas
   // recém-persistidas. Advisory e recomputável.
   if (result.terminalKind !== 'result') return;
-  const service = createWorkOrchestrationService(client);
-  const [freshItem, freshEvents] = await Promise.all([
-    service.getItem(correlation.workItemId),
-    service.listEvents(correlation.workItemId),
-  ]);
-  if (freshItem.ok && freshEvents.ok) {
-    await computeAndPersistVerifierOpinion(
-      { item: freshItem.value, events: freshEvents.value },
-      verifierOpinionSinkFor(client),
-    ).catch(() => undefined);
+  try {
+    const service = createWorkOrchestrationService(client);
+    const [freshItem, freshEvents] = await Promise.all([
+      service.getItem(correlation.workItemId),
+      service.listEvents(correlation.workItemId),
+    ]);
+    if (freshItem.ok && freshEvents.ok) {
+      await computeAndPersistVerifierOpinion(
+        { item: freshItem.value, events: freshEvents.value },
+        verifierOpinionSinkFor(client),
+      ).catch(() => undefined);
+    }
+  } catch {
+    // O adaptador é estritamente fail-open: uma leitura fresca indisponível não
+    // pode alterar o resultado já materializado da tentativa.
   }
 }
