@@ -60,6 +60,27 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
     await persistHostObservedCoderEvidence(correlation, coderObservations, coderEvidenceSinkFor(client)).catch(() => undefined);
   }
 
+  // (0c) Settlement do custo efetivo da API. A autoridade do backend vem do
+  // contrato materializado desta execução, nunca da entrada da fila: uma decisão
+  // OpenAI pode incorrer em custo inclusive quando a volta termina em erro.
+  if (contract?.coderBackend === 'openai') {
+    const actualCostUsd = coderObservations.reduce((total, observation) => {
+      const cost = (observation as ObservedCoderInput & { readonly actualCostUsd?: unknown }).actualCostUsd;
+      return total + (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : 0);
+    }, 0);
+    if (actualCostUsd > 0) {
+      await (client as unknown as { rpc: (fn: string, args: Record<string, unknown>) => Promise<unknown> }).rpc(
+        'settle_openai_actual_cost',
+        {
+          p_work_item_id: correlation.workItemId,
+          p_attempt_id: correlation.attemptId,
+          p_approved_proposal_version: correlation.approvedProposalVersion,
+          p_actual_cost_usd: actualCostUsd,
+        },
+      ).catch(() => undefined);
+    }
+  }
+
   // (1) GIT observado pelo host. Só o caminho worktree deixa uma branch real; o
   // host inspeciona `anima-work/<attempt>` contra o SHA-base do contrato e persiste
   // o que o git de fato registrou — nunca o que o executor atestou. Persiste

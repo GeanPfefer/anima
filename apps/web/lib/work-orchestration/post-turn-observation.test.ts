@@ -30,7 +30,8 @@ jest.mock('./server', () => ({
 
 import { persistPostTurnHostObservations } from './post-turn-observation';
 
-const client = {} as SupabaseClient<any>;
+const rpc = jest.fn(async () => undefined);
+const client = { rpc } as unknown as SupabaseClient<any>;
 const result = {
   attemptId: 'attempt-1',
   selection: { workItemId: 'item-1', approvedProposalVersion: 1 },
@@ -40,6 +41,7 @@ const result = {
 describe('persistPostTurnHostObservations', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    rpc.mockResolvedValue(undefined);
     getItem.mockResolvedValue({ ok: true, value: { id: 'item-1' } });
     listEvents.mockResolvedValue({ ok: true, value: [] });
   });
@@ -87,5 +89,22 @@ describe('persistPostTurnHostObservations', () => {
     })).resolves.toBeUndefined();
 
     expect(computeOpinion).not.toHaveBeenCalled();
+  });
+
+  test('liquida o custo efetivo apenas quando o contrato materializado selecionou OpenAI', async () => {
+    await persistPostTurnHostObservations({
+      client,
+      result: { ...result, terminalKind: 'error' },
+      contract: { coderBackend: 'openai' } as any,
+      gateObservations: [],
+      coderObservations: [{ provider: 'openai', model: 'gpt-5.6-terra', durationMs: 34, actualCostUsd: 0.0125 }] as any,
+    });
+
+    expect(rpc).toHaveBeenCalledWith('settle_openai_actual_cost', {
+      p_work_item_id: 'item-1',
+      p_attempt_id: 'attempt-1',
+      p_approved_proposal_version: 1,
+      p_actual_cost_usd: 0.0125,
+    });
   });
 });
