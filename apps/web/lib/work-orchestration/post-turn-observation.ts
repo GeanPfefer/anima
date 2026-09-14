@@ -1,10 +1,16 @@
-import type { ObservedCoderInput, ObservedGateInput } from '@anima/core';
+import type { ComputeCohortKeyV1, ObservedCoderInput, ObservedGateInput, ProviderPricingV1 } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from './gate-evidence';
 import { coderEvidenceSinkFor, persistHostObservedCoderEvidence } from './coder-evidence';
 import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from './host-evidence';
 import { computeAndPersistVerifierOpinion, verifierOpinionSinkFor } from './verifier-opinion';
+import {
+  settleOpenAIActualCostReservation,
+  type OpenAIComputeReservationV1,
+  type OpenAIProviderUsageV1,
+} from './openai-actual-cost-settlement';
+import { settlePaidComputeBudgetReservation } from './paid-compute-authorization-store';
 import { projectRoot, type ExecutionContract } from './executor-selection';
 import { createWorkOrchestrationService } from './server';
 import type { SupervisorTurnResult } from './supervisor';
@@ -22,6 +28,54 @@ import { worktreeBranchFor } from './worktree-executor';
 // jamais um erro que contamine o turno. Não aceita, autoriza, integra nem aplica.
 // ============================================================
 
+/** Fatos canônicos e correlacionados para a liquidação OpenAI pós-turno. */
+export interface OpenAIActualCostSettlementFacts {
+  readonly reservation: OpenAIComputeReservationV1 | null;
+  readonly attemptId: string;
+  readonly model: string;
+  readonly cohort: ComputeCohortKeyV1;
+  readonly usage: OpenAIProviderUsageV1 | null;
+  readonly pricing: ProviderPricingV1 | null;
+}
+
+/** Lê a reserva pelo lease do provider e projeta usage terminal observado pelo host. */
+export async function resolveOpenAIActualCostSettlementFacts(
+  client: SupabaseClient<Database>,
+  input: {
+    readonly attemptId: string;
+    readonly model: string;
+    readonly cohort: ComputeCohortKeyV1;
+    readonly coderObservations: readonly ObservedCoderInput[];
+    readonly pricing: ProviderPricingV1 | null;
+  },
+): Promise<OpenAIActualCostSettlementFacts> {
+  const reservationRow = await client
+    .from('paid_compute_budget_events')
+    .select('reservation_id,currency,amount')
+    .eq('lease_id', `provider-api:${input.attemptId}`)
+    .eq('event_type', 'reserved')
+    .maybeSingle();
+  const reservation: OpenAIComputeReservationV1 | null = reservationRow.error || !reservationRow.data
+    ? null
+    : {
+        reservationId: reservationRow.data.reservation_id,
+        attemptId: input.attemptId,
+        currency: reservationRow.data.currency,
+        reservedAmount: Number(reservationRow.data.amount),
+      };
+  const observed = input.coderObservations.find(observation => observation.providerUsage !== undefined && observation.providerCallCount !== undefined);
+  const usage: OpenAIProviderUsageV1 | null = observed?.providerUsage && observed.providerCallCount !== undefined
+    ? {
+        inputTokens: observed.providerUsage.inputTokens,
+        cachedInputTokens: observed.providerUsage.cachedInputTokens ?? 0,
+        outputTokens: observed.providerUsage.outputTokens,
+        providerCallCount: observed.providerCallCount,
+        terminalEvidence: true,
+      }
+    : null;
+  return { reservation, attemptId: input.attemptId, model: input.model, cohort: input.cohort, usage, pricing: input.pricing };
+}
+
 export interface PostTurnObservationInput {
   readonly client: SupabaseClient<Database>;
   readonly result: SupervisorTurnResult;
@@ -31,6 +85,8 @@ export interface PostTurnObservationInput {
   readonly gateObservations: readonly ObservedGateInput[];
   /** Durações wall-clock do coder cronometradas pelo host ao redor de `backend.edit()`. */
   readonly coderObservations: readonly ObservedCoderInput[];
+  /** Fatos de settlement montados pelo caller vivo para uma volta OpenAI paga. */
+  readonly openAIActualCostSettlement?: OpenAIActualCostSettlementFacts | null;
 }
 
 /**
@@ -60,25 +116,23 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
     await persistHostObservedCoderEvidence(correlation, coderObservations, coderEvidenceSinkFor(client)).catch(() => undefined);
   }
 
-  // (0c) Settlement do custo efetivo da API. A autoridade do backend vem do
-  // contrato materializado desta execução, nunca da entrada da fila: uma decisão
-  // OpenAI pode incorrer em custo inclusive quando a volta termina em erro.
-  if (contract?.coderBackend === 'openai') {
-    const actualCostUsd = coderObservations.reduce((total, observation) => {
-      const cost = (observation as ObservedCoderInput & { readonly actualCostUsd?: unknown }).actualCostUsd;
-      return total + (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : 0);
-    }, 0);
-    if (actualCostUsd > 0) {
-      await (client as unknown as { rpc: (fn: string, args: Record<string, unknown>) => Promise<unknown> }).rpc(
-        'settle_openai_actual_cost',
-        {
-          p_work_item_id: correlation.workItemId,
-          p_attempt_id: correlation.attemptId,
-          p_approved_proposal_version: correlation.approvedProposalVersion,
-          p_actual_cost_usd: actualCostUsd,
-        },
-      ).catch(() => undefined);
-    }
+  // (0c) Liquida exclusivamente fatos montados pelo caller vivo. Sem pricing
+  // versionado, reserva ou usage terminal, a primitive permanece fail-closed.
+  if (contract?.coderBackend === 'openai' && input.openAIActualCostSettlement) {
+    const facts = input.openAIActualCostSettlement;
+    await settleOpenAIActualCostReservation({
+      reservation: facts.reservation,
+      attemptId: facts.attemptId,
+      model: facts.model,
+      cohort: facts.cohort,
+      usage: facts.usage,
+      pricing: facts.pricing,
+      settlePaidComputeBudgetReservation: audit => settlePaidComputeBudgetReservation(client, {
+        reservationId: audit.reservationId,
+        settled: audit.actualCost,
+        costSource: 'provider_reported',
+      }),
+    }).catch(() => undefined);
   }
 
   // (1) GIT observado pelo host. Só o caminho worktree deixa uma branch real; o

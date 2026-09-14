@@ -1,8 +1,8 @@
-import { decideComputeRoute, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ComputeRouteDecisionV1, type LocalFailureSignalV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
+import { decideComputeRoute, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ComputeCohortKeyV1, type ComputeRouteDecisionV1, type LocalFailureSignalV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
-import { persistPostTurnHostObservations } from './post-turn-observation';
+import { persistPostTurnHostObservations, resolveOpenAIActualCostSettlementFacts } from './post-turn-observation';
 import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
 import { readMachinePressure, readResourceAdmission } from './resource-governor';
@@ -272,7 +272,30 @@ export function buildProjectBacklogCycleDeps(
 
       // Observação host-side pós-volta (evidência de gate/coder/git + parecer do
       // Verifier) — a MESMA da rota supervisor-turn. Fail-open: nunca altera o desfecho.
-      await persistPostTurnHostObservations({ client, result: turn, contract, gateObservations, coderObservations });
+      const openAIActualCostSettlement = contract.coderBackend === 'openai' && turn.attemptId
+        ? await resolveOpenAIActualCostSettlementFacts(client, {
+            attemptId: turn.attemptId,
+            model,
+            cohort: {
+              provider: 'openai',
+              model,
+              capability: entry.capability,
+              taskClass: economicTaskClass(item.data.intent),
+              placement: 'api',
+            } satisfies ComputeCohortKeyV1,
+            coderObservations,
+            // Sem pricing ProviderPricingV1 versionado, custo não é liquidável.
+            pricing: null,
+          }).catch(() => null)
+        : null;
+      await persistPostTurnHostObservations({
+        client,
+        result: turn,
+        contract,
+        gateObservations,
+        coderObservations,
+        openAIActualCostSettlement,
+      });
       return turn;
     },
   };
