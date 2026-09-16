@@ -30,6 +30,7 @@ export interface WorkResultProjection {
 }
 export type WorkAction = 'approve'|'reject'|'defer'|'revise_proposal'|'start'|'submit_result'|'accept_result'|'request_result_changes';
 export interface WorkProvenanceProjection { readonly status:'complete'|'incomplete'; readonly issues:readonly string[]; }
+export interface AutonomousAdmissionProjection { readonly status:'admitted_waiting_for_host'; readonly requestId:string; readonly admittedAt:string; readonly eventId:string; }
 
 // UX-01 — projeção do cartão de execução autônoma. É PURA e derivada apenas do
 // item e dos eventos persistidos: o cliente nunca inventa estado. Ausente
@@ -91,7 +92,7 @@ export interface WorkIntegrationProjection {
   // autorização; nunca afirma merge ou integração.
   readonly reviewRequest?:{readonly repositoryId:string;readonly remoteName:string;readonly reviewReference:string;readonly reviewId:string;readonly sourceBranch:string;readonly sourceCommitSha:string;readonly baseBranch:string}|null;
 }
-export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; /** Oferta read-only; a RPC autoritativa ainda valida claims e concorrência. */ readonly manualReleaseAvailable:boolean; /** Fase humana projetada dos fatos (presentWorkItem sempre a preenche; opcional para não quebrar projeções/fixtures antigas). */ readonly progress?:WorkProgressPhaseProjection; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly pendingBudgetWait?:WorkBudgetWaitProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
+export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; /** Oferta read-only; a RPC autoritativa ainda valida claims e concorrência. */ readonly manualReleaseAvailable:boolean; /** Pedido admitido, ainda sem execution_started. */ readonly autonomousAdmission?:AutonomousAdmissionProjection|null; /** Fase humana projetada dos fatos (presentWorkItem sempre a preenche; opcional para não quebrar projeções/fixtures antigas). */ readonly progress?:WorkProgressPhaseProjection; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly pendingBudgetWait?:WorkBudgetWaitProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
   // Histórico append-only dos pareceres do Verifier persistidos (auditoria). Só
   // presente quando há ao menos um; read-only, nunca altera ações nem decide.
   readonly opinionHistory?:readonly VerifierOpinionV1[];
@@ -294,11 +295,11 @@ export function projectAutonomousExecution(item:WorkItem,events:readonly WorkEve
 // fato que as sustente. Analisar e implementar não têm fronteira de evento (o
 // coder edita numa chamada opaca), então ambos caem em `implementing`.
 export type WorkProgressPhase =
-  |'proposal'|'approved'|'implementing'|'testing'|'paused'
+  |'proposal'|'approved'|'waiting_for_host'|'implementing'|'testing'|'paused'
   |'reviewing'|'ready_to_integrate'|'integrating'
   |'done'|'blocked'|'failed'|'rejected'|'cancelled';
 export interface WorkProgressPhaseProjection{readonly phase:WorkProgressPhase;readonly label:string;readonly active:boolean;readonly terminal:boolean;}
-const PROGRESS_LABEL:Record<WorkProgressPhase,string>={proposal:'Proposta',approved:'Aprovado',implementing:'Implementando',testing:'Testando',paused:'Pausado',reviewing:'Revisando',ready_to_integrate:'Pronto para integrar',integrating:'Integrando',done:'Concluído',blocked:'Bloqueado',failed:'Falhou',rejected:'Rejeitado',cancelled:'Cancelado'};
+const PROGRESS_LABEL:Record<WorkProgressPhase,string>={proposal:'Proposta',approved:'Aprovado',waiting_for_host:'Aguardando Resident Host',implementing:'Implementando',testing:'Testando',paused:'Pausado',reviewing:'Revisando',ready_to_integrate:'Pronto para integrar',integrating:'Integrando',done:'Concluído',blocked:'Bloqueado',failed:'Falhou',rejected:'Rejeitado',cancelled:'Cancelado'};
 const PROGRESS_ACTIVE=new Set<WorkProgressPhase>(['implementing','testing']);
 const PROGRESS_TERMINAL=new Set<WorkProgressPhase>(['done','failed','rejected','cancelled']);
 const progressPhase=(phase:WorkProgressPhase):WorkProgressPhaseProjection=>({phase,label:PROGRESS_LABEL[phase],active:PROGRESS_ACTIVE.has(phase),terminal:PROGRESS_TERMINAL.has(phase)});
@@ -313,8 +314,8 @@ const integrationProgressPhase=(integration:WorkIntegrationProjection):WorkProgr
  * `testing` quando existe o checkpoint de pós-edição do worktree, senão
  * `implementing`) → integração (pós-resultado) → espera humana/pré-execução.
  */
-export function deriveWorkProgressPhase(input:{readonly item:WorkItem;readonly execution:AutonomousExecutionProjection|null;readonly integration:WorkIntegrationProjection|null;}):WorkProgressPhaseProjection{
-  const{item,execution,integration}=input;
+export function deriveWorkProgressPhase(input:{readonly item:WorkItem;readonly execution:AutonomousExecutionProjection|null;readonly integration:WorkIntegrationProjection|null;readonly autonomousAdmission?:AutonomousAdmissionProjection|null;}):WorkProgressPhaseProjection{
+  const{item,execution,integration,autonomousAdmission}=input;
   // Estados terminais NEGATIVOS do item vêm primeiro (autoridade do domínio).
   if(item.state==='rejected')return progressPhase('rejected');
   if(item.state==='cancelled')return progressPhase('cancelled');
@@ -337,6 +338,7 @@ export function deriveWorkProgressPhase(input:{readonly item:WorkItem;readonly e
   if(item.state==='blocked')return progressPhase('blocked');
   if(item.state==='review'||item.state==='changes_requested')return progressPhase('reviewing');
   if(item.state==='in_progress')return progressPhase('implementing');
+  if(item.state==='approved'&&autonomousAdmission)return progressPhase('waiting_for_host');
   if(item.state==='approved')return progressPhase('approved');
   return progressPhase('proposal');
 }
@@ -349,7 +351,8 @@ export function projectManualReleaseAvailable(item:WorkItem,events:readonly Work
   return !events.slice(manualStartIndex+1).some(event=>disqualifying.has(event.type));
 }
 
-export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);const observedGit=projectHostObservedEvidence(events);const observedGates=projectHostObservedGateEvidence(events);const execution=projectAutonomousExecution(item,events);const integration=projectWorkIntegration(item,events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),manualReleaseAvailable:projectManualReleaseAvailable(item,events),execution,pendingDecision:projectPendingWorkDecision(item,events),pendingBudgetWait:projectPendingBudgetWait(item,events),integration,progress:deriveWorkProgressPhase({item,execution,integration}),
+export function projectAutonomousAdmission(item:WorkItem,events:readonly WorkEvent[],execution:AutonomousExecutionProjection|null):AutonomousAdmissionProjection|null{if(item.state!=='approved'||execution!==null)return null;for(let index=events.length-1;index>=0;index--){const event=events[index]!;const data=eventData(event);if(event.type!=='work_approved'||event.proposalVersion!==item.proposalVersion||asString(data?.authority)!=='autonomous_execution_request')continue;const requestId=asString(data?.request_id);if(requestId)return{status:'admitted_waiting_for_host',requestId,admittedAt:event.occurredAt.toISOString(),eventId:event.id};}return null;}
+export const presentWorkItem=(item:WorkItem,events:readonly WorkEvent[]):WorkPresentation=>{const latestResult=projectLatestWorkResult(events);const opinionHistory=projectVerifierOpinionHistory(events);const observedGit=projectHostObservedEvidence(events);const observedGates=projectHostObservedGateEvidence(events);const execution=projectAutonomousExecution(item,events);const autonomousAdmission=projectAutonomousAdmission(item,events,execution);const integration=projectWorkIntegration(item,events);return{item,latestResult,acceptedResult:projectAcceptedWorkResult(events),latestEventType:events.at(-1)?.type??null,availableActions:availableWorkActions(item,latestResult),manualReleaseAvailable:projectManualReleaseAvailable(item,events),autonomousAdmission,execution,pendingDecision:projectPendingWorkDecision(item,events),pendingBudgetWait:projectPendingBudgetWait(item,events),integration,progress:deriveWorkProgressPhase({item,execution,integration,autonomousAdmission}),
   // Parecer advisory do Verifier — só quando há evidência git durável a conferir.
   // É projeção pura e read-only; nunca altera ações nem substitui a revisão humana.
   verification:projectWorktreeHandoff(events)?verifyPersistedWorkResult(item,events):null,

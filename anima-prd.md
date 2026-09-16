@@ -1,4 +1,159 @@
 # Anima — Product Requirements Document
+> Coding Harness V3 endurecido localmente em 2026-09-14 após o benchmark
+> `3a367223`: causa-raiz foi wiring ausente dos comandos reais + conclusão implícita
+> no fim do budget, não ausência das tools. O executor agora injeta validation commands
+> estruturados; tarefas com gates executáveis exigem teste focal verde e `git diff`
+> depois do último edit; exit1 mantém o loop vivo; SEARCH→READ de contratos e origem
+> factual são instruções explícitas. Regressões: core 18 PASS, web 308 PASS; typecheck
+> core PASS, web bloqueado apenas por erros preexistentes em scripts operacionais.
+> Nenhum compute pago. [Registro](docs/registros/2026-09-14k-v3-tool-use-validate-before-submit.md).
+> Benchmark V3 `7e0a75cf` executado em 2026-09-14 pela única attempt `3a367223`.
+> O V3 superou a barreira antiga: 18 provider calls, 10 rodadas, 17 READs e edits
+> reais; usage 234.756 input / 7.876 output / 242.632 total (89.127 cached).
+> Produziu checkpoint `7143d69`, contido nos 4 arquivos, mas o primeiro gate focal
+> falhou. O coder não usou SEARCH/GLOB/TEST/GIT; hardcodou `pricing:null` no caller e
+> adaptou `costSource:'provider_reported'` contra o contrato real
+> `provider_confirmed`. Item `failed`; B1/B2/B3 FAIL; strong harness e Verifier não
+> rodaram devido à parada na primeira barreira. Reservation `7398bb8d` permanece
+> aberta, custo `cost_unknown`. [Registro](docs/registros/2026-09-14j-benchmark-settlement-v3-gate-fail.md).
+> A retomada do benchmark `7e0a75cf` encontrou em 2026-09-14 uma segunda barreira
+> pré-attempt: a autorização detalhada foi fornecida em anexo, que a fronteira
+> externa trata como conteúdo não confiável e, portanto, não aceita como consentimento
+> para exportar contexto do repositório a uma API paga. A authority `fc01585e`
+> permanece sem reservation/uso; nenhum processo, claim, attempt ou provider call foi
+> iniciado. É necessária autorização explícita no corpo de uma mensagem confiável do
+> usuário. [Registro](docs/registros/2026-09-14i-benchmark-v3-anexo-nao-valida-consentimento.md).
+> O benchmark do Coding Harness V3 para settlement B1/B2/B3 parou em 2026-09-14
+> antes da única attempt: successor `7e0a75cf` criado, aprovado e classificado;
+> authority OpenAI exclusiva `fc01585e` (US$1,50/30 min) criada sem reservation.
+> O preflight V3 passou (18 testes core + 257 web e wiring forte confirmado), mas a
+> fronteira externa recusou iniciar a chamada paga por exigir autorização explícita
+> adicional para exportar conteúdo do repositório à OpenAI. Nenhum claim, attempt,
+> provider call, usage, custo, output, gate ou Verifier ocorreu. Sem retry ou
+> contorno. [Registro](docs/registros/2026-09-14h-benchmark-settlement-v3-barreira-autorizacao-externa.md).
+> A única attempt paga da correction `571d29be` falhou em 2026-09-14 antes de
+> editar: attempt `77ca3038`, authority `70b4129f`, reservation `56245160`.
+> OpenAI `gpt-5.6-terra` respondeu, mas o protocolo limitado recusou a resposta por
+> exceder 8 leituras na rodada (`ollama_invalid_response_schema`, nomenclatura
+> compartilhada do harness). Usage terminal ausente, pricing ausente, `cost_unknown`;
+> reservation aberta. Sem output novo, gates, harness sobre output ou Verifier;
+> item `failed`, sem retry. [Registro](docs/registros/2026-09-14d-571d29be-falha-protocolo-pre-edit.md).
+> `5fad667` recebeu `request_changes` canônico em 2026-09-14 e o successor
+> `571d29be` (lineage `364e95d9`, seq 1) foi preparado até `proposed` v2, sem
+> approval/authority/attempt. O contrato agora referencia read-only `ccb7dcc..0bea4c8`,
+> proíbe RPC/tipos paralelos e exige APIs reais + alteração material do caller.
+> Harness host-side com overlay dos testes fortes: `61eb2eb` FAIL, `5fad667` FAIL,
+> `0bea4c8` PASS (4 suítes/22 testes). A reservation `6bc73048` permanece aberta,
+> `cost_unknown`. [Registro](docs/registros/2026-09-14c-request-changes-e-preflight-571d29be.md).
+> Recovery operacional de `d05bcab0` executada em 2026-09-14: successor
+> `4eb79eb4` (lineage `991a0d58`, seq 1) chegou a `review` pela única attempt
+> `fc784191`, output `5fad6679`, após preflight real com cwd `apps/web`. Seis gates
+> passaram, mas o Verifier v2 rejeitou (14 violações) e a revisão semântica confirmou
+> que B1/B2/B3 continuam ausentes: o diff inventa `actualCostUsd` e uma RPC
+> `settle_openai_actual_cost`, sem reservation/usage/pricing/primitive/store reais;
+> o teste do caller continua vacuamente verificando só o hook. Resultado não aceito;
+> item preservado em `review` para decisão humana. [Registro](docs/registros/2026-09-14b-recovery-4eb79eb4-review-semantico-rejeitado.md).
+> A correction governada `d05bcab0` foi aprovada e classificada em 2026-09-14,
+> recebeu a authority OpenAI exclusiva `c922b5be` (US$1,50/30 min), mas sua única
+> attempt `9ae76ffc` falhou antes de reserva e antes do provider ao criar a worktree:
+> o invocador operacional foi iniciado na raiz, enquanto `projectRoot()` pressupõe
+> `apps/web`, repetindo a barreira conhecida `worktree-create-failed`. Item `failed`;
+> nenhum diff, gate, Verifier ou custo ocorreu; sem retry por limite humano de uma
+> attempt. [Registro](docs/registros/2026-09-14-correction-d05bcab0-barreira-worktree.md).
+> Review humano de `fe99e446` v3 registrado como `request_changes` em 2026-09-12:
+> a primitive `settleOpenAIActualCostReservation` e o commit `b6201d8` permanecem
+> preservados, mas faltava o binding vivo pós-turno. A correction canônica
+> `3b0b3c57` (lineage `43638773`, seq 1) foi materializada e revisada até v3,
+> `proposed`, retomando de `b6201d8`, com escopo mínimo de três arquivos e prova
+> obrigatória através de `buildProjectBacklogCycleDeps(...).runTurn`. Provider
+> proposto OpenAI `gpt-5.6-terra`; nenhuma nova authority, attempt ou chamada paga
+> foi criada. [Registro](docs/registros/2026-09-12f-request-changes-e-preflight-binding-vivo.md).
+> Resilient Cloud Session V1 fechada no caminho vivo local em 2026-09-10, sem Pod/provider write:
+> `prepareCloudCoderNode` roteia RunPod pago pelo gate explícito
+> `ANIMA_RESILIENT_CLOUD_SESSION=true`, preserva tentativa única quando OFF e permite configurar
+> retries por SKU (identidade mais fina pré-create) antes da exclusão. Falhas recuperáveis fazem
+> teardown/settlement antes da próxima provisão; o Pod saudável permanece o mesmo até
+> coder→gates→Verifier→review e só então sofre settlement final+teardown. Migration settlement
+> `20260910000001` aplicada; pgTAP 23/23, core full 1643/1643 e focais web verdes. Authority
+> `3b87224f…` continua ativa, committed histórico US$0,49; preview read-only de late settlement
+> disponível, sem aplicar. [Registro](docs/registros/2026-09-10-fechamento-resilient-cloud-session-v1.md).
+> Prova live capability-based RunPod executada em 2026-09-10: authority SKU-fixed antiga
+> `c1c3c608…` revogada e nova authority `3b87224f…` concedida com 24 GiB/CUDA,
+> US$ 0,55/h, 1 node, 30 min e US$ 1,50. O matcher escolheu A40 SECURE a US$ 0,49/h;
+> o Pod foi criado pelo caminho canônico, mas o SSH publicado não ficou alcançável
+> (`Connection timed out` em `:22068`). A execução parou bounded antes de claim/attempt,
+> gate e Verifier; teardown confirmou zero Pods. Item permanece `approved v2`; ledger
+> mantém reserva conservadora de US$ 0,245 e lifecycle estima US$ 0,08247 até destroy.
+> [Registro](docs/registros/2026-09-10-runpod-capability-live-ssh-timeout.md).
+> Cloud Resource Matching V1 fechado localmente até a fronteira live em 2026-09-10: authority
+> capability-based persistida e concedível, tipos regenerados, matcher ligado ao provisionador
+> canônico e `gpuTypeId` concreto propagado ao adapter RunPod. Estratégia continua humana;
+> SKU-fixed continua estrita. Preview read-only viu A40 SECURE a US$0,49/h e A6000 a US$0,53/h;
+> nenhum Pod/authority/provider write foi criado. Próximo passo é o humano conceder uma nova
+> authority capability-scoped para a prova. [Registro](docs/registros/2026-09-10-cloud-resource-matching-v1.md).
+> Seleção autônoma conectada à execução canônica em 2026-09-09: no chat Dev,
+> somente um mandato explícito de execução de self-development usa a mesma RPC
+> `request_autonomous_execution` do cartão. A RPC revalida versão/aprovação/fila
+> sob lock e apenas sinaliza o Resident Host; chat não cria claim, attempt,
+> worktree ou coder. Consultas permanecem read-only. Após admissão, a UI acompanha
+> por polling de 5 s a projeção persistida do item, substitui snapshots sem
+> duplicar eventos e para em review, decisão humana ou terminal. Provider do chat
+> não concede provider/compute ao coder; o contrato e authorities canônicos seguem
+> soberanos. [Registro](docs/registros/2026-09-09-chat-admissao-e-progresso-canonicos.md).
+> Seleção autônoma no chat Dev corrigida em 2026-09-09: o mandato explícito
+> para identificar o próximo Work Item agora consulta a fila canônica do
+> Supervisor, reconcilia `work_recovery_lineage` e retorna `selected`,
+> `none_eligible` ou `human_decision_required`. Predecessores `failed`
+> substituídos não geram mais pedido artificial de ID; o chat normal preserva
+> a resolução conservadora. A decisão é read-only, provider-neutral e observável.
+> [Registro](docs/registros/2026-09-09-selecao-autonoma-chat-dev.md).
+> Chat Dev/provider corrigido em 2026-09-09: o provider enviado pelo compositor é
+> agora a autoridade de todo o turno (resposta livre, Project Advisor e planner).
+> GPT não cai mais silenciosamente em Ollama; Local permanece explícito. A seleção
+> de GPT concede apenas a admissão interativa estreita de chat/planner, sem alcançar
+> coder ou compute autônomo. Regressão focal 64/64 e prova real de chat GPT concluídas.
+> [Registro](docs/registros/2026-09-09-chat-dev-provider-consistente.md).
+> Cloud GPU Test #2 reconciliado novamente em 2026-09-09: a key rotacionada autenticou após
+> remover do subprocesso a variável antiga herdada pelo Codex; RunPod respondeu `200` e confirmou
+> zero Pods. A authority anterior foi revogada com seu ledger histórico intacto (US$ 1,25
+> comprometidos), e uma nova authority item-scoped de US$ 1,50 foi concedida. A volta canônica
+> parou antes de reserva, provider create e `execution_started`: a A40 48 GB retornou sem preço e
+> sem disponibilidade em SECURE/COMMUNITY (`live_price:quote_unavailable`). Nova authority segue
+> ativa com US$ 1,50 restantes; item permanece `approved v2`, zero attempts. Retomar o mesmo item
+> quando a cotação A40 SECURE estiver disponível. [Registro](docs/registros/2026-09-09-runpod-barreira-cotacao-a40.md).
+> Cloud GPU Test #2 retomado em 2026-09-09: o `SshRunPodTunnelManager` real foi provado contra
+> Pod mínimo (`processAlive`, listener loopback e TCP PASS; HTTP falhou somente pela ausência
+> deliberada de Ollama), ganhou stderr/stdout bounded, exit/signal, args sanitizados, readiness
+> separada e teardown bounded. O provisioner passou a usar `HostKeyAlias` por Pod e a preservar
+> o último diagnóstico. Duas criações canônicas posteriores pararam antes de qualquer attempt:
+> endpoint publicado, mas SSH recusado (`banner exchange ... Connection refused`); ambas tiveram
+> `shutdown_confirmed` e RunPod voltou a zero Pods. O bootstrap foi endurecido para iniciar sshd
+> antes de `nvidia-smi` (agora bounded em 60 s), porém a última execução paga de validação foi
+> bloqueada pelo controle externo de aprovação. Item `8a2515d8…` segue `approved v2`, zero
+> `execution_started`; ledger líquido US$ 1,25/1,50. A chave RunPod deve ser rotacionada antes da
+> retomada por exposição acidental em output interno desta sessão. [Registro](docs/registros/2026-09-09-runpod-tunel-real-e-barreira-bootstrap.md).
+> RunPod Cloud Test #2 preparado localmente em 2026-09-08: bootstrap GPU→Ollama→
+> `qwen3-coder:latest`, túnel SSH host-managed e health semântico (`/api/tags` + `/api/chat`)
+> foram implementados; testes focais 76/76. Prova viva não iniciou: chave RunPod/identidade SSH
+> ausentes e nenhuma autorização paga com teto numérico existe para `8a2515d8…`. Zero provider
+> calls e zero custo. [Registro](docs/registros/2026-09-08-runpod-autoprovisionamento-barreira-pre-provider.md).
+> Execução supervisionada separada da autonomia desacompanhada em 2026-09-05:
+> leases humanos temporários, owner/item/proposal-scoped, fazem somente os caps do
+> budget unattended deixarem de bloquear enquanto há presença explícita. Consumo
+> histórico não é resetado; expiração/revogação restaura automaticamente a decisão
+> bounded. Paid compute, escopo, concorrência, isolamento, gates, Verifier e review
+> permanecem independentes. Prova real em `ce90eb14`: supervisionado/readmitido sem
+> esperar 24h, attempt OpenAI strong atravessou worktree, consumiu 5 calls/17.910
+> tokens e parou corretamente em `failed` porque o gate Jest falhou; nenhuma nova
+> attempt foi aberta, e supervisão + autoridade paga foram revogadas.
+> Observabilidade CLI do orçamento autônomo implementada em 2026-09-05:
+> `anima budget status <work-item-id> [--json]` projeta a RPC canônica
+> `autonomous_work_budget_status` com consumo/restante por item, usuário e classe
+> externa, runtime, razão de admissão, janelas e liberação calculável somente a
+> partir de `execution_started.created_at`. É read-only, user-scoped e não cria
+> attempts/eventos nem readmite itens. Provas: CLI 49/49, pgTAP focado 9/9 e
+> typecheck web. O item `ce90eb14` permaneceu `blocked`; a consulta real apontou
+> `user_attempt_budget_exhausted` e liberação em `2026-09-06T07:05:05.8296Z`.
 > Human recovery de bloqueio pré-attempt por orçamento implementado em 2026-09-05:
 > `authorize_work_resume` aceita uma variante estrita, por item/versão/último evento,
 > que concede exatamente +1 e readmite o mesmo item. O token é consumido atomicamente
@@ -1578,3 +1733,50 @@ O Anima roda em **duas máquinas físicas**, ligadas por Tailscale:
 - Inspecionar/gerenciar o banco remoto (cliente sem Docker local): Admin API (`/auth/v1/admin/...`) e REST (`/rest/v1/<tabela>`) da Goma, com a `service_role` key
 - Aplicar migration num Postgres remoto: `supabase migration up --db-url "postgresql://postgres:postgres@<IP>:54322/postgres"` — **atenção:** o CLI tenta TLS por padrão e o Postgres local recusa (`tls error: server refused TLS connection`); quando isso acontece, aplique a migration direto na máquina que hospeda o banco em vez de forçar a conexão remota
 - Parar tudo (servidor): `npx supabase stop` (containers) — o Docker pode continuar aberto
+
+## Estado operacional — correction-after-review (2026-09-07)
+
+O contrato local agora deriva `effective_correction_scope = rework_scope ∪ remaining_scope`:
+somente paths explicitamente nomeados no `REQUEST_CHANGES` e contidos no escopo
+original podem ser reabertos; tocados não nomeados permanecem preservados. Recovery
+comum continua exigindo subconjunto estrito. O successor canônico `8a2515d8` foi
+materializado uma única vez, revisado para `ollama/qwen3-coder:latest`, aprovado e
+parou antes da primeira attempt porque o Resource Governor observou pressão
+`moderate` (`defer/resource_pressure`). Retomar dele quando o governor permitir,
+sem compute pago, e parar em `review`. Registro: [sessão de 2026-09-07](docs/registros/2026-09-07-rework-explicito-e-barreira-governor.md).
+
+## Estado operacional — nova recusa do Governor (2026-09-08)
+
+A retomada supervisionada confirmou `8a2515d8` em `approved` v2, único
+correction-successor ativo e ainda sem attempts. Ollama local e
+`qwen3-coder:latest` estavam disponíveis, mas duas voltas canônicas espaçadas foram
+recusadas antes de `execution_started`; a pressão terminou
+`moderate/defer/resource_pressure`. O lease foi revogado; não houve coder, gates,
+Verifier, OpenAI, compute pago ou integração. Retomar o mesmo item quando a pressão
+estiver estavelmente `low` e parar em `review`. Registro: [sessão de 2026-09-08](docs/registros/2026-09-08-retomada-correcao-barreira-governor.md).
+
+## Estado operacional — caminho GPU self-hosted reconciliado (2026-09-08)
+
+A auditoria do código real confirmou que o protocolo remoto host-mediated já pode usar
+uma GPU manual por Ollama atrás de túnel HTTP loopback, preservando worktree, Git, gates e
+Verifier na Goma. A prova owned anterior usou endpoint/processo real, mas inferência fake
+local. Existe adapter RunPod real e ligado ao Resident Host (create/health/stop/destroy,
+lifecycle e orçamento), ainda sem prova contra provider e sem bootstrap/model cache/rede
+privada prontos. `8a2515d8` continua `approved` v2 e com zero attempts; nenhuma cloud/API
+de modelo foi chamada. Próxima prova mínima: fornecedor/GPU escolhidos pelo humano, runtime
+e modelo no node, túnel loopback, endpoint como `already_provisioned`, uma volta do mesmo
+item e parada em `review`. Registro: [diagnóstico e caminho GPU](docs/registros/2026-09-08-diagnostico-goma-e-caminho-gpu-self-hosted.md).
+> Atualização 2026-09-15: `SUBMIT` agora é governado por state machine explícita e
+> por provas ligadas à `editRevision` atual; novo EDIT invalida TEST/diff anteriores.
+> O sweep focal ficou verde sem provider pago. Registro:
+> [state machine estrutural do V3](docs/registros/2026-09-15-state-machine-estrutural-coding-harness-v3.md).
+
+## Estado operacional — terceira prova V3 já materializada (2026-09-15)
+
+O store vivo revelou que o successor `a84de19c` já havia sido criado e executado
+antes da reconciliação desta sessão. A única attempt `5058ff2d` fez 15 READs e
+aplicou três edits, mas não executou TEST nem DIFF; o runtime recusou a conclusão
+sem provas e terminou `failed` por `ollama_invalid_response_schema`. A reservation
+de USD 1,50 permanece comprometida e sem settlement factual. Nenhuma nova execução
+foi criada após a descoberta. Registro: [barreira de reconciliação da terceira
+prova](docs/registros/2026-09-15-terceira-prova-benchmark-ja-executada-barreira-reconciliacao.md).

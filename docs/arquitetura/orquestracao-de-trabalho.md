@@ -1,5 +1,17 @@
 # Orquestração de Trabalho
 
+## Human-supervised versus autonomous-unattended
+
+O budget de attempts/runtime/anti-loop governa autonomia desacompanhada. Presença
+humana explícita é representada por lease temporário, owner/item/proposal-scoped;
+ela não zera contadores. A decisão canônica preserva `unattendedAdmitted` e
+`unattendedReason`, e só projeta `admitted=true` enquanto o lease está vigente.
+Expiração ou revogação restaura a decisão bounded automaticamente.
+
+O lease não concede autoridade de compute pago, não amplia escopo, não substitui
+claim/exclusividade, worktree, eligibility, proposal version, gates, Verifier,
+review ou integração. Cada uma dessas fronteiras continua com sua própria guarda.
+
 > Fundação arquitetural aprovada. Este documento descreve o domínio futuro; não significa que suas estruturas de banco ou integrações estejam implementadas.
 
 ## Motivação
@@ -357,6 +369,15 @@ A régua de elegibilidade ganhou uma implementação SQL única e reutilizável 
 A ordenação é **FIFO pela sequência (`seq`) do evento `work_approved` vigente** — identidade única, monotônica e imutável do log append-only, imune a relógio, fuso e ajuste de horário. Empate é impossível por construção; o `work_item_id` entra como desempate secundário apenas para que a ordem seja total mesmo diante de entrada inesperada. Como a posição depende da aprovação da versão vigente, uma proposta revisada e reaprovada entra no fim da fila: a posição pertence à versão exata que se tornou executável.
 
 `public.next_autonomous_work()` aplica a política V0 `oldest_approval_first`, que é exatamente a cabeça dessa fila, e devolve a razão da escolha (política, tamanho da fila e sequência do segundo colocado). Nenhuma ponderação de urgência, impacto, capacidade ou dificuldade participa — na dúvida, FIFO explicável. Escolher executor, modelo ou esforço pertence à Fase F.
+
+O chat Dev reutiliza essa mesma decisão quando recebe um mandato explícito para
+selecionar autonomamente o próximo trabalho. Antes de responder, a projeção lê
+`work_recovery_lineage` e resolve cada predecessor para o descendente corrente;
+lineage nunca torna um item elegível, apenas impede que um predecessor histórico
+seja oferecido ou apresentado como ambiguidade. O resultado tipado é `selected`,
+`none_eligible` ou `human_decision_required`. Sem Dev ou sem mandato explícito, a
+resolução conversacional comum continua conservadora. Essa consulta não cria claim,
+attempt, evento ou execução e independe do provider do chat.
 
 Selecionar é **leitura e não emite evento**: o efeito auditável é o claim, que já registra `work_claimed`. Como a política é determinística sobre um log imutável, a escolha é sempre recomputável a posteriori; gravar um evento por consulta inundaria um log que não pode ser limpo. No core, `selectNextAutonomousWork` desconfia da entrada e falha fechado: fila com posições não contíguas, ordem não monotônica ou item repetido não seleciona nada, porque fila ambígua não autoriza execução.
 

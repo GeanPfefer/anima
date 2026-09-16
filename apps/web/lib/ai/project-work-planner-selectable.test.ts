@@ -5,6 +5,7 @@ import {
   planExecutableProjectWorkRevision,
   resolveConfiguredProjectPlannerProvider,
   createConfiguredProjectPlanner,
+  createChatProjectPlanner,
   shouldRunProjectPlanner,
   AdmissionGatedOpenAIPlanner,
   LocalOllamaProjectWorkPlanner,
@@ -67,9 +68,13 @@ describe('resolveConfiguredProjectPlannerProvider — config de deploy', () => {
     expect(resolveConfiguredProjectPlannerProvider({ ANIMA_PROJECT_PLANNER_PROVIDER: '' })).toBe('openai');
   });
   test('a factory cria o tipo certo conforme a config', () => {
-    // Default openai vem gated por admissão financeira (com fallback local).
+    // Default openai vem gated por admissão financeira, sem fallback local.
     expect(createConfiguredProjectPlanner({})).toBeInstanceOf(AdmissionGatedOpenAIPlanner);
     expect(createConfiguredProjectPlanner({ ANIMA_PROJECT_PLANNER_PROVIDER: 'local' })).toBeInstanceOf(LocalOllamaProjectWorkPlanner);
+  });
+  test('factory do turno Dev obedece ao provider do request, não ao env', () => {
+    expect(createChatProjectPlanner('openai', 'user-1')).toBeInstanceOf(AdmissionGatedOpenAIPlanner);
+    expect(createChatProjectPlanner('ollama', 'user-1')).toBeInstanceOf(LocalOllamaProjectWorkPlanner);
   });
 });
 
@@ -120,14 +125,14 @@ describe('escopo de gate no monorepo — causa raiz do fan-out', () => {
   });
 });
 
-describe('shouldRunProjectPlanner — gatilho preserva o default de produção', () => {
+describe('shouldRunProjectPlanner — todo provider explícito usa seu planner no Dev', () => {
   test('sem developmentMode nunca roda', () => {
     expect(shouldRunProjectPlanner(false, 'openai', 'openai')).toBe(false);
     expect(shouldRunProjectPlanner(false, 'openai', 'local')).toBe(false);
   });
-  test('planejador openai (default): só com provedor de chat openai (histórico intacto)', () => {
+  test('o provider do chat não desliga a subetapa do planner', () => {
     expect(shouldRunProjectPlanner(true, 'openai', 'openai')).toBe(true);
-    expect(shouldRunProjectPlanner(true, 'ollama', 'openai')).toBe(false);
+    expect(shouldRunProjectPlanner(true, 'ollama', 'openai')).toBe(true);
   });
   test('planejador local: roda na superfície dev independentemente do provedor de chat', () => {
     expect(shouldRunProjectPlanner(true, 'ollama', 'local')).toBe(true);

@@ -81,3 +81,12 @@ Documento arquitetural: [`../arquitetura/orquestracao-de-trabalho.md`](../arquit
 > Persistir a rejeição de propostas de vínculo entre pilares, impedindo que uma proposta recusada reapareça.
 
 Ela exercita intenção, proposta, rejeição, memória de decisão e prevenção de repetição sem executor automático. Só será detalhada depois de F2 fornecer persistência e contratos.
+# Correção de provider no chat Dev (2026-09-09)
+
+O provider escolhido no compositor passou a ser autoritativo para o turno inteiro:
+chat livre, Project Advisor e planner usam a mesma escolha. Foi removido o fallback
+automático GPT → Ollama; falhas de GPT preservam a identidade real do provider. A
+seleção explícita de GPT é a autoridade interativa estreita para chat/planner e não
+autoriza coder, execução autônoma ou compute externo. Local continua disponível por
+seleção explícita. Evidências e limitações da prova viva estão no
+[registro da sessão](../registros/2026-09-09-chat-dev-provider-consistente.md).

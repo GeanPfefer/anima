@@ -56,14 +56,18 @@ const inState = (id: string, state: WorkState, target = id): AutonomousQueueCand
 
 type Snapshot = readonly AutonomousQueueCandidate[];
 
-const turn = (outcome: SupervisorTurnOutcome, workItemId: string | null = 'i'): SupervisorTurnResult => ({
+const turn = (
+  outcome: SupervisorTurnOutcome,
+  workItemId: string | null = 'i',
+  refusal: { code: string; message: string } | null = null,
+): SupervisorTurnResult => ({
   outcome, reconciliation: [],
   selection: workItemId === null ? null : {
     workItemId, approvedProposalVersion: 1, approvalSeq: 1, targetReference: workItemId,
     selectionPolicy: 'oldest_approval_first', queueSize: 1, runnerUpApprovalSeq: null, skippedOccupiedTargets: 0,
   },
   claimId: null, attemptId: null, terminalKind: null, routingDecision: null, routingAdjustment: null,
-  claimReleased: false, requiresAnotherTurn: false, refusal: null, gaps: [],
+  claimReleased: false, requiresAnotherTurn: false, refusal, gaps: [],
 });
 
 // Roteiriza o backlog por iteração; repete o último quando esgota (o maxTurns e as
@@ -178,6 +182,29 @@ describe('driver do backlog autônomo — runAutonomousBacklogCycle', () => {
     expect(result.turnsExecuted).toBe(1);
     expect(result.stopReason).toBe('turn_not_executable');
     expect(turns.calls.count).toBe(1);
+  });
+
+  // (6b) DIAGNOSTICABILIDADE: `turn_not_executable` deixa de ser opaca — a `refusal` canônica
+  // da volta que a causou é promovida à razão estruturada do ciclo (por-volta e no topo).
+  test('turn_not_executable carrega a refusal canônica (code/message) do ciclo', async () => {
+    const backlog = backlogScript([[ready('A', 10)]]);
+    const refusal = { code: 'coder_node_unavailable', message: 'Node on-demand indisponível: provider_rejected_before_create.' };
+    const turns = turnScript([turn('selection_not_executable', 'A', refusal)]);
+    const result = await runAutonomousBacklogCycle(cycle({ readBacklog: backlog.read, runTurn: turns.run, maxTurns: 50 }));
+    expect(result.stopReason).toBe('turn_not_executable');
+    expect(result.notExecutableReason).toEqual(refusal);
+    // A razão também fica no log por-volta, para auditoria da volta exata.
+    expect(result.turns[0]!.refusal).toEqual(refusal);
+  });
+
+  // (6c) Uma parada NÃO-executável real preserva o fail-closed COM a razão; uma volta que
+  // progride NÃO fabrica razão (notExecutableReason só existe no caso opaco).
+  test('volta que progride não gera notExecutableReason (só o caso opaco carrega razão)', async () => {
+    const backlog = backlogScript([[ready('A', 10)], []]);
+    const turns = turnScript([turn('execution_completed', 'A')]);
+    const result = await runAutonomousBacklogCycle(cycle({ readBacklog: backlog.read, runTurn: turns.run }));
+    expect(result.stopReason).toBe('no_eligible_work');
+    expect(result.notExecutableReason ?? null).toBeNull();
   });
 
   test('falha terminal de execução conta como toque e o ciclo segue até esvaziar', async () => {

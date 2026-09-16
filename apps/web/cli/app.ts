@@ -113,6 +113,42 @@ export interface StatusPayload {
   readonly autonomyEnabled: boolean;
   readonly resumable: { readonly total: number; readonly byState: Readonly<Record<string, number>> };
 }
+export interface BudgetStatusPayload {
+  readonly ok: true;
+  readonly kind: 'budget-status';
+  readonly workItemId: string;
+  readonly observedAt: string;
+  readonly policyVersion: string;
+  readonly costClass: string | null;
+  readonly admitted: boolean;
+  readonly reason: string | null;
+  readonly supervised: boolean;
+  readonly supervisionExpiresAt: string | null;
+  readonly unattendedAdmitted: boolean;
+  readonly unattendedReason: string | null;
+  readonly userAttempts24h: number;
+  readonly userAttemptsRemaining: number;
+  readonly externalAttempts24h: number;
+  readonly externalAttemptsRemaining: number;
+  readonly windows: {
+    readonly attemptsHours: number;
+    readonly userRuntimeHours: number;
+    readonly autonomousRuntimeMinutes: number;
+  };
+  readonly attempts: {
+    readonly item: { readonly used: number; readonly limit: number; readonly remaining: number; readonly nextReleaseAt: string | null };
+    readonly user: { readonly used: number; readonly remaining: number; readonly nextReleaseAt: string | null };
+    readonly external: { readonly used: number; readonly remaining: number; readonly nextReleaseAt: string | null };
+  };
+  readonly runtime: {
+    readonly user24h: { readonly usedSeconds: number; readonly remainingSeconds: number };
+    readonly external24h: { readonly usedSeconds: number; readonly remainingSeconds: number };
+    readonly autonomous60m: { readonly usedSeconds: number; readonly remainingSeconds: number };
+  };
+  readonly nextBudgetReleaseAt: string | null;
+}
+
+export type BudgetStatusCapability = (workItemId: string) => Promise<unknown>;
 export interface WorkListPayload {
   readonly ok: true;
   readonly kind: 'work-list';
@@ -163,6 +199,11 @@ export interface WorkCorrectPayload {
   readonly replayed: boolean;
   readonly message: string;
 }
+export interface WorkSupervisionPayload {
+  readonly ok: true; readonly kind: 'work-supervise' | 'work-unsupervise'; readonly workItemId: string;
+  readonly leaseId: string | null; readonly expiresAt: string | null; readonly replayed: boolean; readonly readmitted: boolean;
+  readonly message: string;
+}
 export interface ErrorPayload {
   readonly ok: false;
   readonly kind: 'error';
@@ -176,7 +217,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | ErrorPayload | HelpPayload
+  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -332,6 +373,80 @@ export async function runStatus(service: WorkOrchestrationPort, userId: string, 
       resumable: { total: items.value.length, byState },
     },
   };
+}
+
+const record = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+const finiteNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
+const nullableString = (value: unknown): string | null | undefined =>
+  value === null ? null : typeof value === 'string' ? value : undefined;
+
+/** Projeta exclusivamente o snapshot produzido pela RPC canônica. Não conta eventos,
+ * não aplica limites e não tenta readmitir: payload inválido falha fechado. */
+export async function runBudgetStatus(read: BudgetStatusCapability, workItemId: string): Promise<CommandResult> {
+  const raw = record(await read(workItemId));
+  const windows = record(raw?.windows);
+  const attempts = record(raw?.attempts);
+  const item = record(attempts?.item);
+  const user = record(attempts?.user);
+  const external = record(attempts?.external);
+  const runtime = record(raw?.runtime);
+  const userRuntime = record(runtime?.user24h);
+  const externalRuntime = record(runtime?.external24h);
+  const autonomousRuntime = record(runtime?.autonomous60m);
+  const reason = nullableString(raw?.reason);
+  const costClass = nullableString(raw?.costClass);
+  const nextBudgetReleaseAt = nullableString(raw?.nextBudgetReleaseAt);
+  const supervision = record(raw?.supervision);
+  const supervisionExpiresAt = supervision === null ? null : nullableString(supervision.expiresAt);
+  const unattendedReason = nullableString(raw?.unattendedReason);
+  const itemNext = nullableString(item?.nextReleaseAt);
+  const userNext = nullableString(user?.nextReleaseAt);
+  const externalNext = nullableString(external?.nextReleaseAt);
+  const numbers = {
+    attemptsHours: finiteNumber(windows?.attemptsHours), userRuntimeHours: finiteNumber(windows?.userRuntimeHours), autonomousRuntimeMinutes: finiteNumber(windows?.autonomousRuntimeMinutes),
+    itemUsed: finiteNumber(item?.used), itemLimit: finiteNumber(item?.limit), itemRemaining: finiteNumber(item?.remaining),
+    userUsed: finiteNumber(user?.used), userRemaining: finiteNumber(user?.remaining), externalUsed: finiteNumber(external?.used), externalRemaining: finiteNumber(external?.remaining),
+    userUsedSeconds: finiteNumber(userRuntime?.usedSeconds), userRemainingSeconds: finiteNumber(userRuntime?.remainingSeconds),
+    externalUsedSeconds: finiteNumber(externalRuntime?.usedSeconds), externalRemainingSeconds: finiteNumber(externalRuntime?.remainingSeconds),
+    autonomousUsedSeconds: finiteNumber(autonomousRuntime?.usedSeconds), autonomousRemainingSeconds: finiteNumber(autonomousRuntime?.remainingSeconds),
+  };
+  if (!raw || typeof raw.admitted !== 'boolean' || typeof raw.observedAt !== 'string' || typeof raw.policyVersion !== 'string'
+    || typeof raw.supervised !== 'boolean' || typeof raw.unattendedAdmitted !== 'boolean' || unattendedReason === undefined || supervisionExpiresAt === undefined
+    || reason === undefined || costClass === undefined || nextBudgetReleaseAt === undefined || itemNext === undefined || userNext === undefined || externalNext === undefined
+    || Object.values(numbers).some(value => value === null)) {
+    return errorResult('O orçamento autônomo não pôde ser reconstruído.', 'work_budget_invalid', EXIT.ERROR);
+  }
+  return { exitCode: EXIT.OK, payload: {
+    ok: true, kind: 'budget-status', workItemId, observedAt: raw.observedAt, policyVersion: raw.policyVersion,
+    costClass, admitted: raw.admitted, reason,
+    supervised: raw.supervised, supervisionExpiresAt, unattendedAdmitted: raw.unattendedAdmitted, unattendedReason,
+    userAttempts24h: numbers.userUsed!, userAttemptsRemaining: numbers.userRemaining!,
+    externalAttempts24h: numbers.externalUsed!, externalAttemptsRemaining: numbers.externalRemaining!,
+    windows: { attemptsHours: numbers.attemptsHours!, userRuntimeHours: numbers.userRuntimeHours!, autonomousRuntimeMinutes: numbers.autonomousRuntimeMinutes! },
+    attempts: {
+      item: { used: numbers.itemUsed!, limit: numbers.itemLimit!, remaining: numbers.itemRemaining!, nextReleaseAt: itemNext },
+      user: { used: numbers.userUsed!, remaining: numbers.userRemaining!, nextReleaseAt: userNext },
+      external: { used: numbers.externalUsed!, remaining: numbers.externalRemaining!, nextReleaseAt: externalNext },
+    },
+    runtime: {
+      user24h: { usedSeconds: numbers.userUsedSeconds!, remainingSeconds: numbers.userRemainingSeconds! },
+      external24h: { usedSeconds: numbers.externalUsedSeconds!, remainingSeconds: numbers.externalRemainingSeconds! },
+      autonomous60m: { usedSeconds: numbers.autonomousUsedSeconds!, remainingSeconds: numbers.autonomousRemainingSeconds! },
+    },
+    nextBudgetReleaseAt,
+  } };
+}
+
+export async function runWorkSupervise(capability: () => Promise<{ok:true;leaseId:string;expiresAt:string;replayed:boolean;readmitted:boolean}|{ok:false;code:string|null;message:string}>, workItemId:string):Promise<CommandResult>{
+  const result=await capability();
+  if(!result.ok)return errorResult(result.message,result.code,EXIT.ERROR);
+  return {exitCode:EXIT.OK,payload:{ok:true,kind:'work-supervise',workItemId,leaseId:result.leaseId,expiresAt:result.expiresAt,replayed:result.replayed,readmitted:result.readmitted,message:`Supervisão humana vigente até ${result.expiresAt}.${result.readmitted?' Mesmo item readmitido.':''}`}};
+}
+export async function runWorkUnsupervise(capability: () => Promise<{ok:true;replayed:boolean}|{ok:false;code:string|null;message:string}>, workItemId:string):Promise<CommandResult>{
+  const result=await capability(); if(!result.ok)return errorResult(result.message,result.code,EXIT.ERROR);
+  return {exitCode:EXIT.OK,payload:{ok:true,kind:'work-unsupervise',workItemId,leaseId:null,expiresAt:null,replayed:result.replayed,readmitted:false,message:'Supervisão humana revogada; budgets unattended voltam a valer.'}};
 }
 
 export async function runWorkList(service: WorkOrchestrationPort): Promise<CommandResult> {

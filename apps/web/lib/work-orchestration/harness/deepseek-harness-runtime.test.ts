@@ -71,6 +71,14 @@ describe('composeHarnessTask', () => {
     expect(task).toContain('Make the change, then stop.');
   });
 
+  test('inclui a política do harness quando presente (pré-inferência); ausente ⇒ não injeta', () => {
+    const withPolicy = composeHarnessTask(input({ harnessPolicyInstructions: 'CONTRATO DO HARNESS: runner jest; vitest proibido; entry.coderBackend proibido' }));
+    expect(withPolicy).toContain('CONTRATO DO HARNESS');
+    expect(withPolicy).toContain('vitest');
+    expect(withPolicy).toContain('entry.coderBackend');
+    expect(composeHarnessTask(input())).not.toContain('CONTRATO DO HARNESS');
+  });
+
   test('inclui o protocolo de tool-call (uma por passo; ler antes de editar) — mitiga o stall do Ollama', () => {
     const task = composeHarnessTask(input());
     expect(task).toContain('Tool-call protocol');

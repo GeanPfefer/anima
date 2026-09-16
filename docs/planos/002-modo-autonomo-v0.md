@@ -1,5 +1,11 @@
 # Plano 002 — Modo Autônomo V0
 
+> Estado operacional (2026-09-14): Coding Harness V3 ganhou wiring estruturado dos
+> `validation_criteria` e política validate-before-submit após o benchmark
+> `3a367223`: gate focal verde + `git diff` pós-edit são exigidos quando há comandos
+> executáveis; falha volta como observação recuperável e edits invalidam provas
+> anteriores. Zero compute pago nesta fatia. Ver arquitetura §9 e registro da sessão.
+
 ## Fechamento — Dev Local V1 + review/rework incremental completo (2026-08-30)
 
 `DEV_LOCAL_V1_REVIEW_REWORK_INCREMENTAL = PASS`. Após a reverificação append-only
@@ -2161,3 +2167,77 @@ classificado e executado. Sua attempt `311ec98b…` falhou novamente em
 protocolo é mudança material e exige proposta/decisão própria. Nenhuma mutação
 foi feita nesta reconciliação.
 [Registro](../registros/2026-08-26-reconciliacao-real-do-successor-item1.md).
+## Observabilidade CLI do orçamento autônomo (2026-09-05)
+
+Foi adicionada a capability read-only `anima budget status <work-item-id>` sobre
+a mesma RPC `autonomous_work_budget_status` usada pelo Supervisor. A RPC continua
+delegando a admissão a `private.autonomous_work_budget_decision`; o enriquecimento
+apenas projeta consumo/restante, runtime, janelas e timestamps de expiração de
+attempts persistidas. `nextBudgetReleaseAt` só existe para razões por contagem de
+attempts e seleciona a expiração que efetivamente reduz o consumo abaixo do teto,
+não necessariamente a primeira. Runtime não recebe estimativa heurística.
+
+Aceite provado: CLI humana e `--json`; saldo e esgotamento com razão canônica;
+ausência de novos eventos/attempts; expiração baseada em `execution_started` real.
+Gates: 49 testes CLI, pgTAP focado 9/9 e typecheck web. A regressão já presente
+entre a policy V2 local/external e a redefinição V1 da migration de human recovery
+foi observada nas regressões relacionadas e ficou fora deste incremento, pois sua
+correção mudaria regras de admissão.
+
+## Separação human-supervised / autonomous-unattended (2026-09-05)
+
+`work_supervision_leases` e as RPCs autenticadas de concessão/revogação modelam
+presença humana temporária por item e proposal version. A decisão bounded anterior
+foi preservada como `unattended_work_budget_decision`; a decisão efetiva ignora
+somente a recusa do budget enquanto há lease válido, sem apagar usage. CLI:
+`anima work supervise <id>` (30 min, renovável) e `work unsupervise <id>`.
+
+Provas: pgTAP da política 12/12, budget unattended 15/15, exclusividade 31/31,
+CLI 50/50 e typecheck web/types. A prova UX-03 isolada não iniciou porque seu
+helper `tests/helpers/routing.inc` não é montado pelo modo de invocação de arquivo
+único; isso é infraestrutura do runner, não falha da política.
+
+Prova viva `ce90eb14`: lease readmitiu o mesmo item com os nove attempts intactos;
+a primeira volta sandboxed falhou antes do provider na permissão Git. O retry
+governado fora do sandbox criou worktree, roteou OpenAI strong, persistiu checkpoint
+e evidência do provider (5 calls, 17.910 tokens), mas o gate Jest falhou porque o
+diff gerado não satisfez o contrato aprovado (`--task*` em vez de `--message*`).
+O item terminou `failed`, sem Verifier/review; não houve nova attempt. Lease e paid
+authority foram revogados ao encerrar a supervisão.
+
+## Correction-after-review com rework explícito — 2026-09-07
+
+Implementado o escopo efetivo determinístico `rework_scope ∪ remaining_scope`,
+limitado ao escopo original. O pedido humano persistido é a autoridade de reabertura:
+path completo ou basename inequívoco precisa estar explicitamente presente; ausência,
+ambiguidade e path externo falham fechados. A composição fica registrada no
+`execution_spec.correction_scope` e é revalidada antes da persistência. Recovery
+comum mantém redução estrita e não herda esse relaxamento.
+
+Prova viva: `work correct 01fdf66a` criou uma única seq3 `8a2515d8`; replay devolveu
+o mesmo item. A proposta foi revisada append-only para v2 local
+(`ollama/qwen3-coder:latest`) e aprovada. Nenhuma attempt começou: o Resource
+Governor recusou em pressão `moderate` (`defer/resource_pressure`). Próxima retomada
+exata: renovar supervisão, revalidar a classificação/fila e executar o mesmo item
+quando o governor permitir; parar em `review`, sem accept/integration/push/deploy.
+
+### Retomada supervisionada ainda barrada pelo Governor — 2026-09-08
+
+A fonte persistida confirmou `8a2515d8` `approved` v2, único successor da correção
+e sem attempts. O modelo local estava disponível e o lease item-scoped foi
+renovado, mas as voltas canônicas recusaram antes de `execution_started`; a pressão
+terminou `moderate/defer/resource_pressure`. A supervisão foi revogada e zero
+compute pago foi usado. Próximo ponto: retomar somente `8a2515d8` quando o host
+estiver estavelmente `low`, seguir por coder/gates/Verifier e parar em `review`.
+[Registro](../registros/2026-09-08-retomada-correcao-barreira-governor.md).
+
+# Atualização — chat Dev liga seleção à admissão canônica (2026-09-09)
+
+O mandato explícito de executar self-development no chat Dev agora reutiliza
+`request_autonomous_execution`, a mesma admissão usada pelo cartão. A chamada
+revalida a fila vigente e não cria claim/attempt; estes continuam exclusivos do
+Resident Host e do Supervisor. Consultas sobre o próximo item continuam somente
+leitura. A UI acompanha a projeção canônica por polling moderado, sem acumular
+eventos localmente, e encerra o acompanhamento em review, fronteira humana ou
+terminal. Nenhuma autoridade de provider, compute, integração, merge ou deploy é
+derivada do seletor do chat.

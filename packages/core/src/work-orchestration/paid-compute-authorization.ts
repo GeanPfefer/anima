@@ -25,6 +25,23 @@ import type { Json } from '@anima/types';
  * humano (sem lifecycle de gasto sob controle do Anima). Só `paid` exige autorização. */
 export type NodeBillingMode = 'owned' | 'already_provisioned' | 'paid';
 
+/**
+ * ESCOPO POR CAPACIDADE de uma autorização paga (Cloud Resource Matching V1). Alternativa à
+ * `resourceClass` SKU-fixa: autoriza QUALQUER recurso do provider que satisfaça estes limites de
+ * capacidade — sem amarrar a autoridade a uma GPU específica. Uma autoridade SKU-fixa (ex.: A40)
+ * continua sendo A40-apenas; capability bounds é uma autoridade DIFERENTE, mais ampla, que o
+ * humano concede explicitamente. As duas são mutuamente exclusivas por construção.
+ */
+export interface CloudCapabilityScopeV1 {
+  readonly minimumVramGiB: number;
+  readonly requiredGpuFeatures: readonly string[];
+  /** Teto de preço por hora aceitável para qualquer recurso do escopo; `null` = sem teto horário
+   * (o teto agregado `maxCostEstimate` continua sendo a barreira monetária). */
+  readonly maxHourlyPrice: { readonly currency: string; readonly amount: number } | null;
+  /** Máximo de nodes concorrentes que o escopo autoriza. */
+  readonly maxNodes: number;
+}
+
 /** Autorização HUMANA de compute pago. Proveniência explícita e auditável: quem autorizou,
  * para qual provider/node/trabalho, com que teto de duração e custo, e por quanto tempo a
  * autorização vale. `authorizedByAuthor` é sempre `'user'` — uma autorização com autoria
@@ -37,8 +54,12 @@ export interface PaidComputeAuthorizationV1 {
   readonly providerId: string;
   /** Node específico autorizado, ou `null` = qualquer node do provider. */
   readonly nodeId: string | null;
-  /** Classe de recurso autorizada, ou `null` = qualquer classe do provider. */
+  /** Classe de recurso SKU-fixa autorizada, ou `null` = não amarrada a uma SKU. Mutuamente
+   * exclusiva com `capabilityScope`. */
   readonly resourceClass: string | null;
+  /** Escopo por CAPACIDADE (Cloud Resource Matching V1), quando a autoridade não é SKU-fixa.
+   * Ausente/`null` = sem escopo por capacidade. Nunca coexiste com `resourceClass` não-nulo. */
+  readonly capabilityScope?: CloudCapabilityScopeV1 | null;
   /** Trabalho correlacionado, ou `null` = não amarrado a um item específico. */
   readonly workItemId: string | null;
   /** Teto de duração ativa autorizada (ms). */
@@ -59,6 +80,14 @@ export interface PaidComputeRequest {
   readonly workItemId: string | null;
   readonly requestedDurationMs: number;
   readonly estimatedCost?: { readonly currency: string; readonly amount: number } | null;
+  /** Capacidades REAIS do recurso concreto escolhido (Cloud Resource Matching V1). Necessárias
+   * SOMENTE quando a autoridade é por capacidade (`capabilityScope`); ignoradas quando a
+   * autoridade é SKU-fixa. Ausência sob autoridade por capacidade ⇒ fail-closed. */
+  readonly resourceCapabilities?: {
+    readonly vramGiB: number;
+    readonly gpuFeatures: readonly string[];
+    readonly perHour: { readonly currency: string; readonly amount: number } | null;
+  } | null;
 }
 
 export type PaidComputeDenialReason =
@@ -70,6 +99,8 @@ export type PaidComputeDenialReason =
   | 'provider_mismatch'
   | 'node_mismatch'
   | 'resource_class_mismatch'
+  | 'resource_capabilities_required'
+  | 'resource_capabilities_insufficient'
   | 'work_item_mismatch'
   | 'duration_exceeds_authorized'
   | 'aggregate_cost_ceiling_required'
@@ -96,6 +127,24 @@ const isCostShape = (v: unknown): v is { currency: string; amount: number } => {
   return !!o && nonBlank(o.currency) && typeof o.amount === 'number' && Number.isFinite(o.amount) && o.amount >= 0;
 };
 
+const positiveNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+
+/** Valida a forma de um escopo por capacidade persistido. `null` quando malformado. */
+const parseCapabilityScope = (v: Json | undefined): CloudCapabilityScopeV1 | null => {
+  const o = asObject(v);
+  if (!o) return null;
+  if (!positiveNum(o.minimumVramGiB)) return null;
+  if (!Array.isArray(o.requiredGpuFeatures) || !o.requiredGpuFeatures.every(f => nonBlank(f))) return null;
+  if (!positiveInt(o.maxNodes)) return null;
+  if (o.maxHourlyPrice !== null && o.maxHourlyPrice !== undefined && !isCostShape(o.maxHourlyPrice)) return null;
+  return {
+    minimumVramGiB: o.minimumVramGiB,
+    requiredGpuFeatures: (o.requiredGpuFeatures as string[]).map(String),
+    maxHourlyPrice: o.maxHourlyPrice == null ? null : (o.maxHourlyPrice as { currency: string; amount: number }),
+    maxNodes: o.maxNodes,
+  };
+};
+
 /**
  * Reconstrói e valida uma `PaidComputeAuthorizationV1` de um JSON persistido. Fail-closed em
  * qualquer campo malformado. Não confere autoria humana nem validade temporal aqui (isso é
@@ -116,6 +165,14 @@ export function parsePaidComputeAuthorization(value: Json | undefined): PaidComp
   if (root.maxCostEstimate !== null && !isCostShape(root.maxCostEstimate)) return null;
   if (!isoInstant(root.validFrom) || !isoInstant(root.validUntil)) return null;
   if (Date.parse(root.validUntil) <= Date.parse(root.validFrom)) return null;
+  // Escopo por capacidade (opcional). Malformado quando presente e inválido; mutuamente exclusivo
+  // com `resourceClass` SKU-fixa (uma autoridade não pode ser as duas coisas).
+  let capabilityScope: CloudCapabilityScopeV1 | null = null;
+  if (root.capabilityScope !== null && root.capabilityScope !== undefined) {
+    capabilityScope = parseCapabilityScope(root.capabilityScope);
+    if (capabilityScope === null) return null;
+    if (root.resourceClass !== null) return null; // exclusividade: SKU-fixa XOR capability bounds
+  }
   return {
     schemaVersion: 1,
     authorizationId: root.authorizationId,
@@ -124,6 +181,7 @@ export function parsePaidComputeAuthorization(value: Json | undefined): PaidComp
     providerId: root.providerId,
     nodeId: (root.nodeId as string | null) ?? null,
     resourceClass: (root.resourceClass as string | null) ?? null,
+    capabilityScope,
     workItemId: (root.workItemId as string | null) ?? null,
     maxDurationMs: root.maxDurationMs,
     maxCostEstimate: root.maxCostEstimate === null ? null : (root.maxCostEstimate as { currency: string; amount: number }),
@@ -164,8 +222,25 @@ export function evaluatePaidComputeAuthorization(
 
   if (authorization.providerId !== request.providerId) return { authorized: false, reason: 'provider_mismatch' };
   if (authorization.nodeId !== null && authorization.nodeId !== request.nodeId) return { authorized: false, reason: 'node_mismatch' };
-  if (authorization.resourceClass !== null && authorization.resourceClass !== request.resourceClass) {
-    return { authorized: false, reason: 'resource_class_mismatch' };
+  // Escopo de recurso: SKU-fixa XOR capacidade. Uma autoridade SKU-fixa (ex.: A40) só cobre a
+  // classe exata — NUNCA vira autorização implícita de outra GPU. Uma autoridade por capacidade
+  // cobre qualquer recurso cujas capacidades REAIS satisfaçam os limites concedidos.
+  if (authorization.resourceClass !== null) {
+    if (authorization.resourceClass !== request.resourceClass) return { authorized: false, reason: 'resource_class_mismatch' };
+  } else if (authorization.capabilityScope != null) {
+    const scope = authorization.capabilityScope;
+    const caps = request.resourceCapabilities;
+    if (!caps || typeof caps.vramGiB !== 'number' || !Number.isFinite(caps.vramGiB) || !Array.isArray(caps.gpuFeatures)) {
+      return { authorized: false, reason: 'resource_capabilities_required' };
+    }
+    if (caps.vramGiB < scope.minimumVramGiB) return { authorized: false, reason: 'resource_capabilities_insufficient' };
+    if (!scope.requiredGpuFeatures.every(f => caps.gpuFeatures.includes(f))) return { authorized: false, reason: 'resource_capabilities_insufficient' };
+    if (scope.maxHourlyPrice != null) {
+      if (!caps.perHour || caps.perHour.currency.toUpperCase() !== scope.maxHourlyPrice.currency.toUpperCase()
+        || caps.perHour.amount > scope.maxHourlyPrice.amount) {
+        return { authorized: false, reason: 'resource_capabilities_insufficient' };
+      }
+    }
   }
   if (authorization.workItemId !== null && authorization.workItemId !== request.workItemId) {
     return { authorized: false, reason: 'work_item_mismatch' };

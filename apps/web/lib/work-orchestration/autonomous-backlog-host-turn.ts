@@ -1,4 +1,4 @@
-import { classifyTurnForDriver, type BacklogCycleResult, type BacklogCycleStopReason } from './autonomous-backlog-driver';
+import { classifyTurnForDriver, type BacklogCycleResult, type BacklogCycleStopReason, type TurnRefusal } from './autonomous-backlog-driver';
 import type { SupervisorTurnOutcome } from './supervisor';
 
 // ============================================================
@@ -83,6 +83,12 @@ export interface BacklogHostTurnResult {
   readonly lastOutcome: SupervisorTurnOutcome | null;
   /** Log por ciclo, para observabilidade/UI. */
   readonly cycles: readonly BacklogCycleResult[];
+  /**
+   * Razão canônica (`{ code, message }`) quando o host parou por `turn_not_executable` —
+   * promovida do ciclo que parou. Sobe até o log do resident host para que a barreira
+   * exata seja legível sem inferir do terminal. `null`/ausente nas demais paradas.
+   */
+  readonly notExecutableReason?: TurnRefusal | null;
 }
 
 export interface BacklogHostTurnDependencies {
@@ -115,6 +121,7 @@ export async function runAutonomousBacklogHostTurn(deps: BacklogHostTurnDependen
     stopReason: BacklogHostStopReason,
     continuation: BacklogContinuation,
     moreWorkAvailable: boolean,
+    notExecutableReason: TurnRefusal | null = null,
   ): BacklogHostTurnResult => ({
     cyclesExecuted: cycles.length,
     turnsExecuted: cycles.reduce((sum, cycle) => sum + cycle.turnsExecuted, 0),
@@ -124,6 +131,7 @@ export async function runAutonomousBacklogHostTurn(deps: BacklogHostTurnDependen
     moreWorkAvailable,
     lastOutcome,
     cycles,
+    notExecutableReason,
   });
 
   for (;;) {
@@ -147,7 +155,8 @@ export async function runAutonomousBacklogHostTurn(deps: BacklogHostTurnDependen
     if (continuation !== 'continue') {
       // O ciclo parou por razão definitiva (`stop`) ou de espera (`wait`): o host para
       // com a MESMA razão do ciclo — nenhum trabalho executável agora deixado por fazer.
-      return finish(result.stopReason, continuation, false);
+      // Propaga a razão canônica da parada `turn_not_executable` (quando houve) intacta.
+      return finish(result.stopReason, continuation, false, result.notExecutableReason ?? null);
     }
     // `continue`: o ciclo bateu no próprio bound; pode haver mais → próximo ciclo.
   }

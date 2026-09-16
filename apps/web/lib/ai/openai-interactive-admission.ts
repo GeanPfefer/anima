@@ -6,10 +6,9 @@ import {
 // ============================================================
 // Admissão financeira dos consumidores INTERATIVOS da OpenAI (chat e planner).
 //
-// Hoje NÃO existe autoridade paga interativa persistida no ledger — o domínio de
-// chat/planner ainda não tem um envelope humano de gasto. Portanto esta admissão
-// RECUSA sempre, o que faz os chamadores caírem no provider LOCAL (observável),
-// nunca numa chamada paga silenciosa.
+// A seleção explícita de GPT no request do compositor é a autoridade interativa
+// estreita para chat/planner. Ela não vale para coder, work item, compute autônomo
+// ou qualquer outro efeito e nunca autoriza troca de provider.
 //
 // É deliberadamente o ÚNICO ponto de plugagem para uma futura autoridade interativa
 // (Compute Router V1): quando existir um envelope por-usuário/orçamento, ele entra
@@ -19,7 +18,14 @@ import {
 export function createInteractiveOpenAIAdmission(): OpenAIAdmissionControl {
   return {
     async admit(intent) {
-      throw new OpenAIAdmissionDenied('interactive_paid_authority_absent', intent.consumer);
+      if ((intent.consumer !== 'chat' && intent.consumer !== 'planner') || !intent.userId || intent.userId === 'unknown') {
+        throw new OpenAIAdmissionDenied('interactive_provider_selection_absent', intent.consumer);
+      }
+      return {
+        consumer: intent.consumer,
+        authorizationRef: `interactive-provider-selection:${intent.consumer}:${intent.userId}`,
+        reservationId: null,
+      };
     },
   };
 }

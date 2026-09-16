@@ -1,6 +1,7 @@
 import {
   classifyHarnessTurnEnd,
   decideHarnessPreStep,
+  renderCoderHarnessPolicyInstructions,
   resolveHarnessStepBudget,
   POC_HARNESS_STEP_BUDGET,
   type HarnessObservedTurnOutcome,
@@ -68,6 +69,13 @@ export interface HarnessRunTurnInput {
   /** Raiz absoluta da worktree isolada — o cwd das ferramentas do Harness. */
   readonly rootPath: string;
   readonly objective: string;
+  /**
+   * Política canônica do harness já RENDERIZADA (texto determinístico compartilhado
+   * com Ollama/OpenAI). O runtime deve prependê-la às instruções do agente ANTES da
+   * inferência. Ausente ⇒ o request não trouxe política (fallback seguro: o validador
+   * estrutural pós-output do host ainda roda).
+   */
+  readonly harnessPolicyInstructions?: string;
   readonly includedScope: readonly string[];
   readonly excludedScope: readonly string[];
   readonly carriedContext?: CoderEditRequest['carriedContext'];
@@ -161,6 +169,9 @@ export class DeepSeekHarnessCoderBackend implements CoderBackend {
     const result = await this.runtime.runTurn({
       rootPath,
       objective: request.objective,
+      ...(request.harnessPolicy
+        ? { harnessPolicyInstructions: renderCoderHarnessPolicyInstructions(request.harnessPolicy) }
+        : {}),
       includedScope: request.includedScope,
       excludedScope: request.excludedScope,
       ...(request.carriedContext ? { carriedContext: request.carriedContext } : {}),

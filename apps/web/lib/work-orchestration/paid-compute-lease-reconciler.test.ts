@@ -72,6 +72,10 @@ function statefulRunpod() {
     inferencePort: 11434, healthPath: '/', podEnv: {}, sshPrivateKeyPath: 'key', sshKnownHostsPath: 'known', sshPublicKey: 'ssh-ed25519 TEST',
   };
   const newProvisioner = () => new RunPodNodeProvisioner(config, client, { pollIntervalMs: 1, sleep: async () => undefined,
+    // Sonda TCP determinística: sem ela o `openTunnel` em camadas faz um connect REAL ao IP fake
+    // (10.0.0.1) contra um deadline de relógio real e o teste pendura — a Fase 2 (readiness em
+    // camadas) foi adicionada depois deste fake. 'reachable' faz o túnel abrir na 1ª passada.
+    tcpProbe: { probe: async () => 'reachable' },
     tunnelManager: { open: async () => ({ endpoint: 'http://127.0.0.1:21434', close: async () => undefined }), closeAll: async () => undefined } });
   return { pods, calls, client, config, newProvisioner };
 }

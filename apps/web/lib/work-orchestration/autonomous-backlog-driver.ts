@@ -54,10 +54,26 @@ export type BacklogCycleStopReason =
   //   pausa/cancelamento EXPLÍCITO do usuário aplicado num checkpoint (UX-01).
   | 'control_applied';
 
+/**
+ * Razão canônica estruturada de uma recusa de volta — o MESMO `{ code, message }` do
+ * Supervisor (`SupervisorTurnResult.refusal`), promovido ao vocabulário do driver para
+ * que a diagnosticabilidade atravesse ciclo → host → evidência SEM drift nem categoria
+ * inventada. O `code` é o vocabulário canônico do domínio (ex.: `work_item_unavailable`,
+ * `coder_node_unavailable`, `paid_compute_authorization_required`, `coder_placement_deferred`,
+ * o `reasonCode` do Compute Router, ou o `code` da seleção de executor).
+ */
+export interface TurnRefusal {
+  readonly code: string;
+  readonly message: string;
+}
+
 export interface BacklogCycleTurn {
   /** Item que a volta selecionou server-side, quando houve seleção. */
   readonly workItemId: string | null;
   readonly outcome: SupervisorTurnOutcome;
+  /** Razão canônica estruturada desta volta, quando o Supervisor recusou (`{ code, message }`).
+   *  Ausente/`null` quando a volta não recusou. Preserva o porquê por-volta no log do ciclo. */
+  readonly refusal?: TurnRefusal | null;
 }
 
 export interface BacklogCycleResult {
@@ -71,6 +87,13 @@ export interface BacklogCycleResult {
   readonly lastOutcome: SupervisorTurnOutcome | null;
   /** Log por volta, para telemetria/auditoria do ciclo. */
   readonly turns: readonly BacklogCycleTurn[];
+  /**
+   * Razão canônica (`{ code, message }`) da parada `turn_not_executable` — a `refusal` do
+   * Supervisor da volta que a causou. Existe SÓ quando `stopReason === 'turn_not_executable'`;
+   * `null` em qualquer outra parada. É o que torna a parada mais opaca do terminal
+   * diagnosticável sem inferência: nunca mais só `turn_not_executable`, mas o CÓDIGO real.
+   */
+  readonly notExecutableReason?: TurnRefusal | null;
 }
 
 export interface BacklogCycleDependencies {
@@ -182,13 +205,14 @@ export async function runAutonomousBacklogCycle(deps: BacklogCycleDependencies):
   let lastOutcome: SupervisorTurnOutcome | null = null;
   let lastPending: BacklogPending = EMPTY_PENDING;
 
-  const stop = (reason: BacklogCycleStopReason): BacklogCycleResult => ({
+  const stop = (reason: BacklogCycleStopReason, notExecutableReason: TurnRefusal | null = null): BacklogCycleResult => ({
     turnsExecuted: turns.length,
     itemsTouched: touched.size,
     stopReason: reason,
     pending: lastPending,
     lastOutcome,
     turns,
+    notExecutableReason,
   });
 
   for (;;) {
@@ -212,11 +236,15 @@ export async function runAutonomousBacklogCycle(deps: BacklogCycleDependencies):
 
     const result = await deps.runTurn(decision.entry, deps.signal);
     lastOutcome = result.outcome;
-    turns.push({ workItemId: result.selection?.workItemId ?? null, outcome: result.outcome });
+    turns.push({ workItemId: result.selection?.workItemId ?? null, outcome: result.outcome, refusal: result.refusal });
 
     const verdict = classifyTurnForDriver(result.outcome);
     if (verdict.touched && result.selection) touched.add(result.selection.workItemId);
-    if (verdict.stop !== null) return stop(verdict.stop);
+    // `turn_not_executable` é a parada OPACA no terminal: promove a `refusal` canônica da
+    // volta que a causou à razão estruturada do ciclo, para diagnóstico sem inferência.
+    if (verdict.stop !== null) {
+      return stop(verdict.stop, verdict.stop === 'turn_not_executable' ? result.refusal : null);
+    }
     // continue: reavalia o backlog na próxima iteração.
   }
 }

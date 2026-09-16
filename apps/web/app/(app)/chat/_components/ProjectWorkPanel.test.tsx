@@ -16,3 +16,10 @@ test('lista todos, explica dependências e só oferece execução autônoma ao e
   fireEvent.click(screen.getAllByRole('button',{name:'Ver detalhes'})[1]!);
   expect(screen.queryByRole('button',{name:'Executar autonomamente'})).not.toBeInTheDocument();
 });
+
+test('item admitido abre acompanhamento canônico sem acumular eventos locais',()=>{
+  const item='11111111-1111-4111-8111-111111111111';
+  render(<ProjectWorkPanel items={[make(item,'Ciclo autônomo')]} focusedWorkItemId={item} trackedWorkItemId={item} onFocus={jest.fn()} onChange={jest.fn()}/>);
+  expect(screen.getByText('Aguardando admissão da execução pelo Resident Host.')).toBeInTheDocument();
+  expect(screen.getByRole('article')).toHaveAttribute('aria-label','Trabalho, versão 2');
+});

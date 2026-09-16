@@ -193,10 +193,37 @@ describe('ollama-protocol — Commit 2: leitura limitada', () => {
     expect(JSON.stringify(entry!.structure)).not.toContain('import x');
   });
 
-  test('parseReadRequests: teto de leituras é erro de schema', () => {
+  test('parseReadRequests: excedente do orçamento por rodada é DEFERIDO, não recusado (V3)', () => {
     const many = Array.from({ length: 9 }, () => ({ path: 'docs/a.md' }));
-    expect(() => parseReadRequests(many, SCOPE)).toThrow(OllamaProtocolError);
-    try { parseReadRequests(many, SCOPE); } catch (e) { expect((e as OllamaProtocolError).code).toBe('ollama_invalid_response_schema'); }
+    const { requests, deferred, rejected } = parseReadRequests(many, SCOPE); // orçamento default 8
+    expect(requests).toHaveLength(8);
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]).toContain('docs/a.md');
+    expect(rejected).toHaveLength(0);
+  });
+
+  test('parseReadRequests: orçamento explícito serve N e defere o resto', () => {
+    const many = Array.from({ length: 5 }, () => ({ path: 'docs/a.md' }));
+    const { requests, deferred } = parseReadRequests(many, SCOPE, 2);
+    expect(requests).toHaveLength(2);
+    expect(deferred).toHaveLength(3);
+  });
+
+  test('parseReadRequests: acima da guarda de ABUSO continua erro de schema', () => {
+    const abusive = Array.from({ length: 65 }, () => ({ path: 'docs/a.md' }));
+    expect(() => parseReadRequests(abusive, SCOPE)).toThrow(OllamaProtocolError);
+    try { parseReadRequests(abusive, SCOPE); } catch (e) { expect((e as OllamaProtocolError).code).toBe('ollama_invalid_response_schema'); }
+  });
+
+  test('parseReadRequests: deferência conta só leituras VÁLIDAS (fora do escopo é rejeitado, não deferido)', () => {
+    const mixed = [
+      ...Array.from({ length: 9 }, () => ({ path: 'docs/a.md' })),
+      { path: '/etc/passwd' },
+    ];
+    const { requests, deferred, rejected } = parseReadRequests(mixed, SCOPE);
+    expect(requests).toHaveLength(8);
+    expect(deferred).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
   });
 
   test('parseReadRequests: caminho fora do escopo é rejeitado (relatado), válidos seguem; limites aplicados', () => {

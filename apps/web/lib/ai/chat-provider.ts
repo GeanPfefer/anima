@@ -51,10 +51,6 @@ export type ChatProviderStream = {
   provider: ChatProviderId;
   model: string;
   stream: ReadableStream<Uint8Array>;
-  // Presente quando a OpenAI paga NÃO foi admitida e a resposta veio do provider
-  // LOCAL. Observabilidade da política: nunca é fallback pago silencioso, e o
-  // consumidor pode expor o motivo (ex.: header) além do provider já ser 'ollama'.
-  fallback?: { readonly from: 'openai'; readonly reason: string };
 };
 
 // OpenAI Structured Outputs aceita um subconjunto de JSON Schema. A API provou
@@ -309,13 +305,12 @@ export async function streamChatProvider(
   try {
     return await streamOpenAI(request, admission, deps.fetchImpl);
   } catch (error) {
-    // Política auto-local: OpenAI paga NÃO admitida ⇒ provider LOCAL (observável via
-    // `provider:'ollama'` + `fallback`). Nunca chamada paga silenciosa. Se o local
-    // também não puder operar, o erro observável do Ollama sobe — bloqueio sem gasto.
     if (error instanceof OpenAIAdmissionDenied) {
-      console.info('[chat-provider] OpenAI paga não admitida; usando provider local', { reason: error.reason, consumer: 'chat' });
-      const local = await streamOllama(request);
-      return { ...local, fallback: { from: 'openai', reason: error.reason } };
+      console.warn('[chat-provider] provider selecionado não admitido', {
+        requestedProvider: 'openai', effectiveProvider: 'openai',
+        reason: error.reason, consumer: 'chat', fallbackAttempted: false,
+      });
+      throw new ChatProviderError(`Não foi possível usar a OpenAI: ${error.reason}.`, 403);
     }
     throw error;
   }

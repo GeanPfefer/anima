@@ -3,6 +3,10 @@ import {
   OpenAIAdmissionDenied,
   type OpenAIAdmissionControl,
 } from '@/lib/ai/openai-paid-transport';
+import {
+  resolveAgenticRuntimePolicy,
+  STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1,
+} from '@anima/core';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend, type CoderProtocolTransport } from './ollama-coder';
 import type { ContextBudget } from './ollama-protocol';
@@ -260,9 +264,23 @@ export class GptCoderBackend implements CoderBackend {
     // bounded/fail-closed (o protocolo ainda recusa um prompt que não caiba na janela).
     const context = resolveOpenAICoderContext(model);
     this.contextResolutionValue = context;
+    // Coding Harness V3: um backend REMOTO FORTE recebe o perfil agêntico forte —
+    // orçamento de leituras por rodada e rodadas MAIORES do que o local. É a correção
+    // arquiteturalmente correta do gargalo que reprovou a correction paga: o
+    // `gpt-5.6-terra` pediu mais leituras do que o orçamento por rodada e a tentativa
+    // falhava com `ollama_invalid_response_schema` ANTES de qualquer edit. Agora o
+    // excedente é deferido; a janela grande do modelo remoto comporta a exploração
+    // ampla. Um `maxReadRounds` legado (se passado) ainda faz override, clampado no core.
+    const runtimePolicy = resolveAgenticRuntimePolicy({
+      mode: 'supervised',
+      profile: STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1,
+      ...(options.maxReadRounds !== undefined
+        ? { overrides: { maxReadRounds: options.maxReadRounds } }
+        : {}),
+    });
     this.delegate = new OllamaCoderBackend({
       model, backendId: this.id, providerLabel: `OpenAI ${model}`, protocolTransport: transport, fetchImpl,
-      timeoutMs: options.timeoutMs ?? 90_000, maxReadRounds: options.maxReadRounds,
+      timeoutMs: options.timeoutMs ?? 90_000, agenticRuntimePolicy: runtimePolicy,
       operationalContextCap: context.operationalCap,
       ...(context.declaredContextLength !== null ? { declaredContextLength: context.declaredContextLength } : {}),
       outputReserveTokens: OPENAI_CODER_OUTPUT_RESERVE_TOKENS,

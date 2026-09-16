@@ -19,6 +19,7 @@ const EMPTY_PENDING = { readyOccupied: 0, running: 0, awaitingHuman: 0, blocked:
 const cycle = (
   stopReason: BacklogCycleStopReason,
   turns: readonly [string, SupervisorTurnOutcome][] = [],
+  notExecutableReason: { code: string; message: string } | null = null,
 ): BacklogCycleResult => ({
   turnsExecuted: turns.length,
   itemsTouched: new Set(turns.map(([id]) => id)).size,
@@ -26,6 +27,7 @@ const cycle = (
   pending: EMPTY_PENDING,
   lastOutcome: turns.length > 0 ? turns[turns.length - 1]![1] : null,
   turns: turns.map(([workItemId, outcome]) => ({ workItemId, outcome })),
+  notExecutableReason,
 });
 
 const cycleScript = (results: readonly BacklogCycleResult[]) => {
@@ -166,6 +168,17 @@ describe('host-turn do backlog — runAutonomousBacklogHostTurn', () => {
     expect(cy.calls.count).toBe(1);
     expect(r.stopReason).toBe('turn_not_executable');
     expect(r.continuation).toBe('stop');
+  });
+
+  // (8b) DIAGNOSTICABILIDADE: o host promove a razão canônica do ciclo que parou por
+  // `turn_not_executable` — a barreira exata sobe intacta até o desfecho do host.
+  test('host promove a razão canônica (code/message) da parada turn_not_executable', async () => {
+    const refusal = { code: 'paid_compute_authorization_required', message: 'Node on-demand indisponível: waiting_authorization.' };
+    const cy = cycleScript([cycle('turn_not_executable', [['A', 'selection_not_executable']], refusal)]);
+    const r = await runAutonomousBacklogHostTurn(host({ runCycle: cy.run, maxCycles: 50 }));
+    expect(r.stopReason).toBe('turn_not_executable');
+    expect(r.continuation).toBe('stop');
+    expect(r.notExecutableReason).toEqual(refusal);
   });
 
   test('ciclo com tentativa aberta (turn_incomplete) → wait (retomar depois), sem spin', async () => {

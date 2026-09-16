@@ -9,6 +9,11 @@ describe('parser de argumentos da CLI', () => {
     expect(parseArgs(['status', '--json'])).toEqual({ ok: true, command: { kind: 'status', json: true } });
   });
 
+  test('budget status exige item e aceita --json', () => {
+    expect(parseArgs(['budget', 'status', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'budget-status', id: 'abc', json: true } });
+    expect(parseArgs(['budget', 'status'])).toEqual({ ok: false, error: 'Uso: anima budget status <id>' });
+  });
+
   test('work list sem json', () => {
     expect(parseArgs(['work', 'list'])).toEqual({ ok: true, command: { kind: 'work-list', json: false } });
   });
@@ -48,6 +53,10 @@ describe('parser de argumentos da CLI', () => {
   test('work authorize-resume <id> (deriva o resto do estado persistido)', () => {
     expect(parseArgs(['work', 'authorize-resume', 'abc'])).toEqual({ ok: true, command: { kind: 'work-authorize-resume', id: 'abc', planPath: null, json: false } });
     expect(parseArgs(['work', 'authorize-resume'])).toEqual({ ok: false, error: 'Uso: anima work authorize-resume <id> [--plan arquivo.json]' });
+  });
+  test('work supervise/unsupervise exigem item',()=>{
+    expect(parseArgs(['work','supervise','abc'])).toEqual({ok:true,command:{kind:'work-supervise',id:'abc',json:false}});
+    expect(parseArgs(['work','unsupervise','abc','--json'])).toEqual({ok:true,command:{kind:'work-unsupervise',id:'abc',json:true}});
   });
 
   test('work authorize-resume com --plan e --json', () => {

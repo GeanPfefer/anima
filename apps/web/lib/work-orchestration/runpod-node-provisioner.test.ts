@@ -3,13 +3,21 @@ import type { NodeLeaseV0, NodeProvisionRequest, ProvisionedNodeHandle } from '@
 import {
   RunPodNodeProvisioner,
   classifyRunPodError,
+  fetchHttpClient,
   readRunPodProvisionerConfig,
+  runpodHttpTimeoutMs,
+  DEFAULT_RUNPOD_HTTP_TIMEOUT_MS,
+  netTcpProbe,
+  runpodEndpointPublicationDeadlineMs,
+  DEFAULT_RUNPOD_ENDPOINT_PUBLICATION_DEADLINE_MS,
   type HttpClient,
   type HttpRequestInput,
   type HttpResponse,
   type RunPodProvisionerConfig,
 } from './runpod-node-provisioner';
-import type { RunPodTunnelManager } from './runpod-ssh-tunnel';
+import type { RunPodTunnelManager, RunPodSshTarget } from './runpod-ssh-tunnel';
+import type { TcpProbe, TcpReachability } from './runpod-node-provisioner';
+import { renderRunPodBootstrapScript, RUNPOD_BOOTSTRAP_DURABLE_COMMAND } from './runpod-bootstrap';
 
 const API_KEY = 'rp_secret_KEY_abc123';
 const BASE = 'https://runpod.test/v1';
@@ -42,7 +50,10 @@ const json = (status: number, value: unknown): HttpResponse => ({ status, body: 
 const runningPod = (over: Record<string, unknown> = {}) => ({ id: 'pod-1', name: 'anima-node-1', desiredStatus: 'RUNNING', publicIp: '1.2.3.4', portMappings: { '22': 20022 }, costPerHr: 0.44, ...over });
 
 const tunnelManager: RunPodTunnelManager = { open: async () => ({ endpoint: 'http://127.0.0.1:21434', close: async () => undefined }), closeAll: async () => undefined };
-const opts = { pollIntervalMs: 1, maxProvisionMs: 1_000, healthTimeoutMs: 50, sleep: async () => undefined, now: () => 1_000, tunnelManager } as const;
+// Sonda TCP default dos testes: endpoint sempre roteável (o cold-start de TCP/mapping é exercitado
+// explicitamente na suíte de readiness em camadas, com sondas dedicadas).
+const reachableProbe: TcpProbe = { probe: async () => 'reachable' };
+const opts = { pollIntervalMs: 1, maxProvisionMs: 1_000, healthTimeoutMs: 50, sleep: async () => undefined, now: () => 1_000, tunnelManager, tcpProbe: reachableProbe } as const;
 const request: NodeProvisionRequest = {
   nodeId: 'node-1', providerId: 'runpod', model: 'qwen3-coder:latest', resourceClass: 'gpu-a40',
   lease: { schemaVersion: 1, nodeId: 'node-1', providerId: 'runpod', billingMode: 'paid', workItemId: 'w1', attemptId: 'a1', maxActiveDurationMs: 1800000, idleTimeoutMs: 60000, leaseExpiresAt: '2030-01-01T00:00:00Z', authorizationRef: 'auth-1', priceHint: null } as NodeLeaseV0,
@@ -78,6 +89,56 @@ describe('classifyRunPodError (Missão 5)', () => {
     expect(classifyRunPodError(400, 'no available GPUs in this region')).toBe('capacity_unavailable');
     expect(classifyRunPodError(500, '')).toBe('provider_unreachable');
     expect(classifyRunPodError(400, 'weird')).toBe('provision_failed');
+  });
+});
+
+// ============================================================
+// ANTI-HANG: o transporte HTTP tem timeout POR REQUISIÇÃO. Sem ele, um único `fetch` cuja
+// conexão abre e nunca responde (clássico em cold-start) penduraria o host-turn para sempre em
+// `state=running` — os deadlines dos laços de provisão só são checados ENTRE requisições. Aqui
+// provamos o boundary do transporte diretamente, mockando o `fetch` global.
+// ============================================================
+describe('fetchHttpClient — timeout por requisição (anti-hang)', () => {
+  const realFetch = global.fetch;
+  afterEach(() => { global.fetch = realFetch; delete process.env.ANIMA_RUNPOD_HTTP_TIMEOUT_MS; });
+
+  test('teto default e override por env (bounded, positivo)', () => {
+    expect(runpodHttpTimeoutMs({})).toBe(DEFAULT_RUNPOD_HTTP_TIMEOUT_MS);
+    expect(runpodHttpTimeoutMs({ ANIMA_RUNPOD_HTTP_TIMEOUT_MS: '1234' })).toBe(1234);
+    expect(runpodHttpTimeoutMs({ ANIMA_RUNPOD_HTTP_TIMEOUT_MS: '0' })).toBe(DEFAULT_RUNPOD_HTTP_TIMEOUT_MS);
+    expect(runpodHttpTimeoutMs({ ANIMA_RUNPOD_HTTP_TIMEOUT_MS: 'nope' })).toBe(DEFAULT_RUNPOD_HTTP_TIMEOUT_MS);
+  });
+
+  test('requisição pendurada é abortada dentro do teto → lança (não pendura o host-turn)', async () => {
+    process.env.ANIMA_RUNPOD_HTTP_TIMEOUT_MS = '25';
+    let aborted = false;
+    // `fetch` que NUNCA responde mas HONRA o abort — como o fetch real do Node sob AbortSignal.
+    global.fetch = ((_url: string, init: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => { aborted = true; reject(new DOMException('The operation was aborted.', 'AbortError')); });
+    })) as unknown as typeof fetch;
+    const start = Date.now();
+    await expect(fetchHttpClient.send({ method: 'GET', url: 'https://x/pods', signal: new AbortController().signal }))
+      .rejects.toBeDefined();
+    expect(aborted).toBe(true);
+    expect(Date.now() - start).toBeLessThan(2_000); // bounded — jamais pendura
+  });
+
+  test('requisição normal NÃO é abortada (execução válida preservada)', async () => {
+    process.env.ANIMA_RUNPOD_HTTP_TIMEOUT_MS = '10000';
+    global.fetch = (async () => ({ status: 200, text: async () => 'ok' })) as unknown as typeof fetch;
+    const res = await fetchHttpClient.send({ method: 'GET', url: 'https://x/pods', signal: new AbortController().signal });
+    expect(res).toEqual({ status: 200, body: 'ok' });
+  });
+
+  test('cancelamento do chamador aborta a requisição (composição de sinais)', async () => {
+    process.env.ANIMA_RUNPOD_HTTP_TIMEOUT_MS = '60000';
+    const caller = new AbortController();
+    global.fetch = ((_url: string, init: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    })) as unknown as typeof fetch;
+    const pending = fetchHttpClient.send({ method: 'GET', url: 'https://x', signal: caller.signal });
+    caller.abort();
+    await expect(pending).rejects.toBeDefined();
   });
 });
 
@@ -264,6 +325,51 @@ describe('RunPodNodeProvisioner', () => {
     expect(await p.provision(request, signal())).toEqual({ ok: false, reason: 'capacity_unavailable' });
   });
 
+  test('RUNNING mas endpoint nunca publica dentro da janela → endpoint_unpublished (não capacity_unavailable)', async () => {
+    // Reproduz a prova viva 2026-09-10: pod fica RUNNING com publicIp/portMappings vazios além do
+    // deadline. A capacidade EXISTIU; a janela de publicação do endpoint foi curta. A atribuição
+    // deixa de culpar falsamente a capacidade e emite diagnóstico estruturado.
+    const errors: string[] = [];
+    const spy = jest.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errors.push(a.map(String).join(' ')); });
+    try {
+      let t = 0;
+      const { client } = fakeHttp((req) => {
+        if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
+        if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1' });
+        return json(200, runningPod({ desiredStatus: 'RUNNING', publicIp: '', portMappings: {} }));
+      });
+      const p = new RunPodNodeProvisioner(config(), client, { ...opts, now: () => (t += 400) });
+      expect(await p.provision(request, signal())).toEqual({ ok: false, reason: 'endpoint_unpublished' });
+      expect(errors.some(line => line.includes('runpod_endpoint_unpublished') && line.includes('"podId":"pod-1"'))).toBe(true);
+    } finally { spy.mockRestore(); }
+  });
+
+  test('endpointPublicationDeadlineMs é a política explícita do deadline (precede o alias maxProvisionMs)', () => {
+    // Default conservador documentado, na faixa 480–600s da evidência 2026-09-10.
+    expect(runpodEndpointPublicationDeadlineMs({})).toBe(DEFAULT_RUNPOD_ENDPOINT_PUBLICATION_DEADLINE_MS);
+    expect(DEFAULT_RUNPOD_ENDPOINT_PUBLICATION_DEADLINE_MS).toBeGreaterThanOrEqual(480_000);
+    expect(DEFAULT_RUNPOD_ENDPOINT_PUBLICATION_DEADLINE_MS).toBeLessThanOrEqual(600_000);
+    // Env explícito da nova política tem precedência sobre o legado ANIMA_RUNPOD_MAX_PROVISION_MS.
+    expect(runpodEndpointPublicationDeadlineMs({ ANIMA_RUNPOD_ENDPOINT_PUBLICATION_DEADLINE_MS: '600000', ANIMA_RUNPOD_MAX_PROVISION_MS: '1' })).toBe(600_000);
+    // Sem a nova, o legado ainda é honrado (retrocompat).
+    expect(runpodEndpointPublicationDeadlineMs({ ANIMA_RUNPOD_MAX_PROVISION_MS: '480000' })).toBe(480_000);
+  });
+
+  test('opção endpointPublicationDeadlineMs governa awaitEndpoint (RUNNING sem endpoint → endpoint_unpublished ao estourá-la)', async () => {
+    let t = 0;
+    const { client } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
+      if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1' });
+      return json(200, runningPod({ desiredStatus: 'RUNNING', publicIp: '', portMappings: {} }));
+    });
+    // maxProvisionMs ausente; só a nova política define a janela (deadline 500ms, relógio +200/iter).
+    const p = new RunPodNodeProvisioner(config(), client, {
+      pollIntervalMs: 1, endpointPublicationDeadlineMs: 500, healthTimeoutMs: 50,
+      sleep: async () => undefined, now: () => (t += 200), tunnelManager, tcpProbe: reachableProbe,
+    });
+    expect(await p.provision(request, signal())).toEqual({ ok: false, reason: 'endpoint_unpublished' });
+  });
+
   test('inspect: RUNNING + health externo 200 → healthy (Goma verifica por fora, Missão 7)', async () => {
     const { client, calls } = fakeHttp((req) => {
       if (req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
@@ -307,12 +413,39 @@ describe('RunPodNodeProvisioner', () => {
     });
     const failedTunnel: RunPodTunnelManager = { open: async () => { throw new Error('no route'); }, closeAll: async () => undefined };
     // tunnelReadyTimeoutMs:0 ⇒ uma única tentativa (sem retry) antes de desistir, com now constante.
+    // Pod criado + REST alcançável, só o túnel desta máquina não subiu ⇒ tunnel_unavailable
+    // (RECUPERÁVEL por placement), NÃO provider_unreachable (que é indisponibilidade GLOBAL da REST).
     expect(await new RunPodNodeProvisioner(config(), client, { ...opts, tunnelManager: failedTunnel, tunnelReadyTimeoutMs: 0 }).provision(request, signal()))
-      .toEqual({ ok: false, reason: 'provider_unreachable' });
+      .toEqual({ ok: false, reason: 'tunnel_unavailable' });
     const payload = JSON.parse(calls.find(c => c.method === 'POST')!.body!) as { ports: string[]; dockerStartCmd: string[] };
     expect(payload.ports).toEqual(['22/tcp']);
-    expect(payload.dockerStartCmd.join(' ')).toContain('ANIMA_MODEL_CACHE=warm');
-    expect(payload.dockerStartCmd.join(' ')).toContain('timeout 1800 ollama pull qwen3-coder:latest');
+    // WIRING: createPod delega a geração do bootstrap à função PURA testável (seam). O contrato
+    // estrutural do script (sshd durável, worker isolado, marcadores) é coberto por runpod-bootstrap.test.ts.
+    expect(payload.dockerStartCmd).toEqual([renderRunPodBootstrapScript('qwen3-coder:latest')]);
+    const bootstrap = payload.dockerStartCmd[0]!;
+    // ENDURECIMENTO: o processo DURÁVEL (sshd -D foreground) é a ÚLTIMA instrução — nada pesado
+    // depois pode encerrá-lo; e o pull do modelo ocorre num worker isolado, não no shell do container.
+    expect(bootstrap.trimEnd().endsWith(RUNPOD_BOOTSTRAP_DURABLE_COMMAND)).toBe(true);
+    expect(bootstrap).toContain('timeout 1800 ollama pull qwen3-coder:latest');
+  });
+
+  test('contrato de rede: node por SSH → create expõe EXATAMENTE TCP/22 + supportPublicIp, sem extras', async () => {
+    // Este adapter SEMPRE acessa o node por SSH (SshRunPodTunnelManager) ⇒ o create tem de expor
+    // TCP/22 e pedir IP público, e SÓ isso. Regressão contra: porta faltando, duplicada, ou extra.
+    const { client, calls } = fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
+      if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1' });
+      if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
+      return json(404, {});
+    });
+    const outcome = await new RunPodNodeProvisioner(config(), client, opts).provision(request, signal());
+    expect(outcome.ok).toBe(true);
+    const payload = JSON.parse(calls.find(c => c.method === 'POST')!.body!) as { ports: string[]; supportPublicIp?: boolean };
+    expect(payload.ports).toEqual(['22/tcp']);                       // shape exato do provider (REST v1)
+    expect(new Set(payload.ports).size).toBe(payload.ports.length);  // sem duplicação
+    expect(payload.ports.filter(p => p !== '22/tcp')).toEqual([]);   // nenhuma porta adicional
+    expect(payload.supportPublicIp).toBe(true);                      // IP público pedido explicitamente
   });
 
   test('stop encerra o túnel antes do provider call', async () => {
@@ -380,5 +513,90 @@ describe('RunPodNodeProvisioner', () => {
       const outcome = await new RunPodNodeProvisioner(config(), client, opts).provision(request, signal());
       expect(JSON.stringify(outcome)).not.toContain(API_KEY);
     }
+  });
+});
+
+// ============================================================
+// READINESS EM CAMADAS (Fases 2+3): o endpoint atravessa mapping corrente → TCP roteável → SSH.
+// Cada iteração RECONSULTA o provider e segue mudanças de mapping, em vez de martelar um endpoint
+// stale. A camada TCP torna "publicado mas não roteável" (a falha da última prova viva) atribuível
+// por si, separada de "sshd/handshake ainda não pronto". Zero rede real: HTTP, túnel e sonda TCP
+// são todos fakes determinísticos.
+// ============================================================
+describe('RunPodNodeProvisioner — readiness TCP/mapping em camadas', () => {
+  const recordingTunnel = () => {
+    const opens: RunPodSshTarget[] = [];
+    const manager: RunPodTunnelManager = {
+      open: async (target) => { opens.push(target); return { endpoint: 'http://127.0.0.1:21434', close: async () => undefined }; },
+      closeAll: async () => undefined,
+    };
+    return { manager, opens };
+  };
+  const httpForRunningPod = (podFor: (getPodCall: number) => Record<string, unknown>) => {
+    let getPodCalls = 0;
+    return fakeHttp((req) => {
+      if (req.method === 'GET' && req.url.endsWith('/pods')) return json(200, []);
+      if (req.method === 'POST' && req.url.endsWith('/pods')) return json(201, { id: 'pod-1', name: 'anima-node-1', desiredStatus: 'CREATED' });
+      if (req.method === 'GET' && req.url.endsWith('/pods/pod-1')) { getPodCalls += 1; return json(200, podFor(getPodCalls)); }
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
+      return json(404, {});
+    });
+  };
+
+  test('Fase 3: mapping muda durante readiness → túnel segue o novo publicIp:port', async () => {
+    // 1º getPod (awaitEndpoint) publica 1.2.3.4:20022; a partir daí o RunPod re-roteia para
+    // 5.6.7.8:30033. Só o endpoint novo é roteável — martelar o antigo nunca abriria.
+    const { client } = httpForRunningPod((n) => n <= 1
+      ? runningPod({ publicIp: '1.2.3.4', portMappings: { '22': 20022 } })
+      : runningPod({ publicIp: '5.6.7.8', portMappings: { '22': 30033 } }));
+    const { manager, opens } = recordingTunnel();
+    const probe: TcpProbe = { probe: async (_host, port) => (port === 30033 ? 'reachable' : 'timeout') };
+    const outcome = await new RunPodNodeProvisioner(config(), client, { ...opts, tunnelManager: manager, tcpProbe: probe }).provision(request, signal());
+    expect(outcome.ok).toBe(true);
+    expect(opens).toHaveLength(1); // uma única abertura — no endpoint CORRENTE, não no stale
+    expect(opens[0]).toMatchObject({ publicIp: '5.6.7.8', port: 30033 });
+  });
+
+  test('Fase 2: TCP nunca roteável → ssh NÃO é tentado; tunnel_unavailable (recuperável) com fase tcp_unreachable', async () => {
+    const errors: string[] = [];
+    const spy = jest.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errors.push(a.map(String).join(' ')); });
+    try {
+      const { client } = httpForRunningPod(() => runningPod());
+      const { manager, opens } = recordingTunnel();
+      const probe: TcpProbe = { probe: async () => 'timeout' as TcpReachability };
+      // tunnelReadyTimeoutMs:0 com now constante ⇒ exatamente uma passada antes de desistir.
+      const outcome = await new RunPodNodeProvisioner(config(), client, { ...opts, tunnelManager: manager, tcpProbe: probe, tunnelReadyTimeoutMs: 0 }).provision(request, signal());
+      expect(outcome).toEqual({ ok: false, reason: 'tunnel_unavailable' });
+      expect(opens).toHaveLength(0); // TCP não roteável ⇒ o ssh jamais foi tentado
+      expect(errors.some(line => line.includes('runpod_tunnel_open_failed') && line.includes('"phase":"tcp_unreachable"'))).toBe(true);
+    } finally { spy.mockRestore(); }
+  });
+
+  test('cold-start TCP: roteável só após N sondas → abre o túnel na tentativa em que fica roteável', async () => {
+    const { client } = httpForRunningPod(() => runningPod());
+    const { manager, opens } = recordingTunnel();
+    let n = 0;
+    const probe: TcpProbe = { probe: async () => ((n += 1) < 3 ? 'timeout' : 'reachable') };
+    const outcome = await new RunPodNodeProvisioner(config(), client, { ...opts, tunnelManager: manager, tcpProbe: probe }).provision(request, signal());
+    expect(outcome.ok).toBe(true);
+    expect(n).toBeGreaterThanOrEqual(3); // sondou até rotear (cold-start de roteamento)
+    expect(opens).toHaveLength(1);
+  });
+
+  test('sonda TCP default classifica connect/refused/timeout sem abrir túnel', async () => {
+    const { createServer } = await import('node:net');
+    // Servidor efêmero: connect real → reachable.
+    const server = createServer();
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (addr === null || typeof addr === 'string') throw new Error('no port');
+    try {
+      expect(await netTcpProbe.probe('127.0.0.1', addr.port, 500, new AbortController().signal)).toBe('reachable');
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+    // Porta agora fechada no loopback → refused (rápido, determinístico).
+    expect(await netTcpProbe.probe('127.0.0.1', addr.port, 500, new AbortController().signal)).toBe('refused');
+    // signal já abortado → error sem tocar a rede.
+    const aborted = new AbortController(); aborted.abort();
+    expect(await netTcpProbe.probe('127.0.0.1', addr.port, 500, aborted.signal)).toBe('error');
   });
 });

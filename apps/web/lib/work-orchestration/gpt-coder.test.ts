@@ -1,4 +1,5 @@
 /** @jest-environment node */
+import { resolveCommandExecutionPolicy, supervisedWorkspaceAccessPolicy } from '@anima/core';
 import type { OpenAIAdmissionControl } from '@/lib/ai/openai-paid-transport';
 import { OpenAIAdmissionDenied } from '@/lib/ai/openai-paid-transport';
 import type { CoderWorkspace } from './coder-backend';
@@ -127,6 +128,27 @@ describe('GptCoderBackend — mesmo protocolo host-mediated do Ollama, fail-clos
       consumer: 'coder', workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2,
       model: 'gpt-test', callIndex: 1, maxDurationMs: 60_000,
     }));
+  });
+
+  // REGRESSÃO DO GARGALO PAGO (Coding Harness V3): a correction paga reprovou com
+  // `ollama_invalid_response_schema` ANTES de qualquer edit porque o `gpt-5.6-terra`
+  // pediu MAIS leituras do que o teto por rodada. Com o perfil remoto forte, uma
+  // rodada de read com 12 leituras é servida e o laço prossegue ao edit.
+  test('uma rodada de read com >8 leituras é servida (perfil forte) e prossegue ao edit — nenhuma falha de schema', async () => {
+    const original = 'export const value = 1;\n';
+    let n = 0;
+    const fetchImpl = (async () => {
+      n += 1;
+      const content = n === 1
+        ? JSON.stringify({ action: 'read', reads: Array.from({ length: 12 }, () => ({ path: 'src/a.ts', lineRange: [1, 1], maxLines: 5 })) })
+        : JSON.stringify({ action: 'edit', operations: [{ kind: 'replace_exact', path: 'src/a.ts', expected_file_sha256: sha256(original), before: 'value = 1', after: 'value = 2', expected_occurrences: 1 }] });
+      return response({ output_text: content, usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } });
+    }) as typeof fetch;
+    const ws = workspace({ 'src/a.ts': original });
+    const result = await new GptCoderBackend({ apiKey: 'x', fetchImpl, admission: grant }).edit(request, ws, new AbortController().signal);
+    expect(ws.files.get('src/a.ts')).toBe('export const value = 2;\n');
+    expect(result.touchedResources).toEqual(['src/a.ts']);
+    expect(n).toBe(2); // read (12 leituras) + edit; nunca reprovou por schema
   });
 });
 
@@ -345,5 +367,84 @@ describe('contrato do transport OpenAI — reserva de saída real e ausência de
         .edit({ ...request, objective: bigObjective }, workspace({ 'src/a.ts': original }), new AbortController().signal),
     ).rejects.toThrow('excede o orçamento de input');
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('GptCoderBackend — SEARCH host-side compartilhado com o Ollama (contrato model-agnostic)', () => {
+  test('SEARCH -> READ -> EDIT pelo transporte OpenAI, com read amplo e write estreito', async () => {
+    const targetContent = 'export const target = 1;\n';
+    const depContent = 'export const dep = SIMBOLO;\n';
+    const files = new Map<string, string>([['src/a.ts', targetContent], ['src/dep.ts', depContent]]);
+    const ws: CoderWorkspace & { files: Map<string, string> } = {
+      files,
+      readFile: async p => files.get(p) ?? null,
+      writeFile: async (p, c) => { files.set(p, c); return true; },
+      async search(input) {
+        const matches: { path: string; line: number; preview: string }[] = [];
+        for (const [path, content] of files) content.split('\n').forEach((t, i) => { if (t.includes(input.query)) matches.push({ path, line: i + 1, preview: t }); });
+        return { matches, truncated: false };
+      },
+    };
+    let n = 0;
+    const fetchImpl = (async () => {
+      n += 1;
+      const content = n === 1
+        ? JSON.stringify({ action: 'search', query: 'SIMBOLO', maxResults: 10 })
+        : n === 2
+          ? JSON.stringify({ action: 'read', reads: [{ path: 'src/dep.ts', search: 'SIMBOLO', maxLines: 5 }] })
+          : JSON.stringify({ action: 'edit', operations: [{ kind: 'replace_exact', path: 'src/a.ts', expected_file_sha256: sha256(targetContent), before: 'target = 1', after: 'target = 2', expected_occurrences: 1 }] });
+      return response({ output_text: content, usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } });
+    }) as typeof fetch;
+    const result = await new GptCoderBackend({ apiKey: 'x', fetchImpl, admission: grant }).edit(
+      { ...request, workspaceAccessPolicy: supervisedWorkspaceAccessPolicy(['src/a.ts'], []) },
+      ws, new AbortController().signal,
+    );
+    expect(ws.files.get('src/a.ts')).toBe('export const target = 2;\n');
+    expect(result.touchedResources).toEqual(['src/a.ts']);
+    expect(n).toBe(3); // search + read + edit atravessaram o mesmo protocolo compartilhado
+    // dep.ts, legível mas fora do write scope, permaneceu intacto.
+    expect(ws.files.get('src/dep.ts')).toBe(depContent);
+  });
+});
+
+describe('GptCoderBackend — EXEC/TEST/GIT governados compartilhados (contrato model-agnostic)', () => {
+  test('EXEC(test) -> EDIT -> EXEC(test) -> submit pelo transporte OpenAI (mesmo laço iterativo)', async () => {
+    const initial = 'export const value = 1;\n';
+    const files = new Map<string, string>([['src/a.ts', initial]]);
+    const ws: CoderWorkspace & { files: Map<string, string> } = {
+      files,
+      readFile: async p => files.get(p) ?? null,
+      writeFile: async (p, c) => { files.set(p, c); return true; },
+      async exec(input) {
+        const ok = (files.get('src/a.ts') ?? '').includes('FIXED');
+        if (input.program === 'npm' && input.args[0] === 'test') {
+          return { exitCode: ok ? 0 : 1, stdout: ok ? 'passed' : 'failed', stderr: '', timedOut: false, durationMs: 3 };
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false, durationMs: 1 };
+      },
+    };
+    let n = 0;
+    const fetchImpl = (async () => {
+      n += 1;
+      const content = n === 1
+        ? JSON.stringify({ action: 'exec', program: 'npm', args: ['test'] })
+        : n === 2
+          ? JSON.stringify({ action: 'edit', operations: [{ kind: 'replace_exact', path: 'src/a.ts', expected_file_sha256: sha256(initial), before: 'value = 1', after: 'value = 1; // FIXED', expected_occurrences: 1 }] })
+          : n === 3
+            ? JSON.stringify({ action: 'exec', program: 'npm', args: ['test'] })
+            : JSON.stringify({ action: 'submit' });
+      return response({ output_text: content, usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } });
+    }) as typeof fetch;
+    const result = await new GptCoderBackend({ apiKey: 'x', fetchImpl, admission: grant }).edit(
+      {
+        ...request,
+        workspaceAccessPolicy: supervisedWorkspaceAccessPolicy(['src/a.ts'], []),
+        commandPolicy: resolveCommandExecutionPolicy('supervised'),
+      },
+      ws, new AbortController().signal,
+    );
+    expect(ws.files.get('src/a.ts')).toContain('FIXED');
+    expect(result.touchedResources).toEqual(['src/a.ts']);
+    expect(n).toBe(4); // exec(fail) + edit + exec(pass) + submit — laço iterativo pelo OpenAI
   });
 });

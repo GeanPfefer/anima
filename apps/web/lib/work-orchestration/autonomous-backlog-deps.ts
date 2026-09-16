@@ -7,7 +7,7 @@ import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
 import { readMachinePressure, readResourceAdmission } from './resource-governor';
 import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteRuntimeFor } from './coder-placement';
-import { leaseDeadlineSignal, onDemandBurstForced, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
+import { leaseDeadlineSignal, onDemandBurstForced, prepareCloudCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
 import { readLivePaidNodeCount } from './paid-compute-lease-reconciler-deps';
 import { createOpenAICoderAdmission, openAIProviderResourceClass } from './openai-paid-compute';
 import { readActivePaidComputeAuthorization } from './paid-compute-authorization-store';
@@ -195,7 +195,7 @@ export function buildProjectBacklogCycleDeps(
         if (decision.status !== 'selected') {
           await client.rpc('record_compute_routing_decision', {
             p_work_item_id: entry.workItemId, p_expected_proposal_version: entry.approvedProposalVersion,
-            p_decision_id: crypto.randomUUID(), p_attempt_id: null, p_decision: decision as unknown as Json,
+            p_decision_id: crypto.randomUUID(), p_decision: decision as unknown as Json,
           });
           return notExecutable(entry, decision.reasonCode, decision.reason);
         }
@@ -214,14 +214,16 @@ export function buildProjectBacklogCycleDeps(
         nodes: node ? [node] : [],
         paidComputeAuthorized: false,
       });
-      let onDemandSession: Awaited<ReturnType<typeof prepareResidentOnDemandCoderNode>> | null = null;
+      let onDemandSession: Awaited<ReturnType<typeof prepareCloudCoderNode>> | null = null;
       let ollamaRuntimeOverride;
       // On-demand engata sob defer (pressão moderada/alta) OU quando o lever de prova/ops
       // força a pré-condição; `unknown` permanece fail-closed (sensor indisponível).
       if (placement && (placement.placement === 'defer' || onDemandBurstForced()) && admittedPressure !== 'unknown') {
         const onDemand = readResidentOnDemandNodeConfig(model);
         if (onDemand) {
-          onDemandSession = await prepareResidentOnDemandCoderNode({
+          // Caminho canônico: RunPod PAGO com o gate ligado passa pela SESSÃO RESILIENTE (troca de
+          // máquina + settlement dentro do envelope); o resto segue a tentativa única. Mesma forma.
+          onDemandSession = await prepareCloudCoderNode({
             client, config: onDemand, workItemId: entry.workItemId,
             proposalVersion: entry.approvedProposalVersion, leaseId: crypto.randomUUID(), signal,
             readLivePaidNodeCount: () => readLivePaidNodeCount(client),

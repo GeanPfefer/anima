@@ -61,6 +61,9 @@ export function mapHostTurnResult(result: BacklogHostTurnResult): HostTurnOutcom
     cyclesExecuted: result.cyclesExecuted,
     itemsTouched: result.itemsTouched,
     workItemIds: touchedWorkItemIds(result),
+    // Sobe a razão canônica da parada `turn_not_executable` ao desfecho da engine (e daí ao
+    // log durável): só presente quando houve — mantém o mapeamento inalterado nos demais casos.
+    ...(result.notExecutableReason ? { notExecutableReason: result.notExecutableReason } : {}),
   };
 }
 

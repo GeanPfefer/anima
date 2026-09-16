@@ -8,7 +8,7 @@ import {
   type HarnessRunTurnResult,
   type HarnessRuntime,
 } from './deepseek-harness-coder';
-import { POC_HARNESS_STEP_BUDGET } from '@anima/core';
+import { DEFAULT_CODER_HARNESS_POLICY_V1, POC_HARNESS_STEP_BUDGET } from '@anima/core';
 
 const ROOT = process.platform === 'win32' ? 'C:\\tmp\\anima-wt\\tree' : '/tmp/anima-wt/tree';
 
@@ -55,6 +55,23 @@ describe('DeepSeekHarnessCoderBackend — identidade e config', () => {
     expect(runtime.last?.tools.disabled).toContain('str_replace_editor');
     expect(runtime.last?.tools.enabled).toEqual(expect.arrayContaining(['edit', 'write', 'read', 'glob', 'grep', 'pwsh']));
     expect(runtime.last?.stepBudget).toBe(POC_HARNESS_STEP_BUDGET);
+  });
+
+  test('PRÉ-CODER: a política do harness é renderizada e encaminhada ao turno ANTES da inferência', async () => {
+    const runtime = fakeRuntime(completed());
+    const backend = new DeepSeekHarnessCoderBackend({ runtime, model: 'm' });
+    await backend.edit({ ...request, harnessPolicy: DEFAULT_CODER_HARNESS_POLICY_V1 }, rootedWorkspace(), new AbortController().signal);
+    const instructions = runtime.last?.harnessPolicyInstructions;
+    expect(instructions).toBeDefined();
+    expect(instructions).toContain('jest');
+    expect(instructions).toContain('vitest');
+    expect(instructions).toContain('entry.coderBackend');
+  });
+
+  test('sem harnessPolicy, o turno não recebe instruções de política (compat)', async () => {
+    const runtime = fakeRuntime(completed());
+    await new DeepSeekHarnessCoderBackend({ runtime, model: 'm' }).edit(request, rootedWorkspace(), new AbortController().signal);
+    expect(runtime.last?.harnessPolicyInstructions).toBeUndefined();
   });
 
   test('temperature, orçamento e ferramentas são configuráveis', async () => {

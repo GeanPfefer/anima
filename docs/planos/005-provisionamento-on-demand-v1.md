@@ -3,6 +3,11 @@
 > Estado em 2026-08-30: primeiro recorte implementado e provado com processo local
 > real; cloud real NÃO provisionada; nenhuma despesa externa realizada.
 
+> Atualização 2026-09-08: bootstrap RunPod, transporte SSH privado e health Ollama semântico
+> implementados e provados localmente (76/76). A prova viva permanece bloqueada antes do provider
+> por ausência de credencial/identidade SSH e de autorização paga com teto numérico para o work
+> item canônico. Ver `docs/registros/2026-09-08-runpod-autoprovisionamento-barreira-pre-provider.md`.
+
 ## Objetivo
 
 Evoluir de "existe um endpoint remoto previamente configurado" ([Plano 004](004-execution-placement-v0.md))
@@ -118,6 +123,49 @@ evidence preservada`, sem mover worktree/Git/gates/Verifier/banco/Anima Web. O r
 prova essa cadeia com um processo local real; falta a prova com provider pago (bloqueada por
 autorização financeira persistida, deliberadamente).
 
+## Fechamento local da Resilient Cloud Session V1 — 2026-09-10
+
+O caminho vivo agora usa `prepareCloudCoderNode`: com
+`ANIMA_RESILIENT_CLOUD_SESSION=true`, RunPod pago entra na sessão resiliente; com o gate OFF, modos
+owned/local e a tentativa única permanecem compatíveis. A próxima prova configura duas tentativas
+por SKU (`ANIMA_RESILIENT_CLOUD_MAX_ATTEMPTS_PER_PLACEMENT=2`) e mantém 16 como rede defensiva
+finita, subordinada a `maxNodes=1`, custo agregado, validade e deadline da sessão. A identidade
+pré-create mais fina continua sendo `gpuTypeId`; não se inventa machine id.
+
+A migration `20260910000001_paid_compute_budget_settlement.sql` está aplicada localmente. O store
+usa a RPC tipada, authenticated/RLS, sem `service_role`. Testes provam settlement idempotente,
+limites, exclusividade void/settle e late settlement após expiração ou revogação. O Pod saudável é
+devolvido ao pipeline e não é destruído até coder, gates, Verifier e review terminarem; qualquer
+desfecho chama `finish` em `finally`, liquida e derruba o mesmo `providerRef`. Nenhum Pod foi criado
+nesse fechamento. Registro: `docs/registros/2026-09-10-fechamento-resilient-cloud-session-v1.md`.
+
+## Retomada Cloud GPU Test #2 — 2026-09-09
+
+O túnel de produção foi provado em Pod mínimo real: processo SSH vivo, listener loopback e TCP
+local passaram; a falha HTTP foi a ausência deliberada de Ollama. O manager agora separa
+`processAlive` de `listenerReady`, captura diagnóstico bounded, preserva exit/signal, sanitiza args
+e faz teardown bounded. `HostKeyAlias=runpod-<podId>` evita colisão de host key quando o provider
+recicla IP/porta sem afrouxar `StrictHostKeyChecking=accept-new`.
+
+Duas retomadas canônicas falharam antes de `execution_started`: o endpoint surgiu, mas o sshd não
+aceitou conexões dentro do teto (`banner exchange: Connection ... refused`). Ambas destruíram o
+Pod e persistiram `shutdown_confirmed`. Como `nvidia-smi` ainda precedia o canal de controle, o
+bootstrap foi reordenado para iniciar sshd antes da validação GPU, agora bounded em 60 s, e antes
+de instalar/puxar Ollama. A prova paga seguinte não ocorreu porque o controle externo de aprovação
+bloqueou a última criação; não contornar. Ledger líquido: US$ 1,25 de US$ 1,50. O item permanece
+`approved v2`, sem attempts. Rotacionar a chave RunPod antes da retomada devido a exposição
+acidental em output interno. Ver registro de 2026-09-09.
+
+### Nova authority e barreira de cotação A40
+
+A key rotacionada autenticou com sucesso quando o subprocesso deixou de herdar a credencial
+antiga do processo do Codex. A RunPod confirmou zero Pods. A authority anterior foi revogada sem
+alterar seu ledger de US$ 1,25 comprometidos, e uma nova authority de US$ 1,50 foi concedida ao
+mesmo item/recurso. A volta canônica foi recusada antes de reserva e create porque a A40 retornou
+sem preço/estoque em SECURE e COMMUNITY (`live_price:quote_unavailable`). O item permanece
+`approved v2`, sem attempts, e a nova authority permanece integral. Retomar sem criar successor
+quando a cotação A40 SECURE voltar a existir.
+
 ## Teto agregado por autorização (2026-08-31)
 
 `maxCostEstimate` passou a significar **teto agregado da autorização**, não teto independente
@@ -156,3 +204,18 @@ prova de ausência. Nenhuma garantia de TTL provider-side foi assumida ou implem
   inalcançável; falha/timeout de teardown; e replay sem efeito duplicado.
 - Reserva sem `provision_requested` só é anulada com prova `provider_not_called`; create ambíguo
   conserva orçamento e converge por nome determinístico/`providerRef`.
+
+## Prova capability-based live — 2026-09-10
+
+A estratégia `cloud_self_hosted` foi autorizada com envelope capability-based (24 GiB/CUDA,
+US$ 0,55/h, um node, 30 minutos, US$ 1,50). O inventário vivo ranqueou A40 SECURE a US$ 0,49/h
+antes da RTX A6000; L40S e A100 ficaram fora do teto. O caminho canônico reservou US$ 0,245,
+criou exatamente um Pod e persistiu sua identidade. O canal SSH publicado não respondeu dentro
+do teto: `ssh` terminou 255 por `Connection timed out` em `194.68.245.239:22068`.
+
+A falha voltou bounded como `provider_unreachable` / `coder_node_unavailable`, antes de claim,
+attempt, coder, gate ou Verifier. O finally persistiu `shutdown_requested` e
+`shutdown_confirmed`; a leitura final da RunPod confirmou zero Pods. O item segue `approved v2`.
+Próxima ação mínima: investigar por que o endpoint TCP SSH publicado pelo Pod A40 não ficou
+alcançável antes de autorizar outra execução paga. Ver
+[registro da prova](../registros/2026-09-10-runpod-capability-live-ssh-timeout.md).

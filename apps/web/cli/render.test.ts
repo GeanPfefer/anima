@@ -10,6 +10,14 @@ describe('render humano da CLI', () => {
     expect(out).toContain('review: 1');
   });
 
+  test('budget status mostra decisão, saldos e próxima liberação', () => {
+    const payload: CliPayload = { ok: true, kind: 'budget-status', workItemId: 'i', observedAt: '2026-09-05T12:00:00Z', policyVersion: 'p', costClass: 'external', admitted: false, reason: 'user_attempt_budget_exhausted', supervised:false,supervisionExpiresAt:null,unattendedAdmitted:false,unattendedReason:'user_attempt_budget_exhausted', userAttempts24h: 6, userAttemptsRemaining: 0, externalAttempts24h: 4, externalAttemptsRemaining: 2, windows: { attemptsHours: 24, userRuntimeHours: 24, autonomousRuntimeMinutes: 60 }, attempts: { item: { used: 2, limit: 3, remaining: 1, nextReleaseAt: null }, user: { used: 6, remaining: 0, nextReleaseAt: '2026-09-05T13:00:00Z' }, external: { used: 4, remaining: 2, nextReleaseAt: null } }, runtime: { user24h: { usedSeconds: 60, remainingSeconds: 7140 }, external24h: { usedSeconds: 30, remainingSeconds: 7170 }, autonomous60m: { usedSeconds: 10, remainingSeconds: 2690 } }, nextBudgetReleaseAt: '2026-09-05T13:00:00Z' };
+    const out = renderHuman(payload);
+    expect(out).toContain('reason=user_attempt_budget_exhausted');
+    expect(out).toContain('Tentativas do usuário: 6 · restantes 0');
+    expect(out).toContain('Próxima liberação estimável: 2026-09-05T13:00:00Z');
+  });
+
   test('work-show contrasta Verifier ao vivo × registrado e marca cobertura de aceite', () => {
     const payload: CliPayload = {
       ok: true, kind: 'work-show', id: 'i', state: 'review', proposalVersion: 2, phase: 'Revisando', attemptId: 'a1',

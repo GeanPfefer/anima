@@ -246,6 +246,9 @@ async function main(): Promise<void> {
       backoffMs: detail?.backoffMs,
       // "qual work item?" no topo do log durável (além de dentro de `outcome`).
       workItems: detail?.outcome && detail.outcome.ok ? detail.outcome.workItemIds : undefined,
+      // "por que não executável?" no topo: o CÓDIGO canônico da barreira quando a parada
+      // foi `turn_not_executable` — nunca mais inferir a causa só pelo terminal.
+      notExecutable: detail?.outcome && detail.outcome.ok ? detail.outcome.notExecutableReason : undefined,
       materialization: detail?.materialization,
     }),
     backoff,
