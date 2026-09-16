@@ -112,15 +112,20 @@ export const CAPABILITY_DOMAIN_LABEL_PT: Record<CapabilityDomain, string> = {
 
 // Tipos de evidência que o V0 aceita de forma declarativa. Cada `ref` deve
 // apontar para algo REAL no repositório/histórico — nunca um id inventado.
+// Tipos distintos e não confundíveis: work_item ≠ attempt ≠ commit ≠ marco ≠
+// teste ≠ rota. A distinção importa para o usuário entender POR QUE uma
+// capacidade é considerada comprovada.
 export type CapabilityProofKind =
   | 'commit' //    hash de commit
+  | 'work_item' // id de work item (unidade de trabalho, com lineage/sucessores)
+  | 'attempt' //   id de attempt (uma tentativa de um work item)
   | 'test' //      caminho de arquivo de teste
-  | 'attempt' //   id de attempt/work item
   | 'verifier' //  parecer do Verifier
   | 'event' //     evento persistido (work_events, ledger)
+  | 'route' //     rota/página do app (API route, page.tsx)
   | 'milestone' // docs/marcos/*
   | 'record' //    docs/registros/*
-  | 'doc'; //      outra documentação (PRD, arquitetura)
+  | 'doc'; //      outra documentação/código (componente, PRD, arquitetura)
 
 export interface CapabilityProofRef {
   kind: CapabilityProofKind;

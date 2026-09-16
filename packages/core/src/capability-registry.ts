@@ -28,8 +28,8 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement:
       'Autonomia: manter precisão de extração e de relações sob volume real, sem revisão humana, e reconciliar duplicatas sozinho.',
     proofRefs: [
-      { kind: 'doc', ref: 'apps/web/app/api/ai/extract-entities', note: 'rota de extração de entidades' },
-      { kind: 'doc', ref: 'apps/web/app/(app)/graph/page.tsx', note: 'entidades e arestas relation/cooccurrence no grafo' },
+      { kind: 'route', ref: 'apps/web/app/api/ai/extract-entities', note: 'rota de extração de entidades' },
+      { kind: 'route', ref: 'apps/web/app/(app)/graph/page.tsx', note: 'entidades e arestas relation/cooccurrence no grafo' },
     ],
   },
   {
@@ -56,7 +56,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     meaning: 'O Anima percebe áreas de vida que estão surgindo e as sugere, em vez de exigir que o usuário as declare.',
     advancement: 'Reproduzir a proposta de pilares de forma confiável e reduzir falsos positivos sem revisão constante.',
     proofRefs: [
-      { kind: 'doc', ref: 'apps/web/app/api/pillars/confirm' },
+      { kind: 'route', ref: 'apps/web/app/api/pillars/confirm' },
       { kind: 'doc', ref: 'apps/web/app/(app)/home/_components/PendingPillarsWidget.tsx' },
     ],
   },
@@ -110,7 +110,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement: 'Já operacional; próximo uso é alimentar o Capability Proof Engine a partir destes eventos.',
     proofRefs: [
       { kind: 'test', ref: 'packages/core/src/economic-observations.test.ts', note: 'event store por coorte' },
-      { kind: 'doc', ref: 'apps/web/app/(app)/history' },
+      { kind: 'route', ref: 'apps/web/app/(app)/history' },
     ],
   },
   {
@@ -122,7 +122,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     dependsOn: ['memory.persistence'],
     meaning: 'O Anima traz de volta o que é relevante para o momento, em vez de depender de o usuário lembrar onde algo está.',
     advancement: 'Comprovar relevância consistente sob volume e integrar à memória narrativa.',
-    proofRefs: [{ kind: 'doc', ref: 'apps/web/app/api/ai/embed-entry' }],
+    proofRefs: [{ kind: 'route', ref: 'apps/web/app/api/ai/embed-entry' }],
   },
   {
     id: 'memory.continuity',
@@ -249,7 +249,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement:
       'Operacional exige reprodutibilidade local (RAM) e provas pagas confiáveis; hoje é comprovado ponta a ponta, não rotineiro.',
     proofRefs: [
-      { kind: 'attempt', ref: '8a2515d8', note: 'fim-a-fim até review→completed com OpenAI forte' },
+      { kind: 'work_item', ref: '8a2515d8', note: 'work item que foi fim-a-fim até review→completed com OpenAI forte (2026-09-11)' },
       { kind: 'milestone', ref: 'docs/marcos/008-dev-local-v1-review-rework-incremental.md' },
     ],
   },
@@ -313,7 +313,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement: 'Autoridades pagas por-item são efêmeras (expiram); operacional pleno exige envelopes reutilizáveis e revogáveis por evidência.',
     proofRefs: [
       { kind: 'milestone', ref: 'docs/marcos/005-autonomia-progressiva-e-identidade-una.md' },
-      { kind: 'doc', ref: 'apps/web/app/api/work-orchestration/paid-compute-authorizations' },
+      { kind: 'route', ref: 'apps/web/app/api/work-orchestration/paid-compute-authorizations' },
     ],
   },
   {
@@ -341,7 +341,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     meaning: 'Nenhuma mudança de impacto vaza sem revisão: o sistema para ANTES do PR e espera a decisão humana.',
     advancement: 'Já operacional; evolução é promover classes de efeito a autônomas por evidência (autonomia progressiva).',
     proofRefs: [
-      { kind: 'doc', ref: 'apps/web/app/api/work-orchestration/review-requests' },
+      { kind: 'route', ref: 'apps/web/app/api/work-orchestration/review-requests' },
       { kind: 'milestone', ref: 'docs/marcos/008-dev-local-v1-review-rework-incremental.md' },
     ],
   },
@@ -420,10 +420,13 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     name: 'Provider externo',
     description: 'Chamar providers externos (OpenAI) por uma borda única governada (admit antes do fetch).',
     domain: 'compute',
-    maturity: 'operational',
+    // Auditoria 2026-09-16: rebaixada operational→proven. As chamadas pagas são
+    // deliberadamente raras e gated (autoridade efêmera por item), então não há
+    // "uso rotineiro reproduzido" que justifique operational — só provas concretas.
+    maturity: 'proven',
     dependsOn: ['governance.authority'],
     meaning: 'local-first != local-only: o Anima usa modelos externos enquanto forem mais capazes, sempre por uma borda única que admite antes de gastar.',
-    advancement: 'Transporte é confiável; o gargalo é o settlement de custo real, não a chamada.',
+    advancement: 'Transporte comprovado; operacional exigiria uso reproduzido, hoje limitado por autoridades pagas efêmeras e pela barreira de settlement de custo real.',
     proofRefs: [
       { kind: 'commit', ref: '78dfc3f', note: 'governança OpenAI global (borda única)' },
       { kind: 'commit', ref: '43b47c2', note: 'coder pago OpenAI governado até review' },
@@ -499,7 +502,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     dependsOn: ['memory.persistence'],
     meaning: 'O chat é a única frente conversacional do produto; telas auxiliares só visualizam e confirmam.',
     advancement: 'Operacional; evolui com proatividade cognitiva (o Anima puxando assunto sobre o futuro).',
-    proofRefs: [{ kind: 'doc', ref: 'apps/web/app/(app)/chat' }],
+    proofRefs: [{ kind: 'route', ref: 'apps/web/app/(app)/chat' }],
   },
   {
     id: 'interaction.web-interface',
@@ -510,7 +513,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     dependsOn: ['memory.persistence'],
     meaning: 'A camada visual que projeta o estado do Anima — inclui esta própria tela de evolução.',
     advancement: 'Operacional; esta tela /evolution é o V0 da projeção do autoconhecimento do sistema.',
-    proofRefs: [{ kind: 'doc', ref: 'apps/web/app/(app)', note: 'grupo de rotas do app' }],
+    proofRefs: [{ kind: 'route', ref: 'apps/web/app/(app)', note: 'grupo de rotas do app' }],
   },
   {
     id: 'interaction.resident-host',

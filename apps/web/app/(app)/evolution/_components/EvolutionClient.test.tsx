@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import {
   ANIMA_CAPABILITY_REGISTRY_V0,
   getAnimaCapabilityGraph,
@@ -6,58 +6,116 @@ import {
   summarizeByDomain,
   summarizeTargetProgress,
 } from '@anima/core';
-import EvolutionClient, { type EvolutionClientProps } from './EvolutionClient';
+import EvolutionClient, { type EvolutionClientProps, type EvolutionObjective } from './EvolutionClient';
 
 const FEATURED = 'agency.continuous-self-development';
 
 function buildProps(): EvolutionClientProps {
   const graph = getAnimaCapabilityGraph();
+  const objectives: EvolutionObjective[] = ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.target)
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      progress: summarizeTargetProgress(graph, c.id),
+      path: longestDependencyPath(graph, c.id) ?? [],
+    }))
+    .sort((a, b) => (a.id === FEATURED ? -1 : b.id === FEATURED ? 1 : 0));
   return {
     nodes: graph.nodes,
     domainSummaries: summarizeByDomain(ANIMA_CAPABILITY_REGISTRY_V0),
+    objectives,
     featuredTargetId: FEATURED,
-    featuredProgress: summarizeTargetProgress(graph, FEATURED),
-    featuredPath: longestDependencyPath(graph, FEATURED) ?? [],
   };
 }
 
-describe('EvolutionClient', () => {
-  test('projeta o modelo: título, domínios e uma capacidade por nó (não é hardcoded)', () => {
+const stateOf = (container: HTMLElement, id: string): string | null =>
+  container.querySelector(`[data-capid="${id}"]`)?.getAttribute('data-state') ?? null;
+
+describe('EvolutionClient (Evolution UX V1)', () => {
+  test('projeta o modelo: título, domínios como filtros e capacidades como nós', () => {
     render(<EvolutionClient {...buildProps()} />);
-    expect(screen.getByRole('heading', { level: 1, name: 'Evolução do Anima' })).toBeInTheDocument();
-    // Os seis domínios aparecem (resumo + faixa do mapa).
-    expect(screen.getAllByText('Compreensão').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Agência').length).toBeGreaterThan(0);
-    // Cada capacidade vira um nó clicável com nome + maturidade no rótulo acessível.
+    expect(screen.getByRole('heading', { level: 1, name: 'Mapa de Evolução do Anima' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Compreensão/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Agência/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Chat — Operacional' })).toBeInTheDocument();
   });
 
-  test('diferencia futuro de presente: capacidade projetada aparece como projetada', () => {
-    render(<EvolutionClient {...buildProps()} />);
-    // O self-development contínuo é futuro — nunca marcado como já existente.
-    expect(
-      screen.getByRole('button', { name: 'Self-development contínuo — Projetada' }),
-    ).toBeInTheDocument();
+  test('viewport tem controles e o zoom altera a transformação do mapa', () => {
+    const { getByTestId } = render(<EvolutionClient {...buildProps()} />);
+    const canvas = getByTestId('map-canvas');
+    expect(canvas.getAttribute('transform')).toContain('scale(1)');
+    fireEvent.click(screen.getByRole('button', { name: 'Aproximar' }));
+    expect(canvas.getAttribute('transform')).toContain('scale(1.2');
+    fireEvent.click(screen.getByRole('button', { name: 'Resetar visão' }));
+    expect(canvas.getAttribute('transform')).toContain('scale(1)');
+    expect(screen.getByRole('button', { name: 'Ajustar' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Afastar' })).toBeInTheDocument();
   });
 
-  test('sem seleção, mostra o objetivo em foco e um caminho do presente até o futuro', () => {
-    render(<EvolutionClient {...buildProps()} />);
+  test('selecionar uma capacidade foca sua cadeia e atenua o resto', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat — Operacional' }));
+    // selecionada
+    expect(stateOf(container, 'interaction.chat')).toBe('selected');
+    // dependência direta em destaque
+    expect(stateOf(container, 'memory.persistence')).toBe('strong');
+    // capacidade fora da cadeia é atenuada
+    expect(stateOf(container, 'compute.cloud-self-hosted')).toBe('dim');
+  });
+
+  test('filtro por domínio destaca o domínio e atenua os demais', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Compreensão/ }));
+    expect(stateOf(container, 'understanding.entities')).toBe('strong');
+    expect(stateOf(container, 'interaction.chat')).toBe('dim');
+  });
+
+  test('presente e futuro são distinguíveis por mais de um sinal', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    const future = container.querySelector('[data-capid="agency.continuous-self-development"]');
+    const present = container.querySelector('[data-capid="interaction.chat"]');
+    // sinal 1: atributo; sinal 2: rótulo acessível textual
+    expect(future?.getAttribute('data-future')).toBe('true');
+    expect(future?.getAttribute('aria-label')).toContain('(a conquistar)');
+    expect(present?.getAttribute('data-future')).toBe('false');
+    expect(present?.getAttribute('aria-label')).not.toContain('(a conquistar)');
+  });
+
+  test('objetivo em foco mostra distância factual e um caminho relevante (não único)', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
     expect(screen.getByText('Objetivo em foco')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Self-development contínuo' })).toBeInTheDocument();
-    expect(screen.getByText('Um caminho do presente até o futuro')).toBeInTheDocument();
-    // Distância estrutural derivada do grafo (contagens factuais).
-    expect(screen.getByText(/capacidades necessárias já existem/)).toBeInTheDocument();
+    expect(screen.getByText(/capacidades\s+necessárias já existem/)).toBeInTheDocument();
+    expect(screen.getByText(/não de uma única sequência/)).toBeInTheDocument();
+    // o alvo aparece no caminho em foco
+    expect(stateOf(container, FEATURED)).toBe('path');
   });
 
-  test('clicar numa capacidade abre o detalhe com estado, dependências e evidências', () => {
+  test('trocar o objetivo recalcula o painel a partir do grafo', () => {
     render(<EvolutionClient {...buildProps()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Chat — Operacional' }));
-    expect(screen.getByRole('heading', { name: 'Chat' })).toBeInTheDocument();
-    expect(screen.getByText('Depende de')).toBeInTheDocument();
-    expect(screen.getByText('Evidências conhecidas')).toBeInTheDocument();
-    expect(screen.getByText('O que falta para o próximo estágio')).toBeInTheDocument();
-    // Uma dependência real é navegável.
-    expect(screen.getByRole('button', { name: 'Persistência' })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Escolher objetivo futuro' }), {
+      target: { value: 'understanding.world-model' },
+    });
+    expect(screen.getByRole('heading', { name: 'World model' })).toBeInTheDocument();
+  });
+
+  test('linguagem de produto: painel usa Capacidade e Provas (não "node"/"Evidências")', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Self-development supervisionado — Comprovada' }));
+    expect(screen.getByText(/Capacidade selecionada/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Provas' })).toBeInTheDocument();
+    expect(screen.queryByText(/evidências/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\bnode\b/i)).not.toBeInTheDocument();
+  });
+
+  test('provas aparecem tipadas e a auditoria corrige work_item vs attempt', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Self-development supervisionado — Comprovada' }));
+    const provas = screen.getByRole('heading', { name: 'Provas' }).parentElement as HTMLElement;
+    // 8a2515d8 é WORK ITEM (tem lineage/sucessores), não attempt.
+    expect(within(provas).getByText('WORK ITEM')).toBeInTheDocument();
+    expect(within(provas).getByText('8a2515d8')).toBeInTheDocument();
+    expect(within(provas).queryByText('ATTEMPT')).not.toBeInTheDocument();
   });
 
   test('navegação por dependência troca a capacidade selecionada', () => {
@@ -69,8 +127,6 @@ describe('EvolutionClient', () => {
 
   test('não inventa porcentagem global de conclusão', () => {
     render(<EvolutionClient {...buildProps()} />);
-    // Nenhuma alegação numérica de conclusão (ex.: "63% completo"). O rodapé cita
-    // "X% completo" só para explicar por que NÃO existe — X é letra, não dígito.
     expect(screen.queryByText(/\d+\s*%\s*completo/i)).not.toBeInTheDocument();
     expect(screen.getByText(/não existe base semântica/i)).toBeInTheDocument();
   });

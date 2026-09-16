@@ -1,15 +1,30 @@
+/* /evolution é uma exceção deliberada ao layout estreito do app: ocupa toda a
+   largura e altura disponíveis, com o mapa como protagonista. */
+
 .page {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 24px 20px 80px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  width: 100%;
+  padding: 14px 18px 0;
+  gap: 12px;
 }
 
-/* ─── Cabeçalho ─────────────────────────────────────────── */
+@media (min-width: 901px) {
+  .page {
+    height: calc(100vh - 52px); /* 52px = altura da AppNav sticky no desktop */
+  }
+}
+
+/* ─── Cabeçalho e controles ─────────────────────────────── */
 
 .header {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.headTop {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -17,17 +32,17 @@
 }
 
 .title {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.02em;
 }
 
 .subtitle {
-  margin-top: 6px;
-  max-width: 720px;
-  font-size: 14px;
-  line-height: 1.55;
+  margin-top: 4px;
+  max-width: 760px;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--text-secondary);
 }
 
@@ -41,125 +56,221 @@
   background: var(--accent-subtle);
   border: 1px solid var(--border-focus);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 5px 11px;
 }
 
-/* ─── Resumo por domínio ────────────────────────────────── */
-
-.summaryStrip {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 10px;
-}
-
-.summaryCard {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.summaryHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.summaryDomain {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.summaryTotal {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.summaryCounts {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.summaryCount {
-  font-size: 11px;
-  color: var(--text-secondary);
+.controls {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-variant-numeric: tabular-nums;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-/* ─── Legenda ───────────────────────────────────────────── */
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.filterChip {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.filterChip:hover {
+  color: var(--text-primary);
+  border-color: var(--border-focus);
+}
+
+.filterActive {
+  color: var(--text-primary);
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.filterCount {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.objectivePicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.objectivePicker select {
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  max-width: 260px;
+}
 
 .legend {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
-  padding: 10px 14px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  gap: 6px 14px;
 }
 
 .legendItem {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .legendGlyph {
-  font-size: 14px;
+  font-size: 13px;
 }
 
-.pathToggle {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
+.legendFrontier {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 2px dashed #f5b301;
 }
 
-/* ─── Workspace (mapa + painel) ─────────────────────────── */
+/* ─── Workspace: mapa + painel ──────────────────────────── */
 
 .workspace {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 14px;
 }
 
-.mapScroll {
-  overflow: auto;
-  max-height: 72vh;
+.mapContainer {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 4px;
+  touch-action: none;
 }
 
 .svg {
   display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
 }
 
-/* ─── SVG: faixas ───────────────────────────────────────── */
+.svg:active {
+  cursor: grabbing;
+}
+
+/* Controles de viewport */
+
+.mapControls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 6px;
+  background: rgba(20, 20, 20, 0.86);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px;
+  backdrop-filter: blur(6px);
+}
+
+.mapControls button {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  min-width: 30px;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.mapControls button:hover {
+  color: var(--text-primary);
+  border-color: var(--border-focus);
+}
+
+.zoomBadge {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  background: rgba(20, 20, 20, 0.8);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+/* ─── SVG: regiões, fronteira, faixas ───────────────────── */
+
+.band {
+  fill: rgba(255, 255, 255, 0.015);
+}
+
+.bandFuture {
+  fill: rgba(56, 189, 248, 0.035);
+}
+
+.bandTitle {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.frontier {
+  stroke: #f5b301;
+  stroke-width: 2;
+  stroke-dasharray: 8 6;
+  opacity: 0.85;
+}
+
+.frontierPill {
+  fill: rgba(20, 20, 20, 0.95);
+  stroke: #f5b301;
+  stroke-width: 1;
+}
+
+.frontierLabel {
+  fill: #f5b301;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
 
 .laneSep {
   stroke: var(--border);
   stroke-width: 1;
   stroke-dasharray: 2 6;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 .laneLabel {
@@ -170,33 +281,47 @@
   text-transform: uppercase;
 }
 
+.laneLabelDim {
+  opacity: 0.35;
+}
+
 /* ─── SVG: arestas ──────────────────────────────────────── */
 
 .edge {
   stroke: var(--border-focus);
   stroke-width: 1;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .edgeDim {
   stroke: var(--border);
   stroke-width: 1;
-  opacity: 0.18;
+  opacity: 0.12;
+}
+
+.edgeRelated {
+  stroke: var(--accent-hover);
+  stroke-width: 1.6;
+  opacity: 0.6;
 }
 
 .edgeActive {
   stroke: var(--accent-hover);
-  stroke-width: 2;
-  opacity: 0.9;
+  stroke-width: 2.2;
+  opacity: 0.95;
 }
 
 .edgePath {
   stroke: #f5b301;
   stroke-width: 2.4;
-  opacity: 0.85;
+  opacity: 0.9;
 }
 
-/* ─── SVG: nós ──────────────────────────────────────────── */
+.edgeFuture {
+  stroke-dasharray: 5 5;
+}
+
+/* ─── SVG: capacidades (chips) ──────────────────────────── */
 
 .chip {
   cursor: pointer;
@@ -218,7 +343,11 @@
 }
 
 .chipDim {
-  opacity: 0.32;
+  opacity: 0.26;
+}
+
+.chipStrong .chipBg {
+  fill: #2b2b2b;
 }
 
 .chipSelected .chipBg {
@@ -226,7 +355,7 @@
 }
 
 .chipGlyph {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -237,7 +366,7 @@
 }
 
 .chipMaturity {
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 500;
   opacity: 0.9;
 }
@@ -245,14 +374,13 @@
 /* ─── Painel de detalhe ─────────────────────────────────── */
 
 .panel {
-  position: sticky;
-  top: 16px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 18px;
-  max-height: 82vh;
-  overflow: auto;
 }
 
 .detail {
@@ -267,7 +395,7 @@
   justify-content: space-between;
 }
 
-.detailDomain {
+.detailKicker {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -351,8 +479,6 @@
   font-size: 12px;
   color: var(--text-muted);
   font-style: italic;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
 }
 
 /* ─── Chips de relação ──────────────────────────────────── */
@@ -378,7 +504,7 @@
   color: var(--text-primary);
 }
 
-/* ─── Evidências ────────────────────────────────────────── */
+/* ─── Provas ────────────────────────────────────────────── */
 
 .proofList {
   list-style: none;
@@ -399,7 +525,6 @@
 .proofKind {
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--accent-hover);
   background: var(--accent-subtle);
@@ -423,13 +548,14 @@
   font-size: 11.5px;
 }
 
-/* ─── Caminho presente → futuro ─────────────────────────── */
+/* ─── Caminho até o objetivo ────────────────────────────── */
 
 .pathList {
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  margin-top: 4px;
 }
 
 .pathList li {
@@ -467,27 +593,27 @@
 /* ─── Rodapé ────────────────────────────────────────────── */
 
 .footer {
-  font-size: 12px;
+  flex-shrink: 0;
+  font-size: 11.5px;
   color: var(--text-muted);
   line-height: 1.5;
-  border-top: 1px solid var(--border);
-  padding-top: 14px;
+  padding: 10px 0 14px;
 }
 
 /* ─── Responsivo ────────────────────────────────────────── */
 
 @media (max-width: 900px) {
-  .summaryStrip {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .workspace {
     grid-template-columns: 1fr;
   }
+  .mapContainer {
+    height: 62vh;
+  }
   .panel {
-    position: static;
+    height: auto;
     max-height: none;
   }
-  .pathToggle {
-    margin-left: 0;
+  .objectivePicker select {
+    max-width: 180px;
   }
 }
