@@ -25,6 +25,14 @@ function buildProps(): EvolutionClientProps {
     domainSummaries: summarizeByDomain(ANIMA_CAPABILITY_REGISTRY_V0),
     objectives,
     featuredTargetId: FEATURED,
+    capabilityAssessment: {
+      status: 'available',
+      eventCount: 0,
+      projection: {
+        assessments: [],
+        issues: [],
+      },
+    },
   };
 }
 
@@ -129,5 +137,159 @@ describe('EvolutionClient (Evolution UX V1)', () => {
     render(<EvolutionClient {...buildProps()} />);
     expect(screen.queryByText(/\d+\s*%\s*completo/i)).not.toBeInTheDocument();
     expect(screen.getByText(/não existe base semântica/i)).toBeInTheDocument();
+  });
+
+  test('mostra declarado, base e derivado sem substituir o maturity do nó', () => {
+    const props = buildProps();
+
+    render(
+      <EvolutionClient
+        {...props}
+        capabilityAssessment={{
+          status: 'available',
+          eventCount: 42,
+          projection: {
+            issues: [],
+            assessments: [
+              {
+                capabilityId: 'interaction.chat',
+                declaredMaturity: 'operational',
+                definitionMaturity: 'implemented',
+                derivedMaturity: 'proven',
+                assessment: {
+                  maturity: 'proven',
+                  basis: 'verified_execution',
+                  decisiveEvidenceId: 'evidence-1',
+                  supportingEvidenceIds: ['evidence-1'],
+                  contradictingEvidenceIds: [],
+                },
+                evidence: [
+                  {
+                    id: 'evidence-1',
+                    capabilityId: 'interaction.chat',
+                    evidenceClass: 'verified_execution',
+                    outcome: 'positive',
+                    observedAt: '2026-09-16T12:00:00.000Z',
+                    proofRefs: [
+                      {
+                        kind: 'event',
+                        ref: 'event-1',
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Chat — Operacional',
+      }),
+    );
+
+    expect(
+      screen.getByText('Avaliação dinâmica'),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText('Declarado: Operacional'),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText('Base: Implementada'),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText('Derivado: Comprovada'),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText(
+        'Evidências usadas: 1 · eventos lidos: 42. O derivado não substitui o estado declarado.',
+      ),
+    ).toBeInTheDocument();
+
+    // A maturity canônica do node NÃO foi reescrita.
+    /**
+     * O assessment derivado não reescreve a maturity canônica do node:
+     * o botão/nó continua Operational e o significado do badge declarado
+     * continua sendo o original.
+     */
+    expect(
+      screen.getByRole('button', {
+        name: 'Chat — Operacional',
+      }),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText(
+        '— comprovada de maneira confiável',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test('ausência de assessment dinâmico não é apresentada como rebaixamento', () => {
+    render(
+      <EvolutionClient {...buildProps()} />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Chat — Operacional',
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Sem avaliação dinâmica para esta capacidade — ausência de telemetria não implica rebaixamento.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test('histórico inválido preserva o mapa declarado e informa indisponibilidade', () => {
+    const props = buildProps();
+
+    render(
+      <EvolutionClient
+        {...props}
+        capabilityAssessment={{
+          status: 'unavailable',
+          reason: 'event_history_invalid',
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Chat — Operacional',
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Indisponível: o histórico de evidências está inconsistente. O estado declarado continua visível sem inferência dinâmica.',
+      ),
+    ).toBeInTheDocument();
+
+    /**
+     * O assessment derivado não reescreve a maturity canônica do node:
+     * o botão/nó continua Operational e o significado do badge declarado
+     * continua sendo o original.
+     */
+    expect(
+      screen.getByRole('button', {
+        name: 'Chat — Operacional',
+      }),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText(
+        '— comprovada de maneira confiável',
+      ),
+    ).toBeInTheDocument();
   });
 });

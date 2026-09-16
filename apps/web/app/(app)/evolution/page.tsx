@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { readCapabilityAssessments } from '@/lib/evolution/capability-assessment-read';
 import {
   ANIMA_CAPABILITY_REGISTRY_V0,
   getAnimaCapabilityGraph,
@@ -7,7 +8,7 @@ import {
   summarizeByDomain,
   summarizeTargetProgress,
 } from '@anima/core';
-import EvolutionClient, { type EvolutionObjective } from './_components/EvolutionClient';
+import EvolutionClient, { type EvolutionCapabilityAssessmentState, type EvolutionObjective } from './_components/EvolutionClient';
 
 // Objetivo padrão em foco: o norte do arco de agência.
 const FEATURED_TARGET_ID = 'agency.continuous-self-development';
@@ -18,6 +19,27 @@ export default async function EvolutionPage() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect('/login');
+
+  /**
+   * A leitura dinâmica é advisory/read-only.
+   *
+   * O mapa declarado continua existindo mesmo quando o histórico não pode ser
+   * reconstruído. Falha de telemetria nunca vira rebaixamento implícito.
+   */
+  const assessmentRead =
+    await readCapabilityAssessments(supabase);
+
+  const capabilityAssessment: EvolutionCapabilityAssessmentState =
+    assessmentRead.ok
+      ? {
+          status: 'available',
+          eventCount: assessmentRead.eventCount,
+          projection: assessmentRead.projection,
+        }
+      : {
+          status: 'unavailable',
+          reason: assessmentRead.reason,
+        };
 
   // O grafo é uma projeção do modelo explícito de capacidades (packages/core),
   // não uma tela hardcoded. Tudo é construído no servidor e passado como dados
@@ -46,6 +68,7 @@ export default async function EvolutionPage() {
       domainSummaries={summarizeByDomain(ANIMA_CAPABILITY_REGISTRY_V0)}
       objectives={objectives}
       featuredTargetId={FEATURED_TARGET_ID}
+      capabilityAssessment={capabilityAssessment}
     />
   );
 }

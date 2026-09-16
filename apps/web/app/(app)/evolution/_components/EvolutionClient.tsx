@@ -25,6 +25,7 @@ import type {
   DomainMaturitySummary,
   TargetProgress,
 } from '@anima/core';
+import type { CapabilityAssessmentProjection } from '@anima/core';
 import styles from './EvolutionClient.module.css';
 
 // ─── Vocabulário de produto / apresentação (valores puros; tipos vêm do core) ───
@@ -271,11 +272,24 @@ export interface EvolutionObjective {
   path: string[];
 }
 
+export type EvolutionCapabilityAssessmentState =
+  | {
+      readonly status: 'available';
+      readonly eventCount: number;
+      readonly projection: CapabilityAssessmentProjection;
+    }
+  | {
+      readonly status: 'unavailable';
+      readonly reason:
+        | 'event_history_read_failed'
+        | 'event_history_invalid';
+    };
 export interface EvolutionClientProps {
   nodes: CapabilityGraphNode[];
   domainSummaries: DomainMaturitySummary[];
   objectives: EvolutionObjective[];
   featuredTargetId: string;
+  capabilityAssessment: EvolutionCapabilityAssessmentState;
 }
 
 interface View {
@@ -289,6 +303,7 @@ export default function EvolutionClient({
   domainSummaries,
   objectives,
   featuredTargetId,
+  capabilityAssessment,
 }: EvolutionClientProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [domainFilter, setDomainFilter] = useState<CapabilityDomain | null>(null);
@@ -678,6 +693,7 @@ export default function EvolutionClient({
         <aside className={styles.panel} aria-live="polite">
           {selectedNode ? (
             <CapabilityDetail
+              capabilityAssessment={capabilityAssessment}
               node={selectedNode}
               nameById={nameById}
               onSelect={selectCapability}
@@ -729,11 +745,13 @@ function ChipList({
 }
 
 function CapabilityDetail({
+  capabilityAssessment,
   node,
   nameById,
   onSelect,
   onClose,
 }: {
+  capabilityAssessment: EvolutionCapabilityAssessmentState;
   node: CapabilityGraphNode;
   nameById: Map<string, string>;
   onSelect: (id: string) => void;
@@ -742,6 +760,13 @@ function CapabilityDetail({
   const cap: Capability = node.capability;
   const color = MATURITY_COLOR[cap.maturity];
   const next = nextStage(cap.maturity);
+
+  const dynamicAssessment =
+    capabilityAssessment.status === 'available'
+      ? capabilityAssessment.projection.assessments.find(
+          (entry) => entry.capabilityId === cap.id,
+        ) ?? null
+      : null;
 
   return (
     <div className={styles.detail}>
@@ -756,6 +781,37 @@ function CapabilityDetail({
         <span>{MATURITY_GLYPH[cap.maturity]}</span> {MATURITY_LABEL[cap.maturity]}
         <span className={styles.maturityMeaning}>— {MATURITY_MEANING[cap.maturity]}</span>
       </div>
+
+      <section className={styles.detailSection}>
+        <h3 className={styles.detailLabel}>Avaliação dinâmica</h3>
+
+        {capabilityAssessment.status === 'unavailable' ? (
+          <p className={styles.detailEmpty}>
+            {capabilityAssessment.reason === 'event_history_invalid'
+              ? 'Indisponível: o histórico de evidências está inconsistente. O estado declarado continua visível sem inferência dinâmica.'
+              : 'Indisponível: não foi possível ler o histórico de evidências. O estado declarado continua visível sem inferência dinâmica.'}
+          </p>
+        ) : dynamicAssessment === null ? (
+          <p className={styles.detailEmpty}>
+            Sem avaliação dinâmica para esta capacidade — ausência de telemetria não implica rebaixamento.
+          </p>
+        ) : (
+          <>
+            <p className={styles.detailText}>
+              Declarado: {MATURITY_LABEL[dynamicAssessment.declaredMaturity]}
+            </p>
+            <p className={styles.detailText}>
+              Base: {MATURITY_LABEL[dynamicAssessment.definitionMaturity]}
+            </p>
+            <p className={styles.detailText}>
+              Derivado: {MATURITY_LABEL[dynamicAssessment.derivedMaturity]}
+            </p>
+            <p className={styles.detailEmpty}>
+              Evidências usadas: {dynamicAssessment.evidence.length} · eventos lidos: {capabilityAssessment.eventCount}. O derivado não substitui o estado declarado.
+            </p>
+          </>
+        )}
+      </section>
 
       <p className={styles.detailDesc}>{cap.description}</p>
 
