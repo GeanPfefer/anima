@@ -10,7 +10,10 @@ import {
   type WorkEvent,
   type WorktreeHandoffV1,
 } from './work-orchestration';
-import { deriveVerifiedWorktreeExecutionEvidenceFromEvents } from './capability-proof-work-evidence';
+import {
+  deriveCanonicalWorkCapabilityEvidenceFromEvents,
+  deriveVerifiedWorktreeExecutionEvidenceFromEvents,
+} from './capability-proof-work-evidence';
 
 const BASE = 'a'.repeat(40);
 const COMMIT = 'b'.repeat(40);
@@ -499,5 +502,257 @@ describe('Capability Proof Work Evidence V0', () => {
         fullHistory(),
       ),
     ).toEqual([]);
+  });
+});
+function coderEvent(
+  overrides: {
+    outcome?: 'succeeded' | 'failed' | 'cancelled';
+    backendId?: string;
+    attemptId?: string;
+    id?: string;
+  } = {},
+): WorkEvent {
+  const attemptId = overrides.attemptId ?? ATTEMPT;
+  const backendId = overrides.backendId ?? 'fake';
+  const outcome = overrides.outcome ?? 'succeeded';
+
+  const observedAt =
+    '2026-09-16T10:00:30.000Z';
+
+  const evidence = {
+    schemaVersion: 1,
+    workItemId: WORK_ITEM,
+    attemptId,
+    approvedProposalVersion: VERSION,
+    backendId,
+    durationMs: 500,
+    outcome,
+    observedAt,
+  };
+
+  return {
+    id: overrides.id ?? 'ev-host-coder',
+    workItemId: WORK_ITEM,
+    type: 'host_observed_coder_evidence_recorded',
+    author: 'system',
+    proposalVersion: VERSION,
+    payload: {
+      schema_version: 1,
+      data: {
+        work_item_id: WORK_ITEM,
+        attempt_id: attemptId,
+        approved_proposal_version: VERSION,
+        origin: 'host',
+        evidence: evidence as unknown as Json,
+      },
+    } as unknown as Json,
+    occurredAt: new Date(observedAt),
+  };
+}
+
+function attributionHistory(): readonly WorkEvent[] {
+  return [
+    ...fullHistory(),
+    coderEvent(),
+  ];
+}
+
+describe('Capability Attribution V0', () => {
+  const capabilityIds = (
+    events: readonly WorkEvent[],
+  ): readonly string[] =>
+    deriveCanonicalWorkCapabilityEvidenceFromEvents(
+      events,
+    ).map((entry) => entry.capabilityId);
+
+  test('cadeia forte + coder observado atribui as quatro capabilities primitivas exercitadas', () => {
+    expect(
+      [
+        ...new Set(
+          capabilityIds(attributionHistory()),
+        ),
+      ].sort(),
+    ).toEqual([
+      'agency.edit-file',
+      'agency.produce-change',
+      'agency.run-tests',
+      'agency.verify-change',
+    ]);
+  });
+
+  test('Git host-observed sozinho NÃO prova edit-file', () => {
+    expect(
+      capabilityIds([
+        gitEvent(),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('coder observado sozinho NÃO prova edit-file sem mudança Git correlacionada', () => {
+    expect(
+      capabilityIds([
+        coderEvent(),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('coder + Git sem handoff durável NÃO provam edit-file', () => {
+    expect(
+      capabilityIds([
+        coderEvent(),
+        gitEvent(),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('handoff + coder succeeded + Git correlacionado provam edit-file', () => {
+    expect(
+      capabilityIds([
+        resultEvent(),
+        coderEvent(),
+        gitEvent(),
+      ]),
+    ).toEqual([
+      'agency.edit-file',
+    ]);
+  });
+
+  test('coder failed não prova edit-file mesmo que exista Git na attempt', () => {
+    expect(
+      capabilityIds([
+        resultEvent(),
+        coderEvent({
+          outcome: 'failed',
+        }),
+        gitEvent(),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('backend observado precisa ser o mesmo backend do handoff', () => {
+    expect(
+      capabilityIds([
+        resultEvent(),
+        coderEvent({
+          backendId: 'outro-backend',
+        }),
+        gitEvent(),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('Git observado precisa corresponder aos arquivos declarados no handoff', () => {
+    const differentGit = gitEvidence({
+      observedChangedFiles: ['src/b.ts'],
+      observedDiffFiles: [
+        {
+          path: 'src/b.ts',
+          insertions: 1,
+          deletions: 0,
+        },
+      ],
+    });
+
+    expect(
+      capabilityIds([
+        resultEvent(),
+        coderEvent(),
+        gitEvent(differentGit),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('gate host-observed sozinho prova run-tests', () => {
+    expect(
+      capabilityIds([
+        gateEvent(),
+      ]),
+    ).toEqual([
+      'agency.run-tests',
+    ]);
+  });
+
+  test('resultado + coder + Git + gates sem Verifier preservam edit-file e run-tests, mas não produce/verify', () => {
+    const ids = capabilityIds([
+      resultEvent(),
+      coderEvent(),
+      gitEvent(),
+      gateEvent(),
+    ]);
+
+    expect(
+      [...new Set(ids)].sort(),
+    ).toEqual([
+      'agency.edit-file',
+      'agency.run-tests',
+    ]);
+  });
+
+  test('gate terminal falho não produz evidência positiva de run-tests', () => {
+    expect(
+      capabilityIds([
+        gateEvent(gateEvidence(1)),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('a atribuição continua independente de WorkCapability e texto livre', () => {
+    const evidence =
+      deriveCanonicalWorkCapabilityEvidenceFromEvents(
+        attributionHistory(),
+      );
+
+    expect(
+      evidence.some(
+        (entry) =>
+          entry.capabilityId ===
+          'agency.produce-change',
+      ),
+    ).toBe(true);
+
+    expect(
+      evidence.some(
+        (entry) =>
+          entry.capabilityId ===
+          'agency.verify-change',
+      ),
+    ).toBe(true);
+  });
+
+  test('cada atribuição mantém proofRefs auditáveis', () => {
+    const evidence =
+      deriveCanonicalWorkCapabilityEvidenceFromEvents(
+        attributionHistory(),
+      );
+
+    expect(evidence.length).toBeGreaterThan(0);
+
+    for (const entry of evidence) {
+      expect(
+        entry.proofRefs.length,
+      ).toBeGreaterThan(0);
+
+      expect(
+        entry.proofRefs.some(
+          (proof) =>
+            proof.kind === 'attempt',
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test('é determinística mesmo com eventos recebidos fora de ordem', () => {
+    const ordered = attributionHistory();
+    const reversed = [...ordered].reverse();
+
+    expect(
+      deriveCanonicalWorkCapabilityEvidenceFromEvents(
+        reversed,
+      ),
+    ).toEqual(
+      deriveCanonicalWorkCapabilityEvidenceFromEvents(
+        ordered,
+      ),
+    );
   });
 });
