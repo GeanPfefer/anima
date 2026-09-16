@@ -13,3 +13,5 @@ export * from './project-intake';
 export * from './compute-economics';
 export * from './compute-router';
 export * from './economic-observations';
+export * from './capability-map';
+export * from './capability-registry';

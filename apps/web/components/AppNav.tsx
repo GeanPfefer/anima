@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: '/identity', label: 'Identidade' },
   { href: '/reports',  label: 'Relatórios' },
   { href: '/graph',    label: 'Graph' },
+  { href: '/evolution', label: 'Evolução' },
   { href: '/settings', label: 'Config' },
 ];
 

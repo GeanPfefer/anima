@@ -1,0 +1,493 @@
+.page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 20px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ─── Cabeçalho ─────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.title {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin-top: 6px;
+  max-width: 720px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.marker {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-hover);
+  background: var(--accent-subtle);
+  border: 1px solid var(--border-focus);
+  border-radius: 999px;
+  padding: 6px 12px;
+}
+
+/* ─── Resumo por domínio ────────────────────────────────── */
+
+.summaryStrip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+
+.summaryCard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summaryHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.summaryDomain {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.summaryTotal {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.summaryCounts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.summaryCount {
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Legenda ───────────────────────────────────────────── */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.legendItem {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendGlyph {
+  font-size: 14px;
+}
+
+.pathToggle {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+/* ─── Workspace (mapa + painel) ─────────────────────────── */
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+.mapScroll {
+  overflow: auto;
+  max-height: 72vh;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+}
+
+.svg {
+  display: block;
+}
+
+/* ─── SVG: faixas ───────────────────────────────────────── */
+
+.laneSep {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 2 6;
+  opacity: 0.6;
+}
+
+.laneLabel {
+  fill: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* ─── SVG: arestas ──────────────────────────────────────── */
+
+.edge {
+  stroke: var(--border-focus);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+.edgeDim {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.18;
+}
+
+.edgeActive {
+  stroke: var(--accent-hover);
+  stroke-width: 2;
+  opacity: 0.9;
+}
+
+.edgePath {
+  stroke: #f5b301;
+  stroke-width: 2.4;
+  opacity: 0.85;
+}
+
+/* ─── SVG: nós ──────────────────────────────────────────── */
+
+.chip {
+  cursor: pointer;
+  outline: none;
+}
+
+.chip:focus-visible .chipBg {
+  stroke: var(--accent-hover) !important;
+  stroke-width: 2.5 !important;
+}
+
+.chipBg {
+  fill: var(--bg-elevated);
+  transition: fill 0.12s ease;
+}
+
+.chip:hover .chipBg {
+  fill: #262626;
+}
+
+.chipDim {
+  opacity: 0.32;
+}
+
+.chipSelected .chipBg {
+  fill: #2a2440;
+}
+
+.chipGlyph {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.chipName {
+  fill: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chipMaturity {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+/* ─── Painel de detalhe ─────────────────────────────────── */
+
+.panel {
+  position: sticky;
+  top: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  max-height: 82vh;
+  overflow: auto;
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detailTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.detailDomain {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.closeBtn:hover {
+  color: var(--text-primary);
+}
+
+.detailName {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.maturityBadge {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 4px 10px;
+  flex-wrap: wrap;
+}
+
+.maturityMeaning {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.detailDesc {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.detailSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.detailLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.detailText {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.detailEmpty {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.detailHint {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+/* ─── Chips de relação ──────────────────────────────────── */
+
+.relChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.relChip {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 4px 9px;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.relChip:hover {
+  border-color: var(--border-focus);
+  color: var(--text-primary);
+}
+
+/* ─── Evidências ────────────────────────────────────────── */
+
+.proofList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.proofItem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.proofKind {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent-hover);
+  background: var(--accent-subtle);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+
+.proofRef {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-primary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 6px;
+  word-break: break-all;
+}
+
+.proofNote {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+/* ─── Caminho presente → futuro ─────────────────────────── */
+
+.pathList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pathList li {
+  position: relative;
+  padding-left: 14px;
+}
+
+.pathList li::before {
+  content: '↓';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.pathList li:first-child::before {
+  content: '•';
+}
+
+.pathStep {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 3px 0;
+}
+
+.pathStep:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+/* ─── Rodapé ────────────────────────────────────────────── */
+
+.footer {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+/* ─── Responsivo ────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .summaryStrip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .panel {
+    position: static;
+    max-height: none;
+  }
+  .pathToggle {
+    margin-left: 0;
+  }
+}
