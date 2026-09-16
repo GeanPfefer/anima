@@ -15,3 +15,4 @@ export * from './compute-router';
 export * from './economic-observations';
 export * from './capability-map';
 export * from './capability-registry';
+export * from './capability-proof-engine';
