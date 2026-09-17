@@ -1,4 +1,4 @@
-import { buildHostObservedGitEvidence, type HostObservedEvidenceResult, type HostObservedGitEvidenceV1 } from '@anima/core';
+import { buildHostObservedGitEvidence, guardCanonicalResidentWrite, type HostObservedEvidenceResult, type HostObservedGitEvidenceV1 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runProcess } from './worktree';
@@ -147,6 +147,10 @@ export async function observeAndPersistHostGitEvidence(
  */
 export const hostEvidenceSinkFor = (client: SupabaseClient<Database>): HostEvidenceSink => ({
   record: async (evidence) => {
+    // Guarda canônica (read-your-writes): não persiste um formato que a linha
+    // atual não conseguiria reprojetar de volta pelo read-model do Evolution.
+    const guard = guardCanonicalResidentWrite('host_observed_evidence', evidence);
+    if (!guard.ok) return { ok: false, message: `canonical resident contract guard: ${guard.reason}` };
     const { data, error } = await client.rpc('record_host_observed_evidence', {
       work_item_id: evidence.workItemId,
       expected_proposal_version: evidence.approvedProposalVersion,

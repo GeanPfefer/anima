@@ -140,4 +140,22 @@ describe('coderEvidenceSinkFor — tradução para a RPC record_host_observed_co
     const client = { rpc: async () => ({ data: null, error: { message: 'attempt not found' } }) } as unknown as SupabaseClient<Database>;
     expect(await coderEvidenceSinkFor(client).record(evidence())).toEqual({ ok: false, message: 'attempt not found' });
   });
+
+  test('guarda canônica: carga ilegível é recusada ANTES da RPC (a RPC nunca é chamada)', async () => {
+    let rpcCalled = false;
+    const client = { rpc: async () => { rpcCalled = true; return { data: { action: 'recorded' }, error: null }; } } as unknown as SupabaseClient<Database>;
+    // Transcript com chave que o reader não conhece: o exato mecanismo do 51929.
+    const unreadable = {
+      ...evidence(),
+      transcripts: [{
+        schemaVersion: 1, call: 0, previousCall: null, gateFingerprint: null, diffFingerprint: null,
+        termination: 'returned', truncated: false, entries: [], chaveFutura: 'x',
+      }],
+    } as unknown as HostObservedCoderEvidenceV1;
+    const result = await coderEvidenceSinkFor(client).record(unreadable);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain('canonical resident contract guard');
+    expect(rpcCalled).toBe(false);
+  });
 });

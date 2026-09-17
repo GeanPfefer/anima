@@ -1,5 +1,6 @@
 import {
   buildHostObservedCoderEvidence,
+  guardCanonicalResidentWrite,
   type HostObservedCoderEvidenceV1,
   type ObservedCoderInput,
 } from '@anima/core';
@@ -152,6 +153,10 @@ export async function persistHostObservedCoderEvidence(
  */
 export const coderEvidenceSinkFor = (client: SupabaseClient<Database>): CoderEvidenceSink => ({
   record: async (evidence) => {
+    // Guarda canônica (read-your-writes): não persiste um formato que a linha
+    // atual não conseguiria reprojetar de volta pelo read-model do Evolution.
+    const guard = guardCanonicalResidentWrite('host_observed_coder_evidence', evidence);
+    if (!guard.ok) return { ok: false, message: `canonical resident contract guard: ${guard.reason}` };
     const { data, error } = await client.rpc('record_host_observed_coder_evidence', {
       work_item_id: evidence.workItemId,
       expected_proposal_version: evidence.approvedProposalVersion,

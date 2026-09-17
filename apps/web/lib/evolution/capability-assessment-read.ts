@@ -1,9 +1,6 @@
 import {
   deriveCapabilityAssessmentsFromWorkHistory,
-  projectHostObservedCoderEvidence,
-  projectHostObservedEvidence,
-  projectHostObservedGateEvidence,
-  projectVerifierOpinionHistory,
+  isCanonicalResidentEventReadable,
   type CapabilityAssessmentProjection,
   type WorkEvent,
 } from '@anima/core';
@@ -21,38 +18,16 @@ const PAGE_SIZE = 500;
  * boundary epistemológica. Aqui um evento crítico inválido não pode virar
  * "ausência de evidência", porque isso pode preservar indevidamente uma prova
  * positiva anterior.
+ *
+ * A régua vive no core (`isCanonicalResidentEventReadable`), a MESMA que o
+ * write-guard `guardCanonicalResidentWrite` aplica antes de persistir. Compartilhar
+ * a régua é o que impede escrita e leitura de divergirem dentro de uma linha —
+ * a causa estrutural do incidente 51929.
  */
 function isSemanticallyValidEvidenceEvent(
   event: WorkEvent,
 ): boolean {
-  switch (event.type) {
-    case 'host_observed_evidence_recorded':
-      return (
-        projectHostObservedEvidence([event]) !==
-        null
-      );
-
-    case 'host_observed_gate_evidence_recorded':
-      return (
-        projectHostObservedGateEvidence([event]) !==
-        null
-      );
-
-    case 'host_observed_coder_evidence_recorded':
-      return (
-        projectHostObservedCoderEvidence([event]) !==
-        null
-      );
-
-    case 'verifier_opinion_recorded':
-      return (
-        projectVerifierOpinionHistory([event])
-          .length === 1
-      );
-
-    default:
-      return true;
-  }
+  return isCanonicalResidentEventReadable(event);
 }
 export type CapabilityAssessmentReadResult =
   | {

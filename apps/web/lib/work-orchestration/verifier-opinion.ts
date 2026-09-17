@@ -1,4 +1,4 @@
-import { computeVerifierOpinion, type VerifierOpinionV1, type WorkEvent, type WorkItem } from '@anima/core';
+import { computeVerifierOpinion, guardCanonicalResidentWrite, type VerifierOpinionV1, type WorkEvent, type WorkItem } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -50,6 +50,10 @@ export async function computeAndPersistVerifierOpinion(
  */
 export const verifierOpinionSinkFor = (client: SupabaseClient<Database>): VerifierOpinionSink => ({
   record: async (opinion) => {
+    // Guarda canônica (read-your-writes): não persiste um parecer que a linha
+    // atual não conseguiria reprojetar de volta pelo read-model do Evolution.
+    const guard = guardCanonicalResidentWrite('verifier_opinion', opinion);
+    if (!guard.ok) return { ok: false, message: `canonical resident contract guard: ${guard.reason}` };
     const { data, error } = await client.rpc('record_verifier_opinion', {
       work_item_id: opinion.workItemId,
       expected_proposal_version: opinion.approvedProposalVersion,
