@@ -1,3 +1,4 @@
+import { buildHostObservedCoderEvidence } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readCapabilityAssessments } from './capability-assessment-read';
@@ -173,6 +174,62 @@ function verifierRow(
       },
     },
   } as EventRow;
+}
+
+function coderRuntimeEventsRow(): EventRow {
+  const built = buildHostObservedCoderEvidence({
+    workItemId: 'work-1',
+    attemptId: 'attempt-1',
+    approvedProposalVersion: 1,
+    backendId: 'ollama-coder',
+    durationMs: 100,
+    outcome: 'succeeded',
+    observedAt: '2026-09-16T18:00:00.000Z',
+    transcripts: [
+      {
+        schemaVersion: 1,
+        call: 0,
+        previousCall: null,
+        gateFingerprint: null,
+        diffFingerprint: null,
+        termination: 'ollama_submit_gate_unsatisfied',
+        truncated: false,
+        entries: [],
+        runtimeEvents: [
+          {
+            round: 1,
+            kind: 'submit_blocked',
+            result: 'blocked',
+            state: 'dirty_unvalidated',
+            editRevision: 1,
+            passedValidationRevision: -1,
+            diffReviewedRevision: -1,
+            detail: '',
+          },
+        ],
+      },
+    ],
+  });
+
+  if (!built.ok) {
+    throw new Error(`fixture coder invalida: ${built.defect}`);
+  }
+
+  return row({
+    id: 'coder-runtime-events',
+    seq: 51929,
+    event_type: 'host_observed_coder_evidence_recorded',
+    payload: {
+      schema_version: 1,
+      data: {
+        work_item_id: 'work-1',
+        attempt_id: 'attempt-1',
+        approved_proposal_version: 1,
+        origin: 'host',
+        evidence: built.value,
+      },
+    } as unknown as EventRow['payload'],
+  });
 }
 
 function malformedGateRow(): EventRow {
@@ -361,6 +418,21 @@ describe('readCapabilityAssessments', () => {
       ok: false,
       reason: 'event_history_read_failed',
     });
+  });
+
+  test('evento coder historico com transcript.runtimeEvents e aceito pelo boundary', async () => {
+    const result =
+      await readCapabilityAssessments(
+        fakeClient({
+          rows: [coderRuntimeEventsRow()],
+        }),
+      );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) return;
+
+    expect(result.eventCount).toBe(1);
   });
 
   test('evento host-observed semanticamente incoerente falha fechado', async () => {

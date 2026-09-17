@@ -51,4 +51,25 @@ describe('validCoderTranscripts — observabilidade EXEC/TEST/GIT (Parte A)', ()
     const bad = { ...baseTranscript(), extra: 1 } as unknown;
     expect(validCoderTranscripts([bad])).toBe(false);
   });
+  test('aceita runtimeEvents V3 aditivos e conhecidos', () => {
+    expect(
+      validCoderTranscripts([
+        baseTranscript({
+          runtimeEvents: [
+            {
+              round: 1,
+              kind: 'submit_blocked',
+              result: 'blocked',
+              state: 'dirty_unvalidated',
+              editRevision: 1,
+              passedValidationRevision: -1,
+              diffReviewedRevision: -1,
+              detail: '',
+            },
+          ],
+        }),
+      ]),
+    ).toBe(true);
+  });
+
 });
