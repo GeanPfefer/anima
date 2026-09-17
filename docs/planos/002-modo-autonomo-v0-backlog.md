@@ -252,6 +252,12 @@ A primeira integração deve ser estreita, nesta forma exata: um `work_item` apr
 
 **Estado (2026-07-20):** concluído. Política V0 `oldest_approval_first` — FIFO pela sequência do evento `work_approved` vigente, imune a relógio, com o `work_item_id` como desempate defensivo (empate é impossível no log). `public.next_autonomous_work()` devolve a escolha e sua razão (política, tamanho da fila, sequência do segundo colocado); `selectNextAutonomousWork` no core recusa fila ambígua (posições não contíguas, ordem não monotônica, item repetido). 16 testes de domínio e 14 asserções pgTAP, incluindo prova de que selecionar não grava evento, não cria claim e não altera estado. **Decisão registrada:** selecionar é leitura e não emite evento próprio — o efeito auditável é o claim, e a política determinística sobre log imutável torna a escolha recomputável. Corrida real entre dois supervisores: ambos selecionaram a mesma cabeça, um venceu o claim e o outro recebeu o próximo item ao reconsultar.
 
+**Costura conversacional (2026-09-09):** o chat Dev passou a reutilizar a fila e
+a política deste item sob mandato autônomo explícito, reconciliando também o
+lineage de recovery/correction. A busca rasa por `capability/state` permanece
+somente no drill-down conservador do chat comum. Regressões e prova de banco:
+[registro da sessão](../registros/2026-09-09-selecao-autonoma-chat-dev.md).
+
 - **Problema:** com mais de um elegível, alguém precisa escolher o próximo de forma explicável e segura.
 - **Resultado esperado:** política de seleção determinística e documentada (ex.: aprovação mais antiga primeiro, respeitando SUP-03), com a razão da escolha registrada.
 - **Dependências:** SUP-01. **Escopo:** política V0 simples + registro da decisão. **Fora do escopo:** priorização por urgência/valor; reordenação pelo usuário (futuro).

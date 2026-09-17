@@ -155,7 +155,7 @@ describe('superfície de autodesenvolvimento do Anima', () => {
     expect(screen.queryByRole('button', { name: /Dev do Anima/ })).not.toBeInTheDocument();
   });
 
-  test('autorizado: ativar mostra o aviso e envia developmentMode:true + GPT somente nessa superfície', async () => {
+  test('autorizado: ativar mostra o aviso e envia developmentMode:true + provider GPT selecionado', async () => {
     const bodies: Record<string, unknown>[] = [];
     mount(true, bodies);
     await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
@@ -167,6 +167,29 @@ describe('superfície de autodesenvolvimento do Anima', () => {
     fireEvent.click(screen.getByRole('button', { name: '↑' }));
     await waitFor(() => expect(bodies.length).toBe(1));
     expect(bodies[0]).toMatchObject({ developmentMode: true, provider: 'openai' });
+  });
+
+  test('primeiro e segundo turno Dev preservam GPT; Local selecionado preserva Local', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    mount(true, bodies);
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /Dev do Anima/ }));
+    for (const message of ['Liste os candidatos.', 'Selecione autonomamente o próximo Work Item.']) {
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: message } });
+      fireEvent.click(screen.getByRole('button', { name: '↑' }));
+      await waitFor(() => expect(bodies).toHaveLength(message.startsWith('Liste') ? 1 : 2));
+      await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    }
+    expect(bodies).toEqual([
+      expect.objectContaining({ developmentMode: true, provider: 'openai' }),
+      expect.objectContaining({ developmentMode: true, provider: 'openai' }),
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Local' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Planeje pelo provider local.' } });
+    fireEvent.click(screen.getByRole('button', { name: '↑' }));
+    await waitFor(() => expect(bodies).toHaveLength(3));
+    expect(bodies[2]).toMatchObject({ developmentMode: true, provider: 'ollama' });
   });
 
   test('autorizado com o modo desligado: chat comum, nunca envia developmentMode', async () => {

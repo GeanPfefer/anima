@@ -42,6 +42,18 @@ describe('mapHostTurnResult (puro)', () => {
   test('mapeia o resultado + extrai os IDs distintos de work_items tocados', () => {
     expect(mapHostTurnResult(RESULT)).toEqual(MAPPED);
   });
+  test('sobe notExecutableReason ao desfecho quando a parada foi turn_not_executable', () => {
+    const refusal = { code: 'coder_node_unavailable', message: 'Node on-demand indisponível: provider_rejected_before_create.' };
+    const out = mapHostTurnResult({ ...RESULT, stopReason: 'turn_not_executable', continuation: 'stop', notExecutableReason: refusal });
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.notExecutableReason).toEqual(refusal);
+  });
+
+  test('sem parada não-executável, o desfecho NÃO carrega notExecutableReason (mapeamento inalterado)', () => {
+    const out = mapHostTurnResult(RESULT) as { notExecutableReason?: unknown };
+    expect('notExecutableReason' in out).toBe(false);
+  });
+
   test('dedupe de workItemIds através de ciclos/voltas', () => {
     const dup: BacklogHostTurnResult = {
       ...RESULT, itemsTouched: 2,
@@ -127,5 +139,47 @@ describe('createInProcessHostTurnPort', () => {
     const port=createInProcessHostTurnPort(config,{buildClient:()=>client,runHostTurn:async input=>{requested=input.requestedWorkItemId;return RESULT;}});
     await port({userId:'u1',accessToken:'t'},new AbortController().signal);
     expect(requested).toBe('work-requested');
+  });
+
+  // Parte 2 — admitido + host presente: a admissão autônoma pendente (mesma request
+  // gravada pelo cartão/chat) é amarrada ao item governado e consumida pela volta.
+  test('admissão autonomous_execution_request pendente vira requestedWorkItemId',async()=>{
+    const signal={work_item_id:'item-x',proposal_version:2,seq:51571,payload:{data:{authority:'autonomous_execution_request'}}};
+    let reads=0;const client={from:jest.fn(()=>query(reads++===0?[signal]:[]))} as unknown as SupabaseClient<Database>;
+    let requested:string|undefined;
+    const port=createInProcessHostTurnPort(config,{buildClient:()=>client,runHostTurn:async input=>{requested=input.requestedWorkItemId;return RESULT;}});
+    await port({userId:'u1',accessToken:'t'},new AbortController().signal);
+    expect(requested).toBe('item-x');
+  });
+
+  // Parte 3/5 — duas requests do MESMO item (no real, seq 51570/51571): o host pede
+  // execução do item UMA vez por volta (break após o primeiro), nunca duas. A
+  // exclusividade da attempt segue sendo do claim canônico dentro de runHostTurn.
+  test('duas requests do mesmo item ⇒ um único requestedWorkItemId por volta',async()=>{
+    const requests=[
+      {work_item_id:'item-x',proposal_version:2,seq:51571,payload:{data:{authority:'autonomous_execution_request'}}},
+      {work_item_id:'item-x',proposal_version:2,seq:51570,payload:{data:{authority:'autonomous_execution_request'}}},
+    ];
+    let reads=0;const client={from:jest.fn(()=>query(reads++===0?requests:[]))} as unknown as SupabaseClient<Database>;
+    const requestedIds:(string|undefined)[]=[];
+    const port=createInProcessHostTurnPort(config,{buildClient:()=>client,runHostTurn:async input=>{requestedIds.push(input.requestedWorkItemId);return RESULT;}});
+    await port({userId:'u1',accessToken:'t'},new AbortController().signal);
+    expect(requestedIds).toEqual(['item-x']);
+    // O break após o primeiro impede uma segunda leitura de start: 1 read de requests + 1 verificação.
+    expect((client.from as jest.Mock).mock.calls.length).toBe(2);
+  });
+
+  // Já iniciada a execução (execution_started com seq após AMBOS os pedidos), nenhuma das
+  // duas requests é reentregue — as duas ficam consumidas pelo mesmo início de execução.
+  test('com execution_started após ambos os seqs, nenhuma das duas requests é reentregue',async()=>{
+    const requests=[
+      {work_item_id:'item-x',proposal_version:2,seq:51571,payload:{data:{authority:'autonomous_execution_request'}}},
+      {work_item_id:'item-x',proposal_version:2,seq:51570,payload:{data:{authority:'autonomous_execution_request'}}},
+    ];
+    let reads=0;const client={from:jest.fn(()=>query(reads++===0?requests:[{seq:60000}]))} as unknown as SupabaseClient<Database>;
+    let requested:string|undefined='sentinel';
+    const port=createInProcessHostTurnPort(config,{buildClient:()=>client,runHostTurn:async input=>{requested=input.requestedWorkItemId;return RESULT;}});
+    await port({userId:'u1',accessToken:'t'},new AbortController().signal);
+    expect(requested).toBeUndefined();
   });
 });

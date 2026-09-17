@@ -25,6 +25,8 @@ export interface NodeProvisionRequest {
   readonly providerId: string;
   readonly model: string;
   readonly resourceClass: string;
+  /** Identidade concreta do catálogo do provider, quando um matcher já a selecionou. */
+  readonly gpuTypeId?: string;
   /** Envelope temporal/custo que acompanha a provisão (autoridade da camada de decisão). */
   readonly lease: NodeLeaseV0;
 }

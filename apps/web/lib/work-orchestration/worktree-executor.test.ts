@@ -17,7 +17,7 @@ import {
   type WorktreeHandoffV1,
 } from '@anima/core';
 import { runProcess } from './worktree';
-import { ScriptedCoderBackend, type CoderBackend, type CoderEditResult, type CoderWorkspace } from './coder-backend';
+import { ScriptedCoderBackend, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { WorktreeExecutorAdapter, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, type WorktreeTargetResolver } from './worktree-executor';
 
@@ -188,6 +188,87 @@ describe('WorktreeExecutorAdapter', () => {
   test('alteração fora do escopo aprovado vira contract_violation', async () => {
     const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([{ path: 'src/evil.ts', content: 'x' }]) });
     const terminal = (await collect(adapter, request(), new AbortController().signal)).at(-1)!;
+    expect(terminal.kind).toBe('error');
+    if (terminal.kind === 'error') expect(terminal.code).toBe('contract_violation');
+  });
+
+  // ── Contrato do harness: os dois modos de falha recorrentes são bloqueados
+  // FAIL-CLOSED antes dos gates caros (o fixture `npm test` PASSARIA nestes
+  // arquivos; é o harness — não o gate — que os rejeita). ────────────────────
+  test('teste importando vitest (workspace Jest) vira contract_violation antes do gate — nunca result', async () => {
+    const vitestTest = { path: 'src/added.test.ts', content: `import { test, expect } from 'vitest';\ntest('x', () => expect(1).toBe(1));\n` };
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([vitestTest]) });
+    const signals = await collect(adapter, request({ includedScope: ['src/added.test.ts'] }), new AbortController().signal);
+    expect(signals.some(s => s.kind === 'result')).toBe(false);
+    const terminal = signals.at(-1)!;
+    expect(terminal.kind).toBe('error');
+    if (terminal.kind === 'error') {
+      expect(terminal.code).toBe('contract_violation');
+      expect(terminal.retryable).toBe(false);
+      expect(terminal.message).toContain('vitest');
+    }
+    expect(validateWorkExecutorTranscript(signals)).toBeNull();
+  });
+
+  test('leitura de entry.coderBackend (fonte não autoritativa) vira contract_violation — nunca result', async () => {
+    const badSource = { path: 'src/added.ts', content: `export const routedToOpenAI = (entry: { coderBackend?: string }) => entry.coderBackend === 'openai';\n` };
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([badSource]) });
+    const signals = await collect(adapter, request(), new AbortController().signal);
+    expect(signals.some(s => s.kind === 'result')).toBe(false);
+    const terminal = signals.at(-1)!;
+    expect(terminal.kind).toBe('error');
+    if (terminal.kind === 'error') {
+      expect(terminal.code).toBe('contract_violation');
+      expect(terminal.retryable).toBe(false);
+      expect(terminal.message).toContain('entry.coderBackend');
+    }
+  });
+
+  test('teste Jest legítimo (@jest/globals) passa o harness e chega a result — sem falso-positivo', async () => {
+    const jestTest = { path: 'src/added.test.ts', content: `import { test, expect } from '@jest/globals';\ntest('ok', () => expect(1).toBe(1));\n` };
+    const req = request({ includedScope: ['src/added.test.ts'] });
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([jestTest]) });
+    const signals = await collect(adapter, req, new AbortController().signal);
+    const terminal = signals.at(-1)!;
+    expect(terminal.kind).toBe('result');
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
+  });
+
+  test('PRÉ-CODER: o executor injeta a política canônica no request ANTES da inferência', async () => {
+    let captured: CoderEditRequest | null = null;
+    const backend: CoderBackend = {
+      id: 'capture-policy',
+      async edit(req, ws) {
+        captured = req;
+        await ws.writeFile('src/added.ts', 'export const two = 2;\n');
+        return { summary: 'ok', touchedResources: ['src/added.ts'] };
+      },
+    };
+    const req = request();
+    await collect(new WorktreeExecutorAdapter({ targets: ctx.resolver, backend }), req, new AbortController().signal);
+    expect(captured).not.toBeNull();
+    const policy = captured!.harnessPolicy;
+    expect(policy).toBeDefined();
+    expect(policy!.canonicalTestRunner).toBe('jest');
+    expect(policy!.incompatibleTestRunners).toContain('vitest');
+    expect(policy!.forbiddenBackendSources).toContain('entry.coderBackend');
+    expect(captured!.validationCommands).toEqual([
+      { label: 'testes', program: 'npm', args: ['test'] },
+    ]);
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
+  });
+
+  test('policy override VAZIA não enfraquece o gate vivo: vitest ainda é bloqueado', async () => {
+    const vitestTest = { path: 'src/added.test.ts', content: `import { test } from 'vitest';\ntest('x', () => {});\n` };
+    const adapter = new WorktreeExecutorAdapter({
+      targets: ctx.resolver,
+      backend: new ScriptedCoderBackend([vitestTest]),
+      // Caller tenta desligar o gate com listas vazias — resolveEffective ignora.
+      harnessPolicy: { schemaVersion: 1, canonicalTestRunner: 'jest', incompatibleTestRunners: [], forbiddenBackendSources: [] },
+    });
+    const signals = await collect(adapter, request({ includedScope: ['src/added.test.ts'] }), new AbortController().signal);
+    expect(signals.some(s => s.kind === 'result')).toBe(false);
+    const terminal = signals.at(-1)!;
     expect(terminal.kind).toBe('error');
     if (terminal.kind === 'error') expect(terminal.code).toBe('contract_violation');
   });
@@ -496,12 +577,30 @@ describe('WorktreeExecutorAdapter — duração do coder observada de primeira p
   };
 
   test('endpoint remoto controlado devolve operação; host local aplica, cria checkpoint e roda gate', async () => {
-    const server = createServer((_req, response) => {
-      response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({
-        message: { content: JSON.stringify({ action: 'edit', operations: [{ kind: 'create_file', path: 'src/added.ts', content: added.content }] }) },
-        prompt_eval_count: 1000, eval_count: 50, done_reason: 'stop',
-      }));
+    const server = createServer((req, response) => {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        // Completa o protocolo V3 real (EDIT → validação focal → git diff → SUBMIT),
+        // reagindo ao marcador de estado que o prompt do laço carrega. SUBMIT só é
+        // enviado quando o host anuncia READY_TO_SUBMIT.
+        let prompt = '';
+        try {
+          const payload = JSON.parse(body) as { messages?: { content?: string }[]; prompt?: string };
+          prompt = payload.messages?.at(-1)?.content ?? payload.prompt ?? '';
+        } catch { /* deixa o fake no estado inicial */ }
+        const state = /Ações permitidas nesta rodada \(estado (exploring|dirty_unvalidated|dirty_validated|ready_to_submit)\)/
+          .exec(prompt)?.[1] ?? 'exploring';
+        const content = state === 'ready_to_submit' ? { action: 'submit' }
+          : state === 'dirty_validated' ? { action: 'exec', program: 'git', args: ['diff'] }
+          : state === 'dirty_unvalidated' ? { action: 'exec', program: 'npm', args: ['test'] }
+          : { action: 'edit', operations: [{ kind: 'create_file', path: 'src/added.ts', content: added.content }] };
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({
+          message: { content: JSON.stringify(content) },
+          prompt_eval_count: 100_000, eval_count: 50, done_reason: 'stop',
+        }));
+      });
     });
     await new Promise<void>((resolveListen, reject) => {
       server.once('error', reject);

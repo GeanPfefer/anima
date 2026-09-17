@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { MAX_READS_REQUESTED_PER_ROUND } from '@anima/core';
 
 // ============================================================
 // Protocolo limitado de leitura + edição estruturada para backends de modelo
@@ -30,6 +31,9 @@ export type OllamaProtocolErrorCode =
   | 'ollama_stale_file_hash'
   | 'ollama_ambiguous_replacement'
   | 'ollama_no_effective_edits'
+  // Esgotamento pós-edit SEM as provas exigidas (validate-before-submit / máquina de
+  // estados V3): terminal e específico — nunca sucesso implícito.
+  | 'ollama_submit_gate_unsatisfied'
   | 'ollama_aborted'
   | 'ollama_timeout'
   | 'ollama_transport_error';
@@ -199,7 +203,18 @@ export async function callOllamaChat(input: OllamaChatInput): Promise<OllamaChat
 
 export type ProtocolResponse =
   | { readonly action: 'read'; readonly reads: unknown }
-  | { readonly action: 'edit'; readonly operations: unknown };
+  | { readonly action: 'edit'; readonly operations: unknown }
+  // Investigação ampla (V3): busca textual/símbolo e listagem por padrão. O host
+  // executa; o modelo NÃO inventa shell. Os campos crus são clampados por
+  // `parseSearchRequest`/`parseGlobRequest`.
+  | { readonly action: 'search'; readonly raw: Record<string, unknown> }
+  | { readonly action: 'glob'; readonly raw: Record<string, unknown> }
+  // EXEC governado (V3, 3ª fatia): comando ESTRUTURADO (program/args) validado pela
+  // command policy e executado pelo host — inclui test/typecheck/git read-only. O
+  // modelo NUNCA recebe shell. Campos crus clampados por `parseExecRequest`.
+  | { readonly action: 'exec'; readonly raw: Record<string, unknown> }
+  // Encerra o turno iterativo devolvendo as edições acumuladas para revisão do host.
+  | { readonly action: 'submit' };
 
 const MAX_RAW_RESPONSE_CHARS = 200_000;
 
@@ -235,7 +250,22 @@ export function parseProtocolResponse(raw: string): ProtocolResponse {
     if (!Array.isArray(root.operations)) throw new OllamaProtocolError('ollama_invalid_response_schema', 'ação edit exige uma lista "operations".');
     return { action: 'edit', operations: root.operations };
   }
-  throw new OllamaProtocolError('ollama_invalid_response_schema', 'campo "action" precisa ser "read" ou "edit".');
+  if (root.action === 'search') {
+    if (typeof root.query !== 'string' || root.query.trim().length === 0) throw new OllamaProtocolError('ollama_invalid_response_schema', 'ação search exige "query" string não vazia.');
+    return { action: 'search', raw: root };
+  }
+  if (root.action === 'glob') {
+    if (typeof root.pattern !== 'string' || root.pattern.trim().length === 0) throw new OllamaProtocolError('ollama_invalid_response_schema', 'ação glob exige "pattern" string não vazia.');
+    return { action: 'glob', raw: root };
+  }
+  if (root.action === 'exec') {
+    if (typeof root.program !== 'string' || root.program.trim().length === 0) throw new OllamaProtocolError('ollama_invalid_response_schema', 'ação exec exige "program" string não vazia.');
+    return { action: 'exec', raw: root };
+  }
+  if (root.action === 'submit') {
+    return { action: 'submit' };
+  }
+  throw new OllamaProtocolError('ollama_invalid_response_schema', 'campo "action" precisa ser "read", "edit", "search", "glob", "exec" ou "submit".');
 }
 
 // ---- Commit 2: manifesto sem conteúdo integral + leitura limitada ----
@@ -254,7 +284,12 @@ const clampInt = (value: unknown, min: number, max: number, fallback: number): n
  * DETERMINÍSTICA e fail-closed: normaliza `\`→`/`, colapsa um `./` inicial,
  * recusa absoluto (POSIX ou `X:`), traversal (`..`) e segmentos vazios/`.`, e
  * exige pertencer ao escopo. Não adivinha; só normaliza o que é inequívoco. */
-export function resolveScopedPath(raw: unknown, allowed: ReadonlySet<string>): string | null {
+/** Superfície mínima de pertencimento de caminho. Um `ReadonlySet<string>` a
+ * satisfaz estruturalmente; a autoridade de LEITURA ampla (V3) passa um objeto
+ * cujo `has` delega à `WorkspaceAccessPolicyV1` (leitura pode ser > escrita). */
+export interface PathMembership { has(path: string): boolean; }
+
+export function resolveScopedPath(raw: unknown, allowed: PathMembership): string | null {
   if (typeof raw !== 'string' || raw.trim().length === 0) return null;
   let p = raw.replace(/\\/g, '/').trim();
   if (p.startsWith('./')) p = p.slice(2);
@@ -280,6 +315,14 @@ export interface ManifestInputFile { readonly path: string; readonly content: st
 
 const MANIFEST_MAX_STRUCTURE = 80;
 const STRUCTURE_ITEM_MAX = 200;
+/**
+ * Orçamento DEFAULT de leituras servidas por rodada (Coding Harness V3). NÃO é
+ * mais um teto de schema terminal: o excedente é DEFERIDO (re-solicitável), não
+ * recusado. O valor efetivo vem da `AgenticRuntimePolicyV1` do backend — este
+ * default preserva o comportamento local histórico quando nenhum orçamento é
+ * passado. A guarda de ABUSO (payload patológico) é `MAX_READS_REQUESTED_PER_ROUND`,
+ * MUITO acima de qualquer orçamento operacional.
+ */
 export const MAX_READS_PER_ROUND = 8;
 const READ_MAX_LINES = 200;
 const READ_MAX_CONTEXT = 20;
@@ -340,14 +383,40 @@ export interface ReadRequest {
   readonly maxLines: number;
 }
 
-/** Parseia solicitações de leitura, fail-closed. Estouro do teto de leituras é
- * erro de schema; entradas malformadas ou fora do escopo são REJEITADAS
- * (relatadas, nunca escondidas), não interrompem as válidas. Parâmetros são
- * limitados (linhas, contexto, tamanho da busca). */
-export function parseReadRequests(reads: readonly unknown[], allowed: ReadonlySet<string>): { requests: ReadRequest[]; rejected: string[] } {
+/** Descreve, de forma curta e segura, uma leitura DEFERIDA para o modelo re-solicitá-la. */
+const describeReadRequest = (request: ReadRequest): string => {
+  if (request.search !== undefined) return `${request.path} (search:${clipStr(request.search, 40)})`;
+  if (request.lineRange !== undefined) return `${request.path} (lineRange:${request.lineRange[0]}-${request.lineRange[1]})`;
+  return `${request.path} (head)`;
+};
+
+/**
+ * Parseia solicitações de leitura para o laço iterativo (Coding Harness V3).
+ *
+ * Correção arquitetural central do V3: o EXCEDENTE do orçamento por rodada NÃO é
+ * mais um erro de schema terminal — é DEFERIDO. As leituras válidas são divididas
+ * em `requests` (as primeiras `servingBudget`, servidas nesta rodada) e `deferred`
+ * (as demais, descritas para re-solicitação numa próxima rodada). O laço continua;
+ * um modelo forte que investiga amplamente não perde a tentativa por causa do
+ * orçamento de prompt de uma única rodada.
+ *
+ * Fail-closed permanece onde é correto: entradas malformadas/fora do escopo são
+ * REJEITADAS (relatadas), e uma lista acima da guarda de ABUSO
+ * (`MAX_READS_REQUESTED_PER_ROUND`, muito acima de qualquer orçamento operacional)
+ * é payload patológico e continua sendo `ollama_invalid_response_schema`.
+ * Parâmetros são limitados (linhas, contexto, tamanho da busca).
+ */
+export function parseReadRequests(
+  reads: readonly unknown[],
+  allowed: PathMembership,
+  servingBudget: number = MAX_READS_PER_ROUND,
+): { requests: ReadRequest[]; rejected: string[]; deferred: string[] } {
   if (!Array.isArray(reads)) throw new OllamaProtocolError('ollama_invalid_response_schema', '"reads" precisa ser uma lista.');
-  if (reads.length > MAX_READS_PER_ROUND) throw new OllamaProtocolError('ollama_invalid_response_schema', `no máximo ${MAX_READS_PER_ROUND} leituras por rodada.`);
-  const requests: ReadRequest[] = [];
+  if (reads.length > MAX_READS_REQUESTED_PER_ROUND) {
+    throw new OllamaProtocolError('ollama_invalid_response_schema', `no máximo ${MAX_READS_REQUESTED_PER_ROUND} leituras por rodada (guarda de abuso; o excedente do orçamento é deferido, não recusado).`);
+  }
+  const budget = Number.isInteger(servingBudget) && servingBudget > 0 ? servingBudget : MAX_READS_PER_ROUND;
+  const valid: ReadRequest[] = [];
   const rejected: string[] = [];
   for (const raw of reads) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { rejected.push('entrada de leitura malformada'); continue; }
@@ -363,7 +432,7 @@ export function parseReadRequests(reads: readonly unknown[], allowed: ReadonlySe
       const b = Math.max(a, Math.floor(entry.lineRange[1] as number));
       lineRange = [a, b];
     }
-    requests.push({
+    valid.push({
       path,
       ...(search ? { search } : {}),
       ...(lineRange ? { lineRange } : {}),
@@ -372,7 +441,95 @@ export function parseReadRequests(reads: readonly unknown[], allowed: ReadonlySe
       maxLines: clampInt(entry.maxLines, 1, READ_MAX_LINES, 60),
     });
   }
-  return { requests, rejected };
+  const requests = valid.slice(0, budget);
+  const deferred = valid.slice(budget).map(describeReadRequest);
+  return { requests, rejected, deferred };
+}
+
+// ---- Investigação ampla (V3): SEARCH e GLOB host-executados ----
+
+/** Teto de resultados de busca por rodada — CAP DE VOLUME (compactação host-side),
+ * NÃO um teto terminal: pedir mais só trunca com aviso, nunca derruba a sessão. */
+export const MAX_SEARCH_RESULTS = 50;
+export const MAX_GLOB_RESULTS = 100;
+const SEARCH_QUERY_MAX_CHARS = 300;
+const GLOB_PATTERN_MAX_CHARS = 200;
+
+export interface SearchRequest {
+  readonly query: string;
+  readonly pathGlob?: string;
+  readonly maxResults: number;
+  readonly isRegex: boolean;
+}
+export interface GlobRequest {
+  readonly pattern: string;
+  readonly maxResults: number;
+}
+
+/** Um match de busca servido ao modelo: caminho, linha 1-based e prévia curta. */
+export interface WorkspaceSearchMatch {
+  readonly path: string;
+  readonly line: number;
+  readonly preview: string;
+}
+
+/** Parseia (e clampa) um pedido de busca textual/símbolo. `maxResults` é um cap de
+ * volume (default 20, teto `MAX_SEARCH_RESULTS`); `isRegex` explícito, senão literal. */
+export function parseSearchRequest(raw: Record<string, unknown>): SearchRequest {
+  if (typeof raw.query !== 'string' || raw.query.trim().length === 0) {
+    throw new OllamaProtocolError('ollama_invalid_response_schema', 'search exige "query" string não vazia.');
+  }
+  const query = raw.query.trim().slice(0, SEARCH_QUERY_MAX_CHARS);
+  const pathGlob = typeof raw.pathGlob === 'string' && raw.pathGlob.trim().length > 0
+    ? raw.pathGlob.trim().slice(0, GLOB_PATTERN_MAX_CHARS)
+    : undefined;
+  return {
+    query,
+    ...(pathGlob ? { pathGlob } : {}),
+    maxResults: clampInt(raw.maxResults, 1, MAX_SEARCH_RESULTS, 20),
+    isRegex: raw.isRegex === true,
+  };
+}
+
+/** Pedido de execução ESTRUTURADO extraído do envelope. A validação de POLÍTICA
+ * (allowlist de programa, git read-only, npm run/test, metacaracteres, timeout) é
+ * feita por `resolveCommandExecution` no core — aqui só se dá forma segura ao cru. */
+export interface ExecActionRequest {
+  readonly program: string;
+  readonly args: readonly string[];
+  readonly timeoutMs?: number;
+}
+
+const MAX_EXEC_ARGS = 32;
+
+/** Extrai `{program, args, timeoutMs}` do envelope exec, fail-closed no formato.
+ * A AUTORIDADE (o que pode rodar) é da command policy, não deste parser. */
+export function parseExecRequest(raw: Record<string, unknown>): ExecActionRequest {
+  if (typeof raw.program !== 'string' || raw.program.trim().length === 0) {
+    throw new OllamaProtocolError('ollama_invalid_response_schema', 'exec exige "program" string não vazia.');
+  }
+  const rawArgs = Array.isArray(raw.args) ? raw.args : [];
+  if (rawArgs.length > MAX_EXEC_ARGS) {
+    throw new OllamaProtocolError('ollama_invalid_response_schema', `exec: no máximo ${MAX_EXEC_ARGS} argumentos.`);
+  }
+  const args: string[] = [];
+  for (const a of rawArgs) {
+    if (typeof a !== 'string') throw new OllamaProtocolError('ollama_invalid_response_schema', 'exec: cada argumento deve ser string.');
+    args.push(a);
+  }
+  const timeoutMs = typeof raw.timeoutMs === 'number' && Number.isFinite(raw.timeoutMs) ? Math.floor(raw.timeoutMs) : undefined;
+  return { program: raw.program.trim(), args, ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+}
+
+/** Parseia (e clampa) um pedido de listagem por padrão glob. */
+export function parseGlobRequest(raw: Record<string, unknown>): GlobRequest {
+  if (typeof raw.pattern !== 'string' || raw.pattern.trim().length === 0) {
+    throw new OllamaProtocolError('ollama_invalid_response_schema', 'glob exige "pattern" string não vazia.');
+  }
+  return {
+    pattern: raw.pattern.trim().slice(0, GLOB_PATTERN_MAX_CHARS),
+    maxResults: clampInt(raw.maxResults, 1, MAX_GLOB_RESULTS, 40),
+  };
 }
 
 const numberLines = (lines: readonly string[], firstLineNo: number): string =>

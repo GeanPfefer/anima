@@ -26,15 +26,34 @@ const server = http.createServer((req, res) => {
   let body = '';
   req.on('data', chunk => { body += chunk; });
   req.on('end', () => {
+    // Coding Harness V3: o laço agêntico governa a máquina de estados de submit — o
+    // host anuncia por rodada o estado atual e SUBMIT só existe em READY_TO_SUBMIT.
+    // Este node fake completa o protocolo real (EDIT → validação focal → git diff →
+    // SUBMIT), reagindo ao marcador de estado que o próprio prompt carrega. Em tarefas
+    // sem gate executável o estado vira READY_TO_SUBMIT logo após o EDIT (retrocompat).
+    let prompt = '';
+    try {
+      const payload = JSON.parse(body);
+      prompt = payload?.messages?.at?.(-1)?.content || payload?.prompt || '';
+    } catch { /* resposta inválida será tratada como estado inicial */ }
+    const state = /Ações permitidas nesta rodada \(estado (exploring|dirty_unvalidated|dirty_validated|ready_to_submit)\)/
+      .exec(prompt)?.[1] || 'exploring';
+    let action;
+    if (state === 'ready_to_submit') {
+      action = { action: 'submit' };
+    } else if (state === 'dirty_validated') {
+      action = { action: 'exec', program: 'git', args: ['diff'] };
+    } else if (state === 'dirty_unvalidated') {
+      action = { action: 'exec', program: 'npm', args: ['test'] };
+    } else {
+      action = { action: 'edit', operations: [{ kind: 'create_file', path: targetPath, content: targetContent }] };
+    }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({
-      message: {
-        content: JSON.stringify({
-          action: 'edit',
-          operations: [{ kind: 'create_file', path: targetPath, content: targetContent }],
-        }),
-      },
-      prompt_eval_count: 1000,
+      message: { content: JSON.stringify(action) },
+      // Deve ser >= à estimativa do prompt V3; um valor pequeno simularia truncamento
+      // do provider e encerraria o protocolo antes de exercitar a state machine.
+      prompt_eval_count: 100000,
       eval_count: 50,
       done_reason: 'stop',
     }));

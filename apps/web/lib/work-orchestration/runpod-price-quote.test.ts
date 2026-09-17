@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { readRunPodLivePriceQuote } from './runpod-price-quote';
+import { canonicalGpuResourceClass, readRunPodLivePriceQuote, readRunPodResourceInventory } from './runpod-price-quote';
 import type { HttpClient, HttpRequestInput } from './runpod-node-provisioner';
 
 const key = 'rp_quote_test_secret';
@@ -43,4 +43,69 @@ test.each([
 test('falha de rede é provider_unreachable', async () => {
   const http: HttpClient = { send: async () => { throw new Error(key); } };
   expect(await readRunPodLivePriceQuote(config, signal(), http)).toEqual({ ok: false, reason: 'provider_unreachable' });
+});
+
+// ---- Inventário normalizado (Cloud Resource Matching V1) ----------------------------------
+const invConfig = { graphqlBase: 'https://api.runpod.io/graphql', apiKey: key, gpuTypeIds: ['NVIDIA A40', 'NVIDIA RTX A6000'], gpuCount: 1, cloudType: 'SECURE' as const };
+const invBody = (id: string, displayName: string, memoryInGb: number, stockStatus: string | null, price: number | null, counts: number[] | null = [1]) =>
+  JSON.stringify({ data: { gpuTypes: [{ id, displayName, memoryInGb, lowestPrice: { stockStatus, uninterruptablePrice: price, availableGpuCounts: counts } }] } });
+
+test('canonicalGpuResourceClass casa com a SKU histórica (A40 48 → gpu-a40-48gb)', () => {
+  expect(canonicalGpuResourceClass('A40', 48)).toBe('gpu-a40-48gb');
+  expect(canonicalGpuResourceClass('NVIDIA RTX A6000', 48)).toBe('gpu-rtx-a6000-48gb');
+});
+
+test('normaliza candidatos com VRAM/preço/disponibilidade', async () => {
+  const http = client(input => {
+    const id = (JSON.parse(input.body!) as { variables: { id: string } }).variables.id;
+    return id === 'NVIDIA A40'
+      ? { status: 200, body: invBody('NVIDIA A40', 'A40', 48, 'High', 0.49) }
+      : { status: 200, body: invBody('NVIDIA RTX A6000', 'RTX A6000', 48, 'High', 0.44) };
+  });
+  const result = await readRunPodResourceInventory(invConfig, signal(), http);
+  expect(result).toEqual({ ok: true, candidates: [
+    { providerId: 'runpod', resourceClass: 'gpu-a40-48gb', gpuTypeId: 'NVIDIA A40', displayName: 'A40', vramGiB: 48, gpuFeatures: ['cuda'], availability: 'available', perHour: { currency: 'USD', amount: 0.49 } },
+    { providerId: 'runpod', resourceClass: 'gpu-rtx-a6000-48gb', gpuTypeId: 'NVIDIA RTX A6000', displayName: 'RTX A6000', vramGiB: 48, gpuFeatures: ['cuda'], availability: 'available', perHour: { currency: 'USD', amount: 0.44 } },
+  ] });
+});
+
+test('12) availableGpuCounts null com estoque válido NÃO regride: candidato available', async () => {
+  const http = client(() => ({ status: 200, body: invBody('NVIDIA A40', 'A40', 48, 'High', 0.49, null) }));
+  const result = await readRunPodResourceInventory({ ...invConfig, gpuTypeIds: ['NVIDIA A40'] }, signal(), http);
+  expect(result).toMatchObject({ ok: true, candidates: [{ availability: 'available', perHour: { amount: 0.49 } }] });
+});
+
+test('A40 indisponível vira candidato unavailable entre os demais (não interrompe)', async () => {
+  const http = client(input => {
+    const id = (JSON.parse(input.body!) as { variables: { id: string } }).variables.id;
+    return id === 'NVIDIA A40'
+      ? { status: 200, body: invBody('NVIDIA A40', 'A40', 48, 'None', null, []) }
+      : { status: 200, body: invBody('NVIDIA RTX A6000', 'RTX A6000', 48, 'High', 0.44) };
+  });
+  const result = await readRunPodResourceInventory(invConfig, signal(), http);
+  expect(result.ok && result.candidates.map(c => [c.gpuTypeId, c.availability])).toEqual([
+    ['NVIDIA A40', 'unavailable'], ['NVIDIA RTX A6000', 'available'],
+  ]);
+});
+
+test('13) cotação individual indisponível (erro gql) pula o SKU e continua nos outros', async () => {
+  const http = client(input => {
+    const id = (JSON.parse(input.body!) as { variables: { id: string } }).variables.id;
+    return id === 'NVIDIA A40'
+      ? { status: 200, body: JSON.stringify({ errors: [{ message: 'unavailable' }] }) }
+      : { status: 200, body: invBody('NVIDIA RTX A6000', 'RTX A6000', 48, 'High', 0.44) };
+  });
+  const result = await readRunPodResourceInventory(invConfig, signal(), http);
+  expect(result.ok && result.candidates.map(c => c.gpuTypeId)).toEqual(['NVIDIA RTX A6000']);
+});
+
+test('credencial inválida fecha globalmente sem expor segredo', async () => {
+  const result = await readRunPodResourceInventory(invConfig, signal(), client(() => ({ status: 403, body: key })));
+  expect(result).toEqual({ ok: false, reason: 'auth_invalid' });
+  expect(JSON.stringify(result)).not.toContain(key);
+});
+
+test('todas as consultas falham no transporte → provider_unreachable', async () => {
+  const http: HttpClient = { send: async () => { throw new Error(key); } };
+  expect(await readRunPodResourceInventory(invConfig, signal(), http)).toEqual({ ok: false, reason: 'provider_unreachable' });
 });

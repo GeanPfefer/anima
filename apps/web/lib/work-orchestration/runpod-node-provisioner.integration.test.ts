@@ -2,7 +2,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { NodeLeaseV0, NodeProvisionRequest } from '@anima/core';
-import { RunPodNodeProvisioner, fetchHttpClient, type RunPodProvisionerConfig } from './runpod-node-provisioner';
+import { RunPodNodeProvisioner, fetchHttpClient, type RunPodProvisionerConfig, type TcpProbe } from './runpod-node-provisioner';
 import type { RunPodTunnelManager } from './runpod-ssh-tunnel';
 
 // ============================================================
@@ -66,7 +66,10 @@ test('boundary real: provision→inspect→stop→destroy contra servidor local 
   const spy = jest.spyOn(console, 'log').mockImplementation((...a) => { serverLog += a.join(' '); });
   try {
     const tunnelManager: RunPodTunnelManager = { open: async () => ({ endpoint: base.replace(/\/v1$/, ''), close: async () => undefined }), closeAll: async () => undefined };
-    const provisioner = new RunPodNodeProvisioner(config(), fetchHttpClient, { pollIntervalMs: 1, sleep: async () => undefined, tunnelManager });
+    // Boundary/lifecycle: o endpoint publicado é roteável (o túnel stub conecta ao server local);
+    // a camada TCP cold-start é exercitada nas suítes de readiness, não aqui.
+    const tcpProbe: TcpProbe = { probe: async () => 'reachable' };
+    const provisioner = new RunPodNodeProvisioner(config(), fetchHttpClient, { pollIntervalMs: 1, sleep: async () => undefined, tunnelManager, tcpProbe });
     const signal = new AbortController().signal;
 
     const outcome = await provisioner.provision(request, signal);

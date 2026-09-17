@@ -1,10 +1,44 @@
-import { parsePaidComputeAuthorization, type NodeCostSourceV1, type PaidComputeAuthorizationV1 } from '@anima/core';
+import { parsePaidComputeAuthorization, type CloudCapabilityScopeV1, type NodeCostSourceV1, type PaidComputeAuthorizationV1 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+type StoredPaidComputeAuthorizationRow = Database['public']['Tables']['paid_compute_authorizations']['Row'];
+
+/**
+ * Projeta uma linha persistida em `PaidComputeAuthorizationV1`, INCLUINDO o escopo por capacidade
+ * quando presente. DEFENSIVO e RETROCOMPATÍVEL: antes da migração 20260910000000 a coluna não
+ * existe, `capability_scope` vem `undefined` e é projetada como `null` (comportamento idêntico ao
+ * anterior). O parser do core aplica a exclusividade SKU-fixa XOR capacidade e a forma mínima do
+ * escopo — uma linha malformada vira `null` (fail-closed), nunca uma autoridade ilimitada. PURO.
+ *
+ * Sem esta projeção, uma autoridade por capacidade (resource_class NULL) seria reconstruída SEM os
+ * limites e `deriveAuthorityScope` a classificaria como `any_provider_resource` (qualquer GPU do
+ * provider) — perda de segurança. Por isso ela acompanha, obrigatoriamente, a coluna nova.
+ */
+export function projectStoredPaidComputeAuthorization(row: StoredPaidComputeAuthorizationRow): PaidComputeAuthorizationV1 | null {
+  return parsePaidComputeAuthorization({
+    schemaVersion: 1,
+    authorizationId: row.id,
+    authorizedBy: row.user_id,
+    authorizedByAuthor: 'user',
+    providerId: row.provider_id,
+    nodeId: row.node_id,
+    resourceClass: row.resource_class,
+    capabilityScope: row.capability_scope ?? null,
+    workItemId: row.work_item_id,
+    maxDurationMs: Number(row.max_duration_ms),
+    maxCostEstimate: row.max_cost_currency === null ? null : { currency: row.max_cost_currency, amount: Number(row.max_cost_amount) },
+    validFrom: row.valid_from,
+    validUntil: row.valid_until,
+  } as unknown as Json);
+}
+
 export async function readActivePaidComputeAuthorization(
   client: SupabaseClient<Database>,
-  input: { readonly providerId: string; readonly nodeId: string; readonly resourceClass: string | null; readonly workItemId: string; readonly now: Date },
+  // `nodeId` aceita `null` = consulta não amarrada a um node específico (casa autoridades
+  // node-agnósticas: `row.node_id IS NULL`). O runtime passa sempre um nodeId concreto; scripts de
+  // reconciliação de uma autoridade node-agnóstica passam `null`. O filtro abaixo já trata os dois.
+  input: { readonly providerId: string; readonly nodeId: string | null; readonly resourceClass: string | null; readonly workItemId: string; readonly now: Date },
 ): Promise<PaidComputeAuthorizationV1 | null> {
   const { data, error } = await client.from('paid_compute_authorizations').select('*')
     .eq('provider_id', input.providerId).is('revoked_at', null)
@@ -13,22 +47,12 @@ export async function readActivePaidComputeAuthorization(
   if (error) return null;
   for (const row of data ?? []) {
     if (row.node_id !== null && row.node_id !== input.nodeId) continue;
+    // Autoridade SKU-fixa: só casa a classe exata. Autoridade por capacidade (resource_class NULL)
+    // casa qualquer classe pedida — os limites de capacidade são impostos depois, na AVALIAÇÃO
+    // (`evaluatePaidComputeAuthorization` com `resourceCapabilities`), nunca aqui.
     if (row.resource_class !== null && row.resource_class !== input.resourceClass) continue;
     if (row.work_item_id !== null && row.work_item_id !== input.workItemId) continue;
-    const parsed = parsePaidComputeAuthorization({
-      schemaVersion: 1,
-      authorizationId: row.id,
-      authorizedBy: row.user_id,
-      authorizedByAuthor: 'user',
-      providerId: row.provider_id,
-      nodeId: row.node_id,
-      resourceClass: row.resource_class,
-      workItemId: row.work_item_id,
-      maxDurationMs: Number(row.max_duration_ms),
-      maxCostEstimate: row.max_cost_currency === null ? null : { currency: row.max_cost_currency, amount: Number(row.max_cost_amount) },
-      validFrom: row.valid_from,
-      validUntil: row.valid_until,
-    } as unknown as Json);
+    const parsed = projectStoredPaidComputeAuthorization(row);
     if (parsed) return parsed;
   }
   return null;
@@ -49,6 +73,7 @@ export interface PaidComputeAuthorizationView {
   readonly providerId: string;
   readonly nodeId: string | null;
   readonly resourceClass: string | null;
+  readonly capabilityScope: CloudCapabilityScopeV1 | null;
   readonly workItemId: string | null;
   readonly maxDurationMs: number;
   readonly maxCost: { readonly currency: string; readonly amount: number } | null;
@@ -84,6 +109,7 @@ export interface GrantPaidComputeAuthorizationInput {
   readonly providerId: string;
   readonly nodeId?: string | null;
   readonly resourceClass?: string | null;
+  readonly capabilityScope?: CloudCapabilityScopeV1 | null;
   readonly workItemId?: string | null;
   readonly maxDurationMs: number;
   readonly maxCost?: { readonly currency: string; readonly amount: number } | null;
@@ -117,6 +143,7 @@ const toView = (row: Database['public']['Tables']['paid_compute_authorizations']
   providerId: row.provider_id,
   nodeId: row.node_id,
   resourceClass: row.resource_class,
+  capabilityScope: projectStoredPaidComputeAuthorization(row)?.capabilityScope ?? null,
   workItemId: row.work_item_id,
   maxDurationMs: Number(row.max_duration_ms),
   maxCost: row.max_cost_currency === null || row.max_cost_amount === null
@@ -176,6 +203,7 @@ export async function listPaidComputeBudgetAudit(
           nodeId: e.node_id, amount: Number(e.amount), currency: e.currency, createdAt: e.created_at,
           voided: voidIds.has(e.reservation_id), voidReason: voidEvent?.reason ?? null,
           settled: settleEvent !== undefined,
+          // Custo liquidado S = reserva − excesso liberado (derivado; sem coluna extra no schema).
           settledCost: released === null ? null : Number(e.amount) - released,
           releasedExcess: released,
           costSource: asCostSource(settleEvent?.reason ?? null) };
@@ -231,6 +259,15 @@ export async function grantPaidComputeAuthorization(
     provider_id: input.providerId,
     node_id: input.nodeId ?? null,
     resource_class: input.resourceClass ?? null,
+    ...(input.capabilityScope ? { capability_scope: {
+      minimumVramGiB: input.capabilityScope.minimumVramGiB,
+      requiredGpuFeatures: [...input.capabilityScope.requiredGpuFeatures],
+      maxHourlyPrice: input.capabilityScope.maxHourlyPrice === null ? null : {
+        currency: input.capabilityScope.maxHourlyPrice.currency,
+        amount: input.capabilityScope.maxHourlyPrice.amount,
+      },
+      maxNodes: input.capabilityScope.maxNodes,
+    } } : {}),
     work_item_id: input.workItemId ?? null,
     max_duration_ms: input.maxDurationMs,
     max_cost_currency: input.maxCost?.currency ?? null,

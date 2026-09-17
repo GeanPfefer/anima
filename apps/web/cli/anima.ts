@@ -9,7 +9,7 @@ import { correctReviewedWorkItem } from '@/lib/work-orchestration/review-correct
 import { readWorkRetryReadiness } from '@/lib/work-orchestration/retry-readiness';
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
-import { runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkWithdraw, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
+import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
 
@@ -42,6 +42,12 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
 
   switch (command.kind) {
     case 'status': return runStatus(service, userId, process.env);
+    case 'budget-status':
+      return runBudgetStatus(async (workItemId) => {
+        const result = await client.rpc('autonomous_work_budget_status', { p_work_item_id: workItemId });
+        if (result.error) return null;
+        return result.data;
+      }, command.id);
     case 'work-list': return runWorkList(service);
     case 'work-show': return runWorkShow(service, command.id);
     case 'work-evidence': return runWorkEvidence(service, command.id);
@@ -67,6 +73,18 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
       }
       return runWorkAuthorizeResume(() => authorizeResume(client,command.id,authorization));
     }
+    case 'work-supervise':
+      return runWorkSupervise(async()=>{
+        const item=await service.getItem(command.id); if(!item.ok)return {ok:false,code:item.error.code,message:item.error.message};
+        const granted=await client.rpc('grant_work_supervision',{p_work_item_id:command.id,p_expected_proposal_version:item.value.proposalVersion,p_request_id:randomUUID(),p_ttl_seconds:1800});
+        if(granted.error)return {ok:false,code:granted.error.code??null,message:granted.error.message};
+        const value=granted.data as {leaseId:string;expiresAt:string;replayed:boolean};
+        const readmitted=await client.rpc('readmit_budget_blocked_work');
+        if(readmitted.error)return {ok:false,code:readmitted.error.code??null,message:readmitted.error.message};
+        return {ok:true,...value,readmitted:(readmitted.data??[]).some(row=>row.work_item_id===command.id)};
+      },command.id);
+    case 'work-unsupervise':
+      return runWorkUnsupervise(async()=>{const r=await client.rpc('revoke_work_supervision',{p_work_item_id:command.id});if(r.error)return {ok:false,code:r.error.code??null,message:r.error.message};const v=r.data as {replayed:boolean};return {ok:true,replayed:v.replayed};},command.id);
     case 'work-approve':
       return runWorkApprove(service, command.id);
     case 'work-accept':

@@ -157,15 +157,44 @@ describe('Resident Host — node on-demand vivo', () => {
     })).toMatchObject({ priceHint: null });
   });
 
-  const paidAuthClient = (maxCost: { currency: string; amount: number } | null, providerId = 'local-process', onRpc?: (args: unknown) => void): SupabaseClient<Database> => {
+  const paidAuthClient = (maxCost: { currency: string; amount: number } | null, providerId = 'local-process', onRpc?: (args: unknown) => void,
+    capabilityScope: Database['public']['Tables']['paid_compute_authorizations']['Row']['capability_scope'] = null): SupabaseClient<Database> => {
     const authRow = {
       id: 'auth-x', user_id: 'u', provider_id: providerId, node_id: null, resource_class: null, work_item_id: null,
+      capability_scope: capabilityScope,
       max_duration_ms: 60 * 60_000, max_cost_currency: maxCost?.currency ?? null, max_cost_amount: maxCost?.amount ?? null,
       valid_from: '2026-08-30T23:00:00.000Z', valid_until: '2026-08-31T02:00:00.000Z', revoked_at: null, created_at: '2026-08-30T23:00:00.000Z',
     };
     const chain = { eq: () => chain, is: () => chain, lte: () => chain, gt: () => chain, order: () => chain, limit: async () => ({ data: [authRow], error: null }) };
     return { from: () => ({ select: () => chain }), rpc: async (_name: string, args: unknown) => { onRpc?.(args); return { data: { action: 'reserved', reservation_id: 'reserve-x' }, error: null }; } } as unknown as SupabaseClient<Database>;
   };
+
+  test('authority por capacidade: A40 indisponível seleciona alternativa e envia exatamente a classe escolhida ao provisionador', async () => {
+    let request: NodeProvisionRequest | null = null;
+    let reservedClass: string | null = null;
+    const provisioner: NodeProvisioner = {
+      providerId: 'runpod',
+      provision: async value => { request = value; return { ok: false, reason: 'fim controlado antes de provider write' }; },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }), stop: async () => ({ ok: true }),
+    };
+    const scope = { minimumVramGiB: 24, requiredGpuFeatures: ['cuda'], maxHourlyPrice: { currency: 'USD', amount: 1 }, maxNodes: 1 };
+    const prepared = await prepareResidentOnDemandCoderNode({
+      client: paidAuthClient({ currency: 'USD', amount: 1.5 }, 'runpod', args => {
+        reservedClass = (args as { resource_class: string }).resource_class;
+      }, scope),
+      config: { ...config('paid'), providerId: 'runpod', resourceClass: 'gpu-a40-48gb', maxActiveDurationMs: 30 * 60_000 },
+      workItemId: 'work-1', proposalVersion: 1, leaseId: 'lease-capability', signal: new AbortController().signal,
+      now: () => new Date('2026-08-31T00:00:30Z'),
+      evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) }, provisionerFactory: () => provisioner,
+      readResourceInventory: async () => ({ ok: true, candidates: [
+        { providerId: 'runpod', resourceClass: 'gpu-a40-48gb', gpuTypeId: 'NVIDIA A40', displayName: 'A40', vramGiB: 48, gpuFeatures: ['cuda'], availability: 'unavailable', perHour: { currency: 'USD', amount: 0.4 } },
+        { providerId: 'runpod', resourceClass: 'gpu-a6000-48gb', gpuTypeId: 'NVIDIA RTX A6000', displayName: 'RTX A6000', vramGiB: 48, gpuFeatures: ['cuda'], availability: 'available', perHour: { currency: 'USD', amount: 0.44 } },
+      ] }),
+    });
+    expect(prepared).toMatchObject({ ok: false, reason: 'provision_failed' });
+    expect(request).toMatchObject({ providerId: 'runpod', resourceClass: 'gpu-a6000-48gb', gpuTypeId: 'NVIDIA RTX A6000', lease: { priceHint: { currency: 'USD', perHour: 0.44 } } });
+    expect(reservedClass).toBe('gpu-a6000-48gb');
+  });
 
   test('RunPod usa max(configured, live) imediatamente antes da reserva; lookup falho não provisiona', async () => {
     let reservedAmount: number | undefined; let provisionCalls = 0;
@@ -391,7 +420,9 @@ describe('Resident Host — node on-demand vivo', () => {
       provisionerFactory: () => provisioner, revalidatePaidAuthority: async () => false,
       evidenceSink: { record: async value => { events.push(value); return { ok: true, action: 'recorded' }; }, },
     });
-    expect(prepared).toEqual({ ok: false, reason: 'waiting_authorization', detail: 'authority_unavailable_before_runtime' });
+    // O Pod foi criado antes de a autoridade sumir: o teardown reporta o providerRef derrubado e a
+    // tentativa de settlement (best-effort; com client fake não liquida ⇒ settledCost null).
+    expect(prepared).toEqual({ ok: false, reason: 'waiting_authorization', detail: 'authority_unavailable_before_runtime', providerRef: 'pod-expired', settledCost: null });
     expect(stopped).toEqual(['pod-expired']); expect(destroyed).toEqual(['pod-expired']);
     expect(events.map(e => e.transition.event)).toEqual([
       'provision_requested', 'provider_identified', 'health_lost', 'shutdown_requested', 'shutdown_confirmed',

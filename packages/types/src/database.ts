@@ -482,6 +482,7 @@ export type Database = {
       }
       paid_compute_authorizations: {
         Row: {
+          capability_scope: Json | null
           created_at: string
           id: string
           max_cost_amount: number | null
@@ -497,6 +498,7 @@ export type Database = {
           work_item_id: string | null
         }
         Insert: {
+          capability_scope?: Json | null
           created_at?: string
           id?: string
           max_cost_amount?: number | null
@@ -512,6 +514,7 @@ export type Database = {
           work_item_id?: string | null
         }
         Update: {
+          capability_scope?: Json | null
           created_at?: string
           id?: string
           max_cost_amount?: number | null
@@ -1757,6 +1760,47 @@ export type Database = {
           },
         ]
       }
+      work_supervision_leases: {
+        Row: {
+          expires_at: string
+          id: string
+          issued_at: string
+          proposal_version: number
+          request_id: string
+          revoked_at: string | null
+          user_id: string
+          work_item_id: string
+        }
+        Insert: {
+          expires_at: string
+          id?: string
+          issued_at?: string
+          proposal_version: number
+          request_id: string
+          revoked_at?: string | null
+          user_id: string
+          work_item_id: string
+        }
+        Update: {
+          expires_at?: string
+          id?: string
+          issued_at?: string
+          proposal_version?: number
+          request_id?: string
+          revoked_at?: string | null
+          user_id?: string
+          work_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_supervision_leases_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       xp_records: {
         Row: {
           activity_date: string
@@ -2030,7 +2074,7 @@ export type Database = {
       }
       apply_work_control_at_checkpoint: {
         Args: {
-          p_attempt_id: string | null
+          p_attempt_id: string
           p_expected_proposal_version: number
           p_work_item_id: string
         }
@@ -2311,6 +2355,7 @@ export type Database = {
       }
       grant_paid_compute_authorization: {
         Args: {
+          capability_scope?: Json
           max_cost_amount: number
           max_cost_currency: string
           max_duration_ms: number
@@ -2320,6 +2365,15 @@ export type Database = {
           valid_from: string
           valid_until: string
           work_item_id: string
+        }
+        Returns: Json
+      }
+      grant_work_supervision: {
+        Args: {
+          p_expected_proposal_version: number
+          p_request_id: string
+          p_ttl_seconds?: number
+          p_work_item_id: string
         }
         Returns: Json
       }
@@ -2460,7 +2514,7 @@ export type Database = {
       }
       record_compute_routing_decision: {
         Args: {
-          p_attempt_id: string | null
+          p_attempt_id?: string
           p_decision: Json
           p_decision_id: string
           p_expected_proposal_version: number
@@ -2856,6 +2910,10 @@ export type Database = {
         Args: { authorization_id: string }
         Returns: Json
       }
+      revoke_work_supervision: {
+        Args: { p_work_item_id: string }
+        Returns: Json
+      }
       select_autonomous_work: {
         Args: { p_expected_proposal_version: number; p_work_item_id: string }
         Returns: {
@@ -2893,6 +2951,15 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      settle_paid_compute_budget_reservation: {
+        Args: {
+          cost_source: string
+          reservation_id: string
+          settled_amount: number
+          settled_currency: string
+        }
+        Returns: Json
       }
       start_claimed_work_attempt: {
         Args: { attempt_id: string; claim_id: string; executor_id: string }
@@ -3022,15 +3089,6 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
-      }
-      settle_paid_compute_budget_reservation: {
-        Args: {
-          cost_source: string
-          reservation_id: string
-          settled_amount: number
-          settled_currency: string
-        }
-        Returns: Json
       }
       void_paid_compute_budget_reservation: {
         Args: { reason: string; reservation_id: string }

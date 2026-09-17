@@ -1,10 +1,12 @@
 /** @jest-environment node */
+import { deriveAuthorityScope } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   grantPaidComputeAuthorization,
   listPaidComputeAuthorizations,
   listPaidComputeBudgetAudit,
+  projectStoredPaidComputeAuthorization,
   revokePaidComputeAuthorization,
   settlePaidComputeBudgetReservation,
 } from './paid-compute-authorization-store';
@@ -36,6 +38,7 @@ const row = (over: Partial<Row> = {}): Row => ({
   provider_id: 'runpod',
   node_id: null,
   resource_class: null,
+  capability_scope: null,
   work_item_id: null,
   max_duration_ms: 1_800_000,
   max_cost_currency: null,
@@ -99,6 +102,17 @@ describe('paid-compute-authorization-store', () => {
     expect(calls[0]!.args).toMatchObject({ node_id: 'm1', resource_class: 'gpu', work_item_id: 'w1', max_cost_currency: 'USD', max_cost_amount: 5 });
   });
 
+  test('grant capability-based envia escopo e mantém resource_class nula', async () => {
+    const { client, calls } = rpcClient({ data: { authorization_id: 'cap-x' }, error: null });
+    const capabilityScope = { minimumVramGiB: 24, requiredGpuFeatures: ['cuda'], maxHourlyPrice: { currency: 'USD', amount: 0.8 }, maxNodes: 1 } as const;
+    await grantPaidComputeAuthorization(client, {
+      providerId: 'runpod', resourceClass: null, capabilityScope, workItemId: 'work-1',
+      maxDurationMs: 1_800_000, maxCost: { currency: 'USD', amount: 1.5 },
+      validFrom: '2026-09-10T00:00:00Z', validUntil: '2026-09-10T00:30:00Z',
+    });
+    expect(calls[0]!.args).toMatchObject({ resource_class: null, capability_scope: capabilityScope, work_item_id: 'work-1', max_cost_amount: 1.5 });
+  });
+
   test('grant mapeia SQLSTATE de autorização humana negada (service_role) para forbidden', async () => {
     const { client } = rpcClient({ data: null, error: { code: '42501', message: 'human authenticated user required' } });
     const result = await grantPaidComputeAuthorization(client, { providerId: 'runpod', maxDurationMs: 1, validFrom: 'a', validUntil: 'b' });
@@ -155,5 +169,41 @@ describe('listPaidComputeBudgetAudit — settlement reflete custo efetivo, não 
     expect(settled.settledCost).toBeCloseTo(0.0825, 6);
     const open = b.reservations.find(r => r.reservationId === 'r2')!;
     expect(open).toMatchObject({ settled: false, settledCost: null, costSource: null });
+  });
+});
+
+describe('projectStoredPaidComputeAuthorization — Cloud Resource Matching V1 (leitura por capacidade)', () => {
+  const withCost = (over: Partial<Row> = {}): Row => row({ max_cost_currency: 'USD', max_cost_amount: 1.5, ...over });
+
+  test('capability_scope presente (resource_class NULL) → autoridade por capacidade LIMITADA, nunca ilimitada', () => {
+    const parsed = projectStoredPaidComputeAuthorization({
+      ...withCost({ resource_class: null }),
+      capability_scope: { minimumVramGiB: 24, requiredGpuFeatures: ['cuda'], maxHourlyPrice: null, maxNodes: 1 },
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed!.capabilityScope).toEqual({ minimumVramGiB: 24, requiredGpuFeatures: ['cuda'], maxHourlyPrice: null, maxNodes: 1 });
+    // A projeção NÃO pode virar "qualquer recurso do provider": o escopo derivado é bounded.
+    expect(deriveAuthorityScope(parsed!)).toMatchObject({ kind: 'capability_bounds', providerId: 'runpod' });
+  });
+
+  test('SKU-fixa (resource_class, sem capability_scope) → escopo fixo, retrocompatível', () => {
+    const parsed = projectStoredPaidComputeAuthorization(withCost({ resource_class: 'gpu-a40-48gb' }));
+    expect(parsed).not.toBeNull();
+    expect(deriveAuthorityScope(parsed!)).toEqual({ kind: 'fixed_resource_class', providerId: 'runpod', resourceClass: 'gpu-a40-48gb' });
+  });
+
+  test('coluna ausente (banco pré-migração) → capabilityScope null, comportamento idêntico ao anterior', () => {
+    const parsed = projectStoredPaidComputeAuthorization(withCost({ resource_class: null })); // sem campo capability_scope
+    expect(parsed).not.toBeNull();
+    expect(parsed!.capabilityScope).toBeNull();
+    expect(deriveAuthorityScope(parsed!)).toEqual({ kind: 'any_provider_resource', providerId: 'runpod' });
+  });
+
+  test('malformado: resource_class E capability_scope juntos → null (fail-closed, exclusividade)', () => {
+    const parsed = projectStoredPaidComputeAuthorization({
+      ...withCost({ resource_class: 'gpu-a40-48gb' }),
+      capability_scope: { minimumVramGiB: 24, requiredGpuFeatures: ['cuda'], maxHourlyPrice: null, maxNodes: 1 },
+    });
+    expect(parsed).toBeNull();
   });
 });

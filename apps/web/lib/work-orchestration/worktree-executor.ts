@@ -1,6 +1,12 @@
 import {
   buildWorktreeHandoff,
   validateWorkCheckpoint,
+  describeCoderHarnessViolations,
+  resolveCommandExecution,
+  resolveCommandExecutionPolicy,
+  resolveEffectiveCoderHarnessPolicy,
+  supervisedWorkspaceAccessPolicy,
+  type CoderHarnessPolicyV1,
   type HostObservedCoderOutcome,
   type ObservedCoderInput,
   type ObservedGateInput,
@@ -14,6 +20,8 @@ import {
 } from '@anima/core';
 import { createHash } from 'node:crypto';
 import type { CoderBackend, CoderWorkspace, HostValidationFeedback } from './coder-backend';
+import { analyzeCoderOutputFiles, collectCoderOutputForHarness } from './coder-output-analysis';
+import { summarizeCommandOutput } from './output-sanitization';
 import { GitWorktree, parseGateCommand, runGate } from './worktree';
 
 // ============================================================
@@ -68,6 +76,13 @@ export interface WorktreeExecutorOptions {
   /** Emite um checkpoint mid-flight após a edição e antes do gate. */
   readonly emitCheckpoint?: boolean;
   /**
+   * Política do contrato do harness aplicada à SAÍDA do coder (runner de teste
+   * canônico, runners incompatíveis, fontes de backend não autoritativas). Ausente
+   * ⇒ política padrão do monorepo (Jest; rejeita vitest e `entry.coderBackend`). A
+   * validação é determinística, host-side e fail-closed — roda antes dos gates caros.
+   */
+  readonly harnessPolicy?: CoderHarnessPolicyV1;
+  /**
    * Internal retries driven only by host-observed gate failure.
    * They stay inside the same attempt/worktree. Default: 0.
    */
@@ -97,16 +112,9 @@ const opaque = (value: string): boolean => value.length > 0 && !value.includes('
 const norm = (path: string): string => path.replace(/\\/g, '/');
 const clip = (value: string, max = 120): string => value.length <= max ? value : `${value.slice(0, max)}…`;
 
+// Régua do resumo de gate: causa (tail), 8 linhas, 700 chars, caminhos redigidos.
 const GATE_DIAGNOSTIC_MAX = 700;
 const GATE_DIAGNOSTIC_LINES = 8;
-const GATE_DIAGNOSTIC_FOOTER =
-  /^(?:Test Suites:|Tests:|Snapshots:|Time:|Ran all test suites\.?|Node\.js v\d+|npm (?:error|ERR!)\b)/i;
-const GATE_SECRET_ASSIGNMENT =
-  /\b([A-Za-z0-9_]*(?:password|passwd|secret|api[-_]?key|access[-_]?token)|authorization|cookie|set-cookie|x-api-key|proxy-authorization)\b\s*[:=]\s*.*$/gi;
-const GATE_BEARER = /\bbearer\s+[a-z0-9._~+/-]{8,}=*/gi;
-const GATE_JWT = /\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\b/gi;
-const GATE_WINDOWS_PATH = /[A-Za-z]:[\\/][^\s'"<>|]*/g;
-const GATE_POSIX_PATH = /(?:\/[A-Za-z0-9._@-]+){2,}/g;
 const ENVIRONMENTAL_GATE_DIAGNOSTIC =
   /(?:\.next[\\/]types|next-env\.d\.ts|ECONNREFUSED|ENOSPC|ENOMEM|out of memory|command not found|is not recognized as (?:an internal|the name)|spawn\s+\S+\s+ENOENT|network (?:is )?unreachable|temporary failure in name resolution)/i;
 
@@ -132,35 +140,14 @@ export function summarizeGateFailureForRetry(
   stdout: string,
   stderr: string,
 ): string | undefined {
-  const rawLines = `${stderr}\n${stdout}`
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(Boolean);
-
-  if (rawLines.length === 0) return undefined;
-
-  // Rodapes de Jest/npm/Node descrevem o encerramento do comando, nao a causa.
-  // Removemos somente formatos conhecidos antes de aplicar o limite de linhas.
-  // Se tudo for rodape, usamos a saida original para nunca apagar o diagnostico.
-  const informativeLines = rawLines.filter(
-    line => !GATE_DIAGNOSTIC_FOOTER.test(line),
-  );
-  const selectedLines =
-    informativeLines.length > 0 ? informativeLines : rawLines;
-
-  const sanitized = selectedLines
-    .slice(-GATE_DIAGNOSTIC_LINES)
-    .map(line => line
-      .replace(GATE_SECRET_ASSIGNMENT, (_match, key: string) => `${key}=<redacted>`)
-      .replace(GATE_BEARER, 'Bearer <redacted>')
-      .replace(GATE_JWT, '<redacted>')
-      .replace(GATE_WINDOWS_PATH, '<path>')
-      .replace(GATE_POSIX_PATH, '<path>'))
-    .join('\n')
-    .slice(0, GATE_DIAGNOSTIC_MAX)
-    .trim();
-
-  return sanitized.length > 0 ? sanitized : undefined;
+  // Régua compartilhada (SISTEMA ÚNICO de redaction): causa por tail, rodapés
+  // removidos, últimas 8 linhas, caminhos redigidos, truncado a 700 chars.
+  return summarizeCommandOutput(stdout, stderr, {
+    maxChars: GATE_DIAGNOSTIC_MAX,
+    maxLines: GATE_DIAGNOSTIC_LINES,
+    dropFooters: true,
+    redactPaths: true,
+  });
 }
 
 type Attach = (sequence: number, value: WorkExecutorSignalInput) => WorkExecutorSignal;
@@ -171,6 +158,11 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
 
   async *execute(request: WorkExecutorRequest, signal: AbortSignal): AsyncIterable<WorkExecutorSignal> {
     let seq = 0;
+    // Política EFETIVA do harness: sempre superset canônico. Um `harnessPolicy` de
+    // caller só pode ENDURECER; listas vazias/omissão NÃO desligam as invariantes
+    // (Vitest proibido, `entry.coderBackend` proibido). É esta política que viaja ao
+    // coder ANTES da inferência e que o validador estrutural pós-output aplica.
+    const effectiveHarnessPolicy = resolveEffectiveCoderHarnessPolicy(this.options.harnessPolicy);
     const attach: Attach = (sequence, value) => ({
       attemptId: request.attemptId, workItemId: request.workItemId, approvedProposalVersion: request.approvedProposalVersion,
       origin: 'executor', sequence, ...value,
@@ -206,12 +198,45 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       const workspace: CoderWorkspace = {
         readFile: relPath => worktree!.readWorkspaceFile(relPath),
         writeFile: (relPath, content) => worktree!.writeWorkspaceFile(relPath, content),
+        // SEARCH/GLOB host-executados (Coding Harness V3): o agente INVESTIGA
+        // amplamente (todo o escopo de LEITURA) sem shell e sem ganhar autoridade de
+        // escrita. O confinamento é do git grep/ls-files (só arquivos rastreados sob a
+        // raiz) mais o filtro de read-scope no laço; a escrita continua governada.
+        search: (input, searchSignal) => worktree!.searchText(input, searchSignal),
+        list: (input, listSignal) => worktree!.listFiles(input, listSignal),
+        // EXEC/TEST/GIT governados (V3, 3ª fatia): o comando já vem validado pela
+        // command policy (allowlist de programa, git read-only, npm run/test, sem
+        // metacaractere de shell); a worktree o roda confinado à raiz, sem shell
+        // arbitrário, com node_modules/.bin no PATH. Captura/limite de saída é do host.
+        exec: (input, execSignal) => worktree!.runCommand(input, execSignal),
         // Seam para backends enraizados (ex.: DeepSeek Harness) que rodam o próprio
         // laço agêntico e precisam de um cwd real. Os backends que só propõem edições
         // ignoram este campo. O host segue sendo a autoridade única do git observado,
         // escopo, gates, commit e restauração — o cwd não afrouxa nada disso.
         rootPath: worktree!.root,
       };
+      // Autoridade de acesso ao workspace (V3): LER todo o workspace autorizado,
+      // ESCREVER só o escopo do Work Item (`includedScope`). O host reforça a escrita
+      // pós-edição via git observado (contract_violation) — ler não concede escrever.
+      // Este é o wiring vivo mínimo do Governor; um readScope mais conservador para
+      // modo autônomo pode ser injetado no futuro sem mudar os braços.
+      const workspaceAccessPolicy = supervisedWorkspaceAccessPolicy(
+        request.includedScope,
+        request.excludedScope,
+      );
+      // EXEC authority (V3, 3ª fatia): perfil de comandos supervisionado (dev toolchain
+      // + git read-only, rede negada). Distinta de READ/WRITE — rodar testes não concede
+      // rede nem escrita. Wiring vivo mínimo do Governor; um perfil autônomo mais
+      // restrito é injetável depois sem mudar os braços.
+      const commandPolicy = resolveCommandExecutionPolicy('supervised');
+      const validationCommands = request.validationCriteria.flatMap(criterion => {
+        if (!criterion.command) return [];
+        const parsed = parseGateCommand(criterion.command);
+        if (!parsed) return [];
+        const program = parsed.file.toLowerCase().replace(/\.cmd$/, '');
+        const decision = resolveCommandExecution({ program, args: parsed.args }, commandPolicy);
+        return decision.ok ? [{ label: criterion.label, program: decision.program, args: decision.args }] : [];
+      });
       const gateRetryLimit =
         Number.isInteger(this.options.gateRetryLimit) && (this.options.gateRetryLimit ?? 0) > 0
           ? this.options.gateRetryLimit!
@@ -268,6 +293,15 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
               onTranscript: value => { transcript = value; },
               includedScope: request.includedScope,
               excludedScope: request.excludedScope,
+              // V3: READ amplo / WRITE estreito. includedScope permanece a autoridade
+              // de ESCRITA; readScope=workspace habilita investigação ampla.
+              workspaceAccessPolicy,
+              // V3 (3ª fatia): EXEC governado (dev/test/typecheck/git read-only).
+              commandPolicy,
+              validationCommands,
+              // PRÉ-CODER: a política canônica chega ao backend ANTES da inferência,
+              // pelo contrato compartilhado (Ollama/OpenAI/DeepSeek recebem a mesma).
+              harnessPolicy: effectiveHarnessPolicy,
               ...(request.carriedContext
                 ? { carriedContext: request.carriedContext }
                 : {}),
@@ -379,6 +413,41 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
               message: `Alteração fora do escopo aprovado: ${outOfScope
                 .map(norm)
                 .join(', ')}.`,
+              retryable: false,
+              handoffReference,
+            });
+            return;
+          }
+
+          // Leitura FAIL-CLOSED da saída do coder + análise ESTRUTURAL (AST) ANTES dos
+          // gates caros e de qualquer checkpoint. Diferencia status Git: uma deleção (D)
+          // legitimamente não tem conteúdo; um arquivo A/M/R/C/T DEVE ser legível — se a
+          // leitura falhar, é erro terminal (nunca passagem silenciosa de arquivo não
+          // inspecionado). Rename (R) inspeciona o DESTINO. Depois, um teste com runner
+          // incompatível (ex.: `vitest` num workspace Jest) ou a leitura do backend de
+          // fonte não autoritativa (`entry.coderBackend` e equivalentes) são rejeitados
+          // FAIL-CLOSED — nunca viram result nem checkpoint. Antes, esses modos só
+          // falhavam TARDE (na build/tsc), depois do gasto pago.
+          const collected = await collectCoderOutputForHarness(worktree, signal);
+          if (!collected.ok) {
+            yield attach(++seq, {
+              kind: 'error',
+              code: 'execution_failed',
+              message: `Arquivo alterado (${collected.unreadable.status}) não pôde ser lido para inspeção do harness: ${clip(norm(collected.unreadable.path), 200)}.`,
+              retryable: false,
+              handoffReference,
+            });
+            return;
+          }
+          const harness = analyzeCoderOutputFiles(collected.files, effectiveHarnessPolicy);
+          if (!harness.ok) {
+            yield attach(++seq, {
+              kind: 'error',
+              code: 'contract_violation',
+              message: `Saída do coder viola o contrato do harness: ${clip(
+                describeCoderHarnessViolations(harness.violations),
+                500,
+              )}.`,
               retryable: false,
               handoffReference,
             });

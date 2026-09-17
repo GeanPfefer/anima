@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { lstat, mkdtemp, mkdir, readFile, readdir, rm, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 // ============================================================
 // Primitivas de execução em git worktree isolada (ADR-001, Opção A).
@@ -224,6 +224,87 @@ export class GitWorktree {
   }
 
   /**
+   * Busca textual/símbolo host-executada (Coding Harness V3) sobre os arquivos
+   * RASTREADOS da worktree, via `git grep`. Confinada por construção: git grep só
+   * enxerga arquivos versionados sob a raiz (node_modules/.git etc. são
+   * ignorados/não-rastreados, logo nunca aparecem). O modelo NUNCA roda shell — o
+   * host executa e devolve caminho + linha + trecho. `pathGlob` usa pathspec glob
+   * (`:(glob)`), então `**` funciona. Resultado é bounded (cap de volume). Cancela
+   * com o `signal` do host.
+   */
+  async searchText(
+    input: { readonly query: string; readonly pathGlob?: string; readonly maxResults: number; readonly isRegex: boolean },
+    signal?: AbortSignal,
+  ): Promise<{ matches: { path: string; line: number; preview: string }[]; truncated: boolean }> {
+    const cap = Math.max(1, Math.min(Math.floor(input.maxResults) || 1, 200));
+    const args = ['-C', this.root, 'grep', '--no-color', '-n', '-I', input.isRegex ? '-E' : '-F', '-e', input.query];
+    if (typeof input.pathGlob === 'string' && input.pathGlob.trim().length > 0) {
+      args.push('--', `:(glob)${input.pathGlob.trim()}`);
+    }
+    const result = await runProcess('git', args, { cwd: this.root, timeoutMs: 15_000, signal });
+    // git grep: exit 0 = houve match; 1 = nenhum; outros = erro → resultado vazio.
+    if (result.exitCode !== 0 && result.exitCode !== 1) return { matches: [], truncated: false };
+    const matches: { path: string; line: number; preview: string }[] = [];
+    let truncated = false;
+    for (const raw of result.stdout.split(/\r?\n/)) {
+      if (!raw) continue;
+      const m = /^(.+?):(\d+):(.*)$/.exec(raw);
+      if (!m) continue;
+      if (matches.length >= cap) { truncated = true; break; }
+      matches.push({ path: m[1]!.replace(/\\/g, '/'), line: Number(m[2]), preview: m[3]!.slice(0, 300) });
+    }
+    return { matches, truncated };
+  }
+
+  /**
+   * Executa um comando JÁ validado pela command policy (Coding Harness V3, 3ª fatia),
+   * confinado à raiz da worktree (cwd = this.root). O modelo NUNCA vê shell: recebe-se
+   * `{program, args}` estruturado. Sem `shell` exceto os batch shims do Windows
+   * (npm/pnpm/npx/tsc/jest/vitest são `.cmd`) — e mesmo aí os args já passaram pelo
+   * charset seguro da policy (sem metacaractere de encadeamento). O PATH inclui o
+   * `node_modules/.bin` da worktree, para os binários locais (tsc/jest/vitest)
+   * resolverem sem instalar nada. stdout/stderr/exit code/timeout são capturados por
+   * `runProcess` (bounded em MAX_CAPTURE; o laço aplica o cap menor da policy).
+   */
+  async runCommand(
+    input: { readonly program: string; readonly args: readonly string[]; readonly timeoutMs: number },
+    signal?: AbortSignal,
+  ): Promise<CommandResult> {
+    const isWin = process.platform === 'win32';
+    const WIN_BATCH = new Set(['npm', 'pnpm', 'npx', 'tsc', 'jest', 'vitest']);
+    const useShell = isWin && WIN_BATCH.has(input.program);
+    const file = useShell ? `${input.program}.cmd` : input.program;
+    const binDir = join(this.root, 'node_modules', '.bin');
+    const basePath = process.env.PATH ?? process.env.Path ?? '';
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${binDir}${delimiter}${basePath}`, Path: `${binDir}${delimiter}${basePath}` };
+    return runProcess(file, [...input.args], { cwd: this.root, timeoutMs: input.timeoutMs, signal, shell: useShell, env });
+  }
+
+  /**
+   * Listagem host-executada de arquivos RASTREADOS por padrão glob, via
+   * `git ls-files` (pathspec `:(glob)`). Mesmo confinamento do `searchText`.
+   */
+  async listFiles(
+    input: { readonly pattern: string; readonly maxResults: number },
+    signal?: AbortSignal,
+  ): Promise<{ paths: string[]; truncated: boolean }> {
+    const cap = Math.max(1, Math.min(Math.floor(input.maxResults) || 1, 500));
+    const pattern = input.pattern.trim();
+    const args = ['-C', this.root, 'ls-files', '--', pattern.length > 0 ? `:(glob)${pattern}` : '.'];
+    const result = await runProcess('git', args, { cwd: this.root, timeoutMs: 15_000, signal });
+    if (result.exitCode !== 0) return { paths: [], truncated: false };
+    const paths: string[] = [];
+    let truncated = false;
+    for (const raw of result.stdout.split(/\r?\n/)) {
+      const p = raw.trim();
+      if (!p) continue;
+      if (paths.length >= cap) { truncated = true; break; }
+      paths.push(p.replace(/\\/g, '/'));
+    }
+    return { paths, truncated };
+  }
+
+  /**
    * Religa os node_modules fisicos ja instalados no repositorio autorizado:
    * a raiz e os node_modules proprios de workspaces sob apps/* e packages/*.
    *
@@ -323,6 +404,35 @@ export class GitWorktree {
     await this.stageAll(signal);
     const result = await git(this.root, ['diff', '--cached', '--no-color', this.baseSha], signal);
     return result.stdout;
+  }
+
+  /**
+   * Status Git por arquivo alterado POR ESTA tentativa (vs estado inicial), com
+   * detecção de rename (`-M`). Para A/M/D/T o `path` é o próprio arquivo; para
+   * R/C o `path` é o DESTINO (novo nome) e `oldPath` a origem. Alimenta a leitura
+   * fail-closed do executor: uma deleção legitimamente não tem conteúdo; A/M/R/C/T
+   * DEVEM ser legíveis.
+   */
+  async changedEntriesSinceStart(signal?: AbortSignal): Promise<readonly { readonly status: string; readonly path: string; readonly oldPath?: string }[]> {
+    await this.stageAll(signal);
+    const result = await git(this.root, ['diff', '--cached', '--name-status', '-M', this.startSha], signal);
+    const out: { status: string; path: string; oldPath?: string }[] = [];
+    for (const line of result.stdout.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split('\t');
+      const code = (parts[0] ?? '').trim();
+      const status = code.charAt(0).toUpperCase();
+      if (status === 'R' || status === 'C') {
+        const oldPath = (parts[1] ?? '').replace(/\\/g, '/');
+        const path = (parts[2] ?? '').replace(/\\/g, '/');
+        if (path) out.push({ status, path, oldPath });
+      } else {
+        const path = (parts[1] ?? '').replace(/\\/g, '/');
+        if (path && status) out.push({ status, path });
+      }
+    }
+    return out;
   }
 
   /** Diff estruturado (numstat) do estado atual vs base: por arquivo, caminho +

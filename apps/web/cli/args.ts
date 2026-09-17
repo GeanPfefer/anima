@@ -6,6 +6,7 @@
 export type ParsedCommand =
   | { readonly kind: 'help' }
   | { readonly kind: 'status'; readonly json: boolean }
+  | { readonly kind: 'budget-status'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-list'; readonly json: boolean }
   | { readonly kind: 'work-show'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-evidence'; readonly id: string; readonly json: boolean }
@@ -13,6 +14,8 @@ export type ParsedCommand =
   | { readonly kind: 'work-correct'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-replan'; readonly id: string; readonly diagnosisPath: string | null; readonly json: boolean }
   | { readonly kind: 'work-authorize-resume'; readonly id: string; readonly planPath: string | null; readonly json: boolean }
+  | { readonly kind: 'work-supervise'; readonly id: string; readonly json: boolean }
+  | { readonly kind: 'work-unsupervise'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-approve'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-accept'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-withdraw'; readonly id: string; readonly reason: string; readonly json: boolean }
@@ -74,6 +77,13 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     return { ok: true, command: { kind: 'status', json } };
   }
 
+  if (group === 'budget') {
+    if (sub !== 'status' || !rest[0] || rest.length !== 1) {
+      return { ok: false, error: 'Uso: anima budget status <id>' };
+    }
+    return { ok: true, command: { kind: 'budget-status', id: rest[0], json } };
+  }
+
   if (group === 'work') {
     if (sub === 'list') {
       if (rest.length > 0) return { ok: false, error: `Argumento inesperado para "work list": ${rest[0]}` };
@@ -87,6 +97,10 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     if (sub === 'authorize-resume') {
       if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:'Uso: anima work authorize-resume <id> [--plan arquivo.json]' };
       return {ok:true, command:{kind:'work-authorize-resume',id,planPath,json}};
+    }
+    if (sub === 'supervise' || sub === 'unsupervise') {
+      if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:`Uso: anima work ${sub} <id>` };
+      return {ok:true,command:{kind:sub === 'supervise' ? 'work-supervise' : 'work-unsupervise',id,json}};
     }
     if (sub === 'show') {
       if (!id) return { ok: false, error: 'Uso: anima work show <id>' };
@@ -132,6 +146,7 @@ export const USAGE = `anima — CLI operacional do Anima (adapter sobre os mesmo
 
 Uso:
   anima status                                Identidade, conexão e resumo do trabalho
+  anima budget status <id>                    Orçamento autônomo atual (somente leitura)
   anima work list                             Lista os trabalhos não terminais (retomáveis)
   anima work show <id>                        Estado, versão, tentativa, Verifier e cobertura
   anima work evidence <id>                    Critérios de aceite, provas e lacunas (Verifier)
@@ -139,6 +154,8 @@ Uso:
   anima work correct <id>                      Materializa o sucessor de correção (proposed)
   anima work replan <id> [--diagnosis arquivo] Replaneja unidade mínima; sem diagnóstico, replay persistido
   anima work authorize-resume <id> [--plan f]  Autoridade humana: +1 tentativa após saldo esgotado (sucessor proposed)
+  anima work supervise <id>                    Inicia/renova supervisão humana por 30 minutos
+  anima work unsupervise <id>                  Revoga a supervisão humana vigente
   anima work approve <id>                     Aprova uma PROPOSTA (proposed → approved)
   anima work accept <id>                       Aceita o RESULTADO em review (review → completed)
   anima work withdraw <id> --reason "..."      Retira um plano APROVADO não iniciado (approved → cancelled)

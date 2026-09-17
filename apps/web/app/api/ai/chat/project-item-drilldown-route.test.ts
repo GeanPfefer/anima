@@ -44,6 +44,25 @@ describe('fronteira read-only do item drill-down', () => {
   });
 });
 
+describe('seleção autônoma antes do drill-down conservador', () => {
+  const source = readFileSync(resolve(__dirname, 'route.ts'), 'utf8');
+  const autonomous = source.indexOf('if (developmentMode && isAutonomousWorkSelectionRequest(message))');
+  const drilldown = source.indexOf('if (isProjectItemDrilldownQuestion(message) || isConversationalItemReferenceQuestion(message))');
+  const branch = source.slice(autonomous, drilldown);
+
+  test('só habilita com Dev e não depende do provider GPT/Local', () => {
+    expect(autonomous).toBeGreaterThan(0);
+    expect(autonomous).toBeLessThan(drilldown);
+    expect(branch).not.toMatch(/provider\s*===|createProjectAdvisor|streamChatProvider/);
+  });
+
+  test('é read-only e não dispara execução', () => {
+    expect(branch).toContain("'X-Anima-Mutation': 'none'");
+    expect(branch).not.toMatch(/\.(?:insert|update|upsert|delete)\s*\(/);
+    expect(branch).not.toMatch(/claim|coder|startExecution|supervisor/);
+  });
+});
+
 describe('fronteira read-only do Project Advisor global', () => {
   const source = readFileSync(resolve(__dirname, 'route.ts'), 'utf8');
   const start = source.indexOf('if (isProjectAdvisorQuestion(message))');
@@ -78,7 +97,7 @@ describe('governança conversacional precede providers sem virar execução', ()
     expect(governance).toBeLessThan(source.indexOf('detectActivities(message'));
   });
   test('resposta governada retorna sem work item, foco, coder ou supervisor', () => {
-    const end = source.indexOf('// Drill-down operacional read-only');
+    const end = source.indexOf('// Mandato estreito do Dev');
     const branch = source.slice(governance, end);
     expect(branch).toContain("'X-Anima-Mutation': 'project-decision-only'");
     expect(branch).not.toMatch(/work_items|work_focus|coder|supervisor|resolve_approval/i);

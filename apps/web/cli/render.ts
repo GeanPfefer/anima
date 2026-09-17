@@ -32,6 +32,26 @@ export function renderHuman(payload: CliPayload): string {
       ].join('\n');
     }
 
+    case 'budget-status': {
+      const seconds = (value: number): string => `${value}s (${(value / 60).toFixed(1)} min)`;
+      const lines = [
+        `${payload.workItemId} ${DOT} orçamento autônomo ${DOT} ${payload.admitted ? 'admitido' : 'recusado'}`,
+        `Política: ${payload.policyVersion}${payload.costClass ? ` ${DOT} custo ${payload.costClass}` : ''}`,
+        `Decisão: admitted=${payload.admitted}${payload.reason ? ` ${DOT} reason=${payload.reason}` : ''}`,
+        `Supervisão: ${payload.supervised ? `ativa até ${payload.supervisionExpiresAt}` : 'inativa'} ${DOT} unattended admitted=${payload.unattendedAdmitted}${payload.unattendedReason ? ` reason=${payload.unattendedReason}` : ''}`,
+        `Janela de tentativas: ${payload.windows.attemptsHours}h`,
+        `Tentativas do item: ${payload.attempts.item.used}/${payload.attempts.item.limit} ${DOT} restantes ${payload.attempts.item.remaining}`,
+        `Tentativas do usuário: ${payload.attempts.user.used} ${DOT} restantes ${payload.attempts.user.remaining}`,
+        `Tentativas externas: ${payload.attempts.external.used} ${DOT} restantes ${payload.attempts.external.remaining}`,
+        `Runtime usuário ${payload.windows.userRuntimeHours}h: usado ${seconds(payload.runtime.user24h.usedSeconds)} ${DOT} restante ${seconds(payload.runtime.user24h.remainingSeconds)}`,
+        `Runtime externo ${payload.windows.userRuntimeHours}h: usado ${seconds(payload.runtime.external24h.usedSeconds)} ${DOT} restante ${seconds(payload.runtime.external24h.remainingSeconds)}`,
+        `Reserva autônoma ${payload.windows.autonomousRuntimeMinutes}min: usada ${seconds(payload.runtime.autonomous60m.usedSeconds)} ${DOT} restante ${seconds(payload.runtime.autonomous60m.remainingSeconds)}`,
+      ];
+      if (payload.nextBudgetReleaseAt) lines.push(`Próxima liberação estimável: ${payload.nextBudgetReleaseAt}`);
+      else lines.push('Próxima liberação estimável: indisponível a partir dos fatos atuais');
+      return lines.join('\n');
+    }
+
     case 'work-list': {
       if (payload.items.length === 0) return 'Nenhum trabalho retomável.';
       return payload.items
@@ -131,6 +151,8 @@ export function renderHuman(payload: CliPayload): string {
         `Lineage: ${payload.lineageId} ${DOT} seq ${payload.recoverySequence}${payload.replayed ? ' (replay)' : ''}`,
         `Próximo passo: anima work show ${payload.successorWorkItemId} ${DOT} depois anima work approve ${payload.successorWorkItemId}`,
       ].join('\n');
+    case 'work-supervise':
+    case 'work-unsupervise': return `${payload.workItemId} ${DOT} ${payload.message}`;
     case 'work-replan':
       return `Sucessor: ${payload.successorWorkItemId}\nLineage: ${payload.lineageId}\nReplan: ${payload.replanId}${payload.replayed ? ' (replay)' : ''}\nBudget transferido: ${payload.allocatedAttempts}\nEstratégia: ${payload.strategy.map(s=>`${s.kind}: ${s.symbols.join(', ')}`).join(' | ')}\nAprovação humana permanece separada.`;
 

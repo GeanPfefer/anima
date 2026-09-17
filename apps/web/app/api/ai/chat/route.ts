@@ -30,7 +30,7 @@ import {
   parseChatProvider,
   streamChatProvider,
 } from '@/lib/ai/chat-provider';
-import { planExecutableProjectWork, shouldRunProjectPlanner } from '@/lib/ai/project-work-planner';
+import { createChatProjectPlanner, planExecutableProjectWork, shouldRunProjectPlanner } from '@/lib/ai/project-work-planner';
 import { isDevelopmentChatAuthorized, resolveChatDevelopmentMode } from '@/lib/ai/chat-surface';
 import { shouldReuseOrphanUserMessage } from '@/lib/ai/chat-turn';
 import {
@@ -54,6 +54,13 @@ import { buildProjectAdvisorContext } from '@/lib/ai/project-context-builder';
 import { createProjectAdvisor, renderProjectAdvisory } from '@/lib/ai/project-advisor';
 import { processProjectConversationGovernance } from '@/lib/ai/project-conversation-governance';
 import { processProjectBacklogGovernanceRequest } from '@/lib/ai/project-backlog-governance-request';
+import {
+  isAutonomousWorkSelectionRequest,
+  resolveAutonomousWorkChatIntent,
+  admitSelectedAutonomousWork,
+  renderAutonomousWorkSelection,
+  selectAutonomousWorkForChat,
+} from '@/lib/ai/autonomous-work-selection';
 
 function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -113,6 +120,12 @@ export async function POST(req: NextRequest) {
     requested: requestedDevelopmentMode === true,
     authorized: isDevelopmentChatAuthorized(user.id),
   });
+  console.info('[chat-turn-provider]', {
+    requestedProvider: requestedProvider === 'ollama' ? 'ollama' : requestedProvider === 'openai' ? 'openai' : 'unspecified',
+    effectiveProvider: provider,
+    developmentMode,
+    fallbackAllowed: false,
+  });
 
   const governedDecision = await processProjectConversationGovernance({
     client: supabase, userId: user.id, message, retryMessageId: typeof requestedRetryMessageId === 'string' ? requestedRetryMessageId : undefined,
@@ -128,6 +141,47 @@ export async function POST(req: NextRequest) {
     'X-Anima-Mutation': governedBacklog.kind === 'materialized' ? 'work-proposals-only' : 'project-backlog-only',
     ...(governedBacklog.sourceMessageId ? {'X-Source-Message-Id': governedBacklog.sourceMessageId} : {}),
   } });
+
+  // Mandato estreito do Dev. Consulta permanece read-only; execução explícita
+  // delega à mesma admission RPC do cartão. Claim/attempt/executor continuam
+  // pertencendo exclusivamente ao Resident Host + Supervisor.
+  if (developmentMode && isAutonomousWorkSelectionRequest(message)) {
+    try {
+      const intent = resolveAutonomousWorkChatIntent(message)!;
+      let decision = await selectAutonomousWorkForChat(supabase, user.id);
+      let admission: 'not_requested' | 'admitted' | 'human_decision_required' | 'stale' = 'not_requested';
+      if (intent === 'execute' && decision.outcome === 'selected') {
+        const item = await supabase.from('work_items').select('proposal_version')
+          .eq('user_id', user.id).eq('id', decision.workItemId).maybeSingle();
+        if (item.error || !item.data) admission = 'human_decision_required';
+        else {
+          const admitted = await admitSelectedAutonomousWork(
+            supabase, decision.workItemId, item.data.proposal_version, crypto.randomUUID(),
+          );
+          admission = admitted.outcome;
+          if (admitted.outcome === 'stale') decision = await selectAutonomousWorkForChat(supabase, user.id);
+        }
+      } else if (intent === 'execute' && decision.outcome === 'human_decision_required') admission = 'human_decision_required';
+      const selectedId = decision.outcome === 'selected' ? decision.workItemId : undefined;
+      const suffix = admission === 'admitted' ? '\n\nExecução admitida pelo caminho canônico — ainda NÃO está em curso. Ela só avança quando o Resident Host consumir a solicitação (suba-o com `npm run dev:supervised` se ele não estiver ativo). Vou acompanhar os eventos persistidos: enquanto não houver início de execução, o cartão mostra "Aguardando Resident Host"; sigo até a execução, o review ou um bloqueio real.'
+        : admission === 'human_decision_required' ? '\n\nA execução não foi iniciada: uma decisão ou authority humana vigente é necessária.'
+        : admission === 'stale' ? '\n\nA seleção perdeu elegibilidade durante a admissão; reconciliei a fila e não executei estado stale.' : '';
+      return new Response(renderAutonomousWorkSelection(decision) + suffix, { headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Anima-Capability': 'autonomous-work-selection-v1',
+        'X-Anima-Mutation': admission === 'admitted' ? 'canonical-execution-request' : 'none',
+        'X-Anima-Autonomous-Work': encodeURIComponent(JSON.stringify({ intent, admission, workItemId: selectedId })),
+      } });
+    } catch (error) {
+      console.warn('[autonomous-work-selection] fail-closed', {
+        code: error instanceof Error ? error.message.split(':', 1)[0] : 'unknown_error',
+      });
+      return Response.json({ error: 'Não foi possível reconciliar a fila autônoma com segurança agora.' }, {
+        status: 503,
+        headers: { 'X-Anima-Capability': 'autonomous-work-selection-v1', 'X-Anima-Mutation': 'none' },
+      });
+    }
+  }
 
   // Drill-down operacional read-only: resolve uma única referência antes de ler
   // payloads e só deixa a projeção tipada/minimizada atravessar para o Advisor.
@@ -214,6 +268,9 @@ export async function POST(req: NextRequest) {
       console.warn('[project-advisor-item-drilldown] fail-closed', {
         code: error instanceof Error ? error.message.split(':', 1)[0] : 'unknown_error',
       });
+      if (error instanceof ChatProviderError) {
+        return Response.json({ error: error.message }, { status: error.status });
+      }
       return Response.json({ error: 'Não há evidência governada suficiente para detalhar esse item com segurança agora.' }, { status: 503 });
     }
   }
@@ -798,7 +855,8 @@ ${contextBlock}`;
     // O planejador investiga o repositório real; só roda na superfície de
     // desenvolvimento. No chat pessoal um pedido de trabalho segue o fluxo
     // honesto de proposta/indisponibilidade, sem tocar o código.
-    const planned = await planExecutableProjectWork(message, interpretation.command);
+    console.info('[chat-turn-provider]', { phase: 'project-planner', effectiveProvider: provider, fallbackAllowed: false });
+    const planned = await planExecutableProjectWork(message, interpretation.command, createChatProjectPlanner(provider, user.id));
     if (planned.ok) interpretation = { ...interpretation, command: planned.command };
     else projectPlanningError = planned.message;
   }
@@ -947,9 +1005,6 @@ ${contextBlock}`;
     'X-AI-Provider':          providerResult.provider,
     'X-AI-Model':             providerResult.model,
   };
-  // Observabilidade da política auto-local: quando a OpenAI paga não foi admitida,
-  // o provider vira 'ollama' e o motivo do fallback é exposto (nunca gasto silencioso).
-  if (providerResult.fallback) responseHeaders['X-AI-Fallback-Reason'] = providerResult.fallback.reason;
   responseHeaders['X-Source-Message-Id'] = sourceMessage.id;
   responseHeaders['X-Work-Orchestration'] = encodeURIComponent(JSON.stringify(orchestrationMetadata));
 

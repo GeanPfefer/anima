@@ -1,6 +1,6 @@
 # RunPod Autoprovisionamento — implementação local e barreira pré-provider
 
-Data: 2026-09-08  
+Data: 2026-09-08
 Objetivo: preparar a primeira prova canônica de autoprovisionamento RunPod end-to-end, limitada ao
 successor `8a2515d8-6967-463e-af2a-fd5d2b5e42a1`, e parar na primeira fronteira humana real.
 

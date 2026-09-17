@@ -9,7 +9,9 @@ import type {
   ProvisionOutcome,
   StopOutcome,
 } from '@anima/core';
+import { createConnection } from 'node:net';
 import { SshRunPodTunnelManager, type RunPodTunnel, type RunPodTunnelManager } from './runpod-ssh-tunnel';
+import { renderRunPodBootstrapScript } from './runpod-bootstrap';
 
 // ============================================================
 // PRIMEIRO ADAPTER DE PROVIDER REAL (RunPod) — TEST-ONLY / env-gated / SEM efeito real.
@@ -38,6 +40,21 @@ export type RunPodErrorCode =
   | 'auth_invalid'
   | 'quota_exceeded'
   | 'capacity_unavailable'
+  // Pod ficou RUNNING mas o endpoint (publicIp + porta 22) não publicou dentro do deadline de
+  // publicação (`endpointPublicationDeadlineMs`).
+  // Distinto de `capacity_unavailable` (nunca chegou a RUNNING): a capacidade existiu; só a janela
+  // de publicação do endpoint foi curta. NÃO é produzido por `classifyRunPodError` (só pelo loop de
+  // readiness), então não colide com o mapeamento de status HTTP.
+  | 'endpoint_unpublished'
+  // Pod foi CRIADO e a REST do provider seguiu alcançável (getPod respondendo), mas o túnel para
+  // ESTA máquina não ficou utilizável dentro do `tunnelReadyTimeoutMs`: o mapping publicou e depois
+  // oscilou/sumiu (`mapping_absent`), o TCP publicado nunca ficou roteável (`tcp_unreachable`), o
+  // `ssh`/túnel não subiu (`ssh_not_ready`) ou o Pod terminou durante a espera (`resource_gone`).
+  // É falha DE PLACEMENT/MÁQUINA — RECUPERÁVEL trocando de máquina/SKU —, NÃO indisponibilidade
+  // GLOBAL do provider: só `openTunnel` o produz. A indisponibilidade global continua sendo
+  // `provider_unreachable`, emitida SOMENTE nos sites de chamada REST (create/list/get/stop/destroy)
+  // quando a própria API fica inalcançável — é lá que a "evidência global" aparece.
+  | 'tunnel_unavailable'
   | 'rate_limited'
   | 'provider_unreachable'
   | 'provision_failed'
@@ -59,12 +76,73 @@ export interface HttpClient {
   send(input: HttpRequestInput): Promise<HttpResponse>;
 }
 
-/** Cliente HTTP padrão sobre o `fetch` global (Node 24+). Erros de rede viram exceção,
- * que o adapter traduz para `provider_unreachable` — nunca vaza stack/segredo. */
+/** Teto por-requisição do transporte HTTP (anti-hang). SEM ele, um único `fetch` cuja conexão
+ * abre mas o servidor nunca responde (clássico em cold-start de GPU) pendura para sempre: os
+ * deadlines dos laços de provisão (`awaitEndpoint`/`awaitModelReady`/price-quote) só são checados
+ * ENTRE requisições, então NUNCA são alcançados enquanto UMA requisição está pendurada — e o
+ * host-turn fica em `state=running` indefinidamente. Bounded por env; o mesmo padrão que
+ * `externalHealth` já usava, agora no transporte para TODA requisição herdar o limite. */
+export const DEFAULT_RUNPOD_HTTP_TIMEOUT_MS = 30_000;
+export const runpodHttpTimeoutMs = (env: Record<string, string | undefined> = process.env): number =>
+  positiveInt(env.ANIMA_RUNPOD_HTTP_TIMEOUT_MS, DEFAULT_RUNPOD_HTTP_TIMEOUT_MS);
+
+/** Cliente HTTP padrão sobre o `fetch` global (Node 24+). Erros de rede/timeout viram exceção,
+ * que o adapter traduz para `provider_unreachable` — nunca vaza stack/segredo. O timeout por
+ * requisição compõe com o `signal` do chamador: aborta no PRIMEIRO dos dois (deadline ou cancel). */
 export const fetchHttpClient: HttpClient = {
   async send({ method, url, headers, body, signal }) {
-    const response = await fetch(url, { method, headers: headers as HeadersInit, body, signal });
-    return { status: response.status, body: await response.text() };
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(), runpodHttpTimeoutMs());
+    try {
+      const response = await fetch(url, { method, headers: headers as HeadersInit, body, signal: controller.signal });
+      return { status: response.status, body: await response.text() };
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+    }
+  },
+};
+
+// ============================================================
+// READINESS EM CAMADAS (Fase 2): antes de tentar o `ssh`, uma sonda TCP explícita ao endpoint
+// publicado separa "endpoint publicado mas ainda NÃO roteável" (a falha observada na última prova
+// viva — TCP timeout) de "sshd/handshake/auth ainda não prontos". Sem esta camada, ambos colapsam
+// no mesmo `provider_unreachable` e a causa fica inatribuível. A sonda é injetável (fail-closed nos
+// testes, que nunca tocam a rede real) e NUNCA carrega segredo.
+// ============================================================
+export type TcpReachability = 'reachable' | 'refused' | 'timeout' | 'error';
+export interface TcpProbe {
+  probe(host: string, port: number, timeoutMs: number, signal: AbortSignal): Promise<TcpReachability>;
+}
+export const DEFAULT_RUNPOD_TCP_PROBE_TIMEOUT_MS = 5_000;
+export const runpodTcpProbeTimeoutMs = (env: Record<string, string | undefined> = process.env): number =>
+  positiveInt(env.ANIMA_RUNPOD_TCP_PROBE_TIMEOUT_MS, DEFAULT_RUNPOD_TCP_PROBE_TIMEOUT_MS);
+
+/** Sonda TCP real: uma tentativa de `connect` bounded; classifica o resultado sem abrir túnel nem
+ * trocar dados. Sempre destrói o socket. Coopera com o `signal` externo (cancelamento). */
+export const netTcpProbe: TcpProbe = {
+  probe(host, port, timeoutMs, signal) {
+    return new Promise<TcpReachability>(resolve => {
+      if (signal.aborted) return resolve('error');
+      const socket = createConnection({ host, port });
+      let settled = false;
+      const done = (result: TcpReachability): void => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        signal.removeEventListener('abort', onAbort);
+        resolve(result);
+      };
+      const onAbort = () => done('error');
+      signal.addEventListener('abort', onAbort, { once: true });
+      socket.setTimeout(timeoutMs, () => done('timeout'));
+      socket.once('connect', () => done('reachable'));
+      socket.once('error', (error: NodeJS.ErrnoException) =>
+        done(error.code === 'ECONNREFUSED' ? 'refused' : error.code === 'ETIMEDOUT' ? 'timeout' : 'error'));
+    });
   },
 };
 
@@ -88,9 +166,31 @@ export interface RunPodProvisionerConfig {
   readonly podEnv: Readonly<Record<string, string>>;
 }
 
+/**
+ * DEADLINE DE PUBLICAÇÃO DO ENDPOINT — política EXPLÍCITA (Resilient Cloud Session V1). Separado dos
+ * timeouts de camadas posteriores (`tunnelReadyTimeoutMs` = TCP+ssh; `tcpProbeTimeoutMs` = por
+ * sonda): esta é a janela para o Pod, uma vez RUNNING, PUBLICAR `publicIp`+porta 22.
+ *
+ * EVIDÊNCIA (duas provas vivas 2026-09-10): uma máquina publicou endpoint dentro de ~minutos e
+ * chegou ao TCP; outra ficou RUNNING com `publicIp`/`portMappings` vazios por toda a janela de 300s.
+ * O tempo de publicação VARIA por máquina. Um default de 300s é curto o bastante para condenar
+ * máquinas lentas-porém-boas. 540s (9 min) dá folga conservadora a uma máquina lenta sem imobilizar
+ * a sessão indefinidamente — e, crucialmente, ESTOURAR o deadline agora HABILITA reprovisionamento
+ * (trocar de máquina), não termina a sessão inteira: `awaitEndpoint` devolve `endpoint_unpublished`,
+ * que a sessão resiliente classifica como placement recuperável.
+ */
+export const DEFAULT_RUNPOD_ENDPOINT_PUBLICATION_DEADLINE_MS = 540_000;
+export const runpodEndpointPublicationDeadlineMs = (env: Record<string, string | undefined> = process.env): number =>
+  positiveInt(env.ANIMA_RUNPOD_ENDPOINT_PUBLICATION_DEADLINE_MS,
+    positiveInt(env.ANIMA_RUNPOD_MAX_PROVISION_MS, DEFAULT_RUNPOD_ENDPOINT_PUBLICATION_DEADLINE_MS));
+
 export interface RunPodProvisionerOptions {
   readonly pollIntervalMs?: number;
+  /** @deprecated alias de compat de `endpointPublicationDeadlineMs`. Precedência:
+   * `endpointPublicationDeadlineMs` > `maxProvisionMs` > env > default. */
   readonly maxProvisionMs?: number;
+  /** Deadline explícito para o Pod RUNNING publicar o endpoint (ver constante acima). */
+  readonly endpointPublicationDeadlineMs?: number;
   readonly healthTimeoutMs?: number;
   /** Teto para o túnel SSH aceitar conexão (o `sshd` só sobe no meio do bootstrap; a 1ª tentativa
    * quase sempre falha em cold-start). Retry bounded até este teto. */
@@ -101,6 +201,11 @@ export interface RunPodProvisionerOptions {
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
   readonly tunnelManager?: RunPodTunnelManager;
+  /** Sonda TCP injetável (Fase 2). Default real sobre `node:net`; testes injetam um fake
+   * determinístico e nunca tocam a rede. */
+  readonly tcpProbe?: TcpProbe;
+  /** Teto por-sonda TCP (bounded, anti-hang). */
+  readonly tcpProbeTimeoutMs?: number;
 }
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
@@ -200,16 +305,26 @@ const parsePodList = (value: unknown): PodView[] => {
 
 const TERMINAL = new Set(['EXITED', 'TERMINATED']);
 
+// REQUISITO DE REDE do node (não literal solto): este adapter acessa o node SEMPRE por SSH sobre
+// TCP/22 (`SshRunPodTunnelManager`). Logo o create SEMPRE precisa (a) expor a porta TCP 22 e
+// (b) pedir IP público. `ports` no formato REST v1 `"[porta]/[protocolo]"`. Em SECURE o IP público
+// é garantido pelo provider; em COMMUNITY `supportPublicIp` é o flag documentado — "se null, o Pod
+// pode não ter IP público" — então declaramos `true` para remover a ambiguidade e casar o requisito
+// do túnel em qualquer cloudType. NÃO expor portas adicionais.
+const SSH_TUNNEL_TCP_PORT = '22/tcp';
+
 export class RunPodNodeProvisioner implements NodeProvisioner {
   readonly providerId = 'runpod';
   private readonly pollIntervalMs: number;
-  private readonly maxProvisionMs: number;
+  private readonly endpointPublicationDeadlineMs: number;
   private readonly healthTimeoutMs: number;
   private readonly tunnelReadyTimeoutMs: number;
   private readonly modelReadyTimeoutMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private readonly tunnels: RunPodTunnelManager;
+  private readonly tcpProbe: TcpProbe;
+  private readonly tcpProbeTimeoutMs: number;
   private readonly openTunnels = new Map<string, RunPodTunnel>();
 
   constructor(
@@ -218,7 +333,8 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     options: RunPodProvisionerOptions = {},
   ) {
     this.pollIntervalMs = options.pollIntervalMs ?? 5_000;
-    this.maxProvisionMs = options.maxProvisionMs ?? positiveInt(process.env.ANIMA_RUNPOD_MAX_PROVISION_MS, 300_000);
+    this.endpointPublicationDeadlineMs = options.endpointPublicationDeadlineMs ?? options.maxProvisionMs
+      ?? runpodEndpointPublicationDeadlineMs();
     this.healthTimeoutMs = options.healthTimeoutMs ?? 5_000;
     this.tunnelReadyTimeoutMs = options.tunnelReadyTimeoutMs ?? positiveInt(process.env.ANIMA_RUNPOD_TUNNEL_READY_TIMEOUT_MS, 180_000);
     this.modelReadyTimeoutMs = options.modelReadyTimeoutMs ?? positiveInt(process.env.ANIMA_RUNPOD_MODEL_READY_TIMEOUT_MS, 900_000);
@@ -228,6 +344,8 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
       privateKeyPath: config.sshPrivateKeyPath,
       knownHostsPath: config.sshKnownHostsPath,
     });
+    this.tcpProbe = options.tcpProbe ?? netTcpProbe;
+    this.tcpProbeTimeoutMs = options.tcpProbeTimeoutMs ?? runpodTcpProbeTimeoutMs();
   }
 
   private lastPriceHint: NodePriceHintV0 | null = null;
@@ -290,7 +408,14 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     const ready = await this.awaitEndpoint(podId, signal);
     if (!ready.ok) return { ok: false, reason: ready.reason };
     const endpoint = await this.openTunnel(ready.pod, signal);
-    if (endpoint === null) return { ok: false, reason: 'provider_unreachable' };
+    // openTunnel só retorna null DEPOIS de o Pod existir e a REST do provider ter respondido durante
+    // toda a espera (o próprio loop `getPod` reconsulta o provider): a máquina/endpoint desta SKU é
+    // que não ficou utilizável (mapping oscilou, TCP não roteou, ssh não subiu, ou o Pod terminou).
+    // Isso é RECUPERÁVEL POR PLACEMENT (trocar de máquina/SKU), NÃO indisponibilidade global — logo
+    // `tunnel_unavailable`, nunca `provider_unreachable`. Se a REST estivesse GLOBALMENTE fora, o
+    // próximo `createPod`/`findPodByName` desta sessão devolveria `provider_unreachable` e a sessão
+    // daria HALT ali — a evidência global aparece nos sites de chamada REST, não numa falha de túnel.
+    if (endpoint === null) return { ok: false, reason: 'tunnel_unavailable' };
     // COLD-START: o bootstrap dentro do Pod faz `ollama pull` do modelo (minutos p/ ~19 GB). O
     // provision só retorna PRONTO quando o modelo já é servível pelo endpoint — assim o health
     // subsequente (inspect) passa em vez de derrubar um Pod que ainda estava puxando o modelo.
@@ -384,14 +509,16 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
       imageName: this.config.imageName,
       computeType: 'GPU',
       cloudType: this.config.cloudType,
-      gpuTypeIds: this.config.gpuTypeIds,
+      gpuTypeIds: request.gpuTypeId ? [request.gpuTypeId] : this.config.gpuTypeIds,
       gpuCount: this.config.gpuCount,
       containerDiskInGb: this.config.containerDiskInGb,
       ...(this.config.volumeInGb > 0 ? { volumeInGb: this.config.volumeInGb } : {}),
       ...(this.config.networkVolumeId ? { networkVolumeId: this.config.networkVolumeId } : {}),
-      ports: ['22/tcp'],
+      // Requisito do túnel SSH: expõe TCP/22 e pede IP público explicitamente (ver SSH_TUNNEL_TCP_PORT).
+      ports: [SSH_TUNNEL_TCP_PORT],
+      supportPublicIp: true,
       dockerEntrypoint: ['bash', '-lc'],
-      dockerStartCmd: [this.bootstrapCommand(request.model)],
+      dockerStartCmd: [renderRunPodBootstrapScript(request.model)],
       env: { ...this.config.podEnv, PUBLIC_KEY: this.config.sshPublicKey },
     };
     const response = await this.call('POST', '/pods', signal, payload);
@@ -419,22 +546,76 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     return { kind: 'ok', pod };
   }
 
-  private async openTunnel(pod: PodView, signal: AbortSignal): Promise<string | null> {
-    const existing = this.openTunnels.get(pod.id);
+  // READINESS EM CAMADAS (Fases 2+3). O endpoint só é considerado utilizável depois de atravessar,
+  // nesta ordem, com deadline e retry bounded/cancelável: (1) mapping corrente presente →
+  // (2) TCP roteável → (3) `ssh` aceita/túnel de pé. Cada iteração RECONSULTA o provider
+  // (`getPod`) porque o RunPod pode publicar o mapping ANTES de o roteamento estar pronto ou ALTERAR
+  // publicIp/publicPort durante o provisioning — martelar um endpoint stale foi o que a última prova
+  // viva expôs (TCP timeout em endpoint fixo). Ao esgotar o teto, emite UM diagnóstico estruturado
+  // e sanitizado com a fase exata (`mapping_absent` | `tcp_unreachable` | `ssh_not_ready`), o mapping
+  // observado, quantas vezes ele mudou e o tempo — tornando a barreira ATRIBUÍVEL por si.
+  private async openTunnel(initialPod: PodView, signal: AbortSignal): Promise<string | null> {
+    const existing = this.openTunnels.get(initialPod.id);
     if (existing) return existing.endpoint;
-    const port = pod.portMappings['22'];
-    if (!pod.publicIp || typeof port !== 'number') return null;
-    // O `sshd` só sobe no MEIO do bootstrap (após apt-get install + ollama install), então a 1ª
-    // tentativa quase sempre falha em cold-start. Retry BOUNDED até o teto, cancelável.
-    const deadline = this.now() + this.tunnelReadyTimeoutMs;
+    const startedAt = this.now();
+    const deadline = startedAt + this.tunnelReadyTimeoutMs;
+    let observedIp: string | null = initialPod.publicIp;
+    let observedPort: number | null = typeof initialPod.portMappings['22'] === 'number' ? initialPod.portMappings['22'] : null;
+    let mappingChanges = 0;
+    let attempts = 0;
+    let phase: 'mapping_absent' | 'tcp_unreachable' | 'ssh_not_ready' = 'mapping_absent';
+    let lastDetail = 'no observation yet';
     for (;;) {
       if (signal.aborted) return null;
-      try {
-        const tunnel = await this.tunnels.open({ publicIp: pod.publicIp, port }, signal);
-        this.openTunnels.set(pod.id, tunnel);
-        return tunnel.endpoint;
-      } catch { /* sshd ainda não aceita conexão; retry bounded */ }
-      if (this.now() >= deadline) return null;
+      attempts += 1;
+      const current = await this.getPod(initialPod.id, signal);
+      if (current.kind === 'not_found' || (current.kind === 'ok' && TERMINAL.has(current.pod.desiredStatus))) {
+        // O recurso faturável sumiu/terminou — não adianta continuar; o caller faz teardown por ref.
+        console.error(`runpod_tunnel_open_failed ${JSON.stringify({ podId: initialPod.id, phase: 'resource_gone', attempts, elapsedMs: this.now() - startedAt })}`);
+        return null;
+      }
+      if (current.kind === 'error') {
+        phase = 'mapping_absent';
+        lastDetail = `getpod:${current.code}`;
+      } else {
+        const ip = current.pod.publicIp;
+        const port = current.pod.portMappings['22'];
+        if (!ip || typeof port !== 'number') {
+          phase = 'mapping_absent';
+          lastDetail = 'no publicIp/port22';
+        } else {
+          if (ip !== observedIp || port !== observedPort) {
+            mappingChanges += 1;
+            console.error(`runpod_tunnel_mapping_changed ${JSON.stringify({ podId: initialPod.id, from: observedIp && observedPort ? `${observedIp}:${observedPort}` : null, to: `${ip}:${port}` })}`);
+          }
+          observedIp = ip;
+          observedPort = port;
+          const reachability = await this.tcpProbe.probe(ip, port, this.tcpProbeTimeoutMs, signal);
+          if (reachability === 'reachable') {
+            try {
+              const tunnel = await this.tunnels.open({ publicIp: ip, port, hostKeyAlias: `runpod-${initialPod.id}` }, signal);
+              this.openTunnels.set(initialPod.id, tunnel);
+              return tunnel.endpoint;
+            } catch (error) {
+              // TCP roteável mas o `ssh`/túnel ainda não sobe (sshd aquecendo, banner, auth); retry.
+              phase = 'ssh_not_ready';
+              lastDetail = error instanceof Error ? error.message : String(error);
+            }
+          } else {
+            // Endpoint publicado mas ainda NÃO roteável — a classe de falha da última prova viva.
+            phase = 'tcp_unreachable';
+            lastDetail = reachability;
+          }
+        }
+      }
+      if (this.now() >= deadline) {
+        console.error(`runpod_tunnel_open_failed ${JSON.stringify({
+          podId: initialPod.id, phase, lastDetail: this.redact(lastDetail),
+          observed: observedIp && observedPort ? `${observedIp}:${observedPort}` : null,
+          mappingChanges, attempts, elapsedMs: this.now() - startedAt,
+        })}`);
+        return null;
+      }
       await this.sleep(this.pollIntervalMs);
     }
   }
@@ -473,40 +654,13 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     await this.tunnels.closeAll();
   }
 
-  private bootstrapCommand(model: string): string {
-    const safeModel = /^[A-Za-z0-9._:/-]+$/.test(model) ? model : '';
-    if (!safeModel) return 'exit 64';
-    return [
-      'set -euo pipefail',
-      'command -v nvidia-smi >/dev/null',
-      'nvidia-smi >/dev/null',
-      'apt-get update -qq',
-      'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server curl ca-certificates',
-      // sshd ANTES da instalação do Ollama: o RunPod só publica portMappings['22'] quando o sshd
-      // escuta; instalar o Ollama primeiro (curl|sh, lento) atrasava o mapeamento além do teto de
-      // awaitEndpoint. Com o sshd cedo, a porta mapeia rápido e o túnel conecta; o pull do modelo
-      // corre depois e é coberto por awaitModelReady.
-      'install -d -m 700 /root/.ssh /run/sshd',
-      'test -n "${PUBLIC_KEY:-}"',
-      'printf "%s\\n" "$PUBLIC_KEY" > /root/.ssh/authorized_keys',
-      'chmod 600 /root/.ssh/authorized_keys',
-      '/usr/sbin/sshd',
-      'command -v ollama >/dev/null || (curl -fsSL https://ollama.com/install.sh | sh)',
-      'export OLLAMA_HOST=127.0.0.1:11434',
-      'ollama serve >/tmp/ollama.log 2>&1 &',
-      'for i in $(seq 1 60); do curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done',
-      'curl -fsS http://127.0.0.1:11434/api/tags >/dev/null',
-      `if ollama show ${safeModel} >/dev/null 2>&1; then echo ANIMA_MODEL_CACHE=warm; else echo ANIMA_MODEL_CACHE=cold; timeout 1800 ollama pull ${safeModel}; fi`,
-      `ollama show ${safeModel} >/dev/null`,
-      'wait',
-    ].join('; ');
-  }
-
   private async awaitEndpoint(
     podId: string,
     signal: AbortSignal,
   ): Promise<{ ok: true; endpoint: string; pod: PodView } | { ok: false; reason: RunPodErrorCode }> {
-    const deadline = this.now() + this.maxProvisionMs;
+    const startedAt = this.now();
+    const deadline = startedAt + this.endpointPublicationDeadlineMs;
+    let sawRunning = false;
     for (;;) {
       if (signal.aborted) return { ok: false, reason: 'provision_failed' };
       const pod = await this.getPod(podId, signal);
@@ -514,9 +668,26 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
       if (pod.kind === 'error') return { ok: false, reason: pod.code };
       if (TERMINAL.has(pod.pod.desiredStatus)) return { ok: false, reason: 'provision_failed' };
       if (pod.pod.desiredStatus === 'RUNNING') {
+        sawRunning = true;
         if (pod.pod.publicIp && typeof pod.pod.portMappings['22'] === 'number') return { ok: true, endpoint: '', pod: pod.pod };
       }
-      if (this.now() >= deadline) return { ok: false, reason: 'capacity_unavailable' };
+      if (this.now() >= deadline) {
+        // ATRIBUIÇÃO na camada PRÉ-túnel (Fase 2): "nunca ficou RUNNING" (capacidade real
+        // indisponível) é honestamente diferente de "ficou RUNNING mas o endpoint SSH nunca publicou
+        // dentro da janela". A prova viva 2026-09-10 (pod `yi133l1j51prjr`) foi o SEGUNDO caso —
+        // RUNNING com `publicIp`/`portMappings` vazios além do `endpointPublicationDeadlineMs` — e
+        // antes disso colapsava, enganosamente, em `capacity_unavailable`. Aqui a capacidade EXISTIU;
+        // a janela de publicação do endpoint é que foi curta. `endpoint_unpublished` é RECUPERÁVEL
+        // pela sessão resiliente (trocar de máquina), não terminal; ampliar o deadline
+        // (`ANIMA_RUNPOD_ENDPOINT_PUBLICATION_DEADLINE_MS`) só dá mais paciência à MESMA máquina. O
+        // diagnóstico estruturado torna a fase atribuível por si e a mensagem de refusal deixa de
+        // culpar falsamente a capacidade.
+        if (sawRunning) {
+          console.error(`runpod_endpoint_unpublished ${JSON.stringify({ podId, endpointPublicationDeadlineMs: this.endpointPublicationDeadlineMs, elapsedMs: this.now() - startedAt })}`);
+          return { ok: false, reason: 'endpoint_unpublished' };
+        }
+        return { ok: false, reason: 'capacity_unavailable' };
+      }
       await this.sleep(this.pollIntervalMs);
     }
   }

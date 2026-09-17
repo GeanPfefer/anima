@@ -50,6 +50,7 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
   // distinta do cartão criado por uma mensagem (workItems).
   const [historyCards, setHistoryCards] = useState<Record<string, WorkPresentationView[]>>({});
   const [focusedWorkItemId,setFocusedWorkItemId]=useState<string|null>(null);
+  const [trackedAutonomousWorkItemId,setTrackedAutonomousWorkItemId]=useState<string|null>(null);
   const [focusChoice,setFocusChoice]=useState<{sourceMessageId:string;candidates:readonly{id:string;summary:string}[]}|null>(null);
   // Turno interrompido/órfão (correção 3): mensagem do usuário sem resposta,
   // retryável. Reconstruído do servidor no reload e marcado ao falhar ao vivo.
@@ -77,9 +78,8 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
     window.localStorage.setItem('anima-chat-provider', next);
   }
 
-  // Só o usuário autorizado alterna o modo. Ao ativar, fixa o provedor em GPT: o
-  // planejador que investiga o repositório e produz o execution_spec de worktree é
-  // exclusivamente OpenAI. Desativar volta ao chat pessoal comum.
+  // Só o usuário autorizado alterna o modo. Ao ativar, inicia em GPT; o seletor
+  // continua sendo a autoridade explícita para todos os turnos e subpassos Dev.
   const devActive = devAuthorized && devMode;
   function toggleDevMode() {
     if (loading || !devAuthorized) return;
@@ -237,12 +237,12 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
   async function streamChat(text: string, retryMessageId?: string) {
     // `developmentMode:true` só sai desta superfície dedicada e só para quem o
     // servidor autorizou; o chat pessoal comum nunca o envia. No modo dev o
-    // provedor é sempre GPT (o planejador de worktree é OpenAI). O servidor
-    // re-verifica a autorização — o cliente nunca habilita nada sozinho.
+    // provedor segue o seletor explícito do turno. O servidor re-verifica a
+    // autorização — o cliente nunca habilita nada sozinho.
     const res = await fetch('/api/ai/chat', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ message: text, provider: devActive ? 'openai' : provider, ...(presentedItemReferences.current.length > 0 ? { presentedItemReferences: presentedItemReferences.current } : {}), ...(devActive ? { developmentMode: true } : {}), ...(retryMessageId ? { retryMessageId } : {}) }),
+      body:    JSON.stringify({ message: text, provider, ...(presentedItemReferences.current.length > 0 ? { presentedItemReferences: presentedItemReferences.current } : {}), ...(devActive ? { developmentMode: true } : {}), ...(retryMessageId ? { retryMessageId } : {}) }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
@@ -253,6 +253,7 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
     const sourceMessageId = res.headers.get('X-Source-Message-Id');
     const orchestrationHeader = res.headers.get('X-Work-Orchestration');
     const presentedItemsHeader = res.headers.get('X-Anima-Presented-Items');
+    const autonomousWorkHeader = res.headers.get('X-Anima-Autonomous-Work');
     if (presentedItemsHeader) {
       try {
         const parsed = JSON.parse(decodeURIComponent(presentedItemsHeader)) as unknown;
@@ -263,6 +264,18 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
     if (sourceMessageId) lastSourceId.current = sourceMessageId;
     if (sourceMessageId) setMessages(previous => previous.map((message, index) => index === previous.length - 2 && message.role === 'user' ? { ...message, id: sourceMessageId } : message));
     await readStream(res);
+    if (autonomousWorkHeader) {
+      try {
+        const tracked = JSON.parse(decodeURIComponent(autonomousWorkHeader)) as { admission?: unknown; workItemId?: unknown };
+        if (tracked.admission === 'admitted' && typeof tracked.workItemId === 'string') {
+          setTrackedAutonomousWorkItemId(tracked.workItemId);
+          setFocusedWorkItemId(tracked.workItemId);
+          const current = await fetch(`/api/work-orchestration/items/${tracked.workItemId}`, { cache: 'no-store' });
+          const body = await current.json().catch(() => null);
+          if (current.ok && body?.ok) setProjectWorkItems(previous => replaceWorkPresentation(previous, body.value.presentation as WorkPresentationView));
+        }
+      } catch { /* metadado opcional inválido não cria progresso fictício */ }
+    }
     if (linksHeader) {
       try {
         const links = JSON.parse(decodeURIComponent(linksHeader)) as ProposedLink[];
@@ -416,13 +429,13 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
         <div className={styles.devBanner} role="status">
           <strong>Modo desenvolvimento do Anima ativo.</strong> Suas mensagens aqui
           podem virar propostas de alteração no próprio projeto, planejadas pelo GPT
-          sobre o código real. Nada é executado sem a sua aprovação — a execução
-          autônoma continua sendo uma ação separada, no cartão do trabalho.
+          sobre o código real. Um mandato explícito pode sinalizar a execução de
+          um item já aprovado; perguntas e consultas continuam sem executar.
         </div>
       )}
 
       <div className={styles.messages}>
-        <ProjectWorkPanel items={projectWorkItems} focusedWorkItemId={focusedWorkItemId} onFocus={focusWork} onChange={updated=>setProjectWorkItems(previous=>replaceWorkPresentation(previous,updated))}/>
+        <ProjectWorkPanel items={projectWorkItems} focusedWorkItemId={focusedWorkItemId} trackedWorkItemId={trackedAutonomousWorkItemId} onFocus={focusWork} onChange={updated=>setProjectWorkItems(previous=>replaceWorkPresentation(previous,updated))}/>
         {messages.length === 0 && !isOnboarding && (
           <div className={styles.empty}>
             <p className={styles.emptyIcon}>🧠</p>

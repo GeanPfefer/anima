@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { describeCostClass, describeExecutionAdvisory, describeMachinePressure, describeValidationOutcome, evaluateAutonomousEligibility, formatObservedDurationMs, parseWorkResultValidations, type ApprovalDecision, type MachinePressure, type ResultReviewDecision, type WorkItem, type WorkloadAdvisory, type WorkPresentation, type WorkVerificationVerdict } from '@anima/core';
 import styles from './chat.module.css';
 import { WorkExecutionCard } from './WorkExecutionCard';
@@ -10,7 +10,7 @@ import type { WorkRetryReadiness } from '@/lib/work-orchestration/retry-readines
 
 type WorkItemView=Omit<WorkItem,'createdAt'|'updatedAt'>&{createdAt:string;updatedAt:string};
 export type WorkPresentationView=Omit<WorkPresentation,'item'>&{item:WorkItemView;autonomousReadiness?:AutonomousReadinessView;retryReadiness?:WorkRetryReadiness};
-type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void;autonomousExecutionAllowed?:boolean;autonomousBlockReason?:string|null};
+type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void;autonomousExecutionAllowed?:boolean;autonomousBlockReason?:string|null;trackAutonomousProgress?:boolean};
 
 // Rótulos do parecer advisory do Verifier. Read-only: informa a revisão humana,
 // nunca a substitui nem altera as ações disponíveis (que vêm da projeção).
@@ -41,7 +41,7 @@ const describeRetryBlock=(readiness?:WorkRetryReadiness):string|null=>
   readiness?.status==='BLOCKED'&&readiness.reason?RETRY_BLOCK_LABEL[readiness.reason]??null:null;
 
 
-export function WorkProposalCard({presentation,onChange,focused=false,onFocus,autonomousExecutionAllowed,autonomousBlockReason}:Props){
+export function WorkProposalCard({presentation,onChange,focused=false,onFocus,autonomousExecutionAllowed,autonomousBlockReason,trackAutonomousProgress=false}:Props){
   const {item,latestResult,acceptedResult,availableActions}=presentation;
   const executionSpec=item.intent['execution_spec'] as {
     target?:{kind?:string;reference?:string};permissions?:string[];
@@ -72,6 +72,15 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,au
     }catch{/* read-only: sem painel em falha */}
   }
   async function reload(preserveError=false){setStatus('reconciling');const response=await fetch(`/api/work-orchestration/items/${item.id}`);const body=await response.json();if(response.ok&&body.ok){onChange(body.value.presentation as WorkPresentationView);if(!preserveError)setError('');}else setError(body.error?.message??'Não foi possível reler o trabalho.');setStatus('idle');}
+  useEffect(()=>{
+    if(!trackAutonomousProgress)return;
+    const terminal=['review','failed','cancelled','completed','rejected'].includes(item.state)||presentation.pendingDecision!==null;
+    if(terminal)return;
+    let active=true;
+    const poll=async()=>{try{const response=await fetch(`/api/work-orchestration/items/${item.id}`,{cache:'no-store'});const body=await response.json().catch(()=>null);if(active&&response.ok&&body?.ok)onChange(body.value.presentation as WorkPresentationView);}catch{/* próxima leitura bounded tenta novamente */}};
+    const timer=window.setInterval(()=>void poll(),5_000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[trackAutonomousProgress,item.id,item.state,presentation.pendingDecision,onChange]);
   async function mutate(endpoint:string,payload:Record<string,unknown>){if(status!=='idle')return;setStatus('submitting');setError('');const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion,...payload})});const body=await response.json().catch(()=>({}));if(response.ok&&body.ok){setMode('none');setDetail('');setReferences('');setValidations('');setLimitations('');setCustomDeferReason('');await reload();return;}const message=body.error?.message??'Não foi possível atualizar o trabalho.';setError(message);setStatus('idle');if(body.error?.code==='version_conflict'||body.error?.code==='ambiguous_outcome'){await reload();setError(message);}}
   async function startAutonomous(){
     if(status!=='idle')return;
@@ -172,7 +181,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,au
       <p>Pressão da máquina agora: {describeMachinePressure(resourceAdvisory.pressure)}. Parecer consultivo por workload, relativo ao histórico de custo de toda a máquina. Read-only: informa a decisão de rodar, não decide, não bloqueia e não muda a elegibilidade.</p>
       <ul>{resourceAdvisory.advisories.map(entry=><li key={`${entry.key.workloadKind}-${entry.key.command}`}>{entry.key.command} — custo {describeCostClass(entry.advisory.basis.workloadClass)}: {describeExecutionAdvisory(entry.advisory.recommendation)}</li>)}</ul>
     </section>}
-    <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?'Aprovado; execução ainda não iniciada.':item.state==='in_progress'?'Execução manual em andamento; quando terminar, registre o resultado abaixo. O Supervisor não assume um ciclo manual já iniciado.':item.state==='review'?(latestResult?'Revise as evidências acima antes de decidir.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?(presentation.integration?.status==='awaiting_decision'?'Resultado aceito; a decisão de integração está pendente abaixo. Nada foi publicado, enviado ou mergeado.':'Resultado aceito e trabalho concluído; evidências preservadas acima.'):'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?(presentation.retryReadiness?.status==='RETRY_READY'?`A tentativa ${presentation.retryReadiness.attemptsUsed} de ${presentation.retryReadiness.maxAttempts} falhou. O histórico foi preservado e há uma nova tentativa disponível.`:describeRetryBlock(presentation.retryReadiness)?`A execução falhou; nova tentativa indisponível: ${describeRetryBlock(presentation.retryReadiness)}.`:'A execução falhou; nenhuma nova tentativa está autorizável no estado atual.'):`Estado atual: ${item.state}.`}</p>
+    <p className={styles.workNotice}>{item.state==='proposed'?'Aguardando sua decisão.':item.state==='approved'?(presentation.autonomousAdmission?'Aguardando Resident Host. A solicitação foi admitida, mas nenhum claim ou início de execução foi persistido. Inicie o ambiente supervisionado com npm run dev:supervised.':trackAutonomousProgress?'Aguardando admissão da execução pelo Resident Host.':'Aprovado; execução ainda não iniciada.'):item.state==='in_progress'?(presentation.execution?'Execução canônica em andamento; o progresso abaixo vem dos eventos persistidos.':'Execução manual em andamento; quando terminar, registre o resultado abaixo. O Supervisor não assume um ciclo manual já iniciado.'):item.state==='review'?(latestResult?'Review — aguardando decisão humana.':'O resultado registrado não pôde ser verificado; o aceite permanece bloqueado até um novo envio.'):item.state==='changes_requested'?'Correções solicitadas; histórico preservado.':item.state==='completed'?(acceptedResult?(presentation.integration?.status==='awaiting_decision'?'Resultado aceito; a decisão de integração está pendente abaixo. Nada foi publicado, enviado ou mergeado.':'Resultado aceito e trabalho concluído; evidências preservadas acima.'):'Trabalho concluído, mas as evidências do resultado aceito não puderam ser verificadas.'):item.state==='failed'?(presentation.retryReadiness?.status==='RETRY_READY'?`A tentativa ${presentation.retryReadiness.attemptsUsed} de ${presentation.retryReadiness.maxAttempts} falhou. O histórico foi preservado e há uma nova tentativa disponível.`:describeRetryBlock(presentation.retryReadiness)?`A execução falhou; nova tentativa indisponível: ${describeRetryBlock(presentation.retryReadiness)}.`:'A execução falhou; nenhuma nova tentativa está autorizável no estado atual.'):`Estado atual: ${item.state}.`}</p>
     {presentation.execution&&<WorkExecutionCard execution={presentation.execution} workItemId={item.id} proposalVersion={item.proposalVersion} onReload={reload} />}
     {presentation.pendingDecision&&<WorkDecisionCard decision={presentation.pendingDecision} workItemId={item.id} onReload={reload} />}
     {presentation.pendingBudgetWait&&<WorkBudgetWaitCard wait={presentation.pendingBudgetWait} workItemId={item.id} expectedProposalVersion={item.proposalVersion} onReload={reload} />}

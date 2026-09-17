@@ -8,7 +8,7 @@ import type {
 } from '@anima/core';
 import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
 import type { AuthorizeResumeResult } from '@/lib/work-orchestration/authorize-resume';
-import { runStatus, runWorkApprove, runWorkAuthorizeResume, runWorkCorrect, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
+import { runBudgetStatus, runStatus, runWorkApprove, runWorkAuthorizeResume, runWorkCorrect, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
 import { EXIT } from './exit-codes';
 
 const ok = <T>(value: T): WorkOperationResult<T> => ({ ok: true, value });
@@ -57,6 +57,19 @@ const sourceContext: readonly WorkContextSnapshot[] = [
 ];
 
 describe('runners da CLI sobre o application service', () => {
+  test('budget status apenas projeta o snapshot canônico sem mutação', async () => {
+    let reads = 0;
+    const result = await runBudgetStatus(async (id) => { reads += 1; expect(id).toBe('i'); return {
+      observedAt: '2026-09-05T12:00:00Z', policyVersion: 'autonomous-work-budget-v1', costClass: 'external', admitted: false, reason: 'user_attempt_budget_exhausted', supervised:false, supervision:null, unattendedAdmitted:false, unattendedReason:'user_attempt_budget_exhausted',
+      windows: { attemptsHours: 24, userRuntimeHours: 24, autonomousRuntimeMinutes: 60 },
+      attempts: { item: { used: 2, limit: 3, remaining: 1, nextReleaseAt: '2026-09-05T13:00:00Z' }, user: { used: 6, remaining: 0, nextReleaseAt: '2026-09-05T12:30:00Z' }, external: { used: 4, remaining: 2, nextReleaseAt: '2026-09-05T12:40:00Z' } },
+      runtime: { user24h: { usedSeconds: 300, remainingSeconds: 6900 }, external24h: { usedSeconds: 200, remainingSeconds: 7000 }, autonomous60m: { usedSeconds: 100, remainingSeconds: 2600 } },
+      nextBudgetReleaseAt: '2026-09-05T12:30:00Z',
+    }; }, 'i');
+    expect(reads).toBe(1);
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(result.payload).toMatchObject({ kind: 'budget-status', admitted: false, reason: 'user_attempt_budget_exhausted', userAttempts24h: 6, userAttemptsRemaining: 0, externalAttempts24h: 4, externalAttemptsRemaining: 2, attempts: { user: { used: 6, remaining: 0 } } });
+  });
   test('request_changes num item em review monta o comando e persiste pelo serviço', async () => {
     const spy = { called: false };
     const result = await runWorkReview(fakePort({ reviewSpy: spy }), 'i', { type: 'request_changes', requestedChanges: 'faltam provas' });

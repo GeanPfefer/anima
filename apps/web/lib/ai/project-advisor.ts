@@ -132,7 +132,7 @@ export function createProjectAdvisor(provider: ChatProviderId): ProjectAdvisor {
         structuredOutput: { name: 'project_advisory_answer', schema: projectAdvisoryAnswerSchema(context) },
       });
       const response = await readStream(result.stream);
-      console.info('[project-advisor] provider response received', { provider: result.provider, model: result.model, characters: response.length });
+      console.info('[project-advisor] provider response received', { requestedProvider: provider, effectiveProvider: result.provider, model: result.model, characters: response.length, fallbackAttempted: false });
       return response;
   });
 }

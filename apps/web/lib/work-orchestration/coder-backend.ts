@@ -1,4 +1,4 @@
-import type { ObservedGateInput, WorkExecutorRequest } from '@anima/core';
+import type { CoderHarnessPolicyV1, CommandExecutionPolicyV1, ObservedGateInput, WorkExecutorRequest, WorkspaceAccessPolicyV1 } from '@anima/core';
 
 // ============================================================
 // Interface selecionável de inteligência que ESCREVE o código (ADR-001).
@@ -49,6 +49,38 @@ export interface CoderEditRequest {
   /** Contexto informativo de uma tentativa anterior; nunca amplia escopo. */
   readonly carriedContext?: WorkExecutorRequest['carriedContext'];
   /**
+   * Política canônica do harness (runner de teste canônico, runners incompatíveis,
+   * fontes de backend não autoritativas), transportada no contrato COMPARTILHADO para
+   * que TODOS os backends aplicáveis (Ollama, OpenAI — que delega ao Ollama —, DeepSeek
+   * Harness) recebam a MESMA regra ANTES da inferência. O host a resolve como superset
+   * canônico e a injeta; o validador estrutural pós-output é a segunda linha de defesa.
+   */
+  readonly harnessPolicy?: CoderHarnessPolicyV1;
+  /**
+   * Autoridade de acesso ao workspace (Coding Harness V3): READ e WRITE são
+   * DISTINTAS. Quando presente, o backend usa `readScope` (potencialmente amplo)
+   * para leitura/busca e `writeScope` (estreito, = Work Item) para edição. Ausente
+   * ⇒ retrocompatível: read == write == `includedScope`. NUNCA amplia a autoridade
+   * de escrita além do que o host observa via git no `worktree-executor`.
+   */
+  readonly workspaceAccessPolicy?: WorkspaceAccessPolicyV1;
+  /**
+   * Autoridade de EXECUÇÃO (Coding Harness V3, 3ª fatia): comandos de dev + git
+   * read-only que o coder pode rodar na worktree via a ação `exec`. Ausente ⇒ EXEC
+   * desabilitado (retrocompat: o laço não oferece a ação nem aceita `exec`). EXEC é
+   * uma autoridade DISTINTA de READ/WRITE — poder executar testes não concede rede
+   * nem escrita fora do write scope.
+   */
+  readonly commandPolicy?: CommandExecutionPolicyV1;
+  /** Comandos executáveis dos critérios de validação do Work Item, já parseados e
+   * autorizados pelo host. Informam o agente e sustentam validate-before-submit;
+   * não ampliam a command policy. */
+  readonly validationCommands?: readonly {
+    readonly label: string;
+    readonly program: string;
+    readonly args: readonly string[];
+  }[];
+  /**
    * Host-observed validation feedback from the CURRENT execution attempt.
    * This is not persisted resumption context, does not create a new attempt,
    * and never expands scope or permissions.
@@ -56,11 +88,69 @@ export interface CoderEditRequest {
   readonly hostValidationFeedback?: HostValidationFeedback;
 }
 
+/** Pedido de busca textual/símbolo executado pelo HOST (nunca shell do modelo). */
+export interface WorkspaceSearchInput {
+  readonly query: string;
+  readonly pathGlob?: string;
+  readonly maxResults: number;
+  readonly isRegex: boolean;
+}
+export interface WorkspaceSearchHit {
+  readonly path: string;
+  readonly line: number;
+  readonly preview: string;
+}
+export interface WorkspaceSearchResult {
+  readonly matches: readonly WorkspaceSearchHit[];
+  readonly truncated: boolean;
+}
+/** Pedido de listagem por padrão glob executado pelo HOST. */
+export interface WorkspaceListInput {
+  readonly pattern: string;
+  readonly maxResults: number;
+}
+export interface WorkspaceListResult {
+  readonly paths: readonly string[];
+  readonly truncated: boolean;
+}
+
+/** Comando ESTRUTURADO já validado pela command policy, para o host executar
+ * confinado à worktree. O modelo nunca vê isto — vem do laço após a validação. */
+export interface WorkspaceExecInput {
+  readonly program: string;
+  readonly args: readonly string[];
+  readonly timeoutMs: number;
+}
+/** Observação bruta de uma execução (o laço trunca ao cap da policy antes de servir). */
+export interface WorkspaceExecResult {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly timedOut: boolean;
+  readonly durationMs: number;
+}
+
 /** Superfície confinada de arquivos entregue ao backend. Ler/escrever fora da
  * raiz do worktree ou em caminhos sensíveis já é recusado pelas guardas. */
 export interface CoderWorkspace {
   readFile(relPath: string): Promise<string | null>;
   writeFile(relPath: string, content: string): Promise<boolean>;
+  /**
+   * Busca textual/símbolo executada pelo HOST sobre o escopo de LEITURA (V3),
+   * confinada ao workspace. Opcional: um workspace sem esta capacidade
+   * simplesmente não oferece a ação `search` ao modelo (retrocompatível). O modelo
+   * NUNCA executa shell — o host roda a busca e devolve caminhos + trechos.
+   */
+  search?(input: WorkspaceSearchInput, signal: AbortSignal): Promise<WorkspaceSearchResult>;
+  /** Listagem por padrão glob executada pelo HOST, confinada ao workspace. Opcional. */
+  list?(input: WorkspaceListInput, signal: AbortSignal): Promise<WorkspaceListResult>;
+  /**
+   * Execução de comando (dev/test/typecheck/git read-only) pelo HOST, confinada à
+   * worktree, SEM shell arbitrário. Opcional: um workspace sem esta capacidade não
+   * oferece a ação `exec` (retrocompat). Recebe o comando JÁ validado pela command
+   * policy; o confinamento de cwd e a captura/limite de saída são do host.
+   */
+  exec?(input: WorkspaceExecInput, signal: AbortSignal): Promise<WorkspaceExecResult>;
   /**
    * Raiz ABSOLUTA da worktree isolada, presente SÓ quando o host roda a execução
    * local in-process (o adaptador de worktree a preenche com `worktree.root`). É o

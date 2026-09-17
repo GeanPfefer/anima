@@ -241,7 +241,7 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
     const recorded = spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision');
     expect(recorded).toHaveLength(1);
     const args = recorded[0]!.args;
-    expect(args.p_attempt_id).toBeNull();
+    expect(args.p_attempt_id).toBeUndefined(); // DEFAULT NULL canônico no RPC pré-attempt
     expect((args.p_decision as { status: string }).status).toBe('waiting_for_human_authorization');
     expect(runTurnMock).not.toHaveBeenCalled();
   });

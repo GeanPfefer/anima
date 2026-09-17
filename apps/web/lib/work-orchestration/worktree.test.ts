@@ -397,3 +397,121 @@ describe('GitWorktree — retomada de checkpoint (startSha)', () => {
     await resumed.dispose({ deleteBranch: true });
   });
 });
+
+describe('GitWorktree.changedEntriesSinceStart — status por arquivo (A/M/D/R)', () => {
+  let ctx: Awaited<ReturnType<typeof makeRepo>>;
+  beforeAll(async () => { ctx = await makeRepo(); });
+  afterAll(async () => { await ctx.cleanup(); });
+
+  test('adição (A) e modificação (M)', async () => {
+    const worktree = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: `anima-work/am-${Date.now()}` });
+    try {
+      await worktree.writeWorkspaceFile('packages/core/src/nova.ts', 'export const n = 1;\n');
+      await worktree.writeWorkspaceFile('packages/core/src/existing.ts', 'export const one = 2;\n');
+      const byPath = new Map((await worktree.changedEntriesSinceStart()).map(e => [e.path, e.status]));
+      expect(byPath.get('packages/core/src/nova.ts')).toBe('A');
+      expect(byPath.get('packages/core/src/existing.ts')).toBe('M');
+    } finally { await worktree.dispose({ deleteBranch: true }); }
+  });
+
+  test('deleção (D) é reportada com status D (conteúdo legitimamente ausente)', async () => {
+    const worktree = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: `anima-work/del-${Date.now()}` });
+    try {
+      await rm(join(worktree.root, 'packages', 'core', 'src', 'existing.ts'));
+      const entry = (await worktree.changedEntriesSinceStart()).find(e => e.path === 'packages/core/src/existing.ts');
+      expect(entry?.status).toBe('D');
+      expect(await worktree.readWorkspaceFile('packages/core/src/existing.ts')).toBeNull();
+    } finally { await worktree.dispose({ deleteBranch: true }); }
+  });
+
+  test('rename (R) reporta o destino e a origem, com detecção -M', async () => {
+    const worktree = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: `anima-work/ren-${Date.now()}` });
+    try {
+      await rm(join(worktree.root, 'packages', 'core', 'src', 'existing.ts'));
+      await worktree.writeWorkspaceFile('packages/core/src/renamed.ts', 'export const one = 1;\n');
+      const entry = (await worktree.changedEntriesSinceStart()).find(e => e.status === 'R');
+      expect(entry).toBeDefined();
+      expect(entry!.path).toBe('packages/core/src/renamed.ts');
+      expect(entry!.oldPath).toBe('packages/core/src/existing.ts');
+    } finally { await worktree.dispose({ deleteBranch: true }); }
+  });
+});
+
+describe('GitWorktree.searchText / listFiles — busca host-executada confinada (V3)', () => {
+  let ctx: Awaited<ReturnType<typeof makeRepo>>;
+  let wt: GitWorktree;
+  beforeEach(async () => {
+    ctx = await makeRepo();
+    wt = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: `anima-work/search-${Date.now()}-${Math.random().toString(36).slice(2)}` });
+  });
+  afterEach(async () => { await wt.dispose({ deleteBranch: true }).catch(() => {}); await ctx.cleanup(); });
+
+  test('searchText encontra símbolo em arquivo rastreado, com caminho relativo e linha', async () => {
+    const res = await wt.searchText({ query: 'export const one', maxResults: 10, isRegex: false });
+    const hit = res.matches.find(m => m.path === 'packages/core/src/existing.ts');
+    expect(hit).toBeTruthy();
+    expect(hit!.line).toBe(1);
+    expect(hit!.preview).toContain('one = 1');
+  });
+
+  test('searchText sem ocorrência devolve vazio (não erro)', async () => {
+    const res = await wt.searchText({ query: 'SIMBOLO_INEXISTENTE_ZZZ', maxResults: 10, isRegex: false });
+    expect(res.matches).toEqual([]);
+    expect(res.truncated).toBe(false);
+  });
+
+  test('listFiles por glob lista só arquivos rastreados que casam o padrão', async () => {
+    const res = await wt.listFiles({ pattern: 'packages/**/*.ts', maxResults: 50 });
+    expect(res.paths).toContain('packages/core/src/existing.ts');
+    expect(res.paths.every(p => p.endsWith('.ts'))).toBe(true);
+  });
+
+  test('searchText nunca retorna caminho fora da worktree (só arquivos rastreados sob a raiz)', async () => {
+    const res = await wt.searchText({ query: 'export', maxResults: 50, isRegex: false });
+    for (const m of res.matches) {
+      expect(m.path.startsWith('..')).toBe(false);
+      expect(/^[A-Za-z]:/.test(m.path)).toBe(false);
+    }
+  });
+
+  test('truncamento explícito quando há mais matches que o cap', async () => {
+    await wt.writeWorkspaceFile('packages/core/src/a.ts', 'const MARCA = 1;\n');
+    await wt.writeWorkspaceFile('packages/core/src/b.ts', 'const MARCA = 2;\n');
+    await wt.writeWorkspaceFile('packages/core/src/c.ts', 'const MARCA = 3;\n');
+    await git(wt.root, ['add', '-A']);
+    const res = await wt.searchText({ query: 'MARCA', maxResults: 2, isRegex: false });
+    expect(res.matches.length).toBe(2);
+    expect(res.truncated).toBe(true);
+  });
+});
+
+describe('GitWorktree.runCommand — execução governada confinada (V3, 3ª fatia)', () => {
+  let ctx: Awaited<ReturnType<typeof makeRepo>>;
+  let wt: GitWorktree;
+  beforeEach(async () => {
+    ctx = await makeRepo();
+    wt = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: `anima-work/exec-${Date.now()}-${Math.random().toString(36).slice(2)}` });
+  });
+  afterEach(async () => { await wt.dispose({ deleteBranch: true }).catch(() => {}); await ctx.cleanup(); });
+
+  test('git status/diff read-only rodam no root da worktree e capturam saída', async () => {
+    const status = await wt.runCommand({ program: 'git', args: ['status', '--porcelain'], timeoutMs: 15_000 });
+    expect(status.exitCode).toBe(0);
+    await wt.writeWorkspaceFile('packages/core/src/existing.ts', 'export const one = 2;\n');
+    const diff = await wt.runCommand({ program: 'git', args: ['diff'], timeoutMs: 15_000 });
+    expect(diff.exitCode).toBe(0);
+    expect(diff.stdout).toContain('one = 2');
+  });
+
+  test('node roda e captura stdout/exitCode', async () => {
+    const r = await wt.runCommand({ program: 'node', args: ['--version'], timeoutMs: 15_000 });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toMatch(/^v\d+/);
+  });
+
+  test('timeout cancela o processo (timedOut)', async () => {
+    const r = await wt.runCommand({ program: 'node', args: ['-e', 'setTimeout(function(){}, 10000)'], timeoutMs: 500 });
+    expect(r.timedOut).toBe(true);
+    expect(r.exitCode).not.toBe(0);
+  });
+});

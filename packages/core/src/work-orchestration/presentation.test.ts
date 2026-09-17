@@ -1,4 +1,4 @@
-import { availableWorkActions, buildProposalRevision, deriveWorkProgressPhase, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectLatestWorkResult, projectPendingBudgetWait, projectPendingWorkDecision, projectWorkIntegration, projectWorkResourceCost, reconstructWorkPresentation, type AutonomousExecutionProjection, type WorkEvent, type WorkIntegrationProjection, type WorkItem } from '.';
+import { availableWorkActions, buildProposalRevision, deriveWorkProgressPhase, HUMAN_INTERRUPTION_REASONS, parseWorkResultValidations, presentWorkItem, projectAcceptedWorkResult, projectAutonomousAdmission, projectLatestWorkResult, projectPendingBudgetWait, projectPendingWorkDecision, projectWorkIntegration, projectWorkResourceCost, reconstructWorkPresentation, type AutonomousExecutionProjection, type WorkEvent, type WorkIntegrationProjection, type WorkItem } from '.';
 const item={id:'i',userId:'u',sourceMessageId:'m',state:'review',impactLevel:'low',capability:'planning',originalRequest:'x',intent:{},proposal:{schemaVersion:1,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:2,createdAt:new Date(),updatedAt:new Date()} satisfies WorkItem;
 const event={id:'r',workItemId:'i',type:'result_submitted',author:'executor',proposalVersion:2,payload:{schema_version:1,data:{summary:'feito',result_references:['commit:a']}},occurredAt:new Date()} satisfies WorkEvent;
 describe('projeção de apresentação do trabalho',()=>{
@@ -213,5 +213,59 @@ describe('deriveWorkProgressPhase — fase humana projetada de fatos',()=>{
   test('presentWorkItem expõe a fase (projeção pura, read-only)',()=>{
     const p=presentWorkItem(withState('proposed'),[]);
     expect(p.progress).toMatchObject({phase:'proposal',label:'Proposta',active:false});
+  });
+});
+
+// waiting_for_host: distinção honesta entre "admitido" e "rodando". A admissão é
+// derivada do work_approved com autoridade de execução autônoma persistido — nunca
+// de um timer do frontend. Enquanto o Resident Host não cria claim/execution_started,
+// a fase é `waiting_for_host` (Aguardando Resident Host), não "implementando".
+describe('projectAutonomousAdmission / waiting_for_host — admissão sem execução',()=>{
+  const base:Omit<WorkItem,'state'>={id:'i',userId:'u',sourceMessageId:'m',impactLevel:'low',capability:'programming',originalRequest:'x',intent:{},proposal:{schemaVersion:1,data:{summary:'s',objective:'o',includedScope:[],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:2,createdAt:new Date(),updatedAt:new Date()};
+  const itemAt=(state:WorkItem['state']='approved'):WorkItem=>({...base,state});
+  // Igual ao que a RPC request_autonomous_execution grava: work_approved (author user),
+  // authority=autonomous_execution_request, request_id único.
+  const admission=(requestId='req-1',proposalVersion=2):WorkEvent=>({id:`adm-${requestId}`,workItemId:'i',type:'work_approved',author:'user',proposalVersion,occurredAt:new Date('2026-09-09T12:00:00.000Z'),payload:{schema_version:1,data:{decision:'execute',authority:'autonomous_execution_request',decided_proposal_version:proposalVersion,request_id:requestId}}});
+  const executionStarted:WorkEvent={id:'start',workItemId:'i',type:'execution_started',author:'system',proposalVersion:2,occurredAt:new Date(),payload:{schema_version:1,data:{attempt_id:'attempt-1',approved_proposal_version:2}}};
+  const runningExecution:AutonomousExecutionProjection={attemptId:'a',status:'running',startedAt:'',executorId:null,providerRef:null,modelRef:null,effort:null,limits:{maxAttempts:null,maxDurationMinutes:null},latestCheckpoint:null,pendingControl:null,appliedControl:null,budgetBlock:null,canRequestControl:false};
+
+  // Cenário 1 — admitido + host ausente → waiting_for_host.
+  test('deriva admitted_waiting_for_host do evento persistido (approved, sem execução)',()=>{
+    expect(projectAutonomousAdmission(itemAt(),[admission()],null)).toMatchObject({status:'admitted_waiting_for_host',requestId:'req-1',eventId:'adm-req-1',admittedAt:'2026-09-09T12:00:00.000Z'});
+  });
+  test('a fase é waiting_for_host com rótulo Aguardando Resident Host (não ativa, não terminal)',()=>{
+    const adm=projectAutonomousAdmission(itemAt(),[admission()],null);
+    expect(deriveWorkProgressPhase({item:itemAt(),execution:null,integration:null,autonomousAdmission:adm})).toMatchObject({phase:'waiting_for_host',label:'Aguardando Resident Host',active:false,terminal:false});
+  });
+  test('presentWorkItem expõe autonomousAdmission e fase waiting_for_host end-to-end',()=>{
+    const p=presentWorkItem(itemAt(),[admission()]);
+    expect(p.autonomousAdmission).toMatchObject({status:'admitted_waiting_for_host',requestId:'req-1'});
+    expect(p.progress?.phase).toBe('waiting_for_host');
+  });
+  test('sem admissão persistida a fase permanece approved (não inventa espera)',()=>{
+    const p=presentWorkItem(itemAt(),[]);
+    expect(p.autonomousAdmission).toBeNull();
+    expect(p.progress?.phase).toBe('approved');
+  });
+  test('admissão de versão anterior não conta (proteção contra estado stale)',()=>{
+    expect(projectAutonomousAdmission(itemAt(),[admission('req-old',1)],null)).toBeNull();
+  });
+
+  // Parte 3 — duas requests do mesmo item (no real, seq 51570/51571): a projeção é
+  // idempotente, expõe UMA admissão viva (a mais recente) e uma só fase.
+  test('duas requests do mesmo item ⇒ uma única admissão projetada, sem duplicar fase',()=>{
+    const p=presentWorkItem(itemAt(),[admission('req-a'),admission('req-b')]);
+    expect(p.autonomousAdmission?.requestId).toBe('req-b');
+    expect(p.progress?.phase).toBe('waiting_for_host');
+  });
+
+  // Cenário 3/4 — claim/execução ⇒ deixa waiting_for_host.
+  test('com execution_started o item vira in_progress: sem admissão, fase implementing',()=>{
+    const p=presentWorkItem(itemAt('in_progress'),[admission(),executionStarted]);
+    expect(p.autonomousAdmission).toBeNull();
+    expect(p.progress?.phase).toBe('implementing');
+  });
+  test('execução observada anula a admissão mesmo em approved (fail-safe anti-duplicação)',()=>{
+    expect(projectAutonomousAdmission(itemAt('approved'),[admission()],runningExecution)).toBeNull();
   });
 });

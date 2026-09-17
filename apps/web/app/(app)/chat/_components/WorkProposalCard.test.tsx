@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { WorkPresentationView } from './WorkProposalCard';
 import { WorkProposalCard } from './WorkProposalCard';
 const item = { id:'item',userId:'user',sourceMessageId:'message',state:'proposed',impactLevel:'significant',capability:'programming',originalRequest:'pedido',intent:{},proposal:{schemaVersion:1,data:{summary:'Construir tela',objective:'Criar uma tela segura',includedScope:['Tela'],excludedScope:['Execução'],expectedEffects:['Proposta'],risks:['Escopo']}},proposalVersion:2,createdAt:'2026-07-14T00:00:00Z',updatedAt:'2026-07-14T00:00:00Z' } as const;
@@ -184,5 +184,43 @@ describe('WorkProposalCard', () => {
     expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/items/item/resource-advisory');
     // Consultar NÃO executa: o supervisor-turn nunca é chamado.
     expect((global.fetch as jest.Mock).mock.calls.some(c=>typeof c[0]==='string'&&c[0].includes('/supervisor-turn'))).toBe(false);
+  });
+  const admission={status:'admitted_waiting_for_host' as const,requestId:'req-1',admittedAt:'2026-09-09T12:00:00.000Z',eventId:'adm-1'};
+  test('admissão persistida exibe Aguardando Resident Host e orienta o dev:supervised (não afirma execução em curso)', () => {
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'approved'},availableActions:['start'],autonomousAdmission:admission})} onChange={jest.fn()} />);
+    expect(screen.getByText(/Aguardando Resident Host\./)).toBeInTheDocument();
+    expect(screen.getByText(/npm run dev:supervised/)).toBeInTheDocument();
+    // Honestidade: não pode afirmar que está implementando/rodando.
+    expect(screen.queryByText(/Execução canônica em andamento/)).not.toBeInTheDocument();
+  });
+  test('acompanhamento canônico faz polling enquanto espera e PARA ao chegar em review (cenários 3/7)', async () => {
+    jest.useFakeTimers();
+    try {
+      const onChange=jest.fn();
+      // pendingDecision:null como na projeção real (presentWorkItem sempre a preenche).
+      const admitted=presentation({item:{...item,state:'approved'},availableActions:['start'],autonomousAdmission:admission,pendingDecision:null});
+      const { rerender } = render(<WorkProposalCard presentation={admitted} onChange={onChange} trackAutonomousProgress />);
+      await act(async()=>{ jest.advanceTimersByTime(5000); });
+      expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/items/item', expect.objectContaining({ cache:'no-store' }));
+      const pollsWhileWaiting=(global.fetch as jest.Mock).mock.calls.length;
+      expect(pollsWhileWaiting).toBeGreaterThan(0);
+      // Chega a review: o acompanhamento é terminal ⇒ o polling para (não fica batendo no servidor).
+      const reviewed=presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes']});
+      rerender(<WorkProposalCard presentation={reviewed} onChange={onChange} trackAutonomousProgress />);
+      await act(async()=>{ jest.advanceTimersByTime(15000); });
+      expect((global.fetch as jest.Mock).mock.calls.length).toBe(pollsWhileWaiting);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  test('sem trackAutonomousProgress não há polling (o cartão não inventa acompanhamento)', async () => {
+    jest.useFakeTimers();
+    try {
+      render(<WorkProposalCard presentation={presentation({item:{...item,state:'approved'},availableActions:['start'],autonomousAdmission:admission})} onChange={jest.fn()} />);
+      await act(async()=>{ jest.advanceTimersByTime(20000); });
+      expect(global.fetch).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

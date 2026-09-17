@@ -3,8 +3,12 @@ import type { OpenAIAdmissionControl } from './openai-paid-transport';
 import { ReadableStream as NodeReadableStream } from 'node:stream/web';
 
 // Admissão que CONCEDE: exercita o caminho OpenAI sem fail-open. Sem ela (default),
-// a admissão interativa recusa e o chat cai no provider local — coberto abaixo.
+// a admissão interativa recusa e o chat falha no provider solicitado — coberto abaixo.
 const grant: OpenAIAdmissionControl = { admit: async intent => ({ consumer: intent.consumer, authorizationRef: 'test', reservationId: null }) };
+const deny: OpenAIAdmissionControl = { admit: async intent => {
+  const { OpenAIAdmissionDenied } = await import('./openai-paid-transport');
+  throw new OpenAIAdmissionDenied('interactive_paid_authority_absent', intent.consumer);
+} };
 
 function bodyFrom(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -98,7 +102,7 @@ describe('chat provider', () => {
     expect(body.instructions).not.toMatch(/repositório Anima/i);
   });
 
-  test('OpenAI paga NÃO admitida (default) cai no provider local, observável, sem chamada à OpenAI', async () => {
+  test('OpenAI não admitida falha como OpenAI e nunca tenta o provider local', async () => {
     process.env.OPENAI_API_KEY = 'test-key';
     // Só o endpoint do Ollama responde; qualquer ida à OpenAI seria um bug de política.
     (global.fetch as jest.Mock).mockImplementation((url: string) => {
@@ -106,15 +110,10 @@ describe('chat provider', () => {
       return Promise.resolve({ ok: true, body: bodyFrom(['{"message":{"content":"resposta local"}}\n{"done":true}\n']) });
     });
 
-    const result = await streamChatProvider({
+    await expect(streamChatProvider({
       provider: 'openai', systemPrompt: 'sistema', messages: [{ role: 'user', content: 'oi' }], userId: 'u1',
-    });
-
-    expect(result.provider).toBe('ollama');
-    expect(result.fallback).toEqual({ from: 'openai', reason: 'interactive_paid_authority_absent' });
-    expect(await read(result.stream)).toBe('resposta local');
-    // Nenhuma chamada ao endpoint pago.
-    for (const call of (global.fetch as jest.Mock).mock.calls) expect(String(call[0])).not.toContain('api.openai.com');
+    }, { admission: deny })).rejects.toThrow(/OpenAI.*interactive_paid_authority_absent/);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   test('modo de desenvolvimento explícito: oferece somente as ferramentas de leitura permitidas', async () => {

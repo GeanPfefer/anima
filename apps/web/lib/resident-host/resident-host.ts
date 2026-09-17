@@ -2,6 +2,7 @@ import type {
   BacklogContinuation,
   BacklogHostStopReason,
 } from '../work-orchestration/autonomous-backlog-host-turn';
+import type { TurnRefusal } from '../work-orchestration/autonomous-backlog-driver';
 
 // ============================================================
 // Resident Local Host — engine V0 (ADR-003).
@@ -73,6 +74,13 @@ export type HostTurnOutcome =
       readonly itemsTouched: number;
       /** IDs dos work_items tocados (distintos), para telemetria/auditoria. */
       readonly workItemIds: readonly string[];
+      /**
+       * Razão canônica estruturada (`{ code, message }`) quando o host parou por
+       * `turn_not_executable` — para diagnosticar a barreira exata (compute indisponível,
+       * autoridade paga ausente, item ilegível, placement adiado…) sem inferir do terminal.
+       * Ausente nas demais paradas. É telemetria: não altera nenhuma decisão da engine.
+       */
+      readonly notExecutableReason?: TurnRefusal;
     }
   | { readonly ok: false; readonly error: string };
 

@@ -97,6 +97,44 @@ describe('evaluatePaidComputeAuthorization — fail-closed (necessidade ≠ auto
   });
 });
 
+describe('evaluatePaidComputeAuthorization — escopo por capacidade (Cloud Resource Matching V1)', () => {
+  const capAuth = (overrides: Partial<PaidComputeAuthorizationV1> = {}): PaidComputeAuthorizationV1 => auth({
+    resourceClass: null,
+    capabilityScope: { minimumVramGiB: 24, requiredGpuFeatures: ['cuda'], maxHourlyPrice: { currency: 'USD', amount: 0.6 }, maxNodes: 1 },
+    ...overrides,
+  });
+  const withCaps = (caps: PaidComputeRequest['resourceCapabilities'], overrides: Partial<PaidComputeRequest> = {}): PaidComputeRequest =>
+    paidRequest({ resourceClass: 'gpu-a6000-48gb', resourceCapabilities: caps, ...overrides });
+
+  test('8) autoridade por capacidade autoriza recurso compatível dentro dos limites', () => {
+    const decision = evaluatePaidComputeAuthorization(
+      withCaps({ vramGiB: 48, gpuFeatures: ['cuda'], perHour: { currency: 'USD', amount: 0.44 } }), capAuth(), NOW);
+    expect(decision).toMatchObject({ authorized: true, requiresPayment: true });
+  });
+
+  test('autoridade por capacidade exige as capacidades reais no pedido', () => {
+    expect(evaluatePaidComputeAuthorization(withCaps(null), capAuth(), NOW))
+      .toEqual({ authorized: false, reason: 'resource_capabilities_required' });
+  });
+
+  test('capacidades insuficientes (VRAM / feature / preço horário) são recusadas', () => {
+    expect(evaluatePaidComputeAuthorization(withCaps({ vramGiB: 16, gpuFeatures: ['cuda'], perHour: { currency: 'USD', amount: 0.4 } }), capAuth(), NOW))
+      .toEqual({ authorized: false, reason: 'resource_capabilities_insufficient' });
+    expect(evaluatePaidComputeAuthorization(withCaps({ vramGiB: 48, gpuFeatures: [], perHour: { currency: 'USD', amount: 0.4 } }), capAuth(), NOW))
+      .toEqual({ authorized: false, reason: 'resource_capabilities_insufficient' });
+    expect(evaluatePaidComputeAuthorization(withCaps({ vramGiB: 48, gpuFeatures: ['cuda'], perHour: { currency: 'USD', amount: 0.9 } }), capAuth(), NOW))
+      .toEqual({ authorized: false, reason: 'resource_capabilities_insufficient' });
+  });
+
+  test('7) autoridade SKU-fixa (A40) NÃO usa capacidades para liberar outra GPU', () => {
+    // Mesmo com capacidades ótimas, uma autoridade A40-fixa só cobre a classe exata.
+    const decision = evaluatePaidComputeAuthorization(
+      paidRequest({ resourceClass: 'gpu-a6000-48gb', resourceCapabilities: { vramGiB: 48, gpuFeatures: ['cuda'], perHour: { currency: 'USD', amount: 0.44 } } }),
+      auth({ resourceClass: 'gpu-a40-48gb' }), NOW);
+    expect(decision).toEqual({ authorized: false, reason: 'resource_class_mismatch' });
+  });
+});
+
 describe('parsePaidComputeAuthorization — fail-closed', () => {
   const good: Json = {
     schemaVersion: 1, authorizationId: 'auth-1', authorizedBy: 'user-gean', authorizedByAuthor: 'user',
@@ -118,5 +156,24 @@ describe('parsePaidComputeAuthorization — fail-closed', () => {
 
   test('maxDurationMs não-positivo é malformado', () => {
     expect(parsePaidComputeAuthorization({ ...good, maxDurationMs: 0 } as Json)).toBeNull();
+  });
+
+  test('capabilityScope válido (resourceClass null) reconstrói o escopo por capacidade', () => {
+    const parsed = parsePaidComputeAuthorization({
+      ...good, resourceClass: null,
+      capabilityScope: { minimumVramGiB: 24, requiredGpuFeatures: ['cuda'], maxHourlyPrice: null, maxNodes: 1 },
+    } as Json);
+    expect(parsed?.capabilityScope).toEqual({ minimumVramGiB: 24, requiredGpuFeatures: ['cuda'], maxHourlyPrice: null, maxNodes: 1 });
+  });
+
+  test('capabilityScope + resourceClass simultâneos são malformados (exclusividade)', () => {
+    expect(parsePaidComputeAuthorization({
+      ...good, resourceClass: 'gpu-a40-48gb',
+      capabilityScope: { minimumVramGiB: 24, requiredGpuFeatures: ['cuda'], maxHourlyPrice: null, maxNodes: 1 },
+    } as Json)).toBeNull();
+  });
+
+  test('capabilityScope malformado é rejeitado', () => {
+    expect(parsePaidComputeAuthorization({ ...good, resourceClass: null, capabilityScope: { minimumVramGiB: 0, requiredGpuFeatures: [], maxHourlyPrice: null, maxNodes: 1 } } as Json)).toBeNull();
   });
 });
