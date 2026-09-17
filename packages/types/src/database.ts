@@ -480,6 +480,44 @@ export type Database = {
           },
         ]
       }
+      paid_compute_authorization_events: {
+        Row: {
+          authorization_id: string
+          created_at: string
+          event_type: string
+          id: string
+          next_capability_scope: Json
+          previous_capability_scope: Json
+          user_id: string
+        }
+        Insert: {
+          authorization_id: string
+          created_at?: string
+          event_type: string
+          id?: string
+          next_capability_scope: Json
+          previous_capability_scope: Json
+          user_id: string
+        }
+        Update: {
+          authorization_id?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          next_capability_scope?: Json
+          previous_capability_scope?: Json
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "paid_compute_authorization_events_authorization_id_fkey"
+            columns: ["authorization_id"]
+            isOneToOne: false
+            referencedRelation: "paid_compute_authorizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       paid_compute_authorizations: {
         Row: {
           capability_scope: Json | null
@@ -2447,6 +2485,10 @@ export type Database = {
           p_recovery_reason: string
           p_recovery_sequence: number
         }
+        Returns: Json
+      }
+      raise_paid_compute_hourly_limit_to_usd_1: {
+        Args: { authorization_id: string }
         Returns: Json
       }
       readmit_budget_blocked_work: {
