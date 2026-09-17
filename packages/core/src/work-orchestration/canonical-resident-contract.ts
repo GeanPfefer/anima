@@ -18,26 +18,26 @@ import { projectVerifierOpinionHistory, type VerifierOpinionV1 } from './verifie
 // O incidente 51929 nasceu da DIVERGÊNCIA entre esses dois lados entre linhas de
 // código: uma linha (snapshot/Harness V3) persistiu transcripts do coder com
 // `runtimeEvents` — um formato novo — e uma linha `dev` posterior não carregava
-// mais o reader correspondente. O Evolution então rejeitava o evento como
-// `semantic_projection_rejected`, quebrando a leitura inteira.
+// mais o reader correspondente, quebrando o Evolution com semantic_projection_rejected.
 //
-// ESTE REGISTRY É O PONTO CENTRAL que enumera esses contratos e amarra ESCRITA e
-// LEITURA à MESMA régua: o projector canônico do próprio contrato. Ele não
-// substitui os builders (que validam a construção); ele garante, num único ponto
-// e fail-closed, a invariante "read-your-writes" no nível do ENVELOPE — o exato
-// nível onde o 51929 quebrou:
+// DUAS CAMADAS DE PROTEÇÃO, uma superfície central (este módulo):
 //
-//   nenhuma linha persiste no estado residente um formato canônico que ela
-//   própria não consegue reprojetar de volta.
+// 1. READ-YOUR-WRITES (lado de escrita, dentro de uma linha).
+//    `guardCanonicalResidentWrite` recusa persistir uma carga que a própria linha
+//    não reprojeta de volta. Impede uma linha de poluir o estado residente com o
+//    que ela mesma não lê.
 //
-// LIMITE HONESTO. Este guard fecha o lado de ESCRITA da classe (uma linha não
-// polui o estado residente com o que ela não lê) e torna a introdução de um novo
-// formato canônico uma mudança em UM lugar enumerado, verificada por teste
-// (writer ⇔ reader). Ele NÃO fecha, sozinho, a regressão de LEITURA entre linhas
-// divergentes (linha A escreve formato que a linha B, mais antiga, não lê): isso
-// exige namespace isolado OU um carimbo de contrato no envelope persistido —
-// ambos mudam a persistência/schema e são decisão humana (migration + checkpoint).
-// Ver docs/arquitetura/protecao-contrato-canonico-estado-residente.md.
+// 2. CARIMBO DE CONTRATO (lado de leitura, ENTRE linhas).
+//    Todo evento canônico carrega `payload.canonical_contract = { id, version }`
+//    (carimbado autoritativamente pelo trigger de work_events). O leitor observa a
+//    IDENTIDADE SEMÂNTICA do contrato ANTES de tentar o projector específico e
+//    classifica: legível, contrato desconhecido, versão não suportada (futura) ou
+//    payload realmente inválido. Assim uma linha mais antiga que encontra uma
+//    versão futura reporta INCOMPATIBILIDADE (reconciliação), nunca "corrupção".
+//
+// O carimbo representa SEMÂNTICA DO CONTRATO — nunca SHA de commit, branch ou
+// identidade efêmera de código. Ver
+// docs/arquitetura/protecao-contrato-canonico-estado-residente.md.
 
 /**
  * Identidade estável de cada contrato persistível no estado residente cuja
@@ -51,9 +51,9 @@ export type CanonicalResidentContractId =
   | 'verifier_opinion';
 
 /**
- * Toda carga canônica carrega a mesma correlação mínima; o projector cruza estes
- * campos contra o envelope persistido. As cargas concretas são os V1 de cada
- * contrato (evidência observada ou parecer do Verifier).
+ * Cargas concretas persistidas: os V1 de cada contrato (evidência observada ou
+ * parecer do Verifier). Todas compartilham a correlação mínima que o projector
+ * cruza contra o envelope.
  */
 export type CanonicalResidentPayload =
   | HostObservedGitEvidenceV1
@@ -61,15 +61,26 @@ export type CanonicalResidentPayload =
   | HostObservedCoderEvidenceV1
   | VerifierOpinionV1;
 
+/**
+ * Versão canônica inferida para eventos LEGADOS (anteriores ao carimbo). É
+ * determinística: cada um dos quatro contratos só teve a versão 1, então um evento
+ * canônico sem carimbo pertence à versão 1. Não é backfill que inventa versão —
+ * é a única versão que já existiu.
+ */
+export const LEGACY_CANONICAL_CONTRACT_VERSION = 1 as const;
+
 interface CanonicalContractDefinition {
   readonly eventType: WorkEventType;
   /** Chave sob `data` onde o envelope carrega a carga: evidência ou parecer. */
   readonly payloadKey: 'evidence' | 'opinion';
   readonly origin: 'host' | 'verifier';
+  /** Versão canônica ATUAL que esta linha escreve (carimbada pelo servidor). */
+  readonly writeVersion: number;
+  /** Versões que esta linha consegue LER. Invariante: writeVersion ∈ readableVersions. */
+  readonly readableVersions: readonly number[];
   /**
    * `true` quando a linha ATUAL consegue reprojetar o evento pela MESMA régua
-   * semântica usada pelo read-model do Evolution. É a única fonte da verdade de
-   * legibilidade — o read-model e o write-guard a compartilham.
+   * semântica usada pelo read-model do Evolution.
    */
   readonly survivesReader: (event: WorkEvent) => boolean;
 }
@@ -79,24 +90,32 @@ const REGISTRY: Record<CanonicalResidentContractId, CanonicalContractDefinition>
     eventType: 'host_observed_evidence_recorded',
     payloadKey: 'evidence',
     origin: 'host',
+    writeVersion: 1,
+    readableVersions: [1],
     survivesReader: (event) => projectHostObservedEvidence([event]) !== null,
   },
   host_observed_gate_evidence: {
     eventType: 'host_observed_gate_evidence_recorded',
     payloadKey: 'evidence',
     origin: 'host',
+    writeVersion: 1,
+    readableVersions: [1],
     survivesReader: (event) => projectHostObservedGateEvidence([event]) !== null,
   },
   host_observed_coder_evidence: {
     eventType: 'host_observed_coder_evidence_recorded',
     payloadKey: 'evidence',
     origin: 'host',
+    writeVersion: 1,
+    readableVersions: [1],
     survivesReader: (event) => projectHostObservedCoderEvidence([event]) !== null,
   },
   verifier_opinion: {
     eventType: 'verifier_opinion_recorded',
     payloadKey: 'opinion',
     origin: 'verifier',
+    writeVersion: 1,
+    readableVersions: [1],
     // O projector do parecer é tolerante (pula inválidos); "sobrevive" = exatamente
     // um parecer projetado a partir do evento único, espelhando o read-boundary.
     survivesReader: (event) => projectVerifierOpinionHistory([event]).length === 1,
@@ -111,13 +130,124 @@ export function canonicalResidentEventTypes(): readonly WorkEventType[] {
   return CANONICAL_RESIDENT_CONTRACT_IDS.map((id) => REGISTRY[id].eventType);
 }
 
+/** Versão canônica atual (de escrita) de um contrato — a autoridade do registry. */
+export function canonicalResidentWriteVersion(id: CanonicalResidentContractId): number {
+  return REGISTRY[id].writeVersion;
+}
+
+const asObject = (value: unknown): Record<string, unknown> | null =>
+  !!value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+/** Identidade do contrato como o trigger a carimba no envelope. */
+export interface CanonicalContractStamp {
+  readonly id: string;
+  readonly version: number;
+}
+
+/**
+ * Lê o carimbo genérico `payload.canonical_contract` — a identidade semântica do
+ * contrato, observável ANTES do projector específico. `undefined` = evento legado
+ * (sem carimbo); `null` = carimbo presente porém malformado.
+ */
+export function readCanonicalContractStamp(event: WorkEvent): CanonicalContractStamp | null | undefined {
+  const payload = asObject(event.payload);
+  if (!payload || !('canonical_contract' in payload)) return undefined;
+  const stamp = asObject(payload.canonical_contract);
+  if (!stamp) return null;
+  const { id, version } = stamp;
+  if (typeof id !== 'string' || id.length === 0) return null;
+  if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1) return null;
+  return { id, version };
+}
+
+/**
+ * Classificação de leitura de um evento do estado residente. Distingue as quatro
+ * situações que o incidente 51929 confundia num único `event_history_invalid`.
+ */
+export type CanonicalContractReadClassification =
+  | { readonly kind: 'not_canonical' }
+  | { readonly kind: 'readable'; readonly contractId: CanonicalResidentContractId; readonly version: number }
+  | { readonly kind: 'unsupported_contract'; readonly contractId: string }
+  | {
+      readonly kind: 'unsupported_contract_version';
+      readonly contractId: CanonicalResidentContractId;
+      readonly version: number;
+      readonly readableVersions: readonly number[];
+    }
+  | { readonly kind: 'invalid_payload'; readonly contractId: CanonicalResidentContractId };
+
+function entryForEventType(type: WorkEventType): { id: CanonicalResidentContractId; def: CanonicalContractDefinition } | null {
+  for (const id of CANONICAL_RESIDENT_CONTRACT_IDS) {
+    if (REGISTRY[id].eventType === type) return { id, def: REGISTRY[id] };
+  }
+  return null;
+}
+
+/**
+ * Classifica um evento persistido lendo o carimbo ANTES do projector específico:
+ *
+ * - evento fora dos contratos canônicos → `not_canonical` (semântica atual);
+ * - carimbo presente com id desconhecido → `unsupported_contract`;
+ * - carimbo presente com versão fora das legíveis → `unsupported_contract_version`
+ *   (é versão futura/não reconciliada — NÃO corrupção);
+ * - carimbo ausente (legado) → versão 1 inferida deterministicamente;
+ * - versão legível + projector aprova → `readable`;
+ * - versão legível + projector recusa (ou carimbo malformado/incoerente) → `invalid_payload`.
+ */
+export function classifyCanonicalResidentEvent(event: WorkEvent): CanonicalContractReadClassification {
+  const entry = entryForEventType(event.type);
+  if (!entry) return { kind: 'not_canonical' };
+
+  const stamp = readCanonicalContractStamp(event);
+
+  // Carimbo presente e bem-formado: a identidade declarada manda na classificação.
+  if (stamp) {
+    if (!(stamp.id in REGISTRY)) {
+      return { kind: 'unsupported_contract', contractId: stamp.id };
+    }
+    // Envelope incoerente: o id carimbado não corresponde ao event_type persistido.
+    if (REGISTRY[stamp.id as CanonicalResidentContractId].eventType !== event.type) {
+      return { kind: 'invalid_payload', contractId: entry.id };
+    }
+    if (!entry.def.readableVersions.includes(stamp.version)) {
+      return {
+        kind: 'unsupported_contract_version',
+        contractId: entry.id,
+        version: stamp.version,
+        readableVersions: entry.def.readableVersions,
+      };
+    }
+    return entry.def.survivesReader(event)
+      ? { kind: 'readable', contractId: entry.id, version: stamp.version }
+      : { kind: 'invalid_payload', contractId: entry.id };
+  }
+
+  // Carimbo presente porém malformado (readCanonicalContractStamp === null): corrupção.
+  if (stamp === null) return { kind: 'invalid_payload', contractId: entry.id };
+
+  // Sem carimbo (legado): versão 1 inferida; projeta pela régua atual.
+  return entry.def.survivesReader(event)
+    ? { kind: 'readable', contractId: entry.id, version: LEGACY_CANONICAL_CONTRACT_VERSION }
+    : { kind: 'invalid_payload', contractId: entry.id };
+}
+
+/**
+ * Régua de LEITURA compartilhada: `true` quando o evento é legível ou não pertence
+ * a um contrato canônico. `false` para QUALQUER incompatibilidade/corrupção — o
+ * caller decide o diagnóstico exato via `classifyCanonicalResidentEvent`.
+ */
+export function isCanonicalResidentEventReadable(event: WorkEvent): boolean {
+  const kind = classifyCanonicalResidentEvent(event).kind;
+  return kind === 'readable' || kind === 'not_canonical';
+}
+
 /**
  * Sintetiza o evento COMO O LEITOR O VERÁ, a partir da própria correlação da
- * carga. É fiel ao que a RPC de gravação materializa no envelope (`data.*`
- * derivado da própria evidência), então reprojetá-lo aqui é reproduzir a leitura
- * do Evolution antes de persistir.
+ * carga e do carimbo canônico que o trigger materializa. Reprojetá-lo aqui é
+ * reproduzir a leitura do Evolution antes de persistir.
  */
 function synthesizeReaderEvent(
+  contractId: CanonicalResidentContractId,
   definition: CanonicalContractDefinition,
   payload: CanonicalResidentPayload,
 ): WorkEvent {
@@ -129,6 +259,7 @@ function synthesizeReaderEvent(
     proposalVersion: payload.approvedProposalVersion,
     payload: {
       schema_version: 1,
+      canonical_contract: { id: contractId, version: definition.writeVersion },
       data: {
         work_item_id: payload.workItemId,
         attempt_id: payload.attemptId,
@@ -153,11 +284,8 @@ export type CanonicalResidentWriteGuard =
 
 /**
  * Guarda fail-closed do lado de ESCRITA: só autoriza persistir uma carga canônica
- * se a linha atual conseguir reprojetá-la de volta pela régua do read-model.
- *
- * - contrato desconhecido ⇒ recusa (um formato novo tem de ser registrado aqui);
- * - carga que o reader não reprojeta ⇒ recusa (é justamente o formato divergente
- *   que quebraria o Evolution — bloqueado ANTES de tocar o estado residente).
+ * se a linha atual conseguir reprojetá-la de volta (na versão de escrita) pela
+ * régua do read-model.
  */
 export function guardCanonicalResidentWrite(
   contractId: CanonicalResidentContractId,
@@ -174,8 +302,8 @@ export function guardCanonicalResidentWrite(
     };
   }
 
-  const event = synthesizeReaderEvent(definition, payload);
-  if (!definition.survivesReader(event)) {
+  const event = synthesizeReaderEvent(contractId, definition, payload);
+  if (classifyCanonicalResidentEvent(event).kind !== 'readable') {
     return {
       ok: false,
       reason: 'unreadable_by_authoritative_reader',
@@ -186,21 +314,4 @@ export function guardCanonicalResidentWrite(
   }
 
   return { ok: true };
-}
-
-/**
- * Régua de LEITURA compartilhada: `true` quando o evento — se carregar um contrato
- * canônico do estado residente — sobrevive ao projector do seu contrato. Eventos
- * que não carregam contrato canônico ficam fora do escopo desta boundary e
- * retornam `true` (não são reinterpretados aqui). É a mesma régua do write-guard,
- * de modo que escrita e leitura não podem divergir dentro de uma linha.
- */
-export function isCanonicalResidentEventReadable(event: WorkEvent): boolean {
-  for (const id of CANONICAL_RESIDENT_CONTRACT_IDS) {
-    const definition = REGISTRY[id];
-    if (definition.eventType === event.type) {
-      return definition.survivesReader(event);
-    }
-  }
-  return true;
 }

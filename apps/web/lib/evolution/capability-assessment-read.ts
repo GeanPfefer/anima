@@ -1,6 +1,6 @@
 import {
+  classifyCanonicalResidentEvent,
   deriveCapabilityAssessmentsFromWorkHistory,
-  isCanonicalResidentEventReadable,
   type CapabilityAssessmentProjection,
   type WorkEvent,
 } from '@anima/core';
@@ -10,25 +10,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const PAGE_SIZE = 500;
 
-/**
- * Os projectors usados pelo Proof Engine normalmente são tolerantes:
- * evidência persistida incoerente simplesmente não participa da projeção.
- *
- * Isso é adequado para presentation/read-models comuns, mas NÃO para esta
- * boundary epistemológica. Aqui um evento crítico inválido não pode virar
- * "ausência de evidência", porque isso pode preservar indevidamente uma prova
- * positiva anterior.
- *
- * A régua vive no core (`isCanonicalResidentEventReadable`), a MESMA que o
- * write-guard `guardCanonicalResidentWrite` aplica antes de persistir. Compartilhar
- * a régua é o que impede escrita e leitura de divergirem dentro de uma linha —
- * a causa estrutural do incidente 51929.
- */
-function isSemanticallyValidEvidenceEvent(
-  event: WorkEvent,
-): boolean {
-  return isCanonicalResidentEventReadable(event);
-}
 export type CapabilityAssessmentReadResult =
   | {
       readonly ok: true;
@@ -39,7 +20,14 @@ export type CapabilityAssessmentReadResult =
       readonly ok: false;
       readonly reason:
         | 'event_history_read_failed'
-        | 'event_history_invalid';
+        // Payload realmente inválido/corrompido de um contrato conhecido, OU
+        // envelope temporal inválido: o histórico não é confiável.
+        | 'event_history_invalid'
+        // Um evento canônico carrega um contrato/versão que ESTA linha não
+        // reconhece (formato de uma linha divergente/mais nova). NÃO é corrupção:
+        // é sinal de reconciliação de contrato. Distingui-lo evita derivar
+        // assessment incorreto e evita alarmar "histórico corrompido".
+        | 'canonical_contract_incompatibility';
     };
 
 /**
@@ -116,16 +104,37 @@ export async function readCapabilityAssessments(
         }
 
         /**
-         * Eventos que carregam evidência usada pelo Capability Proof Engine
-         * precisam sobreviver ao projector canônico do próprio contrato.
+         * Eventos que carregam um contrato canônico precisam ser classificados
+         * pela MESMA régua do core que o write-guard aplica — a única fonte da
+         * verdade, o que impede escrita e leitura de divergirem numa linha.
          *
-         * Rejeição aqui é fatal para a leitura inteira: "evidência inválida"
-         * nunca é reinterpretada como "evidência inexistente".
+         * A classificação distingue as situações que o incidente 51929 confundia:
+         * - readable / not_canonical → participa da projeção;
+         * - unsupported_contract(_version) → contrato/versão de uma linha que esta
+         *   não reconhece; é INCOMPATIBILIDADE (reconciliação), não corrupção, e
+         *   fecha a leitura com um diagnóstico próprio em vez de derivar errado;
+         * - invalid_payload → corrupção real de um contrato conhecido: fecha como
+         *   histórico inválido (evidência inválida nunca vira "inexistente").
          */
+        const classification =
+          classifyCanonicalResidentEvent(event);
+
         if (
-          !isSemanticallyValidEvidenceEvent(
-            event,
-          )
+          classification.kind ===
+            'unsupported_contract' ||
+          classification.kind ===
+            'unsupported_contract_version'
+        ) {
+          return {
+            ok: false,
+            reason:
+              'canonical_contract_incompatibility',
+          };
+        }
+
+        if (
+          classification.kind ===
+          'invalid_payload'
         ) {
           return {
             ok: false,

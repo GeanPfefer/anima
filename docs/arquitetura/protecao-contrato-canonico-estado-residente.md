@@ -1,8 +1,8 @@
 # Proteção de contrato canônico do estado residente
 
-> Fundação implementada (linha `dev`). Fecha o lado de ESCRITA da classe do
-> incidente 51929 e cria um ponto central único; o resíduo de leitura entre
-> linhas divergentes é decisão humana registrada em "Limite e próxima decisão".
+> Fundação implementada (linha `dev`). Fecha a classe conhecida do incidente 51929
+> com DUAS camadas: read-your-writes (escrita) + carimbo de contrato (leitura). O
+> resíduo restante é temporal, registrado em "Limite e próxima decisão".
 
 ## Causa estrutural modelada
 
@@ -10,85 +10,115 @@ Um **formato canônico persistível** é aquele cuja evidência, gravada no log
 append-only `work_events` (o **estado residente**), é REPROJETADA depois pelo
 Capability Proof Engine / Evolution. Cada formato tem **dois lados** que precisam
 concordar: um **produtor** que o escreve e um **leitor** (a linha autoritativa)
-que precisa reprojetá-lo de volta.
+que reprojeta de volta.
 
 O incidente **51929** (`host_observed_coder_evidence_recorded`,
 `0c3e2c6d-652f-49ae-a1e1-53d60bc63e61`) nasceu da divergência entre esses lados
 **entre linhas de código**: a linha snapshot/Harness V3 persistiu transcripts do
 coder com `runtimeEvents` (formato novo), e a linha `dev` posterior não carregava
-mais o reader correspondente. O `validCoderTranscripts` rejeitava a chave extra,
-o projector retornava `null`, e o read-model do Evolution falhava fechado com
-`semantic_projection_rejected` — quebrando a leitura inteira.
+mais o reader. `validCoderTranscripts` rejeitava a chave extra → projector `null`
+→ Evolution `semantic_projection_rejected` → leitura inteira quebra.
 
-A combinação perigosa é: **código divergente + novo contrato persistível +
-escrita no estado residente sem reconciliação/isolamento.** O objetivo é
-enforcement técnico num ponto central, não dependência de documentação/memória.
+Combinação perigosa = código divergente + novo contrato persistível + escrita no
+estado residente **sem reconciliação/isolamento**. O objetivo é enforcement
+técnico num ponto central, não dependência de documentação/memória.
 
-## Boundary escolhido
+## Duas camadas de proteção (uma superfície central)
 
-Os quatro contratos canônicos persistidos hoje são gate, coder, git observados
-pelo host e o parecer do Verifier. Cada um já tinha um **projector** no core
-(`projectHostObserved*`, `projectVerifierOpinionHistory`) e o read-model do
-Evolution (`capability-assessment-read.ts`) já os enumerava para falhar fechado.
+O núcleo é o registry `packages/core/.../canonical-resident-contract.ts`, que
+enumera os quatro contratos persistidos (gate/coder/git observados pelo host +
+parecer do Verifier) e é a única superfície de reconciliação.
 
-O ponto central é o **registry** `packages/core/.../canonical-resident-contract.ts`,
-que enumera cada contrato uma única vez e amarra ESCRITA e LEITURA à **mesma
-régua**: o projector do próprio contrato. Ele não substitui os builders (que
-validam a construção); garante a invariante **read-your-writes** no nível do
-ENVELOPE — o exato nível onde o 51929 quebrou.
+### Camada 1 — read-your-writes (lado de ESCRITA, dentro de uma linha)
 
-## Mecanismo de proteção
+`guardCanonicalResidentWrite(contractId, payload)` sintetiza o evento **como o
+leitor o verá** (a partir da própria correlação da carga e do carimbo) e o
+reprojeta pela régua do read-model. Recusa **fail-closed** contrato não registrado
+ou carga que a linha atual não reprojeta. Invocada nos quatro sinks antes da RPC.
+Impede uma linha de poluir o estado residente com o que ela mesma não lê.
 
-1. `guardCanonicalResidentWrite(contractId, payload)` — guarda **fail-closed** do
-   lado de escrita. Sintetiza o evento **como o leitor o verá** (a partir da
-   própria correlação da carga, fiel ao que a RPC materializa) e o reprojeta.
-   Recusa se o contrato não está registrado (`unknown_canonical_contract`) ou se a
-   carga não sobrevive ao reader (`unreadable_by_authoritative_reader`). É invocada
-   nos quatro sinks (`*EvidenceSinkFor`, `verifierOpinionSinkFor`) **antes** da RPC.
-2. `isCanonicalResidentEventReadable(event)` — a MESMA régua do lado da leitura;
-   `capability-assessment-read.ts` passou a consumi-la. Escrita e leitura não podem
-   mais divergir dentro de uma linha, porque são a mesma função.
-3. Introduzir um novo formato canônico é, por construção, adicionar um membro ao
-   registry — um único lugar, verificado por teste (writer ⇔ reader).
+### Camada 2 — carimbo de contrato (lado de LEITURA, ENTRE linhas)
 
-## Como worktrees normais continuam funcionando
+Todo evento canônico carrega `payload.canonical_contract = { id, version }`,
+carimbado **autoritativamente** por um trigger `BEFORE INSERT` em `work_events`
+(migration `20260917000000`). O leitor observa a IDENTIDADE SEMÂNTICA do contrato
+**antes** do projector específico e `classifyCanonicalResidentEvent` distingue:
 
-Cargas em formatos já conhecidos passam a guarda e são persistidas normalmente. A
-guarda vive na porta de persistência da observação, que é **fail-open**: uma
-recusa vira "sem evidência nesta volta", nunca quebra a tentativa. O laço legítimo
-`dev → worktree → coder → gates → verifier → review` é inalterado.
+| Situação | Classificação | Reação do read-model |
+|---|---|---|
+| contrato + versão legíveis, payload projeta | `readable` | participa da projeção |
+| evento fora dos contratos canônicos | `not_canonical` | segue semântica atual |
+| `id` carimbado desconhecido | `unsupported_contract` | `canonical_contract_incompatibility` |
+| versão fora das legíveis (futura) | `unsupported_contract_version` | `canonical_contract_incompatibility` |
+| contrato+versão conhecidos, payload corrompido | `invalid_payload` | `event_history_invalid` |
+
+Assim uma linha mais antiga que encontra uma **versão futura** reporta
+INCOMPATIBILIDADE (reconciliação), com issue diagnóstica própria no Evolution, em
+vez de "histórico corrompido" — e nunca deriva assessment incorreto.
+
+## Onde o carimbo vive, e por quê (não em colunas)
+
+`work_events` já tem um envelope genérico e contrato-agnóstico
+(`payload.schema_version` + `payload.data`, com CHECK). O carimbo é **irmão de
+`schema_version`** — mesmo nível genérico, observável antes de `payload.data`.
+
+Colunas próprias foram consideradas e **rejeitadas por incompatibilidade**: o
+`packages/types/src/database.ts` commitado está atrás do schema local (tabelas/
+funcs `paid_compute_*` WIP não commitadas); regenerá-lo para pegar colunas novas
+contaminaria a mudança com esse WIP. O envelope é o **menor lugar genérico E
+compatível**, e não exige regenerar tipos (o carimbo é `Json`).
+
+Um **trigger** (não 4 reescritas de RPC) é o boundary central: os cinco sites de
+`INSERT INTO public.work_events` das RPCs canônicas passam por ele. O carimbo
+representa **semântica do contrato** — nunca SHA de commit, branch ou identidade
+efêmera de código.
+
+## Autoridade e compatibilidade legada
+
+- **Autoridade:** o trigger deriva `id` do `event_type` (mapa 1:1) e fixa a versão
+  canônica atual (1). Sobrescreve qualquer valor do cliente ⇒ o writer não declara
+  versão arbitrária. Introduzir uma versão nova é mudar o trigger (migration) + o
+  `writeVersion`/`readableVersions` do registry — a superfície única de reconciliação.
+- **Legado:** eventos anteriores à migration não têm carimbo. O reader os infere
+  como versão 1 a partir do `event_type` — determinístico, pois cada contrato só
+  teve a versão 1 (`LEGACY_CANONICAL_CONTRACT_VERSION`). Sem backfill que invente
+  versão; nada é reescrito no histórico. Uma CHECK lenient valida a forma do
+  carimbo **quando presente**, permitindo a ausência (legado).
 
 ## Como o 51929-equivalente passa a ser bloqueado
 
-- **Lado de escrita (runtime, fail-closed):** uma linha rodando como host residente
-  não consegue mais persistir um formato canônico que ela própria não lê de volta —
-  bloqueado ANTES de tocar o estado residente, em vez de deixar o Evolution quebrar
-  depois.
-- **Dentro de uma linha (build/CI):** escrita e leitura são a mesma régua; um writer
-  sem reader (ou vice-versa) falha no teste. O registry é a única superfície de
-  reconciliação — um merge que derrube um lado é visível e testável.
+- **Lado de escrita:** uma linha não persiste um formato que ela própria não lê.
+- **Entre linhas:** um evento de versão/contrato que a linha atual não reconhece é
+  classificado como INCOMPATIBILIDADE explícita (reconciliação), nunca corrupção —
+  o read-model dá um diagnóstico próprio e não deriva assessment errado.
+- **Dentro de uma linha (build/CI):** escrita e leitura compartilham a régua do
+  registry; um writer sem reader (ou vice-versa) falha no teste.
 
-## Limite e próxima decisão (barreira humana)
+## Provas
 
-Esta fundação é **pura** (sem migration). Ela NÃO fecha, sozinha, a regressão de
-**leitura entre linhas divergentes**: linha A (que conhece o formato) escreve; linha
-B, mais antiga, lê e não conhece. A guarda de A passa (A lê o próprio formato), e B
-ainda falha. Fechar esse resíduo exige uma de duas opções — ambas mudam a
-persistência/schema e são **decisão humana (migration + checkpoint)**:
+- Core: `canonical-resident-contract.test.ts` (guard + `classifyCanonicalResidentEvent`
+  A/B/C/D/E + carimbo malformado + autoridade da versão).
+- Web: `capability-assessment-read.test.ts` (versão futura → `canonical_contract_incompatibility`;
+  contractId desconhecido → idem; versão atual carimbada → aceita; legado sem carimbo → aceito).
+- pgTAP: `canonical_resident_contract_stamp.test.sql` (writer real carimbado; carimbo
+  autoritativo sobrescreve valor forjado; não-canônico não é carimbado; CHECK recusa malformado).
 
-- **(A) Namespace isolado:** um tipo/namespace de evento para formatos ainda não
-  reconciliados que o reader canônico ignora por construção.
-- **(B) Carimbo de contrato no envelope:** `contractId`+`version` explícitos no
-  envelope persistido, permitindo ao reader classificar "versão que não conheço"
-  (reconciliação) distinta de "corrupção", em vez do atual `event_history_invalid`
-  opaco.
+## Limite e próxima decisão
 
-Recomendação: preferir (B) por preservar a régua fail-closed e dar diagnóstico
-acionável; (A) como escape hatch para experimentação. Nenhuma foi implementada aqui.
+O carimbo fecha a classe conhecida, mas tem uma **limitação temporal honesta**:
+branches que **antecedem** a introdução do stamping não ganham retroativamente a
+capacidade de classificar versões futuras — para elas, um evento de versão futura
+ainda cairia no caminho legado/`invalid_payload`. A proteção vale para linhas a
+partir desta migration.
+
+O **namespace isolado (opção A)** — um tipo/namespace de evento que o reader
+canônico ignora por construção, para formatos experimentais ainda não reconciliados
+— permanece **FUTURO/escape hatch**, não implementado aqui. Introduzi-lo é nova
+decisão humana (migration + checkpoint).
 
 ## Referências
 
-- Incidente e regressão permanente: commit `4f0c745`, reconciliação `dd5936f`.
+- Incidente e regressão permanente: commit `4f0c745`; reconciliação `dd5936f`.
+- Camada 1 (guard): commit `2a5316e`. Camada 2 (carimbo): migration `20260917000000`.
 - Read-model: `apps/web/lib/evolution/capability-assessment-read.ts`.
-- Contratos: `packages/core/src/work-orchestration/{host-observed-*,verifier-opinion,coder-transcript}.ts`.
-- Orquestração de trabalho: `docs/arquitetura/orquestracao-de-trabalho.md`.
+- Contratos: `packages/core/src/work-orchestration/{canonical-resident-contract,host-observed-*,verifier-opinion,coder-transcript}.ts`.

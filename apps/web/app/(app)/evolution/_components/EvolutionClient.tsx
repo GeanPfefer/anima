@@ -282,7 +282,8 @@ export type EvolutionCapabilityAssessmentState =
       readonly status: 'unavailable';
       readonly reason:
         | 'event_history_read_failed'
-        | 'event_history_invalid';
+        | 'event_history_invalid'
+        | 'canonical_contract_incompatibility';
     };
 export interface EvolutionClientProps {
   nodes: CapabilityGraphNode[];
@@ -787,7 +788,9 @@ function CapabilityDetail({
 
         {capabilityAssessment.status === 'unavailable' ? (
           <p className={styles.detailEmpty}>
-            {capabilityAssessment.reason === 'event_history_invalid'
+            {capabilityAssessment.reason === 'canonical_contract_incompatibility'
+              ? 'Indisponível: o histórico contém um contrato de evidência que esta versão do app ainda não reconhece (formato de uma linha divergente/mais nova). É incompatibilidade de contrato, não corrupção — requer reconciliação. O estado declarado continua visível sem inferência dinâmica.'
+              : capabilityAssessment.reason === 'event_history_invalid'
               ? 'Indisponível: o histórico de evidências está inconsistente. O estado declarado continua visível sem inferência dinâmica.'
               : 'Indisponível: não foi possível ler o histórico de evidências. O estado declarado continua visível sem inferência dinâmica.'}
           </p>

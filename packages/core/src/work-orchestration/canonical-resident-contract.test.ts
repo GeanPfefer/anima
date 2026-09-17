@@ -1,6 +1,8 @@
 import {
   CANONICAL_RESIDENT_CONTRACT_IDS,
   canonicalResidentEventTypes,
+  canonicalResidentWriteVersion,
+  classifyCanonicalResidentEvent,
   guardCanonicalResidentWrite,
   isCanonicalResidentEventReadable,
   buildHostObservedCoderEvidence,
@@ -145,6 +147,82 @@ describe('guardCanonicalResidentWrite — read-your-writes fail-closed', () => {
     expect(guard.ok).toBe(false);
     if (guard.ok) return;
     expect(guard.reason).toBe('unreadable_by_authoritative_reader');
+  });
+});
+
+function coderEvent(opts: {
+  readonly stamp?: { id: string; version: number };
+  readonly malformedStamp?: unknown;
+  readonly corrupt?: boolean;
+}): WorkEvent {
+  const ev = coderEvidence();
+  const evidence = opts.corrupt
+    ? ({ ...ev, transcripts: [{ ...(ev.transcripts![0]), chaveFutura: 'x' }] } as unknown as HostObservedCoderEvidenceV1)
+    : ev;
+  const payload: Record<string, unknown> = {
+    schema_version: 1,
+    data: {
+      work_item_id: ev.workItemId,
+      attempt_id: ev.attemptId,
+      approved_proposal_version: ev.approvedProposalVersion,
+      origin: 'host',
+      evidence,
+    },
+  };
+  if (opts.stamp !== undefined) payload.canonical_contract = opts.stamp;
+  if (opts.malformedStamp !== undefined) payload.canonical_contract = opts.malformedStamp;
+  return {
+    id: 'e',
+    workItemId: ev.workItemId,
+    type: 'host_observed_coder_evidence_recorded',
+    author: 'system',
+    proposalVersion: ev.approvedProposalVersion,
+    payload: payload as unknown as WorkEvent['payload'],
+    occurredAt: new Date(0),
+  };
+}
+
+describe('classifyCanonicalResidentEvent — distingue as 4 situações do 51929', () => {
+  test('A: contrato + versão atuais (carimbado) → readable', () => {
+    const c = classifyCanonicalResidentEvent(coderEvent({ stamp: { id: 'host_observed_coder_evidence', version: 1 } }));
+    expect(c.kind).toBe('readable');
+  });
+
+  test('B/H: contrato conhecido + versão FUTURA → unsupported_contract_version, NUNCA invalid_payload', () => {
+    const c = classifyCanonicalResidentEvent(coderEvent({ stamp: { id: 'host_observed_coder_evidence', version: 2 } }));
+    expect(c.kind).toBe('unsupported_contract_version');
+    expect(c.kind).not.toBe('invalid_payload');
+  });
+
+  test('C: contractId desconhecido → unsupported_contract', () => {
+    const c = classifyCanonicalResidentEvent(coderEvent({ stamp: { id: 'formato_de_outra_linha', version: 1 } }));
+    expect(c.kind).toBe('unsupported_contract');
+  });
+
+  test('D: contrato+versão suportados, payload corrompido → invalid_payload', () => {
+    const c = classifyCanonicalResidentEvent(coderEvent({ stamp: { id: 'host_observed_coder_evidence', version: 1 }, corrupt: true }));
+    expect(c.kind).toBe('invalid_payload');
+  });
+
+  test('E: evento legado SEM carimbo → readable (versão 1 inferida deterministicamente)', () => {
+    const c = classifyCanonicalResidentEvent(coderEvent({}));
+    expect(c.kind).toBe('readable');
+    if (c.kind !== 'readable') return;
+    expect(c.version).toBe(1);
+  });
+
+  test('carimbo malformado (versão < 1) → invalid_payload', () => {
+    const c = classifyCanonicalResidentEvent(coderEvent({ malformedStamp: { id: 'host_observed_coder_evidence', version: 0 } }));
+    expect(c.kind).toBe('invalid_payload');
+  });
+
+  test('G: a versão de escrita é a autoridade do registry (não arbitrária)', () => {
+    expect(canonicalResidentWriteVersion('host_observed_coder_evidence')).toBe(1);
+    // Um evento carimbado com a versão de escrita atual é sempre readable.
+    const c = classifyCanonicalResidentEvent(
+      coderEvent({ stamp: { id: 'host_observed_coder_evidence', version: canonicalResidentWriteVersion('host_observed_coder_evidence') } }),
+    );
+    expect(c.kind).toBe('readable');
   });
 });
 

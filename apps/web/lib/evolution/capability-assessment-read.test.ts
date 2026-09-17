@@ -232,6 +232,21 @@ function coderRuntimeEventsRow(): EventRow {
   });
 }
 
+function stampedCoderRow(
+  stamp: { id: string; version: number },
+): EventRow {
+  const base = coderRuntimeEventsRow();
+  const payload = JSON.parse(
+    JSON.stringify(base.payload),
+  ) as Record<string, unknown>;
+  payload.canonical_contract = stamp;
+  return {
+    ...base,
+    id: `coder-stamped-${stamp.id}-${stamp.version}`,
+    payload: payload as EventRow['payload'],
+  };
+}
+
 function malformedGateRow(): EventRow {
   const valid = row();
 
@@ -432,6 +447,64 @@ describe('readCapabilityAssessments', () => {
 
     if (!result.ok) return;
 
+    expect(result.eventCount).toBe(1);
+  });
+
+  test('contrato de versão FUTURA vira incompatibilidade, não corrupção', async () => {
+    const result =
+      await readCapabilityAssessments(
+        fakeClient({
+          rows: [
+            stampedCoderRow({
+              id: 'host_observed_coder_evidence',
+              version: 2,
+            }),
+          ],
+        }),
+      );
+
+    expect(result).toEqual({
+      ok: false,
+      reason:
+        'canonical_contract_incompatibility',
+    });
+  });
+
+  test('contractId desconhecido vira incompatibilidade explícita', async () => {
+    const result =
+      await readCapabilityAssessments(
+        fakeClient({
+          rows: [
+            stampedCoderRow({
+              id: 'formato_de_outra_linha',
+              version: 1,
+            }),
+          ],
+        }),
+      );
+
+    expect(result).toEqual({
+      ok: false,
+      reason:
+        'canonical_contract_incompatibility',
+    });
+  });
+
+  test('contrato conhecido na versão atual (carimbado) é aceito', async () => {
+    const result =
+      await readCapabilityAssessments(
+        fakeClient({
+          rows: [
+            stampedCoderRow({
+              id: 'host_observed_coder_evidence',
+              version: 1,
+            }),
+          ],
+        }),
+      );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
     expect(result.eventCount).toBe(1);
   });
 
