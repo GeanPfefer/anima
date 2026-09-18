@@ -52,6 +52,14 @@ describe('elegibilidade autônoma — especificação de execução (fail-closed
   test('permissão em branco não está declarada', () => expect(codes(withSpec({ permissions: ['ler', ' '] }))).toEqual(['permissions_not_declared']));
   test('critérios de validação vazios faltam', () => expect(codes(withSpec({ validation_criteria: [] }))).toEqual(['validation_criteria_missing']));
   test('critério sem rótulo falta', () => expect(codes(withSpec({ validation_criteria: [{ command: 'npm test' }] }))).toEqual(['validation_criteria_missing']));
+  test('claim_kind gate_assertion é projetado no spec (claimKind)', () => expect(evaluateAutonomousEligibility(withSpec({ validation_criteria: [{ label: 'unit', command: 'npm test', claim_kind: 'gate_assertion' }] }))).toMatchObject({ eligible: true, spec: { validationCriteria: [{ label: 'unit', command: 'npm test', claimKind: 'gate_assertion' }] } }));
+  test('claim_kind substantive é projetado no spec (claimKind)', () => expect(evaluateAutonomousEligibility(withSpec({ validation_criteria: [{ label: 'unit', command: 'npm test', claim_kind: 'substantive' }] }))).toMatchObject({ eligible: true, spec: { validationCriteria: [{ label: 'unit', command: 'npm test', claimKind: 'substantive' }] } }));
+  test('claim_kind fora do domínio falha fechado', () => expect(codes(withSpec({ validation_criteria: [{ label: 'unit', command: 'npm test', claim_kind: 'talvez' }] }))).toEqual(['validation_criteria_missing']));
+  test('claim_kind ausente é honesto: critério elegível SEM claimKind (não promovido silenciosamente)', () => {
+    const result = evaluateAutonomousEligibility(withSpec({ validation_criteria: [{ label: 'unit', command: 'npm test' }] }));
+    expect(result.eligible).toBe(true);
+    if (result.eligible) expect(result.spec.validationCriteria[0]!.claimKind).toBeUndefined();
+  });
   test('limites sem nenhum valor faltam', () => expect(codes(withSpec({ limits: {} }))).toEqual(['limits_missing']));
   test('limite não inteiro positivo falta', () => expect(codes(withSpec({ limits: { max_attempts: 0 } }))).toEqual(['limits_missing']));
   test('limite fracionário falta', () => expect(codes(withSpec({ limits: { max_duration_minutes: 2.5 } }))).toEqual(['limits_missing']));

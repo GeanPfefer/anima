@@ -191,6 +191,10 @@ const SCOPE_REMAINING = `A revisão é cumprida alterando apenas ${TEST} (rework
     expect(spec).not.toBeNull();
     const gate = spec!.validationCriteria.find(c => c.label === 'test');
     expect(gate?.covers).toEqual([FUNCTIONAL]);
+    // O meta-critério funcional ("as validações passam") é estruturalmente uma
+    // gate-assertion: o produtor determinístico a marca, então o Verifier a aceita
+    // como prova suficiente ao passar (mantém a convergência legítima em verified).
+    expect(gate?.claimKind).toBe('gate_assertion');
     const scope = spec!.validationCriteria.find(c => c.proof === 'scope');
     expect(scope).toMatchObject({ proof: 'scope', covers: [SCOPE_REMAINING, SCOPE_INTACT] });
     expect(scope?.command).toBeUndefined();

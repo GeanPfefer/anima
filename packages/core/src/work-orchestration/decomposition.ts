@@ -236,7 +236,9 @@ export function deriveDecompositionSuccessor(input: DecompositionInput): Decompo
 /**
  * Requisitos de PROVA a materializar no `execution_spec` do sucessor (opcional). Quando
  * presente (correção governada), enriquece os `validation_criteria` mirrorados:
- *  * cada gate por comando passa a COBRIR o critério funcional (`covers += functional`);
+ *  * cada gate por comando passa a COBRIR o critério funcional (`covers += functional`)
+ *    e é marcado `claim_kind:'gate_assertion'` — o meta-critério "as validações passam"
+ *    é estruturalmente uma gate-assertion, então um gate verde o prova de forma suficiente;
  *  * é ACRESCENTADO um critério `proof:'scope'` que cobre os critérios de escopo.
  * Ausente (decomposição por falha) ⇒ o spec é espelhado VERBATIM, sem enriquecer.
  */
@@ -291,7 +293,12 @@ function buildSuccessorIntent(
           const existing = Array.isArray(criterion['covers'])
             ? (criterion['covers'] as Json[]).filter((value): value is string => typeof value === 'string')
             : [];
-          return { ...criterion, covers: [...new Set([...existing, proof.functional])] };
+          // `proof.functional` é o META-critério "as validações declaradas passam" —
+          // estruturalmente conhecido por ESTE código como uma gate-assertion (a
+          // afirmação É o resultado do gate). Marca `claim_kind:'gate_assertion'` para
+          // que o Verifier o aceite como prova suficiente ao passar. Critérios funcionais
+          // substantivos NÃO são classificados aqui (o código não os conhece).
+          return { ...criterion, covers: [...new Set([...existing, proof.functional])], claim_kind: 'gate_assertion' };
         }
         return criterion;
       });

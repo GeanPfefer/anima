@@ -90,6 +90,10 @@ export type WorkVerificationFindingCode =
   | 'criterion_without_gate_coverage'
   | 'acceptance_criterion_covered'
   | 'acceptance_criterion_without_evidence'
+  // Aceite com associação declarada a um gate que passou, mas cuja afirmação é
+  // SUBSTANTIVA (`claim_kind:'substantive'`, ou não classificada — default conservador):
+  // gate verde + covers é associação declarada, não prova semântica suficiente.
+  | 'acceptance_substantive_gate_insufficient'
   | 'criterion_covers_unknown_acceptance'
   | 'declared_criterion_unverifiable'
   // Critério provado por INVARIANTE DE ESCOPO (não por gate): satisfeito quando a
@@ -462,13 +466,28 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   // evidência precisa CORRESPONDER ao requisito do critério (§ "não conte qualquer
   // evidência"). Sem esta dimensão, gates cobririam a si mesmos enquanto parte da
   // intenção desaparece no planejamento (PIN-02).
+  // SUFICIÊNCIA SEMÂNTICA (não só associação declarada): um `covers` é uma
+  // ASSOCIAÇÃO que o executor/planner declara; ela não basta, por si, para afirmar
+  // que um critério funcional de aceite está PROVADO. A prova SUFICIENTE depende da
+  // CLASSE da afirmação (`claim_kind`), lida como dado ESTRUTURAL — nunca inferida de
+  // texto, rótulo ou comando:
+  //  * gate + `gate_assertion` + gate correspondente PASSOU ⇒ prova suficiente (a
+  //    afirmação É o resultado factual do gate);
+  //  * gate + `substantive` (ou SEM `claim_kind` — default conservador fail-closed) +
+  //    gate verde ⇒ apenas associação declarada: LACUNA explícita, nunca `verified`;
+  //  * scope + contenção observada independentemente ⇒ prova suficiente (independente).
   const acceptance = authorized.acceptanceCriteria ?? [];
   const acceptanceSet = new Set(acceptance);
   const coveredAcceptance = new Set<string>();
+  // Aceites cuja ÚNICA base é um gate SUBSTANTIVO/não-classificado que passou — a
+  // associação existe, mas o gate verde não a demonstra sozinho (lacuna explícita).
+  const substantiveOnlyAcceptance = new Set<string>();
   for (const criterion of authorized.validationCriteria) {
     const proofKind = proofKindOf(criterion);
+    const gatePassed = proofKind === 'gate' && passedByLabel.has(criterion.label);
+    const isGateAssertion = criterion.claimKind === 'gate_assertion';
     // A prova deste critério está SATISFEITA pela evidência do seu PRÓPRIO tipo?
-    const proven = proofKind === 'gate' ? passedByLabel.has(criterion.label)
+    const proven = proofKind === 'gate' ? (isGateAssertion && gatePassed)
       : proofKind === 'scope' ? scopeIndependentlyClean
       : false; // `declared` não cobre aceite (a cargo do humano).
     for (const covered of criterion.covers ?? []) {
@@ -477,16 +496,24 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
           `O critério "${criterion.label}" declara cobrir um item que não pertence ao aceite aprovado.`, covered, 'independent'));
       } else if (proven) {
         coveredAcceptance.add(covered);
+      } else if (gatePassed && !isGateAssertion) {
+        // Gate verde + covers, mas a afirmação é substantiva (ou não classificada):
+        // associação declarada insuficiente. Marca para a lacuna explícita (a menos
+        // que outra prova suficiente cubra o mesmo aceite — `coveredAcceptance` vence).
+        substantiveOnlyAcceptance.add(covered);
       }
     }
   }
   for (const approved of acceptance) {
     if (coveredAcceptance.has(approved)) {
       findings.push(ok('acceptance_criterion_covered',
-        `O critério aprovado possui associação explícita com uma prova suficiente (gate aprovado ou escopo observado).`, approved));
+        `O critério aprovado possui associação explícita com uma prova suficiente (gate-assertion aprovado ou escopo observado).`, approved));
+    } else if (substantiveOnlyAcceptance.has(approved)) {
+      findings.push(gap('acceptance_substantive_gate_insufficient',
+        `O critério aprovado tem associação declarada (covers) a um gate que passou, mas a afirmação é substantiva: um gate verde não demonstra sozinho o comportamento exigido — falta uma classe de prova suficiente.`, approved, 'independent'));
     } else {
       findings.push(gap('acceptance_criterion_without_evidence',
-        `O critério aprovado não possui associação com prova suficiente (gate aprovado ou escopo observado independentemente).`, approved, 'independent'));
+        `O critério aprovado não possui associação com prova suficiente (gate-assertion aprovado ou escopo observado independentemente).`, approved, 'independent'));
     }
   }
 

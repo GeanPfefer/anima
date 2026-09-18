@@ -27,7 +27,7 @@ const item = (overrides: Partial<WorkItem> = {}): WorkItem => ({
     execution_spec: {
       schema_version: 1, target: { kind: 'project', reference: 'proj' },
       permissions: ['workspace_read', 'workspace_write_isolated'],
-      validation_criteria: [{ label: 'unit', command: 'npm test', covers: ['e'] }],
+      validation_criteria: [{ label: 'unit', command: 'npm test', covers: ['e'], claim_kind: 'gate_assertion' }],
       limits: { max_attempts: 3 },
     },
   } as unknown as WorkItem['intent'],
@@ -110,6 +110,13 @@ const gateEvent = (evidence: HostObservedGateEvidenceV1, id = 'ev-gate'): WorkEv
 });
 
 describe('computeVerifierOpinion', () => {
+  test('a versão do Verifier reflete a semântica de suficiência (claim_kind) ⇒ v3', () => {
+    // Bump obrigatório: a mesma evidência (aceite substantivo coberto só por gate)
+    // passa a produzir verdict diferente sob a nova semântica; não pode ser gravada
+    // como se ainda fosse v2.
+    expect(VERIFIER_VERSION).toBe('work-verifier-v3');
+  });
+
   test('sem handoff durável ⇒ null (parecer é sobre um resultado produzido)', () => {
     expect(computeVerifierOpinion(item(), [])).toBeNull();
   });

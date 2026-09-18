@@ -32,6 +32,25 @@ export interface AutonomousExecutionLimits {
  */
 export type WorkProofKind = 'gate' | 'scope';
 
+/**
+ * Classe de AFIRMAÇÃO de um critério `proof:'gate'` — o que a passagem do gate
+ * DEMONSTRA. Separa a ASSOCIAÇÃO DECLARADA (`covers`) da SUFICIÊNCIA semântica da
+ * prova, como DADO ESTRUTURAL (o Verifier lê, nunca interpreta texto/rótulo/comando).
+ *
+ * - `gate_assertion`: a afirmação de aceite É o próprio resultado factual do gate
+ *   ("as validações declaradas passam"). Um gate correspondente que passou (de
+ *   preferência host-observado) é prova SUFICIENTE do critério que ele cobre.
+ * - `substantive`: a afirmação de aceite descreve um COMPORTAMENTO material (ex.:
+ *   "o parser rejeita flags desconhecidas"). Um gate verde associado por `covers` é
+ *   apenas ASSOCIAÇÃO DECLARADA — não demonstra sozinho a semântica exigida; o
+ *   critério permanece uma LACUNA até existir uma classe de prova suficiente.
+ *
+ * FAIL-CLOSED: ausente/ambíguo NÃO é promovido à classe permissiva `gate_assertion`.
+ * Irrelevante para `proof:'scope'` (prova independente por contenção observada) e
+ * para critérios apenas declarados (a cargo do humano).
+ */
+export type WorkClaimKind = 'gate_assertion' | 'substantive';
+
 export interface AutonomousValidationCriterion {
   readonly label: string;
   readonly command?: string;
@@ -39,6 +58,9 @@ export interface AutonomousValidationCriterion {
   readonly covers?: readonly string[];
   /** Requisito de prova explícito. Ausente ⇒ inferido do `command` (ver `WorkProofKind`). */
   readonly proof?: WorkProofKind;
+  /** Classe de afirmação de um critério `proof:'gate'` (ver `WorkClaimKind`). Ausente
+   * ⇒ o Verifier a trata de forma CONSERVADORA (não promovida a `gate_assertion`). */
+  readonly claimKind?: WorkClaimKind;
 }
 export interface AutonomousExecutionSpecV1 {
   readonly schemaVersion: 1;
@@ -176,9 +198,14 @@ const parseValidationCriteria = (raw: Readonly<Record<string, Json>>): readonly 
       || new Set(covers).size !== covers.length)) return null;
     const proof = entry['proof'];
     if (proof !== undefined && proof !== 'gate' && proof !== 'scope') return null;
+    // FAIL-CLOSED: valor de `claim_kind` fora do domínio invalida o spec inteiro; ausência
+    // é honesta (o Verifier trata como conservador, NÃO promove a `gate_assertion`).
+    const claimKind = entry['claim_kind'];
+    if (claimKind !== undefined && claimKind !== 'gate_assertion' && claimKind !== 'substantive') return null;
     criteria.push({ label, ...(command === undefined ? {} : { command }),
       ...(covers === undefined ? {} : { covers: covers as readonly string[] }),
-      ...(proof === undefined ? {} : { proof: proof as WorkProofKind }) });
+      ...(proof === undefined ? {} : { proof: proof as WorkProofKind }),
+      ...(claimKind === undefined ? {} : { claimKind: claimKind as WorkClaimKind }) });
   }
   return criteria;
 };

@@ -470,7 +470,7 @@ describe('verifyPersistedWorkResult — composição a partir de fatos persistid
       execution_spec: {
         schema_version: 1, target: { kind: 'project', reference: 'proj' },
         permissions: ['workspace_read', 'workspace_write_isolated'],
-        validation_criteria: [{ label: 'unit', command: 'npm test', covers: ['e'] }],
+        validation_criteria: [{ label: 'unit', command: 'npm test', covers: ['e'], claim_kind: 'gate_assertion' }],
         limits: { max_attempts: 3 },
       },
     } as unknown as WorkItem['intent'],
@@ -507,7 +507,7 @@ describe('verifyPersistedWorkResult — composição a partir de fatos persistid
     const candidate = item({
       intent: { execution_spec: {
         schema_version: 1, target: { kind: 'project', reference: 'proj' }, permissions: [],
-        validation_criteria: [{ label: 'unit', command: 'npm test', covers: ['round-trip', 'extra fields'] }],
+        validation_criteria: [{ label: 'unit', command: 'npm test', covers: ['round-trip', 'extra fields'], claim_kind: 'gate_assertion' }],
         limits: { max_attempts: 1 },
       } } as unknown as WorkItem['intent'],
       proposal: { schemaVersion: 1, data: {
@@ -530,7 +530,7 @@ describe('verifyPersistedWorkResult — composição a partir de fatos persistid
     const candidate = item({
       intent: { execution_spec: {
         schema_version: 1, target: { kind: 'project', reference: 'anima' }, permissions: [],
-        validation_criteria: [{ label: 'unit', command: 'npm test', covers: [effects[2]!] }],
+        validation_criteria: [{ label: 'unit', command: 'npm test', covers: [effects[2]!], claim_kind: 'gate_assertion' }],
         limits: { max_attempts: 1 },
       } } as unknown as WorkItem['intent'],
       proposal: { schemaVersion: 1, data: { summary: 'PIN-02', objective: 'codec',
@@ -670,7 +670,7 @@ describe('verifyWorkResult — critérios de aceite provados por escopo (não s�
       includedScope: ['src/test.ts'],
       excludedScope: ['src/impl.ts'],
       validationCriteria: [
-        { label: 'unit', command: 'npm test', covers: [FUNC] },
+        { label: 'unit', command: 'npm test', covers: [FUNC], claimKind: 'gate_assertion' },
         { label: 'Contenção de escopo', proof: 'scope', covers: [SCOPE_ONLY, SCOPE_INTACT] },
       ],
       acceptanceCriteria: [FUNC, SCOPE_ONLY, SCOPE_INTACT],
@@ -707,7 +707,7 @@ describe('verifyWorkResult — critérios de aceite provados por escopo (não s�
       authorized: {
         includedScope: ['src/test.ts'], excludedScope: ['src/impl.ts'],
         validationCriteria: [
-          { label: 'gate-que-nao-rodou', command: 'npm run focused', covers: [FUNC] },
+          { label: 'gate-que-nao-rodou', command: 'npm run focused', covers: [FUNC], claimKind: 'gate_assertion' },
           { label: 'Contenção de escopo', proof: 'scope', covers: [SCOPE_ONLY, SCOPE_INTACT] },
         ],
         acceptanceCriteria: [FUNC, SCOPE_ONLY, SCOPE_INTACT],
@@ -739,5 +739,106 @@ describe('verifyWorkResult — critérios de aceite provados por escopo (não s�
     expect(report.findings.filter(f => f.code === 'acceptance_criterion_without_evidence').map(f => f.subject)).toEqual(expect.arrayContaining([SCOPE_ONLY, SCOPE_INTACT]));
     // A prova de EXECUÇÃO (gate) continua válida — evidência do tipo certo.
     expect(report.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject)).toContain(FUNC);
+  });
+});
+
+// ============================================================
+// SUFICIÊNCIA SEMÂNTICA por CLASSE DE AFIRMAÇÃO (claim_kind): separa a ASSOCIAÇÃO
+// declarada (`covers`) da PROVA suficiente. Um gate SUBSTANTIVO verde é só associação
+// (lacuna); um gate_assertion verde prova o critério que afirma que os gates passam.
+// ============================================================
+describe('verifyWorkResult — suficiência semântica por claim_kind (gate_assertion × substantive)', () => {
+  const SUBSTANTIVE = 'O parser rejeita flags desconhecidas e argumentos posicionais.';
+  const GATE_ASSERTION = 'As validações declaradas do trabalho passam.';
+
+  test('REGRESSÃO CENTRAL: aceite SUBSTANTIVO coberto só por gate verde ⇒ inconclusive, NUNCA verified', () => {
+    // O padrão do falso positivo histórico (seq4→seq5): gate verde associado por
+    // covers, sem demonstração material suficiente do comportamento exigido.
+    const result = verifyWorkResult(baseInput({
+      authorized: {
+        includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'],
+        validationCriteria: [{ label: 'unit', command: 'npm test', covers: [SUBSTANTIVE], claimKind: 'substantive' }],
+        acceptanceCriteria: [SUBSTANTIVE],
+      },
+    }));
+    expect(result.verdict).toBe('inconclusive');
+    expect(codes(result)).toContain('acceptance_substantive_gate_insufficient');
+    expect(codes(result)).not.toContain('acceptance_criterion_covered');
+    // Lacuna (inconclusive), NÃO rejected: não há violação independente.
+    expect(result.summary.violations).toBe(0);
+    expect(result.summary.gaps).toBeGreaterThan(0);
+    // A VALIDAÇÃO rodou e passou (criterion_covered) — é o ACEITE que não está provado.
+    expect(codes(result)).toContain('criterion_covered');
+    expect(result.findings.find(f => f.code === 'acceptance_substantive_gate_insufficient')?.provenance).toBe('independent');
+  });
+
+  test('DEFAULT FAIL-CLOSED: aceite coberto por gate SEM claim_kind ⇒ conservador (insuficiente)', () => {
+    const result = verifyWorkResult(baseInput({
+      authorized: {
+        includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'],
+        validationCriteria: [{ label: 'unit', command: 'npm test', covers: [SUBSTANTIVE] }],
+        acceptanceCriteria: [SUBSTANTIVE],
+      },
+    }));
+    expect(result.verdict).toBe('inconclusive');
+    expect(codes(result)).toContain('acceptance_substantive_gate_insufficient');
+    expect(codes(result)).not.toContain('acceptance_criterion_covered');
+  });
+
+  test('CONTROLE POSITIVO: aceite gate_assertion + gate host-observado PASS ⇒ verified', () => {
+    const result = verifyWorkResult(baseInput({
+      authorized: {
+        includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'],
+        validationCriteria: [{ label: 'unit', command: 'npm test', covers: [GATE_ASSERTION], claimKind: 'gate_assertion' }],
+        acceptanceCriteria: [GATE_ASSERTION],
+      },
+      observedGates: gateEvidenceWith(),
+    }));
+    expect(result.verdict).toBe('verified');
+    expect(result.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject)).toContain(GATE_ASSERTION);
+    expect(codes(result)).toContain('gates_independently_observed');
+  });
+
+  test('gate_assertion mas gate FALHOU (host-observado) ⇒ nunca verified e aceite não coberto', () => {
+    const result = verifyWorkResult(baseInput({
+      authorized: {
+        includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'],
+        validationCriteria: [{ label: 'unit', command: 'npm test', covers: [GATE_ASSERTION], claimKind: 'gate_assertion' }],
+        acceptanceCriteria: [GATE_ASSERTION],
+      },
+      observedGates: gateEvidenceWith({ gates: [{ label: 'unit', command: 'npm test', exitCode: 1, durationMs: 50, timedOut: false, cancelled: false }] }),
+    }));
+    expect(result.verdict).toBe('rejected');
+    expect(codes(result)).toContain('gate_failed');
+    expect(result.findings.some(f => f.code === 'acceptance_criterion_covered')).toBe(false);
+  });
+
+  test('covers de aceite inexistente continua violação, mesmo com claim_kind gate_assertion', () => {
+    const result = verifyWorkResult(baseInput({
+      authorized: {
+        includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'],
+        validationCriteria: [{ label: 'unit', command: 'npm test', covers: ['aceite fantasma'], claimKind: 'gate_assertion' }],
+        acceptanceCriteria: [GATE_ASSERTION],
+      },
+    }));
+    expect(result.verdict).toBe('rejected');
+    expect(codes(result)).toContain('criterion_covers_unknown_acceptance');
+  });
+
+  test('cobertura MISTA: mesmo aceite por gate substantivo E gate_assertion ⇒ a prova suficiente vence', () => {
+    const result = verifyWorkResult(baseInput({
+      authorized: {
+        includedScope: ['src/a.ts'], excludedScope: ['src/z.ts'],
+        validationCriteria: [
+          { label: 'unit', command: 'npm test', covers: [GATE_ASSERTION], claimKind: 'substantive' },
+          { label: 'unit', command: 'npm test', covers: [GATE_ASSERTION], claimKind: 'gate_assertion' },
+        ],
+        acceptanceCriteria: [GATE_ASSERTION],
+      },
+      observedGates: gateEvidenceWith(),
+    }));
+    expect(result.verdict).toBe('verified');
+    expect(result.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject)).toContain(GATE_ASSERTION);
+    expect(codes(result)).not.toContain('acceptance_substantive_gate_insufficient');
   });
 });
