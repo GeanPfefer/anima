@@ -1,5 +1,6 @@
 import {
   buildHostObservedGateEvidence,
+  classifyDifferentialGate,
   deriveObservedGateOutcome,
   parseHostObservedGateEvidence,
   projectHostObservedGateEvidence,
@@ -131,6 +132,105 @@ describe('parseHostObservedGateEvidence', () => {
     const raw = JSON.parse(JSON.stringify(serialized())) as Record<string, Json>;
     mutate(raw);
     expect(parseHostObservedGateEvidence(raw as Json)).toBeNull();
+  });
+});
+
+// ============================================================
+// Evidência DIFERENCIAL de gate (base × resultado): representação/classificação
+// PURA e ADITIVA. Adiciona confiança estrutural; NÃO prova comportamento
+// substantivo e NÃO altera o verdict do Verifier.
+// ============================================================
+const baselineInput = (over: Record<string, unknown> = {}) =>
+  ({ baseExitCode: 1, baseTimedOut: false, baseCancelled: false, targetExistedAtBase: true, changeTouchedGateTargets: false, ...over });
+
+const gateWithBaseline = (resultExitCode: number, baselineOver: Record<string, unknown> = {}): ObservedGateOutcomeV1 => {
+  const built = build({ gates: [gate({ exitCode: resultExitCode, baseline: baselineInput(baselineOver) as never })] });
+  if (!built.ok) throw new Error('build falhou');
+  return built.value.gates[0]!;
+};
+
+describe('evidência diferencial de gate — build/parse aditivo (E1)', () => {
+  test('baseline ausente ⇒ gate sem baseline (retrocompatível); classify inconclusive', () => {
+    const built = build();
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value.gates[0]!.baseline).toBeUndefined();
+    expect(classifyDifferentialGate(built.value.gates[0]!)).toBe('inconclusive');
+  });
+
+  test('baseline válido ⇒ baseOutcome DERIVADO e presente', () => {
+    const g = gateWithBaseline(0, { baseExitCode: 1 });
+    expect(g.baseline).toMatchObject({ baseExitCode: 1, baseOutcome: 'failed', targetExistedAtBase: true, changeTouchedGateTargets: false });
+    // base timedOut deriva failed mesmo com exit 0
+    expect(gateWithBaseline(0, { baseExitCode: 0, baseTimedOut: true }).baseline?.baseOutcome).toBe('failed');
+  });
+
+  test('baseline MALFORMADO no build ⇒ OMITIDO, gate/evidência do resultado permanecem válidos', () => {
+    const built = build({ gates: [gate({ exitCode: 0, baseline: { baseExitCode: 'x', baseTimedOut: false, baseCancelled: false, targetExistedAtBase: true, changeTouchedGateTargets: false } as never })] });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value.gates[0]!.outcome).toBe('passed');
+    expect(built.value.gates[0]!.baseline).toBeUndefined();
+    expect(classifyDifferentialGate(built.value.gates[0]!)).toBe('inconclusive');
+  });
+
+  test('ida e volta preserva o baseline; parse recomputa baseOutcome (ignora o gravado)', () => {
+    const built = build({ gates: [gate({ exitCode: 0, baseline: baselineInput({ baseExitCode: 1 }) as never })] });
+    if (!built.ok) throw new Error('build falhou');
+    const raw = JSON.parse(JSON.stringify(built.value)) as Record<string, Json>;
+    // adultera o baseOutcome persistido → parse deve recomputar 'failed'
+    ((raw.gates as Record<string, Json>[])[0]!.baseline as Record<string, Json>).baseOutcome = 'passed';
+    const parsed = parseHostObservedGateEvidence(raw as Json);
+    expect(parsed?.gates[0]!.baseline?.baseOutcome).toBe('failed');
+  });
+
+  test('baseline MALFORMADO no persistido ⇒ OMITIDO, result gate intacto (não invalida a evidência)', () => {
+    const built = build({ gates: [gate({ exitCode: 0, baseline: baselineInput() as never })] });
+    if (!built.ok) throw new Error('build falhou');
+    const raw = JSON.parse(JSON.stringify(built.value)) as Record<string, Json>;
+    ((raw.gates as Record<string, Json>[])[0]!.baseline as Record<string, Json>).targetExistedAtBase = 'sim' as unknown as Json;
+    const parsed = parseHostObservedGateEvidence(raw as Json);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.gates[0]!.outcome).toBe('passed');
+    expect(parsed?.gates[0]!.baseline).toBeUndefined();
+  });
+
+  test('retrocompatibilidade: evidência do formato ANTERIOR (sem baseline) faz ida e volta idêntica', () => {
+    const built = build();
+    if (!built.ok) throw new Error('build falhou');
+    const parsed = parseHostObservedGateEvidence(built.value as unknown as Json);
+    expect(parsed?.gates[0]!.baseline).toBeUndefined();
+    expect(parsed?.gates[0]).toMatchObject({ label: 'unit', outcome: 'passed' });
+  });
+});
+
+describe('classifyDifferentialGate — só fatos estruturais (E2)', () => {
+  test('base FAIL + result PASS + alvo preexistente + não tocado ⇒ discriminating', () => {
+    expect(classifyDifferentialGate(gateWithBaseline(0, { baseExitCode: 1, targetExistedAtBase: true, changeTouchedGateTargets: false }))).toBe('discriminating');
+  });
+  test('alvo NOVO (targetExistedAtBase=false) ⇒ confounded', () => {
+    expect(classifyDifferentialGate(gateWithBaseline(0, { baseExitCode: 1, targetExistedAtBase: false }))).toBe('confounded');
+  });
+  test('alvo MODIFICADO (changeTouchedGateTargets=true) ⇒ confounded', () => {
+    expect(classifyDifferentialGate(gateWithBaseline(0, { baseExitCode: 1, changeTouchedGateTargets: true }))).toBe('confounded');
+  });
+  test('base já PASS ⇒ non_discriminating', () => {
+    expect(classifyDifferentialGate(gateWithBaseline(0, { baseExitCode: 0 }))).toBe('non_discriminating');
+  });
+  test('base FAIL + result NÃO-PASS (alvo limpo) ⇒ confounded (sem PASS a creditar)', () => {
+    expect(classifyDifferentialGate(gateWithBaseline(1, { baseExitCode: 1 }))).toBe('confounded');
+  });
+  test('sem baseline ⇒ inconclusive', () => {
+    const built = build();
+    if (!built.ok) throw new Error('build falhou');
+    expect(classifyDifferentialGate(built.value.gates[0]!)).toBe('inconclusive');
+  });
+  test('NENHUMA interpretação textual: label/command não afetam a classificação', () => {
+    // Um gate cujo label/command "parecem" typecheck, mas base já passou ⇒ non_discriminating,
+    // decidido só por fatos estruturais (não pela semântica do texto).
+    const built = build({ gates: [gate({ label: 'typecheck', command: 'npm run typecheck', exitCode: 0, baseline: baselineInput({ baseExitCode: 0 }) as never })] });
+    if (!built.ok) throw new Error('build falhou');
+    expect(classifyDifferentialGate(built.value.gates[0]!)).toBe('non_discriminating');
   });
 });
 
