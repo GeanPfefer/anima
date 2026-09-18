@@ -155,10 +155,41 @@ infinitamente — mas a *decisão* permanece humana.
   projeção derivada, sem tabela nova) — e, se houver, com versionamento, reader
   compatível, writer guard e contract stamping desde o início (barreira 51929).
 
-## Barreira atual (fronteira humana)
+## Prova E2E real (2026-09-18)
 
 O **dry-run contra o histórico REAL** (`apps/web/scripts/self-deficiency-dry-run-readonly.ts`,
-read-only, US$0) depende da identidade residente (GoTrue Bearer + RLS). Enquanto
-essa identidade não autenticar contra o DB local (usuário residente ausente/chaves
-divergentes), a leitura do histórico real é fronteira humana (humano na UI ou host
-residente com identidade válida). Não se usa `service_role` nem `db reset`.
+read-only, US$0) foi executado sob a identidade residente canônica (GoTrue Bearer
++ RLS; nunca `service_role`). Leu **1130 eventos reais** e o detector produziu **6
+deficiências determinísticas** (todas `open`, nenhuma coberta — 0 work_items com
+`self_deficiency_provenance`):
+
+- `capability_regression|agency.supervised-self-development` (5 ocasiões);
+- `repeated_failure|gate_failed` (11 work_items);
+- `repeated_failure|ollama_no_effective_edits` (2 work_items);
+- `repeated_failure|ollama_read_round_limit` (3 work_items);
+- `repeated_failure|ollama_transport_error` (3 work_items);
+- `verifier_recurrent_issue|agency.supervised-self-development` (5 ocasiões).
+
+Dos **55** `execution_failed` reais, só **22** (as 4 causas que recorrem em ≥2
+work_items) viraram deficiência; as demais são causa não-classificável (ignorada,
+fail-closed) ou aparecem num único work_item — o comportamento conservador provado
+em dados reais. Todos os `evidenceRefs` de `work_event` resolvem 100% para
+`execution_failed` reais; nenhuma proposta foi materializada.
+
+Observações honestas (não são bugs; o detector operou corretamente): (1)
+`agency.supervised-self-development` é sinalizado por DUAS classes
+(`capability_regression` e `verifier_recurrent_issue`) — duas lentes sobre as
+mesmas 5 ocasiões negativas; ambas verdadeiras; (2) `gate_failed` é a causa mais
+COARSE (11 tarefas heterogêneas sob um código canônico único) — cabe ao humano
+decidir se é UMA deficiência estrutural ou várias.
+
+### Causa-raiz da barreira AUTH anterior (resolvida, não destrutiva)
+
+A sessão anterior não autenticou porque `ANIMA_RESIDENT_PASSWORD` em
+`apps/web/.env.local` continha um `#` no meio do valor **sem aspas**. O parser
+`--env-file` do Node trata `#` como início de comentário inline em valor não
+citado e **truncava a senha**, quebrando o sign-in do runner — o que afeta também
+o Resident Host e a CLI (mesmo runner). Correção: **citar o valor** em
+`.env.local` (reconciliação não destrutiva do segredo existente; sem
+`service_role`, sem `db reset`, sem recriar usuário). O detector NÃO precisou de
+mudança.
