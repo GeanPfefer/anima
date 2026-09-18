@@ -61,6 +61,26 @@ describe('Self-Improvement V0 — formulação determinística', () => {
     expect(p.capability).toBe('programming');
   });
 
+  test('verifier_recurrent_issue descreve recorrencia sem inventar causa comum', () => {
+    const d = deficiency({
+      id: 'verifier_recurrent_issue|agency.supervised-self-development',
+      kind: 'verifier_recurrent_issue',
+      subject: 'agency.supervised-self-development',
+      summary: 'A revisao humana pediu mudancas em multiplas auto-modificacoes verificadas.',
+      rationale: 'Ha recorrencia de verified -> changes_requested, sem prova de uma causa unica.',
+      occasions: 5,
+      occurrences: 5,
+    });
+
+    const proposal = formulateImprovementProposal(d);
+
+    expect(proposal.objective).toContain('falsos positivos semânticos');
+    expect(proposal.expectedOutcome).toContain('verified → changes_requested');
+    expect(proposal.acceptanceCriteria.join(' ')).toContain('sem presumir que compartilham a mesma causa');
+    expect(proposal.acceptanceCriteria.join(' ')).not.toContain('changes_requested pela mesma causa');
+    expect(proposal.suggestedScope).toContain('Não inferir causa comum quando as razões de revisão diferirem.');
+    expect(proposal.risk).toContain('nem inferir causa comum a partir de texto livre');
+  });
   test('cada classe de deficiência tem template próprio', () => {
     const kinds = ['repeated_failure', 'capability_regression', 'verifier_recurrent_issue'] as const;
     const objectives = kinds.map(kind => formulateImprovementProposal(deficiency({ kind, subject: 'x', id: `${kind}|x` })).objective);

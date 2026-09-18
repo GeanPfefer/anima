@@ -103,18 +103,19 @@ const TEMPLATES: Record<SelfDeficiencyKind, KindTemplate> = {
     affectsCapability: true,
   },
   verifier_recurrent_issue: {
-    objective: d => `Fechar a lacuna de qualidade em "${d.subject}" que a verificação automática não captura e a revisão humana rejeita.`,
-    expectedOutcome: d => `Auto-modificações de "${d.subject}" passam a sustentar a revisão humana, sem o padrão de falso-positivo verificado.`,
+    objective: d => `Reduzir os falsos positivos sem\u00e2nticos em "${d.subject}": resultados verificados automaticamente que n\u00e3o sustentam a revis\u00e3o humana.`,
+    expectedOutcome: d => `Auto-modifica\u00e7\u00f5es de "${d.subject}" passam a apresentar evid\u00eancia semanticamente suficiente para a revis\u00e3o humana, reduzindo a recorr\u00eancia de verified \u2192 changes_requested.`,
     acceptanceCriteria: d => [
-      'A verificação passa a detectar o tipo de problema que a revisão humana vinha apontando.',
-      `Uma nova auto-modificação de "${d.subject}" é aceita na revisão humana sem changes_requested pela mesma causa.`,
-      'O critério que separava "verificado" de "aprovável" é tornado explícito e testável.',
+      'As rejei\u00e7\u00f5es humanas hist\u00f3ricas s\u00e3o caracterizadas por classes de lacuna observ\u00e1vel, sem presumir que compartilham a mesma causa.',
+      'A verifica\u00e7\u00e3o relaciona explicitamente crit\u00e9rios materiais aprovados \u00e0s evid\u00eancias que os sustentam, em vez de inferir cobertura sem\u00e2ntica apenas de gates verdes.',
+      `Uma nova auto-modifica\u00e7\u00e3o de "${d.subject}" percorre verifica\u00e7\u00e3o e revis\u00e3o humana sem repetir um falso positivo sem\u00e2ntico j\u00e1 caracterizado.`,
     ],
     suggestedScope: () => [
-      'Caracterizar o que a revisão humana apontou nas ocasiões rejeitadas.',
-      'Fortalecer o critério/verificador para capturar essa classe antes da revisão.',
+      'Caracterizar as classes de lacuna presentes nas ocasi\u00f5es verified \u2192 changes_requested.',
+      'Fortalecer o v\u00ednculo entre crit\u00e9rios aprovados, evid\u00eancia observada e parecer do verifier.',
+      'N\u00e3o inferir causa comum quando as raz\u00f5es de revis\u00e3o diferirem.',
     ],
-    risk: 'Não transformar preferência subjetiva em gate rígido; capturar apenas o padrão recorrente comprovado.',
+    risk: 'N\u00e3o transformar prefer\u00eancia subjetiva em gate r\u00edgido nem inferir causa comum a partir de texto livre; fortalecer apenas lacunas sustentadas por evid\u00eancia.',
     affectsCapability: true,
   },
 };
