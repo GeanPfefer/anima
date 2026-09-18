@@ -149,16 +149,26 @@ export async function planExecutableProjectWork(
           // separados — cada comando já foi validado na allowlist por parseProposal
           // e é escopado aqui igual ao principal. São N gates, nunca um `A && B`.
           // Sem additional_validations ⇒ exatamente um critério, como antes.
+          // Cada gate do planner é sempre prova por COMANDO (`proof:'gate'`,
+          // explícito) e carrega seu `claim_kind` estrutural (gate_assertion ×
+          // substantive), declarado pelo planner e normalizado fail-closed pelo
+          // host. O campo é propagado SEM perda até aqui, para o Verifier lê-lo
+          // como dado — sem heurística de texto. Critérios `proof:'scope'` não são
+          // produzidos pelo planner e seguem inalterados em outros produtores.
           validation_criteria: [
             {
               label: proposal.validation_label,
               command: scopeTestCommandToWorkspace(proposal.validation_command, proposal.included_scope),
               covers: proposal.validation_covers,
+              proof: 'gate',
+              claim_kind: proposal.validation_claim_kind,
             },
             ...(proposal.additional_validations ?? []).map(validation => ({
               label: validation.label,
               command: scopeTestCommandToWorkspace(validation.command, proposal.included_scope),
               covers: validation.covers,
+              proof: 'gate',
+              claim_kind: validation.claim_kind,
             })),
           ],
           limits: { max_attempts: 3, max_duration_minutes: 30 },

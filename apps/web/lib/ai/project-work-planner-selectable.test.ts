@@ -211,14 +211,20 @@ describe('parseAdditionalValidations — autoridade do host sobre provas adicion
     expect(parseAdditionalValidations([])).toBeUndefined();
   });
 
-  test('provas válidas na allowlist são normalizadas e preservadas', () => {
+  test('provas válidas na allowlist são normalizadas e preservadas (claim_kind ausente ⇒ substantive conservador)', () => {
     expect(parseAdditionalValidations([
       { label: 'Regressão do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts', covers: ['regressão'] },
-      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['tipos'] },
+      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['tipos'], claim_kind: 'gate_assertion' },
     ])).toEqual([
-      { label: 'Regressão do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts', covers: ['regressão'] },
-      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['tipos'] },
+      { label: 'Regressão do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts', covers: ['regressão'], claim_kind: 'substantive' },
+      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['tipos'], claim_kind: 'gate_assertion' },
     ]);
+  });
+
+  test('fail-closed: claim_kind inválido em prova adicional ⇒ null', () => {
+    expect(parseAdditionalValidations([
+      { label: 'x', command: 'npm run typecheck --workspace=apps/web', covers: ['e'], claim_kind: 'gate' },
+    ])).toBeNull();
   });
 
   test('fail-closed: não-array, entrada sem command, comando fora da allowlist e composto (&&) ⇒ null', () => {
@@ -258,7 +264,7 @@ describe('planExecutableProjectWork — múltiplos validation_criteria governado
     if (!result.ok) return;
     const spec = (result.command.intent as { execution_spec: { validation_criteria: Array<{ label: string; command: string }> } }).execution_spec;
     expect(spec.validation_criteria).toEqual([
-      { label: 'coder-backend', command: 'npm test --workspace=apps/web -- coder-backend.test.ts', covers: ['gate verde'] },
+      { label: 'coder-backend', command: 'npm test --workspace=apps/web -- coder-backend.test.ts', covers: ['gate verde'], proof: 'gate', claim_kind: 'substantive' },
     ]);
   });
 
@@ -281,9 +287,9 @@ describe('planExecutableProjectWork — múltiplos validation_criteria governado
     if (!result.ok) return;
     const spec = (result.command.intent as { execution_spec: { validation_criteria: Array<{ label: string; command: string }> } }).execution_spec;
     expect(spec.validation_criteria).toEqual([
-      { label: 'Testes unitários direcionados de ollama-protocol', command: 'npm test --workspace=apps/web -- ollama-protocol.test.ts', covers: ['gate verde'] },
-      { label: 'Regressão de compatibilidade do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts', covers: ['gate verde'] },
-      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['gate verde'] },
+      { label: 'Testes unitários direcionados de ollama-protocol', command: 'npm test --workspace=apps/web -- ollama-protocol.test.ts', covers: ['gate verde'], proof: 'gate', claim_kind: 'substantive' },
+      { label: 'Regressão de compatibilidade do ollama-coder', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts', covers: ['gate verde'], proof: 'gate', claim_kind: 'substantive' },
+      { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['gate verde'], proof: 'gate', claim_kind: 'substantive' },
     ]);
     // Rodar um teste externo ao diff NÃO amplia o included_scope de ESCRITA.
     expect(result.command.proposal.data.includedScope).toEqual([
@@ -303,6 +309,64 @@ describe('planExecutableProjectWork — múltiplos validation_criteria governado
     const args = validArgs({ additional_validations: [{ label: 'gambiarra', command: 'npm test --workspace=apps/web -- ollama-coder.test.ts && npm run typecheck --workspace=apps/web' }] });
     const result = await planExecutableProjectWork('faça', base, fakePlanner(args));
     expect(result.ok).toBe(false);
+  });
+});
+
+// claim_kind: o planner DECLARA (gate_assertion × substantive); o host propaga o
+// dado ESTRUTURAL até execution_spec.validation_criteria sem perda, fail-closed e
+// SEM heurística de texto. proof:'gate' fica explícito em cada gate do planner.
+describe('planExecutableProjectWork — propagação de claim_kind (produtor)', () => {
+  const specOf = (result: Awaited<ReturnType<typeof planExecutableProjectWork>>) => {
+    if (!result.ok) throw new Error('esperava sucesso');
+    return (result.command.intent as { execution_spec: { validation_criteria: Array<{ label: string; proof?: string; claim_kind?: string }> } }).execution_spec;
+  };
+
+  test('gate principal: claim_kind explícito (gate_assertion) propaga com proof:gate', async () => {
+    const result = await planExecutableProjectWork('faça', base, fakePlanner(validArgs({ validation_claim_kind: 'gate_assertion' })));
+    expect(result.ok).toBe(true);
+    const spec = specOf(result);
+    expect(spec.validation_criteria[0]).toMatchObject({ proof: 'gate', claim_kind: 'gate_assertion' });
+  });
+
+  test('additional_validations: cada claim_kind declarado propaga (mistura gate_assertion × substantive)', async () => {
+    const args = validArgs({
+      expected_effects: ['gate verde', 'tipos'],
+      validation_claim_kind: 'gate_assertion',
+      additional_validations: [
+        { label: 'Typecheck web', command: 'npm run typecheck --workspace=apps/web', covers: ['tipos'], claim_kind: 'gate_assertion' },
+      ],
+    });
+    const result = await planExecutableProjectWork('faça', base, fakePlanner(args));
+    expect(result.ok).toBe(true);
+    const spec = specOf(result);
+    expect(spec.validation_criteria.map(c => c.claim_kind)).toEqual(['gate_assertion', 'gate_assertion']);
+    expect(spec.validation_criteria.every(c => c.proof === 'gate')).toBe(true);
+  });
+
+  test('ausência ⇒ substantive conservador no execution_spec (nunca gate_assertion por default)', async () => {
+    const result = await planExecutableProjectWork('faça', base, fakePlanner(validArgs()));
+    expect(result.ok).toBe(true);
+    expect(specOf(result).validation_criteria[0]!.claim_kind).toBe('substantive');
+  });
+
+  test('fail-closed: claim_kind inválido no gate principal reprova a proposta inteira', async () => {
+    const result = await planExecutableProjectWork('faça', base, fakePlanner(validArgs({ validation_claim_kind: 'gate' })));
+    expect(result.ok).toBe(false);
+  });
+
+  test('SEM heurística: label/comando "typecheck" declarados substantive PERMANECEM substantive', async () => {
+    // Mesmo que o comando "pareça" um typecheck (gate_assertion natural), a
+    // declaração do planner é a autoridade — o host NÃO reclassifica por texto.
+    const args = validArgs({
+      expected_effects: ['tipos coerentes'],
+      validation_label: 'Typecheck web',
+      validation_command: 'npm run typecheck --workspace=apps/web',
+      validation_covers: ['tipos coerentes'],
+      validation_claim_kind: 'substantive',
+    });
+    const result = await planExecutableProjectWork('faça', base, fakePlanner(args));
+    expect(result.ok).toBe(true);
+    expect(specOf(result).validation_criteria[0]!.claim_kind).toBe('substantive');
   });
 });
 describe('replanejamento de correção de proposta', () => {

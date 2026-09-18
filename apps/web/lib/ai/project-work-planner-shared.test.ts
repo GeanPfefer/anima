@@ -1,0 +1,136 @@
+/** @jest-environment node */
+import {
+  SUBMIT_PARAMETERS,
+  parseProposal,
+  parseAdditionalValidations,
+  normalizeClaimKind,
+} from './project-work-planner-shared';
+
+// ============================================================
+// Contrato claim_kind do Project Work Planner (host-side): o planner DECLARA a
+// classe de afirmação de cada gate; o host valida fail-closed e SEM heurística de
+// texto. Ausência ⇒ substantive conservador (nunca gate_assertion); valor inválido
+// ⇒ proposta rejeitada. Espelha o `WorkClaimKind` canônico lido pelo Verifier v3.
+// ============================================================
+
+const validArgs = (over: Record<string, unknown> = {}): string =>
+  JSON.stringify({
+    summary: 'Ajuste pequeno',
+    objective: 'Objetivo claro',
+    included_scope: ['apps/web/lib/ai/project-work-planner.ts'],
+    excluded_scope: ['Não alterar banco'],
+    expected_effects: ['gate verde'],
+    risks: ['variância'],
+    validation_label: 'unit',
+    validation_command: 'npm test -- coder-backend.test.ts',
+    validation_covers: ['gate verde'],
+    validation_claim_kind: 'gate_assertion',
+    additional_validations: [],
+    ...over,
+  });
+
+describe('normalizeClaimKind — fail-closed sem heurística', () => {
+  test('valores válidos passam', () => {
+    expect(normalizeClaimKind('gate_assertion')).toBe('gate_assertion');
+    expect(normalizeClaimKind('substantive')).toBe('substantive');
+  });
+  test('ausência (undefined/null) ⇒ substantive conservador, NUNCA gate_assertion', () => {
+    expect(normalizeClaimKind(undefined)).toBe('substantive');
+    expect(normalizeClaimKind(null)).toBe('substantive');
+  });
+  test('valor fora do domínio ⇒ null (rejeição)', () => {
+    expect(normalizeClaimKind('gate')).toBeNull();
+    expect(normalizeClaimKind('GATE_ASSERTION')).toBeNull();
+    expect(normalizeClaimKind(1)).toBeNull();
+    expect(normalizeClaimKind({})).toBeNull();
+  });
+});
+
+describe('SUBMIT_PARAMETERS — schema enviado ao modelo exige claim_kind', () => {
+  test('validation_claim_kind é enum obrigatório', () => {
+    const props = SUBMIT_PARAMETERS.properties as Record<string, { enum?: readonly string[] }>;
+    expect(props.validation_claim_kind?.enum).toEqual(['gate_assertion', 'substantive']);
+    expect(SUBMIT_PARAMETERS.required as readonly string[]).toContain('validation_claim_kind');
+  });
+  test('cada additional_validation exige claim_kind (enum)', () => {
+    const item = (SUBMIT_PARAMETERS.properties as { additional_validations: { items: { properties: Record<string, { enum?: readonly string[] }>; required: readonly string[] } } })
+      .additional_validations.items;
+    expect(item.properties.claim_kind?.enum).toEqual(['gate_assertion', 'substantive']);
+    expect(item.required).toContain('claim_kind');
+  });
+});
+
+describe('parseProposal — claim_kind do gate principal', () => {
+  test('1. gate_assertion válido é aceito e preservado', () => {
+    const parsed = parseProposal(validArgs({ validation_claim_kind: 'gate_assertion' }));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.validation_claim_kind).toBe('gate_assertion');
+  });
+
+  test('2. substantive válido é aceito e preservado', () => {
+    const parsed = parseProposal(validArgs({ validation_claim_kind: 'substantive' }));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.validation_claim_kind).toBe('substantive');
+  });
+
+  test('3. claim_kind inválido rejeita a proposta (fail-closed)', () => {
+    expect(parseProposal(validArgs({ validation_claim_kind: 'gate' }))).toBeNull();
+    expect(parseProposal(validArgs({ validation_claim_kind: '' }))).toBeNull();
+    expect(parseProposal(validArgs({ validation_claim_kind: 123 }))).toBeNull();
+  });
+
+  test('4. claim_kind ausente ⇒ substantive conservador (nunca gate_assertion)', () => {
+    const raw = JSON.stringify({
+      summary: 's', objective: 'o',
+      included_scope: ['apps/web/lib/ai/project-work-planner.ts'],
+      excluded_scope: ['x'], expected_effects: ['e'], risks: ['r'],
+      validation_label: 'unit', validation_command: 'npm test -- x.test.ts',
+      validation_covers: ['e'], additional_validations: [],
+      // validation_claim_kind AUSENTE de propósito
+    });
+    const parsed = parseProposal(raw);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.validation_claim_kind).toBe('substantive');
+  });
+
+  test('5. resposta malformada (JSON inválido) NÃO é silenciosamente consertada', () => {
+    expect(parseProposal('{ isso não é json')).toBeNull();
+    expect(parseProposal('null')).toBeNull();
+  });
+
+  test('8. SEM heurística: comando "typecheck" declarado substantive permanece substantive', () => {
+    const parsed = parseProposal(validArgs({
+      validation_label: 'typecheck', validation_command: 'npm run typecheck --workspace=apps/web',
+      validation_claim_kind: 'substantive',
+    }));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.validation_claim_kind).toBe('substantive');
+  });
+
+  test('10. covers fora de expected_effects continua inválido (contrato preservado)', () => {
+    expect(parseProposal(validArgs({ validation_covers: ['efeito fantasma'] }))).toBeNull();
+  });
+});
+
+describe('parseAdditionalValidations — claim_kind por prova adicional', () => {
+  test('6/7. claim_kind explícito por prova é preservado; ausência ⇒ substantive', () => {
+    const result = parseAdditionalValidations([
+      { label: 'a', command: 'npm run typecheck --workspace=apps/web', covers: ['x'], claim_kind: 'gate_assertion' },
+      { label: 'b', command: 'npm test --workspace=apps/web -- y.test.ts', covers: ['y'] },
+    ]);
+    expect(result).toEqual([
+      { label: 'a', command: 'npm run typecheck --workspace=apps/web', covers: ['x'], claim_kind: 'gate_assertion' },
+      { label: 'b', command: 'npm test --workspace=apps/web -- y.test.ts', covers: ['y'], claim_kind: 'substantive' },
+    ]);
+  });
+
+  test('claim_kind inválido em prova adicional ⇒ null (rejeita a proposta inteira via parseProposal)', () => {
+    expect(parseAdditionalValidations([
+      { label: 'a', command: 'npm run typecheck --workspace=apps/web', covers: ['x'], claim_kind: 'bogus' },
+    ])).toBeNull();
+    expect(parseProposal(validArgs({
+      expected_effects: ['gate verde', 'x'],
+      additional_validations: [{ label: 'a', command: 'npm run typecheck --workspace=apps/web', covers: ['x'], claim_kind: 'bogus' }],
+    }))).toBeNull();
+  });
+});

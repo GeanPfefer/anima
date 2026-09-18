@@ -77,9 +77,12 @@ describe('planejador executável do projeto', () => {
       },
     });
     // O SHA-base autorizado foi capturado e persistido no contrato.
-    const spec = (result.command.intent as { execution_spec: { base_sha?: unknown; model?: unknown } }).execution_spec;
+    const spec = (result.command.intent as { execution_spec: { base_sha?: unknown; model?: unknown; validation_criteria: Array<{ proof?: string; claim_kind?: string }> } }).execution_spec;
     expect(String(spec.base_sha)).toMatch(/^[a-f0-9]{40}$/);
     expect(typeof spec.model).toBe('string');
+    // claim_kind propaga do planner ao execution_spec; a fixture OpenAI omite o
+    // campo ⇒ fallback conservador substantive (nunca gate_assertion), com proof:gate.
+    expect(spec.validation_criteria[0]).toMatchObject({ proof: 'gate', claim_kind: 'substantive' });
   });
 
   test('falha de tool nao libera evidencia no planner OpenAI', async () => {
