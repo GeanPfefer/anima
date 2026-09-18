@@ -61,6 +61,18 @@ export interface AutonomousValidationCriterion {
   /** Classe de afirmação de um critério `proof:'gate'` (ver `WorkClaimKind`). Ausente
    * ⇒ o Verifier a trata de forma CONSERVADORA (não promovida a `gate_assertion`). */
   readonly claimKind?: WorkClaimKind;
+  /**
+   * Alvo(s) ESTRUTURAL(is) do gate: caminhos relativos que este gate exercita/alveja
+   * (inclui o(s) arquivo(s) de teste). Declarado, nunca inferido do `command`. Serve a
+   * consumidores que precisam correlacionar o gate a arquivos SEM parsear texto — ex.:
+   * uma evidência diferencial derivar `targetExistedAtBase` (git no base_sha) e
+   * `changeTouchedGateTargets` (interseção com os arquivos alterados). Ausente ⇒
+   * critério idêntico ao contrato anterior (retrocompatível). Quando presente: lista
+   * NÃO-VAZIA de caminhos relativos SEGUROS (sem absolutos/traversal/segmentos sensíveis);
+   * qualquer item malformado invalida o spec inteiro (fail-closed). NÃO impõe relação
+   * com `included_scope` (o alvo do gate pode estar fora do escopo de escrita).
+   */
+  readonly targetPaths?: readonly string[];
 }
 export interface AutonomousExecutionSpecV1 {
   readonly schemaVersion: 1;
@@ -153,6 +165,26 @@ const isPositiveInteger = (value: Json | undefined): value is number =>
 
 const targetKinds: ReadonlySet<string> = new Set(['project', 'workspace', 'resource']);
 
+/**
+ * Um caminho de `target_paths` é um caminho relativo SEGURO? Espelha a régua de
+ * `safePath` do host (não absoluto, sem drive, sem traversal, sem segmentos/arquivos
+ * sensíveis). É verificação de FORMA/segurança — nunca checa existência (isso é o
+ * consumidor, ex.: git no base_sha). Puro; sem heurística de texto sobre o comando.
+ */
+const isSafeRelativePath = (value: Json | undefined): value is string => {
+  if (typeof value !== 'string' || value.trim().length === 0) return false;
+  const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!normalized || normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return false;
+  const segments = normalized.toLowerCase().split('/');
+  return !segments.includes('..')
+    && !segments.includes('.git')
+    && !segments.includes('node_modules')
+    && !segments.includes('.next')
+    && !segments.includes('.worktrees')
+    && !segments.some(segment => segment === '.env' || segment.startsWith('.env.'))
+    && !/\.(?:pem|key|p12|pfx)$/i.test(normalized);
+};
+
 type SpecParse =
   | { readonly kind: 'absent' }
   | { readonly kind: 'invalid' }
@@ -202,10 +234,18 @@ const parseValidationCriteria = (raw: Readonly<Record<string, Json>>): readonly 
     // é honesta (o Verifier trata como conservador, NÃO promove a `gate_assertion`).
     const claimKind = entry['claim_kind'];
     if (claimKind !== undefined && claimKind !== 'gate_assertion' && claimKind !== 'substantive') return null;
+    // FAIL-CLOSED: `target_paths`, quando presente, é lista NÃO-VAZIA de caminhos
+    // relativos seguros; ausência é honesta (critério idêntico ao anterior). Qualquer
+    // item malformado (não-array, vazio, não-string, absoluto/traversal/sensível)
+    // invalida o spec. Nunca inferido do comando.
+    const targetPaths = entry['target_paths'];
+    if (targetPaths !== undefined && (!Array.isArray(targetPaths) || targetPaths.length === 0
+      || !targetPaths.every(isSafeRelativePath))) return null;
     criteria.push({ label, ...(command === undefined ? {} : { command }),
       ...(covers === undefined ? {} : { covers: covers as readonly string[] }),
       ...(proof === undefined ? {} : { proof: proof as WorkProofKind }),
-      ...(claimKind === undefined ? {} : { claimKind: claimKind as WorkClaimKind }) });
+      ...(claimKind === undefined ? {} : { claimKind: claimKind as WorkClaimKind }),
+      ...(targetPaths === undefined ? {} : { targetPaths: targetPaths as readonly string[] }) });
   }
   return criteria;
 };

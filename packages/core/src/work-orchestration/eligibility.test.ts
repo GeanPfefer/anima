@@ -1,4 +1,4 @@
-import { buildNotEligibleBlockPayload, evaluateAutonomousEligibility, type AutonomousEligibilityGapCode, type WorkItem, type WorkState } from '.';
+import { buildNotEligibleBlockPayload, evaluateAutonomousEligibility, readAutonomousExecutionSpec, type AutonomousEligibilityGapCode, type WorkItem, type WorkState } from '.';
 import type { Json } from '@anima/types';
 
 const fullSpec: Json = { schema_version: 1, target: { kind: 'project', reference: 'G:/anima' }, permissions: ['read_repo', 'run_tests'], validation_criteria: [{ label: 'npm test', command: 'npm test' }], limits: { max_attempts: 3 } };
@@ -63,6 +63,65 @@ describe('elegibilidade autônoma — especificação de execução (fail-closed
   test('limites sem nenhum valor faltam', () => expect(codes(withSpec({ limits: {} }))).toEqual(['limits_missing']));
   test('limite não inteiro positivo falta', () => expect(codes(withSpec({ limits: { max_attempts: 0 } }))).toEqual(['limits_missing']));
   test('limite fracionário falta', () => expect(codes(withSpec({ limits: { max_duration_minutes: 2.5 } }))).toEqual(['limits_missing']));
+});
+
+describe('elegibilidade autônoma — target_paths estrutural do gate (aditivo, fail-closed)', () => {
+  const withSpec = (spec: Record<string, Json>): WorkItem => makeItem({}, { ...(fullSpec as object), ...spec } as Json);
+  const criterion = (over: Record<string, Json>): Record<string, Json> => ({ label: 'unit', command: 'npm test', ...over });
+
+  test('target_paths válido (único) é projetado no spec', () => {
+    expect(evaluateAutonomousEligibility(withSpec({ validation_criteria: [criterion({ target_paths: ['apps/web/lib/ai/x.test.ts'] })] })))
+      .toMatchObject({ eligible: true, spec: { validationCriteria: [{ label: 'unit', targetPaths: ['apps/web/lib/ai/x.test.ts'] }] } });
+  });
+
+  test('múltiplos target_paths são preservados na ordem', () => {
+    const paths = ['packages/core/src/a.ts', 'packages/core/src/a.test.ts'];
+    expect(evaluateAutonomousEligibility(withSpec({ validation_criteria: [criterion({ target_paths: paths })] })))
+      .toMatchObject({ eligible: true, spec: { validationCriteria: [{ targetPaths: paths }] } });
+  });
+
+  test('ausência de target_paths ⇒ critério IDÊNTICO ao anterior (retrocompatível, sem o campo)', () => {
+    const result = evaluateAutonomousEligibility(withSpec({ validation_criteria: [criterion({})] }));
+    expect(result.eligible).toBe(true);
+    if (result.eligible) expect(result.spec.validationCriteria[0]!.targetPaths).toBeUndefined();
+  });
+
+  test('formato ANTIGO (spec sem target_paths em nenhum critério) continua elegível e igual', () => {
+    expect(evaluateAutonomousEligibility(makeItem())).toMatchObject({ eligible: true, spec: { validationCriteria: [{ label: 'npm test', command: 'npm test' }] } });
+  });
+
+  test.each<[string, Json]>([
+    ['caminho absoluto (posix)', ['/etc/passwd']],
+    ['caminho com drive (win)', ['C:/segredo.ts']],
+    ['traversal', ['../fora.ts']],
+    ['item não-string', [123 as unknown as Json]],
+    ['item em branco', ['   ']],
+    ['segmento sensível node_modules', ['node_modules/x.ts']],
+    ['arquivo sensível .env', ['apps/web/.env.local']],
+    ['array vazio (contrato: lista não-vazia)', []],
+    ['não-array', 'apps/web/x.ts' as unknown as Json],
+  ])('fail-closed: target_paths %s ⇒ validation_criteria_missing', (_label, bad) => {
+    expect(codes(withSpec({ validation_criteria: [criterion({ target_paths: bad })] }))).toEqual(['validation_criteria_missing']);
+  });
+
+  test('parsing preserva claim_kind/proof/covers ao lado de target_paths', () => {
+    const spec = withSpec({ validation_criteria: [criterion({ covers: ['tela X migrada com testes verdes'], proof: 'gate', claim_kind: 'gate_assertion', target_paths: ['packages/core/src/a.test.ts'] })] });
+    expect(evaluateAutonomousEligibility(spec)).toMatchObject({
+      eligible: true,
+      spec: { validationCriteria: [{ label: 'unit', command: 'npm test', covers: ['tela X migrada com testes verdes'], proof: 'gate', claimKind: 'gate_assertion', targetPaths: ['packages/core/src/a.test.ts'] }] },
+    });
+  });
+
+  test('readAutonomousExecutionSpec expõe target_paths quando presente', () => {
+    const item = withSpec({ validation_criteria: [criterion({ target_paths: ['packages/core/src/a.test.ts'] })] });
+    const spec = readAutonomousExecutionSpec(item.intent);
+    expect(spec?.validationCriteria[0]!.targetPaths).toEqual(['packages/core/src/a.test.ts']);
+  });
+
+  test('readAutonomousExecutionSpec: ausência de target_paths continua null-safe e omite o campo', () => {
+    const spec = readAutonomousExecutionSpec(makeItem().intent);
+    expect(spec?.validationCriteria[0]!.targetPaths).toBeUndefined();
+  });
 });
 
 describe('elegibilidade autônoma — combinações e payload de bloqueio', () => {
