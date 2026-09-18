@@ -1,6 +1,7 @@
 import { isValidWorkIntent, isValidWorkProposal, type CreateWorkProposalCommand } from './work-orchestration';
 import type { SelfDeficiencyV0 } from './self-deficiency';
 import {
+  blockingSelfDeficiencyIds,
   buildSelfDeficiencyProvenance,
   buildSelfImprovementProposalCommand,
   formulateImprovementProposal,
@@ -35,15 +36,50 @@ interface FakeDeps extends SelfImprovementMaterializerDeps {
   readonly created: CreateWorkProposalCommand[];
 }
 
-function fakeDeps(materialized: readonly string[] = []): FakeDeps {
+function coverage(
+  state:
+    | 'proposed'
+    | 'approved'
+    | 'in_progress'
+    | 'blocked'
+    | 'review'
+    | 'changes_requested'
+    | 'completed'
+    | 'failed'
+    | 'rejected'
+    | 'cancelled',
+  deficiencyId = 'repeated_failure|gate_failed',
+) {
+  return {
+    deficiencyId,
+    workItemId: `wi-${state}`,
+    state,
+    updatedAt: '2026-09-12T10:00:00.000Z',
+  } as const;
+}
+
+function fakeDeps(
+  entries: readonly ReturnType<typeof coverage>[] = [],
+): FakeDeps {
   const audit: string[] = [];
   const created: CreateWorkProposalCommand[] = [];
+
   return {
     audit,
     created,
-    readMaterializedDeficiencyIds: async () => { audit.push('read'); return new Set(materialized); },
-    persistSourceMessage: async () => { audit.push('persistSourceMessage'); return 'msg-1'; },
-    createProposal: async (command) => { audit.push('createProposal'); created.push(command); return { ok: true, workItemId: 'wi-1' }; },
+    readDeficiencyCoverage: async () => {
+      audit.push('read');
+      return entries;
+    },
+    persistSourceMessage: async () => {
+      audit.push('persistSourceMessage');
+      return 'msg-1';
+    },
+    createProposal: async (command) => {
+      audit.push('createProposal');
+      created.push(command);
+      return { ok: true, workItemId: 'wi-1' };
+    },
   };
 }
 
@@ -138,12 +174,75 @@ describe('Self-Improvement V0 — materialização governada (para antes da apro
     expect(command.intent).not.toHaveProperty('authority');
     expect(command.intent).not.toHaveProperty('reservation');
   });
+  test('8/dedup. work ATIVO equivalente bloqueia nova proposta', async () => {
+    const deps = fakeDeps([coverage('approved')]);
 
-  test('8/dedup. deficiência já materializada não gera nova proposta', async () => {
-    const deps = fakeDeps(['repeated_failure|gate_failed']);
-    const result = await materializeSelfImprovementProposal({ candidates: [deficiency()] }, deps);
+    const result = await materializeSelfImprovementProposal(
+      { candidates: [deficiency()] },
+      deps,
+    );
+
     expect(result).toEqual({ ok: false, reason: 'no_candidate' });
-    expect(deps.audit).toEqual(['read']); // nada além da leitura de correlação
+    expect(deps.audit).toEqual(['read']);
+  });
+
+  test('terminal negativo não vira dedup eterno: open pode gerar replacement', async () => {
+    for (const state of ['cancelled', 'failed', 'rejected'] as const) {
+      const deps = fakeDeps([coverage(state)]);
+
+      const result = await materializeSelfImprovementProposal(
+        { candidates: [deficiency()] },
+        deps,
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        deficiencyId: 'repeated_failure|gate_failed',
+      });
+
+      expect(deps.audit).toEqual([
+        'read',
+        'persistSourceMessage',
+        'createProposal',
+      ]);
+    }
+  });
+
+  test('completed não bloqueia deficiency reopened após recorrência', async () => {
+    const deps = fakeDeps([coverage('completed')]);
+
+    const result = await materializeSelfImprovementProposal(
+      { candidates: [deficiency({ status: 'reopened' })] },
+      deps,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      deficiencyId: 'repeated_failure|gate_failed',
+    });
+
+    expect(deps.audit).toEqual([
+      'read',
+      'persistSourceMessage',
+      'createProposal',
+    ]);
+  });
+
+  test('blockingSelfDeficiencyIds contém somente estados ativos/aguardando', () => {
+    const ids = blockingSelfDeficiencyIds([
+      coverage('proposed', 'a'),
+      coverage('approved', 'b'),
+      coverage('in_progress', 'c'),
+      coverage('blocked', 'd'),
+      coverage('review', 'e'),
+      coverage('changes_requested', 'f'),
+      coverage('completed', 'g'),
+      coverage('failed', 'h'),
+      coverage('rejected', 'i'),
+      coverage('cancelled', 'j'),
+    ]);
+
+    expect([...ids].sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
   });
 
   test('deficiência covered/resolved não é candidata a proposta', () => {

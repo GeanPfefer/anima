@@ -20,7 +20,9 @@
 // duplicar a proposta da mesma deficiência (espelha `canonical_provenance`).
 // ============================================================
 
-import { selfDeficienciesAwaitingProposal, type SelfDeficiencyKind, type SelfDeficiencyV0, type SelfDeficiencyEvidenceRef } from './self-deficiency';
+import { selfDeficienciesAwaitingProposal, type SelfDeficiencyKind, isSelfDeficiencyBlockingWorkState,
+  type SelfDeficiencyCoverage,
+  type SelfDeficiencyV0, type SelfDeficiencyEvidenceRef } from './self-deficiency';
 import type {
   CreateWorkProposalCommand,
   SourceMessageId,
@@ -279,7 +281,7 @@ export function buildSelfImprovementProposalCommand(input: {
 export interface SelfImprovementMaterializerDeps {
   /** Correlação REAL: deficiencyIds já ligados a QUALQUER work_item (via
    * `readSelfDeficiencyIdFromIntent`). Defesa em profundidade além do lifecycle. */
-  readonly readMaterializedDeficiencyIds: () => Promise<ReadonlySet<string>>;
+  readonly readDeficiencyCoverage: () => Promise<readonly SelfDeficiencyCoverage[]>;
   /** Persiste a mensagem de origem (role=user, sob a identidade do usuário) →
    * sourceMessageId. `null` em falha. */
   readonly persistSourceMessage: (content: string) => Promise<string | null>;
@@ -303,12 +305,22 @@ const errText = (error: unknown): string => (error instanceof Error ? error.mess
 /** Seleção determinística da deficiência mais forte a propor: sinal ativo
  * (open/reopened), não já materializada; ordena por ocasiões desc, ocorrências
  * desc, id asc. */
+export function blockingSelfDeficiencyIds(
+  coverage: readonly SelfDeficiencyCoverage[],
+): ReadonlySet<string> {
+  return new Set(
+    coverage
+      .filter(entry => isSelfDeficiencyBlockingWorkState(entry.state))
+      .map(entry => entry.deficiencyId),
+  );
+}
+
 export function selectSelfDeficiencyToPropose(
   candidates: readonly SelfDeficiencyV0[],
-  alreadyMaterialized: ReadonlySet<string>,
+  blockingDeficiencyIds: ReadonlySet<string>,
 ): SelfDeficiencyV0 | null {
   const eligible = selfDeficienciesAwaitingProposal(candidates)
-    .filter(d => !alreadyMaterialized.has(d.id));
+    .filter(d => !blockingDeficiencyIds.has(d.id));
   if (eligible.length === 0) return null;
   return [...eligible].sort((a, b) =>
     b.occasions - a.occasions || b.occurrences - a.occurrences || a.id.localeCompare(b.id),
@@ -324,14 +336,15 @@ export async function materializeSelfImprovementProposal(
   input: { readonly candidates: readonly SelfDeficiencyV0[] },
   deps: SelfImprovementMaterializerDeps,
 ): Promise<SelfImprovementMaterializationResult> {
-  let materialized: ReadonlySet<string>;
+  let coverage: readonly SelfDeficiencyCoverage[];
   try {
-    materialized = await deps.readMaterializedDeficiencyIds();
+    coverage = await deps.readDeficiencyCoverage();
   } catch (error) {
     return { ok: false, reason: `correlation_read_failed:${errText(error)}` };
   }
 
-  const deficiency = selectSelfDeficiencyToPropose(input.candidates, materialized);
+  const blocking = blockingSelfDeficiencyIds(coverage);
+  const deficiency = selectSelfDeficiencyToPropose(input.candidates, blocking);
   if (!deficiency) return { ok: false, reason: 'no_candidate' };
 
   const proposal = formulateImprovementProposal(deficiency);

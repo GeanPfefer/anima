@@ -385,6 +385,16 @@ const ACTIVE_OR_WAITING: ReadonlySet<WorkState> = new Set<WorkState>([
 ]);
 
 /**
+ * Um work_item neste estado ainda cobre a deficiência e deve bloquear
+ * materialização concorrente/replay. Estados terminais não bloqueiam por si:
+ * completed é tratado pelo lifecycle como resolved/reopened; failed/rejected/
+ * cancelled deixam a deficiência open.
+ */
+export function isSelfDeficiencyBlockingWorkState(state: WorkState): boolean {
+  return ACTIVE_OR_WAITING.has(state);
+}
+
+/**
  * Cruza deficiências detectadas com o trabalho governado que as cobre e promove o
  * `status`. Puro e determinístico:
  *   - work ATIVO/aguardando cobrindo a deficiência → `covered` (não duplicar);
