@@ -366,6 +366,69 @@ describe('EvolutionClient (Evolution UX V1)', () => {
     ).toBeInTheDocument();
   });
 
+  test('capability recém-conectada (self-development supervisionado) mostra linguagem de domínio derivada', () => {
+    const props = buildProps();
+
+    render(
+      <EvolutionClient
+        {...props}
+        capabilityAssessment={{
+          status: 'available',
+          eventCount: 20,
+          projection: {
+            issues: [],
+            assessments: [
+              {
+                capabilityId: 'agency.supervised-self-development',
+                declaredMaturity: 'proven',
+                definitionMaturity: 'implemented',
+                derivedMaturity: 'operational',
+                assessment: {
+                  maturity: 'operational',
+                  basis: 'reproduced_operation',
+                  decisiveEvidenceId: 'sup-2',
+                  supportingEvidenceIds: ['sup-1', 'sup-2'],
+                  contradictingEvidenceIds: [],
+                },
+                evidence: [
+                  {
+                    id: 'sup-1',
+                    capabilityId: 'agency.supervised-self-development',
+                    evidenceClass: 'verified_execution',
+                    outcome: 'positive',
+                    observedAt: '2026-09-16T12:00:00.000Z',
+                    occasionId: 'attempt-1',
+                    proofRefs: [{ kind: 'attempt', ref: 'attempt-1' }],
+                  },
+                  {
+                    id: 'sup-2',
+                    capabilityId: 'agency.supervised-self-development',
+                    evidenceClass: 'verified_execution',
+                    outcome: 'positive',
+                    observedAt: '2026-09-16T13:00:00.000Z',
+                    occasionId: 'attempt-2',
+                    proofRefs: [{ kind: 'attempt', ref: 'attempt-2' }],
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Self-development supervisionado — Comprovada',
+      }),
+    );
+
+    expect(screen.getByText('Derivado: Operacional')).toBeInTheDocument();
+    expect(
+      screen.getByText(/self-development supervisionado válido reproduzida em 2 ocasiões/),
+    ).toBeInTheDocument();
+  });
+
   test('ausência de assessment dinâmico não é apresentada como rebaixamento', () => {
     render(
       <EvolutionClient {...buildProps()} />,

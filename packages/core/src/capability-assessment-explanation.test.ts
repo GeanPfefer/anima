@@ -263,3 +263,108 @@ describe('explainCapabilityAssessment', () => {
     );
   });
 });
+
+describe('explainCapabilityAssessment — linguagem de domínio (V1.1)', () => {
+  function entryForCapability(
+    capabilityId: string,
+    domain: Capability['domain'],
+    evidence: readonly CapabilityEvidenceObservation[],
+    declaredMaturity: CapabilityMaturity = 'proven',
+  ): CapabilityHistoryAssessment {
+    const cap: Capability = {
+      id: capabilityId,
+      name: capabilityId,
+      description: 'fixture',
+      domain,
+      maturity: declaredMaturity,
+      dependsOn: [],
+    };
+
+    const projection = assessCapabilitiesFromEvidence([cap], evidence);
+    const entry = projection.assessments[0];
+    if (!entry) throw new Error('fixture sem assessment');
+    return entry;
+  }
+
+  function obsFor(
+    capabilityId: string,
+    id: string,
+    occasionId: string,
+    observedAt: string,
+    outcome: CapabilityEvidenceOutcome = 'positive',
+  ): CapabilityEvidenceObservation {
+    return {
+      id,
+      capabilityId,
+      evidenceClass: 'verified_execution',
+      outcome,
+      observedAt,
+      occasionId,
+      proofRefs: [{ kind: 'attempt', ref: occasionId }],
+    };
+  }
+
+  test('governance.verifier comprovada usa linguagem do verifier', () => {
+    const entry = entryForCapability('governance.verifier', 'governance', [
+      obsFor('governance.verifier', 'v1', 'attempt-1', '2026-09-16T12:00:00.000Z'),
+    ]);
+
+    const explanation = explainCapabilityAssessment(entry);
+    expect(entry.derivedMaturity).toBe('proven');
+    expect(explanation.rationale).toContain('o verifier analisou fatos observados');
+  });
+
+  test('governance.verifier operacional descreve reprodução da verificação', () => {
+    const entry = entryForCapability('governance.verifier', 'governance', [
+      obsFor('governance.verifier', 'v1', 'attempt-1', '2026-09-16T12:00:00.000Z'),
+      obsFor('governance.verifier', 'v2', 'attempt-2', '2026-09-16T13:00:00.000Z'),
+    ]);
+
+    const explanation = explainCapabilityAssessment(entry);
+    expect(entry.derivedMaturity).toBe('operational');
+    expect(explanation.rationale).toContain(
+      'verificação com cobertura independente reproduzida em 2 ocasiões',
+    );
+  });
+
+  test('supervised self-development comprovada usa linguagem de auto-modificação supervisionada', () => {
+    const entry = entryForCapability('agency.supervised-self-development', 'agency', [
+      obsFor(
+        'agency.supervised-self-development',
+        's1',
+        'attempt-1',
+        '2026-09-16T12:00:00.000Z',
+      ),
+    ]);
+
+    const explanation = explainCapabilityAssessment(entry);
+    expect(explanation.rationale).toContain('o ANIMA modificou o próprio código');
+  });
+
+  test('supervised self-development regredida cita o pedido de mudanças da revisão', () => {
+    const entry = entryForCapability(
+      'agency.supervised-self-development',
+      'agency',
+      [
+        obsFor(
+          'agency.supervised-self-development',
+          's1',
+          'attempt-1',
+          '2026-09-16T12:00:00.000Z',
+          'positive',
+        ),
+        obsFor(
+          'agency.supervised-self-development',
+          's2',
+          'attempt-2',
+          '2026-09-16T13:00:00.000Z',
+          'negative',
+        ),
+      ],
+    );
+
+    const explanation = explainCapabilityAssessment(entry);
+    expect(entry.derivedMaturity).toBe('degraded');
+    expect(explanation.rationale).toContain('a revisão humana pediu mudanças');
+  });
+});

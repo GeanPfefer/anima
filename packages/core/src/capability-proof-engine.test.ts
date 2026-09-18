@@ -407,6 +407,39 @@ describe('Capability Proof Engine V0', () => {
     );
   });
 
+  test('a régua de regressão/recuperação vale para qualquer capability (ex.: governance.verifier)', () => {
+    // A régua do engine é agnóstica de capability. Este teste documenta que a
+    // composição de regressão/recuperação vale para os ids conectados no V1.1,
+    // mesmo que o adapter de governance.verifier não emita negativos hoje.
+    const assessment = assessCapabilityMaturity({
+      capabilityId: 'governance.verifier',
+      definitionMaturity: 'implemented',
+      evidence: [
+        evidence(
+          'ok',
+          'verified_execution',
+          'positive',
+          '2026-09-16T10:00:00.000Z',
+          'governance.verifier',
+          [eventProof('ok')],
+          'attempt-1',
+        ),
+        evidence(
+          'broke',
+          'verified_execution',
+          'negative',
+          '2026-09-16T11:00:00.000Z',
+          'governance.verifier',
+          [eventProof('broke')],
+          'attempt-2',
+        ),
+      ],
+    });
+
+    expect(assessment.maturity).toBe('degraded');
+    expect(assessment.basis).toBe('regression');
+  });
+
   test('recusa timestamp inválido porque recência decide regressão e recuperação', () => {
     expect(() =>
       deriveCapabilityMaturity({

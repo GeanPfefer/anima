@@ -97,8 +97,9 @@ alcance do V1 (ver "O que ainda não é derivado").
 
 ## Capacidades-piloto
 
-O V1 deriva de prova real as capacidades cujo histórico canônico já carrega
-sinais persistidos. São quatro, cobrindo classes de prova distintas:
+O motor deriva de prova real as capacidades cujo histórico canônico já carrega
+sinais persistidos. São **seis** (quatro do V1 + duas conectadas no V1.1),
+cobrindo classes de prova distintas:
 
 | Capacidade                | Fonte de prova (adapter)                                            | Regra mínima de promoção                                | Não é suficiente                                                        |
 |---------------------------|--------------------------------------------------------------------|---------------------------------------------------------|------------------------------------------------------------------------|
@@ -106,10 +107,53 @@ sinais persistidos. São quatro, cobrindo classes de prova distintas:
 | `agency.run-tests`        | `host_observed_gate_evidence` com **todos** os gates terminais `passed` | idem                                                    | gate terminal falho; ausência de gates                                 |
 | `agency.produce-change`   | cadeia forte: resultado + Git + gates + **Verifier** independente (coverage git+gates, correlação exata) | idem                                                    | `verified` puramente atestado; falta de um fato independente           |
 | `agency.verify-change`    | mesma cadeia forte (o Verifier conferiu contra gates)              | idem                                                    | idem                                                                    |
+| `governance.verifier` **(V1.1)** | parecer do Verifier conclusivo (`verified` **ou** `rejected`) sobre observação **independente** (git + gates), correlacionado à attempt | ≥1 ocasião ⇒ `proven`; ≥2 ocasiões ⇒ `operational`      | `inconclusive`; parecer atestado/sem cobertura independente; correlação errada |
+| `agency.supervised-self-development` **(V1.1)** | cadeia forte verificada **+** decisão humana de revisão sobre o resultado (`result_accepted`) | idem                                                    | sem decisão humana (aguardando review); sem cadeia forte; verifier rejeitou; gate falho |
 
 A seleção é guiada por **evidência real disponível**, não pela facilidade de
 hardcodar. Capacidades sem sinal persistido **não** foram incluídas só para
 completar número.
+
+### governance.verifier — "o verifier funcionou" ≠ "a mudança foi aprovada"
+
+`governance.verifier` credita a capacidade de **verificar trabalho**, não a de
+produzir uma boa mudança. O sinal é um parecer do Verifier que repousa sobre
+**observação independente** (git + gates observados pelo host, correlacionados à
+attempt) e chega a um **veredito conclusivo**:
+
+- `verified` **e** `rejected` provam que o verifier OPEROU — uma rejeição
+  bem-fundada é o verifier fazendo o seu trabalho. Ambos são ocasiões
+  **positivas** para `governance.verifier`;
+- `inconclusive` é abstenção → não conta;
+- parecer **puramente atestado** (sem observar git/gates de forma independente),
+  correlação divergente ou payload ilegível → falham fechado (não contam).
+
+Uma ocasião por attempt (`occasionId = attempt`): múltiplos pareceres da mesma
+attempt colapsam para o mais recente e **nunca** viram reprodução. Não há sinal
+persistido que prove o verifier ter **falhado** (um falso-positivo só é
+descoberto por revisão humana, cuja causa pode ser de produto, não do verifier),
+então o adapter não emite ocasião negativa — a régua de regressão do engine
+segue disponível caso um sinal futuro exista.
+
+### agency.supervised-self-development — auto-modificação sob supervisão válida
+
+Distingue-se de `produce-change` justamente pela **supervisão**: além de produzir
+e verificar uma mudança no próprio código, o resultado passou pela **decisão
+humana de revisão**. `supervised` ≠ `autonomous`: a intervenção humana não
+invalida — ela é a prova.
+
+- cadeia forte verificada **+** `result_accepted` (que aponta o resultado
+  revisado) → ocasião **positiva**;
+- cadeia forte verificada **+** `changes_requested` (que aponta o resultado
+  revisado) → ocasião **negativa** — o supervisor pediu mudanças; o
+  self-development não se sustentou (captura o padrão do falso-positivo
+  seq4→seq5). Uma negativa posterior a uma positiva deriva `degraded`;
+- sem decisão humana terminal ainda → nenhuma observação (aguardando supervisão),
+  para não confundir "produziu" com "supervisionado e aceito".
+
+Não basta um work item ser "self-dev", existir uma attempt, haver um commit ou
+uma chamada de provider: sem a cadeia forte verificada **e** a decisão humana, a
+capacidade não é creditada.
 
 ### Comportamentos por capacidade-piloto
 
@@ -162,18 +206,29 @@ de regressão (`capability-assessment-read.test.ts`, fixture `seq: 51929`).
 ## O que ainda NÃO é derivado (dívida honesta)
 
 - **`autonomous_operation`** (→ `autonomous`): nenhum sinal atual demonstra
-  operação autônoma sob governança; o degrau existe na escada mas fica fora do V1.
-- Capacidades fora das quatro pilotos (compreensão, memória, governança, compute,
-  interação, e o restante de agência) ainda vivem só pela **definição** —
+  operação autônoma sob governança; o degrau existe na escada mas fica fora do
+  V1/V1.1 **de propósito**. O sinal candidato seria uma execução verificada sob
+  autoridade válida **sem** intervenção humana no ciclo (sem `work_approved`
+  humano nem decisão humana de revisão como pré-condição) — mas isso exige um
+  contrato que distinga autoridade autônoma concedida de aprovação humana
+  pontual, e há ambiguidade sobre o que conta como "sem humano no ciclo" quando o
+  envelope de autonomia foi concedido por um humano. Fica para sessão própria.
+- Capacidades fora das seis pilotos (compreensão, memória, o restante de
+  governança/compute/interação/agência) ainda vivem só pela **definição** —
   conectá-las ao motor é a evolução natural seguinte.
-- O motor é **majoritariamente read-model/projection**: V1 não adicionou nenhuma
-  migração, tabela, contrato canônico novo nem tipo novo de `work_event`. Toda a
-  conclusão é derivada do estado canônico já existente.
+- O motor é **majoritariamente read-model/projection**: V1 e V1.1 não adicionaram
+  nenhuma migração, tabela, contrato canônico novo nem tipo novo de `work_event`.
+  Toda a conclusão é derivada do estado canônico já existente.
 
 ## Extensibilidade
 
 Conectar uma nova capacidade é escrever um adapter de extração no
 `capability-proof-work-evidence.ts` que emita `CapabilityEvidenceObservation`
-(com `occasionId` quando houver ocasião independente). A régua de maturidade
-(engine) e a projeção (UI) **não** mudam. A UI nunca codifica maturidade: ela
-renderiza a conclusão e a explicação que o core produz.
+(com `occasionId` quando houver ocasião independente). Toda derivação que depende
+do Verifier passa por **um** reader compartilhado
+(`resolveIndependentVerifierOpinions`), que resolve o parecer + resultado + fatos
+observados e os correlaciona — cada caller aplica só o seu filtro (cadeia forte,
+veredito conclusivo, decisão humana). A régua de maturidade (engine) e a projeção
+(UI) **não** mudam. A UI nunca codifica maturidade: ela renderiza a conclusão e a
+explicação que o core produz; a linguagem de domínio por capacidade vive no core
+(`capability-assessment-explanation.ts`), nunca em React.

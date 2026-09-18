@@ -54,6 +54,33 @@ const BASIS_LABEL: Record<CapabilityProofBasis, string> = {
   regression: 'regressão',
 };
 
+/**
+ * Linguagem de DOMÍNIO por capacidade, mantida no core (nunca hardcoded na UI).
+ * `proven`/`reproduced`/`regressed` são frases-sujeito que a explicação injeta
+ * nos templates por base. Capacidades sem entrada usam a linguagem genérica.
+ */
+interface CapabilityRationaleSubject {
+  readonly proven: string;
+  readonly reproduced: string;
+  readonly regressed: string;
+}
+
+const CAPABILITY_RATIONALE: Record<string, CapabilityRationaleSubject> = {
+  'governance.verifier': {
+    proven:
+      'o verifier analisou fatos observados de forma independente (Git + gates) e emitiu um parecer conclusivo com cobertura suficiente',
+    reproduced: 'verificação com cobertura independente',
+    regressed: 'uma verificação recente deixou de se sustentar',
+  },
+  'agency.supervised-self-development': {
+    proven:
+      'o ANIMA modificou o próprio código com resultado observado, verificado e ACEITO pela revisão humana',
+    reproduced: 'self-development supervisionado válido',
+    regressed:
+      'a revisão humana pediu mudanças no resultado — o self-development supervisionado não se sustentou',
+  },
+};
+
 function proofKey(ref: CapabilityProofRef): string {
   return `${ref.kind}:${ref.ref}`;
 }
@@ -122,20 +149,24 @@ export function explainCapabilityAssessment(
   const distinctOccasions = occasions.size;
 
   const basisLabel = BASIS_LABEL[assessment.basis];
+  const subject = CAPABILITY_RATIONALE[entry.capabilityId] ?? null;
 
   let rationale: string;
   let nextProof: string | null;
 
   switch (assessment.basis) {
     case 'regression':
-      rationale =
-        'Regredida: evidência forte recente contradisse uma capacidade antes comprovada — precisa ser re-provada.';
+      rationale = subject
+        ? `Regredida: ${subject.regressed}.`
+        : 'Regredida: evidência forte recente contradisse uma capacidade antes comprovada — precisa ser re-provada.';
       nextProof =
         'Falta uma nova execução verificada posterior à regressão para voltar a comprovar.';
       break;
 
     case 'reproduced_operation':
-      rationale = `Operacional: execução verificada reproduzida em ${distinctOccasions} ocasiões independentes.`;
+      rationale = subject
+        ? `Operacional: ${subject.reproduced} reproduzida em ${distinctOccasions} ocasiões independentes.`
+        : `Operacional: execução verificada reproduzida em ${distinctOccasions} ocasiões independentes.`;
       nextProof =
         'Falta operação verificada de forma autônoma sob governança válida para chegar a autônoma.';
       break;
@@ -147,8 +178,9 @@ export function explainCapabilityAssessment(
       break;
 
     case 'verified_execution':
-      rationale =
-        distinctOccasions <= 1
+      rationale = subject
+        ? `Comprovada: ${subject.proven} (1 ocasião; falta reproduzir para operacional).`
+        : distinctOccasions <= 1
           ? 'Comprovada por execução verificada em 1 ocasião — resultado observado com prova independente, mas ainda sem reprodução.'
           : `Comprovada por execução verificada; reprodução ainda não pôde ser contada em ocasiões independentes (${distinctOccasions}).`;
       nextProof = `Falta reproduzir a execução verificada em pelo menos ${REPRODUCTION_THRESHOLD} ocasiões independentes (hoje: ${distinctOccasions}) para operacional.`;

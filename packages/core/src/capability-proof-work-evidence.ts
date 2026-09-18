@@ -59,31 +59,84 @@ function verifierAttemptKey(value: ValidVerifierEvent): string {
   ].join(':');
 }
 
-/**
- * Adapter do histórico real de self-development para a ontologia genérica
- * do Capability Proof Engine.
- *
- * Este V0 é DELIBERADAMENTE estreito:
- *
- * - só reconhece execução de código via worktree;
- * - exige resultado durável;
- * - exige Git observado pelo host;
- * - exige gates observados pelo host;
- * - exige todos os gates observados como `passed`;
- * - exige parecer persistido do Verifier com coverage git+gates;
- * - exige correlação exata por item + attempt + versão;
- * - não transforma `verified` puramente atestado em prova forte.
- *
- * Retorna UMA observação por attempt cujo parecer válido mais recente satisfaça
- * o contrato. Parecer posterior rejected/inconclusive invalida o antigo
- * `verified` daquela mesma attempt.
- */
-export function deriveVerifiedWorktreeExecutionEvidenceFromEvents(
-  capabilityId: string,
-  events: readonly WorkEvent[],
-): readonly CapabilityEvidenceObservation[] {
-  if (capabilityId.trim().length === 0) return [];
+function compareEvents(left: WorkEvent, right: WorkEvent): number {
+  const time = eventTimestamp(left) - eventTimestamp(right);
 
+  if (time !== 0) return time;
+
+  return left.id.localeCompare(right.id);
+}
+
+function byObservedAtThenId(
+  left: CapabilityEvidenceObservation,
+  right: CapabilityEvidenceObservation,
+): number {
+  const time = Date.parse(left.observedAt) - Date.parse(right.observedAt);
+
+  if (time !== 0) return time;
+
+  return left.id.localeCompare(right.id);
+}
+
+function eventData(event: WorkEvent): Record<string, unknown> | null {
+  const payload = event.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const data = (payload as Record<string, unknown>).data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+
+  return data as Record<string, unknown>;
+}
+
+function readString(
+  data: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  const value = data?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * Um parecer do Verifier que a linha atual sabe reprojetar E que repousa sobre
+ * OBSERVAÇÃO INDEPENDENTE (git + gates observados pelo host), correlacionado à
+ * mesma attempt/versão. É o único ponto onde o parecer, o resultado e os fatos
+ * observados são resolvidos e cruzados — um READER, reutilizado por todas as
+ * derivações que dependem do Verifier.
+ *
+ * DELIBERADAMENTE NÃO filtra por veredito nem por sucesso do resultado: isso é
+ * responsabilidade de cada caller.
+ *
+ * - `agency.produce-change`/`verify-change` exigem a cadeia FORTE
+ *   (`isStrongVerifiedExecution`): verdict verified + handoff succeeded + commit
+ *   observado == commit produzido + todos os gates passed;
+ * - `governance.verifier` aceita veredito conclusivo (verified OU rejected),
+ *   porque uma rejeição bem-fundada PROVA que o verifier operou;
+ * - `agency.supervised-self-development` parte da cadeia FORTE e soma a decisão
+ *   humana de revisão.
+ *
+ * Retorna UMA entrada por attempt: o parecer válido mais recente. Um parecer
+ * posterior inválido/incoerente da mesma attempt substitui o anterior.
+ */
+interface ResolvedIndependentOpinion {
+  readonly opinion: ValidVerifierEvent['opinion'];
+  readonly verifierEvent: WorkEvent;
+  readonly resultEvent: WorkEvent;
+  readonly handoff: NonNullable<ReturnType<typeof projectWorktreeHandoff>>;
+  readonly observedGitEvent: WorkEvent;
+  readonly observedGit: NonNullable<
+    ReturnType<typeof projectHostObservedEvidence>
+  >;
+  readonly observedGateEvent: WorkEvent;
+  readonly observedGates: NonNullable<
+    ReturnType<typeof projectHostObservedGateEvidence>
+  >;
+}
+
+function resolveIndependentVerifierOpinions(
+  events: readonly WorkEvent[],
+): readonly ResolvedIndependentOpinion[] {
   const validVerifierEvents: ValidVerifierEvent[] = [];
 
   for (const event of events) {
@@ -114,17 +167,15 @@ export function deriveVerifiedWorktreeExecutionEvidenceFromEvents(
 
   const byEventId = new Map(events.map((event) => [event.id, event] as const));
 
-  const observations: CapabilityEvidenceObservation[] = [];
+  const resolved: ResolvedIndependentOpinion[] = [];
 
   for (const candidate of latestByAttempt.values()) {
     const { event: verifierEvent, opinion } = candidate;
 
-    if (opinion.verdict !== 'verified') continue;
-
     const basis = opinion.evidenceBasis;
 
-    // Um `verified` atestado continua útil para review, mas NÃO constitui
-    // `verified_execution` no Capability Proof Engine.
+    // Um parecer puramente atestado (sem observação independente) NÃO prova que
+    // o Verifier realmente conferiu fatos — falha fechado.
     if (
       basis.coverage.git !== true ||
       basis.coverage.gates !== true ||
@@ -162,20 +213,60 @@ export function deriveVerifiedWorktreeExecutionEvidenceFromEvents(
       continue;
     }
 
-    // Resultado de worktree precisa de fato ter terminado com sucesso.
-    if (handoff.status !== 'succeeded') continue;
+    resolved.push({
+      opinion,
+      verifierEvent,
+      resultEvent,
+      handoff,
+      observedGitEvent,
+      observedGit,
+      observedGateEvent,
+      observedGates,
+    });
+  }
 
-    // Não basta o executor declarar um commit: o host precisa ter observado
-    // exatamente esse commit.
-    if (observedGit.observedCommitSha !== handoff.commitSha) continue;
+  return resolved;
+}
 
-    // Gate observado é autoridade sobre execução. Qualquer falha impede a
-    // emissão de evidência positiva.
-    if (observedGates.gates.some((gate) => gate.outcome !== 'passed')) {
-      continue;
-    }
+/**
+ * Cadeia FORTE: o resultado de worktree terminou com sucesso, o host observou
+ * exatamente o commit produzido, todos os gates observados passaram e o Verifier
+ * concluiu `verified` sobre observação independente.
+ */
+function isStrongVerifiedExecution(
+  resolved: ResolvedIndependentOpinion,
+): boolean {
+  return (
+    resolved.opinion.verdict === 'verified' &&
+    resolved.handoff.status === 'succeeded' &&
+    resolved.observedGit.observedCommitSha === resolved.handoff.commitSha &&
+    resolved.observedGates.gates.every((gate) => gate.outcome === 'passed')
+  );
+}
 
-    const observedAt = verifierEvent.occurredAt.toISOString();
+/**
+ * Cadeia forte: resultado + Git + gates + Verifier `verified` correlacionados na
+ * mesma attempt. Uma observação por attempt cujo parecer válido mais recente
+ * satisfaça o contrato forte. Usada por `agency.produce-change`/`verify-change`.
+ */
+export function deriveVerifiedWorktreeExecutionEvidenceFromEvents(
+  capabilityId: string,
+  events: readonly WorkEvent[],
+): readonly CapabilityEvidenceObservation[] {
+  if (capabilityId.trim().length === 0) return [];
+
+  const observations: CapabilityEvidenceObservation[] = [];
+
+  for (const resolved of resolveIndependentVerifierOpinions(events)) {
+    if (!isStrongVerifiedExecution(resolved)) continue;
+
+    const {
+      opinion,
+      verifierEvent,
+      resultEvent,
+      observedGitEvent,
+      observedGateEvent,
+    } = resolved;
 
     observations.push({
       id: [
@@ -187,7 +278,7 @@ export function deriveVerifiedWorktreeExecutionEvidenceFromEvents(
       capabilityId,
       evidenceClass: 'verified_execution',
       outcome: 'positive',
-      observedAt,
+      observedAt: verifierEvent.occurredAt.toISOString(),
       // Ocasião = attempt: reprodução exige execuções verificadas de attempts
       // distintos, não múltiplas provas do mesmo attempt.
       occasionId: opinion.attemptId,
@@ -222,13 +313,183 @@ export function deriveVerifiedWorktreeExecutionEvidenceFromEvents(
     });
   }
 
-  return observations.sort((left, right) => {
-    const time = Date.parse(left.observedAt) - Date.parse(right.observedAt);
+  return observations.sort(byObservedAtThenId);
+}
 
-    if (time !== 0) return time;
+/**
+ * GOVERNANCE.VERIFIER — prova de que o VERIFIER operou.
+ *
+ * Um parecer conclusivo (`verified` OU `rejected`) que repousa sobre observação
+ * INDEPENDENTE (git + gates) demonstra que o verifier analisou fatos reais e
+ * emitiu juízo — inclusive uma REJEIÇÃO bem-fundada prova que ele funcionou.
+ *
+ * NÃO exige que a mudança tenha sido aprovada nem que os gates passem: "verifier
+ * funcionou" é separado de "mudança correta". `inconclusive` é abstenção e não
+ * conta; parecer atestado/sem cobertura independente falha fechado no resolver.
+ * Uma ocasião por attempt (occasionId = attempt), então múltiplos pareceres da
+ * mesma attempt nunca viram reprodução.
+ */
+export function deriveVerifierOperationEvidenceFromEvents(
+  events: readonly WorkEvent[],
+): readonly CapabilityEvidenceObservation[] {
+  const observations: CapabilityEvidenceObservation[] = [];
 
-    return left.id.localeCompare(right.id);
-  });
+  for (const resolved of resolveIndependentVerifierOpinions(events)) {
+    const { opinion, verifierEvent, resultEvent, observedGitEvent, observedGateEvent } =
+      resolved;
+
+    if (opinion.verdict !== 'verified' && opinion.verdict !== 'rejected') {
+      continue;
+    }
+
+    observations.push({
+      id: [
+        'verifier-operation',
+        'governance.verifier',
+        opinion.attemptId,
+        verifierEvent.id,
+      ].join(':'),
+      capabilityId: 'governance.verifier',
+      evidenceClass: 'verified_execution',
+      outcome: 'positive',
+      observedAt: verifierEvent.occurredAt.toISOString(),
+      occasionId: opinion.attemptId,
+      proofRefs: [
+        {
+          kind: 'attempt',
+          ref: opinion.attemptId,
+          note: 'attempt sobre a qual o verifier operou',
+        },
+        {
+          kind: 'verifier',
+          ref: verifierEvent.id,
+          note: `${opinion.verifierVersion}: ${opinion.verdict}`,
+        },
+        {
+          kind: 'event',
+          ref: resultEvent.id,
+          note: 'resultado que o verifier analisou',
+        },
+        {
+          kind: 'event',
+          ref: observedGitEvent.id,
+          note: 'Git observado que embasou o parecer',
+        },
+        {
+          kind: 'event',
+          ref: observedGateEvent.id,
+          note: 'gates observados que embasaram o parecer',
+        },
+      ],
+      note: 'Verifier operou sobre observação independente (git+gates) com veredito conclusivo.',
+    });
+  }
+
+  return observations.sort(byObservedAtThenId);
+}
+
+/**
+ * AGENCY.SUPERVISED-SELF-DEVELOPMENT — o ANIMA modificou o próprio código sob
+ * supervisão humana válida.
+ *
+ * Parte da cadeia FORTE (mudança produzida e verificada de forma independente) e
+ * soma a DECISÃO HUMANA de revisão sobre aquele resultado:
+ *
+ * - `result_accepted` (accepted_result_event_id) → ocasião POSITIVA (o supervisor
+ *   aceitou a auto-modificação verificada);
+ * - `changes_requested` (reviewed_result_event_id) → ocasião NEGATIVA (o
+ *   supervisor pediu mudanças; o self-development não se sustentou — captura o
+ *   padrão do falso-positivo seq4→seq5);
+ * - sem decisão terminal ainda → NENHUMA observação (aguardando supervisão).
+ *
+ * Distingue-se de `produce-change` justamente pela SUPERVISÃO: a proposta foi
+ * aprovada (correlação por versão) e a revisão humana atuou sobre o resultado.
+ * `supervised` != `autonomous`: a intervenção humana NÃO invalida — ela é a prova.
+ */
+export function deriveSupervisedSelfDevelopmentEvidenceFromEvents(
+  events: readonly WorkEvent[],
+): readonly CapabilityEvidenceObservation[] {
+  const observations: CapabilityEvidenceObservation[] = [];
+
+  for (const resolved of resolveIndependentVerifierOpinions(events)) {
+    if (!isStrongVerifiedExecution(resolved)) continue;
+
+    const { opinion, verifierEvent, resultEvent } = resolved;
+
+    // Decisão humana terminal de revisão sobre ESTE resultado. Append-only pode
+    // conter mais de uma; a mais recente representa a supervisão vigente.
+    let decision: { readonly event: WorkEvent; readonly accepted: boolean } | null =
+      null;
+
+    for (const event of events) {
+      let accepted: boolean | null = null;
+
+      if (
+        event.type === 'result_accepted' &&
+        readString(eventData(event), 'accepted_result_event_id') === resultEvent.id
+      ) {
+        accepted = true;
+      } else if (
+        event.type === 'changes_requested' &&
+        readString(eventData(event), 'reviewed_result_event_id') === resultEvent.id
+      ) {
+        accepted = false;
+      }
+
+      if (accepted === null) continue;
+
+      if (decision === null || compareEvents(event, decision.event) > 0) {
+        decision = { event, accepted };
+      }
+    }
+
+    if (decision === null) continue;
+
+    const accepted = decision.accepted;
+
+    observations.push({
+      id: [
+        'supervised-self-development',
+        opinion.attemptId,
+        resultEvent.id,
+        decision.event.id,
+      ].join(':'),
+      capabilityId: 'agency.supervised-self-development',
+      evidenceClass: 'verified_execution',
+      outcome: accepted ? 'positive' : 'negative',
+      observedAt: decision.event.occurredAt.toISOString(),
+      occasionId: opinion.attemptId,
+      proofRefs: [
+        {
+          kind: 'attempt',
+          ref: opinion.attemptId,
+          note: 'attempt do self-development',
+        },
+        {
+          kind: 'event',
+          ref: resultEvent.id,
+          note: 'mudança produzida e verificada no próprio código',
+        },
+        {
+          kind: 'verifier',
+          ref: verifierEvent.id,
+          note: `${opinion.verifierVersion}: ${opinion.verdict}`,
+        },
+        {
+          kind: 'event',
+          ref: decision.event.id,
+          note: accepted
+            ? 'revisão humana aceitou o resultado'
+            : 'revisão humana pediu mudanças',
+        },
+      ],
+      note: accepted
+        ? 'Mudança no próprio código verificada e ACEITA sob supervisão humana.'
+        : 'Mudança verificada, mas a revisão humana pediu mudanças (self-development não sustentado).',
+    });
+  }
+
+  return observations.sort(byObservedAtThenId);
 }
 /**
  * Atribui fatos do worktree às capabilities canônicas mais estreitas que eles
@@ -558,6 +819,26 @@ export function deriveCanonicalWorkCapabilityEvidenceFromEvents(
       'agency.verify-change',
       canonicalEvents,
     ),
+  );
+
+  /**
+   * GOVERNANCE.VERIFIER
+   *
+   * O verifier operou sobre observação independente com veredito conclusivo
+   * (verified OU rejected) — "verifier funcionou", separado de "mudança correta".
+   */
+  observations.push(
+    ...deriveVerifierOperationEvidenceFromEvents(canonicalEvents),
+  );
+
+  /**
+   * SUPERVISED-SELF-DEVELOPMENT
+   *
+   * Cadeia forte verificada + decisão humana de revisão: aceite = ocasião
+   * positiva; changes_requested = ocasião negativa (regressão real).
+   */
+  observations.push(
+    ...deriveSupervisedSelfDevelopmentEvidenceFromEvents(canonicalEvents),
   );
 
   return observations.sort((left, right) => {

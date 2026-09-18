@@ -12,8 +12,11 @@ import {
 } from './work-orchestration';
 import {
   deriveCanonicalWorkCapabilityEvidenceFromEvents,
+  deriveSupervisedSelfDevelopmentEvidenceFromEvents,
   deriveVerifiedWorktreeExecutionEvidenceFromEvents,
+  deriveVerifierOperationEvidenceFromEvents,
 } from './capability-proof-work-evidence';
+import { deriveCapabilityAssessmentsFromWorkHistory } from './capability-proof-assessment';
 
 const BASE = 'a'.repeat(40);
 const COMMIT = 'b'.repeat(40);
@@ -565,7 +568,7 @@ describe('Capability Attribution V0', () => {
       events,
     ).map((entry) => entry.capabilityId);
 
-  test('cadeia forte + coder observado atribui as quatro capabilities primitivas exercitadas', () => {
+  test('cadeia forte + coder observado atribui as capabilities exercitadas (incl. governance.verifier)', () => {
     expect(
       [
         ...new Set(
@@ -575,9 +578,10 @@ describe('Capability Attribution V0', () => {
     ).toEqual([
       'agency.edit-file',
       'agency.produce-change',
-      'agency.run-tests',
       'agency.verify-change',
-    ]);
+      'agency.run-tests',
+      'governance.verifier',
+    ].sort());
   });
 
   test('Git host-observed sozinho NÃO prova edit-file', () => {
@@ -870,5 +874,531 @@ describe('Capability Reproduction attribution V0', () => {
     );
 
     expect(occasions).toEqual(new Set(['attempt-unico']));
+  });
+});
+
+// ─── Cadeia parametrizada por attempt (V1.1) ────────────────────────────────────
+
+/**
+ * Constrói a cadeia forte de UMA attempt com ids distintos: resultado + Git +
+ * gates + parecer do Verifier correlacionados. `verdict` e `gatePassed` permitem
+ * cobrir os casos negativos/insuficientes.
+ */
+function attemptChain(
+  attemptId: string,
+  suffix: string,
+  opts: {
+    readonly verdict?: VerifierOpinionV1['verdict'];
+    readonly gatePassed?: boolean;
+    readonly time?: string;
+  } = {},
+): WorkEvent[] {
+  const verdict = opts.verdict ?? 'verified';
+  const gatePassed = opts.gatePassed ?? true;
+  const time = opts.time ?? '2026-09-16T10:00:00.000Z';
+
+  const h = buildWorktreeHandoff({
+    workItemId: WORK_ITEM,
+    attemptId,
+    approvedProposalVersion: VERSION,
+    executorId: 'worktree-v1',
+    backendId: 'fake',
+    model: null,
+    baseSha: BASE,
+    branch: `anima-work/${attemptId}`,
+    commitSha: COMMIT,
+    status: 'succeeded',
+    changedFiles: ['src/a.ts'],
+    diffFiles: [{ path: 'src/a.ts', insertions: 3, deletions: 1 }],
+    gates: [{ label: 'unit', command: 'npm test', exitCode: 0, outcome: 'passed' }],
+  });
+  if (!h.ok) throw new Error(`fixture handoff inválida: ${h.explanation}`);
+
+  const resultEv: WorkEvent = {
+    id: `ev-result-${suffix}`,
+    workItemId: WORK_ITEM,
+    type: 'result_submitted',
+    author: 'executor',
+    proposalVersion: VERSION,
+    payload: {
+      schema_version: 1,
+      data: {
+        work_item_id: WORK_ITEM,
+        attempt_id: attemptId,
+        approved_proposal_version: VERSION,
+        summary: 'feito',
+        result_references: [],
+        executor_signal: { worktreeHandoff: h.value as unknown as Json },
+      },
+    } as unknown as Json,
+    occurredAt: new Date(time),
+  };
+
+  const g = buildHostObservedGitEvidence({
+    workItemId: WORK_ITEM,
+    attemptId,
+    approvedProposalVersion: VERSION,
+    baseSha: BASE,
+    observedCommitSha: COMMIT,
+    observedChangedFiles: ['src/a.ts'],
+    observedDiffFiles: [{ path: 'src/a.ts', insertions: 3, deletions: 1 }],
+    observedAt: time,
+  });
+  if (!g.ok) throw new Error(`fixture git inválida: ${g.explanation}`);
+
+  const gitEv: WorkEvent = {
+    id: `ev-git-${suffix}`,
+    workItemId: WORK_ITEM,
+    type: 'host_observed_evidence_recorded',
+    author: 'system',
+    proposalVersion: VERSION,
+    payload: {
+      schema_version: 1,
+      data: {
+        work_item_id: WORK_ITEM,
+        attempt_id: attemptId,
+        approved_proposal_version: VERSION,
+        origin: 'host',
+        coverage: { git: true, gates: false },
+        evidence: g.value as unknown as Json,
+      },
+    } as unknown as Json,
+    occurredAt: new Date(time),
+  };
+
+  const ga = buildHostObservedGateEvidence({
+    workItemId: WORK_ITEM,
+    attemptId,
+    approvedProposalVersion: VERSION,
+    gates: [
+      {
+        label: 'unit',
+        command: 'npm test',
+        exitCode: gatePassed ? 0 : 1,
+        durationMs: 500,
+        timedOut: false,
+        cancelled: false,
+      },
+    ],
+    observedAt: time,
+  });
+  if (!ga.ok) throw new Error(`fixture gate inválida: ${ga.explanation}`);
+
+  const gateEv: WorkEvent = {
+    id: `ev-gate-${suffix}`,
+    workItemId: WORK_ITEM,
+    type: 'host_observed_gate_evidence_recorded',
+    author: 'system',
+    proposalVersion: VERSION,
+    payload: {
+      schema_version: 1,
+      data: {
+        work_item_id: WORK_ITEM,
+        attempt_id: attemptId,
+        approved_proposal_version: VERSION,
+        origin: 'host',
+        coverage: { gates: true },
+        evidence: ga.value as unknown as Json,
+      },
+    } as unknown as Json,
+    occurredAt: new Date(time),
+  };
+
+  const op = opinion({
+    attemptId,
+    verdict,
+    evidenceBasis: {
+      resultEventId: `ev-result-${suffix}`,
+      observedEventId: `ev-git-${suffix}`,
+      observedGateEventId: `ev-gate-${suffix}`,
+      coverage: { git: true, gates: true },
+    },
+  });
+
+  const verifierEv = verifierEvent(op, {
+    id: `ev-verifier-${suffix}`,
+    occurredAt: new Date(time),
+  });
+
+  return [resultEv, gitEv, gateEv, verifierEv];
+}
+
+function acceptEvent(
+  suffix: string,
+  resultEventId: string,
+  time: string,
+): WorkEvent {
+  return {
+    id: `ev-accept-${suffix}`,
+    workItemId: WORK_ITEM,
+    type: 'result_accepted',
+    author: 'user',
+    proposalVersion: VERSION,
+    payload: {
+      schema_version: 1,
+      data: { accepted_result_event_id: resultEventId },
+    } as unknown as Json,
+    occurredAt: new Date(time),
+  };
+}
+
+function changesRequestedEvent(
+  suffix: string,
+  resultEventId: string,
+  time: string,
+): WorkEvent {
+  return {
+    id: `ev-changes-${suffix}`,
+    workItemId: WORK_ITEM,
+    type: 'changes_requested',
+    author: 'user',
+    proposalVersion: VERSION,
+    payload: {
+      schema_version: 1,
+      data: {
+        reviewed_result_event_id: resultEventId,
+        requested_changes: 'ajustar escopo',
+      },
+    } as unknown as Json,
+    occurredAt: new Date(time),
+  };
+}
+
+describe('Governance Verifier attribution V1.1', () => {
+  test('sem parecer não prova governance.verifier', () => {
+    const noVerifier = attemptChain('attempt-1', 'a1').filter(
+      (event) => event.type !== 'verifier_opinion_recorded',
+    );
+
+    expect(
+      deriveVerifierOperationEvidenceFromEvents(noVerifier),
+    ).toEqual([]);
+  });
+
+  test('parecer válido verified prova que o verifier operou', () => {
+    const obs = deriveVerifierOperationEvidenceFromEvents(
+      attemptChain('attempt-1', 'a1'),
+    );
+
+    expect(obs).toHaveLength(1);
+    expect(obs[0]).toMatchObject({
+      capabilityId: 'governance.verifier',
+      evidenceClass: 'verified_execution',
+      outcome: 'positive',
+      occasionId: 'attempt-1',
+    });
+  });
+
+  test('parecer REJECTED válido ainda prova que o verifier operou', () => {
+    const obs = deriveVerifierOperationEvidenceFromEvents(
+      attemptChain('attempt-1', 'a1', { verdict: 'rejected' }),
+    );
+
+    expect(obs).toHaveLength(1);
+    expect(obs[0]).toMatchObject({
+      capabilityId: 'governance.verifier',
+      outcome: 'positive',
+    });
+  });
+
+  test('gate falho + rejeição continua provando operação do verifier', () => {
+    const obs = deriveVerifierOperationEvidenceFromEvents(
+      attemptChain('attempt-1', 'a1', {
+        verdict: 'rejected',
+        gatePassed: false,
+      }),
+    );
+
+    expect(obs).toHaveLength(1);
+    expect(obs[0]?.outcome).toBe('positive');
+  });
+
+  test('parecer inconclusive NÃO prova operação do verifier', () => {
+    expect(
+      deriveVerifierOperationEvidenceFromEvents(
+        attemptChain('attempt-1', 'a1', { verdict: 'inconclusive' }),
+      ),
+    ).toEqual([]);
+  });
+
+  test('parecer atestado (sem cobertura independente) não prova governance.verifier', () => {
+    const attested = verifierEvent(
+      opinion({
+        restsOnAttestedEvidence: true,
+        evidenceBasis: {
+          resultEventId: 'ev-result-a1',
+          observedEventId: null,
+          observedGateEventId: null,
+          coverage: { git: false, gates: false },
+        },
+      }),
+      { id: 'ev-verifier-a1' },
+    );
+
+    const events = [
+      ...attemptChain('attempt-1', 'a1').filter(
+        (event) => event.type !== 'verifier_opinion_recorded',
+      ),
+      attested,
+    ];
+
+    expect(
+      deriveVerifierOperationEvidenceFromEvents(events),
+    ).toEqual([]);
+  });
+
+  test('correlação errada (envelope de outra attempt) não prova', () => {
+    const wrong = verifierEvent(
+      opinion({
+        attemptId: 'attempt-1',
+        evidenceBasis: {
+          resultEventId: 'ev-result-a1',
+          observedEventId: 'ev-git-a1',
+          observedGateEventId: 'ev-gate-a1',
+          coverage: { git: true, gates: true },
+        },
+      }),
+      { id: 'ev-verifier-a1', envelopeAttemptId: 'attempt-outra' },
+    );
+
+    const events = [
+      ...attemptChain('attempt-1', 'a1').filter(
+        (event) => event.type !== 'verifier_opinion_recorded',
+      ),
+      wrong,
+    ];
+
+    expect(
+      deriveVerifierOperationEvidenceFromEvents(events),
+    ).toEqual([]);
+  });
+
+  test('duas attempts independentes → duas ocasiões de governance.verifier', () => {
+    const obs = deriveVerifierOperationEvidenceFromEvents([
+      ...attemptChain('attempt-1', 'a1', {
+        time: '2026-09-16T10:00:00.000Z',
+      }),
+      ...attemptChain('attempt-2', 'a2', {
+        time: '2026-09-16T11:00:00.000Z',
+      }),
+    ]);
+
+    expect(obs).toHaveLength(2);
+    expect(new Set(obs.map((entry) => entry.occasionId))).toEqual(
+      new Set(['attempt-1', 'attempt-2']),
+    );
+  });
+
+  test('múltiplos pareceres da MESMA attempt → uma ocasião só', () => {
+    const chain = attemptChain('attempt-1', 'a1', {
+      time: '2026-09-16T10:00:00.000Z',
+    });
+
+    const laterOpinion = verifierEvent(
+      opinion({
+        attemptId: 'attempt-1',
+        evidenceBasis: {
+          resultEventId: 'ev-result-a1',
+          observedEventId: 'ev-git-a1',
+          observedGateEventId: 'ev-gate-a1',
+          coverage: { git: true, gates: true },
+        },
+      }),
+      { id: 'ev-verifier-a1-b', occurredAt: new Date('2026-09-16T10:05:00.000Z') },
+    );
+
+    const obs = deriveVerifierOperationEvidenceFromEvents([
+      ...chain,
+      laterOpinion,
+    ]);
+
+    expect(obs).toHaveLength(1);
+    expect(obs[0]?.occasionId).toBe('attempt-1');
+  });
+
+  test('duas ocasiões independentes derivam governance.verifier operational', () => {
+    const projection = deriveCapabilityAssessmentsFromWorkHistory([
+      ...attemptChain('attempt-1', 'a1', {
+        time: '2026-09-16T10:00:00.000Z',
+      }),
+      ...attemptChain('attempt-2', 'a2', {
+        time: '2026-09-16T11:00:00.000Z',
+      }),
+    ]);
+
+    const entry = projection.assessments.find(
+      (assessment) => assessment.capabilityId === 'governance.verifier',
+    );
+
+    expect(entry?.derivedMaturity).toBe('operational');
+    expect(entry?.assessment.basis).toBe('reproduced_operation');
+  });
+});
+
+describe('Supervised Self-Development attribution V1.1', () => {
+  test('histórico vazio não prova supervised self-development', () => {
+    expect(
+      deriveSupervisedSelfDevelopmentEvidenceFromEvents([]),
+    ).toEqual([]);
+  });
+
+  test('cadeia forte SEM decisão humana ainda não prova (aguardando supervisão)', () => {
+    expect(
+      deriveSupervisedSelfDevelopmentEvidenceFromEvents(
+        attemptChain('attempt-1', 'a1'),
+      ),
+    ).toEqual([]);
+  });
+
+  test('cadeia forte + aceite humano prova supervised self-development (positiva)', () => {
+    const obs = deriveSupervisedSelfDevelopmentEvidenceFromEvents([
+      ...attemptChain('attempt-1', 'a1', {
+        time: '2026-09-16T10:00:00.000Z',
+      }),
+      acceptEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+    ]);
+
+    expect(obs).toHaveLength(1);
+    expect(obs[0]).toMatchObject({
+      capabilityId: 'agency.supervised-self-development',
+      evidenceClass: 'verified_execution',
+      outcome: 'positive',
+      occasionId: 'attempt-1',
+    });
+  });
+
+  test('changes_requested torna a ocasião NEGATIVA', () => {
+    const obs = deriveSupervisedSelfDevelopmentEvidenceFromEvents([
+      ...attemptChain('attempt-1', 'a1', {
+        time: '2026-09-16T10:00:00.000Z',
+      }),
+      changesRequestedEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+    ]);
+
+    expect(obs).toHaveLength(1);
+    expect(obs[0]).toMatchObject({
+      outcome: 'negative',
+      occasionId: 'attempt-1',
+    });
+  });
+
+  test('commit/edição sem cadeia verificada não prova, mesmo com aceite', () => {
+    const events = [
+      ...attemptChain('attempt-1', 'a1').filter(
+        (event) => event.type !== 'verifier_opinion_recorded',
+      ),
+      acceptEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+    ];
+
+    expect(
+      deriveSupervisedSelfDevelopmentEvidenceFromEvents(events),
+    ).toEqual([]);
+  });
+
+  test('verifier rejected quebra a cadeia forte → sem supervised self-dev mesmo com decisão', () => {
+    const events = [
+      ...attemptChain('attempt-1', 'a1', { verdict: 'rejected' }),
+      changesRequestedEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+    ];
+
+    expect(
+      deriveSupervisedSelfDevelopmentEvidenceFromEvents(events),
+    ).toEqual([]);
+  });
+
+  test('gate falho quebra a cadeia forte → sem supervised self-dev', () => {
+    const events = [
+      ...attemptChain('attempt-1', 'a1', { gatePassed: false }),
+      acceptEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+    ];
+
+    expect(
+      deriveSupervisedSelfDevelopmentEvidenceFromEvents(events),
+    ).toEqual([]);
+  });
+
+  test('duas provas da MESMA attempt não são reprodução', () => {
+    // Um segundo aceite do MESMO resultado não cria nova ocasião.
+    const obs = deriveSupervisedSelfDevelopmentEvidenceFromEvents([
+      ...attemptChain('attempt-1', 'a1', {
+        time: '2026-09-16T10:00:00.000Z',
+      }),
+      acceptEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+    ]);
+
+    expect(new Set(obs.map((entry) => entry.occasionId))).toEqual(
+      new Set(['attempt-1']),
+    );
+  });
+
+  test('duas attempts aceitas → supervised self-development operational', () => {
+    const projection = deriveCapabilityAssessmentsFromWorkHistory([
+      ...attemptChain('attempt-1', 'a1', {
+        time: '2026-09-16T10:00:00.000Z',
+      }),
+      acceptEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+      ...attemptChain('attempt-2', 'a2', {
+        time: '2026-09-16T11:00:00.000Z',
+      }),
+      acceptEvent('a2', 'ev-result-a2', '2026-09-16T11:10:00.000Z'),
+    ]);
+
+    const entry = projection.assessments.find(
+      (assessment) =>
+        assessment.capabilityId === 'agency.supervised-self-development',
+    );
+
+    expect(entry?.derivedMaturity).toBe('operational');
+    expect(entry?.assessment.basis).toBe('reproduced_operation');
+  });
+
+  test('aceite seguido de changes_requested em attempt posterior → degraded', () => {
+    const projection = deriveCapabilityAssessmentsFromWorkHistory([
+      ...attemptChain('attempt-1', 'a1', {
+        time: '2026-09-16T10:00:00.000Z',
+      }),
+      acceptEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+      ...attemptChain('attempt-2', 'a2', {
+        time: '2026-09-16T11:00:00.000Z',
+      }),
+      changesRequestedEvent('a2', 'ev-result-a2', '2026-09-16T11:10:00.000Z'),
+    ]);
+
+    const entry = projection.assessments.find(
+      (assessment) =>
+        assessment.capabilityId === 'agency.supervised-self-development',
+    );
+
+    expect(entry?.derivedMaturity).toBe('degraded');
+    expect(entry?.assessment.basis).toBe('regression');
+  });
+
+  test('changes_requested depois de aceite na MESMA attempt → decisão mais recente vence (negativa)', () => {
+    const obs = deriveSupervisedSelfDevelopmentEvidenceFromEvents([
+      ...attemptChain('attempt-1', 'a1', {
+        time: '2026-09-16T10:00:00.000Z',
+      }),
+      acceptEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+      changesRequestedEvent('a1', 'ev-result-a1', '2026-09-16T10:20:00.000Z'),
+    ]);
+
+    expect(obs).toHaveLength(1);
+    expect(obs[0]?.outcome).toBe('negative');
+  });
+
+  test('provenance preservada: attempt, resultado, verifier e decisão', () => {
+    const obs = deriveSupervisedSelfDevelopmentEvidenceFromEvents([
+      ...attemptChain('attempt-1', 'a1', {
+        time: '2026-09-16T10:00:00.000Z',
+      }),
+      acceptEvent('a1', 'ev-result-a1', '2026-09-16T10:10:00.000Z'),
+    ]);
+
+    const kinds = (obs[0]?.proofRefs ?? []).map((ref) => ref.kind);
+    expect(kinds).toContain('attempt');
+    expect(kinds).toContain('verifier');
+    expect(
+      obs[0]?.proofRefs.some((ref) => ref.ref === 'ev-accept-a1'),
+    ).toBe(true);
   });
 });
