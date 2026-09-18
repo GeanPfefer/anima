@@ -10,6 +10,23 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const PAGE_SIZE = 500;
 
+/** Razões de falha do carregamento canônico do histórico — compartilhadas por
+ * todos os read-models que consomem `work_events` (assessments, deficiências). */
+export type CanonicalWorkHistoryFailure =
+  | 'event_history_read_failed'
+  // Payload realmente inválido/corrompido de um contrato conhecido, OU
+  // envelope temporal inválido: o histórico não é confiável.
+  | 'event_history_invalid'
+  // Um evento canônico carrega um contrato/versão que ESTA linha não
+  // reconhece (formato de uma linha divergente/mais nova). NÃO é corrupção:
+  // é sinal de reconciliação de contrato. Distingui-lo evita derivar
+  // assessment incorreto e evita alarmar "histórico corrompido".
+  | 'canonical_contract_incompatibility';
+
+export type CanonicalWorkHistoryResult =
+  | { readonly ok: true; readonly events: readonly WorkEvent[] }
+  | { readonly ok: false; readonly reason: CanonicalWorkHistoryFailure };
+
 export type CapabilityAssessmentReadResult =
   | {
       readonly ok: true;
@@ -18,33 +35,25 @@ export type CapabilityAssessmentReadResult =
     }
   | {
       readonly ok: false;
-      readonly reason:
-        | 'event_history_read_failed'
-        // Payload realmente inválido/corrompido de um contrato conhecido, OU
-        // envelope temporal inválido: o histórico não é confiável.
-        | 'event_history_invalid'
-        // Um evento canônico carrega um contrato/versão que ESTA linha não
-        // reconhece (formato de uma linha divergente/mais nova). NÃO é corrupção:
-        // é sinal de reconciliação de contrato. Distingui-lo evita derivar
-        // assessment incorreto e evita alarmar "histórico corrompido".
-        | 'canonical_contract_incompatibility';
+      readonly reason: CanonicalWorkHistoryFailure;
     };
 
 /**
- * Read-model server-side do Evolution.
+ * Carregador CANÔNICO do histórico de `work_events` — a ÚNICA leitura confiável
+ * de eventos, com as mesmas proteções do incidente 51929. Fonte única reutilizada
+ * pelos read-models (Proof Engine e Self-Deficiency), para que ESCRITA e LEITURA
+ * nunca divirjam por leitores separados.
  *
- * Regras:
- *
- * - usa o client autenticado recebido pelo caller;
- * - isolamento continua sendo responsabilidade do RLS;
- * - lê o histórico inteiro, paginado;
+ * - usa o client autenticado recebido pelo caller (RLS user-scoped);
+ * - lê o histórico inteiro, paginado, em ordem de `seq`;
  * - usa o mapper canônico `mapWorkEvent`;
- * - row inválida falha fechado: não deriva maturidade de histórico parcial;
- * - nunca envia rows do banco ao cliente por esta primitive.
+ * - envelope temporal inválido / payload corrompido → fecha `event_history_invalid`;
+ * - contrato/versão não reconhecidos → `canonical_contract_incompatibility`;
+ * - row inválida NUNCA é pulada (poderia remover a evidência que muda a conclusão).
  */
-export async function readCapabilityAssessments(
+export async function readCanonicalWorkHistory(
   client: SupabaseClient<Database>,
-): Promise<CapabilityAssessmentReadResult> {
+): Promise<CanonicalWorkHistoryResult> {
   const events: WorkEvent[] = [];
 
   for (let from = 0; ; from += PAGE_SIZE) {
@@ -162,10 +171,23 @@ export async function readCapabilityAssessments(
     }
   }
 
+  return { ok: true, events };
+}
+
+/**
+ * Read-model server-side do Evolution. Deriva a maturidade das capacidades do
+ * histórico canônico. Isolamento continua sendo responsabilidade do RLS; nunca
+ * envia rows do banco ao cliente por esta primitive.
+ */
+export async function readCapabilityAssessments(
+  client: SupabaseClient<Database>,
+): Promise<CapabilityAssessmentReadResult> {
+  const history = await readCanonicalWorkHistory(client);
+  if (!history.ok) return { ok: false, reason: history.reason };
+
   return {
     ok: true,
-    projection:
-      deriveCapabilityAssessmentsFromWorkHistory(events),
-    eventCount: events.length,
+    projection: deriveCapabilityAssessmentsFromWorkHistory(history.events),
+    eventCount: history.events.length,
   };
 }
