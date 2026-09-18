@@ -188,6 +188,9 @@ export function deriveVerifiedWorktreeExecutionEvidenceFromEvents(
       evidenceClass: 'verified_execution',
       outcome: 'positive',
       observedAt,
+      // Ocasião = attempt: reprodução exige execuções verificadas de attempts
+      // distintos, não múltiplas provas do mesmo attempt.
+      occasionId: opinion.attemptId,
       proofRefs: [
         {
           kind: 'attempt',
@@ -400,6 +403,7 @@ export function deriveCanonicalWorkCapabilityEvidenceFromEvents(
         evidenceClass: 'verified_execution',
         outcome: 'positive',
         observedAt: observedGates.observedAt,
+        occasionId: observedGates.attemptId,
         proofRefs: [
           {
             kind: 'attempt',
@@ -501,6 +505,7 @@ export function deriveCanonicalWorkCapabilityEvidenceFromEvents(
       observedAt: new Date(
         Math.max(...timestamps),
       ).toISOString(),
+      occasionId: result.handoff.attemptId,
       proofRefs: [
         {
           kind: 'attempt',

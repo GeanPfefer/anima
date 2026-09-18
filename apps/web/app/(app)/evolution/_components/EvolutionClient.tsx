@@ -26,6 +26,7 @@ import type {
   TargetProgress,
 } from '@anima/core';
 import type { CapabilityAssessmentProjection } from '@anima/core';
+import { explainCapabilityAssessment } from '@anima/core';
 import styles from './EvolutionClient.module.css';
 
 // ─── Vocabulário de produto / apresentação (valores puros; tipos vêm do core) ───
@@ -769,6 +770,13 @@ function CapabilityDetail({
         ) ?? null
       : null;
 
+  // A explicação é a PROJEÇÃO humana da conclusão do Proof Engine (core, pura):
+  // por que a capacidade está no nível derivado e QUAIS provas o sustentam. A
+  // régua vive no core; aqui só se renderiza.
+  const dynamicExplanation = dynamicAssessment
+    ? explainCapabilityAssessment(dynamicAssessment)
+    : null;
+
   return (
     <div className={styles.detail}>
       <div className={styles.detailTop}>
@@ -812,6 +820,50 @@ function CapabilityDetail({
             <p className={styles.detailEmpty}>
               Evidências usadas: {dynamicAssessment.evidence.length} · eventos lidos: {capabilityAssessment.eventCount}. O derivado não substitui o estado declarado.
             </p>
+
+            {dynamicExplanation && (
+              <div className={styles.dynamicWhy}>
+                <p className={styles.detailText}>
+                  <span className={styles.whyLabel}>Por que:</span> {dynamicExplanation.rationale}
+                </p>
+
+                {dynamicExplanation.decisiveProofRefs.length > 0 && (
+                  <>
+                    <p className={styles.detailHint}>Provas que sustentam este nível</p>
+                    <ul className={styles.proofList}>
+                      {dynamicExplanation.decisiveProofRefs.map((proof, i) => (
+                        <li key={`decisive-${i}`} className={styles.proofItem}>
+                          <span className={styles.proofKind}>{PROOF_KIND_LABEL[proof.kind]}</span>
+                          <code className={styles.proofRef}>{proof.ref}</code>
+                          {proof.note && <span className={styles.proofNote}>{proof.note}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+
+                {dynamicExplanation.contradictingProofRefs.length > 0 && (
+                  <>
+                    <p className={styles.detailHint}>Provas que contradizem (regressão)</p>
+                    <ul className={styles.proofList}>
+                      {dynamicExplanation.contradictingProofRefs.map((proof, i) => (
+                        <li key={`contra-${i}`} className={styles.proofItem}>
+                          <span className={styles.proofKind}>{PROOF_KIND_LABEL[proof.kind]}</span>
+                          <code className={styles.proofRef}>{proof.ref}</code>
+                          {proof.note && <span className={styles.proofNote}>{proof.note}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+
+                {dynamicExplanation.nextProof && (
+                  <p className={styles.detailText}>
+                    <span className={styles.whyLabel}>Próxima prova:</span> {dynamicExplanation.nextProof}
+                  </p>
+                )}
+              </div>
+            )}
           </>
         )}
       </section>

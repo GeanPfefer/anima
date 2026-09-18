@@ -397,6 +397,75 @@ describe('deriveCapabilityAssessmentsFromWorkHistory', () => {
     });
   });
 
+  function gateEventFor(
+    attemptId: string,
+    observedAt: string,
+    id: string,
+  ): WorkEvent {
+    const built = buildHostObservedGateEvidence({
+      workItemId: 'work-1',
+      attemptId,
+      approvedProposalVersion: 1,
+      gates: [
+        {
+          label: 'unit',
+          command: 'npm test',
+          exitCode: 0,
+          durationMs: 250,
+          timedOut: false,
+          cancelled: false,
+        },
+      ],
+      observedAt,
+    });
+
+    if (!built.ok) {
+      throw new Error(built.explanation);
+    }
+
+    return {
+      id,
+      workItemId: 'work-1',
+      type: 'host_observed_gate_evidence_recorded',
+      author: 'system',
+      proposalVersion: 1,
+      payload: {
+        schema_version: 1,
+        data: {
+          work_item_id: 'work-1',
+          attempt_id: attemptId,
+          approved_proposal_version: 1,
+          origin: 'host',
+          coverage: {
+            gates: true,
+          },
+          evidence: built.value as unknown as Json,
+        },
+      } as unknown as Json,
+      occurredAt: new Date(observedAt),
+    };
+  }
+
+  test('reprodução em attempts distintos deriva operational, não só proven', () => {
+    const projection = deriveCapabilityAssessmentsFromWorkHistory([
+      gateEventFor('attempt-1', '2026-09-16T14:00:00.000Z', 'gate-a1'),
+      gateEventFor('attempt-2', '2026-09-16T15:00:00.000Z', 'gate-a2'),
+    ]);
+
+    expect(projection.issues).toEqual([]);
+
+    expect(projection.assessments[0]).toMatchObject({
+      capabilityId: 'agency.run-tests',
+      declaredMaturity: 'proven',
+      definitionMaturity: 'implemented',
+      derivedMaturity: 'operational',
+      assessment: {
+        maturity: 'operational',
+        basis: 'reproduced_operation',
+      },
+    });
+  });
+
   test('histórico sem fatos reconhecidos não inventa assessments', () => {
     const unrelated: WorkEvent = {
       id: 'other',

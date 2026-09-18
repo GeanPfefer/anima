@@ -232,6 +232,140 @@ describe('EvolutionClient (Evolution UX V1)', () => {
     ).toBeInTheDocument();
   });
 
+  test('avaliação dinâmica explica o porquê e mostra as provas decisivas', () => {
+    const props = buildProps();
+
+    render(
+      <EvolutionClient
+        {...props}
+        capabilityAssessment={{
+          status: 'available',
+          eventCount: 7,
+          projection: {
+            issues: [],
+            assessments: [
+              {
+                capabilityId: 'interaction.chat',
+                declaredMaturity: 'operational',
+                definitionMaturity: 'implemented',
+                derivedMaturity: 'proven',
+                assessment: {
+                  maturity: 'proven',
+                  basis: 'verified_execution',
+                  decisiveEvidenceId: 'evidence-1',
+                  supportingEvidenceIds: ['evidence-1'],
+                  contradictingEvidenceIds: [],
+                },
+                evidence: [
+                  {
+                    id: 'evidence-1',
+                    capabilityId: 'interaction.chat',
+                    evidenceClass: 'verified_execution',
+                    outcome: 'positive',
+                    observedAt: '2026-09-16T12:00:00.000Z',
+                    occasionId: 'attempt-xyz',
+                    proofRefs: [
+                      { kind: 'attempt', ref: 'attempt-xyz' },
+                      { kind: 'verifier', ref: 'verifier-1' },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Chat — Operacional',
+      }),
+    );
+
+    // O "por quê" derivado da prova, em linguagem humana.
+    expect(
+      screen.getByText(/Comprovada por execução verificada/),
+    ).toBeInTheDocument();
+
+    // Provas decisivas tipadas — o "POR CAUSA DESTAS provas".
+    expect(screen.getByText('Provas que sustentam este nível')).toBeInTheDocument();
+    expect(screen.getByText('ATTEMPT')).toBeInTheDocument();
+    expect(screen.getByText('attempt-xyz')).toBeInTheDocument();
+    expect(screen.getByText('VERIFIER')).toBeInTheDocument();
+
+    // Próxima prova derivada: reprodução para operacional.
+    expect(
+      screen.getByText(/Falta reproduzir a execução verificada/),
+    ).toBeInTheDocument();
+  });
+
+  test('reprodução derivada é apresentada como operacional com contagem de ocasiões', () => {
+    const props = buildProps();
+
+    render(
+      <EvolutionClient
+        {...props}
+        capabilityAssessment={{
+          status: 'available',
+          eventCount: 12,
+          projection: {
+            issues: [],
+            assessments: [
+              {
+                capabilityId: 'interaction.chat',
+                declaredMaturity: 'operational',
+                definitionMaturity: 'implemented',
+                derivedMaturity: 'operational',
+                assessment: {
+                  maturity: 'operational',
+                  basis: 'reproduced_operation',
+                  decisiveEvidenceId: 'evidence-2',
+                  supportingEvidenceIds: ['evidence-1', 'evidence-2'],
+                  contradictingEvidenceIds: [],
+                },
+                evidence: [
+                  {
+                    id: 'evidence-1',
+                    capabilityId: 'interaction.chat',
+                    evidenceClass: 'verified_execution',
+                    outcome: 'positive',
+                    observedAt: '2026-09-16T12:00:00.000Z',
+                    occasionId: 'attempt-1',
+                    proofRefs: [{ kind: 'attempt', ref: 'attempt-1' }],
+                  },
+                  {
+                    id: 'evidence-2',
+                    capabilityId: 'interaction.chat',
+                    evidenceClass: 'verified_execution',
+                    outcome: 'positive',
+                    observedAt: '2026-09-16T13:00:00.000Z',
+                    occasionId: 'attempt-2',
+                    proofRefs: [{ kind: 'attempt', ref: 'attempt-2' }],
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Chat — Operacional',
+      }),
+    );
+
+    expect(
+      screen.getByText('Derivado: Operacional'),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText(/reproduzida em 2 ocasiões/),
+    ).toBeInTheDocument();
+  });
+
   test('ausência de assessment dinâmico não é apresentada como rebaixamento', () => {
     render(
       <EvolutionClient {...buildProps()} />,

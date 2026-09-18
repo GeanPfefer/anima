@@ -481,6 +481,22 @@
   font-style: italic;
 }
 
+/* ─── Avaliação dinâmica: por quê + proveniência ─────────── */
+
+.dynamicWhy {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.whyLabel {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
 /* ─── Chips de relação ──────────────────────────────────── */
 
 .relChips {

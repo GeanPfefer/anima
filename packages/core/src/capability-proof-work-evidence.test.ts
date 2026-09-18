@@ -755,4 +755,120 @@ describe('Capability Attribution V0', () => {
       ),
     );
   });
+
+  test('cada observação carimba occasionId = attempt (sinal de reprodução)', () => {
+    const evidence =
+      deriveCanonicalWorkCapabilityEvidenceFromEvents(
+        attributionHistory(),
+      );
+
+    expect(evidence.length).toBeGreaterThan(0);
+
+    for (const entry of evidence) {
+      expect(entry.occasionId).toBe(ATTEMPT);
+    }
+  });
+});
+
+function gateEventFor(
+  attemptId: string,
+  observedAt: string,
+  id: string,
+): WorkEvent {
+  const built = buildHostObservedGateEvidence({
+    workItemId: WORK_ITEM,
+    attemptId,
+    approvedProposalVersion: VERSION,
+    gates: [
+      {
+        label: 'unit',
+        command: 'npm test',
+        exitCode: 0,
+        durationMs: 500,
+        timedOut: false,
+        cancelled: false,
+      },
+    ],
+    observedAt,
+  });
+
+  if (!built.ok) {
+    throw new Error(`fixture gate inválida: ${built.explanation}`);
+  }
+
+  return {
+    id,
+    workItemId: WORK_ITEM,
+    type: 'host_observed_gate_evidence_recorded',
+    author: 'system',
+    proposalVersion: VERSION,
+    payload: {
+      schema_version: 1,
+      data: {
+        work_item_id: WORK_ITEM,
+        attempt_id: attemptId,
+        approved_proposal_version: VERSION,
+        origin: 'host',
+        coverage: {
+          gates: true,
+        },
+        evidence: built.value as unknown as Json,
+      },
+    } as unknown as Json,
+    occurredAt: new Date(observedAt),
+  };
+}
+
+describe('Capability Reproduction attribution V0', () => {
+  test('gates de attempts distintos geram duas ocasiões independentes de run-tests', () => {
+    const evidence =
+      deriveCanonicalWorkCapabilityEvidenceFromEvents([
+        gateEventFor(
+          'attempt-1',
+          '2026-09-16T10:00:00.000Z',
+          'gate-a1',
+        ),
+        gateEventFor(
+          'attempt-2',
+          '2026-09-16T11:00:00.000Z',
+          'gate-a2',
+        ),
+      ]);
+
+    const runTests = evidence.filter(
+      (entry) => entry.capabilityId === 'agency.run-tests',
+    );
+
+    expect(runTests).toHaveLength(2);
+
+    expect(
+      new Set(runTests.map((entry) => entry.occasionId)),
+    ).toEqual(new Set(['attempt-1', 'attempt-2']));
+  });
+
+  test('dois gates da MESMA attempt não criam ocasiões independentes', () => {
+    const evidence =
+      deriveCanonicalWorkCapabilityEvidenceFromEvents([
+        gateEventFor(
+          'attempt-unico',
+          '2026-09-16T10:00:00.000Z',
+          'gate-1',
+        ),
+        gateEventFor(
+          'attempt-unico',
+          '2026-09-16T11:00:00.000Z',
+          'gate-2',
+        ),
+      ]);
+
+    const occasions = new Set(
+      evidence
+        .filter(
+          (entry) => entry.capabilityId === 'agency.run-tests',
+        )
+        .map((entry) => entry.occasionId),
+    );
+
+    expect(occasions).toEqual(new Set(['attempt-unico']));
+  });
 });

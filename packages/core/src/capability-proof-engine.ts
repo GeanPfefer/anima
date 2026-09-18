@@ -54,6 +54,19 @@ export interface CapabilityEvidenceObservation {
   readonly proofRefs: readonly CapabilityProofRef[];
 
   readonly note?: string;
+
+  /**
+   * Identidade da OCASIÃO independente que produziu esta observação — tipicamente
+   * o attempt. É o sinal explícito de REPRODUÇÃO: duas execuções verificadas da
+   * mesma capacidade só contam como reprodução quando vêm de ocasiões distintas.
+   *
+   * Deliberadamente separado de `proofRefs`: reprodução conta OCASIÕES, nunca a
+   * quantidade de ponteiros de prova. Ausência de `occasionId` NUNCA dispara
+   * promoção por reprodução (fail-closed conservador) — a observação ainda
+   * sustenta a força da sua própria classe, mas não é contada como ocasião
+   * independente.
+   */
+  readonly occasionId?: string;
 }
 
 export type CapabilityProofBasis =
@@ -104,6 +117,14 @@ const EVIDENCE_RANK: Record<CapabilityEvidenceClass, number> = {
   reproduced_operation: 2,
   autonomous_operation: 3,
 };
+
+/**
+ * Reprodução V1: NÃO é estatística — é o mínimo semântico de "reproduziu". Duas
+ * ocasiões independentes de execução verificada bastam para sair de "provado uma
+ * vez" (`proven`) e sustentar operação reproduzível (`operational`). Um único
+ * sucesso, por mais rico que seja em provas, nunca é reprodução.
+ */
+export const REPRODUCTION_THRESHOLD = 2 as const;
 
 const EVIDENCE_MATURITY: Record<
   Exclude<CapabilityEvidenceClass, 'implementation'>,
@@ -277,9 +298,45 @@ export function assessCapabilityMaturity(
     'implementation'
   >;
 
+  let maturity: CapabilityMaturity = EVIDENCE_MATURITY[bestClass];
+  let basis: CapabilityProofBasis = bestClass;
+
+  /**
+   * REPRODUÇÃO.
+   *
+   * Uma execução verificada única PROVA (`proven`), mas não demonstra OPERAÇÃO
+   * reproduzível. Execução verificada positiva em >= REPRODUCTION_THRESHOLD
+   * ocasiões INDEPENDENTES (occasionId distinto) dentro da janela válida (já
+   * pós-recuperação, se houve regressão) promove a `operational`
+   * (`reproduced_operation`).
+   *
+   * - só REFORÇA a partir de `verified_execution`; nunca rebaixa uma classe já
+   *   mais forte (`reproduced_operation`/`autonomous_operation`);
+   * - conta OCASIÕES distintas, então duas observações da MESMA ocasião não
+   *   inflam reprodução;
+   * - ausência de `occasionId` não é contada — reprodução falha fechado.
+   */
+  if (bestClass === 'verified_execution') {
+    const occasions = new Set<string>();
+
+    for (const evidence of positiveWindow) {
+      if (
+        evidence.evidenceClass === 'verified_execution' &&
+        evidence.occasionId !== undefined
+      ) {
+        occasions.add(evidence.occasionId);
+      }
+    }
+
+    if (occasions.size >= REPRODUCTION_THRESHOLD) {
+      maturity = 'operational';
+      basis = 'reproduced_operation';
+    }
+  }
+
   return {
-    maturity: EVIDENCE_MATURITY[bestClass],
-    basis: bestClass,
+    maturity,
+    basis,
     decisiveEvidenceId: best.id,
     supportingEvidenceIds: positiveWindow.map(
       (evidence) => evidence.id,
