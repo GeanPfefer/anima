@@ -41,6 +41,9 @@ export type PlannerArguments = {
    * conservador (NUNCA `gate_assertion`); valor inválido ⇒ proposta rejeitada.
    */
   validation_claim_kind: WorkClaimKind;
+  /** Superfície material exercitada pelo gate principal. Vazio/ausente significa
+   * que a investigação não sustentou paths precisos; o host não os inventa. */
+  validation_target_paths?: string[];
   /**
    * Provas ADICIONAIS além da principal (validation_label/validation_command),
    * quando o trabalho exige múltiplas verificações independentes (ex.: um teste
@@ -51,7 +54,7 @@ export type PlannerArguments = {
    * critérios, não uma concatenação de shell. Cada prova também declara seu
    * `claim_kind` (mesma régua do gate principal).
    */
-  additional_validations?: { label: string; command: string; covers: string[]; claim_kind: WorkClaimKind }[];
+  additional_validations?: { label: string; command: string; covers: string[]; claim_kind: WorkClaimKind; target_paths?: string[] }[];
 };
 
 /** Resultado do PLANEJADOR (parte provider-específica): a string JSON dos
@@ -90,6 +93,7 @@ export const SUBMIT_PARAMETERS = {
       enum: ['gate_assertion', 'substantive'],
       description: 'Classe do que o gate principal DEMONSTRA. Use "gate_assertion" quando o(s) item(ns) de covers afirmam o PRÓPRIO resultado do gate (ex.: "as validações declaradas passam", "o typecheck passa"). Use "substantive" quando covers descreve um COMPORTAMENTO material que um gate verde apenas associa, mas não demonstra sozinho (ex.: "o parser rejeita entrada inválida"). Na dúvida use "substantive". Não escolha por palavra-chave/nome de teste/comando: declare a intenção real do critério.',
     },
+    validation_target_paths: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Paths relativos exatos que este gate exercita. Use [] quando a investigação não sustentar uma superfície precisa.' },
     additional_validations: {
       type: 'array',
       description: 'Provas ADICIONAIS além da principal, SÓ quando múltiplas verificações independentes são realmente necessárias. Cada item é UM único comando npm (test/typecheck/build); nunca encadeie comandos com &&. Use [] quando uma única prova basta.',
@@ -100,14 +104,15 @@ export const SUBMIT_PARAMETERS = {
           command: { type: 'string', description: 'Um único comando npm de teste, typecheck ou build.' },
           covers: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Itens exatos de expected_effects provados por este gate.' },
           claim_kind: { type: 'string', enum: ['gate_assertion', 'substantive'], description: 'Mesma régua de validation_claim_kind, aplicada a esta prova.' },
+          target_paths: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Paths relativos exatos que esta prova exercita; [] quando não deriváveis.' },
         },
-        required: ['label', 'command', 'covers', 'claim_kind'],
+        required: ['label', 'command', 'covers', 'claim_kind', 'target_paths'],
         additionalProperties: false,
       },
       maxItems: 6,
     },
   },
-  required: ['summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command', 'validation_covers', 'validation_claim_kind', 'additional_validations'],
+  required: ['summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command', 'validation_covers', 'validation_claim_kind', 'validation_target_paths', 'additional_validations'],
   additionalProperties: false,
 } as const;
 
@@ -146,7 +151,7 @@ export const PLANNER_CHAT_TOOLS = [
 ];
 
 export const PLANNER_SYSTEM_INSTRUCTIONS =
-  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Para cada gate, `covers` deve repetir literalmente os itens de `expected_effects` que aquela prova demonstra; TODO expected_effect deve ser coberto por ao menos um gate. Para cada gate, declare também `claim_kind`: use "gate_assertion" quando os itens de `covers` afirmam o PRÓPRIO resultado do gate (ex.: "as validações declaradas passam", "o typecheck passa"); use "substantive" quando `covers` descreve um COMPORTAMENTO material que um gate verde apenas associa, mas não demonstra sozinho (ex.: "o parser rejeita entrada inválida"). Na dúvida, use "substantive". A escolha é a intenção real do critério, nunca uma inferência por palavra-chave, nome de teste ou comando. Quando o trabalho exigir MAIS DE UMA prova independente, registre a primeira em validation_label/validation_command/validation_covers/validation_claim_kind e as demais em additional_validations, cada uma com seu label, comando, covers e claim_kind. Use additional_validations = [] quando uma única prova basta. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS de strings. Executar um teste NÃO concede permissão de editar o arquivo testado: só o included_scope autoriza escrita. Quando houver evidência suficiente, chame submit_project_work_proposal.';
+  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Para cada gate, `covers` deve repetir literalmente os itens de `expected_effects` que aquela prova demonstra; TODO expected_effect deve ser coberto por ao menos um gate. Para cada gate, declare também `claim_kind`: use "gate_assertion" quando os itens de `covers` afirmam o PRÓPRIO resultado do gate (ex.: "as validações declaradas passam", "o typecheck passa"); use "substantive" quando `covers` descreve um COMPORTAMENTO material que um gate verde apenas associa, mas não demonstra sozinho (ex.: "o parser rejeita entrada inválida"). Na dúvida, use "substantive". A escolha é a intenção real do critério, nunca uma inferência por palavra-chave, nome de teste ou comando. Declare ainda `target_paths` por gate: somente paths relativos exatos que a investigação demonstrou serem a superfície material exercitada por aquela prova (incluindo testes quando aplicável), nunca o projeto inteiro; use [] quando não houver evidência suficiente. Quando o trabalho exigir MAIS DE UMA prova independente, registre a primeira em validation_label/validation_command/validation_covers/validation_claim_kind/validation_target_paths e as demais em additional_validations, cada uma com seu label, command, covers, claim_kind e target_paths. Use additional_validations = [] quando uma única prova basta. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS de strings. Executar um teste NÃO concede permissão de editar o arquivo testado: só o included_scope autoriza escrita. Quando houver evidência suficiente, chame submit_project_work_proposal.';
 
 export function buildPlannerUserPrompt(message: string): string {
   return `Prepare uma proposta executável para este pedido:\n\n${message}\n\nInvestigue primeiro o repositório com as ferramentas locais (project_search, project_read_file, project_list_files, project_git_status, project_git_diff). Leia AGENTS.md e os arquivos relevantes. Não altere nada. O alvo será fixado pelo servidor como anima. Escolha somente caminhos exatos de arquivos necessários. Quando houver informação suficiente, chame submit_project_work_proposal.`;
@@ -272,6 +277,14 @@ export function scopeTestCommandToWorkspace(command: string, includedScope: read
 /** Máximo de provas ADICIONAIS além da principal (espelha `maxItems` do schema). */
 export const MAX_ADDITIONAL_VALIDATIONS = 6;
 
+const parseTargetPaths = (value: unknown): string[] | undefined | null => {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return null;
+  if (value.length === 0) return undefined;
+  if (value.length > 12 || !value.every(nonBlank) || !value.every(safePath) || new Set(value).size !== value.length) return null;
+  return value;
+};
+
 /** Domínio canônico de `claim_kind` — amarrado ao `WorkClaimKind` do core (fonte
  * única): se o tipo mudar, esta lista falha o typecheck. */
 const CLAIM_KINDS: readonly WorkClaimKind[] = ['gate_assertion', 'substantive'];
@@ -302,21 +315,24 @@ export function normalizeClaimKind(value: unknown): WorkClaimKind | null {
  */
 export function parseAdditionalValidations(
   value: unknown,
-): { label: string; command: string; covers: string[]; claim_kind: WorkClaimKind }[] | undefined | null {
+): { label: string; command: string; covers: string[]; claim_kind: WorkClaimKind; target_paths?: string[] }[] | undefined | null {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) return null;
   if (value.length === 0) return undefined;
   if (value.length > MAX_ADDITIONAL_VALIDATIONS) return null;
-  const out: { label: string; command: string; covers: string[]; claim_kind: WorkClaimKind }[] = [];
+  const out: { label: string; command: string; covers: string[]; claim_kind: WorkClaimKind; target_paths?: string[] }[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
-    const candidate = entry as { label?: unknown; command?: unknown; covers?: unknown; claim_kind?: unknown };
+    const candidate = entry as { label?: unknown; command?: unknown; covers?: unknown; claim_kind?: unknown; target_paths?: unknown };
     if (!nonBlank(candidate.label) || !nonBlank(candidate.command) || !safeValidationCommand(candidate.command)
       || !textList(candidate.covers)) return null;
     // `claim_kind` inválido reprova a prova inteira; ausência ⇒ substantive conservador.
     const claimKind = normalizeClaimKind(candidate.claim_kind);
     if (claimKind === null) return null;
-    out.push({ label: candidate.label, command: candidate.command, covers: candidate.covers, claim_kind: claimKind });
+    const targetPaths = parseTargetPaths(candidate.target_paths);
+    if (targetPaths === null) return null;
+    out.push({ label: candidate.label, command: candidate.command, covers: candidate.covers, claim_kind: claimKind,
+      ...(targetPaths === undefined ? {} : { target_paths: targetPaths }) });
   }
   return out;
 }
@@ -333,13 +349,19 @@ export function parseProposal(raw: string): PlannerArguments | null {
     // `claim_kind` do gate principal: inválido reprova a proposta; ausência ⇒ substantive conservador.
     const validationClaimKind = normalizeClaimKind(value.validation_claim_kind);
     if (validationClaimKind === null) return null;
+    const validationTargetPaths = parseTargetPaths(value.validation_target_paths);
+    if (validationTargetPaths === null) return null;
     const additionalValidations = parseAdditionalValidations(value.additional_validations);
     if (additionalValidations === null) return null;
     const expected = new Set(value.expected_effects);
     const allCovered = [value.validation_covers, ...(additionalValidations ?? []).map(v => v.covers)].flat();
     if (allCovered.some(criterion => !expected.has(criterion))
       || value.expected_effects.some(criterion => !allCovered.includes(criterion))) return null;
-    return { ...(value as PlannerArguments), validation_claim_kind: validationClaimKind, additional_validations: additionalValidations };
+    const normalized = { ...(value as PlannerArguments), validation_claim_kind: validationClaimKind,
+      additional_validations: additionalValidations };
+    if (validationTargetPaths === undefined) delete normalized.validation_target_paths;
+    else normalized.validation_target_paths = validationTargetPaths;
+    return normalized;
   } catch {
     return null;
   }

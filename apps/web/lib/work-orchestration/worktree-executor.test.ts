@@ -155,6 +155,35 @@ describe('WorktreeExecutorAdapter', () => {
     expect(validateWorkExecutorTranscript(signals)).toBeNull();
   });
 
+  test('produz baseline diferencial real somente para a superfície targetPaths do gate', async () => {
+    const observed: ObservedGateInput[] = [];
+    const req = request({
+      includedScope: ['src/added.ts'],
+      validationCriteria: [{ label: 'retry', command: 'npm test -- retry', targetPaths: ['retry-gate.js'] }],
+    });
+    const signals = await collect(new WorktreeExecutorAdapter({
+      targets: ctx.resolver,
+      backend: new ScriptedCoderBackend([{ path: 'src/added.ts', content: 'export const fixed = "fixed";\n' }]),
+      onGateObserved: outcome => observed.push(outcome),
+    }), req, new AbortController().signal);
+    expect(signals.at(-1)?.kind).toBe('result');
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({
+      exitCode: 0,
+      baseline: { baseExitCode: 1, baseTimedOut: false, baseCancelled: false, targetExistedAtBase: true, changeTouchedGateTargets: false },
+    });
+  });
+
+  test('gate sem targetPaths preserva fluxo antigo e não produz baseline', async () => {
+    const observed: ObservedGateInput[] = [];
+    await collect(new WorktreeExecutorAdapter({
+      targets: ctx.resolver, backend: new ScriptedCoderBackend([added]),
+      onGateObserved: outcome => observed.push(outcome),
+    }), request(), new AbortController().signal);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).not.toHaveProperty('baseline');
+  });
+
   test('gate falho após repair preserva causa classificável sem autorizar terceira edição ou retry', async () => {
     let edits = 0;
     const observed: ObservedGateInput[] = [];

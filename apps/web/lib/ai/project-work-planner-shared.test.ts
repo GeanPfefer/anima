@@ -134,3 +134,34 @@ describe('parseAdditionalValidations — claim_kind por prova adicional', () => 
     }))).toBeNull();
   });
 });
+
+describe('target_paths por gate — superfície explícita e conservadora', () => {
+  test('gate único preserva um target', () => {
+    expect(parseProposal(validArgs({ validation_target_paths: ['apps/web/lib/ai/project-work-planner.test.ts'] }))
+      ?.validation_target_paths).toEqual(['apps/web/lib/ai/project-work-planner.test.ts']);
+  });
+
+  test('gate preserva múltiplos targets', () => {
+    const paths = ['apps/web/lib/ai/project-work-planner.ts', 'apps/web/lib/ai/project-work-planner.test.ts'];
+    expect(parseProposal(validArgs({ validation_target_paths: paths }))?.validation_target_paths).toEqual(paths);
+  });
+
+  test('múltiplos gates preservam superfícies diferentes', () => {
+    const parsed = parseProposal(validArgs({
+      expected_effects: ['gate verde', 'tipos verdes'],
+      validation_target_paths: ['apps/web/lib/ai/project-work-planner.test.ts'],
+      additional_validations: [{
+        label: 'types', command: 'npm run typecheck --workspace=apps/web', covers: ['tipos verdes'],
+        claim_kind: 'gate_assertion', target_paths: ['apps/web/lib/ai/project-work-planner.ts'],
+      }],
+    }));
+    expect(parsed?.validation_target_paths).toEqual(['apps/web/lib/ai/project-work-planner.test.ts']);
+    expect(parsed?.additional_validations?.[0]?.target_paths).toEqual(['apps/web/lib/ai/project-work-planner.ts']);
+  });
+
+  test('sem path derivável ([] ou ausente) omite o campo; path inseguro reprova', () => {
+    expect(parseProposal(validArgs({ validation_target_paths: [] }))).not.toHaveProperty('validation_target_paths');
+    expect(parseProposal(validArgs())).not.toHaveProperty('validation_target_paths');
+    expect(parseProposal(validArgs({ validation_target_paths: ['../segredo'] }))).toBeNull();
+  });
+});

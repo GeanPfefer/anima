@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Project Work Planner e baseline diferencial integrados em 2026-09-19: cada gate
+> pode persistir `target_paths` estruturais derivados da investigação; ausência de
+> evidência mantém o campo omitido. O executor worktree roda, antes do coder, o
+> mesmo gate no `base_sha` somente quando essa superfície existe e anexa ao evento
+> host-observado o resultado-base, existência dos targets e interseção exata com o
+> diff. Compatibilidade dos gates antigos preservada; sem enforcement novo.
+> [Registro](docs/registros/2026-09-19-target-paths-planner-baseline-diferencial.md).
 > Coding Harness V3 endurecido localmente em 2026-09-14 após o benchmark
 > `3a367223`: causa-raiz foi wiring ausente dos comandos reais + conclusão implícita
 > no fim do budget, não ausência das tools. O executor agora injeta validation commands

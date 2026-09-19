@@ -2241,3 +2241,23 @@ leitura. A UI acompanha a projeção canônica por polling moderado, sem acumula
 eventos localmente, e encerra o acompanhamento em review, fronteira humana ou
 terminal. Nenhuma autoridade de provider, compute, integração, merge ou deploy é
 derivada do seletor do chat.
+## Continuação — `target_paths` por gate e baseline diferencial real (2026-09-19)
+
+O Project Work Planner passou a declarar uma superfície material por gate no
+contrato já existente de `target_paths`. O schema exige o campo do provider
+(`[]` representa ausência honesta de evidência), enquanto o parser host-side
+normaliza vazio/ausente para omissão retrocompatível e rejeita lista insegura,
+duplicada ou acima do limite. Gate principal e gates adicionais preservam paths
+distintos até `execution_spec.validation_criteria`.
+
+O `WorktreeExecutorAdapter` agora produz o baseline diferencial antes de chamar o
+coder, apenas para critérios com `targetPaths`: executa o mesmo comando no
+`base_sha`, observa se todos os targets existiam e, no resultado, calcula
+`changedFiles ∩ targetPaths`. A árvore é restaurada ao estado inicial da tentativa
+antes da edição, inclusive em retomadas. Gates sem superfície explícita não geram
+baseline nem provocam varredura ampla. O dado continua advisory/observacional;
+nenhum enforcement destrutivo foi introduzido.
+
+Provas: 68 testes focais web verdes (planner compartilhado, orquestrador e executor
+worktree); typecheck de `packages/core` e `apps/web` verde. Detalhes no
+[registro da sessão](../registros/2026-09-19-target-paths-planner-baseline-diferencial.md).

@@ -262,6 +262,60 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       } | null = null;
       let diffBeforeRepairSha256: string | null = null;
 
+      // Baseline diferencial REAL, produzido antes de qualquer chamada ao coder e
+      // somente para gates que declaram sua superfície estrutural. Gates antigos
+      // (sem targetPaths) permanecem idênticos: não há varredura ampla nem precisão
+      // inventada. A preparação é executada no estado-base e depois integralmente
+      // descartada; falha aqui apenas omite o baseline advisory — o gate final ainda
+      // seguirá seu caminho fail-closed normal após a edição.
+      const differentialBaselines = new Map<number, {
+        baseExitCode: number;
+        baseTimedOut: boolean;
+        baseCancelled: boolean;
+        targetExistedAtBase: boolean;
+      }>();
+      const baselineCriteria = request.validationCriteria
+        .map((criterion, index) => ({ criterion, index }))
+        .filter(({ criterion }) => criterion.command && criterion.targetPaths && criterion.targetPaths.length > 0);
+      if (baselineCriteria.length > 0) {
+        try {
+          // Retomadas nascem no checkpoint; o diferencial, porém, é sempre contra
+          // o base_sha autorizado. Move temporariamente a árvore ao base real.
+          if (!await worktree.restoreToCheckpoint(target.sha)) throw new Error('baseline restore failed');
+          if (this.options.linkNodeModules) await worktree.linkNodeModules(signal);
+          if (this.options.prepareValidation) {
+            await this.options.prepareValidation({
+              rootPath: worktree.root,
+              validationCriteria: baselineCriteria.map(({ criterion }) => criterion),
+              signal,
+            });
+          }
+          const baselineTimeoutMs = (request.limits.maxDurationMinutes ?? 30) * 60_000;
+          for (const { criterion, index } of baselineCriteria) {
+            if (signal.aborted) break;
+            const targetExistedAtBase = (await Promise.all(
+              criterion.targetPaths!.map(path => worktree!.readWorkspaceFile(path)),
+            )).every(content => content !== null);
+            const baseline = await runGate(criterion.command!, worktree.root, baselineTimeoutMs, signal);
+            differentialBaselines.set(index, {
+              baseExitCode: baseline.exitCode,
+              baseTimedOut: baseline.timedOut,
+              baseCancelled: baseline.cancelled,
+              targetExistedAtBase,
+            });
+          }
+        } catch {
+          differentialBaselines.clear();
+        } finally {
+          if (target.startSha) await worktree.restoreToCheckpoint(target.startSha);
+          else await worktree.restoreToBase();
+        }
+        if (signal.aborted) {
+          yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference });
+          return;
+        }
+      }
+
       while (true) {
         // Relogio de primeira parte do HOST por chamada ao coder. Um retry interno
         // continua sendo uma nova observacao de execucao do backend, embora permaneça
@@ -547,7 +601,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         gateOutcomes = [];
         failure = null;
 
-        for (const criterion of request.validationCriteria) {
+        for (const [criterionIndex, criterion] of request.validationCriteria.entries()) {
           if (!criterion.command) {
             validations.push({
               label: criterion.label,
@@ -565,6 +619,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             signal,
           );
 
+          const differential = differentialBaselines.get(criterionIndex);
+          const changedSet = new Set(changed.map(norm));
           this.options.onGateObserved?.({
             label: criterion.label,
             command: gate.command,
@@ -572,6 +628,12 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             durationMs: gate.durationMs,
             timedOut: gate.timedOut,
             cancelled: gate.cancelled,
+            ...(differential && criterion.targetPaths ? {
+              baseline: {
+                ...differential,
+                changeTouchedGateTargets: criterion.targetPaths.some(path => changedSet.has(norm(path))),
+              },
+            } : {}),
           });
 
           const passed =

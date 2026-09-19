@@ -85,6 +85,26 @@ describe('planejador executável do projeto', () => {
     expect(spec.validation_criteria[0]).toMatchObject({ proof: 'gate', claim_kind: 'substantive' });
   });
 
+  test('persiste target_paths distintos por gate no execution_spec canônico', async () => {
+    const planner = { id: 'fixture', proposeArguments: async () => ({ ok: true as const, rawArguments: JSON.stringify({
+      summary: 'Dois gates', objective: 'Validar superfícies distintas',
+      included_scope: ['apps/web/lib/ai/project-work-planner.ts'], excluded_scope: ['supabase'],
+      expected_effects: ['unit', 'types'], risks: ['baixo'],
+      validation_label: 'unit', validation_command: 'npm test -- project-work-planner.test.ts',
+      validation_covers: ['unit'], validation_claim_kind: 'gate_assertion',
+      validation_target_paths: ['apps/web/lib/ai/project-work-planner.test.ts'],
+      additional_validations: [{ label: 'types', command: 'npm run typecheck --workspace=apps/web', covers: ['types'], claim_kind: 'gate_assertion', target_paths: ['apps/web/lib/ai/project-work-planner.ts'] }],
+    }) }) };
+    const result = await planExecutableProjectWork('faça', base, planner);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const spec = (result.command.intent as { execution_spec: { validation_criteria: unknown[] } }).execution_spec;
+    expect(spec.validation_criteria).toEqual([
+      expect.objectContaining({ target_paths: ['apps/web/lib/ai/project-work-planner.test.ts'] }),
+      expect.objectContaining({ target_paths: ['apps/web/lib/ai/project-work-planner.ts'] }),
+    ]);
+  });
+
   test('falha de tool nao libera evidencia no planner OpenAI', async () => {
     (executeProjectTool as jest.Mock).mockResolvedValueOnce(
       JSON.stringify({ ok: false, error: 'arquivo nao encontrado' }),

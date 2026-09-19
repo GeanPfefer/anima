@@ -162,6 +162,7 @@ export async function planExecutableProjectWork(
               covers: proposal.validation_covers,
               proof: 'gate',
               claim_kind: proposal.validation_claim_kind,
+              ...(proposal.validation_target_paths ? { target_paths: proposal.validation_target_paths } : {}),
             },
             ...(proposal.additional_validations ?? []).map(validation => ({
               label: validation.label,
@@ -169,6 +170,7 @@ export async function planExecutableProjectWork(
               covers: validation.covers,
               proof: 'gate',
               claim_kind: validation.claim_kind,
+              ...(validation.target_paths ? { target_paths: validation.target_paths } : {}),
             })),
           ],
           limits: { max_attempts: 3, max_duration_minutes: 30 },
