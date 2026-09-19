@@ -28,6 +28,10 @@ describe('persistHostObservedGateEvidence (fail-open)', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2 });
     expect(calls[0]!.gates.map(g => g.outcome)).toEqual(['passed', 'failed']);
+    expect(calls[0]!.shadowPolicyDecisions).toHaveLength(2);
+    expect(calls[0]!.shadowPolicyDecisions[0]).toMatchObject({
+      policyVersion: 'differential-evidence-policy-v0', decision: 'insufficient_evidence',
+    });
     expect(calls[0]!.coverage).toEqual({ gates: true });
   });
 
@@ -62,6 +66,7 @@ describe('gateEvidenceSinkFor — tradução para a RPC record_host_observed_gat
   const evidence = (): HostObservedGateEvidenceV1 => ({
     schemaVersion: 1, workItemId: 'work-9', attemptId: 'attempt-9', approvedProposalVersion: 4,
     gates: [{ label: 'unit', command: 'npm test', exitCode: 0, durationMs: 1, timedOut: false, cancelled: false, outcome: 'passed' }],
+    shadowPolicyDecisions: [],
     observedAt: '2026-08-16T10:00:00Z', coverage: { gates: true },
   });
 

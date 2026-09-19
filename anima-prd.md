@@ -1793,3 +1793,12 @@ sem provas e terminou `failed` por `ollama_invalid_response_schema`. A reservati
 de USD 1,50 permanece comprometida e sem settlement factual. Nenhuma nova execução
 foi criada após a descoberta. Registro: [barreira de reconciliação da terceira
 prova](docs/registros/2026-09-15-terceira-prova-benchmark-ja-executada-barreira-reconciliacao.md).
+
+## Estado operacional — Differential Evidence Policy V0 shadow (2026-09-19)
+
+A evidência diferencial host-observed agora recebe uma interpretação canônica,
+pura e versionada por `claim_kind`. A Policy V0 registra decisões explicáveis em
+shadow mode junto da evidência, sem alterar outcome de attempt, retry, review,
+Verifier, promoção ou integração. `Evidence != Policy`; nenhuma decisão V0 possui
+enforcement. Antes de ligá-lo, ainda é necessária decisão humana sobre a calibração
+por classe e sobre o papel de mudanças outside-scope/targets alterados.

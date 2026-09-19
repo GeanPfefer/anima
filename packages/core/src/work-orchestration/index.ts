@@ -35,6 +35,7 @@ export * from './work-handoff';
 export * from './worktree-handoff';
 export * from './host-observed-evidence';
 export * from './host-observed-gate-evidence';
+export * from './differential-evidence-policy';
 export * from './host-observed-coder-evidence';
 export * from './canonical-resident-contract';
 export * from './coder-model-selection';

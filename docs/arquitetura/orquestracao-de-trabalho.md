@@ -1015,6 +1015,29 @@ Falhar ao restaurar a árvore do baseline ao estado inicial/checkpoint encerra a
 tentativa antes do coder, sem retry automático. Este recorte continua estritamente
 advisory e não bloqueia alterações apenas por estarem fora do target declarado.
 
+### Differential Evidence Policy V0 — shadow mode
+
+**Evidência não é policy.** `HostObservedGateEvidenceV1` continua registrando os
+fatos produzidos pelo host. A função pura e versionada
+`evaluateDifferentialEvidencePolicy` interpreta esses fatos segundo o
+`claim_kind` canônico (`gate_assertion` ou `substantive`) e produz uma decisão
+estruturada (`allow | require_review | deny | insufficient_evidence`), reason code
+estável, fatos relevantes e referência ao gate avaliado.
+
+A versão `differential-evidence-policy-v0` roda somente em **shadow mode**. Suas
+decisões são calculadas e persistidas junto da evidência observada para permitir a
+comparação posterior entre o outcome operacional real e o que a policy decidiria.
+Nenhum consumidor de execução, retry, Verifier, review, promoção, integração ou
+merge lê essa decisão para mudar comportamento. Em especial, `allow` não promove e
+`deny` não bloqueia nesta versão.
+
+A V0 autoriza apenas uma afirmação sobre o próprio gate quando o scope é verificado,
+o resultado final passa, targets já existiam e não foram alterados e não há mudança
+fora do scope. Um gate verde nunca autoriza sozinho uma afirmação `substantive`.
+Scope ausente/unverified/mismatch, baseline ausente, target novo/alterado e mudança
+outside-scope permanecem explícitos e conservadores; os quatro quadrantes
+PASS→PASS, PASS→FAIL, FAIL→PASS e FAIL→FAIL têm reason codes próprios.
+
 Teste central provado: *executor atesta gate passou; host observa `exitCode != 0`; Verifier
 marca `attested_gate_contradicts_observed` + `gate_failed` e NÃO conclui `verified`.* A
 evolução da base (a evidência de gate chega depois) acrescenta um novo parecer versionado, sem

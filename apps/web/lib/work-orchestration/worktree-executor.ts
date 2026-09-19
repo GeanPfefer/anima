@@ -685,6 +685,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             durationMs: gate.durationMs,
             timedOut: gate.timedOut,
             cancelled: gate.cancelled,
+            ...(criterion.claimKind === undefined ? {} : { claimKind: criterion.claimKind }),
             ...(differential && criterion.targetPaths ? {
               baseline: {
                 baseExitCode: differential.baseExitCode,

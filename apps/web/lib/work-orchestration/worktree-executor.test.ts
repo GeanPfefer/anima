@@ -176,7 +176,7 @@ describe('WorktreeExecutorAdapter', () => {
     const observed: ObservedGateInput[] = [];
     const req = request({
       includedScope: ['src/added.ts'],
-      validationCriteria: [{ label: 'retry', command: 'npm test -- retry-gate.js', targetPaths: ['retry-gate.js'] }],
+      validationCriteria: [{ label: 'retry', command: 'npm test -- retry-gate.js', claimKind: 'gate_assertion', targetPaths: ['retry-gate.js'] }],
     });
     const signals = await collect(new WorktreeExecutorAdapter({
       targets: ctx.resolver,
@@ -187,6 +187,7 @@ describe('WorktreeExecutorAdapter', () => {
     expect(observed).toHaveLength(1);
     expect(observed[0]).toMatchObject({
       exitCode: 0,
+      claimKind: 'gate_assertion',
       baseline: {
         baseExitCode: 1, baseTimedOut: false, baseCancelled: false,
         targetExistedAtBase: true, changeTouchedGateTargets: false,

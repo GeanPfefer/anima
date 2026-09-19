@@ -1,6 +1,8 @@
 import { containsSensitiveData } from './execution-attempt';
 import type { ProposalVersion, WorkEvent, WorkItemId } from './types';
 import type { Json } from '@anima/types';
+import { evaluateDifferentialEvidencePolicy, type DifferentialEvidencePolicyDecisionV0 } from './differential-evidence-policy';
+import type { WorkClaimKind } from './eligibility';
 
 // Evidência de GATE OBSERVADA PELO HOST (independência de primeira parte, sem
 // reexecução — decisão humana de 2026-08-16).
@@ -97,6 +99,8 @@ export interface ObservedGateOutcomeV1 {
   // DERIVADO dos fatos observados (nunca fornecido): passou ⟺ código 0 sem timeout
   // nem cancelamento. Assim o desfecho não pode discordar do exitCode observado.
   readonly outcome: ObservedGateResult;
+  /** Classe declarada do critério; metadado estrutural, nunca inferido do texto. */
+  readonly claimKind?: WorkClaimKind;
   /**
    * Evidência diferencial OPCIONAL (mesmo gate no base_sha). Ausente ⇒ comportamento
    * idêntico ao anterior. Um baseline MALFORMADO é OMITIDO (nunca invalida o outcome
@@ -112,6 +116,8 @@ export interface HostObservedGateEvidenceV1 {
   readonly approvedProposalVersion: ProposalVersion;
   // Na ordem de execução observada (determinística para a mesma tentativa).
   readonly gates: readonly ObservedGateOutcomeV1[];
+  /** Telemetria somente: Policy V0 não é consumida por execução nem Verifier. */
+  readonly shadowPolicyDecisions: readonly DifferentialEvidencePolicyDecisionV0[];
   readonly observedAt: string;
   readonly coverage: { readonly gates: true };
 }
@@ -138,6 +144,7 @@ export interface ObservedGateInput {
   readonly durationMs: number;
   readonly timedOut: boolean;
   readonly cancelled: boolean;
+  readonly claimKind?: WorkClaimKind;
   /** Baseline diferencial OPCIONAL do MESMO gate no base_sha. Malformado ⇒ omitido
    * (o gate permanece válido; nunca falha a evidência do resultado). */
   readonly baseline?: DifferentialGateBaselineInput;
@@ -353,6 +360,7 @@ export function buildHostObservedGateEvidence(input: BuildHostObservedGateEviden
       label: gate.label, command: gate.command, exitCode: gate.exitCode,
       durationMs: gate.durationMs, timedOut: gate.timedOut, cancelled: gate.cancelled,
       outcome: deriveObservedGateOutcome(gate),
+      ...(gate.claimKind === undefined ? {} : { claimKind: gate.claimKind }),
       ...(baseline === null ? {} : { baseline }),
     });
   }
@@ -367,6 +375,7 @@ export function buildHostObservedGateEvidence(input: BuildHostObservedGateEviden
       attemptId: input.attemptId,
       approvedProposalVersion: input.approvedProposalVersion,
       gates,
+      shadowPolicyDecisions: gates.map(gate => evaluateDifferentialEvidencePolicy({ claimKind: gate.claimKind, gate })),
       observedAt: input.observedAt,
       coverage: { gates: true },
     },
@@ -407,6 +416,7 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
       label: gate.label, command: gate.command, exitCode: gate.exitCode,
       durationMs: gate.durationMs, timedOut: gate.timedOut, cancelled: gate.cancelled,
       outcome: deriveObservedGateOutcome({ exitCode: gate.exitCode, timedOut: gate.timedOut, cancelled: gate.cancelled }),
+      ...(gate.claimKind === 'gate_assertion' || gate.claimKind === 'substantive' ? { claimKind: gate.claimKind } : {}),
       ...(baseline === null ? {} : { baseline }),
     });
   }
@@ -416,6 +426,7 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
     attemptId: root.attemptId,
     approvedProposalVersion: root.approvedProposalVersion,
     gates,
+    shadowPolicyDecisions: gates.map(gate => evaluateDifferentialEvidencePolicy({ claimKind: gate.claimKind, gate })),
     observedAt: root.observedAt as string,
     coverage: { gates: true },
   };

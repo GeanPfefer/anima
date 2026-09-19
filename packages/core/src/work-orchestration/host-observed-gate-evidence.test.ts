@@ -27,6 +27,18 @@ describe('buildHostObservedGateEvidence', () => {
     if (!result.ok) return;
     expect(result.value.coverage).toEqual({ gates: true });
     expect(result.value.gates[0]).toMatchObject({ label: 'unit', command: 'npm test', exitCode: 0, outcome: 'passed' });
+    expect(result.value.shadowPolicyDecisions[0]).toMatchObject({
+      policyVersion: 'differential-evidence-policy-v0', claimKind: 'unknown',
+      decision: 'insufficient_evidence', reasonCode: 'unsupported_claim_kind',
+    });
+  });
+
+  test('anexa a decisão shadow sem alterar o outcome observado', () => {
+    const result = build({ gates: [gate({ claimKind: 'gate_assertion', baseline: baselineInput() as never })] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.gates[0]!.outcome).toBe('passed');
+    expect(result.value.shadowPolicyDecisions[0]).toMatchObject({ claimKind: 'gate_assertion', decision: 'require_review', reasonCode: 'outside_scope_change' });
   });
 
   test('o outcome é DERIVADO dos fatos, nunca aceito de fora', () => {

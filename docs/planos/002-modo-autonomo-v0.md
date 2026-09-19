@@ -2280,3 +2280,17 @@ globs/trailing slash são recusados nos contratos puros.
 Provas verdes: core 105, executor/planner 59, planner/evidence web 31; typecheck core
 e web; `git diff --check`. Registro completo em
 [`2026-09-19b-hardening-evidencia-diferencial.md`](../registros/2026-09-19b-hardening-evidencia-diferencial.md).
+
+## Continuação — Differential Evidence Policy V0 em shadow mode (2026-09-19)
+
+A interpretação da evidência diferencial foi separada dos fatos em uma policy pura,
+determinística e explicitamente versionada. Os `claim_kind` reais continuam sendo
+`gate_assertion` e `substantive`: somente o primeiro pode receber `allow` de um gate
+diferencial limpo; evidência verde de gate para uma afirmação substantiva exige
+revisão. Casos desconhecidos e evidência ausente/ambígua falham conservadoramente.
+
+A decisão shadow é anexada à evidência host-observed persistida, com versão, classe,
+decisão, reason code, fatos relevantes e referência ao gate. Ela não é consumida
+por executor, attempt state machine, retry, Verifier, review, promoção ou integração;
+portanto não existe enforcement nesta fatia. O passo futuro permanece uma decisão
+humana de calibrar as regras antes de conectar qualquer decisão operacional.
