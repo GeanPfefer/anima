@@ -163,5 +163,6 @@ describe('target_paths por gate — superfície explícita e conservadora', () =
     expect(parseProposal(validArgs({ validation_target_paths: [] }))).not.toHaveProperty('validation_target_paths');
     expect(parseProposal(validArgs())).not.toHaveProperty('validation_target_paths');
     expect(parseProposal(validArgs({ validation_target_paths: ['../segredo'] }))).toBeNull();
+    expect(parseProposal(validArgs({ validation_target_paths: ['apps/web/lib/*.ts'] }))).toBeNull();
   });
 });

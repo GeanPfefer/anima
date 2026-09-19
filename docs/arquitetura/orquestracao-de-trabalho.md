@@ -993,6 +993,28 @@ worktree in-process). Um executor futuro que rode seus próprios gates num proce
 é honestamente **false** para aquele executor. Não há promessa de independência onde o host não
 observa; `coverage.gates=true` só aparece quando a observação real existe.
 
+### Baseline diferencial: declaração ≠ observação ≠ verificação (advisory)
+
+`target_paths` é declaração do planner, não prova independente de que o comando do
+gate exercita aqueles arquivos. O host preserva três camadas separadas:
+
+1. **declaração:** paths exatos de arquivo no critério aprovado, sem semântica de
+   diretório, prefixo ou glob;
+2. **observação:** para cada target, existência/tipo no `base_sha` e toque no diff,
+   além dos arquivos alterados totais, dentro e fora do conjunto declarado;
+3. **verificação:** relação que o host conseguiu derivar objetivamente da definição
+   do gate. Atualmente somente `npm test ... -- <path-exato>` é verificável; filtro
+   divergente vira `mismatch`; typecheck, build, lint e teste global ficam
+   `unverified`.
+
+Os booleanos agregados legados são derivados dos fatos por target. A classificação
+`discriminating` exige `scopeVerification.status=verified`; evidência legada,
+ambígua ou baseada apenas na declaração cai em `inconclusive`. Os quatro quadrantes
+PASS/FAIL de base e resultado permanecem nos outcomes estruturados, sem policy nova.
+Falhar ao restaurar a árvore do baseline ao estado inicial/checkpoint encerra a
+tentativa antes do coder, sem retry automático. Este recorte continua estritamente
+advisory e não bloqueia alterações apenas por estarem fora do target declarado.
+
 Teste central provado: *executor atesta gate passou; host observa `exitCode != 0`; Verifier
 marca `attested_gate_contradicts_observed` + `gate_failed` e NÃO conclui `verified`.* A
 evolução da base (a evidência de gate chega depois) acrescenta um novo parecer versionado, sem

@@ -118,6 +118,44 @@ const GATE_DIAGNOSTIC_LINES = 8;
 const ENVIRONMENTAL_GATE_DIAGNOSTIC =
   /(?:\.next[\\/]types|next-env\.d\.ts|ECONNREFUSED|ENOSPC|ENOMEM|out of memory|command not found|is not recognized as (?:an internal|the name)|spawn\s+\S+\s+ENOENT|network (?:is )?unreachable|temporary failure in name resolution)/i;
 
+export type GateTargetScopeVerification =
+  | { readonly status: 'verified'; readonly verifiedTargetPaths: readonly string[] }
+  | { readonly status: 'mismatch'; readonly verifiedTargetPaths: readonly string[]; readonly reason: 'declared_scope_differs_from_gate' }
+  | { readonly status: 'unverified'; readonly verifiedTargetPaths: readonly []; readonly reason: 'gate_scope_not_concrete' | 'declared_target_not_exact_file' };
+
+/**
+ * Verifica somente a forma estreita que o host consegue provar pela própria
+ * definição do gate: `npm test ... -- <path-exato>`. Typecheck/build/lint, teste
+ * global, múltiplos filtros sem path e qualquer ambiguidade ficam `unverified`.
+ * Igualdade é EXATA; diretório nunca cobre descendentes implicitamente.
+ */
+export function verifyGateTargetScope(command: string, declaredTargetPaths: readonly string[]): GateTargetScopeVerification {
+  const parsed = parseGateCommand(command);
+  if (!parsed) return { status: 'unverified', verifiedTargetPaths: [], reason: 'gate_scope_not_concrete' };
+  const args = parsed.args;
+  const testIndex = args[0] === 'run' && args[1] === 'test' ? 1 : args[0] === 'test' ? 0 : -1;
+  const separator = args.indexOf('--');
+  if (testIndex < 0 || separator < 0 || separator === args.length - 1) {
+    return { status: 'unverified', verifiedTargetPaths: [], reason: 'gate_scope_not_concrete' };
+  }
+  const workspaceArg = args.find(arg => arg.startsWith('--workspace='));
+  const workspace = workspaceArg?.slice('--workspace='.length).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '');
+  const filters = args.slice(separator + 1);
+  if (filters.length === 0 || filters.some(path => path.includes('*') || path.includes('?') || path.endsWith('/'))) {
+    return { status: 'unverified', verifiedTargetPaths: [], reason: 'gate_scope_not_concrete' };
+  }
+  const verifiedTargetPaths = filters.map(path => {
+    const normalized = norm(path).replace(/^\.\//, '');
+    return workspace && !normalized.startsWith(`${workspace}/`) ? `${workspace}/${normalized}` : normalized;
+  });
+  const declared = [...declaredTargetPaths].map(norm).sort();
+  const verified = [...new Set(verifiedTargetPaths)].sort();
+  if (declared.length === verified.length && declared.every((path, index) => path === verified[index])) {
+    return { status: 'verified', verifiedTargetPaths: verified };
+  }
+  return { status: 'mismatch', verifiedTargetPaths: verified, reason: 'declared_scope_differs_from_gate' };
+}
+
 export interface RepairableGateFailure {
   readonly exitCode: number;
   readonly timedOut: boolean;
@@ -272,12 +310,14 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         baseExitCode: number;
         baseTimedOut: boolean;
         baseCancelled: boolean;
-        targetExistedAtBase: boolean;
+        targets: readonly { path: string; existedAtBase: boolean; kindAtBase: 'file' | 'directory' | 'other' | 'missing' }[];
+        scopeVerification: GateTargetScopeVerification;
       }>();
       const baselineCriteria = request.validationCriteria
         .map((criterion, index) => ({ criterion, index }))
         .filter(({ criterion }) => criterion.command && criterion.targetPaths && criterion.targetPaths.length > 0);
       if (baselineCriteria.length > 0) {
+        let baselineRestoreSucceeded = true;
         try {
           // Retomadas nascem no checkpoint; o diferencial, porém, é sempre contra
           // o base_sha autorizado. Move temporariamente a árvore ao base real.
@@ -293,22 +333,35 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           const baselineTimeoutMs = (request.limits.maxDurationMinutes ?? 30) * 60_000;
           for (const { criterion, index } of baselineCriteria) {
             if (signal.aborted) break;
-            const targetExistedAtBase = (await Promise.all(
-              criterion.targetPaths!.map(path => worktree!.readWorkspaceFile(path)),
-            )).every(content => content !== null);
+            const targets = await Promise.all(criterion.targetPaths!.map(async path => {
+              const kindAtBase = await worktree!.workspacePathKind(path);
+              return { path: norm(path), existedAtBase: kindAtBase === 'file', kindAtBase };
+            }));
+            const commandScope = verifyGateTargetScope(criterion.command!, criterion.targetPaths!);
             const baseline = await runGate(criterion.command!, worktree.root, baselineTimeoutMs, signal);
             differentialBaselines.set(index, {
               baseExitCode: baseline.exitCode,
               baseTimedOut: baseline.timedOut,
               baseCancelled: baseline.cancelled,
-              targetExistedAtBase,
+              targets,
+              scopeVerification: targets.some(target => target.kindAtBase === 'directory' || target.kindAtBase === 'other')
+                ? { status: 'unverified', verifiedTargetPaths: [], reason: 'declared_target_not_exact_file' }
+                : commandScope,
             });
           }
         } catch {
           differentialBaselines.clear();
         } finally {
-          if (target.startSha) await worktree.restoreToCheckpoint(target.startSha);
-          else await worktree.restoreToBase();
+          baselineRestoreSucceeded = target.startSha
+            ? await worktree.restoreToCheckpoint(target.startSha)
+            : await worktree.restoreToBase();
+        }
+        if (!baselineRestoreSucceeded) {
+          yield attach(++seq, {
+            kind: 'error', code: 'execution_failed', retryable: false, handoffReference,
+            message: `Falha ao restaurar a worktree ao estado inicial ${target.startSha ? 'do checkpoint de retomada' : 'da tentativa'} após observar o baseline; o coder não foi executado.`,
+          });
+          return;
         }
         if (signal.aborted) {
           yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference });
@@ -621,6 +674,10 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
 
           const differential = differentialBaselines.get(criterionIndex);
           const changedSet = new Set(changed.map(norm));
+          const declaredTargetSet = new Set(criterion.targetPaths?.map(norm) ?? []);
+          const changedFiles = changed.map(norm);
+          const changedFilesWithinTargetScope = changedFiles.filter(path => declaredTargetSet.has(path));
+          const changedFilesOutsideTargetScope = changedFiles.filter(path => !declaredTargetSet.has(path));
           this.options.onGateObserved?.({
             label: criterion.label,
             command: gate.command,
@@ -630,8 +687,16 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             cancelled: gate.cancelled,
             ...(differential && criterion.targetPaths ? {
               baseline: {
-                ...differential,
-                changeTouchedGateTargets: criterion.targetPaths.some(path => changedSet.has(norm(path))),
+                baseExitCode: differential.baseExitCode,
+                baseTimedOut: differential.baseTimedOut,
+                baseCancelled: differential.baseCancelled,
+                targetExistedAtBase: differential.targets.every(target => target.existedAtBase),
+                changeTouchedGateTargets: differential.targets.some(target => changedSet.has(target.path)),
+                targets: differential.targets.map(target => ({ ...target, changed: changedSet.has(target.path) })),
+                changedFiles,
+                changedFilesWithinTargetScope,
+                changedFilesOutsideTargetScope,
+                scopeVerification: differential.scopeVerification,
               },
             } : {}),
           });

@@ -1,4 +1,10 @@
 # Anima — Product Requirements Document
+> Evidência diferencial endurecida em 2026-09-19, ainda advisory: restore pós-baseline
+> falha fechado antes do coder; fatos por target e partição total/dentro/fora do diff
+> são persistidos; `targetPaths` declarado foi separado da verificação independente
+> do comando (`verified`/`mismatch`/`unverified`). Só filtro `npm test -- <path-exato>`
+> pode ser verificado hoje; gates amplos permanecem inconclusivos para discriminação.
+> [Registro](docs/registros/2026-09-19b-hardening-evidencia-diferencial.md).
 > Project Work Planner e baseline diferencial integrados em 2026-09-19: cada gate
 > pode persistir `target_paths` estruturais derivados da investigação; ausência de
 > evidência mantém o campo omitido. O executor worktree roda, antes do coder, o

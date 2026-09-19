@@ -236,6 +236,28 @@ export function includedScopeAnchoredInProject(
     }
   });
 }
+
+/** `target_paths` usa semântica de ARQUIVO EXATO. Um path ausente é permitido
+ * (teste/arquivo novo e fato `existedAtBase=false`), mas um diretório existente é
+ * recusado — nunca vira prefixo implícito para descendentes. */
+export function targetPathsAreExactFilesOrAbsent(
+  proposal: Pick<PlannerArguments, 'validation_target_paths' | 'additional_validations'>,
+  repoRoot: string = projectRoot(),
+): boolean {
+  const paths = [
+    ...(proposal.validation_target_paths ?? []),
+    ...(proposal.additional_validations ?? []).flatMap(validation => validation.target_paths ?? []),
+  ];
+  return paths.every(path => {
+    if (!safePath(path) || path.includes('*') || path.includes('?') || path.replace(/\\/g, '/').endsWith('/')) return false;
+    const target = resolve(repoRoot, path);
+    try {
+      return !existsSync(target) || statSync(target).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
 export const safeValidationCommand = (value: string): boolean =>
   /^npm(?:\.cmd)? (?:run (?:typecheck|test|build)(?: --workspace=[@a-z0-9._/-]+)?(?: -- [\w./()\\:-]+)*|test(?: --workspace=[@a-z0-9._/-]+)?(?: -- [\w./()\\:*?-]+)*)$/i.test(value.trim());
 
@@ -281,7 +303,9 @@ const parseTargetPaths = (value: unknown): string[] | undefined | null => {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) return null;
   if (value.length === 0) return undefined;
-  if (value.length > 12 || !value.every(nonBlank) || !value.every(safePath) || new Set(value).size !== value.length) return null;
+  if (value.length > 12 || !value.every(nonBlank) || !value.every(safePath)
+    || value.some(path => path.includes('*') || path.includes('?') || path.replace(/\\/g, '/').endsWith('/'))
+    || new Set(value).size !== value.length) return null;
   return value;
 };
 

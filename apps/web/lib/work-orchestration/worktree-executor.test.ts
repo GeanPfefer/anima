@@ -16,10 +16,10 @@ import {
   type WorkExecutorSignal,
   type WorktreeHandoffV1,
 } from '@anima/core';
-import { runProcess } from './worktree';
+import { GitWorktree, runProcess } from './worktree';
 import { ScriptedCoderBackend, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
-import { WorktreeExecutorAdapter, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, type WorktreeTargetResolver } from './worktree-executor';
+import { WorktreeExecutorAdapter, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, verifyGateTargetScope, type WorktreeTargetResolver } from './worktree-executor';
 
 // Operações git reais podem ficar lentas sob carga paralela; folga o timeout
 // para não flakar por contenção (o padrão de 5s do jest é curto demais aqui).
@@ -49,7 +49,7 @@ async function makeNpmRepo(): Promise<{ repo: string; sha: string; resolver: Wor
     // o host precisa de saída para sanitizar e realimentar; um gate mudo não produz
     // diagnóstico algum (é o comportamento correto — não há o que diagnosticar).
     `const fs = require('fs');
-if (!process.argv.includes('retry')) process.exit(0);
+if (!process.argv.slice(2).some(arg => arg.includes('retry'))) process.exit(0);
 const p = 'src/added.ts';
 if (fs.existsSync(p) && fs.readFileSync(p, 'utf8').includes('fixed')) process.exit(0);
 console.error('retry-gate: marcador "fixed" ausente em src added.ts');
@@ -100,6 +100,23 @@ const request = (overrides: Partial<WorkExecutorRequest> = {}): WorkExecutorRequ
   limits: { maxDurationMinutes: 1 },
   contextReferences: [],
   ...overrides,
+});
+
+describe('verifyGateTargetScope — fronteira independente comando↔targets', () => {
+  test('verifica filtro de teste por arquivo exato, inclusive sob workspace', () => {
+    expect(verifyGateTargetScope('npm test --workspace=apps/web -- lib/ai/x.test.ts', ['apps/web/lib/ai/x.test.ts']))
+      .toEqual({ status: 'verified', verifiedTargetPaths: ['apps/web/lib/ai/x.test.ts'] });
+  });
+  test.each(['npm run typecheck --workspace=apps/web', 'npm run build', 'npm test'])(
+    'gate amplo/ambíguo %s fica explicitamente unverified', command => {
+      expect(verifyGateTargetScope(command, ['apps/web/lib/ai/x.test.ts'])).toEqual({
+        status: 'unverified', verifiedTargetPaths: [], reason: 'gate_scope_not_concrete',
+      });
+    });
+  test('diretório declarado não cobre implicitamente o arquivo filtrado', () => {
+    expect(verifyGateTargetScope('npm test -- apps/web/lib/foo/bar.test.ts', ['apps/web/lib/foo']))
+      .toEqual({ status: 'mismatch', verifiedTargetPaths: ['apps/web/lib/foo/bar.test.ts'], reason: 'declared_scope_differs_from_gate' });
+  });
 });
 
 async function collect(adapter: WorktreeExecutorAdapter, req: WorkExecutorRequest, signal: AbortSignal): Promise<WorkExecutorSignal[]> {
@@ -159,7 +176,7 @@ describe('WorktreeExecutorAdapter', () => {
     const observed: ObservedGateInput[] = [];
     const req = request({
       includedScope: ['src/added.ts'],
-      validationCriteria: [{ label: 'retry', command: 'npm test -- retry', targetPaths: ['retry-gate.js'] }],
+      validationCriteria: [{ label: 'retry', command: 'npm test -- retry-gate.js', targetPaths: ['retry-gate.js'] }],
     });
     const signals = await collect(new WorktreeExecutorAdapter({
       targets: ctx.resolver,
@@ -170,8 +187,53 @@ describe('WorktreeExecutorAdapter', () => {
     expect(observed).toHaveLength(1);
     expect(observed[0]).toMatchObject({
       exitCode: 0,
-      baseline: { baseExitCode: 1, baseTimedOut: false, baseCancelled: false, targetExistedAtBase: true, changeTouchedGateTargets: false },
+      baseline: {
+        baseExitCode: 1, baseTimedOut: false, baseCancelled: false,
+        targetExistedAtBase: true, changeTouchedGateTargets: false,
+        targets: [{ path: 'retry-gate.js', existedAtBase: true, changed: false }],
+        changedFilesWithinTargetScope: [], changedFilesOutsideTargetScope: ['src/added.ts'],
+        scopeVerification: { status: 'verified', verifiedTargetPaths: ['retry-gate.js'] },
+      },
     });
+  });
+
+  test('target alterado e target inexistente no base permanecem fatos por-path', async () => {
+    const observed: ObservedGateInput[] = [];
+    const req = request({ validationCriteria: [{ label: 'target novo', command: 'npm test -- src/added.ts', targetPaths: ['src/added.ts'] }] });
+    await collect(new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: new ScriptedCoderBackend([added]),
+      onGateObserved: outcome => observed.push(outcome) }), req, new AbortController().signal);
+    expect(observed[0]?.baseline).toMatchObject({
+      targetExistedAtBase: false, changeTouchedGateTargets: true,
+      targets: [{ path: 'src/added.ts', existedAtBase: false, changed: true }],
+      changedFilesWithinTargetScope: ['src/added.ts'], changedFilesOutsideTargetScope: [],
+      scopeVerification: { status: 'verified' },
+    });
+  });
+
+  test('múltiplos targets preservam existência parcial e arquivo alterado fora do scope', async () => {
+    const observed: ObservedGateInput[] = [];
+    const criteria = [{ label: 'multi', command: 'npm test -- retry-gate.js src/missing.test.ts', targetPaths: ['retry-gate.js', 'src/missing.test.ts'] }];
+    await collect(new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      backend: new ScriptedCoderBackend([{ path: 'src/added.ts', content: 'export const fixed = "fixed";\n' }]),
+      onGateObserved: outcome => observed.push(outcome) }), request({ validationCriteria: criteria }), new AbortController().signal);
+    expect(observed[0]?.baseline).toMatchObject({
+      targets: [{ path: 'retry-gate.js', existedAtBase: true, changed: false }, { path: 'src/missing.test.ts', existedAtBase: false, changed: false }],
+      changedFilesWithinTargetScope: [], changedFilesOutsideTargetScope: ['src/added.ts'],
+    });
+  });
+
+  test('falha ao restaurar baseline encerra antes do coder, sem retry', async () => {
+    let edits = 0;
+    const restore = jest.spyOn(GitWorktree.prototype, 'restoreToBase').mockResolvedValueOnce(false);
+    const req = request({ validationCriteria: [{ label: 'base', command: 'npm test -- src/added.ts', targetPaths: ['src/added.ts'] }] });
+    const terminal = (await collect(new WorktreeExecutorAdapter({ targets: ctx.resolver, backend: {
+      id: 'must-not-run', edit: async () => { edits++; return { summary: 'não deveria rodar', touchedResources: [] }; },
+    } }), req, new AbortController().signal)).at(-1)!;
+    restore.mockRestore();
+    expect(edits).toBe(0);
+    expect(terminal).toMatchObject({ kind: 'error', code: 'execution_failed', retryable: false });
+    if (terminal.kind === 'error') expect(terminal.message).toContain('coder não foi executado');
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]).catch(() => undefined);
   });
 
   test('gate sem targetPaths preserva fluxo antigo e não produz baseline', async () => {
@@ -399,10 +461,12 @@ describe('WorktreeExecutorAdapter', () => {
     await git(ctx.repo, ['commit', '-m', 'checkpoint preservado']);
     const checkpointSha = (await git(ctx.repo, ['rev-parse', 'HEAD'])).stdout.trim();
 
-    const req = request({ includedScope: ['src/added.ts'], excludedScope: ['src/implementation.ts'] });
+    const observed: ObservedGateInput[] = [];
+    const req = request({ includedScope: ['src/added.ts'], excludedScope: ['src/implementation.ts'],
+      validationCriteria: [{ label: 'retomada', command: 'npm test -- src/added.ts', targetPaths: ['src/added.ts'] }] });
     const adapter = new WorktreeExecutorAdapter({
       targets: { resolve: () => ({ repoRoot: ctx.repo, sha: baseSha, startSha: checkpointSha }) },
-      backend: new ScriptedCoderBackend([added]), emitCheckpoint: true,
+      backend: new ScriptedCoderBackend([added]), emitCheckpoint: true, onGateObserved: outcome => observed.push(outcome),
     });
     const signals = await collect(adapter, req, new AbortController().signal);
     expect(signals.at(-1)?.kind).toBe('result');
@@ -411,6 +475,7 @@ describe('WorktreeExecutorAdapter', () => {
     expect(total.stdout).toContain('src/added.ts');
     const attemptOnly = await git(ctx.repo, ['diff', '--name-only', checkpointSha, `anima-work/${req.attemptId}`]);
     expect(attemptOnly.stdout.trim()).toBe('src/added.ts');
+    expect(observed[0]?.baseline).toMatchObject({ targets: [{ path: 'src/added.ts', existedAtBase: false, changed: true }] });
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
   });
 

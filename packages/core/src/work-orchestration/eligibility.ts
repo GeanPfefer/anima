@@ -62,14 +62,14 @@ export interface AutonomousValidationCriterion {
    * ⇒ o Verifier a trata de forma CONSERVADORA (não promovida a `gate_assertion`). */
   readonly claimKind?: WorkClaimKind;
   /**
-   * Alvo(s) ESTRUTURAL(is) do gate: caminhos relativos que este gate exercita/alveja
+   * Alvo(s) ESTRUTURAL(is) do gate: caminhos relativos EXATOS DE ARQUIVO que este gate exercita/alveja
    * (inclui o(s) arquivo(s) de teste). Declarado, nunca inferido do `command`. Serve a
    * consumidores que precisam correlacionar o gate a arquivos SEM parsear texto — ex.:
    * uma evidência diferencial derivar `targetExistedAtBase` (git no base_sha) e
    * `changeTouchedGateTargets` (interseção com os arquivos alterados). Ausente ⇒
    * critério idêntico ao contrato anterior (retrocompatível). Quando presente: lista
    * NÃO-VAZIA de caminhos relativos SEGUROS (sem absolutos/traversal/segmentos sensíveis);
-   * qualquer item malformado invalida o spec inteiro (fail-closed). NÃO impõe relação
+   * diretório/prefixo/glob NÃO é suportado nem expandido implicitamente; qualquer item malformado invalida o spec inteiro (fail-closed). NÃO impõe relação
    * com `included_scope` (o alvo do gate pode estar fora do escopo de escrita).
    */
   readonly targetPaths?: readonly string[];
@@ -174,7 +174,8 @@ const targetKinds: ReadonlySet<string> = new Set(['project', 'workspace', 'resou
 const isSafeRelativePath = (value: Json | undefined): value is string => {
   if (typeof value !== 'string' || value.trim().length === 0) return false;
   const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (!normalized || normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return false;
+  if (!normalized || normalized.startsWith('/') || normalized.endsWith('/') || normalized.includes('*')
+    || normalized.includes('?') || /^[A-Za-z]:/.test(normalized)) return false;
   const segments = normalized.toLowerCase().split('/');
   return !segments.includes('..')
     && !segments.includes('.git')

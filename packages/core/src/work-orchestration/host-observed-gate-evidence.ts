@@ -27,6 +27,18 @@ const MAX_COMMAND = 2000;
 
 export type ObservedGateResult = 'passed' | 'failed';
 
+export interface DifferentialGateTargetFactV1 {
+  readonly path: string;
+  readonly existedAtBase: boolean;
+  readonly changed: boolean;
+  readonly kindAtBase?: 'file' | 'directory' | 'other' | 'missing';
+}
+
+export type GateTargetScopeVerificationV1 =
+  | { readonly status: 'verified'; readonly verifiedTargetPaths: readonly string[] }
+  | { readonly status: 'mismatch'; readonly verifiedTargetPaths: readonly string[]; readonly reason: 'declared_scope_differs_from_gate' }
+  | { readonly status: 'unverified'; readonly verifiedTargetPaths: readonly []; readonly reason: 'gate_scope_not_concrete' | 'declared_target_not_exact_file' };
+
 /**
  * Observação DIFERENCIAL de UM gate: o desfecho do MESMO gate (mesma identidade
  * label+command) medido pelo host contra o `base_sha` — o estado ANTES da mudança
@@ -48,6 +60,13 @@ export interface DifferentialGateBaselineV1 {
   readonly targetExistedAtBase: boolean;
   /** A mudança tocou algum arquivo que o gate exercita/alveja? (changedFiles ∩ alvo) */
   readonly changeTouchedGateTargets: boolean;
+  /** Fatos host-observados por path EXATO; nunca significam prefixo/diretório/glob. */
+  readonly targets?: readonly DifferentialGateTargetFactV1[];
+  readonly changedFiles?: readonly string[];
+  readonly changedFilesWithinTargetScope?: readonly string[];
+  readonly changedFilesOutsideTargetScope?: readonly string[];
+  /** Relação independente comando↔targets. Ausente em evidência legada. */
+  readonly scopeVerification?: GateTargetScopeVerificationV1;
 }
 
 /**
@@ -103,8 +122,13 @@ export interface DifferentialGateBaselineInput {
   readonly baseExitCode: number;
   readonly baseTimedOut: boolean;
   readonly baseCancelled: boolean;
-  readonly targetExistedAtBase: boolean;
-  readonly changeTouchedGateTargets: boolean;
+  readonly targetExistedAtBase?: boolean;
+  readonly changeTouchedGateTargets?: boolean;
+  readonly targets?: readonly DifferentialGateTargetFactV1[];
+  readonly changedFiles?: readonly string[];
+  readonly changedFilesWithinTargetScope?: readonly string[];
+  readonly changedFilesOutsideTargetScope?: readonly string[];
+  readonly scopeVerification?: GateTargetScopeVerificationV1;
 }
 
 export interface ObservedGateInput {
@@ -141,6 +165,19 @@ export type HostObservedGateEvidenceResult =
 const nonBlank = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 const isInt = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value);
 const positiveVersion = (value: unknown): value is number => isInt(value) && (value as number) > 0;
+const exactRelativePath = (value: unknown): value is string => {
+  if (!nonBlank(value) || value.includes('*') || value.includes('?')) return false;
+  const normalized = value.replace(/\\/g, '/');
+  if (normalized.startsWith('/') || normalized.endsWith('/') || /^[A-Za-z]:/.test(normalized)) return false;
+  const segments = normalized.split('/');
+  const lower = segments.map(segment => segment.toLowerCase());
+  return !segments.includes('..') && !segments.includes('.') && segments.every(Boolean)
+    && !lower.includes('.git') && !lower.includes('node_modules') && !lower.includes('.next') && !lower.includes('.worktrees')
+    && !lower.some(segment => segment === '.env' || segment.startsWith('.env.'))
+    && !/\.(?:pem|key|p12|pfx)$/i.test(normalized);
+};
+const exactPathList = (value: unknown): value is string[] => Array.isArray(value)
+  && value.length <= 200 && value.every(exactRelativePath) && new Set(value).size === value.length;
 
 /** Desfecho derivado dos fatos observados — a única fonte de `outcome`. */
 export const deriveObservedGateOutcome = (gate: { exitCode: number; timedOut: boolean; cancelled: boolean }): ObservedGateResult =>
@@ -156,17 +193,76 @@ export function deriveDifferentialBaseline(value: unknown): DifferentialGateBase
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const b = value as Record<string, unknown>;
   if (!isInt(b.baseExitCode)
-    || typeof b.baseTimedOut !== 'boolean' || typeof b.baseCancelled !== 'boolean'
-    || typeof b.targetExistedAtBase !== 'boolean' || typeof b.changeTouchedGateTargets !== 'boolean') {
+    || typeof b.baseTimedOut !== 'boolean' || typeof b.baseCancelled !== 'boolean') {
     return null;
   }
+  let targets: DifferentialGateTargetFactV1[] | undefined;
+  if (b.targets !== undefined) {
+    if (!Array.isArray(b.targets) || b.targets.length === 0 || b.targets.length > 200) return null;
+    targets = [];
+    for (const raw of b.targets) {
+      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+      const target = raw as Record<string, unknown>;
+      const kindAtBase = target.kindAtBase;
+      if (!exactRelativePath(target.path) || typeof target.existedAtBase !== 'boolean' || typeof target.changed !== 'boolean'
+        || (kindAtBase !== undefined && !['file', 'directory', 'other', 'missing'].includes(kindAtBase as string))) return null;
+      targets.push({ path: target.path, existedAtBase: target.existedAtBase, changed: target.changed,
+        ...(kindAtBase === undefined ? {} : { kindAtBase: kindAtBase as DifferentialGateTargetFactV1['kindAtBase'] }) });
+    }
+    if (new Set(targets.map(target => target.path)).size !== targets.length) return null;
+  }
+  const targetExistedAtBase = targets ? targets.every(target => target.existedAtBase) : b.targetExistedAtBase;
+  const changeTouchedGateTargets = targets ? targets.some(target => target.changed) : b.changeTouchedGateTargets;
+  if (typeof targetExistedAtBase !== 'boolean' || typeof changeTouchedGateTargets !== 'boolean') return null;
+
+  const changedFiles = b.changedFiles;
+  const within = b.changedFilesWithinTargetScope;
+  const outside = b.changedFilesOutsideTargetScope;
+  if ((changedFiles !== undefined || within !== undefined || outside !== undefined)
+    && (!exactPathList(changedFiles) || !exactPathList(within) || !exactPathList(outside)
+      || changedFiles.length !== within.length + outside.length
+      || [...within, ...outside].some(path => !changedFiles.includes(path)))) return null;
+  if (targets && changedFiles !== undefined) {
+    const declared = new Set(targets.map(target => target.path));
+    const derivedWithin = changedFiles.filter(path => declared.has(path));
+    const derivedOutside = changedFiles.filter(path => !declared.has(path));
+    if (JSON.stringify(within) !== JSON.stringify(derivedWithin) || JSON.stringify(outside) !== JSON.stringify(derivedOutside)) return null;
+  }
+
+  let scopeVerification: GateTargetScopeVerificationV1 | undefined;
+  if (b.scopeVerification !== undefined) {
+    if (typeof b.scopeVerification !== 'object' || b.scopeVerification === null || Array.isArray(b.scopeVerification)) return null;
+    const verification = b.scopeVerification as Record<string, unknown>;
+    if (!exactPathList(verification.verifiedTargetPaths)) return null;
+    if (verification.status === 'verified') {
+      if (verification.verifiedTargetPaths.length === 0) return null;
+      scopeVerification = { status: 'verified', verifiedTargetPaths: verification.verifiedTargetPaths };
+    } else if (verification.status === 'mismatch' && verification.reason === 'declared_scope_differs_from_gate') {
+      scopeVerification = { status: 'mismatch', verifiedTargetPaths: verification.verifiedTargetPaths, reason: 'declared_scope_differs_from_gate' };
+    } else if (verification.status === 'unverified'
+      && (verification.reason === 'gate_scope_not_concrete' || verification.reason === 'declared_target_not_exact_file')
+      && verification.verifiedTargetPaths.length === 0) {
+      scopeVerification = { status: 'unverified', verifiedTargetPaths: [], reason: verification.reason };
+    } else return null;
+  }
+  if (scopeVerification && targets) {
+    const declared = targets.map(target => target.path).sort();
+    const verified = [...scopeVerification.verifiedTargetPaths].sort();
+    const equal = declared.length === verified.length && declared.every((path, index) => path === verified[index]);
+    if ((scopeVerification.status === 'verified' && !equal) || (scopeVerification.status === 'mismatch' && equal)) return null;
+  } else if (scopeVerification && !targets) return null;
   return {
     baseExitCode: b.baseExitCode,
     baseTimedOut: b.baseTimedOut,
     baseCancelled: b.baseCancelled,
     baseOutcome: deriveObservedGateOutcome({ exitCode: b.baseExitCode, timedOut: b.baseTimedOut, cancelled: b.baseCancelled }),
-    targetExistedAtBase: b.targetExistedAtBase,
-    changeTouchedGateTargets: b.changeTouchedGateTargets,
+    targetExistedAtBase,
+    changeTouchedGateTargets,
+    ...(targets ? { targets } : {}),
+    ...(changedFiles !== undefined ? {
+      changedFiles, changedFilesWithinTargetScope: within as string[], changedFilesOutsideTargetScope: outside as string[],
+    } : {}),
+    ...(scopeVerification ? { scopeVerification } : {}),
   };
 }
 
@@ -187,6 +283,9 @@ export function deriveDifferentialBaseline(value: unknown): DifferentialGateBase
 export function classifyDifferentialGate(gate: ObservedGateOutcomeV1): DifferentialGateStatus {
   const b = gate.baseline;
   if (!b) return 'inconclusive';
+  // Planner-declared targetPaths sozinho não é prova de cobertura. Evidência legada,
+  // gate amplo ou divergência comando↔declaração permanecem inconclusivos.
+  if (b.scopeVerification?.status !== 'verified') return 'inconclusive';
   if (!b.targetExistedAtBase || b.changeTouchedGateTargets) return 'confounded';
   if (b.baseOutcome === 'passed') return 'non_discriminating';
   if (b.baseOutcome === 'failed' && gate.outcome === 'passed') return 'discriminating';

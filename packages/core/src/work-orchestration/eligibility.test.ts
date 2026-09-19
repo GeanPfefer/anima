@@ -98,6 +98,8 @@ describe('elegibilidade autônoma — target_paths estrutural do gate (aditivo, 
     ['item em branco', ['   ']],
     ['segmento sensível node_modules', ['node_modules/x.ts']],
     ['arquivo sensível .env', ['apps/web/.env.local']],
+    ['glob', ['apps/web/lib/*.ts']],
+    ['diretório sintático', ['apps/web/lib/']],
     ['array vazio (contrato: lista não-vazia)', []],
     ['não-array', 'apps/web/x.ts' as unknown as Json],
   ])('fail-closed: target_paths %s ⇒ validation_criteria_missing', (_label, bad) => {

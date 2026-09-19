@@ -1,7 +1,7 @@
 import type { CreateWorkProposalCommand, RequestProposalRevisionCommand, WorkItem } from '@anima/core';
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
-import { parseProposal, scopeTestCommandToWorkspace, type PlannerProposalResult, type ProjectWorkPlanner } from './project-work-planner-shared';
+import { parseProposal, scopeTestCommandToWorkspace, targetPathsAreExactFilesOrAbsent, type PlannerProposalResult, type ProjectWorkPlanner } from './project-work-planner-shared';
 import { OpenAIProjectWorkPlanner } from './project-work-planner-openai';
 import { LocalOllamaProjectWorkPlanner } from './project-work-planner-local';
 import { OpenAIAdmissionDenied } from './openai-paid-transport';
@@ -116,6 +116,9 @@ export async function planExecutableProjectWork(
   // aqui — argumentos fora dos limites são rejeitados, qualquer que seja o provedor.
   const proposal = parseProposal(proposed.rawArguments);
   if (!proposal) return { ok: false, message: 'O planejador produziu uma proposta fora dos limites locais permitidos.' };
+  if (!targetPathsAreExactFilesOrAbsent(proposal)) {
+    return { ok: false, message: 'Os target_paths precisam apontar para arquivos exatos; diretórios e globs não são suportados.' };
+  }
 
   // Captura e persiste o SHA-base autorizado no momento da proposta. A execução
   // criará a worktree exatamente deste SHA, nunca do HEAD futuro. Autoridade do host.

@@ -105,6 +105,16 @@ describe('planejador executável do projeto', () => {
     ]);
   });
 
+  test('recusa diretório existente como target_path exato', async () => {
+    const planner = { id: 'fixture', proposeArguments: async () => ({ ok: true as const, rawArguments: JSON.stringify({
+      summary: 'Inválida', objective: 'Não expandir diretório', included_scope: ['apps/web/lib/ai/project-work-planner.ts'],
+      excluded_scope: ['supabase'], expected_effects: ['unit'], risks: ['baixo'], validation_label: 'unit',
+      validation_command: 'npm test -- project-work-planner.test.ts', validation_covers: ['unit'], validation_claim_kind: 'gate_assertion',
+      validation_target_paths: ['apps/web/lib/ai'], additional_validations: [],
+    }) }) };
+    await expect(planExecutableProjectWork('faça', base, planner)).resolves.toMatchObject({ ok: false, message: expect.stringContaining('arquivos exatos') });
+  });
+
   test('falha de tool nao libera evidencia no planner OpenAI', async () => {
     (executeProjectTool as jest.Mock).mockResolvedValueOnce(
       JSON.stringify({ ok: false, error: 'arquivo nao encontrado' }),

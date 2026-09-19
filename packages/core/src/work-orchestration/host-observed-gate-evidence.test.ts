@@ -141,7 +141,13 @@ describe('parseHostObservedGateEvidence', () => {
 // substantivo e NÃO altera o verdict do Verifier.
 // ============================================================
 const baselineInput = (over: Record<string, unknown> = {}) =>
-  ({ baseExitCode: 1, baseTimedOut: false, baseCancelled: false, targetExistedAtBase: true, changeTouchedGateTargets: false, ...over });
+  ({
+    baseExitCode: 1, baseTimedOut: false, baseCancelled: false,
+    targets: [{ path: 'src/unit.test.ts', existedAtBase: true, changed: false }],
+    changedFiles: ['src/implementation.ts'], changedFilesWithinTargetScope: [], changedFilesOutsideTargetScope: ['src/implementation.ts'],
+    scopeVerification: { status: 'verified', verifiedTargetPaths: ['src/unit.test.ts'] },
+    ...over,
+  });
 
 const gateWithBaseline = (resultExitCode: number, baselineOver: Record<string, unknown> = {}): ObservedGateOutcomeV1 => {
   const built = build({ gates: [gate({ exitCode: resultExitCode, baseline: baselineInput(baselineOver) as never })] });
@@ -163,6 +169,19 @@ describe('evidência diferencial de gate — build/parse aditivo (E1)', () => {
     expect(g.baseline).toMatchObject({ baseExitCode: 1, baseOutcome: 'failed', targetExistedAtBase: true, changeTouchedGateTargets: false });
     // base timedOut deriva failed mesmo com exit 0
     expect(gateWithBaseline(0, { baseExitCode: 0, baseTimedOut: true }).baseline?.baseOutcome).toBe('failed');
+  });
+
+  test('preserva fatos por target e deriva agregados sem perder dentro/fora do scope', () => {
+    const g = gateWithBaseline(0, { targets: [
+      { path: 'src/a.test.ts', existedAtBase: true, changed: true },
+      { path: 'src/b.test.ts', existedAtBase: false, changed: false },
+    ], changedFiles: ['src/a.test.ts', 'src/impl.ts'], changedFilesWithinTargetScope: ['src/a.test.ts'], changedFilesOutsideTargetScope: ['src/impl.ts'],
+    scopeVerification: { status: 'verified', verifiedTargetPaths: ['src/a.test.ts', 'src/b.test.ts'] } });
+    expect(g.baseline).toMatchObject({
+      targetExistedAtBase: false, changeTouchedGateTargets: true,
+      targets: [{ path: 'src/a.test.ts', existedAtBase: true, changed: true }, { path: 'src/b.test.ts', existedAtBase: false, changed: false }],
+      changedFilesWithinTargetScope: ['src/a.test.ts'], changedFilesOutsideTargetScope: ['src/impl.ts'],
+    });
   });
 
   test('baseline MALFORMADO no build ⇒ OMITIDO, gate/evidência do resultado permanecem válidos', () => {
@@ -188,7 +207,7 @@ describe('evidência diferencial de gate — build/parse aditivo (E1)', () => {
     const built = build({ gates: [gate({ exitCode: 0, baseline: baselineInput() as never })] });
     if (!built.ok) throw new Error('build falhou');
     const raw = JSON.parse(JSON.stringify(built.value)) as Record<string, Json>;
-    ((raw.gates as Record<string, Json>[])[0]!.baseline as Record<string, Json>).targetExistedAtBase = 'sim' as unknown as Json;
+    (((raw.gates as Record<string, Json>[])[0]!.baseline as Record<string, Json>).targets as Record<string, Json>[])[0]!.changed = 'sim' as unknown as Json;
     const parsed = parseHostObservedGateEvidence(raw as Json);
     expect(parsed).not.toBeNull();
     expect(parsed?.gates[0]!.outcome).toBe('passed');
@@ -206,13 +225,13 @@ describe('evidência diferencial de gate — build/parse aditivo (E1)', () => {
 
 describe('classifyDifferentialGate — só fatos estruturais (E2)', () => {
   test('base FAIL + result PASS + alvo preexistente + não tocado ⇒ discriminating', () => {
-    expect(classifyDifferentialGate(gateWithBaseline(0, { baseExitCode: 1, targetExistedAtBase: true, changeTouchedGateTargets: false }))).toBe('discriminating');
+    expect(classifyDifferentialGate(gateWithBaseline(0, { baseExitCode: 1 }))).toBe('discriminating');
   });
   test('alvo NOVO (targetExistedAtBase=false) ⇒ confounded', () => {
-    expect(classifyDifferentialGate(gateWithBaseline(0, { baseExitCode: 1, targetExistedAtBase: false }))).toBe('confounded');
+    expect(classifyDifferentialGate(gateWithBaseline(0, { targets: [{ path: 'src/unit.test.ts', existedAtBase: false, changed: false }] }))).toBe('confounded');
   });
   test('alvo MODIFICADO (changeTouchedGateTargets=true) ⇒ confounded', () => {
-    expect(classifyDifferentialGate(gateWithBaseline(0, { baseExitCode: 1, changeTouchedGateTargets: true }))).toBe('confounded');
+    expect(classifyDifferentialGate(gateWithBaseline(0, { targets: [{ path: 'src/unit.test.ts', existedAtBase: true, changed: true }] }))).toBe('confounded');
   });
   test('base já PASS ⇒ non_discriminating', () => {
     expect(classifyDifferentialGate(gateWithBaseline(0, { baseExitCode: 0 }))).toBe('non_discriminating');
@@ -224,6 +243,12 @@ describe('classifyDifferentialGate — só fatos estruturais (E2)', () => {
     const built = build();
     if (!built.ok) throw new Error('build falhou');
     expect(classifyDifferentialGate(built.value.gates[0]!)).toBe('inconclusive');
+  });
+  test('scope amplo não verificado e evidência legada nunca viram discriminating', () => {
+    expect(classifyDifferentialGate(gateWithBaseline(0, {
+      scopeVerification: { status: 'unverified', verifiedTargetPaths: [], reason: 'gate_scope_not_concrete' },
+    }))).toBe('inconclusive');
+    expect(classifyDifferentialGate(gateWithBaseline(0, { scopeVerification: undefined }))).toBe('inconclusive');
   });
   test('NENHUMA interpretação textual: label/command não afetam a classificação', () => {
     // Um gate cujo label/command "parecem" typecheck, mas base já passou ⇒ non_discriminating,

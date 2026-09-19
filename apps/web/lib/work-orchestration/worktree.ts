@@ -215,6 +215,20 @@ export class GitWorktree {
     try { return await readFile(target, 'utf8'); } catch { return null; }
   }
 
+  /** Classifica um path EXATO sem expandi-lo como diretório/prefixo/glob. */
+  async workspacePathKind(relPath: string): Promise<'file' | 'directory' | 'other' | 'missing'> {
+    const target = this.resolve(relPath);
+    if (!target) return 'missing';
+    try {
+      const info = await lstat(target);
+      if (info.isFile()) return 'file';
+      if (info.isDirectory()) return 'directory';
+      return 'other';
+    } catch {
+      return 'missing';
+    }
+  }
+
   async writeWorkspaceFile(relPath: string, content: string): Promise<boolean> {
     const target = this.resolve(relPath);
     if (target === null) return false;

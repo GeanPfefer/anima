@@ -2261,3 +2261,22 @@ nenhum enforcement destrutivo foi introduzido.
 Provas: 68 testes focais web verdes (planner compartilhado, orquestrador e executor
 worktree); typecheck de `packages/core` e `apps/web` verde. Detalhes no
 [registro da sessão](../registros/2026-09-19-target-paths-planner-baseline-diferencial.md).
+## Continuação — hardening da evidência diferencial antes de enforcement (2026-09-19)
+
+R1/R2 foram fechados conservadoramente sem promover policy. O restore após a
+observação do `base_sha` agora é checado; falha ao retornar à base/checkpoint termina
+a attempt explicitamente antes do coder e sem retry. O baseline persiste fatos por
+target (`path`, tipo/existência no base, `changed`), arquivos alterados totais e a
+partição exata dentro/fora do scope declarado. Os agregados anteriores continuam,
+mas são derivados desses fatos.
+
+A confiança no planner foi separada da verificação host-side. Filtros concretos de
+`npm test ... -- <path-exato>` podem produzir `verified`; divergência produz
+`mismatch`; typecheck/build/lint/teste global produzem `unverified`. Sem `verified`,
+o classificador diferencial retorna `inconclusive`, nunca `discriminating`. Paths
+de diretório existentes são recusados pelo planner e nunca têm expansão implícita;
+globs/trailing slash são recusados nos contratos puros.
+
+Provas verdes: core 105, executor/planner 59, planner/evidence web 31; typecheck core
+e web; `git diff --check`. Registro completo em
+[`2026-09-19b-hardening-evidencia-diferencial.md`](../registros/2026-09-19b-hardening-evidencia-diferencial.md).
