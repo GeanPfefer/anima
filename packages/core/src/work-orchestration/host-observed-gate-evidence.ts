@@ -3,6 +3,7 @@ import type { ProposalVersion, WorkEvent, WorkItemId } from './types';
 import type { Json } from '@anima/types';
 import { evaluateDifferentialEvidencePolicy, type DifferentialEvidencePolicyDecisionV0 } from './differential-evidence-policy';
 import { evaluateEnforcementReadiness, type EnforcementReadinessDecisionV0 } from './enforcement-readiness-policy';
+import { classifyChangeAuthorization, type ChangeAuthorizationEvidenceV1, type ChangeAuthorizationFactsV1 } from './change-authorization-evidence';
 import type { WorkClaimKind } from './eligibility';
 
 // Evidência de GATE OBSERVADA PELO HOST (independência de primeira parte, sem
@@ -123,6 +124,9 @@ export interface HostObservedGateEvidenceV1 {
    * futuro, NUNCA consumida por execução/state machine. `changeAuthorization` fica
    * `unavailable` aqui: o gate não carrega o Change Authorization Scope. */
   readonly shadowReadinessDecisions: readonly EnforcementReadinessDecisionV0[];
+  /** Change Authorization Evidence host-observada da attempt (OPCIONAL/aditivo).
+   * Ausente ⇒ retrocompatível. RECOMPUTADA dos fatos brutos pelo parser. */
+  readonly changeAuthorization?: ChangeAuthorizationEvidenceV1;
   readonly observedAt: string;
   readonly coverage: { readonly gates: true };
 }
@@ -160,6 +164,8 @@ export interface BuildHostObservedGateEvidenceInput {
   readonly attemptId: string;
   readonly approvedProposalVersion: ProposalVersion;
   readonly gates: readonly ObservedGateInput[];
+  /** Fatos brutos de autorização de mudança (OPCIONAL). Classificados na build. */
+  readonly changeAuthorization?: ChangeAuthorizationFactsV1;
   readonly observedAt: string;
 }
 
@@ -372,6 +378,7 @@ export function buildHostObservedGateEvidence(input: BuildHostObservedGateEviden
   if (gates.some(gate => containsSensitiveData(gate.command) || containsSensitiveData(gate.label))) {
     return fail('sensitive_data', 'A evidência de gate não pode carregar credenciais nem caminhos absolutos locais.');
   }
+  const changeAuthorization = input.changeAuthorization === undefined ? undefined : classifyChangeAuthorization(input.changeAuthorization);
   return {
     ok: true,
     value: {
@@ -381,7 +388,8 @@ export function buildHostObservedGateEvidence(input: BuildHostObservedGateEviden
       approvedProposalVersion: input.approvedProposalVersion,
       gates,
       shadowPolicyDecisions: gates.map(gate => evaluateDifferentialEvidencePolicy({ claimKind: gate.claimKind, gate })),
-      shadowReadinessDecisions: gates.map(gate => evaluateEnforcementReadiness({ claimKind: gate.claimKind, gate })),
+      shadowReadinessDecisions: gates.map(gate => evaluateEnforcementReadiness({ claimKind: gate.claimKind, gate, changeAuthorization })),
+      ...(changeAuthorization === undefined ? {} : { changeAuthorization }),
       observedAt: input.observedAt,
       coverage: { gates: true },
     },
@@ -426,6 +434,18 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
       ...(baseline === null ? {} : { baseline }),
     });
   }
+  const rawAuthorization = object(root.changeAuthorization);
+  const changeAuthorization = rawAuthorization
+    && Array.isArray(rawAuthorization.declaredScope) && rawAuthorization.declaredScope.every(entry => typeof entry === 'string')
+    && Array.isArray(rawAuthorization.changedFiles) && rawAuthorization.changedFiles.every(entry => typeof entry === 'string')
+    && (rawAuthorization.excludedScope === undefined
+      || (Array.isArray(rawAuthorization.excludedScope) && rawAuthorization.excludedScope.every(entry => typeof entry === 'string')))
+    ? classifyChangeAuthorization({
+        declaredScope: rawAuthorization.declaredScope as readonly string[],
+        excludedScope: (rawAuthorization.excludedScope as readonly string[] | undefined) ?? [],
+        changedFiles: rawAuthorization.changedFiles as readonly string[],
+      })
+    : undefined;
   return {
     schemaVersion: 1,
     workItemId: root.workItemId,
@@ -433,7 +453,8 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
     approvedProposalVersion: root.approvedProposalVersion,
     gates,
     shadowPolicyDecisions: gates.map(gate => evaluateDifferentialEvidencePolicy({ claimKind: gate.claimKind, gate })),
-    shadowReadinessDecisions: gates.map(gate => evaluateEnforcementReadiness({ claimKind: gate.claimKind, gate })),
+    shadowReadinessDecisions: gates.map(gate => evaluateEnforcementReadiness({ claimKind: gate.claimKind, gate, changeAuthorization })),
+    ...(changeAuthorization === undefined ? {} : { changeAuthorization }),
     observedAt: root.observedAt as string,
     coverage: { gates: true },
   };

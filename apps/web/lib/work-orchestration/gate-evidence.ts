@@ -1,6 +1,7 @@
 import {
   buildHostObservedGateEvidence,
   guardCanonicalResidentWrite,
+  type ChangeAuthorizationFactsV1,
   type HostObservedGateEvidenceV1,
   type ObservedGateInput,
 } from '@anima/core';
@@ -43,6 +44,7 @@ export async function persistHostObservedGateEvidence(
   observed: readonly ObservedGateInput[],
   sink: GateEvidenceSink,
   now: () => Date = () => new Date(),
+  changeAuthorization?: ChangeAuthorizationFactsV1,
 ): Promise<GateEvidenceOutcome> {
   if (observed.length === 0) return { ok: false, stage: 'skipped', reason: 'no gates observed' };
   const built = buildHostObservedGateEvidence({
@@ -51,6 +53,7 @@ export async function persistHostObservedGateEvidence(
     approvedProposalVersion: correlation.approvedProposalVersion,
     gates: observed,
     observedAt: now().toISOString(),
+    ...(changeAuthorization ? { changeAuthorization } : {}),
   });
   if (!built.ok) return { ok: false, stage: 'build', reason: built.explanation };
   const persisted = await sink.record(built.value).catch((error: unknown) =>

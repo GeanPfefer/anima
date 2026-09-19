@@ -1,4 +1,4 @@
-import type { ObservedCoderInput, ObservedGateInput } from '@anima/core';
+import type { ChangeAuthorizationFactsV1, ObservedCoderInput, ObservedGateInput } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from './gate-evidence';
@@ -31,6 +31,9 @@ export interface PostTurnObservationInput {
   readonly gateObservations: readonly ObservedGateInput[];
   /** Durações wall-clock do coder cronometradas pelo host ao redor de `backend.edit()`. */
   readonly coderObservations: readonly ObservedCoderInput[];
+  /** Fatos de AUTORIZAÇÃO DE MUDANÇA host-observados na execução (escopo autorizado +
+   * arquivos alterados). OPCIONAL: ausente ⇒ evidência de gate sem change authorization. */
+  readonly changeAuthorization?: ChangeAuthorizationFactsV1;
 }
 
 /**
@@ -39,7 +42,7 @@ export interface PostTurnObservationInput {
  * produziu uma tentativa correlacionada (attempt + selection).
  */
 export async function persistPostTurnHostObservations(input: PostTurnObservationInput): Promise<void> {
-  const { client, result, contract, gateObservations, coderObservations } = input;
+  const { client, result, contract, gateObservations, coderObservations, changeAuthorization } = input;
   if (!result.attemptId || !result.selection) return;
 
   const correlation = {
@@ -51,7 +54,7 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // (0) GATE observado pelo host — persiste INCLUSIVE em terminal de erro (um gate
   // falho é a evidência mais valiosa: contradiz um executor que minta que passou).
   if (gateObservations.length > 0) {
-    await persistHostObservedGateEvidence(correlation, gateObservations, gateEvidenceSinkFor(client)).catch(() => undefined);
+    await persistHostObservedGateEvidence(correlation, gateObservations, gateEvidenceSinkFor(client), undefined, changeAuthorization).catch(() => undefined);
   }
 
   // (0b) CODER observado pelo host — UMA evidência por tentativa, agregando a

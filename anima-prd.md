@@ -1819,3 +1819,22 @@ Scope não está na evidência de gate: a readiness registra
 `change_scope_verification = unavailable` e degrada conservadoramente. A verificação
 host-observada desse escopo a partir da própria evidência é a próxima fatia, antes de
 qualquer Enforcement V1. Nada da Readiness V0 tem autoridade operacional.
+
+## Estado operacional — Change Authorization Evidence V0 shadow (2026-09-19)
+
+O Change Authorization Scope (o que o Work Item AUTORIZOU o coder a modificar) agora é
+evidência host-observada (`ChangeAuthorizationEvidenceV1`), separando `verified |
+partially_verifiable | unavailable` e os arquivos alterados em autorizados × não
+autorizados pela MESMA semântica do executor (`isPathWritable`/`WorkspaceAccessPolicy`) —
+sem criar segunda semântica de autorização. A fonte autoritativa é o
+`includedScope`/`excludedScope` daquela execução (proposal versionado), capturada
+TOCTOU-safe por um observador host no ponto de reforço (`contract_violation`) e threada
+até `HostObservedGateEvidenceV1.changeAuthorization` (recomputada pelo parser). A
+Enforcement Readiness passou a consumi-la: `eligible` exige autorização VERIFICADA e
+limpa; ausência/parcial/não autorizado degrada. Prosa em `includedScope` não vira path.
+Tudo shadow: o `contract_violation` do executor segue sendo a autoridade operacional;
+esta evidência só a torna auditável. Fronteiras: `Declared Scope != Resolved
+Authorization Scope`, `Gate Evidence Scope != Change Authorization Scope`,
+`Observed Authorized Change != Planner Assertion`. Barreira restante antes de
+Enforcement V1: nenhuma dependência de dados nova — a próxima fatia conecta decisão a
+comportamento, com rollout/rollback/gates humanos.

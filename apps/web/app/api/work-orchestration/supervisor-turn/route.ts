@@ -1,4 +1,4 @@
-import type { ObservedCoderInput, ObservedGateInput } from '@anima/core';
+import type { ChangeAuthorizationFactsV1, ObservedCoderInput, ObservedGateInput } from '@anima/core';
 import { authenticateRequest } from '@/lib/supabase/request-auth';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from '@/lib/work-orchestration/execution';
@@ -56,6 +56,7 @@ export async function POST(request: Request) {
   // cronometrou ao redor de `backend.edit()`. Retries internos permanecem na mesma
   // tentativa e podem gerar múltiplas observações; a persistência agrega o custo total.
   const coderObservations: ObservedCoderInput[] = [];
+  let changeAuthorization: ChangeAuthorizationFactsV1 | undefined;
   if (explicit) {
     const item = await client.from('work_items')
       .select('intent, state, proposal_version, impact_level, capability')
@@ -131,6 +132,7 @@ export async function POST(request: Request) {
     const selection = resolveExecutorRoute(contract, {
       gateObserver: outcome => gateObservations.push(outcome),
       coderObserver: outcome => coderObservations.push(outcome),
+      changeAuthorizationObserver: facts => { changeAuthorization = facts; },
     });
     if (!selection.ok) {
       return Response.json({ ok: false, error: selection.error }, { status: 503 });
@@ -170,6 +172,7 @@ export async function POST(request: Request) {
     contract: executionContract,
     gateObservations,
     coderObservations,
+    ...(changeAuthorization ? { changeAuthorization } : {}),
   });
 
   // (3) ADVISORY do Resource Governor (read-only), anexado ao read-model da resposta.

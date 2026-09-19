@@ -171,7 +171,7 @@ const targetKinds: ReadonlySet<string> = new Set(['project', 'workspace', 'resou
  * sensíveis). É verificação de FORMA/segurança — nunca checa existência (isso é o
  * consumidor, ex.: git no base_sha). Puro; sem heurística de texto sobre o comando.
  */
-const isSafeRelativePath = (value: Json | undefined): value is string => {
+export const isSafeRelativePath = (value: Json | undefined): value is string => {
   if (typeof value !== 'string' || value.trim().length === 0) return false;
   const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
   if (!normalized || normalized.startsWith('/') || normalized.endsWith('/') || normalized.includes('*')

@@ -11,7 +11,7 @@ import {
   type DifferentialGateStatus,
   type ObservedGateOutcomeV1,
 } from './host-observed-gate-evidence';
-import { normalizeScopePath } from './workspace-access-policy';
+import type { ChangeAuthorizationEvidenceV1, ChangeAuthorizationStatus } from './change-authorization-evidence';
 
 // ============================================================
 // Enforcement Readiness V0 — SHADOW ONLY (última camada antes de Enforcement V1).
@@ -31,11 +31,13 @@ import { normalizeScopePath } from './workspace-access-policy';
 //     AUTORIZADO a modificar). Só mudança fora da superfície AUTORIZADA é candidata a
 //     violação de escopo — e isso NÃO se deriva do gate target.
 //
-// A evidência host-observada de gate NÃO carrega o Change Authorization Scope hoje;
-// por isso o shadow default registra `changeAuthorization = unavailable` e degrada
-// conservadoramente. O executor já bloqueia HARD escrita fora do `includedScope`
-// (contract_violation, ANTES dos gates) — mas essa prova não está na superfície de
-// evidência que esta camada lê. Verificá-la aqui é a PRÓXIMA fatia.
+// A Change Authorization Evidence host-observada (quando disponível) alimenta esta
+// camada: `eligible` exige verificação COMPLETA (`status = verified`) SEM mudança não
+// autorizada. Autorização ausente/parcial/não verificável degrada conservadoramente
+// (`change_scope_unverified`) — um gate `FAIL→PASS` discriminating continua ótima
+// evidência TÉCNICA, mas não está pronto para enforcement autônomo sem a autorização
+// verificada. O hard enforcement do executor (contract_violation) segue sendo a
+// autoridade operacional; esta camada só a torna AUDITÁVEL, jamais a substitui.
 //
 // `eligible` significa APENAS "a evidência seria CANDIDATA a enforcement autônomo
 // segundo esta versão" — NÃO que qualquer ação operacional seja executada agora.
@@ -60,22 +62,21 @@ export type EnforcementReadinessReasonCode =
   | 'non_discriminating_gate'
   | 'substantive_requires_composite_proof'
   | 'unauthorized_change_detected'
+  | 'change_scope_unverified'
   | 'discriminating_gate_candidate';
 
 /**
- * Verificação do Change Authorization Scope. `unavailable` = a superfície autorizada
- * não está disponível nesta superfície de evidência (o gate não carrega o
- * `includedScope`); qualquer caminho que precisaria dessa prova degrada. `verified` =
- * a superfície autorizada foi comparada host-side contra os arquivos alterados
- * observados, separando autorizados de não autorizados.
+ * Projeção da verificação do Change Authorization Scope para a força da evidência.
+ * `unavailable` = sem evidência de autorização; `partially_verifiable` = parte do
+ * escopo é prosa/não verificável; `verified` = superfície toda verificável e
+ * comparada host-side aos arquivos alterados. Só `verified` sem mudança não
+ * autorizada sustenta `eligible`.
  */
-export type ChangeAuthorizationVerificationV0 =
-  | { readonly status: 'unavailable' }
-  | {
-      readonly status: 'verified';
-      readonly authorizedChangedFiles: readonly string[];
-      readonly unauthorizedChangedFiles: readonly string[];
-    };
+export interface ChangeAuthorizationVerificationV0 {
+  readonly status: ChangeAuthorizationStatus;
+  readonly authorizedChangedFiles: readonly string[];
+  readonly unauthorizedChangedFiles: readonly string[];
+}
 
 export interface EnforcementReadinessEvidenceStrengthV0 {
   /** Classificação diferencial REUTILIZADA (nunca uma taxonomia paralela). */
@@ -105,29 +106,23 @@ export interface EvaluateEnforcementReadinessInput {
   readonly claimKind?: WorkClaimKind | string;
   readonly gate: ObservedGateOutcomeV1;
   /**
-   * OPCIONAL: superfície AUTORIZADA de edição (Change Authorization Scope,
-   * ex.: `includedScope` do Work Item) + arquivos alterados observados pelo host.
-   * Ausente ⇒ `changeAuthorization = unavailable`. NUNCA derive autorização do gate
-   * `targetPaths`: são escopos diferentes.
+   * OPCIONAL: Change Authorization Evidence host-observada da attempt (já classificada
+   * pela semântica canônica). Ausente ⇒ `changeAuthorization = unavailable` e degrada.
+   * NUNCA derive autorização do gate `targetPaths`: são escopos diferentes.
    */
-  readonly changeAuthorization?: {
-    readonly authorizedScope: readonly string[];
-    readonly observedChangedFiles: readonly string[];
-  };
+  readonly changeAuthorization?: ChangeAuthorizationEvidenceV1;
 }
 
-const resolveChangeAuthorization = (
-  input: EvaluateEnforcementReadinessInput['changeAuthorization'],
-): ChangeAuthorizationVerificationV0 => {
-  if (!input) return { status: 'unavailable' };
-  const authorized = new Set(input.authorizedScope.map(normalizeScopePath).filter(Boolean));
-  const observed = [...new Set(input.observedChangedFiles.map(normalizeScopePath).filter(Boolean))];
-  return {
-    status: 'verified',
-    authorizedChangedFiles: observed.filter(path => authorized.has(path)),
-    unauthorizedChangedFiles: observed.filter(path => !authorized.has(path)),
-  };
-};
+const projectChangeAuthorization = (
+  evidence: ChangeAuthorizationEvidenceV1 | undefined,
+): ChangeAuthorizationVerificationV0 =>
+  evidence
+    ? {
+        status: evidence.status,
+        authorizedChangedFiles: evidence.authorizedChangedFiles,
+        unauthorizedChangedFiles: evidence.unauthorizedChangedFiles,
+      }
+    : { status: 'unavailable', authorizedChangedFiles: [], unauthorizedChangedFiles: [] };
 
 /**
  * Avalia, SOMENTE EM SHADOW MODE, se a evidência disponível seria CANDIDATA a uma
@@ -142,7 +137,7 @@ export function evaluateEnforcementReadiness(
   const { gate } = input;
   const policy = evaluateDifferentialEvidencePolicy({ claimKind: input.claimKind, gate });
   const differentialStatus = classifyDifferentialGate(gate);
-  const changeAuthorization = resolveChangeAuthorization(input.changeAuthorization);
+  const changeAuthorization = projectChangeAuthorization(input.changeAuthorization);
   const claimKind = input.claimKind ?? 'unknown';
 
   const evidenceStrength: EnforcementReadinessEvidenceStrengthV0 = {
@@ -207,12 +202,19 @@ export function evaluateEnforcementReadiness(
     return result('requires_review', 'substantive_requires_composite_proof');
   }
 
-  // gate_assertion + discriminating = CANDIDATO a enforcement autônomo futuro. Se o
-  // Change Authorization Scope está DISPONÍVEL e há mudança fora dele, é candidata a
-  // violação de escopo AUTORIZADO (≠ gate target) ⇒ revisão, nunca deny/fraude
-  // automática. Mudança fora do gate target, por si só, é NEUTRA e não rebaixa.
-  if (changeAuthorization.status === 'verified' && changeAuthorization.unauthorizedChangedFiles.length > 0) {
+  // gate_assertion + discriminating = candidato TÉCNICO. A candidatura a enforcement
+  // autônomo exige autorização de mudança VERIFICADA e limpa (regra conservadora):
+  //  - qualquer mudança fora do escopo AUTORIZADO observada ⇒ revisão (nunca deny/
+  //    fraude automática); mudança fora do gate target, por si só, é NEUTRA;
+  //  - autorização ausente/parcial/não verificável ⇒ revisão (change_scope_unverified),
+  //    mesmo com diferencial forte — o hard enforcement do executor segue sendo a
+  //    autoridade operacional, aqui só se afere prontidão;
+  //  - só `verified` sem mudança não autorizada sustenta `eligible`.
+  if (changeAuthorization.unauthorizedChangedFiles.length > 0) {
     return result('requires_review', 'unauthorized_change_detected');
+  }
+  if (changeAuthorization.status !== 'verified') {
+    return result('requires_review', 'change_scope_unverified');
   }
   return result('eligible', 'discriminating_gate_candidate');
 }

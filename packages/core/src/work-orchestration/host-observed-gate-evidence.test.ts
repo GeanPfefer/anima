@@ -39,14 +39,51 @@ describe('buildHostObservedGateEvidence', () => {
     if (!result.ok) return;
     expect(result.value.gates[0]!.outcome).toBe('passed');
     expect(result.value.shadowPolicyDecisions[0]).toMatchObject({ claimKind: 'gate_assertion', decision: 'require_review', reasonCode: 'outside_scope_change' });
-    // Readiness != Policy: o mesmo gate diferencial LIMPO (FAIL→PASS, target intacto)
-    // é CANDIDATO a enforcement autônomo para gate_assertion mesmo com mudança fora do
-    // gate target (neutra), enquanto a Policy V0 pede revisão por outside-scope.
+    // SEM changeAuthorization na build, a readiness degrada conservadoramente
+    // (change_scope_unverified) mesmo num diferencial discriminating.
     expect(result.value.shadowReadinessDecisions[0]).toMatchObject({
       policyVersion: 'enforcement-readiness-v0', claimKind: 'gate_assertion',
-      disposition: 'eligible', reasonCode: 'discriminating_gate_candidate',
+      disposition: 'requires_review', reasonCode: 'change_scope_unverified',
       evidenceStrength: { differentialStatus: 'discriminating', changeAuthorization: { status: 'unavailable' } },
     });
+    expect(result.value.changeAuthorization).toBeUndefined();
+  });
+
+  test('changeAuthorization VERIFICADA e limpa ⇒ readiness eligible e evidência recomputável no parser', () => {
+    const built = build({
+      gates: [gate({ claimKind: 'gate_assertion', baseline: baselineInput({ changedFiles: ['src/impl.ts'], changedFilesOutsideTargetScope: ['src/impl.ts'] }) as never })],
+      changeAuthorization: { declaredScope: ['src/impl.ts'], changedFiles: ['src/impl.ts'] },
+    } as never);
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value.changeAuthorization).toMatchObject({ status: 'verified', authorizedChangedFiles: ['src/impl.ts'], unauthorizedChangedFiles: [] });
+    expect(built.value.shadowReadinessDecisions[0]).toMatchObject({ disposition: 'eligible', reasonCode: 'discriminating_gate_candidate' });
+    // Trust boundary: o parser RECOMPUTA a partir dos fatos brutos persistidos.
+    const roundtrip = parseHostObservedGateEvidence(built.value as unknown as Json);
+    expect(roundtrip?.changeAuthorization).toEqual(built.value.changeAuthorization);
+    expect(roundtrip?.shadowReadinessDecisions[0]!.disposition).toBe('eligible');
+  });
+
+  test('changeAuthorization com mudança NÃO autorizada ⇒ readiness requires_review', () => {
+    const built = build({
+      gates: [gate({ claimKind: 'gate_assertion', baseline: baselineInput() as never })],
+      changeAuthorization: { declaredScope: ['src/foo.ts'], changedFiles: ['src/foo.ts', 'src/nao-autorizado.ts'] },
+    } as never);
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value.changeAuthorization).toMatchObject({ unauthorizedChangedFiles: ['src/nao-autorizado.ts'] });
+    expect(built.value.shadowReadinessDecisions[0]).toMatchObject({ disposition: 'requires_review', reasonCode: 'unauthorized_change_detected' });
+  });
+
+  test('evidência antiga sem changeAuthorization continua parseável (retrocompatível)', () => {
+    const built = build({ gates: [gate({ claimKind: 'gate_assertion', baseline: baselineInput() as never })] });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const json = built.value as unknown as Record<string, unknown>;
+    delete json.changeAuthorization;
+    const parsed = parseHostObservedGateEvidence(json as unknown as Json);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.changeAuthorization).toBeUndefined();
   });
 
   test('o outcome é DERIVADO dos fatos, nunca aceito de fora', () => {

@@ -1,4 +1,4 @@
-import { decideComputeRoute, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ComputeRouteDecisionV1, type LocalFailureSignalV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
+import { decideComputeRoute, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureSignalV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
@@ -246,10 +246,12 @@ export function buildProjectBacklogCycleDeps(
       if (placement) ollamaRuntimeOverride ??= placement.placement === 'remote' ? remoteRuntimeFor(placement.node, model) : localRuntimeFor(model);
       const gateObservations: ObservedGateInput[] = [];
       const coderObservations: ObservedCoderInput[] = [];
+      let changeAuthorization: ChangeAuthorizationFactsV1 | undefined;
       const selection = resolveExecutorRoute(contract, {
         ...(contract.coderBackend === null || contract.coderBackend === 'ollama' ? { ollamaRuntimeOverride } : {}),
         gateObserver: outcome => gateObservations.push(outcome),
         coderObserver: outcome => coderObservations.push(outcome),
+        changeAuthorizationObserver: facts => { changeAuthorization = facts; },
         ...(contract.coderBackend === 'openai' ? { openAIAdmission: createOpenAICoderAdmission(client) } : {}),
       });
       if (!selection.ok) return notExecutable(entry, selection.error.code, selection.error.message);
@@ -274,7 +276,7 @@ export function buildProjectBacklogCycleDeps(
 
       // Observação host-side pós-volta (evidência de gate/coder/git + parecer do
       // Verifier) — a MESMA da rota supervisor-turn. Fail-open: nunca altera o desfecho.
-      await persistPostTurnHostObservations({ client, result: turn, contract, gateObservations, coderObservations });
+      await persistPostTurnHostObservations({ client, result: turn, contract, gateObservations, coderObservations, ...(changeAuthorization ? { changeAuthorization } : {}) });
       return turn;
     },
   };

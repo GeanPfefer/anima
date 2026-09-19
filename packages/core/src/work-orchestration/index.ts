@@ -36,6 +36,7 @@ export * from './worktree-handoff';
 export * from './host-observed-evidence';
 export * from './host-observed-gate-evidence';
 export * from './differential-evidence-policy';
+export * from './change-authorization-evidence';
 export * from './enforcement-readiness-policy';
 export * from './host-observed-coder-evidence';
 export * from './canonical-resident-contract';

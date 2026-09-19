@@ -1071,18 +1071,46 @@ bloqueiam. Target novo/alterado exige revisão. Scope unverified/mismatch e base
 ausente ficam inconclusivos. Claim desconhecido degrada conservadoramente.
 
 O executor já bloqueia HARD, ANTES dos gates, escrita fora do `includedScope`
-(`contract_violation` em `worktree-executor`). Mas esse escopo autorizado NÃO está
-na superfície de evidência de gate que a readiness lê; por isso o shadow default
-registra `change_scope_verification = unavailable` e degrada conservadoramente
-qualquer caminho que precise dessa prova. Quando um chamador fornece a superfície
-autorizada + arquivos alterados observados, a readiness separa host-side
-autorizados de não autorizados; verificar isso a partir da própria evidência de
-gate é a **próxima fatia** (Change Authorization Verification). A readiness roda
-somente em shadow: é calculada, persistida junto da evidência
-(`shadowReadinessDecisions`, recomputada pelo parser — não confia no JSON), e
-aparece em log/review. Nenhum consumidor de execução, attempt, retry, Verifier,
-review, promoção, integração, merge, recovery ou state machine a lê para mudar
-comportamento.
+(`contract_violation` em `worktree-executor`). A **Change Authorization Evidence**
+(abaixo) torna esse escopo autorizado uma evidência host-observada que a readiness
+lê: com ela, `eligible` exige verificação COMPLETA (`status = verified`) SEM mudança
+não autorizada; autorização ausente/parcial/não verificável degrada para
+`change_scope_unverified`, e mudança não autorizada observada vira
+`unauthorized_change_detected`. A readiness roda somente em shadow: é calculada,
+persistida junto da evidência (`shadowReadinessDecisions`, recomputada pelo parser —
+não confia no JSON), e aparece em log/review. Nenhum consumidor de execução, attempt,
+retry, Verifier, review, promoção, integração, merge, recovery ou state machine a lê
+para mudar comportamento.
+
+### Change Authorization Evidence V0 — host-observed, shadow
+
+**Declared Scope != Resolved Authorization Scope; Gate Evidence Scope != Change
+Authorization Scope; Observed Authorized Change != Planner Assertion.** A função pura
+e versionada `classifyChangeAuthorization` torna o CHANGE AUTHORIZATION SCOPE (o que
+o Work Item AUTORIZOU o coder a modificar) uma evidência host-observada
+(`ChangeAuthorizationEvidenceV1`): status (`verified | partially_verifiable |
+unavailable`), superfície declarada, paths verificáveis, entradas não verificáveis
+(prosa), e a partição host-observada dos arquivos alterados em autorizados × não
+autorizados.
+
+FONTE AUTORITATIVA: o `includedScope`/`excludedScope` do Work Item que o executor
+USOU naquela execução (proposal versionado). Capturado TOCTOU-safe por um observador
+do host no ponto de reforço (mesma fonte do `contract_violation`), threado como
+evidência host-observada até `HostObservedGateEvidenceV1.changeAuthorization`
+(OPCIONAL/aditivo; recomputada pelo parser a partir dos fatos brutos — trust
+boundary). A classificação REUTILIZA a semântica canônica (`isPathWritable` sobre a
+`WorkspaceAccessPolicy`), NÃO uma segunda semântica de autorização; e reutiliza
+`isSafeRelativePath` para separar caminhos verificáveis de prosa (sem LLM). Prosa em
+`includedScope` (ex.: "migrar tela X") não vira path: entra como entrada não
+verificável e rebaixa o status.
+
+Divergência arquitetural documentada (não-bloqueante): o verdicto pós-hoc do host
+(`contract_violation`) compara `changedByAttempt` com o `includedScope` cru por
+membership; `isPathWritable` adiciona `excluded` e a checagem lexical. Como a
+autoridade per-edit (o coder só escreve writable) impede escrita fora/excluída ANTES,
+os dois concordam nos arquivos REALMENTE alterados. A evidência não cria autoridade
+operacional; só torna a decisão existente AUDITÁVEL. `Evidence != Policy`;
+`Policy != Readiness`; `Readiness != Enforcement`.
 
 Teste central provado: *executor atesta gate passou; host observa `exitCode != 0`; Verifier
 marca `attested_gate_contradicts_observed` + `gate_failed` e NÃO conclui `verified`.* A

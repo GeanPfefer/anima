@@ -2322,3 +2322,32 @@ A verificação host-observada desse escopo a partir da própria evidência é a
 fatia (Change Authorization Verification), antes de Enforcement V1. A readiness é
 anexada como `shadowReadinessDecisions` (recomputada pelo parser) e não é consumida
 operacionalmente.
+
+## Continuação — Change Authorization Evidence V0 host-observed, shadow (2026-09-19)
+
+Fecha a barreira acima. `classifyChangeAuthorization` (core puro) torna o Change
+Authorization Scope evidência host-observada (`ChangeAuthorizationEvidenceV1`):
+`verified | partially_verifiable | unavailable`, superfície declarada, paths
+verificáveis, entradas em prosa (não verificáveis) e a partição autorizado × não
+autorizado dos arquivos alterados. REUTILIZA `isPathWritable`/`WorkspaceAccessPolicy`
+(mesma semântica do executor) e `isSafeRelativePath` (separa path de prosa; sem LLM).
+
+Fonte autoritativa reconciliada: `includedScope`/`excludedScope` do proposal
+versionado que o executor USOU — capturado TOCTOU-safe por um observador do host
+(`onChangeAuthorizationObserved`, padrão de `onGateObserved`/`onCoderObserved`) no
+ponto de reforço, threado por `executor-selection` → `post-turn-observation` →
+`persistHostObservedGateEvidence` → `HostObservedGateEvidenceV1.changeAuthorization`
+(OPCIONAL/aditivo; recomputada pelo parser = trust boundary; retrocompatível).
+
+Divergência documentada (não-bloqueante): o `contract_violation` do executor usa
+membership cru de `includedScope`; `isPathWritable` adiciona excluded+lexical — mas
+concordam nos arquivos realizados (a autoridade per-edit impede escrita fora/excluída
+antes). A evidência NÃO cria autoridade: o `contract_violation` segue operacional.
+
+Readiness passou a consumir: `eligible` exige `status = verified` sem mudança não
+autorizada; ausente/parcial ⇒ `change_scope_unverified`; não autorizado ⇒
+`unauthorized_change_detected`. Prova: outside GATE target mas DENTRO do Change
+Authorization Scope ⇒ segue `eligible`; fora do Change Authorization Scope ⇒ revisão.
+Gates: core 227 focal / 1965 total, web focal, typecheck core+web, `git diff --check`.
+Antes de Enforcement V1 não resta dependência de dados; a fatia seguinte conecta
+decisão a comportamento (rollout/rollback/gates humanos).

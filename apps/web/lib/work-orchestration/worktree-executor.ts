@@ -1,5 +1,6 @@
 import {
   buildWorktreeHandoff,
+  type ChangeAuthorizationFactsV1,
   validateWorkCheckpoint,
   describeCoderHarnessViolations,
   resolveCommandExecution,
@@ -105,6 +106,13 @@ export interface WorktreeExecutorOptions {
    * isso é uma mudança contratual separada (proveniência host-observed ≠ provider-reported).
    */
   readonly onCoderObserved?: (outcome: ObservedCoderInput) => void;
+  /**
+   * Observador da AUTORIZAÇÃO DE MUDANÇA de PRIMEIRA PARTE DO HOST. Emitido no ponto
+   * de reforço (mesma fonte do contract_violation): o escopo AUTORIZADO da attempt
+   * (`includedScope`/`excludedScope`) e os arquivos observados alterados. Aditivo e
+   * fail-open: não altera controle de fluxo nem a autoridade operacional.
+   */
+  readonly onChangeAuthorizationObserved?: (facts: ChangeAuthorizationFactsV1) => void;
 }
 
 const REQUIRED_PERMISSIONS = ['workspace_read', 'workspace_write_isolated'] as const;
@@ -510,6 +518,13 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         }
 
         if (!noChanges) {
+          // Autorização de mudança host-observada (mesma fonte do enforcement):
+          // fato aditivo/fail-open, NÃO altera o verdicto operacional abaixo.
+          this.options.onChangeAuthorizationObserved?.({
+            declaredScope: request.includedScope,
+            excludedScope: request.excludedScope,
+            changedFiles: changedByAttempt,
+          });
           const approved = new Set(request.includedScope.map(norm));
           const outOfScope = changedByAttempt.filter(path => !approved.has(norm(path)));
 

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
-import type { CoderModelSelectionEvidenceV1, ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
+import type { ChangeAuthorizationFactsV1, CoderModelSelectionEvidenceV1, ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
 import { selectGovernedCoderModel } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
@@ -290,6 +290,10 @@ export function resolveExecutorRoute(
      * pela rota para captar a evidência observada do coder. Só o executor de worktree
      * (host in-process) o usa. */
     readonly coderObserver?: (outcome: ObservedCoderInput) => void;
+    /** Observador host-side da AUTORIZAÇÃO DE MUDANÇA (escopo autorizado + arquivos
+     * alterados), injetado pela rota para captar a Change Authorization Evidence. Só o
+     * executor de worktree (host in-process) o usa. */
+    readonly changeAuthorizationObserver?: (facts: ChangeAuthorizationFactsV1) => void;
     readonly openAIAdmission?: OpenAIAdmissionControl;
   } = {},
 ): ExecutorSelection {
@@ -317,6 +321,7 @@ export function resolveExecutorRoute(
       gateRetryLimit: gateRetryLimitForCoderBackend(contract.coderBackend),
       ...(options.gateObserver ? { onGateObserved: options.gateObserver } : {}),
       ...(options.coderObserver ? { onCoderObserved: options.coderObserver } : {}),
+      ...(options.changeAuthorizationObserver ? { onChangeAuthorizationObserved: options.changeAuthorizationObserver } : {}),
     });
     return { ok: true, route: { adapter, candidate: worktreeCandidate(adapter.id, backend.id) } };
   }
