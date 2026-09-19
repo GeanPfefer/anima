@@ -32,6 +32,14 @@ describe('persistHostObservedGateEvidence (fail-open)', () => {
     expect(calls[0]!.shadowPolicyDecisions[0]).toMatchObject({
       policyVersion: 'differential-evidence-policy-v0', decision: 'insufficient_evidence',
     });
+    expect(calls[0]!.shadowReadinessDecisions).toHaveLength(2);
+    // Gates sem claim_kind declarado degradam conservadoramente (shadow, sem
+    // consequência operacional): nenhum é elegível.
+    expect(calls[0]!.shadowReadinessDecisions[0]).toMatchObject({
+      policyVersion: 'enforcement-readiness-v0', disposition: 'insufficient_evidence', reasonCode: 'unsupported_claim_kind',
+    });
+    expect(calls[0]!.shadowReadinessDecisions[1]).toMatchObject({ disposition: 'insufficient_evidence' });
+    expect(calls[0]!.shadowReadinessDecisions.every(d => d.disposition !== 'eligible')).toBe(true);
     expect(calls[0]!.coverage).toEqual({ gates: true });
   });
 
@@ -67,6 +75,7 @@ describe('gateEvidenceSinkFor — tradução para a RPC record_host_observed_gat
     schemaVersion: 1, workItemId: 'work-9', attemptId: 'attempt-9', approvedProposalVersion: 4,
     gates: [{ label: 'unit', command: 'npm test', exitCode: 0, durationMs: 1, timedOut: false, cancelled: false, outcome: 'passed' }],
     shadowPolicyDecisions: [],
+    shadowReadinessDecisions: [],
     observedAt: '2026-08-16T10:00:00Z', coverage: { gates: true },
   });
 

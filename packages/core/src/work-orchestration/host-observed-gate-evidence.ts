@@ -2,6 +2,7 @@ import { containsSensitiveData } from './execution-attempt';
 import type { ProposalVersion, WorkEvent, WorkItemId } from './types';
 import type { Json } from '@anima/types';
 import { evaluateDifferentialEvidencePolicy, type DifferentialEvidencePolicyDecisionV0 } from './differential-evidence-policy';
+import { evaluateEnforcementReadiness, type EnforcementReadinessDecisionV0 } from './enforcement-readiness-policy';
 import type { WorkClaimKind } from './eligibility';
 
 // Evidência de GATE OBSERVADA PELO HOST (independência de primeira parte, sem
@@ -118,6 +119,10 @@ export interface HostObservedGateEvidenceV1 {
   readonly gates: readonly ObservedGateOutcomeV1[];
   /** Telemetria somente: Policy V0 não é consumida por execução nem Verifier. */
   readonly shadowPolicyDecisions: readonly DifferentialEvidencePolicyDecisionV0[];
+  /** Telemetria somente: Readiness V0 (shadow) — candidatura a enforcement autônomo
+   * futuro, NUNCA consumida por execução/state machine. `changeAuthorization` fica
+   * `unavailable` aqui: o gate não carrega o Change Authorization Scope. */
+  readonly shadowReadinessDecisions: readonly EnforcementReadinessDecisionV0[];
   readonly observedAt: string;
   readonly coverage: { readonly gates: true };
 }
@@ -376,6 +381,7 @@ export function buildHostObservedGateEvidence(input: BuildHostObservedGateEviden
       approvedProposalVersion: input.approvedProposalVersion,
       gates,
       shadowPolicyDecisions: gates.map(gate => evaluateDifferentialEvidencePolicy({ claimKind: gate.claimKind, gate })),
+      shadowReadinessDecisions: gates.map(gate => evaluateEnforcementReadiness({ claimKind: gate.claimKind, gate })),
       observedAt: input.observedAt,
       coverage: { gates: true },
     },
@@ -427,6 +433,7 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
     approvedProposalVersion: root.approvedProposalVersion,
     gates,
     shadowPolicyDecisions: gates.map(gate => evaluateDifferentialEvidencePolicy({ claimKind: gate.claimKind, gate })),
+    shadowReadinessDecisions: gates.map(gate => evaluateEnforcementReadiness({ claimKind: gate.claimKind, gate })),
     observedAt: root.observedAt as string,
     coverage: { gates: true },
   };

@@ -1038,6 +1038,52 @@ Scope ausente/unverified/mismatch, baseline ausente, target novo/alterado e muda
 outside-scope permanecem explícitos e conservadores; os quatro quadrantes
 PASS→PASS, PASS→FAIL, FAIL→PASS e FAIL→FAIL têm reason codes próprios.
 
+### Enforcement Readiness V0 — shadow mode
+
+**Policy decision não é enforcement readiness; enforcement readiness não é
+enforcement.** A função pura e versionada `evaluateEnforcementReadiness`
+(`enforcement-readiness-v0`) avalia — ainda SOMENTE EM SHADOW MODE — se a evidência
+disponível seria **candidata** a uma futura decisão operacional autônoma. Ela
+REUTILIZA a classificação diferencial canônica (`classifyDifferentialGate`:
+`discriminating | confounded | non_discriminating | inconclusive`) e a decisão da
+Policy V0 (referenciada), e produz uma disposição estruturada
+(`eligible | requires_review | blocked | insufficient_evidence`), reason code
+estável, força da evidência e referência à Policy V0. `eligible` significa apenas
+"a evidência seria candidata segundo esta versão" — NUNCA que uma ação será
+executada.
+
+**Dois escopos distintos, jamais confundidos.** O *Gate Evidence Scope* é o
+`targetPaths` do gate — a superfície de PROVA; mudar o próprio target contamina a
+evidência (`confounded`), e mudar arquivos FORA do gate target é NEUTRO por si só
+(implementação legítima). O *Change Authorization Scope* é o `includedScope` do
+Work Item — o que o coder está AUTORIZADO a modificar; só mudança fora da superfície
+AUTORIZADA é candidata a violação de escopo, e isso NÃO se deriva do gate target.
+`changedFilesOutsideTargetScope` ≠ `unauthorized change`.
+
+Calibração humana desta fatia: `FAIL→PASS` com scope verificado e target
+pré-existente/não alterado é diferencial forte (`discriminating`) — para
+`gate_assertion` torna a evidência CANDIDATA (`eligible`); para `substantive`
+permanece revisão (um gate verde não prova sozinho uma afirmação substantiva).
+`PASS→PASS` é `non_discriminating`: prova o gate verde/ausência de regressão, mas
+NÃO efeito causal — logo NÃO elegível (aqui a readiness DIVERGE da Policy V0, que
+diria `allow`). `PASS→FAIL` (regressão) e `FAIL→FAIL` (critério não satisfeito)
+bloqueiam. Target novo/alterado exige revisão. Scope unverified/mismatch e baseline
+ausente ficam inconclusivos. Claim desconhecido degrada conservadoramente.
+
+O executor já bloqueia HARD, ANTES dos gates, escrita fora do `includedScope`
+(`contract_violation` em `worktree-executor`). Mas esse escopo autorizado NÃO está
+na superfície de evidência de gate que a readiness lê; por isso o shadow default
+registra `change_scope_verification = unavailable` e degrada conservadoramente
+qualquer caminho que precise dessa prova. Quando um chamador fornece a superfície
+autorizada + arquivos alterados observados, a readiness separa host-side
+autorizados de não autorizados; verificar isso a partir da própria evidência de
+gate é a **próxima fatia** (Change Authorization Verification). A readiness roda
+somente em shadow: é calculada, persistida junto da evidência
+(`shadowReadinessDecisions`, recomputada pelo parser — não confia no JSON), e
+aparece em log/review. Nenhum consumidor de execução, attempt, retry, Verifier,
+review, promoção, integração, merge, recovery ou state machine a lê para mudar
+comportamento.
+
 Teste central provado: *executor atesta gate passou; host observa `exitCode != 0`; Verifier
 marca `attested_gate_contradicts_observed` + `gate_failed` e NÃO conclui `verified`.* A
 evolução da base (a evidência de gate chega depois) acrescenta um novo parecer versionado, sem

@@ -2294,3 +2294,31 @@ decisão, reason code, fatos relevantes e referência ao gate. Ela não é consu
 por executor, attempt state machine, retry, Verifier, review, promoção ou integração;
 portanto não existe enforcement nesta fatia. O passo futuro permanece uma decisão
 humana de calibrar as regras antes de conectar qualquer decisão operacional.
+
+## Continuação — Enforcement Readiness V0 em shadow mode (2026-09-19)
+
+Sobre a Policy V0, a última camada antes de Enforcement V1 avalia — ainda em shadow —
+se a evidência seria CANDIDATA a decisão autônoma. `evaluateEnforcementReadiness`
+(`enforcement-readiness-v0`, core puro) reutiliza `classifyDifferentialGate`
+(`discriminating | confounded | non_discriminating | inconclusive`) e a decisão da
+Policy V0, e devolve `eligible | requires_review | blocked | insufficient_evidence`
+com reason code, força da evidência e referência à Policy V0.
+
+Calibração humana desta fatia (autorizada): FAIL→PASS verificado com target intacto é
+`discriminating` — candidato (`eligible`) só para `gate_assertion`; `substantive`
+segue revisão. PASS→PASS é `non_discriminating` (verde sem efeito causal) → não
+elegível — aqui a readiness distingue explicitamente "policy diz allow" de "evidência
+suficiente para enforcement autônomo". PASS→FAIL e FAIL→FAIL bloqueiam. Target
+novo/alterado → revisão. Unverified/mismatch/sem baseline → inconclusivo. Claim
+desconhecido degrada.
+
+Contratos reconciliados: o Change Authorization Scope canônico É o `includedScope`
+do Work Item (resolvido em `WorkspaceAccessPolicyV1.writeScope`), já enforced HARD
+pelo executor (`contract_violation`, antes dos gates) — DISTINTO do gate
+`targetPaths`. Como esse escopo autorizado não está na evidência de gate, a readiness
+shadow registra `change_scope_verification = unavailable` e degrada. Fornecido o
+escopo autorizado + arquivos alterados, ela separa autorizados de não autorizados.
+A verificação host-observada desse escopo a partir da própria evidência é a próxima
+fatia (Change Authorization Verification), antes de Enforcement V1. A readiness é
+anexada como `shadowReadinessDecisions` (recomputada pelo parser) e não é consumida
+operacionalmente.

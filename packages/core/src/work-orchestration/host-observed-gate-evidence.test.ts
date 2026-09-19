@@ -39,6 +39,14 @@ describe('buildHostObservedGateEvidence', () => {
     if (!result.ok) return;
     expect(result.value.gates[0]!.outcome).toBe('passed');
     expect(result.value.shadowPolicyDecisions[0]).toMatchObject({ claimKind: 'gate_assertion', decision: 'require_review', reasonCode: 'outside_scope_change' });
+    // Readiness != Policy: o mesmo gate diferencial LIMPO (FAIL→PASS, target intacto)
+    // é CANDIDATO a enforcement autônomo para gate_assertion mesmo com mudança fora do
+    // gate target (neutra), enquanto a Policy V0 pede revisão por outside-scope.
+    expect(result.value.shadowReadinessDecisions[0]).toMatchObject({
+      policyVersion: 'enforcement-readiness-v0', claimKind: 'gate_assertion',
+      disposition: 'eligible', reasonCode: 'discriminating_gate_candidate',
+      evidenceStrength: { differentialStatus: 'discriminating', changeAuthorization: { status: 'unavailable' } },
+    });
   });
 
   test('o outcome é DERIVADO dos fatos, nunca aceito de fora', () => {

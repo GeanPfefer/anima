@@ -1802,3 +1802,20 @@ shadow mode junto da evidência, sem alterar outcome de attempt, retry, review,
 Verifier, promoção ou integração. `Evidence != Policy`; nenhuma decisão V0 possui
 enforcement. Antes de ligá-lo, ainda é necessária decisão humana sobre a calibração
 por classe e sobre o papel de mudanças outside-scope/targets alterados.
+
+## Estado operacional — Enforcement Readiness V0 shadow (2026-09-19)
+
+Sobre a Policy V0, uma camada pura e versionada (`enforcement-readiness-v0`) avalia,
+ainda SOMENTE em shadow mode, se a evidência seria **candidata** a uma futura decisão
+autônoma (`eligible | requires_review | blocked | insufficient_evidence`),
+reutilizando a classificação diferencial canônica. Ela separa três fronteiras —
+`Evidence != Policy`, `Policy Decision != Enforcement Readiness`,
+`Enforcement Readiness != Enforcement` — e dois escopos: *Gate Evidence Scope*
+(`targetPaths`, superfície de prova) ≠ *Change Authorization Scope* (`includedScope`,
+superfície autorizada de edição). `changedFilesOutsideTargetScope` NÃO significa
+mudança não autorizada. `PASS→PASS` prova o gate verde, não efeito causal, logo não
+é elegível (a readiness DIVERGE do `allow` da Policy V0). O Change Authorization
+Scope não está na evidência de gate: a readiness registra
+`change_scope_verification = unavailable` e degrada conservadoramente. A verificação
+host-observada desse escopo a partir da própria evidência é a próxima fatia, antes de
+qualquer Enforcement V1. Nada da Readiness V0 tem autoridade operacional.
