@@ -435,7 +435,7 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
       )}
 
       <div className={styles.messages}>
-        <ProjectWorkPanel items={projectWorkItems} focusedWorkItemId={focusedWorkItemId} trackedWorkItemId={trackedAutonomousWorkItemId} onFocus={focusWork} onChange={updated=>setProjectWorkItems(previous=>replaceWorkPresentation(previous,updated))}/>
+        <ProjectWorkPanel items={projectWorkItems} focusedWorkItemId={focusedWorkItemId} trackedWorkItemId={trackedAutonomousWorkItemId} onFocus={focusWork} onChange={updated=>setProjectWorkItems(previous=>replaceWorkPresentation(previous,updated))} provider={provider}/>
         {messages.length === 0 && !isOnboarding && (
           <div className={styles.empty}>
             <p className={styles.emptyIcon}>🧠</p>
@@ -469,8 +469,8 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
                   : m.content
               }
             </div>
-            {m.role === 'user' && m.id && workItems[m.id]?.map(view => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={presentation => setWorkItems(previous => ({ ...previous, [m.id!]: replaceWorkPresentation(previous[m.id!]??[],presentation) }))} />)}
-            {m.role === 'user' && m.id && historyCards[m.id]?.length ? historyCards[m.id]!.map((view, index) => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={updated => setHistoryCards(previous => ({ ...previous, [m.id!]: previous[m.id!]!.map((existing, position) => position === index ? updated : existing) }))} />) : null}
+            {m.role === 'user' && m.id && workItems[m.id]?.map(view => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={presentation => setWorkItems(previous => ({ ...previous, [m.id!]: replaceWorkPresentation(previous[m.id!]??[],presentation) }))} provider={provider} />)}
+            {m.role === 'user' && m.id && historyCards[m.id]?.length ? historyCards[m.id]!.map((view, index) => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={updated => setHistoryCards(previous => ({ ...previous, [m.id!]: previous[m.id!]!.map((existing, position) => position === index ? updated : existing) }))} provider={provider} />) : null}
           </div>
         ))}
 

@@ -296,6 +296,18 @@ export function parseChatProvider(value: unknown): ChatProviderId {
   return process.env.ANIMA_AI_PROVIDER === 'ollama' ? 'ollama' : 'openai';
 }
 
+/**
+ * Validação ESTRITA da seleção interativa de provider. Diferente de
+ * `parseChatProvider`, NÃO aplica default de deploy: um valor ausente ou inválido
+ * devolve `null` para o chamador falhar fechado como input incompleto. Existe para
+ * subetapas interativas (ex.: correção de proposta) em que herdar silenciosamente
+ * o default (OpenAI paga) trocaria a autoridade do turno por um provider não
+ * escolhido pelo usuário. Necessidade de planejar ≠ autorização de gasto.
+ */
+export function parseExplicitChatProvider(value: unknown): ChatProviderId | null {
+  return value === 'openai' || value === 'ollama' ? value : null;
+}
+
 export async function streamChatProvider(
   request: ChatProviderRequest,
   deps: ChatProviderDeps = {},

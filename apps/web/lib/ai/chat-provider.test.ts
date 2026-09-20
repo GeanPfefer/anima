@@ -1,4 +1,4 @@
-import { openAIStructuredOutputSchema, parseChatProvider, streamChatProvider } from './chat-provider';
+import { openAIStructuredOutputSchema, parseChatProvider, parseExplicitChatProvider, streamChatProvider } from './chat-provider';
 import type { OpenAIAdmissionControl } from './openai-paid-transport';
 import { ReadableStream as NodeReadableStream } from 'node:stream/web';
 
@@ -55,6 +55,20 @@ describe('chat provider', () => {
     expect(parseChatProvider('openai')).toBe('openai');
     expect(parseChatProvider('ollama')).toBe('ollama');
     expect(parseChatProvider('outro')).toBe('ollama');
+  });
+
+  test('parseExplicitChatProvider é estrito: sem default e sem fallback silencioso', () => {
+    // Só a seleção interativa explícita é aceita.
+    expect(parseExplicitChatProvider('openai')).toBe('openai');
+    expect(parseExplicitChatProvider('ollama')).toBe('ollama');
+    // Ausente/inválido ⇒ null (o chamador falha fechado). NÃO herda o default de
+    // deploy nem quando ANIMA_AI_PROVIDER está setado — diferente de parseChatProvider.
+    process.env.ANIMA_AI_PROVIDER = 'ollama';
+    expect(parseExplicitChatProvider(undefined)).toBeNull();
+    expect(parseExplicitChatProvider(null)).toBeNull();
+    expect(parseExplicitChatProvider('')).toBeNull();
+    expect(parseExplicitChatProvider('outro')).toBeNull();
+    expect(parseExplicitChatProvider('OpenAI')).toBeNull();
   });
 
   test('converte o NDJSON do Ollama em texto puro mesmo com chunk dividido', async () => {

@@ -10,7 +10,11 @@ import type { WorkRetryReadiness } from '@/lib/work-orchestration/retry-readines
 
 type WorkItemView=Omit<WorkItem,'createdAt'|'updatedAt'>&{createdAt:string;updatedAt:string};
 export type WorkPresentationView=Omit<WorkPresentation,'item'>&{item:WorkItemView;autonomousReadiness?:AutonomousReadinessView;retryReadiness?:WorkRetryReadiness};
-type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void;autonomousExecutionAllowed?:boolean;autonomousBlockReason?:string|null;trackAutonomousProgress?:boolean};
+// `provider` carrega a seleção interativa vigente do Chat Dev (GPT × Local) para
+// que uma correção de proposta preserve a MESMA autoridade de provider usada na
+// criação. Ausente ⇒ a rota falha fechado (input incompleto), nunca cai num
+// default pago silencioso.
+type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void;autonomousExecutionAllowed?:boolean;autonomousBlockReason?:string|null;trackAutonomousProgress?:boolean;provider?:'openai'|'ollama'};
 
 // Rótulos do parecer advisory do Verifier. Read-only: informa a revisão humana,
 // nunca a substitui nem altera as ações disponíveis (que vêm da projeção).
@@ -41,7 +45,7 @@ const describeRetryBlock=(readiness?:WorkRetryReadiness):string|null=>
   readiness?.status==='BLOCKED'&&readiness.reason?RETRY_BLOCK_LABEL[readiness.reason]??null:null;
 
 
-export function WorkProposalCard({presentation,onChange,focused=false,onFocus,autonomousExecutionAllowed,autonomousBlockReason,trackAutonomousProgress=false}:Props){
+export function WorkProposalCard({presentation,onChange,focused=false,onFocus,autonomousExecutionAllowed,autonomousBlockReason,trackAutonomousProgress=false,provider}:Props){
   const {item,latestResult,acceptedResult,availableActions}=presentation;
   const executionSpec=item.intent['execution_spec'] as {
     target?:{kind?:string;reference?:string};permissions?:string[];
@@ -193,7 +197,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,au
     {!focused&&onFocus&&!['completed','failed','rejected','cancelled'].includes(item.state)&&<button disabled={busy} onClick={onFocus}>Usar como foco</button>}
     {mode==='none'&&allowed('approve')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>decide({type:'approve'})}>Aprovar</button><button disabled={busy} onClick={()=>setMode('correct')}>Pedir correção</button><button disabled={busy} onClick={()=>setMode('defer')}>Adiar</button><button disabled={busy} onClick={()=>decide({type:'reject'})}>Rejeitar</button></div>}
     {mode==='defer'&&<div className={styles.workDecision}><label>Motivo<select value={detail} onChange={event=>setDetail(event.target.value)}><option value="">Selecione</option><option>Quero decidir depois</option><option>Falta contexto</option><option>Não é prioridade agora</option><option value="other">Outro</option></select></label>{detail==='other'&&<input aria-label="Outro motivo" value={customDeferReason} onChange={event=>setCustomDeferReason(event.target.value)}/>}<button disabled={busy||!(detail==='other'?customDeferReason:detail).trim()} onClick={()=>decide({type:'defer',reason:detail==='other'?customDeferReason:detail})}>Confirmar adiamento</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
-    {mode==='correct'&&<div className={styles.workDecision}><label>O que deve mudar?<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>mutate('/api/work-orchestration/proposal-corrections',{requestedChanges:detail.trim()})}>Criar nova versão coerente</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
+    {mode==='correct'&&<div className={styles.workDecision}><label>O que deve mudar?<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>mutate('/api/work-orchestration/proposal-corrections',{requestedChanges:detail.trim(),provider})}>Criar nova versão coerente</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
     {mode==='none'&&!presentation.pendingDecision&&allowed('start')&&<><p className={styles.workNotice}>No modo manual, você executa o trabalho e registra o resultado aqui. O Supervisor não assumirá esse ciclo depois de iniciado.</p>{projectedBlockReason&&<p className={styles.workNotice}>Execução autônoma indisponível: {projectedBlockReason}</p>}<div className={styles.workActions}><button disabled={busy} onClick={()=>mutate('/api/work-orchestration/start',{})}>{item.state==='approved'?'Iniciar execução manual':'Retomar trabalho manual'}</button>{item.state==='approved'&&readinessReason==='work_intelligence_classification_missing'&&<button disabled={busy} onClick={()=>mutate('/api/work-orchestration/prepare-autonomous',{})}>Preparar elegibilidade autônoma</button>}{item.state==='approved'&&autonomousEligible&&<><button disabled={busy} onClick={()=>void loadResourceAdvisory()}>Consultar parecer de recursos</button><button disabled={busy} onClick={startAutonomous}>Executar autonomamente</button></>}</div></>}
     {mode==='none'&&presentation.manualReleaseAvailable&&<div className={styles.workActions}><button disabled={busy} onClick={()=>mutate('/api/work-orchestration/release-manual',{})}>Liberar execução manual</button></div>}
     {mode==='none'&&allowed('submit_result')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>setMode('result')}>Registrar resultado</button></div>}

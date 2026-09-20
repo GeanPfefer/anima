@@ -4,8 +4,8 @@ import styles from './chat.module.css';
 import { WorkProposalCard, type WorkPresentationView } from './WorkProposalCard';
 import { presentWorkReencounter } from './work-item-presentation';
 
-type Props={items:readonly WorkPresentationView[];focusedWorkItemId:string|null;trackedWorkItemId?:string|null;onFocus:(id:string)=>void;onChange:(value:WorkPresentationView)=>void};
-export function ProjectWorkPanel({items,focusedWorkItemId,trackedWorkItemId,onFocus,onChange}:Props){
+type Props={items:readonly WorkPresentationView[];focusedWorkItemId:string|null;trackedWorkItemId?:string|null;onFocus:(id:string)=>void;onChange:(value:WorkPresentationView)=>void;provider?:'openai'|'ollama'};
+export function ProjectWorkPanel({items,focusedWorkItemId,trackedWorkItemId,onFocus,onChange,provider}:Props){
   const [expanded,setExpanded]=useState<string|null>(null);
   useEffect(()=>{if(trackedWorkItemId)setExpanded(trackedWorkItemId);},[trackedWorkItemId]);
   const rows=presentWorkReencounter(items);
@@ -17,7 +17,7 @@ export function ProjectWorkPanel({items,focusedWorkItemId,trackedWorkItemId,onFo
       <p>{readinessLabel}</p>
       <p className={styles.workNotice}>Fila governada: {autonomousEligible?'elegível':blockingDependencyIds.length?'bloqueada por dependência':'não elegível'} · Dependências: {dependencyIds.length?dependencyIds.join(', '):'nenhuma'} · fonte {presentation.item.sourceMessageId}</p>
       <button type="button" onClick={()=>setExpanded(expanded===presentation.item.id?null:presentation.item.id)}>{expanded===presentation.item.id?'Ocultar detalhes':'Ver detalhes'}</button>
-      {expanded===presentation.item.id&&<WorkProposalCard presentation={presentation} focused={focusedWorkItemId===presentation.item.id} onFocus={()=>onFocus(presentation.item.id)} onChange={onChange} autonomousExecutionAllowed={autonomousEligible} autonomousBlockReason={blockingDependencyIds.length?readinessLabel:null} trackAutonomousProgress={trackedWorkItemId===presentation.item.id}/>}
+      {expanded===presentation.item.id&&<WorkProposalCard presentation={presentation} focused={focusedWorkItemId===presentation.item.id} onFocus={()=>onFocus(presentation.item.id)} onChange={onChange} autonomousExecutionAllowed={autonomousEligible} autonomousBlockReason={blockingDependencyIds.length?readinessLabel:null} trackAutonomousProgress={trackedWorkItemId===presentation.item.id} provider={provider}/>}
     </div>)}
   </section>;
 }

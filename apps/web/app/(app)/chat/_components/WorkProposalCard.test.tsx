@@ -122,6 +122,16 @@ describe('WorkProposalCard', () => {
     expect(screen.getByLabelText('Trabalho, versão 3')).toBeInTheDocument();
   });
   test('correção envia somente o pedido, sem reescrever a proposta no cliente', async () => { render(<WorkProposalCard presentation={presentation()} onChange={jest.fn()} />); fireEvent.click(screen.getByRole('button',{name:'Pedir correção'})); fireEvent.change(screen.getByLabelText('O que deve mudar?'),{target:{value:'Reduzir o escopo'}}); fireEvent.click(screen.getByRole('button',{name:'Criar nova versão coerente'})); await waitFor(()=>expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/proposal-corrections',expect.objectContaining({method:'POST',body:expect.stringContaining('"requestedChanges":"Reduzir o escopo"')}))); const body=JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body as string); expect(body.proposal).toBeUndefined(); expect(body.intent).toBeUndefined(); });
+  test('correção envia o provider interativo selecionado (preserva a autoridade do turno)', async () => {
+    render(<WorkProposalCard presentation={presentation()} onChange={jest.fn()} provider="ollama" />);
+    fireEvent.click(screen.getByRole('button',{name:'Pedir correção'}));
+    fireEvent.change(screen.getByLabelText('O que deve mudar?'),{target:{value:'Reduzir o escopo'}});
+    fireEvent.click(screen.getByRole('button',{name:'Criar nova versão coerente'}));
+    await waitFor(()=>expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/proposal-corrections',expect.objectContaining({method:'POST'})));
+    const body=JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body as string);
+    expect(body.provider).toBe('ollama');
+    expect(body.requestedChanges).toBe('Reduzir o escopo');
+  });
   const verification=(verdict:'verified'|'inconclusive'|'rejected',extra:Array<{code:string;severity:'ok'|'gap'|'violation';detail:string}>=[],rests=true)=>({schemaVersion:1 as const,verdict,workItemId:'item',attemptId:'attempt-1',approvedProposalVersion:2,findings:[{code:'correlation_verified',severity:'ok' as const,provenance:'independent' as const,detail:'ok'},...extra.map(f=>({...f,provenance:'attested' as const}))],summary:{violations:extra.filter(f=>f.severity==='violation').length,gaps:extra.filter(f=>f.severity==='gap').length,checks:1+extra.length,attested:extra.length,independent:1},restsOnAttestedEvidence:rests,advisory:true as const});
   test('exibe o parecer advisory sem alterar as ações de revisão', () => {
     render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes'],verification:verification('verified') as unknown as WorkPresentationView['verification']})} onChange={jest.fn()} />);
