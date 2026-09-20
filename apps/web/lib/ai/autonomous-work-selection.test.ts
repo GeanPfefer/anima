@@ -15,6 +15,16 @@ describe('mandato autônomo no chat Dev', () => {
     expect(resolveAutonomousWorkChatIntent('continue desenvolvendo o ANIMA')).toBe('execute');
     expect(resolveAutonomousWorkChatIntent('qual é o próximo item?')).toBeNull();
   });
+  test('negação não concede mandato autônomo', () => {
+    expect(resolveAutonomousWorkChatIntent('não execute o item 11111111-1111-4111-8111-111111111111')).toBeNull();
+    expect(resolveAutonomousWorkChatIntent('não retome o trabalho aprovado')).toBeNull();
+    expect(resolveAutonomousWorkChatIntent('não selecione autonomamente o próximo trabalho')).toBeNull();
+    expect(resolveAutonomousWorkChatIntent('não reutilize, retome ou selecione nenhum item completed existente')).toBeNull();
+  });
+  test('mandato positivo existente continua reconhecido', () => {
+    expect(resolveAutonomousWorkChatIntent('retome o trabalho aprovado 11111111-1111-4111-8111-111111111111')).toBe('execute');
+    expect(resolveAutonomousWorkChatIntent('execute o item 11111111-1111-4111-8111-111111111111')).toBe('execute');
+  });
   test('admissão delega somente à RPC canônica e preserva stale', async () => {
     const rpc = jest.fn().mockResolvedValue({ data: { eventId: 'event-1', replayed: false }, error: null });
     await expect(admitSelectedAutonomousWork({ rpc } as never, 'item-1', 2, 'request-1')).resolves.toEqual({ outcome: 'admitted', eventId: 'event-1', replayed: false });

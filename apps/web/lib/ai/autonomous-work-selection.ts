@@ -15,12 +15,23 @@ export type AutonomousWorkChatIntent = 'inspect' | 'execute';
 /** Mandato estreito: consulta ou execução explícita de self-development no Dev. */
 export function resolveAutonomousWorkChatIntent(message: string): AutonomousWorkChatIntent | null {
   const value = normalize(message.trim());
-  const asksSelection = /\b(?:identifique|selecione|escolha|determine|resolva)\b/.test(value)
+  const clauses = value.split(/[.!?;\n]+/).map(clause => clause.trim()).filter(Boolean);
+  const isPositiveClause = (clause: string, action: RegExp): boolean => {
+    const match = action.exec(clause);
+    if (!match || match.index === undefined) return false;
+    const beforeAction = clause.slice(0, match.index);
+    // Conservador: negação na mesma oração antes do verbo retira autoridade.
+    // "não deixe de executar" também falha fechado em vez de conceder mandato.
+    return !/\b(?:nao|nunca|nem)\b/.test(beforeAction);
+  };
+  const selectionVerb = /\b(?:identifique|selecione|escolha|determine|resolva)\b/;
+  const executionVerb = /\b(?:execute|executar|rode|rodar|continue|continuar|prossiga|prosseguir|inicie|iniciar|retome|retomar)\b/;
+  const asksSelection = clauses.some(clause => isPositiveClause(clause, selectionVerb))
     && /\bproxim[oa]\b/.test(value);
   const asksAutonomy = /\b(?:sozinh[oa]|autonom[oa]|autonomamente|automaticamente)\b/.test(value);
-  const isDevelopmentWork = /\b(?:work item|trabalho|self-development|autodesenvolvimento|desenvolvimento do anima|desenvolvendo o anima)\b/.test(value);
-  const explicitExecution = /\b(?:execute|executar|rode|rodar|continue|continuar|prossiga|prosseguir|inicie|iniciar)\b/.test(value)
-    && /\b(?:ciclo|item|trabalho|self-development|autodesenvolvimento|desenvolvimento do anima|anima)\b/.test(value);
+  const isDevelopmentWork = /\b(?:work item|item|trabalho|self-development|autodesenvolvimento|desenvolvimento do anima|desenvolvendo o anima)\b/.test(value);
+  const explicitExecution = clauses.some(clause => isPositiveClause(clause, executionVerb)
+    && /\b(?:ciclo|item|trabalho|self-development|autodesenvolvimento|desenvolvimento do anima|anima)\b/.test(clause));
   if (explicitExecution && isDevelopmentWork) return 'execute';
   if (asksSelection && asksAutonomy && isDevelopmentWork) return 'inspect';
   return null;

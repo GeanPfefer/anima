@@ -55,12 +55,11 @@ import { createProjectAdvisor, renderProjectAdvisory } from '@/lib/ai/project-ad
 import { processProjectConversationGovernance } from '@/lib/ai/project-conversation-governance';
 import { processProjectBacklogGovernanceRequest } from '@/lib/ai/project-backlog-governance-request';
 import {
-  isAutonomousWorkSelectionRequest,
-  resolveAutonomousWorkChatIntent,
   admitSelectedAutonomousWork,
   renderAutonomousWorkSelection,
   selectAutonomousWorkForChat,
 } from '@/lib/ai/autonomous-work-selection';
+import { bindDevelopmentWorkSource, classifyDevelopmentChatIntent } from '@/lib/ai/development-chat-intent';
 
 function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -126,6 +125,11 @@ export async function POST(req: NextRequest) {
     developmentMode,
     fallbackAllowed: false,
   });
+  // Uma única classificação pura governa a precedência do Chat Dev. Ela não
+  // persiste nem consulta itens; o sourceMessageId real é ligado somente depois.
+  const developmentIntent = developmentMode
+    ? classifyDevelopmentChatIntent({ message, presentedItemReferences: requestedPresentedItemReferences })
+    : null;
 
   const governedDecision = await processProjectConversationGovernance({
     client: supabase, userId: user.id, message, retryMessageId: typeof requestedRetryMessageId === 'string' ? requestedRetryMessageId : undefined,
@@ -145,9 +149,9 @@ export async function POST(req: NextRequest) {
   // Mandato estreito do Dev. Consulta permanece read-only; execução explícita
   // delega à mesma admission RPC do cartão. Claim/attempt/executor continuam
   // pertencendo exclusivamente ao Resident Host + Supervisor.
-  if (developmentMode && isAutonomousWorkSelectionRequest(message)) {
+  if (developmentIntent?.kind === 'autonomous_queue_command') {
     try {
-      const intent = resolveAutonomousWorkChatIntent(message)!;
+      const intent = developmentIntent.command;
       let decision = await selectAutonomousWorkForChat(supabase, user.id);
       let admission: 'not_requested' | 'admitted' | 'human_decision_required' | 'stale' = 'not_requested';
       if (intent === 'execute' && decision.outcome === 'selected') {
@@ -186,7 +190,10 @@ export async function POST(req: NextRequest) {
   // Drill-down operacional read-only: resolve uma única referência antes de ler
   // payloads e só deixa a projeção tipada/minimizada atravessar para o Advisor.
   // Ambiguidade falha fechado sem chamar provider e sem criar memória paralela.
-  if (isProjectItemDrilldownQuestion(message) || isConversationalItemReferenceQuestion(message)) {
+  if (
+    developmentIntent?.kind === 'existing_item_reference'
+    || (!developmentMode && (isProjectItemDrilldownQuestion(message) || isConversationalItemReferenceQuestion(message)))
+  ) {
     try {
       const observedAt = new Date().toISOString();
       const [{ data: candidates }, { data: focus }] = await Promise.all([
@@ -197,7 +204,9 @@ export async function POST(req: NextRequest) {
       const candidateProjection = (candidates ?? []).map(candidate => ({
           id: candidate.id, state: candidate.state, capability: candidate.capability, updatedAt: candidate.updated_at,
         }));
-      const presented = parsePresentedItemReferences(requestedPresentedItemReferences);
+      const presented = developmentIntent?.kind === 'existing_item_reference'
+        ? developmentIntent.presentedReferences
+        : parsePresentedItemReferences(requestedPresentedItemReferences);
       const contextual = resolveConversationalItemReference(message, presented);
       if (contextual.kind === 'clarification_required') {
         const choices = contextual.references.map(reference => {
@@ -280,7 +289,7 @@ export async function POST(req: NextRequest) {
   // pode criar nota, XP, quest, work_item, classificação, decisão ou ação.
   // O único insumo do provider é o contexto governado e allowlisted construído
   // no host; as ferramentas genéricas de repositório permanecem desligadas.
-  if (isProjectAdvisorQuestion(message)) {
+  if (developmentIntent?.kind === 'project_query' || (!developmentMode && isProjectAdvisorQuestion(message))) {
     try {
       console.info('[project-advisor] request received', { provider, userScoped: true });
       // Observação viva, isolada pela sessão/RLS e reduzida a metadados não
@@ -841,7 +850,11 @@ ${contextBlock}`;
     }
   }
 
-  const rawInterpretation = interpretWorkRequest(message, sourceMessage.id);
+  const rawInterpretation = developmentIntent?.kind === 'new_work_request'
+    ? bindDevelopmentWorkSource(developmentIntent, sourceMessage.id)
+    : developmentIntent?.kind === 'conversation' || developmentIntent?.kind === 'existing_item_command'
+      ? developmentIntent.work
+      : interpretWorkRequest(message, sourceMessage.id);
   let interpretation = rawInterpretation.kind === 'work_candidate'
     ? { ...rawInterpretation, command: configureUx02DeterministicProof(message, rawInterpretation.command) }
     : rawInterpretation;

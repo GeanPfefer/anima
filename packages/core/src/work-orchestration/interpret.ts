@@ -67,7 +67,11 @@ export function interpretWorkRequest(message: string, sourceMessageId: string): 
   // dentro de um mandato operacional deixa de ser vetado pela palavra "hoje".
   if (lifeRecord.test(text) && !isWork) return { kind: 'conversation' };
   if (!isWork) return { kind: 'conversation' };
-  const requestKind: ConstructionIntentV1['request_kind'] = /\b(?:investig|an[aá]lis|diagn[oó]stic)/i.test(text) ? 'investigate' : /\b(?:alter|corrig|refator|implement)\b/i.test(text) ? 'change' : 'plan';
+  const requestKind: ConstructionIntentV1['request_kind'] = /\b(?:investig|an[aá]lis|diagn[oó]stic)/i.test(text)
+    ? 'investigate'
+    : codeChangeVerb.test(text) || /\balter(?:ar|e|ando)\b/i.test(text)
+      ? 'change'
+      : 'plan';
   const intent: ConstructionIntentV1 = { schema_version: 1, mode: 'construction', request_kind: requestKind, confidence: 'high' };
   // Proposta planning-first e HONESTA: o escopo não afirma alvo, arquivo ou nó
   // algum (nada é inventado), e o excludedScope registra explicitamente que nada

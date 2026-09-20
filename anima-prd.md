@@ -1,4 +1,10 @@
 # Anima — Product Requirements Document
+> Precedência semântica do Chat Dev corrigida em 2026-09-19: uma classificação
+> pura distingue nova solicitação, referência/comando de item existente, mandato
+> autônomo, consulta de projeto e conversa antes dos handlers especializados.
+> Ordinais de outros domínios não viram Work Item e negação não concede mandato;
+> pedidos novos voltam a alcançar planner e criação de proposta.
+> [Registro](docs/registros/2026-09-19-precedencia-intencao-chat-dev.md).
 > Evidência diferencial endurecida em 2026-09-19, ainda advisory: restore pós-baseline
 > falha fechado antes do coder; fatos por target e partição total/dentro/fora do diff
 > são persistidos; `targetPaths` declarado foi separado da verificação independente

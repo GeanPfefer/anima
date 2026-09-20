@@ -1,9 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { classifyDevelopmentChatIntent } from '@/lib/ai/development-chat-intent';
+
+const REAL_NEW_WORK_MESSAGES = [
+  'Quero corrigir um bug de fronteira no getEraForLevel: abaixo de MIN_LEVEL deve continuar retornando a primeira era e acima de MAX_LEVEL deve retornar a última era. Adicione cobertura explícita para esses dois limites. Limite a mudança a packages/core/src/levels.ts e packages/core/src/levels.test.ts.',
+  'Não estou me referindo a nenhum work item existente. Quero criar um novo trabalho de programação, independente dos itens anteriores, para corrigir o bug de fronteira em getEraForLevel. Abaixo de MIN_LEVEL deve continuar retornando a primeira era e acima de MAX_LEVEL deve retornar a última era. Adicione cobertura explícita para esses dois limites. Limite a mudança a packages/core/src/levels.ts e packages/core/src/levels.test.ts. Não reutilize, retome ou selecione nenhum item completed/cancelled existente. Crie uma nova proposta para este trabalho.',
+] as const;
 
 describe('fronteira read-only do item drill-down', () => {
   const source = readFileSync(resolve(__dirname, 'route.ts'), 'utf8');
-  const start = source.indexOf('if (isProjectItemDrilldownQuestion(message) || isConversationalItemReferenceQuestion(message))');
+  const start = source.indexOf("developmentIntent?.kind === 'existing_item_reference'");
   const end = source.indexOf('// SELF_UNDERSTANDING / PROJECT_ADVISOR_V0');
   const branch = source.slice(start, end);
 
@@ -46,8 +52,8 @@ describe('fronteira read-only do item drill-down', () => {
 
 describe('seleção autônoma antes do drill-down conservador', () => {
   const source = readFileSync(resolve(__dirname, 'route.ts'), 'utf8');
-  const autonomous = source.indexOf('if (developmentMode && isAutonomousWorkSelectionRequest(message))');
-  const drilldown = source.indexOf('if (isProjectItemDrilldownQuestion(message) || isConversationalItemReferenceQuestion(message))');
+  const autonomous = source.indexOf("if (developmentIntent?.kind === 'autonomous_queue_command')");
+  const drilldown = source.indexOf("developmentIntent?.kind === 'existing_item_reference'");
   const branch = source.slice(autonomous, drilldown);
 
   test('só habilita com Dev e não depende do provider GPT/Local', () => {
@@ -65,7 +71,7 @@ describe('seleção autônoma antes do drill-down conservador', () => {
 
 describe('fronteira read-only do Project Advisor global', () => {
   const source = readFileSync(resolve(__dirname, 'route.ts'), 'utf8');
-  const start = source.indexOf('if (isProjectAdvisorQuestion(message))');
+  const start = source.indexOf("if (developmentIntent?.kind === 'project_query'");
   const end = source.indexOf('// ── Contexto do usuário');
   const branch = source.slice(start, end);
 
@@ -92,8 +98,8 @@ describe('governança conversacional precede providers sem virar execução', ()
   const governance = source.indexOf('const governedDecision = await processProjectConversationGovernance');
   test('boundary vem antes de drill-down, Advisor e chat pessoal', () => {
     expect(governance).toBeGreaterThan(0);
-    expect(governance).toBeLessThan(source.indexOf('if (isProjectItemDrilldownQuestion'));
-    expect(governance).toBeLessThan(source.indexOf('if (isProjectAdvisorQuestion'));
+    expect(governance).toBeLessThan(source.indexOf("developmentIntent?.kind === 'existing_item_reference'"));
+    expect(governance).toBeLessThan(source.indexOf("if (developmentIntent?.kind === 'project_query'"));
     expect(governance).toBeLessThan(source.indexOf('detectActivities(message'));
   });
   test('resposta governada retorna sem work item, foco, coder ou supervisor', () => {
@@ -101,5 +107,30 @@ describe('governança conversacional precede providers sem virar execução', ()
     const branch = source.slice(governance, end);
     expect(branch).toContain("'X-Anima-Mutation': 'project-decision-only'");
     expect(branch).not.toMatch(/work_items|work_focus|coder|supervisor|resolve_approval/i);
+  });
+});
+
+describe('precedência semântica de nova solicitação Dev', () => {
+  const source = readFileSync(resolve(__dirname, 'route.ts'), 'utf8');
+
+  test.each(REAL_NEW_WORK_MESSAGES)('mensagem real evita handlers existentes e segue ao planner: %s', message => {
+    expect(classifyDevelopmentChatIntent({ message }).kind).toBe('new_work_request');
+  });
+
+  test('a route classifica uma vez antes dos handlers e reutiliza a interpretação apó persistir', () => {
+    const classification = source.indexOf('const developmentIntent = developmentMode');
+    const autonomous = source.indexOf("if (developmentIntent?.kind === 'autonomous_queue_command')");
+    const drilldown = source.indexOf("developmentIntent?.kind === 'existing_item_reference'");
+    const bindSource = source.indexOf("developmentIntent?.kind === 'new_work_request'");
+    const planner = source.indexOf('const planned = await planExecutableProjectWork');
+    const createProposal = source.indexOf('.createProposal(interpretation.command)');
+    expect(classification).toBeGreaterThan(0);
+    expect(classification).toBeLessThan(autonomous);
+    expect(classification).toBeLessThan(drilldown);
+    expect(bindSource).toBeGreaterThan(drilldown);
+    expect(bindSource).toBeLessThan(planner);
+    expect(planner).toBeLessThan(createProposal);
+    expect(source).toContain("developmentIntent?.kind === 'autonomous_queue_command'");
+    expect(source).toContain("developmentIntent?.kind === 'existing_item_reference'");
   });
 });

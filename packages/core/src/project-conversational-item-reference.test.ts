@@ -58,5 +58,15 @@ describe('resolução conversacional determinística', () => {
   test('turno mais recente governa porque apenas seu conjunto é recebido', () => expect(resolveConversationalItemReference('o primeiro', [{ workItemId: C, ordinal: 1, role: 'review_item' }])).toMatchObject({ itemId: C }));
   test('a mesma coleção sustenta primeiro e depois segundo sem consulta global', () => { expect(resolveConversationalItemReference('o primeiro', refs)).toMatchObject({ itemId: A }); expect(resolveConversationalItemReference('e o segundo', refs)).toMatchObject({ itemId: B }); });
   test('sem referência contextual falha fechado', () => expect(resolveConversationalItemReference('o primeiro', [])).toEqual({ kind: 'not_contextual' }));
-  test('detector não captura chat normal', () => { expect(isConversationalItemReferenceQuestion('E o segundo?')).toBe(true); expect(isConversationalItemReferenceQuestion('Hoje corri 30 minutos.')).toBe(false); });
+  test('ordinal solto só é referência quando existe lista apresentada', () => {
+    expect(isConversationalItemReferenceQuestion('E o segundo?', refs)).toBe(true);
+    expect(isConversationalItemReferenceQuestion('E o segundo?')).toBe(false);
+    expect(isConversationalItemReferenceQuestion('abaixo do limite deve retornar a primeira era', refs)).toBe(false);
+  });
+  test('detector não captura ordinal de outro domínio sem contexto apresentado', () => {
+    expect(isConversationalItemReferenceQuestion('abaixo de MIN_LEVEL deve retornar a primeira era')).toBe(false);
+    expect(isConversationalItemReferenceQuestion('o primeiro item')).toBe(true);
+    expect(isConversationalItemReferenceQuestion('a segunda falha')).toBe(true);
+    expect(isConversationalItemReferenceQuestion('Hoje corri 30 minutos.')).toBe(false);
+  });
 });

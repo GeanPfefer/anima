@@ -2351,3 +2351,18 @@ Authorization Scope ⇒ segue `eligible`; fora do Change Authorization Scope ⇒
 Gates: core 227 focal / 1965 total, web focal, typecheck core+web, `git diff --check`.
 Antes de Enforcement V1 não resta dependência de dados; a fatia seguinte conecta
 decisão a comportamento (rollout/rollback/gates humanos).
+
+## Continuação — precedência semântica do Chat Dev (2026-09-19)
+
+O roteamento do Chat Dev deixou de depender da ordem física de regexes/`if`s. Uma
+classificação pura e reutilizável distingue nova solicitação, referência ou
+comando de item existente, mandato da fila autônoma, consulta de projeto e
+conversa. Nova solicitação reconhecida pelo `interpretWorkRequest` não consulta
+itens antigos nem entra na seleção autônoma: apó a persistência da mensagem, liga
+o `sourceMessageId` real e segue para Project Work Planner e `createProposal`.
+
+Ordinais soltos só referenciam itens quando associados a `item`/`falha`/`trabalho`
+ou quando a mensagem é uma referência ordinal conversacional inteira sobre lista
+realmente apresentada. Mandatos autônomos exigem verbo positivo; negação anterior
+ao verbo na mesma oração falha fechado. UUID/prefixo e anáforas válidas continuam
+preservados, inclusive para consulta read-only de itens encerrados.

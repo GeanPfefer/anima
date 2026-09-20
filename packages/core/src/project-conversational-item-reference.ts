@@ -103,7 +103,17 @@ export function resolveConversationalItemReference(
   return { kind: 'not_contextual' };
 }
 
-export function isConversationalItemReferenceQuestion(message: string): boolean {
+export function isConversationalItemReferenceQuestion(
+  message: string,
+  presentedReferences: readonly PresentedItemReference[] = [],
+): boolean {
   const value = normalize(message.trim());
-  return /\b(?:primeir[oa]|segund[oa]|terceir[oa]|quart[oa])\b|\b(?:esse|desse|neste) item\b|\b(?:essa|aquela) falha\b|\bitem que (?:voce )?mencionou\b|\bfalha que (?:voce )?mencionou\b|\bultima tentativa dele\b|\bpor que ele\b|\b(?:e|é) esse\b/.test(value);
+  const explicitItemReference = /\b(?:primeir[oa]|segund[oa]|terceir[oa]|quart[oa])\s+(?:item|falha|trabalho)\b|\b(?:esse|desse|neste) item\b|\b(?:essa|aquela) falha\b|\bitem que (?:voce )?mencionou\b|\bfalha que (?:voce )?mencionou\b|\bultima tentativa dele\b|\bpor que ele\b|\b(?:e|é) esse\b/.test(value);
+  if (explicitItemReference) return true;
+
+  // Um ordinal desacompanhado ("o segundo") só ganha significado de item quando
+  // existe uma lista de itens realmente apresentada pelo turno anterior. Sem esse
+  // contexto, "primeira era", "segundo teste" etc. pertencem à mensagem normal.
+  const contextualOrdinal = /^(?:(?:e|entao)\s+)?(?:(?:me\s+)?(?:fale|mostre|explique)(?:\s+mais)?\s+(?:sobre\s+)?)?(?:o|a)\s+(?:primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa])(?:\s+(?:item|falha|trabalho))?[?.!]*$/.test(value);
+  return parsePresentedItemReferences(presentedReferences).length > 0 && contextualOrdinal;
 }
