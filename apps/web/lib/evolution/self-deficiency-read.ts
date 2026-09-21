@@ -29,6 +29,28 @@ export type SelfDeficiencyReadResult =
     }
   | { readonly ok: false; readonly reason: CanonicalWorkHistoryFailure | 'coverage_read_failed' };
 
+const COVERAGE_PAGE_SIZE = 500;
+
+type CoverageRow = Pick<
+  Database['public']['Tables']['work_items']['Row'],
+  'id' | 'state' | 'updated_at' | 'intent'
+>;
+
+async function readAllSelfDeficiencyCoverageRows(
+  client: SupabaseClient<Database>,
+): Promise<readonly CoverageRow[] | null> {
+  const rows: CoverageRow[] = [];
+  for (let from = 0; ; from += COVERAGE_PAGE_SIZE) {
+    const result = await client.from('work_items')
+      .select('id,state,updated_at,intent')
+      .order('id', { ascending: true })
+      .range(from, from + COVERAGE_PAGE_SIZE - 1);
+    if (result.error || result.data === null) return null;
+    rows.push(...result.data);
+    if (result.data.length < COVERAGE_PAGE_SIZE) return rows;
+  }
+}
+
 /**
  * Projeta as deficiências próprias do histórico do usuário, já com o ciclo de
  * vida resolvido contra o trabalho governado que as cobre. Fail-closed: um
@@ -44,18 +66,18 @@ export async function readSelfDeficiencies(
   const detected = detectSelfDeficiencies({ events: history.events });
 
   // Correlação REAL: work_items que carregam a proveniência de uma deficiência.
-  const items = await client.from('work_items').select('id,state,updated_at,intent');
-  if (items.error || items.data === null) return { ok: false, reason: 'coverage_read_failed' };
+  const items = await readAllSelfDeficiencyCoverageRows(client);
+  if (items === null) return { ok: false, reason: 'coverage_read_failed' };
 
   const coverage: SelfDeficiencyCoverage[] = [];
-  for (const row of items.data) {
-    const deficiencyId = readSelfDeficiencyIdFromIntent((row as { intent: unknown }).intent);
+  for (const row of items) {
+    const deficiencyId = readSelfDeficiencyIdFromIntent(row.intent);
     if (!deficiencyId) continue;
     coverage.push({
       deficiencyId,
-      workItemId: (row as { id: string }).id,
-      state: (row as { state: SelfDeficiencyCoverage['state'] }).state,
-      updatedAt: (row as { updated_at: string }).updated_at,
+      workItemId: row.id,
+      state: row.state,
+      updatedAt: row.updated_at,
     });
   }
 

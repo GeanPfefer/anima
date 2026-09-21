@@ -24,6 +24,7 @@ interface FakeOptions {
   readonly items?: readonly ItemRow[];
   readonly failEventsRead?: boolean;
   readonly failItemsRead?: boolean;
+  readonly failItemsAtFrom?: number;
 }
 
 function fakeClient(options: FakeOptions = {}): SupabaseClient<Database> {
@@ -39,9 +40,15 @@ function fakeClient(options: FakeOptions = {}): SupabaseClient<Database> {
       };
       return query;
     }
-    return {
-      select: async () => (options.failItemsRead ? { data: null, error: { message: 'items read failed' } } : { data: items, error: null }),
+    const query = {
+      select: () => query,
+      order: () => query,
+      range: async (start: number, end: number) =>
+        options.failItemsRead || options.failItemsAtFrom === start
+          ? { data: null, error: { message: 'items read failed' } }
+          : { data: items.slice(start, end + 1), error: null },
     };
+    return query;
   };
   return { from } as unknown as SupabaseClient<Database>;
 }
@@ -88,6 +95,23 @@ describe('readSelfDeficiencies', () => {
     expect(result.deficiencies[0]?.status).toBe('indeterminate');
   });
 
+  test('pagina toda a cobertura e encontra work equivalente além da primeira página', async () => {
+    const unrelated = Array.from({ length: 500 }, (_, index): ItemRow => ({
+      id: `unrelated-${String(index).padStart(4, '0')}`,
+      state: 'completed',
+      updated_at: '2026-09-12T10:00:00.000Z',
+      intent: {} as ItemRow['intent'],
+    }));
+    const covering: ItemRow = {
+      id: 'zz-covering', state: 'in_progress', updated_at: '2026-09-12T10:00:00.000Z',
+      intent: provenanceIntent(DEFICIENCY_ID) as ItemRow['intent'],
+    };
+    const result = await readSelfDeficiencies(fakeClient({ events: twoFailures, items: [...unrelated, covering] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.deficiencies[0]?.status).toBe('covered');
+  });
+
   test('falha de leitura do histórico fecha com a razão canônica', async () => {
     const result = await readSelfDeficiencies(fakeClient({ failEventsRead: true }));
     expect(result).toEqual({ ok: false, reason: 'event_history_read_failed' });
@@ -95,6 +119,15 @@ describe('readSelfDeficiencies', () => {
 
   test('falha de leitura da correlação fecha fechado', async () => {
     const result = await readSelfDeficiencies(fakeClient({ events: twoFailures, failItemsRead: true }));
+    expect(result).toEqual({ ok: false, reason: 'coverage_read_failed' });
+  });
+
+  test('falha em página intermediária da cobertura fecha fechado', async () => {
+    const items = Array.from({ length: 501 }, (_, index): ItemRow => ({
+      id: `item-${index}`, state: 'completed', updated_at: '2026-09-12T10:00:00.000Z',
+      intent: {} as ItemRow['intent'],
+    }));
+    const result = await readSelfDeficiencies(fakeClient({ events: twoFailures, items, failItemsAtFrom: 500 }));
     expect(result).toEqual({ ok: false, reason: 'coverage_read_failed' });
   });
 });
