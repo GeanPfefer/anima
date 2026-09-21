@@ -57,9 +57,11 @@ export type SelfDeficiencyKind =
  *   - `covered`  : já existe work_item ATIVO/aguardando cobrindo-a (não duplicar);
  *   - `resolved` : um work_item COMPLETADO a cobriu e não houve sinal posterior;
  *   - `reopened` : houve resolução, mas o sinal RECORREU depois (semântica
- *                  explícita de recorrência pós-resolução).
+ *                  explícita de recorrência pós-resolução);
+ *   - `indeterminate`: existe cobertura completed, mas sua ordem temporal não é
+ *                      verificável; bloqueia inferência e nova proposta.
  */
-export type SelfDeficiencyStatus = 'open' | 'covered' | 'resolved' | 'reopened';
+export type SelfDeficiencyStatus = 'open' | 'covered' | 'resolved' | 'reopened' | 'indeterminate';
 
 /** Ponteiro de proveniência para um fato REAL que sustenta a deficiência. */
 export interface SelfDeficiencyEvidenceRef {
@@ -401,6 +403,8 @@ export function isSelfDeficiencyBlockingWorkState(state: WorkState): boolean {
  *   - senão, work `completed` cobrindo-a e SEM sinal posterior → `resolved`;
  *   - work `completed` cobrindo-a MAS com sinal posterior (lastObservedAt >
  *     updatedAt) → `reopened` (recorrência pós-resolução, semântica explícita);
+ *   - timestamp inválido na deficiência ou em QUALQUER cobertura completed →
+ *     `indeterminate` (sem fabricar resolução/recorrência nem duplicar trabalho);
  *   - cobertura só terminal-negativa (failed/rejected/cancelled) ou ausente →
  *     permanece `open` (a deficiência segue sem tratamento efetivo).
  */
@@ -422,9 +426,16 @@ export function resolveSelfDeficiencyLifecycle(
     }
     const completed = covers.filter(entry => entry.state === 'completed');
     if (completed.length > 0) {
-      const lastCompletionMs = Math.max(...completed.map(entry => Date.parse(entry.updatedAt)).filter(Number.isFinite));
+      const completionTimes = completed.map(entry => Date.parse(entry.updatedAt));
       const lastSignalMs = Date.parse(deficiency.lastObservedAt);
-      if (Number.isFinite(lastCompletionMs) && Number.isFinite(lastSignalMs) && lastSignalMs > lastCompletionMs) {
+      // Sem uma ordenação temporal verificável não podemos afirmar nem
+      // resolução nem recorrência. Falha fechado e também não permite que
+      // outra proposta concorrente seja criada sobre uma cobertura ambígua.
+      if (!Number.isFinite(lastSignalMs) || completionTimes.some(value => !Number.isFinite(value))) {
+        return { ...deficiency, status: 'indeterminate' };
+      }
+      const lastCompletionMs = Math.max(...completionTimes);
+      if (lastSignalMs > lastCompletionMs) {
         return { ...deficiency, status: 'reopened' };
       }
       return { ...deficiency, status: 'resolved' };

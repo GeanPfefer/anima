@@ -248,6 +248,7 @@ describe('Self-Improvement V0 — materialização governada (para antes da apro
   test('deficiência covered/resolved não é candidata a proposta', () => {
     expect(selectSelfDeficiencyToPropose([deficiency({ status: 'covered' })], new Set())).toBeNull();
     expect(selectSelfDeficiencyToPropose([deficiency({ status: 'resolved' })], new Set())).toBeNull();
+    expect(selectSelfDeficiencyToPropose([deficiency({ status: 'indeterminate' })], new Set())).toBeNull();
     expect(selectSelfDeficiencyToPropose([deficiency({ status: 'reopened' })], new Set())).not.toBeNull();
   });
 

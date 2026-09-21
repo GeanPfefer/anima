@@ -287,6 +287,25 @@ describe('Self-Deficiency V0 — ciclo de vida (dedup vs trabalho)', () => {
     expect(selfDeficienciesAwaitingProposal(resolved)).toHaveLength(1);
   });
 
+  test('completed sem âncora temporal verificável falha fechado como indeterminate', () => {
+    const detected = detectSelfDeficiencies({ events });
+    const resolved = resolveSelfDeficiencyLifecycle(detected, [
+      { deficiencyId, workItemId: 'wi-fix', state: 'completed', updatedAt: 'timestamp-invalido' },
+    ]);
+    expect(resolved[0]?.status).toBe('indeterminate');
+    expect(selfDeficienciesAwaitingProposal(resolved)).toEqual([]);
+  });
+
+  test('uma cobertura completed inválida impede inferência mesmo ao lado de outra válida', () => {
+    const detected = detectSelfDeficiencies({ events });
+    const resolved = resolveSelfDeficiencyLifecycle(detected, [
+      { deficiencyId, workItemId: 'wi-fix-1', state: 'completed', updatedAt: '2026-09-20T10:00:00Z' },
+      { deficiencyId, workItemId: 'wi-fix-2', state: 'completed', updatedAt: '' },
+    ]);
+    expect(resolved[0]?.status).toBe('indeterminate');
+    expect(selfDeficienciesAwaitingProposal(resolved)).toEqual([]);
+  });
+
   test('8. work ATIVO equivalente impede nova proposta (covered)', () => {
     const detected = detectSelfDeficiencies({ events });
     for (const activeState of ['proposed', 'approved', 'in_progress', 'review'] as const) {

@@ -78,6 +78,16 @@ describe('readSelfDeficiencies', () => {
     expect(result.deficiencies[0]?.status).toBe('covered');
   });
 
+  test('completed com updated_at inválido não fabrica resolução', async () => {
+    const items: ItemRow[] = [
+      { id: 'wi-fix', state: 'completed', updated_at: 'timestamp-invalido', intent: provenanceIntent(DEFICIENCY_ID) as ItemRow['intent'] },
+    ];
+    const result = await readSelfDeficiencies(fakeClient({ events: twoFailures, items }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.deficiencies[0]?.status).toBe('indeterminate');
+  });
+
   test('falha de leitura do histórico fecha com a razão canônica', async () => {
     const result = await readSelfDeficiencies(fakeClient({ failEventsRead: true }));
     expect(result).toEqual({ ok: false, reason: 'event_history_read_failed' });
