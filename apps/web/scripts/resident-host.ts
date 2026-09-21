@@ -156,13 +156,22 @@ async function main(): Promise<void> {
     }
   };
 
-  // OPCIONAL: quando a fila operacional esvazia, materializar UM candidato do backlog
-  // CANÔNICO em `proposed` e, causalmente, avaliar/persistir a autorização autônoma estreita.
-  // A execução continua exclusivamente no próximo host-turn/Supervisor existente. Gated por
-  // `ANIMA_RESIDENT_MATERIALIZE_DOCUMENT` (docs/….md sob a raiz). Composição in-process
-  // (loader ativo); sob a identidade do usuário (Bearer/RLS), sem service_role.
+  // OPCIONAL: quando a fila operacional esvazia, materializar UM candidato em `proposed`.
+  // Duas fontes componíveis, em ORDEM (a primeira que materializar vence):
+  //   1. backlog CANÔNICO escrito por humano — gated por `ANIMA_RESIDENT_MATERIALIZE_DOCUMENT`
+  //      (docs/….md sob a raiz). Impacto `low` ⇒ candidato a autorização autônoma estreita.
+  //   2. SELF-IMPROVEMENT (deficiência própria observada → proposta de melhoria) — gated por
+  //      `ANIMA_RESIDENT_MATERIALIZE_SELF_IMPROVEMENT`. Impacto SEMPRE `structural` ⇒ fronteira
+  //      humana (NUNCA auto-aprova). Fecha o elo autônomo do Self-Development Loop V0.
+  // A execução continua exclusivamente no próximo host-turn/Supervisor existente. Composição
+  // in-process; sob a identidade do usuário (Bearer/RLS), sem service_role. Ambas ausentes ⇒
+  // comportamento inalterado.
   const materializeDocument = process.env.ANIMA_RESIDENT_MATERIALIZE_DOCUMENT ?? null;
-  let materializeWhenIdle: ((identity: ResidentIdentity, signal: AbortSignal) => Promise<MaterializationAttempt>) | undefined;
+  const selfImprovementEnabled = /^(1|true|on|yes)$/i.test(
+    process.env.ANIMA_RESIDENT_MATERIALIZE_SELF_IMPROVEMENT ?? '',
+  );
+  const idleMaterializers: Array<(identity: ResidentIdentity) => Promise<MaterializationAttempt>> = [];
+
   if (materializeDocument && /^docs\/[A-Za-z0-9_./-]+\.md$/.test(materializeDocument) && !materializeDocument.includes('..')) {
     const { readFile } = await import('node:fs/promises');
     const { resolve } = await import('node:path');
@@ -174,7 +183,7 @@ async function main(): Promise<void> {
     const { autoApproveAutonomousWork } = await import('../lib/work-orchestration/auto-approval.ts');
     const { readResourceAdmission } = await import('../lib/work-orchestration/resource-governor.ts');
     log('materialize-source', { document: materializeDocument });
-    materializeWhenIdle = async (identity) => {
+    idleMaterializers.push(async (identity) => {
       try {
         const markdown = await readFile(resolve(projectRoot(), materializeDocument), 'utf8');
         const allCandidates = parseCanonicalBacklog({ document: materializeDocument, markdown });
@@ -199,7 +208,32 @@ async function main(): Promise<void> {
       } catch (error) {
         return { materialized: false, detail: error instanceof Error ? error.message : 'materialize_failed' };
       }
-    };
+    });
+  }
+
+  if (selfImprovementEnabled) {
+    const { readCanonicalWorkHistory } = await import('../lib/evolution/capability-assessment-read.ts');
+    const { createBearerClient } = await import('../lib/supabase/bearer.ts');
+    const { buildSelfImprovementMaterializerDeps } = await import('../lib/work-orchestration/self-improvement-materializer-deps.ts');
+    const { materializeSelfImprovementWhenIdle } = await import('../lib/work-orchestration/self-improvement-materialize.ts');
+    log('materialize-source', { selfImprovement: true });
+    idleMaterializers.push(async (identity) => {
+      const client = createBearerClient(identity.accessToken);
+      return materializeSelfImprovementWhenIdle({
+        loadEvents: async () => {
+          const history = await readCanonicalWorkHistory(client);
+          return history.ok ? { ok: true, events: history.events } : { ok: false, reason: history.reason };
+        },
+        materializerDeps: buildSelfImprovementMaterializerDeps(client, identity.userId),
+      });
+    });
+  }
+
+  let materializeWhenIdle: ((identity: ResidentIdentity, signal: AbortSignal) => Promise<MaterializationAttempt>) | undefined;
+  if (idleMaterializers.length > 0) {
+    const { runMaterializersInOrder } = await import('../lib/work-orchestration/self-improvement-materialize.ts');
+    materializeWhenIdle = async (identity) =>
+      runMaterializersInOrder(idleMaterializers.map((materializer) => () => materializer(identity)));
   }
 
   // Pré-gate do Governor no transporte HTTP: `permit` (autoridade real por-ciclo na rota).
