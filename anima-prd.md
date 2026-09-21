@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Hardening do Continuous Self-Dev em 2026-09-21: o lifecycle de deficiência
+> não fabrica mais `resolved` quando a ordem temporal de uma cobertura completed
+> é inválida (`indeterminate`, fail-closed); a leitura de cobertura pagina todo
+> o conjunto de work_items e falha fechada em qualquer página; o materializador
+> reprojeta o lifecycle sobre a fotografia fresca antes de escrever, fechando o
+> TOCTOU que permitia proposta duplicada após completion recente.
+> [Registro](docs/registros/2026-09-21-hardening-lifecycle-self-development.md).
 > Precedência semântica do Chat Dev corrigida em 2026-09-19: uma classificação
 > pura distingue nova solicitação, referência/comando de item existente, mandato
 > autônomo, consulta de projeto e conversa antes dos handlers especializados.

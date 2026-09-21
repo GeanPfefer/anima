@@ -93,10 +93,18 @@ O ciclo de vida (`resolveSelfDeficiencyLifecycle`) cruza a deficiência com os
 - work `completed` cobrindo-a, sem sinal posterior → `resolved`;
 - work `completed`, mas o sinal recorreu depois → `reopened` (recorrência
   pós-resolução, semântica explícita);
+- cobertura `completed` sem ordem temporal verificável → `indeterminate`
+  (fail-closed: não afirma resolução/recorrência e não abre proposta concorrente);
 - cobertura só terminal-negativa (failed/rejected/cancelled) → segue `open`.
 
 Só deficiências `open`/`reopened` viram proposta — a garantia de que **work ativo
 equivalente impede proposta duplicada**.
+
+A correlação percorre todas as páginas de `work_items`, em ordem estável, e
+qualquer falha intermediária invalida a projeção inteira. No ponto de escrita, o
+materializador relê essa cobertura e reprojeta o lifecycle antes de selecionar o
+candidato: um `completed` surgido entre leitura e materialização resolve o
+candidato obsoleto; somente sinal comprovadamente posterior permanece `reopened`.
 
 ## Formulação da melhoria (determinística, sem LLM)
 

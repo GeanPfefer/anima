@@ -1,5 +1,12 @@
 # Plano 002 — Modo Autônomo V0
 
+> Atualização operacional (2026-09-21): o recorte de Continuous Self-Dev foi
+> endurecido contra três formas de duplicação/sucesso fabricado: completion sem
+> timestamp verificável agora fica `indeterminate`; a cobertura é lida com
+> paginação total e falha fechada; e o materializador recalcula o lifecycle com
+> a fotografia fresca imediatamente antes da escrita. Registro:
+> [`2026-09-21-hardening-lifecycle-self-development.md`](../registros/2026-09-21-hardening-lifecycle-self-development.md).
+
 > Estado operacional (2026-09-14): Coding Harness V3 ganhou wiring estruturado dos
 > `validation_criteria` e política validate-before-submit após o benchmark
 > `3a367223`: gate focal verde + `git diff` pós-edit são exigidos quando há comandos
