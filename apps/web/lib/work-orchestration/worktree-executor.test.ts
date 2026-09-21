@@ -9,6 +9,7 @@ import {
   decideRecovery,
   validateWorkExecutorTranscript,
   verifyWorkResult,
+  type ChangeAuthorizationFactsV1,
   type ObservedCoderInput,
   type ObservedGateInput,
   type WorkCapability,
@@ -195,6 +196,52 @@ describe('WorktreeExecutorAdapter', () => {
         changedFilesWithinTargetScope: [], changedFilesOutsideTargetScope: ['src/added.ts'],
         scopeVerification: { status: 'verified', verifiedTargetPaths: ['retry-gate.js'] },
       },
+    });
+  });
+
+  test('cadeia completa: baseline discriminating + gate_assertion + change-auth verificada ⇒ readiness eligible', async () => {
+    // PROVA END-TO-END do pipeline real de evidência: a saída OBSERVADA do executor
+    // (baseline diferencial + fatos de autorização de mudança), quando construída na
+    // MESMA evidência que o host persiste, produz readiness `eligible`. É a primeira
+    // prova de que uma execução real PODE alcançar o grau `eligible` — o que a
+    // Readiness Calibration mostrou nunca ter acontecido no histórico (dados antigos,
+    // não defeito do pipeline). Continua shadow/advisory: nada é executado ou aceito.
+    const observed: ObservedGateInput[] = [];
+    let changeAuth: ChangeAuthorizationFactsV1 | undefined;
+    const req = request({
+      includedScope: ['src/added.ts'],
+      // O gate exercita `retry-gate.js` (target que EXISTE no base e NÃO é alterado);
+      // a correção vive em `src/added.ts` (fora do gate target, mas dentro do escopo
+      // AUTORIZADO). base FALHA → resultado PASSA = flip discriminating limpo.
+      validationCriteria: [{ label: 'retry', command: 'npm test -- retry-gate.js', claimKind: 'gate_assertion', targetPaths: ['retry-gate.js'] }],
+    });
+    const signals = await collect(new WorktreeExecutorAdapter({
+      targets: ctx.resolver,
+      backend: new ScriptedCoderBackend([{ path: 'src/added.ts', content: 'export const fixed = "fixed";\n' }]),
+      onGateObserved: outcome => observed.push(outcome),
+      onChangeAuthorizationObserved: facts => { changeAuth = facts; },
+    }), req, new AbortController().signal);
+
+    expect(signals.at(-1)?.kind).toBe('result');
+    expect(observed).toHaveLength(1);
+    expect(changeAuth).toBeDefined();
+    expect(changeAuth!.declaredScope).toEqual(['src/added.ts']);
+    expect(changeAuth!.changedFiles).toContain('src/added.ts');
+
+    // Constrói a MESMA evidência host-observada com os fatos REAIS observados.
+    const built = buildHostObservedGateEvidence({
+      workItemId: 'w1', attemptId: 'a1', approvedProposalVersion: 2,
+      gates: observed, changeAuthorization: changeAuth!, observedAt: new Date().toISOString(),
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value.changeAuthorization).toMatchObject({ status: 'verified', unauthorizedChangedFiles: [] });
+    expect(built.value.shadowReadinessDecisions).toHaveLength(1);
+    // A cadeia completa converge para o único caminho `eligible` da readiness.
+    expect(built.value.shadowReadinessDecisions[0]).toMatchObject({
+      disposition: 'eligible',
+      reasonCode: 'discriminating_gate_candidate',
+      claimKind: 'gate_assertion',
     });
   });
 
