@@ -2,6 +2,9 @@ import type {
   EnforcementReadinessDecisionV0,
   EnforcementReadinessDisposition,
 } from './enforcement-readiness-policy';
+import { parseHostObservedGateEvidence } from './host-observed-gate-evidence';
+import type { WorkEvent } from './types';
+import type { Json } from '@anima/types';
 
 // ============================================================
 // Readiness Calibration V0 — SHADOW/ADVISORY ONLY. O consumidor que faltava da cadeia
@@ -127,6 +130,113 @@ const EMPTY_BY_OUTCOME = (): Record<ReadinessCalibrationOutcome, number> => ({
   conservative_overruled: 0,
   no_signal: 0,
 });
+
+// ---------- Correlação sobre o log append-only (pura) ----------
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+const eventData = (event: WorkEvent): Record<string, unknown> | null =>
+  asRecord(asRecord(event.payload as unknown)?.data);
+
+const readString = (record: Record<string, unknown> | null, key: string): string | null => {
+  const value = record?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+};
+
+const readNumber = (record: Record<string, unknown> | null, key: string): number | null => {
+  const value = record?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+};
+
+/** Ordem terminal determinística: instante, depois id (desempate estável). */
+const isLater = (candidate: WorkEvent, incumbent: WorkEvent): boolean => {
+  const a = candidate.occurredAt.getTime();
+  const b = incumbent.occurredAt.getTime();
+  if (a !== b) return a > b;
+  return candidate.id > incumbent.id;
+};
+
+/**
+ * Correlaciona, SOBRE O LOG, a readiness shadow de cada tentativa com a decisão HUMANA
+ * de revisão que a seguiu — pura e determinística. A cadeia de correlação é a MESMA já
+ * usada no codebase (capability-proof): a decisão referencia o `result_submitted` por
+ * `accepted_result_event_id`/`reviewed_result_event_id`; esse resultado carrega o
+ * `attempt_id`; a evidência de gate host-observada (recomputada pelo parser — nunca
+ * confia no JSON) carrega as `shadowReadinessDecisions` da MESMA tentativa.
+ *
+ * Emite NO MÁXIMO um registro por tentativa (a decisão terminal mais recente vence).
+ * Tentativa revisada sem evidência de readiness ⇒ `no_readiness`/`no_signal` (registra
+ * a lacuna de cobertura honestamente, sem fabricar sinal). NÃO altera nada.
+ */
+export function correlateReadinessCalibration(
+  events: readonly WorkEvent[],
+): readonly ReadinessCalibrationRecordV0[] {
+  // 1. result_submitted: eventId → { attemptId, version, workItemId }.
+  const resultById = new Map<string, { attemptId: string; version: number; workItemId: string }>();
+  // 2. readiness por tentativa (a observação de gate mais recente da tentativa vence).
+  const readinessByAttempt = new Map<string, { decisions: readonly EnforcementReadinessDecisionV0[]; event: WorkEvent }>();
+
+  for (const event of events) {
+    if (event.type === 'result_submitted') {
+      const data = eventData(event);
+      const attemptId = readString(data, 'attempt_id');
+      const version = readNumber(data, 'approved_proposal_version');
+      if (attemptId && version !== null) {
+        resultById.set(event.id, { attemptId, version, workItemId: event.workItemId });
+      }
+    } else if (event.type === 'host_observed_gate_evidence_recorded') {
+      const evidence = parseHostObservedGateEvidence(eventData(event)?.evidence as Json | undefined);
+      if (!evidence) continue;
+      const existing = readinessByAttempt.get(evidence.attemptId);
+      if (!existing || isLater(event, existing.event)) {
+        readinessByAttempt.set(evidence.attemptId, { decisions: evidence.shadowReadinessDecisions, event });
+      }
+    }
+  }
+
+  // 3. Decisão terminal por tentativa (a mais recente vence).
+  const decisionByAttempt = new Map<string, { review: ObservedReviewOutcome; event: WorkEvent; result: { attemptId: string; version: number; workItemId: string } }>();
+  for (const event of events) {
+    let review: ObservedReviewOutcome | null = null;
+    let resultRefKey: string | null = null;
+    if (event.type === 'result_accepted') {
+      review = 'accepted';
+      resultRefKey = 'accepted_result_event_id';
+    } else if (event.type === 'changes_requested') {
+      review = 'changes_requested';
+      resultRefKey = 'reviewed_result_event_id';
+    }
+    if (review === null || resultRefKey === null) continue;
+    const resultEventId = readString(eventData(event), resultRefKey);
+    if (!resultEventId) continue;
+    const result = resultById.get(resultEventId);
+    if (!result) continue;
+    const existing = decisionByAttempt.get(result.attemptId);
+    if (!existing || isLater(event, existing.event)) {
+      decisionByAttempt.set(result.attemptId, { review, event, result });
+    }
+  }
+
+  const records: ReadinessCalibrationRecordV0[] = [];
+  for (const [attemptId, { review, result }] of decisionByAttempt) {
+    const readiness = readinessByAttempt.get(attemptId);
+    const rollup = readiness ? rollupAttemptReadiness(readiness.decisions) : 'no_readiness';
+    records.push({
+      workItemId: result.workItemId,
+      attemptId,
+      approvedProposalVersion: result.version,
+      rollup,
+      review,
+      outcome: classifyReadinessCalibration(rollup, review),
+    });
+  }
+  // Ordem estável: item, versão, tentativa.
+  return records.sort((a, b) =>
+    a.workItemId.localeCompare(b.workItemId)
+    || a.approvedProposalVersion - b.approvedProposalVersion
+    || a.attemptId.localeCompare(b.attemptId));
+}
 
 /**
  * Agrega registros calibrados em contagens e na precisão de `eligible` — pura. Sem
