@@ -49,12 +49,13 @@ function coverage(
     | 'rejected'
     | 'cancelled',
   deficiencyId = 'repeated_failure|gate_failed',
+  updatedAt = '2026-09-12T10:00:00.000Z',
 ) {
   return {
     deficiencyId,
     workItemId: `wi-${state}`,
     state,
-    updatedAt: '2026-09-12T10:00:00.000Z',
+    updatedAt,
   } as const;
 }
 
@@ -209,7 +210,7 @@ describe('Self-Improvement V0 — materialização governada (para antes da apro
   });
 
   test('completed não bloqueia deficiency reopened após recorrência', async () => {
-    const deps = fakeDeps([coverage('completed')]);
+    const deps = fakeDeps([coverage('completed', 'repeated_failure|gate_failed', '2026-09-10T10:00:00.000Z')]);
 
     const result = await materializeSelfImprovementProposal(
       { candidates: [deficiency({ status: 'reopened' })] },
@@ -226,6 +227,28 @@ describe('Self-Improvement V0 — materialização governada (para antes da apro
       'persistSourceMessage',
       'createProposal',
     ]);
+  });
+
+  test('fotografia fresca de completion resolve candidato obsoleto antes de escrever', async () => {
+    const deps = fakeDeps([coverage('completed')]);
+    const result = await materializeSelfImprovementProposal(
+      { candidates: [deficiency({ status: 'open' })] },
+      deps,
+    );
+
+    expect(result).toEqual({ ok: false, reason: 'no_candidate' });
+    expect(deps.audit).toEqual(['read']);
+  });
+
+  test('cobertura fresca temporalmente inválida bloqueia materialização', async () => {
+    const deps = fakeDeps([coverage('completed', 'repeated_failure|gate_failed', 'invalido')]);
+    const result = await materializeSelfImprovementProposal(
+      { candidates: [deficiency({ status: 'open' })] },
+      deps,
+    );
+
+    expect(result).toEqual({ ok: false, reason: 'no_candidate' });
+    expect(deps.audit).toEqual(['read']);
   });
 
   test('blockingSelfDeficiencyIds contém somente estados ativos/aguardando', () => {

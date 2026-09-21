@@ -21,6 +21,7 @@
 // ============================================================
 
 import { selfDeficienciesAwaitingProposal, type SelfDeficiencyKind, isSelfDeficiencyBlockingWorkState,
+  resolveSelfDeficiencyLifecycle,
   type SelfDeficiencyCoverage,
   type SelfDeficiencyV0, type SelfDeficiencyEvidenceRef } from './self-deficiency';
 import type {
@@ -343,8 +344,12 @@ export async function materializeSelfImprovementProposal(
     return { ok: false, reason: `correlation_read_failed:${errText(error)}` };
   }
 
+  // A fotografia de cobertura pode ter mudado desde a projeção que produziu os
+  // candidatos. Recalcular o lifecycle aqui fecha o TOCTOU: completion recente
+  // resolve o candidato obsoleto; completion anterior ao sinal preserva reopened.
+  const freshCandidates = resolveSelfDeficiencyLifecycle(input.candidates, coverage);
   const blocking = blockingSelfDeficiencyIds(coverage);
-  const deficiency = selectSelfDeficiencyToPropose(input.candidates, blocking);
+  const deficiency = selectSelfDeficiencyToPropose(freshCandidates, blocking);
   if (!deficiency) return { ok: false, reason: 'no_candidate' };
 
   const proposal = formulateImprovementProposal(deficiency);
