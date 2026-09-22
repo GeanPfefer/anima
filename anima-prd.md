@@ -1851,3 +1851,16 @@ Authorization Scope`, `Gate Evidence Scope != Change Authorization Scope`,
 `Observed Authorized Change != Planner Assertion`. Barreira restante antes de
 Enforcement V1: nenhuma dependência de dados nova — a próxima fatia conecta decisão a
 comportamento, com rollout/rollback/gates humanos.
+
+## Estado operacional — acompanhamento do terminal autônomo no card conversacional (2026-09-22)
+
+A investigação da attempt local `8748b9c4` comprovou que o executor não estava
+stallado: worktree e branch foram materializados, o coder Ollama executou o protocolo
+iterativo e a tentativa persistiu `execution_failed`, liberou a claim e gravou o
+transcript host-observed em 58 s. O card anexado à mensagem, porém, não recebia o
+opt-in de polling já usado pelo painel de projeto; por isso continuava mostrando a
+projeção inicial `in_progress` indefinidamente. O `ChatClient` agora acompanha somente
+o item explicitamente rastreado ou uma projeção autônoma realmente `running`, relê a
+fonte canônica sem estado otimista e para no terminal. A attempt real permaneceu
+intocada e nenhuma nova tentativa foi criada. Registro:
+[sessão de 2026-09-22](docs/registros/2026-09-22-stall-visual-pos-coder-8748b9c4.md).

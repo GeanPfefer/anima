@@ -2330,6 +2330,23 @@ fatia (Change Authorization Verification), antes de Enforcement V1. A readiness 
 anexada como `shadowReadinessDecisions` (recomputada pelo parser) e não é consumida
 operacionalmente.
 
+## Continuação — card conversacional acompanha o terminal persistido (2026-09-22)
+
+A prova real `8748b9c4` revelou que o polling canônico estava ligado somente no
+`ProjectWorkPanel`: os `WorkProposalCard` anexados às mensagens não recebiam
+`trackAutonomousProgress`. Depois da recarga inicial em `in_progress`, o cronômetro e
+os probes visuais continuavam locais, mas o card nunca relia o item, mesmo após o
+banco registrar terminal e liberar a claim. A execução real terminou fail-closed em
+58 s por `ollama_context_budget_exceeded`; o stall era da projeção conversacional.
+
+O `ChatClient` agora ativa o polling canônico apenas para o item explicitamente
+rastreado ou para uma projeção cuja execução autônoma esteja `running`. O polling
+continua `cache: no-store`, substitui a apresentação inteira pela reconstrução do
+servidor e encerra no terminal. Regressão de hidratação cobre `in_progress → failed`.
+Nenhuma attempt, retry, reconciliação, worktree histórica ou resultado funcional do
+Work Item real foi alterado. Ver
+[`2026-09-22-stall-visual-pos-coder-8748b9c4.md`](../registros/2026-09-22-stall-visual-pos-coder-8748b9c4.md).
+
 ## Continuação — Change Authorization Evidence V0 host-observed, shadow (2026-09-19)
 
 Fecha a barreira acima. `classifyChangeAuthorization` (core puro) torna o Change

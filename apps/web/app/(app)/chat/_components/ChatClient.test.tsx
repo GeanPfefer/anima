@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { WorkPresentationView } from './WorkProposalCard';
 import { ChatClient } from './ChatClient';
 
@@ -27,6 +27,33 @@ describe('hidratação conversacional',()=>{
     render(<ChatClient isFirstTime={false} userName="Ana"/>);
     expect(await screen.findByText(/Não foi possível reconstruir a conversa persistida/)).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeDisabled();
+  });
+
+  test('cartão autônomo hidratado acompanha o terminal persistido em vez de ficar congelado em in_progress',async()=>{
+    jest.useFakeTimers();
+    try {
+      const baseItem={id:'item-running',userId:'user',sourceMessageId:'u1',state:'in_progress',impactLevel:'low',capability:'programming',originalRequest:'pedido',intent:{execution_spec:{limits:{max_attempts:3,max_duration_minutes:30}}},proposal:{schemaVersion:1,data:{summary:'Execução observada',objective:'obj',includedScope:['src/a.ts'],excludedScope:[],expectedEffects:[],risks:[]}},proposalVersion:1,createdAt:'2026-09-22T00:25:00.000Z',updatedAt:'2026-09-22T00:25:48.000Z'} as const;
+      const running={item:baseItem,latestResult:null,acceptedResult:null,latestEventType:'execution_started',availableActions:[],pendingDecision:null,execution:{attemptId:'8748b9c4-37b4-4ec2-8208-d8deb95d1c54',status:'running',startedAt:'2026-09-22T00:25:48.000Z',executorId:'worktree-v1',providerRef:'worktree-host',modelRef:'qwen2.5-coder:14b',effort:'strong',limits:{maxAttempts:3,maxDurationMinutes:30},latestCheckpoint:null,pendingControl:null,appliedControl:null,budgetBlock:null,canRequestControl:true}} as unknown as WorkPresentationView;
+      const failed={...running,item:{...baseItem,state:'failed',updatedAt:'2026-09-22T00:26:46.000Z'},latestEventType:'execution_failed',execution:{...running.execution!,status:'failed',canRequestControl:false}} as unknown as WorkPresentationView;
+      (global.fetch as jest.Mock).mockImplementation((input:string)=>{
+        const url=String(input);
+        if(url==='/api/ai/history')return Promise.resolve({ok:true,json:async()=>[{id:'u1',role:'user',content:'pedido'}]});
+        if(url==='/api/work-orchestration/items/by-source/u1')return Promise.resolve({ok:true,json:async()=>({ok:true,value:[running]})});
+        if(url==='/api/work-orchestration/items/item-running')return Promise.resolve({ok:true,json:async()=>({ok:true,value:{presentation:failed}})});
+        if(url==='/api/work-orchestration/items')return Promise.resolve({ok:true,json:async()=>({ok:true,value:[]})});
+        if(url==='/api/work-orchestration/focus')return Promise.resolve({ok:true,json:async()=>({ok:true,value:null})});
+        if(url==='/api/ai/local-runtime-status')return Promise.resolve({ok:true,json:async()=>({ok:true,value:{models:[]}})});
+        return Promise.resolve({ok:true,json:async()=>({ok:true,value:null})});
+      });
+      render(<ChatClient isFirstTime={false} userName="Ana"/>);
+      expect(await screen.findByText('Execução observada')).toBeInTheDocument();
+      expect(screen.getByText('Em execução')).toBeInTheDocument();
+      await act(async()=>{await jest.advanceTimersByTimeAsync(5_000);});
+      expect(await screen.findByText('Falhou')).toBeInTheDocument();
+      expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/items/item-running',expect.objectContaining({cache:'no-store'}));
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 

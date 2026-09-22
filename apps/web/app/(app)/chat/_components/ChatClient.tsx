@@ -469,8 +469,8 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
                   : m.content
               }
             </div>
-            {m.role === 'user' && m.id && workItems[m.id]?.map(view => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={presentation => setWorkItems(previous => ({ ...previous, [m.id!]: replaceWorkPresentation(previous[m.id!]??[],presentation) }))} provider={provider} />)}
-            {m.role === 'user' && m.id && historyCards[m.id]?.length ? historyCards[m.id]!.map((view, index) => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={updated => setHistoryCards(previous => ({ ...previous, [m.id!]: previous[m.id!]!.map((existing, position) => position === index ? updated : existing) }))} provider={provider} />) : null}
+            {m.role === 'user' && m.id && workItems[m.id]?.map(view => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={presentation => setWorkItems(previous => ({ ...previous, [m.id!]: replaceWorkPresentation(previous[m.id!]??[],presentation) }))} trackAutonomousProgress={trackedAutonomousWorkItemId===view.item.id||view.execution?.status==='running'} provider={provider} />)}
+            {m.role === 'user' && m.id && historyCards[m.id]?.length ? historyCards[m.id]!.map((view, index) => <WorkProposalCard key={view.item.id} presentation={view} focused={focusedWorkItemId===view.item.id} onFocus={()=>focusWork(view.item.id)} onChange={updated => setHistoryCards(previous => ({ ...previous, [m.id!]: previous[m.id!]!.map((existing, position) => position === index ? updated : existing) }))} trackAutonomousProgress={trackedAutonomousWorkItemId===view.item.id||view.execution?.status==='running'} provider={provider} />) : null}
           </div>
         ))}
 
