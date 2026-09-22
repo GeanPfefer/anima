@@ -856,11 +856,21 @@ describe('WorktreeExecutorAdapter — retry interno dirigido por gate do host', 
 
         receivedFeedback.push(feedback);
 
-        if (edits === 2) {
-          expect(ws.rootPath).toBeDefined();
-          const nodeModulesVisible = await stat(join(ws.rootPath!, 'node_modules'))
-            .then(() => true, () => false);
-          expect(nodeModulesVisible).toBe(false);
+        expect(ws.rootPath).toBeDefined();
+        const nodeModulesVisible = await stat(join(ws.rootPath!, 'node_modules'))
+          .then(() => true, () => false);
+        expect(nodeModulesVisible).toBe(true);
+
+        // Reproduz o ponto estrutural da attempt real: o coder roda o gate npm
+        // dentro de backend.edit(), antes dos gates finais do host. O comando
+        // precisa enxergar a mesma preparação da worktree em todas as voltas.
+        if (edits === 1) {
+          expect(ws.exec).toBeDefined();
+          const selfValidation = await ws.exec!(
+            { program: 'npm', args: ['test'], timeoutMs: 10_000 },
+            new AbortController().signal,
+          );
+          expect(selfValidation.exitCode).toBe(0);
         }
 
         await ws.writeFile(

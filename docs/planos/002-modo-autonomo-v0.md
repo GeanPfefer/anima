@@ -2347,6 +2347,32 @@ Nenhuma attempt, retry, reconciliação, worktree histórica ou resultado funcio
 Work Item real foi alterado. Ver
 [`2026-09-22-stall-visual-pos-coder-8748b9c4.md`](../registros/2026-09-22-stall-visual-pos-coder-8748b9c4.md).
 
+## Continuação — preparação pré-coder e compactação de recuperação (2026-09-22)
+
+A attempt `8748b9c4` revelou duas lacunas acopladas. Primeiro, o caminho vivo já
+configurava `linkNodeModules: true`, mas `WorktreeExecutorAdapter` só ligava as
+junctions depois de `backend.edit()`. O Harness V3 roda o gate focal durante
+`backend.edit()`, portanto o coder não encontrava `ts-jest`, enquanto o gate final do
+host encontraria. Não era dependência ausente nem gate inválido: era ordem divergente
+de preparação.
+
+O executor agora religa `node_modules` e executa `prepareValidation` antes de cada
+turno do coder, inclusive repair, e repete a preparação antes dos gates autoritativos
+para evitar artefatos gerados obsoletos. A ponte é removida antes de restauração e
+dispose; não há install, rede ou escrita autorizada fora do Work Item. Regressão exige
+que a self-validation `npm test` rode dentro do backend com a ponte visível em todas
+as voltas. Prova sintética com o repositório real: o comando congelado
+`npm test --workspace=packages/core -- src/levels.test.ts` passou 10/10 numa worktree
+destacada e removida em seguida.
+
+Segundo, as tentativas de recuperação eram saudáveis, mas cada `renderExec` acumulava
+até 8.000 caracteres por stream em `servedBlocks`, reemitidos em todo prompt posterior.
+O protocolo agora compacta somente corpos de EXEC antigos, preserva o comando/exit
+factual e mantém integralmente a observação corrente necessária para reparar. Leituras
+e âncoras não são compactadas; stdout/stderr auditáveis permanecem no transcript.
+Nenhum limite foi aumentado. Detalhes e gates no
+[`2026-09-22-worktree-validation-context-compaction.md`](../registros/2026-09-22-worktree-validation-context-compaction.md).
+
 ## Continuação — Change Authorization Evidence V0 host-observed, shadow (2026-09-19)
 
 Fecha a barreira acima. `classifyChangeAuthorization` (core puro) torna o Change

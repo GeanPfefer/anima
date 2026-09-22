@@ -652,6 +652,12 @@ export class OllamaCoderBackend implements CoderBackend {
           const r = misdirect('comando recusado pela política'); if (r) return r; continue;
         }
         const result = await workspace.exec({ program: decision.program, args: decision.args, timeoutMs: decision.timeoutMs }, signal);
+        // O transcript host-observed preserva TODAS as saídas completas. Para o
+        // próximo prompt, porém, somente a observação EXEC mais recente precisa do
+        // corpo integral; resultados antigos ficam como cabeçalhos factuais. Isso
+        // impede crescimento linear após tentativas de recuperação sem apagar a
+        // evidência nem esconder o erro corrente que o modelo precisa corrigir.
+        compactPreviousExecObservations(servedBlocks);
         servedBlocks.push(renderExec(decision.program, decision.args, result, commandPolicy.maxOutputChars));
         const key = commandKey(decision.program, decision.args);
         const outcome: 'exit0' | 'exit_nonzero' | 'timeout' = result.timedOut ? 'timeout' : result.exitCode === 0 ? 'exit0' : 'exit_nonzero';
@@ -947,6 +953,18 @@ const renderExec = (
     err.text.trim() ? `stderr:\n${err.text}` : 'stderr: (vazio)',
     result.exitCode === 0 ? 'Observação: comando OK.' : 'Observação: exitCode≠0 é recuperável — leia o erro, edite e rode de novo, ou {"action":"submit"} se apropriado.',
   ].join('\n');
+};
+
+/** Compacta somente corpos antigos de EXEC. Leituras/âncoras permanecem integrais
+ * porque são autoridade para edits; o transcript separado mantém stdout/stderr de
+ * todos os comandos para auditoria. Mutação local evita duplicar o array do laço. */
+const compactPreviousExecObservations = (blocks: string[]): void => {
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index]!;
+    if (!block.startsWith('EXEC ') || !block.includes('\n')) continue;
+    const header = block.slice(0, block.indexOf('\n'));
+    blocks[index] = `${header}\nDetalhes anteriores compactados; stdout/stderr completos permanecem no transcript host-observed.`;
+  }
 };
 
 const renderServed = (

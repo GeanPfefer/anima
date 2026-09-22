@@ -717,7 +717,7 @@ function execWorkspace(initial: Record<string, string>): CoderWorkspace & { file
       if (program === 'npm' && args[0] === 'run') return { exitCode: 0, stdout: 'typecheck ok', stderr: '', timedOut: false, durationMs: 5 };
       if (program === 'git' && args[0] === 'status') return { exitCode: 0, stdout: ' M src/target.ts', stderr: '', timedOut: false, durationMs: 2 };
       if (program === 'git' && args[0] === 'diff') return { exitCode: 0, stdout: '--- a/src/target.ts\n+++ b/src/target.ts\n+FIXED', stderr: '', timedOut: false, durationMs: 2 };
-      if (program === 'node' && args[0] === 'huge') return { exitCode: 0, stdout: 'x'.repeat(50000), stderr: '', timedOut: false, durationMs: 2 };
+      if (program === 'node' && args[0]?.startsWith('huge')) return { exitCode: 0, stdout: `${args[0]}:${'x'.repeat(50000)}`, stderr: '', timedOut: false, durationMs: 2 };
       if (program === 'node' && args[0] === 'slow') return { exitCode: -1, stdout: '', stderr: 'process killed by timeout', timedOut: true, durationMs: 999999 };
       return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false, durationMs: 1 };
     },
@@ -802,6 +802,23 @@ describe('OllamaCoderBackend — EXEC/TEST/GIT governados + loop iterativo (V3, 
     const result = await backend(fetchImpl).edit(req(), ws, new AbortController().signal);
     expect(result.touchedResources).toEqual(['src/target.ts']);
     expect(sentBodies[1]!).toContain('saída truncada');
+  });
+
+  test('recuperações compactam corpos de EXEC antigos e preservam integralmente só a observação corrente', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const { fetchImpl, sentBodies } = scriptedFetch([
+      execAction('node', ['huge-old']),
+      execAction('node', ['huge-current']),
+      fixEdit,
+      submitAction(),
+    ]);
+    const result = await backend(fetchImpl).edit(req(), ws, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['src/target.ts']);
+    expect(sentBodies[1]!).toContain('huge-old:');
+    expect(sentBodies[2]!).toContain('EXEC node huge-old');
+    expect(sentBodies[2]!).toContain('Detalhes anteriores compactados');
+    expect(sentBodies[2]!).not.toContain(`huge-old:${'x'.repeat(1_000)}`);
+    expect(sentBodies[2]!).toContain(`huge-current:${'x'.repeat(1_000)}`);
   });
 
   test('write fora do escopo de escrita é recusado como observação (arquivo intacto), a sessão continua e conclui', async () => {

@@ -378,6 +378,35 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       }
 
       while (true) {
+        // O Harness V3 pode executar os MESMOS comandos de validação durante
+        // backend.edit() (edit → test → diff → submit). Portanto o ambiente do
+        // coder precisa estar preparado antes da chamada, não apenas depois dela
+        // para os gates finais do host. A preparação continua repetida antes dos
+        // gates autoritativos: edits podem invalidar artefatos gerados.
+        if (this.options.linkNodeModules) {
+          await worktree.linkNodeModules(signal);
+        }
+        if (this.options.prepareValidation) {
+          try {
+            await this.options.prepareValidation({
+              rootPath: worktree.root,
+              validationCriteria: request.validationCriteria,
+              signal,
+            });
+          } catch (error) {
+            yield attach(++seq, {
+              kind: 'error',
+              code: 'execution_failed',
+              message: `Falha ao preparar o ambiente de validacao: ${clip(
+                error instanceof Error ? error.message : String(error),
+              )}.`,
+              retryable: false,
+              handoffReference,
+            });
+            return;
+          }
+        }
+
         // Relogio de primeira parte do HOST por chamada ao coder. Um retry interno
         // continua sendo uma nova observacao de execucao do backend, embora permaneça
         // dentro do mesmo attemptId/worktree.
@@ -774,8 +803,9 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           break;
         }
 
-        // O gate pode ter ligado o node_modules REAL por junction/symlink.
-        // Antes de devolver controle ao coder, essa ponte precisa desaparecer.
+        // Remove a ponte antes de restaurar/realimentar. A próxima volta a recria
+        // explicitamente ANTES do coder; assim nenhum clean/reset pode atravessar
+        // a junction e a self-validation continua vendo o toolchain compartilhado.
         await worktree.unlinkNodeModules();
 
         const initialDiff = await worktree.diff(signal);

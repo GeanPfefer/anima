@@ -1864,3 +1864,22 @@ o item explicitamente rastreado ou uma projeção autônoma realmente `running`,
 fonte canônica sem estado otimista e para no terminal. A attempt real permaneceu
 intocada e nenhuma nova tentativa foi criada. Registro:
 [sessão de 2026-09-22](docs/registros/2026-09-22-stall-visual-pos-coder-8748b9c4.md).
+
+## Estado operacional — paridade de validação coder/host e compactação EXEC (2026-09-22)
+
+O executor de worktree já possuía a ponte segura de `node_modules` do repositório
+autorizado, mas a criava somente depois de `backend.edit()`, para os gates finais.
+Como o Harness V3 executa self-validation dentro do coder, o mesmo comando via duas
+worktrees logicamente diferentes: sem toolchain durante o turno agêntico e com
+toolchain no veredito host-side. A preparação canônica agora ocorre antes de cada
+turno do coder e novamente antes dos gates finais; junctions continuam removidas
+antes de restore/clean/dispose. Uma worktree sintética executou o gate real de
+`packages/core` com 10/10 testes verdes, sem instalação.
+
+O overflow de contexto de `8748b9c4` foi consequência de recuperação legítima sobre
+o ambiente quebrado, agravada por acumulação evitável: cada observação EXEC mantinha
+stdout/stderr no prompt de todas as rodadas seguintes. O protocolo agora conserva no
+prompt somente o corpo da observação EXEC mais recente e reduz as anteriores a
+cabeçalhos factuais; o transcript host-observed continua preservando as saídas para
+auditoria. Não houve aumento de `num_ctx`, enfraquecimento de gate ou nova attempt.
+Registro: [hardening de validação e contexto](docs/registros/2026-09-22-worktree-validation-context-compaction.md).
