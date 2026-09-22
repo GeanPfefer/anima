@@ -47,6 +47,12 @@ export function getXPToNextLevel(totalXP: number): number {
 }
 
 export function getEraForLevel(level: number): Era {
+  if (level < MIN_LEVEL) {
+    return ERAS[0]!;
+  }
+  if (level > MAX_LEVEL) {
+    return ERAS[ERAS.length - 1]!;
+  }
   return ERAS.find((e) => level >= e.minLevel && level <= e.maxLevel) ?? ERAS[0]!;
 }
 
