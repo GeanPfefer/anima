@@ -54,7 +54,69 @@ export const OPENAI_CODER_CONTEXT_CONSERVATIVE_CAP_TOKENS = 64_000;
 export const OPENAI_CODER_OUTPUT_RESERVE_TOKENS = 16_384;
 export const OPENAI_CODER_NUM_PREDICT = 16_384;
 
-/** Configuração de contexto inválida (env/metadata): fail-closed na construção. */
+// ============================================================
+// Transporte do coder OpenAI — raciocínio, timeout e saída configuráveis por OPERADOR.
+//
+// Os defaults acima (16384 de saída, 90s por chamada, nenhum `reasoning`) foram
+// dimensionados junto com o protocolo host-mediated nascido para o Ollama. Num modelo
+// de raciocínio remoto, `max_output_tokens` INCLUI os tokens de raciocínio e uma
+// chamada com esforço alto pode legitimamente passar de 90s: fixá-los impede o uso
+// da capacidade real do modelo. Cada grandeza é agora configurável, sempre BOUNDED e
+// fail-closed (valor presente porém inválido ⇒ erro na construção, nunca silencioso);
+// ausência ⇒ comportamento histórico idêntico (nenhum `reasoning` enviado).
+// O provider continua sendo a autoridade sobre quais esforços um modelo aceita.
+// ============================================================
+
+/** Esforços de raciocínio aceitos pela Responses API na família GPT-5.x. */
+export const OPENAI_CODER_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export type OpenAICoderReasoningEffort = typeof OPENAI_CODER_REASONING_EFFORTS[number];
+export const OPENAI_CODER_TIMEOUT_DEFAULT_MS = 90_000;
+export const OPENAI_CODER_TIMEOUT_MIN_MS = 10_000;
+export const OPENAI_CODER_TIMEOUT_MAX_MS = 900_000;
+export const OPENAI_CODER_OUTPUT_MIN_TOKENS = 4_096;
+export const OPENAI_CODER_OUTPUT_MAX_TOKENS = 128_000;
+
+/** Configuração inválida do transporte (env): fail-closed na construção. */
+export class OpenAICoderTransportConfigError extends Error {
+  constructor(message: string) { super(message); this.name = 'OpenAICoderTransportConfigError'; }
+}
+
+const boundedInteger = (raw: string, source: string, min: number, max: number): number => {
+  const value = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new OpenAICoderTransportConfigError(`${source}: "${raw}" fora do intervalo inteiro [${min}, ${max}].`);
+  }
+  return value;
+};
+
+/** `ANIMA_OPENAI_CODER_REASONING_EFFORT` → `reasoning.effort`. Ausente ⇒ null (não enviado). */
+export function resolveOpenAICoderReasoningEffort(
+  env: Record<string, string | undefined> = process.env,
+): OpenAICoderReasoningEffort | null {
+  const raw = env.ANIMA_OPENAI_CODER_REASONING_EFFORT?.trim().toLowerCase();
+  if (!raw) return null;
+  if (!(OPENAI_CODER_REASONING_EFFORTS as readonly string[]).includes(raw)) {
+    throw new OpenAICoderTransportConfigError(`ANIMA_OPENAI_CODER_REASONING_EFFORT: "${raw}" não é um esforço suportado (${OPENAI_CODER_REASONING_EFFORTS.join('|')}).`);
+  }
+  return raw as OpenAICoderReasoningEffort;
+}
+
+/** `ANIMA_OPENAI_CODER_TIMEOUT_MS`: timeout POR CHAMADA ao provider. Ausente ⇒ 90s. */
+export function resolveOpenAICoderTimeoutMs(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.ANIMA_OPENAI_CODER_TIMEOUT_MS?.trim();
+  if (!raw) return OPENAI_CODER_TIMEOUT_DEFAULT_MS;
+  return boundedInteger(raw, 'ANIMA_OPENAI_CODER_TIMEOUT_MS', OPENAI_CODER_TIMEOUT_MIN_MS, OPENAI_CODER_TIMEOUT_MAX_MS);
+}
+
+/** `ANIMA_OPENAI_CODER_OUTPUT_TOKENS`: reserva de saída = `max_output_tokens` (inclui o
+ * raciocínio). Ausente ⇒ 16384. O protocolo ainda a limita a metade do teto de contexto. */
+export function resolveOpenAICoderOutputTokens(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.ANIMA_OPENAI_CODER_OUTPUT_TOKENS?.trim();
+  if (!raw) return OPENAI_CODER_OUTPUT_RESERVE_TOKENS;
+  return boundedInteger(raw, 'ANIMA_OPENAI_CODER_OUTPUT_TOKENS', OPENAI_CODER_OUTPUT_MIN_TOKENS, OPENAI_CODER_OUTPUT_MAX_TOKENS);
+}
+
+/** Configuração inválida de contexto (env/metadata): fail-closed na construção. */
 export class OpenAICoderContextConfigError extends Error {
   constructor(message: string) { super(message); this.name = 'OpenAICoderContextConfigError'; }
 }
@@ -165,6 +227,17 @@ export interface GptCoderOptions {
   readonly apiKey?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number; readonly maxReadRounds?: number; readonly onUsage?: (usage: OpenAIUsage) => void;
+  /** Esforço de raciocínio explícito; `undefined` ⇒ env; `null` ⇒ não enviar. */
+  readonly reasoningEffort?: OpenAICoderReasoningEffort | null;
+  /** Reserva de saída explícita (`max_output_tokens`); ausente ⇒ env/default. */
+  readonly outputTokens?: number;
+}
+/** Configuração EFETIVA do transporte, exposta para observabilidade/prova. */
+export interface OpenAICoderTransportConfig {
+  readonly model: string;
+  readonly reasoningEffort: OpenAICoderReasoningEffort | null;
+  readonly timeoutMs: number;
+  readonly maxOutputTokens: number;
 }
 /** Correlação do attempt pago, derivada do `CoderEditRequest` a cada `edit()`. */
 interface CoderPaidContext {
@@ -184,6 +257,9 @@ const combinedSignal = (outer: AbortSignal, timeoutMs: number) => {
 };
 const extractText = (body: unknown): string | null => {
   const root = body as { output_text?: unknown; output?: Array<{ type?: unknown; name?: unknown; arguments?: unknown; content?: Array<{ type?: unknown; text?: unknown }> }> } | null;
+  // Resposta truncada (ex.: `max_output_tokens` consumido pelo raciocínio) nunca é uma
+  // ação válida, mesmo que traga texto parcial.
+  if ((root as { status?: unknown } | null)?.status === 'incomplete') return null;
   if (typeof root?.output_text === 'string' && root.output_text.trim()) return root.output_text;
   for (const item of root?.output ?? []) if (item.type === 'function_call' && item.name === 'submit_coder_action' && typeof item.arguments === 'string') return item.arguments;
   const text = (root?.output ?? []).flatMap(item => item.content ?? []).filter(part => part.type === 'output_text' && typeof part.text === 'string').map(part => part.text as string).join('');
@@ -206,10 +282,14 @@ export class GptCoderBackend implements CoderBackend {
   private readonly requestIds: string[] = [];
   private activePaidContext: CoderPaidContext | null = null;
   private callIndex = 0;
+  readonly transportConfig: OpenAICoderTransportConfig;
   constructor(options: GptCoderOptions) {
     const model = options.model ?? process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
     const fetchImpl = options.fetchImpl ?? fetch;
     const admission = options.admission;
+    const reasoningEffort = options.reasoningEffort !== undefined ? options.reasoningEffort : resolveOpenAICoderReasoningEffort();
+    const timeoutMs = options.timeoutMs ?? resolveOpenAICoderTimeoutMs();
+    const outputTokens = options.outputTokens ?? resolveOpenAICoderOutputTokens();
     // O transport NUNCA fala com o provider sem admissão: `fetchAdmittedOpenAIResponses`
     // roda `admit()` antes de qualquer rede. A chave e a URL vivem SÓ na borda; aqui
     // nem a credencial é lida. Correlação ausente ⇒ erro ANTES de qualquer fetch.
@@ -229,7 +309,10 @@ export class GptCoderBackend implements CoderBackend {
           // `max_output_tokens` = a reserva de saída do orçamento (numPredict): a contenção
           // de geração equivalente ao `num_predict` do Ollama, honrando a invariante no
           // request REAL enviado à OpenAI. `num_ctx`/`num_predict` NUNCA vão à OpenAI.
-          body: { model, store: false, input: messages, max_output_tokens: maxOutputTokens },
+          body: {
+            model, store: false, input: messages, max_output_tokens: maxOutputTokens,
+            ...(reasoningEffort !== null ? { reasoning: { effort: reasoningEffort } } : {}),
+          },
           signal: bounded.signal,
           fetchImpl,
           ...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
@@ -253,7 +336,13 @@ export class GptCoderBackend implements CoderBackend {
       // correlação/idempotência/auditoria. Nunca é segredo.
       const requestId = (body as { id?: unknown } | null)?.id;
       if (typeof requestId === 'string' && requestId.trim().length > 0) this.requestIds.push(requestId);
-      const content = extractText(body); if (!content) throw new OpenAICoderError('openai_malformed_response', 'A OpenAI retornou uma resposta sem ação estruturada válida.');
+      const content = extractText(body);
+      if (!content) {
+        const root = body as { status?: unknown; incomplete_details?: { reason?: unknown } } | null;
+        const incomplete = root?.status === 'incomplete'
+          ? ` (resposta incompleta: ${typeof root.incomplete_details?.reason === 'string' ? root.incomplete_details.reason : 'motivo não informado'})` : '';
+        throw new OpenAICoderError('openai_malformed_response', `A OpenAI retornou uma resposta sem ação estruturada válida${incomplete}.`);
+      }
       return { content };
     };
     this.id = coderBackendId('openai', model);
@@ -280,12 +369,13 @@ export class GptCoderBackend implements CoderBackend {
     });
     this.delegate = new OllamaCoderBackend({
       model, backendId: this.id, providerLabel: `OpenAI ${model}`, protocolTransport: transport, fetchImpl,
-      timeoutMs: options.timeoutMs ?? 90_000, agenticRuntimePolicy: runtimePolicy,
+      timeoutMs, agenticRuntimePolicy: runtimePolicy,
       operationalContextCap: context.operationalCap,
       ...(context.declaredContextLength !== null ? { declaredContextLength: context.declaredContextLength } : {}),
-      outputReserveTokens: OPENAI_CODER_OUTPUT_RESERVE_TOKENS,
-      numPredict: OPENAI_CODER_NUM_PREDICT,
+      outputReserveTokens: outputTokens,
+      numPredict: outputTokens,
     });
+    this.transportConfig = { model, reasoningEffort, timeoutMs, maxOutputTokens: this.delegate.contextBudget.numPredict };
   }
 
   /** Orçamento de contexto EFETIVO do coder OpenAI (delegado ao protocolo compartilhado).

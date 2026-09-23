@@ -14,6 +14,11 @@ import {
   OPENAI_CODER_CONTEXT_MIN_TOKENS,
   OPENAI_CODER_OUTPUT_RESERVE_TOKENS,
   OPENAI_CODER_NUM_PREDICT,
+  OPENAI_CODER_TIMEOUT_DEFAULT_MS,
+  OpenAICoderTransportConfigError,
+  resolveOpenAICoderOutputTokens,
+  resolveOpenAICoderReasoningEffort,
+  resolveOpenAICoderTimeoutMs,
   type OpenAIUsage,
 } from './gpt-coder';
 import { OllamaCoderBackend } from './ollama-coder';
@@ -446,5 +451,79 @@ describe('GptCoderBackend — EXEC/TEST/GIT governados compartilhados (contrato 
     expect(ws.files.get('src/a.ts')).toContain('FIXED');
     expect(result.touchedResources).toEqual(['src/a.ts']);
     expect(n).toBe(4); // exec(fail) + edit + exec(pass) + submit — laço iterativo pelo OpenAI
+  });
+});
+
+describe('transporte OpenAI forte — raciocínio, timeout e saída configuráveis (bounded, fail-closed)', () => {
+  const original = 'export const value = 1;\n';
+  const editReply = (calls: number): string => calls === 1
+    ? JSON.stringify({ action: 'read', reads: [{ path: 'src/a.ts', lineRange: [1, 1], maxLines: 10 }] })
+    : JSON.stringify({ action: 'edit', operations: [{ kind: 'replace_exact', path: 'src/a.ts', expected_file_sha256: sha256(original), before: 'value = 1', after: 'value = 2', expected_occurrences: 1 }] });
+  const capture = () => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init!.body)) as Record<string, unknown>);
+      return response({ output_text: editReply(bodies.length) });
+    }) as typeof fetch;
+    return { bodies, fetchImpl };
+  };
+
+  test('sem configuração: nenhum `reasoning` é enviado e defaults históricos (regressão de compatibilidade)', async () => {
+    const { bodies, fetchImpl } = capture();
+    const backend = new GptCoderBackend({ model: 'gpt-test', apiKey: 'x', fetchImpl, admission: grant, reasoningEffort: null });
+    await backend.edit(request, workspace({ 'src/a.ts': original }), new AbortController().signal);
+    expect(bodies[0]).not.toHaveProperty('reasoning');
+    expect(bodies[0]!.max_output_tokens).toBe(OPENAI_CODER_NUM_PREDICT);
+    expect(backend.transportConfig).toEqual({ model: 'gpt-test', reasoningEffort: null, timeoutMs: OPENAI_CODER_TIMEOUT_DEFAULT_MS, maxOutputTokens: OPENAI_CODER_NUM_PREDICT });
+  });
+
+  test('esforço configurado chega ao request REAL como reasoning.effort em TODAS as chamadas', async () => {
+    const { bodies, fetchImpl } = capture();
+    const backend = new GptCoderBackend({ model: 'gpt-test', apiKey: 'x', fetchImpl, admission: grant, reasoningEffort: 'high', outputTokens: 24_000 });
+    await backend.edit(request, workspace({ 'src/a.ts': original }), new AbortController().signal);
+    expect(bodies).toHaveLength(2);
+    for (const body of bodies) {
+      expect(body.reasoning).toEqual({ effort: 'high' });
+      expect(body.max_output_tokens).toBe(24_000);
+      expect(body).not.toHaveProperty('num_predict');
+    }
+    expect(backend.transportConfig.maxOutputTokens).toBe(24_000);
+  });
+
+  test('resposta `incomplete` (saída consumida pelo raciocínio) falha como malformed com o motivo, mesmo com texto parcial', async () => {
+    const fetchImpl = (async () => response({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output_text: '{"action":"ed' })) as typeof fetch;
+    await expect(new GptCoderBackend({ apiKey: 'x', fetchImpl, admission: grant }).edit(request, workspace({ 'src/a.ts': original }), new AbortController().signal))
+      .rejects.toMatchObject({ code: 'openai_malformed_response', message: expect.stringContaining('max_output_tokens') });
+  });
+
+  test('resolvers: ausência ⇒ default; válido ⇒ aplicado; inválido ⇒ erro de configuração (nunca silencioso)', () => {
+    expect(resolveOpenAICoderReasoningEffort({})).toBeNull();
+    expect(resolveOpenAICoderReasoningEffort({ ANIMA_OPENAI_CODER_REASONING_EFFORT: ' HIGH ' })).toBe('high');
+    expect(resolveOpenAICoderReasoningEffort({ ANIMA_OPENAI_CODER_REASONING_EFFORT: 'xhigh' })).toBe('xhigh');
+    expect(() => resolveOpenAICoderReasoningEffort({ ANIMA_OPENAI_CODER_REASONING_EFFORT: 'max' })).toThrow(OpenAICoderTransportConfigError);
+
+    expect(resolveOpenAICoderTimeoutMs({})).toBe(OPENAI_CODER_TIMEOUT_DEFAULT_MS);
+    expect(resolveOpenAICoderTimeoutMs({ ANIMA_OPENAI_CODER_TIMEOUT_MS: '300000' })).toBe(300_000);
+    for (const bad of ['0', '9999', '900001', 'abc', '1.5e5', '12000.5']) {
+      expect(() => resolveOpenAICoderTimeoutMs({ ANIMA_OPENAI_CODER_TIMEOUT_MS: bad })).toThrow(OpenAICoderTransportConfigError);
+    }
+
+    expect(resolveOpenAICoderOutputTokens({})).toBe(OPENAI_CODER_OUTPUT_RESERVE_TOKENS);
+    expect(resolveOpenAICoderOutputTokens({ ANIMA_OPENAI_CODER_OUTPUT_TOKENS: '65536' })).toBe(65_536);
+    for (const bad of ['4095', '128001', 'NaN', '-1']) {
+      expect(() => resolveOpenAICoderOutputTokens({ ANIMA_OPENAI_CODER_OUTPUT_TOKENS: bad })).toThrow(OpenAICoderTransportConfigError);
+    }
+  });
+
+  test('a reserva de saída continua limitada pelo contexto (metade do teto) — bounded mesmo com override alto', () => {
+    const previous = process.env.ANIMA_OPENAI_CODER_CONTEXT_CAP;
+    process.env.ANIMA_OPENAI_CODER_CONTEXT_CAP = '64000';
+    try {
+      const backend = new GptCoderBackend({ model: 'gpt-test', apiKey: 'x', fetchImpl: jest.fn() as unknown as typeof fetch, admission: grant, outputTokens: 100_000 });
+      expect(backend.transportConfig.maxOutputTokens).toBe(32_000);
+      expect(backend.contextBudget.inputBudgetTokens).toBe(32_000);
+    } finally {
+      if (previous === undefined) delete process.env.ANIMA_OPENAI_CODER_CONTEXT_CAP; else process.env.ANIMA_OPENAI_CODER_CONTEXT_CAP = previous;
+    }
   });
 });
