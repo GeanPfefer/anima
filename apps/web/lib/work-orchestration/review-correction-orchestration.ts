@@ -64,21 +64,43 @@ const dataOf = (event: WorkEvent): Record<string, Json | undefined> | null => {
 const readString = (record: Record<string, Json | undefined> | null, key: string): string =>
   typeof record?.[key] === 'string' ? record[key] as string : '';
 
-/** Extrai somente paths explicitamente nomeados no REQUEST_CHANGES e já contidos
- * no escopo aprovado. Basename é aceito apenas quando identifica uma única
- * entrada do escopo, preservando fail-closed diante de ambiguidade. */
+const REWORK_DIRECTIVE = /\b(?:corrija|corrigir|retrabalh(?:e|ar)|alter(?:e|ar)|modifi(?:que|car)|reescrev(?:a|er)|ajust(?:e|ar)|atualiz(?:e|ar))\b/i;
+const PRESERVATION_DIRECTIVE = /\b(?:preserv(?:e|ar)|mantenh(?:a|er)|não\s+(?:altere|modifique|reescreva|retrabalhe)|está\s+corret[oa]|continua\s+corret[oa]|atende)\b/i;
+
+/** Extrai somente paths explicitamente nomeados em uma CLÁUSULA que realmente
+ * autoriza retrabalho. O restante da correção vem de evidência estruturada
+ * (`includedScope - observedChangedFiles`); texto livre só pode REABRIR um arquivo
+ * do checkpoint quando contém uma diretiva positiva e inequívoca. Mera menção,
+ * descrição do estado atual ou diretiva de preservação não concede escrita.
+ * Basename é aceito apenas quando identifica uma única entrada do escopo. */
 export function deriveExplicitReworkScope(requestedChanges: string, approvedScope: readonly string[]): readonly string[] {
-  const text = requestedChanges.toLowerCase().replace(/\\/g, '/');
   const basenameCounts = new Map<string, number>();
   for (const path of approvedScope) {
     const basename = path.toLowerCase().replace(/\\/g, '/').split('/').at(-1) ?? '';
     basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
   }
-  return approvedScope.filter(path => {
-    const normalized = path.toLowerCase().replace(/\\/g, '/');
-    const basename = normalized.split('/').at(-1) ?? '';
-    return text.includes(normalized) || (basename.length > 0 && basenameCounts.get(basename) === 1 && text.includes(basename));
-  });
+  const clauses = requestedChanges
+    .replace(/\\/g, '/')
+    // Ponto dentro de path (`levels.test.ts`) não é separador. Um ponto só
+    // encerra cláusula quando é seguido por espaço/fim; `;`, quebra e
+    // adversativas sempre separam intenções potencialmente distintas.
+    .split(/(?:[;!?\n]+|\.(?=\s|$)|\b(?:mas|porém|contudo|entretanto)\b)/i)
+    .map(value => value.trim())
+    .filter(Boolean);
+  const explicitlyReworked = new Set<string>();
+  for (const clause of clauses) {
+    if (!REWORK_DIRECTIVE.test(clause) || PRESERVATION_DIRECTIVE.test(clause)) continue;
+    const normalizedClause = clause.toLowerCase();
+    for (const path of approvedScope) {
+      const normalized = path.toLowerCase().replace(/\\/g, '/');
+      const basename = normalized.split('/').at(-1) ?? '';
+      if (normalizedClause.includes(normalized)
+          || (basename.length > 0 && basenameCounts.get(basename) === 1 && normalizedClause.includes(basename))) {
+        explicitlyReworked.add(normalized);
+      }
+    }
+  }
+  return approvedScope.filter(path => explicitlyReworked.has(path.toLowerCase().replace(/\\/g, '/')));
 }
 
 /**

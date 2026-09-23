@@ -14,7 +14,7 @@ export type WorkPresentationView=Omit<WorkPresentation,'item'>&{item:WorkItemVie
 // que uma correção de proposta preserve a MESMA autoridade de provider usada na
 // criação. Ausente ⇒ a rota falha fechado (input incompleto), nunca cai num
 // default pago silencioso.
-type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void;autonomousExecutionAllowed?:boolean;autonomousBlockReason?:string|null;trackAutonomousProgress?:boolean;provider?:'openai'|'ollama'};
+type Props={presentation:WorkPresentationView;onChange:(value:WorkPresentationView)=>void;focused?:boolean;onFocus?:()=>void;onSuccessorFocus?:(id:string)=>void;autonomousExecutionAllowed?:boolean;autonomousBlockReason?:string|null;trackAutonomousProgress?:boolean;provider?:'openai'|'ollama'};
 
 // Rótulos do parecer advisory do Verifier. Read-only: informa a revisão humana,
 // nunca a substitui nem altera as ações disponíveis (que vêm da projeção).
@@ -45,7 +45,7 @@ const describeRetryBlock=(readiness?:WorkRetryReadiness):string|null=>
   readiness?.status==='BLOCKED'&&readiness.reason?RETRY_BLOCK_LABEL[readiness.reason]??null:null;
 
 
-export function WorkProposalCard({presentation,onChange,focused=false,onFocus,autonomousExecutionAllowed,autonomousBlockReason,trackAutonomousProgress=false,provider}:Props){
+export function WorkProposalCard({presentation,onChange,focused=false,onFocus,onSuccessorFocus,autonomousExecutionAllowed,autonomousBlockReason,trackAutonomousProgress=false,provider}:Props){
   const {item,latestResult,acceptedResult,availableActions}=presentation;
   const executionSpec=item.intent['execution_spec'] as {
     target?:{kind?:string;reference?:string};permissions?:string[];
@@ -86,6 +86,27 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,au
     return()=>{active=false;window.clearInterval(timer);};
   },[trackAutonomousProgress,item.id,item.state,presentation.pendingDecision,onChange]);
   async function mutate(endpoint:string,payload:Record<string,unknown>){if(status!=='idle')return;setStatus('submitting');setError('');const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion,...payload})});const body=await response.json().catch(()=>({}));if(response.ok&&body.ok){setMode('none');setDetail('');setReferences('');setValidations('');setLimitations('');setCustomDeferReason('');await reload();return;}const message=body.error?.message??'Não foi possível atualizar o trabalho.';setError(message);setStatus('idle');if(body.error?.code==='version_conflict'||body.error?.code==='ambiguous_outcome'){await reload();setError(message);}}
+  async function createReviewCorrection(){
+    if(status!=='idle')return;
+    setStatus('submitting');setError('');
+    try{
+      const response=await fetch('/api/work-orchestration/review-corrections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion})});
+      const body=await response.json().catch(()=>({}));
+      if(!response.ok||!body.ok||typeof body.successorWorkItemId!=='string'){
+        setError(body.error?.message??body.message??'Não foi possível criar a correção por retomada.');setStatus('idle');return;
+      }
+      const successorId=body.successorWorkItemId as string;
+      const focusResponse=await fetch('/api/work-orchestration/focus',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId:successorId})});
+      const focusBody=await focusResponse.json().catch(()=>({}));
+      if(!focusResponse.ok||!focusBody.ok)throw new Error(focusBody.error?.message??'O successor foi criado, mas não foi possível focalizá-lo.');
+      const successorResponse=await fetch(`/api/work-orchestration/items/${successorId}`,{cache:'no-store'});
+      const successorBody=await successorResponse.json().catch(()=>({}));
+      if(!successorResponse.ok||!successorBody.ok)throw new Error(successorBody.error?.message??'O successor foi criado, mas não foi possível carregá-lo.');
+      onChange(successorBody.value.presentation as WorkPresentationView);
+      onSuccessorFocus?.(successorId);
+      setMode('none');setStatus('idle');
+    }catch(error){setError(error instanceof Error?error.message:'A conexão falhou; nenhum successor foi presumido.');setStatus('idle');}
+  }
   async function startAutonomous(){
     if(status!=='idle')return;
     setStatus('submitting');setError('');
@@ -202,7 +223,7 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,au
     {mode==='none'&&presentation.manualReleaseAvailable&&<div className={styles.workActions}><button disabled={busy} onClick={()=>mutate('/api/work-orchestration/release-manual',{})}>Liberar execução manual</button></div>}
     {mode==='none'&&allowed('submit_result')&&<div className={styles.workActions}><button disabled={busy} onClick={()=>setMode('result')}>Registrar resultado</button></div>}
     {mode==='none'&&item.state==='failed'&&presentation.retryReadiness?.status==='RETRY_READY'&&<section className={styles.workNotice} aria-label="Nova tentativa governada"><strong>Falha recuperável</strong><p>{presentation.retryReadiness.attemptsUsed} de {presentation.retryReadiness.maxAttempts} tentativas utilizada. O Resource Governor será reavaliado pelo Resident Host antes de qualquer nova execução.</p><div className={styles.workActions}><button disabled={busy} onClick={()=>void retryAutonomous()}>Tentar novamente autonomamente</button></div></section>}
-    {mode==='none'&&item.state==='changes_requested'&&presentation.verification&&<section className={styles.workNotice} aria-label="Correção por retomada"><strong>Correção por retomada do checkpoint</strong><p>Quando a correção couber no escopo ainda não tocado, retoma do checkpoint durável já verificado e reduz o novo escopo ao restante — a implementação preservada não é reescrita. Gera uma nova proposta governada que passa pela sua aprovação; nada é executado agora.</p><div className={styles.workActions}><button disabled={busy} onClick={()=>mutate('/api/work-orchestration/review-corrections',{})}>Corrigir retomando do checkpoint</button></div></section>}
+    {mode==='none'&&item.state==='changes_requested'&&presentation.verification&&<section className={styles.workNotice} aria-label="Correção por retomada"><strong>Correção por retomada do checkpoint</strong><p>Quando a correção couber no escopo ainda não tocado, retoma do checkpoint durável já verificado e reduz o novo escopo ao restante — a implementação preservada não é reescrita. Gera uma nova proposta governada que passa pela sua aprovação; nada é executado agora.</p><div className={styles.workActions}><button disabled={busy} onClick={()=>void createReviewCorrection()}>Corrigir retomando do checkpoint</button></div></section>}
     {mode==='result'&&<div className={styles.workDecision}><label>Resumo do resultado<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><label>Referências, uma por linha<textarea value={references} onChange={event=>setReferences(event.target.value)}/></label><label>Validações executadas, uma por linha (prefixe com ok: ou falha:)<textarea value={validations} onChange={event=>setValidations(event.target.value)}/></label><label>Limitações conhecidas, uma por linha<textarea value={limitations} onChange={event=>setLimitations(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>mutate('/api/work-orchestration/results',{result:{summary:detail.trim(),resultReferences:references.split('\n').map(value=>value.trim()).filter(Boolean),validations:parseWorkResultValidations(validations),limitations:limitations.split('\n').map(value=>value.trim()).filter(Boolean)}})}>Enviar para revisão</button><button onClick={()=>setMode('none')}>Voltar</button></div>}
     {mode==='none'&&allowed('accept_result')&&latestResult&&<div className={styles.workActions}><button disabled={busy} onClick={()=>review({type:'accept'})}>Aceitar resultado v{latestResult.proposalVersion}</button><button disabled={busy} onClick={()=>setMode('review_changes')}>Pedir correções no resultado</button></div>}
     {mode==='review_changes'&&<div className={styles.workDecision}><label>Correções necessárias<textarea value={detail} onChange={event=>setDetail(event.target.value)}/></label><button disabled={busy||!detail.trim()} onClick={()=>review({type:'request_changes',requestedChanges:detail.trim()})}>Confirmar correções</button><button onClick={()=>setMode('none')}>Voltar</button></div>}

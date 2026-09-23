@@ -133,6 +133,32 @@ describe('WorkProposalCard', () => {
     expect(body.requestedChanges).toBe('Reduzir o escopo');
   });
   const verification=(verdict:'verified'|'inconclusive'|'rejected',extra:Array<{code:string;severity:'ok'|'gap'|'violation';detail:string}>=[],rests=true)=>({schemaVersion:1 as const,verdict,workItemId:'item',attemptId:'attempt-1',approvedProposalVersion:2,findings:[{code:'correlation_verified',severity:'ok' as const,provenance:'independent' as const,detail:'ok'},...extra.map(f=>({...f,provenance:'attested' as const}))],summary:{violations:extra.filter(f=>f.severity==='violation').length,gaps:extra.filter(f=>f.severity==='gap').length,checks:1+extra.length,attested:extra.length,independent:1},restsOnAttestedEvidence:rests,advisory:true as const});
+  test('correção por retomada focaliza e carrega exatamente o successor retornado',async()=>{
+    const successor=presentation({item:{...item,id:'successor',state:'proposed',proposalVersion:1},verification:undefined});
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ok:true,json:async()=>({ok:true,successorWorkItemId:'successor',lineageId:'lineage',recoverySequence:1,replayed:false})})
+      .mockResolvedValueOnce({ok:true,json:async()=>({ok:true,value:{}})})
+      .mockResolvedValueOnce({ok:true,json:async()=>({ok:true,value:{presentation:successor}})});
+    const onChange=jest.fn();const onSuccessorFocus=jest.fn();
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'changes_requested'},verification:verification('inconclusive') as unknown as WorkPresentationView['verification']})} onChange={onChange} onSuccessorFocus={onSuccessorFocus}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Corrigir retomando do checkpoint'}));
+    await waitFor(()=>expect(onChange).toHaveBeenCalledWith(successor));
+    expect(global.fetch).toHaveBeenNthCalledWith(1,'/api/work-orchestration/review-corrections',expect.objectContaining({method:'POST'}));
+    expect(global.fetch).toHaveBeenNthCalledWith(2,'/api/work-orchestration/focus',expect.objectContaining({body:JSON.stringify({workItemId:'successor'})}));
+    expect(global.fetch).toHaveBeenNthCalledWith(3,'/api/work-orchestration/items/successor',{cache:'no-store'});
+    expect(onSuccessorFocus).toHaveBeenCalledWith('successor');
+    expect((global.fetch as jest.Mock).mock.calls.some(call=>call[0]==='/api/work-orchestration/items/item')).toBe(false);
+  });
+  test('falha na derivação preserva o predecessor e não tenta focalizar successor',async()=>{
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ok:false,json:async()=>({ok:false,reason:'derivation_refused',message:'Escopo corretivo ambíguo.'})});
+    const onChange=jest.fn();const onSuccessorFocus=jest.fn();
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'changes_requested'},verification:verification('inconclusive') as unknown as WorkPresentationView['verification']})} onChange={onChange} onSuccessorFocus={onSuccessorFocus}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Corrigir retomando do checkpoint'}));
+    await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Escopo corretivo ambíguo.'));
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();expect(onSuccessorFocus).not.toHaveBeenCalled();
+    expect(screen.getByText('changes_requested · v2')).toBeInTheDocument();
+  });
   test('exibe o parecer advisory sem alterar as ações de revisão', () => {
     render(<WorkProposalCard presentation={presentation({item:{...item,state:'review'},latestResult:result,availableActions:['accept_result','request_result_changes'],verification:verification('verified') as unknown as WorkPresentationView['verification']})} onChange={jest.fn()} />);
     expect(screen.getByText(/Verificação independente \(advisory\)/)).toBeInTheDocument();

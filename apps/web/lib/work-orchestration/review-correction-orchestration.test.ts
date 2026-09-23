@@ -69,6 +69,27 @@ describe('planCorrectionFromReview — correção governada por retomada', () =>
     expect(deriveExplicitReworkScope(`Corrigir ${TEST} e fora.ts`, [IMPL, TEST])).toEqual([TEST]);
     expect(deriveExplicitReworkScope('Corrigir shared.ts', ['a/shared.ts', 'b/shared.ts'])).toEqual([]);
   });
+  test('menção preservadora não reabre o arquivo do checkpoint; somente o restante fica gravável', () => {
+    const requestedChanges = `A implementação em ${IMPL} está correta e deve ser preservada; corrija ${TEST}.`;
+    expect(deriveExplicitReworkScope(requestedChanges, [IMPL, TEST])).toEqual([TEST]);
+    const plan = okPlan(planCorrectionFromReview(facts({ events: [
+      gitEvidenceEvent(), resultEvent(), reviewEvent({ requestedChanges }),
+    ] })));
+    expect(plan.candidate.proposal.data.includedScope).toEqual([TEST]);
+    expect(plan.candidate.proposal.data.excludedScope).toEqual(expect.arrayContaining([IMPL]));
+    const spec = plan.candidate.intent['execution_spec'] as Record<string, unknown>;
+    expect(spec['correction_scope']).toEqual({
+      rework_scope: [TEST], remaining_scope: [TEST], effective_scope: [TEST],
+    });
+    expect(plan.candidate.proposal.data.expectedEffects).toContainEqual(expect.stringContaining(`A implementação já verificada (${IMPL}) permanece intacta`));
+  });
+  test('feedback que manda retrabalhar ambos reabre legitimamente ambos', () => {
+    expect(deriveExplicitReworkScope(`Corrija ${IMPL} e ${TEST}.`, [IMPL, TEST])).toEqual([IMPL, TEST]);
+    const plan = okPlan(planCorrectionFromReview(facts({ events: [
+      gitEvidenceEvent(), resultEvent(), reviewEvent({ requestedChanges: `Corrija ${IMPL} e ${TEST}.` }),
+    ] })));
+    expect(plan.candidate.proposal.data.includedScope).toEqual([IMPL, TEST]);
+  });
   test('deriva candidato válido, escopo=restante, retomando do checkpoint revisado', () => {
     const plan = okPlan(planCorrectionFromReview(facts()));
     expect(validateCorrectionSuccessor(original, plan.candidate)).toMatchObject({ valid: true });
