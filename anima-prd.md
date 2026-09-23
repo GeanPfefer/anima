@@ -1,4 +1,12 @@
 # Anima — Product Requirements Document
+> Prova real de self-development fechou duas lacunas em 2026-09-22: a derivação
+> de correção retomada agora separa o `remaining_scope` host-observado do rework
+> textual e só reabre arquivo do checkpoint sob diretiva positiva inequívoca;
+> mera menção/preservação não concede escrita. Após materializar um successor, o
+> cartão usa o ID retornado para persistir foco e carregar a nova apresentação,
+> em vez de reler o predecessor. O successor real `bc407a1b…` permanece `proposed`
+> v1, intocado e sem attempts; requer decisão humana para rejeitá-lo e derivar uma
+> nova sequência correta. [Registro](docs/registros/2026-09-22-review-correction-scope-e-handoff.md).
 > Hardening do Continuous Self-Dev em 2026-09-21: o lifecycle de deficiência
 > não fabrica mais `resolved` quando a ordem temporal de uma cobertura completed
 > é inválida (`indeterminate`, fail-closed); a leitura de cobertura pagina todo

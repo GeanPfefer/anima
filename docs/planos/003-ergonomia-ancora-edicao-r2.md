@@ -395,3 +395,30 @@ Próximo ponto exato: nova unidade governada de correção por retomada sobre
 `71445254…` (sequência 3, após o terminal `fafd7af1…`), aprovada pelo humano, para
 observar se o coder agora coloca o teste DENTRO do describe com `insert` e
 atravessa gate → Verifier → review. Sem reabrir o terminal `fafd7af1…`.
+
+## Continuação — 2026-09-22: preservação semântica e handoff do successor
+
+A prova real `a703e92f…` chegou a `review` na terceira attempt com checkpoint Git
+durável `9a60f42`: a implementação em `levels.ts` estava presente, mas faltava a
+cobertura explícita aprovada em `levels.test.ts`. A revisão humana levou o item a
+`changes_requested`; o clique de correção criou corretamente o successor governado
+`bc407a1b…`, `proposed` v1 e sem execução.
+
+A prova expôs duas lacunas gerais. O extrator de rework tratava qualquer ocorrência
+textual de path como autorização, reabrindo `levels.ts` embora a frase mandasse
+preservá-lo; a UI, depois da criação, relia `item.id` e mantinha visualmente o
+predecessor. A derivação agora mantém o restante em evidência estruturada
+(`includedScope - observedChangedFiles`) e exige diretiva positiva inequívoca para
+reabrir arquivo do checkpoint, com ambiguidades fechadas. O cartão usa o
+`successorWorkItemId` devolvido pela API, persiste o foco pela rota canônica e
+carrega exatamente esse item.
+
+O successor real problemático não foi alterado. A correção genérica de proposta
+replaneja todo o envelope e não garante preservar a semântica especial de
+lineage/checkpoint; o caminho seguro fica sob decisão humana: rejeitar o successor
+v1 ainda `proposed` e, depois, derivar do predecessor uma nova sequência governada
+com a regra corrigida. Nenhuma dessas mutações foi executada nesta sessão.
+
+Provas: review-correction 11/11, WorkProposalCard 57/57, ChatClient +
+ProjectWorkPanel 15/15, typecheck web e `git diff --check` verdes. Registro:
+[`2026-09-22-review-correction-scope-e-handoff.md`](../registros/2026-09-22-review-correction-scope-e-handoff.md).
