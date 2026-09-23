@@ -2,6 +2,7 @@ import {
   availableRuntimeActions,
   deriveSubmitGateState,
   isPathReadable,
+  isRefreshReadAvailable,
   isSubmitAvailable,
   renderCoderHarnessPolicyInstructions,
   resolveAgenticRuntimePolicy,
@@ -378,6 +379,9 @@ export class OllamaCoderBackend implements CoderBackend {
     let passedValidationRevision = -1;
     let failedValidationRevision = -1;
     let diffReviewedRevision = -1;
+    // Leitura de REFRESH pós-mutação própria (contrato de repair): editRevision cujo
+    // refresh já foi servido. Uma por edição aplicada, só dos arquivos mutados.
+    let refreshedRevision = -1;
     // Uma modificação (replace_exact/insert/append) a arquivo existente DEVE aparecer
     // no `git diff` — se aparecer vazio é suspeito. Um `create_file` de arquivo novo
     // fica UNTRACKED e legitimamente não aparece no `git diff` (sem `git add`), então
@@ -456,7 +460,12 @@ export class OllamaCoderBackend implements CoderBackend {
       const state = gateStateNow();
       // SUBMIT só existe em READY_TO_SUBMIT (com edições aplicadas, em modo exec).
       const submitAvailable = execMode && appliedTouched.size > 0 && isSubmitAvailable(state);
-      const actions: readonly RuntimeAction[] = availableRuntimeActions({ state, searchEnabled, execEnabled: execMode, readRoundsLeft: roundsLeft });
+      // Leitura exploratória esgotada (rodadas OU teto de sessão). Nesse caso só resta a
+      // leitura de REFRESH dos arquivos que o próprio coder mutou (1 por revisão).
+      const exploratoryReadExhausted = roundsLeft <= 0 || totalServedReads >= this.maxTotalServedReads;
+      const refreshRead = execMode && exploratoryReadExhausted
+        && isRefreshReadAvailable({ editRevision, refreshedRevision, mutatedPathCount: appliedTouched.size });
+      const actions: readonly RuntimeAction[] = availableRuntimeActions({ state, searchEnabled, execEnabled: execMode, readRoundsLeft: roundsLeft, refreshReadAvailable: refreshRead });
       // A lista de ações apresentada por rodada contém SOMENTE as permitidas no estado
       // atual — em particular, `submit` só aparece em READY_TO_SUBMIT.
       const actionsLine = execMode
@@ -475,7 +484,9 @@ export class OllamaCoderBackend implements CoderBackend {
       const budgetLine = postEdit
         // Reserva pós-edit ANCORADA: a exploração acabou; estas rodadas são para
         // validar/reparar/revisar/submeter e não foram tocadas pela exploração.
-        ? `Orçamento pós-edit: ${Math.max(postEditLeft, 0)} rodada(s) reservada(s) para validar (exitCode=0), reparar, git diff e {"action":"submit"}.`
+        ? `Orçamento pós-edit: ${Math.max(postEditLeft, 0)} rodada(s) reservada(s) para validar (exitCode=0), reparar, git diff e {"action":"submit"}.${refreshRead
+          ? ` Leitura de REFRESH disponível (1 por edição aplicada, SOMENTE arquivos que você editou: ${[...appliedTouched].join(', ')}): peça {"action":"read",...} deles para obter o conteúdo e o sha256 ATUAIS antes de uma nova edição.`
+          : ''}`
         : roundsLeft <= 0
           ? execMode
             ? 'Orçamento: 0 rodadas de investigação restantes. Edite dentro do escopo agora; a reserva pós-edit (íntegra) só é liberada após a 1ª edição.'
@@ -570,7 +581,7 @@ export class OllamaCoderBackend implements CoderBackend {
             // 1ª edição material ANCORA a reserva pós-edit a partir daqui (íntegra).
             if (postEditBase === null) postEditBase = round;
             if (operations.some(op => op.kind !== 'create_file')) expectNonEmptyDiff = true;
-            servedBlocks.push(`Edição aplicada (${touched.length}): ${touched.join(', ')}. A revisão ${editRevision} precisa de validação focal (exitCode=0) e git diff antes de submit — que só será oferecido então.`);
+            servedBlocks.push(`Edição aplicada (${touched.length}): ${touched.join(', ')}. A revisão ${editRevision} precisa de validação focal (exitCode=0) e git diff antes de submit — que só será oferecido então. O sha256 desses arquivos MUDOU: shas lidos antes desta edição estão obsoletos; para editá-los de novo, leia o estado ATUAL (leitura de refresh garantida).`);
             runtimeEvent('edit_applied', 'served', round);
             round += 1;
             continue;
@@ -587,7 +598,10 @@ export class OllamaCoderBackend implements CoderBackend {
           if (execMode && error instanceof OllamaProtocolError && RECOVERABLE_EDIT_CODES.has(error.code)
               && editFeedbacks < MAX_EDIT_FEEDBACKS) {
             editFeedbacks += 1;
-            servedBlocks.push(`Edição recusada (${error.code}), nada foi aplicado: ${clip(error.message, 300)} Reapresentação ${editFeedbacks}/${MAX_EDIT_FEEDBACKS}. Corrija DENTRO do escopo de escrita.`);
+            const staleHint = error.code === 'ollama_stale_file_hash' && appliedTouched.size > 0
+              ? ' O sha enviado é anterior a uma edição já aplicada: use o sha256 da leitura MAIS RECENTE feita depois dela ou peça {"action":"read"} do arquivo editado (refresh).'
+              : '';
+            servedBlocks.push(`Edição recusada (${error.code}), nada foi aplicado: ${clip(error.message, 300)} Reapresentação ${editFeedbacks}/${MAX_EDIT_FEEDBACKS}. Corrija DENTRO do escopo de escrita.${staleHint}`);
             continue;
           }
           // Esgotado o teto: NÃO conclui sucesso implícito sem as provas exigidas.
@@ -741,7 +755,11 @@ export class OllamaCoderBackend implements CoderBackend {
       }
 
       // action === 'read'
-      if (roundsLeft <= 0) {
+      // REFRESH pós-mutação própria: sem orçamento exploratório, uma leitura por edição
+      // aplicada é servida — RESTRITA aos arquivos que o coder mutou (demais caminhos
+      // são recusados). Consome uma rodada da reserva pós-edit (bounded).
+      const refreshing = refreshRead;
+      if (!refreshing && roundsLeft <= 0) {
         // Fecha o bypass "READ esgotado → concludeApplied": em exec, reorienta
         // (não conclui sem provas); sem exec, é terminal.
         if (execMode) { const r = misdirect('orçamento de leitura esgotado — edite, valide e finalize'); if (r) return r; continue; }
@@ -749,14 +767,25 @@ export class OllamaCoderBackend implements CoderBackend {
       }
       // Fronteira de sessão: exaurido o teto de leituras servidas, o laço exige
       // edição (boundary, não teto de schema por rodada). Fecha o bypass equivalente.
-      if (totalServedReads >= this.maxTotalServedReads) {
+      if (!refreshing && totalServedReads >= this.maxTotalServedReads) {
         if (execMode) { const r = misdirect('teto de leituras da sessão atingido — edite, valide e finalize'); if (r) return r; continue; }
         throw new OllamaProtocolError('ollama_read_round_limit', `o modelo esgotou o teto de ${this.maxTotalServedReads} leituras servidas na sessão sem propor edições.`);
       }
       // Orçamento por rodada é POLÍTICA: o excedente é DEFERIDO (re-solicitável),
       // nunca recusado. `servingBudget` respeita ainda o que resta do teto de sessão.
-      const roundServingBudget = Math.min(this.readServingBudget, this.maxTotalServedReads - totalServedReads);
-      const { requests, rejected, deferred } = parseReadRequests(response.reads as unknown[], readMembership, roundServingBudget);
+      const roundServingBudget = refreshing
+        ? this.readServingBudget
+        : Math.min(this.readServingBudget, this.maxTotalServedReads - totalServedReads);
+      const { requests, rejected, deferred } = parseReadRequests(
+        response.reads as unknown[],
+        refreshing ? { has: (path: string) => appliedTouched.has(path) } : readMembership,
+        roundServingBudget,
+      );
+      if (refreshing && requests.length === 0) {
+        servedBlocks.push(`Leitura de refresh recusada: só serve arquivos que você editou (${[...appliedTouched].join(', ')}). ${rejected.join('; ')}`);
+        const r = misdirect('orçamento de leitura exploratória esgotado — refresh só para arquivos editados'); if (r) return r; continue;
+      }
+      if (refreshing) refreshedRevision = editRevision;
       // READ amplo (V3): carrega sob demanda os caminhos pedidos fora do escopo de
       // escrita pré-carregado. O confinamento de FS (safeJoin) da worktree é a
       // fronteira dura; readFile devolve null p/ inexistente/sensível (então serve

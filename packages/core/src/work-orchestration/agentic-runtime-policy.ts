@@ -218,6 +218,9 @@ export type RuntimeAction = 'read' | 'search' | 'glob' | 'exec' | 'edit' | 'subm
  * apresentada ao modelo deve conter SOMENTE ações permitidas no estado atual.
  * `submit` NUNCA aparece antes de READY_TO_SUBMIT. read/search/glob dependem de
  * ainda haver orçamento de investigação; exec/edit existem enquanto o modo permite.
+ * Exceção governada: `refreshReadAvailable` anuncia SOMENTE `read` (nunca
+ * search/glob) sem orçamento de investigação — é a leitura de REFRESH de um arquivo
+ * que o próprio coder acabou de mutar (ver `isRefreshReadAvailable`).
  * Ordem estável para prompt determinístico.
  */
 export function availableRuntimeActions(input: {
@@ -225,14 +228,47 @@ export function availableRuntimeActions(input: {
   readonly searchEnabled: boolean;
   readonly execEnabled: boolean;
   readonly readRoundsLeft: number;
+  readonly refreshReadAvailable?: boolean;
 }): readonly RuntimeAction[] {
   const actions: RuntimeAction[] = [];
   if (input.readRoundsLeft > 0) {
     actions.push('read');
     if (input.searchEnabled) actions.push('search', 'glob');
+  } else if (input.refreshReadAvailable === true) {
+    actions.push('read');
   }
   if (input.execEnabled) actions.push('exec');
   actions.push('edit');
   if (isSubmitAvailable(input.state)) actions.push('submit');
   return actions;
+}
+
+// ============================================================
+// REFRESH READ pós-mutação própria (contrato de repair).
+//
+// Edições exigem `expected_file_sha256` do estado ATUAL (stale_read fail-closed) e
+// esse sha só é obtido por uma leitura. Uma edição aplicada muda o sha do arquivo;
+// se o orçamento de investigação já acabou, recusar todo `read` cria um estado
+// IMPOSSÍVEL: o reparo do próprio arquivo exige um sha que nenhuma ação disponível
+// fornece (falha real das attempts #1/#2 de d0c7ad98 → ollama_submit_gate_unsatisfied).
+//
+// Contrato: após cada edição material aplicada (nova `editRevision`) existe UMA
+// leitura de refresh, restrita aos arquivos que o próprio coder mutou nesta sessão,
+// mesmo sem orçamento de investigação. Não é exploração: arquivos não mutados
+// continuam recusados, search/glob continuam indisponíveis, e o refresh só renova
+// com uma NOVA edição aplicada (que é bounded pela reserva pós-edit) — logo é finito
+// e não cria laço READ/repair. stale_read permanece intacto.
+// ============================================================
+
+export function isRefreshReadAvailable(input: {
+  /** Nº de edições materiais aplicadas (0 = nenhuma mutação própria). */
+  readonly editRevision: number;
+  /** editRevision cuja leitura de refresh já foi servida; -1 = nenhuma. */
+  readonly refreshedRevision: number;
+  /** Arquivos mutados pelo próprio coder nesta sessão. */
+  readonly mutatedPathCount: number;
+}): boolean {
+  return input.editRevision > 0
+    && input.mutatedPathCount > 0
+    && input.refreshedRevision !== input.editRevision;
 }

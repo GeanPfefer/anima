@@ -6,6 +6,7 @@ import {
   STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1,
   availableRuntimeActions,
   deriveSubmitGateState,
+  isRefreshReadAvailable,
   isSubmitAvailable,
   resolveAgenticRuntimePolicy,
   type SubmitGateSnapshotV1,
@@ -139,5 +140,25 @@ describe('SubmitGate — máquina de estados de submit (V3)', () => {
     const noBudget = availableRuntimeActions({ state: 'exploring', searchEnabled: true, execEnabled: true, readRoundsLeft: 0 });
     expect(noBudget).not.toContain('read');
     expect(noBudget).not.toContain('search');
+  });
+});
+
+describe('Refresh read pós-mutação própria', () => {
+  test('sem orçamento exploratório, refresh anuncia SÓ read (nunca search/glob)', () => {
+    const actions = availableRuntimeActions({ state: 'dirty_unvalidated', searchEnabled: true, execEnabled: true, readRoundsLeft: 0, refreshReadAvailable: true });
+    expect(actions).toEqual(['read', 'exec', 'edit']);
+  });
+
+  test('com orçamento exploratório, o refresh não altera o anúncio normal', () => {
+    const actions = availableRuntimeActions({ state: 'dirty_unvalidated', searchEnabled: true, execEnabled: true, readRoundsLeft: 2, refreshReadAvailable: true });
+    expect(actions).toEqual(['read', 'search', 'glob', 'exec', 'edit']);
+  });
+
+  test('isRefreshReadAvailable: exige mutação própria e é UMA vez por editRevision', () => {
+    expect(isRefreshReadAvailable({ editRevision: 0, refreshedRevision: -1, mutatedPathCount: 0 })).toBe(false);
+    expect(isRefreshReadAvailable({ editRevision: 1, refreshedRevision: -1, mutatedPathCount: 0 })).toBe(false);
+    expect(isRefreshReadAvailable({ editRevision: 1, refreshedRevision: -1, mutatedPathCount: 1 })).toBe(true);
+    expect(isRefreshReadAvailable({ editRevision: 1, refreshedRevision: 1, mutatedPathCount: 1 })).toBe(false);
+    expect(isRefreshReadAvailable({ editRevision: 2, refreshedRevision: 1, mutatedPathCount: 1 })).toBe(true);
   });
 });

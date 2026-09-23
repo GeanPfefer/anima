@@ -1272,3 +1272,112 @@ describe('OllamaCoderBackend — reserva pós-edit ANCORADA (V3, Parte B)', () =
     expect(ws.files.get('src/target.ts')).toContain('FIXED');
   });
 });
+
+describe('OllamaCoderBackend — leitura de REFRESH pós-mutação própria (repair d0c7ad98)', () => {
+  // Reproduz a falha REAL das attempts #1/#2: perfil LOCAL (3 rodadas), exploração
+  // esgotada, 1 edição aplicada, teste vermelho, reparo com sha ANTERIOR à própria
+  // edição (stale_read) e — antes da correção — nenhuma ação capaz de obter o sha atual.
+  const initial = 'export const target = 1;\n';
+  const wip = 'export const target = 1; // WIP\n';
+  const other = 'export const other = SEGREDO_NAO_MUTADO;\n';
+  const sha0 = sha256(initial);
+  const sha1 = sha256(wip);
+  const editToWip = editFileAction('src/target.ts', sha0, 'export const target = 1;', 'export const target = 1; // WIP');
+  const staleRepair = editFileAction('src/target.ts', sha0, 'export const target = 1; // WIP', 'export const target = 1; // FIXED');
+  const freshRepair = editFileAction('src/target.ts', sha1, 'export const target = 1; // WIP', 'export const target = 1; // FIXED');
+  const policy = supervisedWorkspaceAccessPolicy(['src/target.ts'], ['src/secret.ts']);
+  const cmd = resolveCommandExecutionPolicy('supervised');
+  const vcmd = [{ label: 'gate', program: 'npm', args: ['test'] }] as const;
+  const req = () => ({ objective: 'Corrigir', includedScope: ['src/target.ts'], excludedScope: ['src/secret.ts'], workspaceAccessPolicy: policy, commandPolicy: cmd, validationCommands: vcmd });
+  const local = resolveAgenticRuntimePolicy({ mode: 'autonomous' });
+  const exhaust = [readAction('src/target.ts', 'target'), readAction('src/target.ts', 'target'), readAction('src/target.ts', 'target')];
+  const backend = (fetchImpl: typeof fetch) => new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: local });
+  const actionsOf = (body: string): string => /Ações permitidas nesta rodada \(estado [a-z_]+\): ([a-z, ]+)\./.exec(body)?.[1] ?? '';
+
+  test('R1: READ→EDIT→TEST vermelho→EDIT stale recusado→REFRESH (sem orçamento) serve sha atual→EDIT atual→verde→submit', async () => {
+    expect(local.maxReadRounds).toBe(3);
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const { fetchImpl, sentBodies } = scriptedFetch([
+      ...exhaust,                                  // bodies 0..2: exploração esgotada
+      editToWip,                                   // 3: 1ª edição aplicada (sha muda)
+      execAction('npm', ['test']),                 // 4: vermelho
+      staleRepair,                                 // 5: sha anterior à própria edição → stale_read
+      readAction('src/target.ts', 'WIP'),          // 6: REFRESH (orçamento exploratório = 0)
+      freshRepair,                                 // 7: edição com o sha ATUAL servido
+      execAction('npm', ['test']),                 // 8: verde
+      execAction('git', ['diff']),                 // 9
+      submitAction(),                              // 10
+    ]);
+    const result = await backend(fetchImpl).edit(req(), ws, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['src/target.ts']);
+    expect(ws.files.get('src/target.ts')).toContain('FIXED');
+    // Após a edição e o vermelho, read é anunciado (refresh) mas search/glob não.
+    expect(actionsOf(sentBodies[5]!)).toBe('read, exec, edit');
+    // O stale continuou fail-closed e orienta ao refresh.
+    expect(sentBodies[6]!).toContain('ollama_stale_file_hash');
+    expect(sentBodies[6]!).toContain('refresh');
+    // Antes do refresh, o sha atual NÃO era obtível; depois, foi servido.
+    expect(sentBodies.slice(0, 7).some(b => b.includes(sha1))).toBe(false);
+    expect(sentBodies[7]!).toContain(sha1);
+    // Refresh consumido para esta revisão: read deixa de ser anunciado.
+    expect(actionsOf(sentBodies[7]!)).toBe('exec, edit');
+  });
+
+  test('R2: stale_read continua protegendo edição obsoleta mesmo DEPOIS do refresh', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const { fetchImpl, sentBodies } = scriptedFetch([
+      ...exhaust, editToWip, execAction('npm', ['test']),
+      readAction('src/target.ts', 'WIP'),          // 5: refresh servido
+      staleRepair,                                 // 6: sha antigo ainda é recusado
+      freshRepair, execAction('npm', ['test']), execAction('git', ['diff']), submitAction(),
+    ]);
+    const result = await backend(fetchImpl).edit(req(), ws, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['src/target.ts']);
+    expect(sentBodies[7]!).toContain('ollama_stale_file_hash');
+    expect(ws.files.get('src/target.ts')).toContain('FIXED');
+  });
+
+  test('R3: arquivos NÃO mutados não ganham leitura — refresh recusa caminho não relacionado', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial, 'src/other.ts': other });
+    const { fetchImpl, sentBodies } = scriptedFetch([
+      ...exhaust, editToWip, execAction('npm', ['test']),
+      readAction('src/other.ts', 'other'),         // 5: não mutado → recusado
+      readAction('src/target.ts', 'WIP'),          // 6: refresh legítimo ainda disponível
+      freshRepair, execAction('npm', ['test']), execAction('git', ['diff']), submitAction(),
+    ]);
+    const result = await backend(fetchImpl).edit(req(), ws, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['src/target.ts']);
+    expect(sentBodies.some(b => b.includes('SEGREDO_NAO_MUTADO'))).toBe(false);
+    expect(sentBodies[6]!).toContain('Leitura de refresh recusada');
+    expect(sentBodies[7]!).toContain(sha1);
+  });
+
+  test('R4: finito — um refresh por edição aplicada; READ repetido é reorientado e o laço termina bounded', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const refresh = readAction('src/target.ts', 'WIP');
+    const { fetchImpl, sentBodies } = scriptedFetch([
+      ...exhaust, editToWip, execAction('npm', ['test']),
+      refresh,                                     // 5: servido
+      refresh, refresh, refresh, refresh, refresh, refresh, refresh, refresh, // sem nova edição: reorientados
+    ]);
+    await expect(backend(fetchImpl).edit(req(), ws, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_submit_gate_unsatisfied' });
+    expect(sentBodies[6]!).toContain(sha1);
+    expect(sentBodies[7]!).toContain('orçamento de leitura esgotado');
+    // 5 turnos até o vermelho + 1 refresh + no máximo MAX_MISDIRECTED_FEEDBACKS(4)+1 reorientações.
+    expect(sentBodies.length).toBeLessThanOrEqual(5 + 1 + 5);
+  });
+
+  test('R5: search/glob continuam indisponíveis durante o refresh (não vira investigação)', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial, 'src/other.ts': other });
+    const { fetchImpl, sentBodies } = scriptedFetch([
+      ...exhaust, editToWip, execAction('npm', ['test']),
+      searchAction('SEGREDO'),                     // 5: reorientado
+      readAction('src/target.ts', 'WIP'), freshRepair, execAction('npm', ['test']), execAction('git', ['diff']), submitAction(),
+    ]);
+    const result = await backend(fetchImpl).edit(req(), ws, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['src/target.ts']);
+    expect(sentBodies.some(b => b.includes('SEGREDO_NAO_MUTADO'))).toBe(false);
+    expect(sentBodies[6]!).toContain('investigação de leitura esgotada');
+  });
+});
