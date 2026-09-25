@@ -1905,3 +1905,17 @@ condenavam todo sucessor a `criterion_covers_unknown_acceptance` (`a97ad40`) —
 do parecer `rejected` de `bd4092af`. A reserva de US$3 permanece aberta (`cost_unknown`,
 barreira B1). Registro:
 [prova Sol e correções](docs/registros/2026-09-25-prova-sol-bd4092af-router-lineage-e-covers.md).
+
+## Estado operacional — caminho normal até a authority paga, sem scripts (2026-09-25)
+
+O Resident Host normal passa a operar o compute forte só por configuração de operador
+(`ANIMA_COMPUTE_ROUTER_V1_ENABLED`, `ANIMA_CODER_MODEL`, `ANIMA_OPENAI_CODER_*`,
+validadas e logadas no arranque). Uma unidade que o Router põe em
+`waiting_for_human_authorization` fica estável (decisão idempotente, sem laço de
+eventos), aparece em `anima work show` com o envelope exato e é destravada pelo ato
+humano `anima work authorize-compute`; preferência OpenAI aprovada nunca vira Ollama em
+silêncio. `anima work prepare-autonomous` dá à CLI a classificação que só a UI fazia. O
+planejador local entende chamadas textuais do qwen3-coder e tem timeout configurável,
+mas não planeja com qualidade o pedido pendente de `c41ad2ff`. B1 segue congelado: falta
+preço versionado externo e a fiação pós-attempt. Registro:
+[caminho normal até a authority](docs/registros/2026-09-25b-caminho-normal-ate-authority-sem-scripts.md).
