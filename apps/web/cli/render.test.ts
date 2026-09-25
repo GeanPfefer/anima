@@ -28,7 +28,7 @@ describe('render humano da CLI', () => {
       verifierRecorded: { verdict: 'verified', opinions: 1 },
       acceptance: { total: 2, covered: 1, missing: 1, criteria: [{ criterion: 'A', covered: true, proof: 'gate' }, { criterion: 'B', covered: false, proof: 'scope' }] },
       availableActions: ['accept_result', 'request_result_changes'], suggestedDecision: 'request_changes',
-      provenance: { status: 'complete', issues: [] },
+      provenance: { status: 'complete', issues: [] }, computeRouting: null,
     };
     const out = renderHuman(payload);
     expect(out).toContain('Verifier (agora): inconclusive');

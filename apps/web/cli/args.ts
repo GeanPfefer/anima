@@ -19,7 +19,8 @@ export type ParsedCommand =
   | { readonly kind: 'work-approve'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-accept'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-withdraw'; readonly id: string; readonly reason: string; readonly json: boolean }
-  | { readonly kind: 'work-retry'; readonly id: string; readonly json: boolean };
+  | { readonly kind: 'work-retry'; readonly id: string; readonly json: boolean }
+  | { readonly kind: 'work-authorize-compute'; readonly id: string; readonly maxCostUsd: number; readonly maxMinutes: number; readonly validHours: number; readonly json: boolean };
 
 export type ParseResult =
   | { readonly ok: true; readonly command: ParsedCommand }
@@ -31,6 +32,7 @@ interface Extracted {
   readonly reason: string | null;
   readonly diagnosisPath: string | null;
   readonly planPath: string | null;
+  readonly limits: Readonly<Record<'maxUsd' | 'maxMinutes' | 'validHours', string | null>>;
   readonly help: boolean;
   readonly unknownFlag: string | null;
 }
@@ -42,6 +44,7 @@ function extract(argv: readonly string[]): Extracted {
   let reason: string | null = null;
   let diagnosisPath: string | null = null;
   let planPath: string | null = null;
+  const limits: Record<'maxUsd' | 'maxMinutes' | 'validHours', string | null> = { maxUsd: null, maxMinutes: null, validHours: null };
   let help = false;
   let unknownFlag: string | null = null;
   for (let i = 0; i < argv.length; i++) {
@@ -49,17 +52,32 @@ function extract(argv: readonly string[]): Extracted {
     if (token === '--json') { json = true; continue; }
     if (token === '--diagnosis') { diagnosisPath = argv[++i] ?? ''; continue; }
     if (token === '--plan') { planPath = argv[++i] ?? ''; continue; }
+    if (token === '--max-usd') { limits.maxUsd = argv[++i] ?? ''; continue; }
+    if (token === '--max-minutes') { limits.maxMinutes = argv[++i] ?? ''; continue; }
+    if (token === '--valid-hours') { limits.validHours = argv[++i] ?? ''; continue; }
     if (token === '--help' || token === '-h') { help = true; continue; }
     if (token === '--reason' || token === '-m') { reason = argv[++i] ?? ''; continue; }
     if (token.startsWith('--reason=')) { reason = token.slice('--reason='.length); continue; }
     if (token.startsWith('-') && token !== '-') { if (unknownFlag === null) unknownFlag = token; continue; }
     positionals.push(token);
   }
-  return { positionals, json, reason, diagnosisPath, planPath, help, unknownFlag };
+  return { positionals, json, reason, diagnosisPath, planPath, limits, help, unknownFlag };
 }
 
+/** Limites da authority paga: EXPLÍCITOS (sem default de dinheiro) e dentro de faixas sãs. */
+export const COMPUTE_AUTHORITY_LIMIT_BOUNDS = {
+  maxUsd: { min: 0.01, max: 50 },
+  maxMinutes: { min: 1, max: 240 },
+  validHours: { min: 0.1, max: 24 },
+} as const;
+const boundedNumber = (raw: string | null, bounds: { readonly min: number; readonly max: number }): number | null => {
+  if (raw === null || !/^\d+(\.\d+)?$/.test(raw.trim())) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= bounds.min && value <= bounds.max ? value : null;
+};
+
 export function parseArgs(argv: readonly string[]): ParseResult {
-  const { positionals, json, reason, diagnosisPath, planPath, help, unknownFlag } = extract(argv);
+  const { positionals, json, reason, diagnosisPath, planPath, limits, help, unknownFlag } = extract(argv);
 
   if (help || positionals[0] === 'help' || positionals.length === 0) return { ok: true, command: { kind: 'help' } };
   if (unknownFlag !== null) return { ok: false, error: `Flag desconhecida: ${unknownFlag}` };
@@ -70,6 +88,10 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   }
   if (planPath !== null && (group !== 'work' || sub !== 'authorize-resume' || !planPath.trim())) {
     return { ok: false, error: '--plan exige um arquivo e work authorize-resume.' };
+  }
+  const anyLimit = limits.maxUsd !== null || limits.maxMinutes !== null || limits.validHours !== null;
+  if (anyLimit && (group !== 'work' || sub !== 'authorize-compute')) {
+    return { ok: false, error: '--max-usd/--max-minutes/--valid-hours só valem para work authorize-compute.' };
   }
 
   if (group === 'status') {
@@ -132,6 +154,17 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       if (reason === null || reason.trim().length === 0) return { ok: false, error: 'withdraw exige --reason "<motivo>" não vazio.' };
       return { ok: true, command: { kind: 'work-withdraw', id, reason: reason.trim(), json } };
     }
+    if (sub === 'authorize-compute') {
+      const usage = 'Uso: anima work authorize-compute <id> --max-usd <US$> --max-minutes <min> --valid-hours <h>';
+      if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: usage };
+      const maxCostUsd = boundedNumber(limits.maxUsd, COMPUTE_AUTHORITY_LIMIT_BOUNDS.maxUsd);
+      const maxMinutes = boundedNumber(limits.maxMinutes, COMPUTE_AUTHORITY_LIMIT_BOUNDS.maxMinutes);
+      const validHours = boundedNumber(limits.validHours, COMPUTE_AUTHORITY_LIMIT_BOUNDS.validHours);
+      if (maxCostUsd === null || maxMinutes === null || validHours === null) {
+        return { ok: false, error: `${usage} — os três limites são obrigatórios (US$ 0,01–50; 1–240 min; 0,1–24 h).` };
+      }
+      return { ok: true, command: { kind: 'work-authorize-compute', id, maxCostUsd, maxMinutes, validHours, json } };
+    }
     if (sub === 'retry') {
       if (!id) return { ok: false, error: 'Uso: anima work retry <id>' };
       return { ok: true, command: { kind: 'work-retry', id, json } };
@@ -160,6 +193,8 @@ Uso:
   anima work accept <id>                       Aceita o RESULTADO em review (review → completed)
   anima work withdraw <id> --reason "..."      Retira um plano APROVADO não iniciado (approved → cancelled)
   anima work retry <id>                        Solicita o retry governado de um item failed/RETRY_READY
+  anima work authorize-compute <id> --max-usd N --max-minutes M --valid-hours H
+                                               Autoridade humana paga p/ uma unidade que o Router pôs em espera
   anima help                                  Esta ajuda
 
 Flags:
@@ -167,5 +202,8 @@ Flags:
   --reason "..."   Texto do pedido de correção (request-changes)
   --diagnosis f    Arquivo JSON do diagnóstico (work replan)
   --plan f         Arquivo JSON da autorização humana de retomada (work authorize-resume)
+  --max-usd N      Teto de custo da authority paga (work authorize-compute)
+  --max-minutes M  Duração máxima de compute (≥ o que o Router pede por volta)
+  --valid-hours H  Janela de validade da authority
 
 Códigos de saída: 0 sucesso · 1 erro operacional · 2 uso inválido · 3 ação recusada por regra`;

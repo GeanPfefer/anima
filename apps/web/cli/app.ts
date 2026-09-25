@@ -1,4 +1,7 @@
 import {
+  COMPUTE_ROUTER_REQUESTED_DURATION_MS,
+  projectComputeRoutingWait,
+  type ComputeRoutingWaitV1,
   planResultReview,
   readAutonomousExecutionSpec,
   reconstructWorkPresentation,
@@ -88,6 +91,8 @@ export interface WorkShowPayload {
   readonly availableActions: readonly string[];
   readonly suggestedDecision: 'request_changes' | null;
   readonly provenance: { readonly status: string; readonly issues: readonly string[] };
+  /** A unidade aprovada está parada no Compute Router (espera por authority ou bloqueio). */
+  readonly computeRouting: ComputeRoutingWaitV1 | null;
 }
 export interface WorkEvidencePayload {
   readonly ok: true;
@@ -199,6 +204,13 @@ export interface WorkCorrectPayload {
   readonly replayed: boolean;
   readonly message: string;
 }
+export interface WorkAuthorizeComputePayload {
+  readonly ok: true; readonly kind: 'work-authorize-compute'; readonly workItemId: string;
+  readonly authorizationId: string; readonly providerId: string; readonly nodeId: string;
+  readonly resourceClass: string; readonly model: string;
+  readonly maxCostUsd: number; readonly maxDurationMs: number; readonly validFrom: string; readonly validUntil: string;
+  readonly message: string;
+}
 export interface WorkSupervisionPayload {
   readonly ok: true; readonly kind: 'work-supervise' | 'work-unsupervise'; readonly workItemId: string;
   readonly leaseId: string | null; readonly expiresAt: string | null; readonly replayed: boolean; readonly readmitted: boolean;
@@ -217,7 +229,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | ErrorPayload | HelpPayload
+  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -467,11 +479,14 @@ export async function runWorkList(service: WorkOrchestrationPort): Promise<Comma
 export async function runWorkShow(service: WorkOrchestrationPort, id: string): Promise<CommandResult> {
   const loaded = await loadPresentation(service, id);
   if (!loaded.ok) return loaded.result;
-  const { item, presentation } = loaded;
+  const { item, events, presentation } = loaded;
   const live = presentation.verification;
   const coverage = acceptanceCoverage(item, live);
   const missing = coverage.filter(c => !c.covered).length;
   const inReview = item.state === 'review';
+  const computeRouting = projectComputeRoutingWait({
+    workItemId: item.id, state: item.state, proposalVersion: item.proposalVersion, events,
+  });
   const suggestedDecision: 'request_changes' | null =
     inReview && ((live && live.verdict !== 'verified') || missing > 0) ? 'request_changes' : null;
   const spec = readAutonomousExecutionSpec(item.intent);
@@ -501,6 +516,78 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
       availableActions: presentation.availableActions,
       suggestedDecision,
       provenance: { status: presentation.provenance?.status ?? 'unknown', issues: presentation.provenance?.issues ?? [] },
+      computeRouting,
+    },
+  };
+}
+
+/** Limites que o HUMANO escolhe para a authority paga; o envelope (provider/modelo/classe)
+ * vem da espera registrada pelo Router, nunca de texto livre. */
+export interface ComputeAuthorityLimits {
+  readonly maxCostUsd: number;
+  readonly maxMinutes: number;
+  readonly validHours: number;
+}
+export interface ComputeAuthorityGrantPort {
+  /** Authorities ATIVAS já existentes para o item e a classe de recurso. */
+  readonly activeFor: (workItemId: string, resourceClass: string) => Promise<{ ok: true; count: number } | { ok: false; code: string; message: string }>;
+  readonly grant: (input: {
+    providerId: string; nodeId: string; resourceClass: string; workItemId: string;
+    maxDurationMs: number; maxCost: { currency: 'USD'; amount: number }; validFrom: string; validUntil: string;
+  }) => Promise<{ ok: true; authorizationId: string } | { ok: false; code: string; message: string }>;
+}
+
+/**
+ * Concede, como ATO HUMANO, a authority paga que destrava uma unidade parada no Compute
+ * Router. Só age sobre uma espera registrada (`waiting_for_human_authorization`) da versão
+ * aprovada vigente; provider/nó/classe/modelo vêm da decisão. Recusa se já houver authority
+ * ativa compatível (não empilha exposição) ou se a duração não cobrir o que o Router pede.
+ * NÃO executa nada: a próxima volta do Resident Host consome a authority.
+ */
+export async function runWorkAuthorizeCompute(
+  service: WorkOrchestrationPort,
+  port: ComputeAuthorityGrantPort,
+  id: string,
+  limits: ComputeAuthorityLimits,
+  now: () => Date = () => new Date(),
+): Promise<CommandResult> {
+  const loaded = await loadPresentation(service, id);
+  if (!loaded.ok) return loaded.result;
+  const { item, events } = loaded;
+  const wait = projectComputeRoutingWait({ workItemId: item.id, state: item.state, proposalVersion: item.proposalVersion, events });
+  if (!wait || wait.status !== 'waiting_for_human_authorization') {
+    return errorResult(
+      wait ? `A unidade está bloqueada no Router (${wait.reasonCode}); authority paga não a destrava.`
+        : 'Não há espera por authority paga registrada para a versão aprovada vigente.',
+      'no_compute_authority_wait', EXIT.REJECTED);
+  }
+  const required = wait.requiredAuthority;
+  const maxDurationMs = limits.maxMinutes * 60_000;
+  if (maxDurationMs < required.minDurationMs) {
+    return errorResult(`--max-minutes precisa cobrir a duração que o Router pede por volta (${required.minDurationMs / 60_000} min).`,
+      'duration_below_router_request', EXIT.USAGE);
+  }
+  const existing = await port.activeFor(item.id, required.resourceClass);
+  if (!existing.ok) return errorResult(existing.message, existing.code, EXIT.ERROR);
+  if (existing.count > 0) {
+    return errorResult('Já existe authority ativa compatível para esta unidade; nenhuma exposição adicional foi criada.',
+      'authority_already_active', EXIT.REJECTED);
+  }
+  const start = now();
+  const validFrom = new Date(start.getTime() - 30_000).toISOString();
+  const validUntil = new Date(start.getTime() + limits.validHours * 3_600_000).toISOString();
+  const granted = await port.grant({
+    providerId: required.providerId, nodeId: required.nodeId, resourceClass: required.resourceClass, workItemId: item.id,
+    maxDurationMs, maxCost: { currency: 'USD', amount: limits.maxCostUsd }, validFrom, validUntil,
+  });
+  if (!granted.ok) return errorResult(granted.message, granted.code, granted.code === 'invalid_input' || granted.code === 'forbidden' ? EXIT.REJECTED : EXIT.ERROR);
+  return {
+    exitCode: EXIT.OK,
+    payload: {
+      ok: true, kind: 'work-authorize-compute', workItemId: item.id, authorizationId: granted.authorizationId,
+      providerId: required.providerId, nodeId: required.nodeId, resourceClass: required.resourceClass, model: required.model,
+      maxCostUsd: limits.maxCostUsd, maxDurationMs, validFrom, validUntil,
+      message: 'Authority paga concedida. O Resident Host a consome na próxima volta; nada foi executado agora.',
     },
   };
 }

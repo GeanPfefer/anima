@@ -9,6 +9,8 @@ import { correctReviewedWorkItem } from '@/lib/work-orchestration/review-correct
 import { readWorkRetryReadiness } from '@/lib/work-orchestration/retry-readiness';
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
+import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/lib/work-orchestration/paid-compute-authorization-store';
+import { runWorkAuthorizeCompute } from './app';
 import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
@@ -91,6 +93,15 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
       return runWorkReview(service, command.id, { type: 'accept' });
     case 'work-withdraw':
       return runWorkWithdraw(service, command.id, command.reason);
+    case 'work-authorize-compute':
+      return runWorkAuthorizeCompute(service, {
+        activeFor: async (workItemId, resourceClass) => {
+          const listed = await listPaidComputeAuthorizations(client);
+          if (!listed.ok) return listed;
+          return { ok: true, count: listed.authorizations.filter(a => a.active && a.workItemId === workItemId && a.resourceClass === resourceClass).length };
+        },
+        grant: input => grantPaidComputeAuthorization(client, input),
+      }, command.id, { maxCostUsd: command.maxCostUsd, maxMinutes: command.maxMinutes, validHours: command.validHours });
     case 'work-retry': {
       const retry: WorkRetryCapability = {
         readReadiness: (workItemId) => readWorkRetryReadiness(client, workItemId),

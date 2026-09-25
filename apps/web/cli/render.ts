@@ -89,6 +89,18 @@ export function renderHuman(payload: CliPayload): string {
         lines.push('');
         lines.push(`Proveniência: ${payload.provenance.status} (${payload.provenance.issues.join(', ')})`);
       }
+      if (payload.computeRouting) {
+        const wait = payload.computeRouting;
+        lines.push('');
+        if (wait.status === 'waiting_for_human_authorization') {
+          const need = wait.requiredAuthority;
+          lines.push(`Compute: AGUARDANDO AUTORIDADE PAGA ${DOT} ${need.providerId} / ${need.resourceClass} (desde ${wait.decidedAt})`);
+          lines.push(`  ${wait.reason}`);
+          lines.push(`  Para autorizar: anima work authorize-compute ${payload.id} --max-usd <US$> --max-minutes <≥${need.minDurationMs / 60_000}> --valid-hours <h>`);
+        } else {
+          lines.push(`Compute: BLOQUEADO no Router (${wait.reasonCode}) ${DOT} ${wait.reason}`);
+        }
+      }
       lines.push('');
       lines.push(`Ações disponíveis: ${payload.availableActions.length ? payload.availableActions.join(', ') : '(nenhuma)'}`);
       if (payload.suggestedDecision) lines.push(`Decisão sugerida: ${payload.suggestedDecision}`);
@@ -153,6 +165,13 @@ export function renderHuman(payload: CliPayload): string {
       ].join('\n');
     case 'work-supervise':
     case 'work-unsupervise': return `${payload.workItemId} ${DOT} ${payload.message}`;
+    case 'work-authorize-compute':
+      return [
+        `${payload.workItemId} ${DOT} ${payload.message}`,
+        `Authority: ${payload.authorizationId}`,
+        `Envelope: ${payload.providerId} / ${payload.nodeId} / ${payload.resourceClass}`,
+        `Limites: US$ ${payload.maxCostUsd} ${DOT} ${payload.maxDurationMs / 60_000} min ${DOT} válida até ${payload.validUntil}`,
+      ].join('\n');
     case 'work-replan':
       return `Sucessor: ${payload.successorWorkItemId}\nLineage: ${payload.lineageId}\nReplan: ${payload.replanId}${payload.replayed ? ' (replay)' : ''}\nBudget transferido: ${payload.allocatedAttempts}\nEstratégia: ${payload.strategy.map(s=>`${s.kind}: ${s.symbols.join(', ')}`).join(' | ')}\nAprovação humana permanece separada.`;
 

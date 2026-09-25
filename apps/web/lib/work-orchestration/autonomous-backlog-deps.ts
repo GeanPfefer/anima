@@ -1,4 +1,4 @@
-import { decideComputeRoute, deriveLocalFailureSignal, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureHistoryEventV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
+import { COMPUTE_ROUTER_REQUESTED_DURATION_MS, decideComputeRoute, deriveLocalFailureSignal, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureHistoryEventV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
@@ -150,7 +150,7 @@ async function routeCompute(
   const authorityDecision = evaluatePaidComputeAuthorization({
     billingMode: 'paid', providerId: 'openai', nodeId: 'openai-api',
     resourceClass: openAIProviderResourceClass(openAIModel), workItemId: entry.workItemId,
-    requestedDurationMs: 30 * 60_000, estimatedCost: authorization?.maxCostEstimate ?? null,
+    requestedDurationMs: COMPUTE_ROUTER_REQUESTED_DURATION_MS, estimatedCost: authorization?.maxCostEstimate ?? null,
   }, authorization, new Date());
   const economics = await readEconomicHistory(client, {
     capability: entry.capability,
