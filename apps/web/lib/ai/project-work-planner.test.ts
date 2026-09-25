@@ -174,6 +174,11 @@ describe('planejador executável do projeto', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ output: [] }),
+      })
+      // Volta sem tool call recebe UMA continuação corretiva antes de falhar.
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ output: [] }),
       });
 
     const planner = new OpenAIProjectWorkPlanner({
@@ -187,7 +192,7 @@ describe('planejador executável do projeto', () => {
     const result = await planner.proposeArguments('faca');
 
     expect(result.ok).toBe(false);
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 
   test('included_scope inventado e recusado antes de virar proposta terminal', async () => {

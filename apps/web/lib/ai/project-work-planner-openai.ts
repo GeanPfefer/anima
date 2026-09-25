@@ -35,7 +35,54 @@ type OutputItem = {
   arguments?: string;
   content?: Array<{ type?: string; text?: string }>;
 };
-type OpenAIResponse = { output?: OutputItem[]; error?: { message?: string } };
+type OpenAIResponse = {
+  status?: string;
+  incomplete_details?: { reason?: string } | null;
+  output?: OutputItem[];
+  usage?: { input_tokens?: number; output_tokens?: number; output_tokens_details?: { reasoning_tokens?: number } };
+  error?: { message?: string };
+};
+
+/** Diagnóstico de uma volta do planner: forma da resposta, NUNCA conteúdo nem segredo. */
+export interface PlannerTurnDiagnostic {
+  readonly turn: number;
+  readonly status: string | null;
+  readonly incompleteReason: string | null;
+  readonly outputTypes: readonly string[];
+  readonly functionCalls: readonly string[];
+  readonly textChars: number;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly reasoningTokens: number | null;
+}
+
+export function diagnosePlannerTurn(turn: number, body: OpenAIResponse): PlannerTurnDiagnostic {
+  const output = body.output ?? [];
+  const num = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return {
+    turn,
+    status: typeof body.status === 'string' ? body.status : null,
+    incompleteReason: typeof body.incomplete_details?.reason === 'string' ? body.incomplete_details.reason : null,
+    outputTypes: output.map(item => item.type ?? 'unknown'),
+    functionCalls: output.filter(item => item.type === 'function_call').map(item => item.name ?? '?'),
+    textChars: output.flatMap(item => item.content ?? []).reduce((sum, part) => sum + (typeof part.text === 'string' ? part.text.length : 0), 0),
+    inputTokens: num(body.usage?.input_tokens),
+    outputTokens: num(body.usage?.output_tokens),
+    reasoningTokens: num(body.usage?.output_tokens_details?.reasoning_tokens),
+  };
+}
+
+/** Uma volta SEM tool call (texto/raciocínio/incompleta) recebe UMA continuação corretiva
+ * antes de o planejamento falhar — nunca vira proposta: a proposta só nasce do submit. */
+const MAX_NO_CALL_CONTINUATIONS = 1;
+const NO_CALL_CONTINUATION = 'Continue exclusivamente pelas ferramentas: investigue o repositório com as ferramentas read-only e entregue a proposta chamando submit_project_work_proposal. Não responda em texto.';
+
+const describeNoCall = (diagnostic: PlannerTurnDiagnostic): string => {
+  const parts = [`status=${diagnostic.status ?? 'desconhecido'}`];
+  if (diagnostic.incompleteReason) parts.push(`motivo=${diagnostic.incompleteReason}`);
+  parts.push(`saída=[${diagnostic.outputTypes.join(',') || 'vazia'}]`);
+  return parts.join(' ');
+};
 
 
 export interface OpenAIPlannerDeps {
@@ -68,6 +115,8 @@ export class OpenAIProjectWorkPlanner implements ProjectWorkPlanner {
     let input: unknown[] = [{ role: 'user', content: buildPlannerUserPrompt(message) }];
     let localEvidenceCalls = 0;
     let totalCalls = 0;
+    let turn = 0;
+    let noCallContinuations = 0;
 
     while (totalCalls <= PLANNER_TOOL_CALL_LIMIT) {
       let response: Response | null;
@@ -82,9 +131,12 @@ export class OpenAIProjectWorkPlanner implements ProjectWorkPlanner {
             instructions: PLANNER_SYSTEM_INSTRUCTIONS,
             input,
             tools: [...OPENAI_PROJECT_TOOLS, SUBMIT_TOOL_RESPONSES],
+            // `required`: o protocolo do planner é SÓ por ferramentas (investigar ou submeter).
+            // Com `auto` o modelo podia encerrar a volta em texto/raciocínio e o host
+            // descartava tudo. Depois da evidência mínima, o submit é forçado.
             tool_choice: localEvidenceCalls >= FORCE_SUBMISSION_AFTER_EVIDENCE
               ? { type: 'function', name: SUBMIT_TOOL_NAME }
-              : 'auto',
+              : 'required',
           },
           signal: timeoutSignal(90_000),
           fetchImpl: this.fetchImpl,
@@ -102,9 +154,20 @@ export class OpenAIProjectWorkPlanner implements ProjectWorkPlanner {
       }
       const body = await response.json() as OpenAIResponse;
       const output = body.output ?? [];
+      turn += 1;
+      const diagnostic = diagnosePlannerTurn(turn, body);
+      // Observabilidade: forma da volta (tipos, status, tokens) — sem conteúdo nem segredos.
+      console.info('[project-work-planner-openai] turn', { model, ...diagnostic });
       const calls = output.filter((item): item is OutputItem & { call_id: string; name: string; arguments: string } =>
         item.type === 'function_call' && nonBlank(item.call_id) && nonBlank(item.name) && typeof item.arguments === 'string');
-      if (calls.length === 0) return { ok: false, message: 'O GPT não produziu uma proposta estruturada.' };
+      if (calls.length === 0) {
+        if (noCallContinuations < MAX_NO_CALL_CONTINUATIONS && diagnostic.status !== 'failed') {
+          noCallContinuations += 1;
+          input = [...input, ...output, { role: 'user', content: NO_CALL_CONTINUATION }];
+          continue;
+        }
+        return { ok: false, message: `O GPT não produziu uma proposta estruturada (${describeNoCall(diagnostic)}).` };
+      }
 
       totalCalls += calls.length;
       if (totalCalls > PLANNER_TOOL_CALL_LIMIT) return { ok: false, message: 'O planejamento excedeu o limite de consultas locais.' };
@@ -120,16 +183,14 @@ export class OpenAIProjectWorkPlanner implements ProjectWorkPlanner {
 
       const toolOutputs = await Promise.all(calls.map(async call => {
         if (call.name === SUBMIT_TOOL_NAME) {
-          return {
-            type: 'function_call_output',
-            call_id: call.call_id,
-            output: JSON.stringify({
-              ok: false,
-              error: localEvidenceCalls > 0
-                ? 'O included_scope não está ancorado na topologia real do repositório. Investigue os caminhos e submeta novamente.'
-                : 'Investigue o repositório antes de enviar a proposta.',
-            }),
-          };
+          // Recusa com o motivo REAL: sem evidência, validação estrutural do host, ou
+          // escopo fora da topologia do repositório.
+          const error = localEvidenceCalls === 0
+            ? 'Investigue o repositório antes de enviar a proposta.'
+            : parseProposal(call.arguments) === null
+              ? 'A proposta não passou na validação estrutural do host (campos obrigatórios, caminhos seguros no included_scope, até 12 caminhos, comando de validação permitido). Corrija e submeta novamente.'
+              : 'O included_scope não está ancorado na topologia real do repositório. Investigue os caminhos e submeta novamente.';
+          return { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify({ ok: false, error }) };
         }
 
         const output = await this.executeTool(call.name, call.arguments);
