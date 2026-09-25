@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { LocalOllamaProjectWorkPlanner, parseTextualToolCalls } from './project-work-planner-local';
+import { LocalOllamaProjectWorkPlanner, parseTextualToolCalls, resolveLocalPlannerRoundTimeoutMs } from './project-work-planner-local';
 
 // Formato nativo observado AO VIVO (qwen3-coder:30b via Ollama, 2026-09-25): a chamada vem
 // no `content` e `tool_calls` fica vazio.
@@ -51,5 +51,15 @@ describe('LocalOllamaProjectWorkPlanner com chamadas textuais', () => {
     expect(tools).toEqual(['project_read_file']);
     expect(result.ok).toBe(true);
     if (result.ok) expect(JSON.parse(result.rawArguments).included_scope).toEqual(['apps/web/lib/ai/project-work-planner.ts']);
+  });
+});
+
+describe('resolveLocalPlannerRoundTimeoutMs', () => {
+  test('default histórico, faixa limitada e fail-safe', () => {
+    expect(resolveLocalPlannerRoundTimeoutMs({})).toBe(90_000);
+    expect(resolveLocalPlannerRoundTimeoutMs({ ANIMA_PROJECT_PLANNER_ROUND_TIMEOUT_MS: '240000' })).toBe(240_000);
+    expect(resolveLocalPlannerRoundTimeoutMs({ ANIMA_PROJECT_PLANNER_ROUND_TIMEOUT_MS: '5' })).toBe(90_000);
+    expect(resolveLocalPlannerRoundTimeoutMs({ ANIMA_PROJECT_PLANNER_ROUND_TIMEOUT_MS: '9999999' })).toBe(90_000);
+    expect(resolveLocalPlannerRoundTimeoutMs({ ANIMA_PROJECT_PLANNER_ROUND_TIMEOUT_MS: 'x' })).toBe(90_000);
   });
 });

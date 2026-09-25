@@ -63,6 +63,14 @@ export function parseTextualToolCalls(content: string | null | undefined, knownT
   return calls;
 }
 
+/** Timeout POR RODADA do planejador local. Ausente ⇒ 90 s (histórico). Faixa [30 s, 600 s];
+ * valor inválido ⇒ default (o planejamento local nunca gasta dinheiro, só tempo). Um modelo
+ * grande no limite de memória da máquina pode precisar de rodadas mais longas. */
+export function resolveLocalPlannerRoundTimeoutMs(env: Record<string, string | undefined> = process.env): number {
+  const raw = Number(env.ANIMA_PROJECT_PLANNER_ROUND_TIMEOUT_MS);
+  return Number.isInteger(raw) && raw >= 30_000 && raw <= 600_000 ? raw : 90_000;
+}
+
 const KNOWN_PLANNER_TOOLS: ReadonlySet<string> = new Set(
   [...PLANNER_CHAT_TOOLS, SUBMIT_CHAT_TOOL]
     .map(tool => (tool as { function?: { name?: unknown } }).function?.name)
@@ -84,6 +92,8 @@ export interface LocalPlannerDeps {
   /** Após N chamadas de evidência, força o submit (tools = só submit). O modelo
    * local tende a sobre-investigar; forçar mais cedo é mais confiável e barato. */
   readonly forceAfterEvidence?: number;
+  /** Timeout por rodada; ausente ⇒ `ANIMA_PROJECT_PLANNER_ROUND_TIMEOUT_MS` ⇒ 90 s. */
+  readonly roundTimeoutMs?: number;
 }
 
 export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
@@ -94,6 +104,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
   private readonly model: string;
   private readonly maxTurns: number;
   private readonly forceAfterEvidence: number;
+  private readonly roundTimeoutMs: number;
 
   constructor(deps: LocalPlannerDeps = {}) {
     this.fetchImpl = deps.fetchImpl ?? fetch;
@@ -102,6 +113,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
     this.model = deps.model ?? process.env.ANIMA_PROJECT_PLANNER_MODEL ?? 'qwen3-coder:latest';
     this.maxTurns = deps.maxTurns ?? 16;
     this.forceAfterEvidence = deps.forceAfterEvidence ?? 4;
+    this.roundTimeoutMs = deps.roundTimeoutMs ?? resolveLocalPlannerRoundTimeoutMs();
   }
 
   async proposeArguments(message: string): Promise<PlannerProposalResult> {
@@ -131,7 +143,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
       try {
         response = await this.fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
           method: 'POST',
-          signal: timeoutSignal(90_000),
+          signal: timeoutSignal(this.roundTimeoutMs),
           // SEM Authorization: o endpoint é o Ollama local; nenhum segredo é enviado.
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -156,7 +168,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
           return {
             ok: false,
             message: timedOut
-              ? 'O planejador local excedeu o tempo limite de 90 segundos em uma rodada do modelo.'
+              ? `O planejador local excedeu o tempo limite de ${Math.round(this.roundTimeoutMs / 1000)} segundos em uma rodada do modelo.`
               : 'Não foi possível comunicar com o modelo local durante o planejamento.',
           };
         }
