@@ -44,6 +44,27 @@ describe('Compute Router V1', () => {
   test('explicit approved preference selects authorized OpenAI', () => expect(decideComputeRoute(input({ preferred: { provider: 'openai', model: 'gpt-x' } }))).toMatchObject({ selectedProvider: 'openai', reasonCode: 'preferred_candidate', authorizationId: 'auth-1' }));
 });
 
+describe('Compute Router V1 — preferência OpenAI aprovada é autoritativa', () => {
+  const missing = { status: 'missing' as const, authorizationId: null, remainingExposure: { status: 'unavailable' as const, reason: 'cost_unknown' as const } };
+  const preferred = { provider: 'openai' as const, model: 'gpt-x' };
+  test('sem authority espera em vez de executar Ollama (local admissível e mais barato)', () => {
+    expect(decideComputeRoute(input({ preferred, paidAuthority: missing, economics: { local: metrics('ollama', 1), openai: metrics('openai', 2) } })))
+      .toMatchObject({ status: 'waiting_for_human_authorization', selectedProvider: null, reasonCode: 'paid_authorization_required', fallbackChain: [] });
+  });
+  test('falha temporária local não bloqueia a preferência OpenAI autorizada', () => {
+    expect(decideComputeRoute(input({ preferred, localFailure: 'temporary_infrastructure' })))
+      .toMatchObject({ selectedProvider: 'openai', reasonCode: 'preferred_candidate' });
+  });
+  test('OpenAI sem credencial bloqueia (nunca Ollama)', () => {
+    expect(decideComputeRoute(input({ preferred, openai: { ...input().openai, available: false } })))
+      .toMatchObject({ status: 'blocked', selectedProvider: null, reasonCode: 'openai_unavailable' });
+  });
+  test('preferência por um modelo diferente do configurado não é honrada nem substituída', () => {
+    expect(decideComputeRoute(input({ preferred: { provider: 'openai', model: 'outro' } })))
+      .toMatchObject({ status: 'blocked', selectedProvider: null });
+  });
+});
+
 describe('deriveLocalFailureSignal', () => {
   const failed = (attemptId: string, message: string): LocalFailureHistoryEventV1 => ({
     event_type: 'execution_failed', payload: { data: { reason: 'execution_failed', message, attempt_id: attemptId } },

@@ -85,6 +85,22 @@ describe('planejador executável do projeto', () => {
     expect(spec.validation_criteria[0]).toMatchObject({ proof: 'gate', claim_kind: 'substantive' });
   });
 
+  test('backend OpenAI configurado pelo operador persiste o modelo OpenAI do operador, não o Ollama', async () => {
+    process.env.ANIMA_CODER_PROVIDER = 'openai';
+    process.env.ANIMA_CODER_MODEL = 'gpt-5.6-sol';
+    process.env.ANIMA_WORKTREE_CODER_MODEL = 'qwen3-coder:latest';
+    try {
+      const result = await planExecutableProjectWork('adicione o teste', base, new OpenAIProjectWorkPlanner({ admission: grant }));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.command.intent).toMatchObject({ execution_spec: { coder_backend: 'openai', model: 'gpt-5.6-sol' } });
+    } finally {
+      delete process.env.ANIMA_CODER_PROVIDER;
+      delete process.env.ANIMA_CODER_MODEL;
+      delete process.env.ANIMA_WORKTREE_CODER_MODEL;
+    }
+  });
+
   test('persiste target_paths distintos por gate no execution_spec canônico', async () => {
     const planner = { id: 'fixture', proposeArguments: async () => ({ ok: true as const, rawArguments: JSON.stringify({
       summary: 'Dois gates', objective: 'Validar superfícies distintas',

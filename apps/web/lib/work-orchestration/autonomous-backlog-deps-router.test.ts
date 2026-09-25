@@ -61,6 +61,7 @@ interface ClientConfig {
   readonly lineage?: { readonly originalId: string; readonly sequence: number; readonly predecessors: readonly { readonly id: string; readonly sequence: number }[] };
   /** Histórico por work item (predecessores); o item corrente usa `historyEvents`. */
   readonly historyByItem?: Readonly<Record<string, readonly HistoryEvent[]>>;
+  readonly intent?: unknown;
 }
 interface ClientSpy { rpcCalls: { fn: string; args: Record<string, unknown> }[]; authQueried: number }
 
@@ -100,7 +101,7 @@ function makeClient(cfg: ClientConfig, spy: ClientSpy): SupabaseClient<Database>
     if (table === 'work_items') {
       const chain: Record<string, unknown> = {
         select: () => chain, eq: () => chain,
-        maybeSingle: async () => ({ data: { intent: workItemIntent }, error: null }),
+        maybeSingle: async () => ({ data: { intent: cfg.intent ?? workItemIntent }, error: null }),
       };
       return chain;
     }
@@ -364,6 +365,23 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
     const turn = await deps.runTurn(entry, new AbortController().signal);
     expect(turn.outcome).toBe('turn_recorded');
     expect(runTurnMock.mock.calls[0][0].computeRoutingDecision).toMatchObject({ selectedProvider: 'ollama', reasonCode: 'local_sufficient' });
+  });
+
+  test('J · contrato aprovado com coder_backend openai e sem authority ⇒ espera; nunca Ollama', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED = '1';
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    process.env.ANIMA_CODER_MODEL = 'gpt-5.6-sol';
+    const intent = { execution_spec: { ...workItemIntent.execution_spec, coder_backend: 'openai', model: 'gpt-5.6-sol' } };
+    const deps = buildProjectBacklogCycleDeps(makeClient({ historyEvents: [], authRows: [], intent }, spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.outcome).toBe('selection_not_executable');
+    expect(turn.refusal?.code).toBe('paid_authorization_required');
+    expect(spy.rpcCalls.find(c => c.fn === 'record_compute_routing_decision')!.args.p_decision)
+      .toMatchObject({ status: 'waiting_for_human_authorization', selectedProvider: null, fallbackChain: [] });
+    expect(runTurnMock).not.toHaveBeenCalled();
+    expect(ProvisionerMock).not.toHaveBeenCalled();
   });
 
   // E — "cloud inalterado": sob Router ON com Ollama selecionado, o ciclo de vida

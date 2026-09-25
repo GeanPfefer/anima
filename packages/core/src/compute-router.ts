@@ -136,6 +136,23 @@ export function decideComputeRoute(input: DecideComputeRouteInputV1): ComputeRou
     authorizationId: provider === 'openai' ? input.paidAuthority.authorizationId : null,
   });
 
+  // Preferência APROVADA por OpenAI é autoritativa: o humano aprovou esse executor. Sem
+  // autoridade paga a unidade ESPERA (nunca vira Ollama em silêncio); sem candidato OpenAI
+  // técnico, bloqueia. Mudar de executor exige revisar a proposta, não um fallback do Router.
+  if (input.preferred?.provider === 'openai') {
+    if (input.preferred.model === input.openai.model && openaiAdmissible) {
+      return selected('openai', 'preferred_candidate', 'A preferência aprovada aponta para um candidato OpenAI admissível.');
+    }
+    if (input.preferred.model === input.openai.model && openaiTechnicallyAdmissible) {
+      return { ...base, status: 'waiting_for_human_authorization', selectedProvider: null, selectedModel: null, placement: null,
+        reasonCode: 'paid_authorization_required', reason: 'A preferência aprovada é OpenAI e não existe autoridade paga válida e compatível; o compute local não a substitui.',
+        fallbackChain: [], authorizationId: null };
+    }
+    return { ...base, status: 'blocked', selectedProvider: null, selectedModel: null, placement: null,
+      reasonCode: !input.openai.available ? 'openai_unavailable' : 'no_admissible_provider',
+      reason: 'A preferência aprovada é OpenAI, mas o candidato OpenAI configurado não é admissível.', fallbackChain: [], authorizationId: null };
+  }
+
   // Falha temporária não é um sinal de incapacidade: nunca promove gasto automaticamente.
   if (input.localFailure === 'temporary_infrastructure') {
     return { ...base, status: 'blocked', selectedProvider: null, selectedModel: null, placement: null,
@@ -149,9 +166,6 @@ export function decideComputeRoute(input: DecideComputeRouteInputV1): ComputeRou
       return selected('openai', 'economics_favors_openai', 'Coortes comparáveis indicam menor custo por resultado VERIFIED na OpenAI.');
     }
     return selected('ollama', 'economics_favors_local', 'Coortes comparáveis favorecem ou empatam com o compute local.');
-  }
-  if (input.preferred?.provider === 'openai' && input.preferred.model === input.openai.model && openaiAdmissible) {
-    return selected('openai', 'preferred_candidate', 'A preferência aprovada aponta para um candidato OpenAI admissível.');
   }
   if (localAdmissible) return selected('ollama', 'local_sufficient', 'O compute local é capaz, disponível e permitido pelo Resource Governor.');
   if (openaiAdmissible) {

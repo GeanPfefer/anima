@@ -1,6 +1,7 @@
 import type { CreateWorkProposalCommand, RequestProposalRevisionCommand, WorkItem } from '@anima/core';
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
+import { resolveOpenAICoderModel } from '@/lib/work-orchestration/gpt-coder';
 import { parseProposal, scopeTestCommandToWorkspace, targetPathsAreExactFilesOrAbsent, type PlannerProposalResult, type ProjectWorkPlanner } from './project-work-planner-shared';
 import { OpenAIProjectWorkPlanner } from './project-work-planner-openai';
 import { LocalOllamaProjectWorkPlanner } from './project-work-planner-local';
@@ -124,6 +125,7 @@ export async function planExecutableProjectWork(
   // criará a worktree exatamente deste SHA, nunca do HEAD futuro. Autoridade do host.
   const baseSha = await readAuthorizedBaseSha();
   if (!baseSha) return { ok: false, message: 'Não foi possível capturar o SHA-base autorizado do repositório.' };
+  const coderBackend = resolveConfiguredCoderBackend();
 
   return {
     ok: true,
@@ -140,8 +142,12 @@ export async function planExecutableProjectWork(
           // Executor e backend persistidos pelo HOST (ADR-001): project:anima usa a
           // worktree isolada com o backend de código local selecionável por deploy.
           executor: 'worktree',
-          coder_backend: resolveConfiguredCoderBackend(),
-          model: process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
+          coder_backend: coderBackend,
+          // O modelo acompanha o backend: um contrato `openai` com modelo Ollama era
+          // incoerente (e, com o Router desligado, chamaria a OpenAI com `qwen…`).
+          model: coderBackend === 'openai'
+            ? resolveOpenAICoderModel()
+            : process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
           base_sha: baseSha,
           permissions: ['workspace_read', 'workspace_write_isolated'],
           // Autoridade do host: escopa um `npm test -- <arquivo>` ao workspace do
