@@ -116,6 +116,17 @@ async function main(): Promise<void> {
     note: 'pare com Ctrl+C (SIGINT).',
   });
 
+  // Configuração EFETIVA de compute (Router V1 + coder OpenAI), resolvida pelas mesmas
+  // funções da volta. Router ligado com configuração inválida ⇒ não sobe (fail-closed cedo,
+  // antes de qualquer volta paga). Nunca loga a credencial.
+  const { describeComputeRoutingConfig } = await import('../lib/work-orchestration/compute-routing-config.ts');
+  const computeConfig = describeComputeRoutingConfig();
+  log('compute-config', computeConfig);
+  if (!computeConfig.ok && computeConfig.routerEnabled) {
+    process.exitCode = 1;
+    return;
+  }
+
   const acquireIdentity = createGoTrueIdentityProvider({
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
     anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,

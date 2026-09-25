@@ -101,6 +101,13 @@ export function resolveOpenAICoderReasoningEffort(
   return raw as OpenAICoderReasoningEffort;
 }
 
+/** Modelo do coder OpenAI escolhido pelo OPERADOR: `ANIMA_CODER_MODEL` ⇒ `OPENAI_MODEL` ⇒
+ * default histórico. Fonte única para o Router (candidato) e para o backend (chamada). */
+export function resolveOpenAICoderModel(env: Record<string, string | undefined> = process.env): string {
+  const configured = env.ANIMA_CODER_MODEL?.trim() || env.OPENAI_MODEL?.trim();
+  return configured || 'gpt-5.6-terra';
+}
+
 /** `ANIMA_OPENAI_CODER_TIMEOUT_MS`: timeout POR CHAMADA ao provider. Ausente ⇒ 90s. */
 export function resolveOpenAICoderTimeoutMs(env: Record<string, string | undefined> = process.env): number {
   const raw = env.ANIMA_OPENAI_CODER_TIMEOUT_MS?.trim();
@@ -284,7 +291,7 @@ export class GptCoderBackend implements CoderBackend {
   private callIndex = 0;
   readonly transportConfig: OpenAICoderTransportConfig;
   constructor(options: GptCoderOptions) {
-    const model = options.model ?? process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
+    const model = options.model ?? resolveOpenAICoderModel();
     const fetchImpl = options.fetchImpl ?? fetch;
     const admission = options.admission;
     const reasoningEffort = options.reasoningEffort !== undefined ? options.reasoningEffort : resolveOpenAICoderReasoningEffort();

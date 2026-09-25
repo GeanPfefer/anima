@@ -1,6 +1,7 @@
 import { decideComputeRoute, deriveLocalFailureSignal, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureHistoryEventV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHash } from 'node:crypto';
 import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
 import { persistPostTurnHostObservations } from './post-turn-observation';
 import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
@@ -10,6 +11,7 @@ import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteR
 import { leaseDeadlineSignal, onDemandBurstForced, prepareCloudCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
 import { readLivePaidNodeCount } from './paid-compute-lease-reconciler-deps';
 import { createOpenAICoderAdmission, openAIProviderResourceClass } from './openai-paid-compute';
+import { resolveOpenAICoderModel } from './gpt-coder';
 import { readActivePaidComputeAuthorization } from './paid-compute-authorization-store';
 import { resolveCoderCapacityPolicy } from './coder-model-policy';
 import { economicTaskClass, readEconomicHistory } from './economic-history';
@@ -58,11 +60,43 @@ export function resumeLatestRetryCheckpoint(contract: ExecutionContract, events:
 const computeRouterEnabled = (): boolean => process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED === '1';
 
 /**
+ * `decision_id` DETERMINÍSTICO de uma decisão não-selecionada (espera/bloqueio): mesma
+ * unidade, mesma versão aprovada e mesma decisão ⇒ mesmo id, e o RPC faz replay em vez
+ * de anexar outro `compute_routing_decided`. Sem isso, cada reavaliação do Resident Host
+ * (poll de 15 s, ou o wake por Realtime disparado pelo PRÓPRIO evento) gravava uma nova
+ * decisão idêntica — crescimento ilimitado de eventos e um laço auto-alimentado enquanto
+ * a unidade aguarda autoridade humana. Uma decisão que MUDA (authority expirou, sinal
+ * novo) produz id novo e continua sendo registrada. Formato UUID (variante RFC 4122).
+ */
+export function stableComputeRoutingDecisionId(
+  workItemId: string,
+  approvedProposalVersion: number,
+  decision: ComputeRouteDecisionV1,
+): string {
+  const hex = createHash('sha256')
+    .update(JSON.stringify({ workItemId, approvedProposalVersion, decision }))
+    .digest('hex');
+  const variant = ((parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/**
  * Histórico (read-only) dos predecessores na lineage de recuperação do item: o original e
  * os successors de sequência MENOR. Falha de leitura ⇒ vazio (o sinal volta ao do próprio
  * item — nunca inventa falha). Bounded: até 200 eventos por predecessor.
  */
 async function readLineagePredecessorHistory(
+  client: SupabaseClient<Database>,
+  workItemId: string,
+): Promise<LocalFailureHistoryEventV1[]> {
+  try {
+    return await readLineagePredecessorHistoryUnsafe(client, workItemId);
+  } catch {
+    return [];
+  }
+}
+
+async function readLineagePredecessorHistoryUnsafe(
   client: SupabaseClient<Database>,
   workItemId: string,
 ): Promise<LocalFailureHistoryEventV1[]> {
@@ -100,7 +134,7 @@ async function routeCompute(
 ): Promise<ComputeRouteDecisionV1> {
   const localModel = contract.coderBackend === 'ollama' && contract.model
     ? contract.model : process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
-  const openAIModel = process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
+  const openAIModel = resolveOpenAICoderModel();
   const policy = resolveCoderCapacityPolicy();
   const modelSelection = policy ? selectGovernedCoderModel(localModel, policy) : null;
   // O sinal considera o próprio item E os predecessores da lineage de recuperação: um
@@ -217,7 +251,8 @@ export function buildProjectBacklogCycleDeps(
         if (decision.status !== 'selected') {
           await client.rpc('record_compute_routing_decision', {
             p_work_item_id: entry.workItemId, p_expected_proposal_version: entry.approvedProposalVersion,
-            p_decision_id: crypto.randomUUID(), p_decision: decision as unknown as Json,
+            p_decision_id: stableComputeRoutingDecisionId(entry.workItemId, entry.approvedProposalVersion, decision),
+            p_decision: decision as unknown as Json,
           });
           return notExecutable(entry, decision.reasonCode, decision.reason);
         }

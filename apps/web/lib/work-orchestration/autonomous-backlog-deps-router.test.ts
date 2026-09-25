@@ -57,6 +57,10 @@ type HistoryEvent = { readonly event_type: string; readonly payload: unknown };
 interface ClientConfig {
   readonly historyEvents?: readonly HistoryEvent[];
   readonly authRows?: readonly unknown[];
+  /** Lineage de recuperação: o item corrente é o successor de `sequence`. */
+  readonly lineage?: { readonly originalId: string; readonly sequence: number; readonly predecessors: readonly { readonly id: string; readonly sequence: number }[] };
+  /** Histórico por work item (predecessores); o item corrente usa `historyEvents`. */
+  readonly historyByItem?: Readonly<Record<string, readonly HistoryEvent[]>>;
 }
 interface ClientSpy { rpcCalls: { fn: string; args: Record<string, unknown> }[]; authQueried: number }
 
@@ -101,9 +105,35 @@ function makeClient(cfg: ClientConfig, spy: ClientSpy): SupabaseClient<Database>
       return chain;
     }
     if (table === 'work_events') {
+      let itemId: unknown = null;
       const chain: Record<string, unknown> = {
-        select: () => chain, eq: () => chain, order: () => chain,
-        limit: async () => ({ data: cfg.historyEvents ?? [], error: null }),
+        select: () => chain, order: () => chain,
+        eq: (column: string, value: unknown) => { if (column === 'work_item_id') itemId = value; return chain; },
+        limit: async () => ({
+          data: typeof itemId === 'string' && cfg.historyByItem?.[itemId] ? cfg.historyByItem[itemId] : cfg.historyEvents ?? [],
+          error: null,
+        }),
+      };
+      return chain;
+    }
+    if (table === 'work_recovery_lineage') {
+      const filters: Record<string, unknown> = {};
+      const rows = () => {
+        const lineage = cfg.lineage;
+        if (!lineage) return [];
+        if (filters.successor_work_item_id !== undefined) {
+          return filters.successor_work_item_id === entry.workItemId
+            ? [{ original_work_item_id: lineage.originalId, recovery_sequence: lineage.sequence }] : [];
+        }
+        return lineage.predecessors
+          .filter(p => filters.original_work_item_id === lineage.originalId && p.sequence < (filters.lt as number))
+          .map(p => ({ successor_work_item_id: p.id }));
+      };
+      const chain: Record<string, unknown> = {
+        select: () => chain,
+        eq: (column: string, value: unknown) => { filters[column] = value; return chain; },
+        lt: (_column: string, value: unknown) => { filters.lt = value; return Promise.resolve({ data: rows(), error: null }); },
+        maybeSingle: async () => ({ data: rows()[0] ?? null, error: null }),
       };
       return chain;
     }
@@ -244,6 +274,96 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
     expect(args.p_attempt_id).toBeUndefined(); // DEFAULT NULL canônico no RPC pré-attempt
     expect((args.p_decision as { status: string }).status).toBe('waiting_for_human_authorization');
     expect(runTurnMock).not.toHaveBeenCalled();
+  });
+
+  // F/G/H/I — lineage de recuperação (prova real bd4092af): o successor não tem histórico
+  // próprio, mas o predecessor esgotou o compute local com `ollama_submit_gate_unsatisfied`.
+  const ORIGINAL = '00000000-0000-0000-0000-0000000000a0';
+  const SEQ2 = '00000000-0000-0000-0000-0000000000a2';
+  const lineageConfig = (authRows: readonly unknown[]): ClientConfig => ({
+    historyEvents: [],
+    authRows,
+    lineage: { originalId: ORIGINAL, sequence: 3, predecessors: [{ id: SEQ2, sequence: 2 }] },
+    historyByItem: {
+      [ORIGINAL]: [],
+      [SEQ2]: [
+        { event_type: 'execution_failed', payload: { data: { attempt_id: 'p3', message: '[ollama_submit_gate_unsatisfied] esgotamento' } } },
+        { event_type: 'host_observed_coder_evidence_recorded', payload: { data: { evidence: { attemptId: 'p3', placement: 'local' } } } },
+      ],
+    },
+  });
+
+  test('F · successor sem histórico próprio + predecessor local sem progresso + sem authority ⇒ waiting, sem tentativa nem Ollama', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED = '1';
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    process.env.ANIMA_CODER_MODEL = 'gpt-5.6-sol';
+    const deps = buildProjectBacklogCycleDeps(makeClient(lineageConfig([]), spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.outcome).toBe('selection_not_executable');
+    expect(turn.refusal?.code).toBe('paid_authorization_required');
+    const decision = spy.rpcCalls.find(c => c.fn === 'record_compute_routing_decision')!.args.p_decision as Record<string, unknown>;
+    expect(decision).toMatchObject({ status: 'waiting_for_human_authorization', selectedProvider: null, authorizationId: null });
+    expect(decision.alternativesConsidered).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: 'ollama', admissible: false, reasons: expect.arrayContaining(['history_no_progress']) }),
+      expect.objectContaining({ provider: 'openai', model: 'gpt-5.6-sol', admissible: false, reasons: ['paid_authority_missing'] }),
+    ]));
+    // Nenhuma tentativa, nenhum fallback silencioso para Ollama, nenhuma authority/reserva criada.
+    expect(runTurnMock).not.toHaveBeenCalled();
+    expect(ProvisionerMock).not.toHaveBeenCalled();
+    expect(spy.rpcCalls.map(c => c.fn)).toEqual(['record_compute_routing_decision']);
+  });
+
+  test('G · mesma lineage com authority válida ⇒ OpenAI configurado pelo operador (local_no_progress)', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED = '1';
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    process.env.ANIMA_CODER_MODEL = 'gpt-5.6-sol';
+    const deps = buildProjectBacklogCycleDeps(makeClient(lineageConfig([validAuthRow()]), spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.outcome).toBe('turn_recorded');
+    expect(runTurnMock.mock.calls[0][0].computeRoutingDecision).toMatchObject({
+      status: 'selected', selectedProvider: 'openai', selectedModel: 'gpt-5.6-sol', reasonCode: 'local_no_progress',
+    });
+    expect(spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision')).toHaveLength(0);
+  });
+
+  test('H · reavaliar a MESMA espera reusa o mesmo decision_id (replay, sem laço de eventos)', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED = '1';
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    process.env.ANIMA_CODER_MODEL = 'gpt-5.6-sol';
+    const deps = buildProjectBacklogCycleDeps(makeClient(lineageConfig([]), spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    await deps.runTurn(entry, new AbortController().signal);
+    await deps.runTurn(entry, new AbortController().signal);
+    const ids = spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision').map(c => c.args.p_decision_id);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(ids[1]);
+    expect(ids[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    // Uma decisão DIFERENTE (outro modelo configurado) gera id diferente.
+    process.env.ANIMA_CODER_MODEL = 'gpt-5.6-terra';
+    await deps.runTurn(entry, new AbortController().signal);
+    const third = spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision').map(c => c.args.p_decision_id)[2];
+    expect(third).not.toBe(ids[0]);
+  });
+
+  test('I · falha na leitura da lineage nunca derruba a volta (sinal volta ao do próprio item)', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED = '1';
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    const base = makeClient({ historyEvents: [] }, spy);
+    const client = { rpc: base.rpc, from: (table: string) => {
+      if (table === 'work_recovery_lineage') throw new Error('network down');
+      return base.from(table as never);
+    } } as unknown as SupabaseClient<Database>;
+    const deps = buildProjectBacklogCycleDeps(client, 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.outcome).toBe('turn_recorded');
+    expect(runTurnMock.mock.calls[0][0].computeRoutingDecision).toMatchObject({ selectedProvider: 'ollama', reasonCode: 'local_sufficient' });
   });
 
   // E — "cloud inalterado": sob Router ON com Ollama selecionado, o ciclo de vida
