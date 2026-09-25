@@ -1381,3 +1381,83 @@ describe('OllamaCoderBackend — leitura de REFRESH pós-mutação própria (rep
     expect(sentBodies[6]!).toContain('investigação de leitura esgotada');
   });
 });
+
+// Barreira real (2ª prova paga, attempt c284f09c, gpt-5.6-sol): a unidade só CRIAVA arquivos
+// (rota + teste). O modelo editou o teste recém-criado (replace_exact), passou o teste focal,
+// mas `git diff` saía VAZIO (arquivos untracked) e `git diff --no-index` sai com 1 quando há
+// diferenças — o harness nunca registrava a revisão do diff e a reserva pós-edit esgotava.
+describe('OllamaCoderBackend — revisão de diff de arquivos novos (untracked)', () => {
+  const route = 'app/api/novo/route.ts';
+  const spec = 'app/api/novo/route.test.ts';
+  const vcmd = [{ label: 'teste focal', program: 'npm', args: ['test'] }] as const;
+  const runtime = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 12 } });
+  const policy = supervisedWorkspaceAccessPolicy([route, spec], ['src/secret.ts']);
+  const cmd = resolveCommandExecutionPolicy('supervised');
+  const req = (onTranscript: (t: import('@anima/core').CoderTranscript) => void) => ({
+    objective: 'Criar rota', includedScope: [route, spec], excludedScope: ['src/secret.ts'],
+    workspaceAccessPolicy: policy, commandPolicy: cmd, validationCommands: vcmd, onTranscript,
+  });
+  // git real: arquivos novos não aparecem em `git diff`; `--no-index` mostra e sai 1.
+  const untrackedWorkspace = (initial: Record<string, string> = {}) => {
+    const ws = execWorkspace(initial);
+    const exec = ws.exec!.bind(ws);
+    ws.exec = async (input, signal) => {
+      const { program, args } = input;
+      if (program === 'npm' && args[0] === 'test') {
+        const ok = (ws.files.get(spec) ?? '').includes('SHIM');
+        return { exitCode: ok ? 0 : 1, stdout: ok ? 'Tests: 4 passed' : 'ReferenceError: Response is not defined', stderr: '', timedOut: false, durationMs: 5 };
+      }
+      if (program === 'git' && args[0] === 'diff') {
+        return args.includes('--no-index')
+          ? { exitCode: 1, stdout: `diff --git a/${spec} b/${spec}\nnew file mode 100644\n+SHIM`, stderr: '', timedOut: false, durationMs: 2 }
+          : { exitCode: 0, stdout: '', stderr: '', timedOut: false, durationMs: 2 };
+      }
+      return exec(input, signal);
+    };
+    return ws;
+  };
+  const createBoth = JSON.stringify({ action: 'edit', operations: [
+    { kind: 'create_file', path: route, content: 'export function GET() { return Response.json({}); }\n' },
+    { kind: 'create_file', path: spec, content: 'import { GET } from "./route";\ntest("x", () => GET());\n' },
+  ] });
+  const specV1 = 'import { GET } from "./route";\ntest("x", () => GET());\n';
+  const fixCreatedSpec = editFileAction(spec, sha256(specV1), 'import { GET } from "./route";', 'import { GET } from "./route"; // SHIM');
+
+  test('reprodução: criar → teste vermelho → editar o arquivo CRIADO → teste verde → git diff vazio ⇒ revisado, submit liberado', async () => {
+    let captured: import('@anima/core').CoderTranscript | undefined;
+    const { fetchImpl } = scriptedFetch([
+      createBoth, execAction('npm', ['test']), fixCreatedSpec, execAction('npm', ['test']), execAction('git', ['diff']), submitAction(),
+    ]);
+    const result = await new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: runtime })
+      .edit(req(t => { captured = t; }), untrackedWorkspace(), new AbortController().signal);
+    expect([...result.touchedResources].sort()).toEqual([spec, route].sort());
+    const events = captured?.runtimeEvents ?? [];
+    expect(events.map(e => e.kind)).toContain('submit_allowed');
+    expect(events.find(e => e.kind === 'git_diff')?.result).not.toBe('empty_diff');
+  });
+
+  test('git diff --no-index com exit 1 (há diferenças) conta como revisão do diff', async () => {
+    let captured: import('@anima/core').CoderTranscript | undefined;
+    const { fetchImpl } = scriptedFetch([
+      createBoth, execAction('npm', ['test']), fixCreatedSpec, execAction('npm', ['test']),
+      execAction('git', ['diff', '--no-index', '--', 'NUL', spec]), submitAction(),
+    ]);
+    await new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: runtime })
+      .edit(req(t => { captured = t; }), untrackedWorkspace(), new AbortController().signal);
+    expect((captured?.runtimeEvents ?? []).map(e => e.kind)).toContain('submit_allowed');
+  });
+
+  test('guarda preservada: arquivo PRÉ-EXISTENTE modificado + git diff vazio continua sem revisão', async () => {
+    const existing = 'import { GET } from "./route";\ntest("x", () => GET());\n';
+    const ws = untrackedWorkspace({ [spec]: existing, [route]: 'export function GET() {}\n' });
+    let captured: import('@anima/core').CoderTranscript | undefined;
+    const { fetchImpl } = scriptedFetch([
+      fixCreatedSpec, execAction('npm', ['test']), execAction('git', ['diff']), submitAction(), submitAction(), submitAction(),
+    ]);
+    await new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: runtime })
+      .edit(req(t => { captured = t; }), ws, new AbortController().signal).catch(() => undefined);
+    const events = captured?.runtimeEvents ?? [];
+    expect(events.find(e => e.kind === 'git_diff')?.result).toBe('empty_diff');
+    expect(events.map(e => e.kind)).not.toContain('submit_allowed');
+  });
+});

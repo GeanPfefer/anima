@@ -388,6 +388,9 @@ export class OllamaCoderBackend implements CoderBackend {
     // um diff vazio numa sessão SÓ de criação é aceitável. Sticky: uma vez que houve
     // modificação, o diff deve ser não-vazio.
     let expectNonEmptyDiff = false;
+    // Arquivos CRIADOS nesta sessão: são untracked na worktree, então `git diff` nunca os
+    // mostra — editá-los depois (replace_exact) não torna um diff vazio suspeito.
+    const sessionCreatedPaths = new Set<string>();
     let submitFeedbacks = 0;
     const MAX_SUBMIT_FEEDBACKS = 4;
     let editFeedbacks = 0;
@@ -580,7 +583,9 @@ export class OllamaCoderBackend implements CoderBackend {
             editRevision += 1;
             // 1ª edição material ANCORA a reserva pós-edit a partir daqui (íntegra).
             if (postEditBase === null) postEditBase = round;
-            if (operations.some(op => op.kind !== 'create_file')) expectNonEmptyDiff = true;
+            for (const op of operations) if (op.kind === 'create_file') sessionCreatedPaths.add(op.path);
+            // Diff não vazio só é exigível quando um arquivo que JÁ EXISTIA foi modificado.
+            if (operations.some(op => op.kind !== 'create_file' && !sessionCreatedPaths.has(op.path))) expectNonEmptyDiff = true;
             servedBlocks.push(`Edição aplicada (${touched.length}): ${touched.join(', ')}. A revisão ${editRevision} precisa de validação focal (exitCode=0) e git diff antes de submit — que só será oferecido então. O sha256 desses arquivos MUDOU: shas lidos antes desta edição estão obsoletos; para editá-los de novo, leia o estado ATUAL (leitura de refresh garantida).`);
             runtimeEvent('edit_applied', 'served', round);
             round += 1;
@@ -700,7 +705,11 @@ export class OllamaCoderBackend implements CoderBackend {
           // um diff anterior à edição não vale). Um diff VAZIO só é recusado quando
           // houve MODIFICAÇÃO de arquivo existente (que deveria aparecer); numa sessão
           // só de create_file (arquivo novo untracked) o diff vazio é aceitável.
-          if (appliedTouched.size > 0 && result.exitCode === 0 && !result.timedOut) {
+          // `git diff --no-index`/`--exit-code` saem com 1 quando HÁ diferenças (semântica
+          // documentada do git) — é o caminho natural para revisar arquivo novo untracked.
+          const differencesExit = result.exitCode === 1 && result.stdout.trim().length > 0
+            && decision.args.some(arg => arg === '--no-index' || arg === '--exit-code');
+          if (appliedTouched.size > 0 && (result.exitCode === 0 || differencesExit) && !result.timedOut) {
             if (result.stdout.trim().length > 0 || !expectNonEmptyDiff) {
               diffReviewedRevision = editRevision;
             } else {
