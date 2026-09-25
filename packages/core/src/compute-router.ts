@@ -168,3 +168,51 @@ export function decideComputeRoute(input: DecideComputeRouteInputV1): ComputeRou
   return { ...base, status: 'blocked', selectedProvider: null, selectedModel: null, placement: null,
     reasonCode, reason: 'Nenhum candidato satisfaz capacidade, disponibilidade e governança.', fallbackChain: [], authorizationId: null };
 }
+
+/** Evento mínimo do histórico que alimenta o sinal de falha local (forma de `work_events`). */
+export interface LocalFailureHistoryEventV1 {
+  readonly event_type: string;
+  readonly payload: unknown;
+}
+
+const recordOf = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+const eventData = (event: LocalFailureHistoryEventV1) => recordOf(recordOf(event.payload)?.data);
+const eventAttemptId = (event: LocalFailureHistoryEventV1): string | null => {
+  const data = eventData(event);
+  const evidence = recordOf(data?.evidence);
+  const id = data?.attempt_id ?? evidence?.attemptId;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+};
+
+/**
+ * Deriva o sinal de falha LOCAL a partir do histórico de eventos — do próprio item e,
+ * quando houver, dos predecessores da mesma lineage de recuperação. PURA.
+ *
+ * - Só falhas de attempts LOCAIS contam: um attempt cuja evidência host-observada do coder
+ *   declara placement não-local (ex.: OpenAI, que reusa o protocolo e os códigos `ollama_*`)
+ *   é descartado inteiro. Attempt sem evidência de placement mantém o comportamento legado.
+ * - Eventos de roteamento são ignorados: suas razões (`local_no_progress`...) são saídas
+ *   do próprio sinal e não podem realimentá-lo.
+ * - `ollama_submit_gate_unsatisfied` (sessão esgotada sem revisão validada) é ausência de
+ *   progresso verificável do modelo local — mesma classe de `ollama_no_effective_edits`.
+ */
+export function deriveLocalFailureSignal(events: readonly LocalFailureHistoryEventV1[]): LocalFailureSignalV1 {
+  const nonLocalAttempts = new Set<string>();
+  for (const event of events) {
+    if (event.event_type !== 'host_observed_coder_evidence_recorded') continue;
+    const evidence = recordOf(eventData(event)?.evidence);
+    const attemptId = eventAttemptId(event);
+    if (attemptId && typeof evidence?.placement === 'string' && evidence.placement !== 'local') nonLocalAttempts.add(attemptId);
+  }
+  const relevant = events.filter(event => {
+    if (/routing/.test(event.event_type)) return false;
+    const attemptId = eventAttemptId(event);
+    return attemptId === null || !nonLocalAttempts.has(attemptId);
+  });
+  const text = JSON.stringify(relevant);
+  if (/ollama_read_round_limit|context_limit|context_window_exceeded/.test(text)) return 'model_capability';
+  if (/ollama_no_effective_edits|ollama_submit_gate_unsatisfied|no_progress|loop_detected/.test(text)) return 'no_progress';
+  if (/ollama_timeout|ollama_transport_error|provider_unavailable/.test(text)) return 'temporary_infrastructure';
+  return 'none';
+}

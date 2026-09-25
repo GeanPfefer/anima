@@ -1,5 +1,5 @@
 import { calculateCohortMetrics, type EconomicAttemptV1 } from './compute-economics';
-import { decideComputeRoute, type DecideComputeRouteInputV1 } from './compute-router';
+import { decideComputeRoute, deriveLocalFailureSignal, type DecideComputeRouteInputV1, type LocalFailureHistoryEventV1 } from './compute-router';
 
 const cohort = (provider: string) => ({ provider, model: provider === 'openai' ? 'gpt-x' : 'qwen', capability: 'programming', taskClass: 'coding/simple' });
 const metrics = (provider: string, cost: number) => calculateCohortMetrics([0, 1].map((): EconomicAttemptV1 => ({
@@ -42,4 +42,38 @@ describe('Compute Router V1', () => {
     expect(decision.alternativesConsidered).toHaveLength(2);
   });
   test('explicit approved preference selects authorized OpenAI', () => expect(decideComputeRoute(input({ preferred: { provider: 'openai', model: 'gpt-x' } }))).toMatchObject({ selectedProvider: 'openai', reasonCode: 'preferred_candidate', authorizationId: 'auth-1' }));
+});
+
+describe('deriveLocalFailureSignal', () => {
+  const failed = (attemptId: string, message: string): LocalFailureHistoryEventV1 => ({
+    event_type: 'execution_failed', payload: { data: { reason: 'execution_failed', message, attempt_id: attemptId } },
+  });
+  const evidence = (attemptId: string, placement: string): LocalFailureHistoryEventV1 => ({
+    event_type: 'host_observed_coder_evidence_recorded', payload: { data: { evidence: { attemptId, placement, outcome: 'failed' } } },
+  });
+  const exhausted = 'O backend de código falhou: [ollama_submit_gate_unsatisfied] esgotamento (ações desviadas em excesso: orçamento de leitura exploratória esgotado)';
+
+  test('empty history is none', () => expect(deriveLocalFailureSignal([])).toBe('none'));
+  test('local submit-gate exhaustion is no_progress', () => {
+    expect(deriveLocalFailureSignal([failed('a1', exhausted), evidence('a1', 'local')])).toBe('no_progress');
+  });
+  test('failure of a non-local attempt is ignored even with ollama_* codes', () => {
+    expect(deriveLocalFailureSignal([failed('a1', exhausted), evidence('a1', 'remote')])).toBe('none');
+  });
+  test('attempt without placement evidence keeps legacy behavior', () => {
+    expect(deriveLocalFailureSignal([failed('a1', '[ollama_read_round_limit] x')])).toBe('model_capability');
+  });
+  test('routing events never feed the signal back', () => {
+    expect(deriveLocalFailureSignal([{ event_type: 'compute_routing_decided', payload: { data: { decision: { reasonCode: 'local_no_progress' } } } }])).toBe('none');
+  });
+  test('capability outranks no_progress and temporary infrastructure', () => {
+    expect(deriveLocalFailureSignal([failed('a1', '[ollama_timeout]'), failed('a2', exhausted), failed('a3', 'context_window_exceeded')])).toBe('model_capability');
+    expect(deriveLocalFailureSignal([failed('a1', '[ollama_timeout]')])).toBe('temporary_infrastructure');
+  });
+  test('local failures of a lineage predecessor plus a clean successor route paid compute when authorized', () => {
+    const signal = deriveLocalFailureSignal([failed('p1', exhausted), evidence('p1', 'local')]);
+    expect(decideComputeRoute(input({ localFailure: signal }))).toMatchObject({ selectedProvider: 'openai', reasonCode: 'local_no_progress' });
+    expect(decideComputeRoute(input({ localFailure: signal, paidAuthority: { status: 'missing', authorizationId: null, remainingExposure: { status: 'unavailable', reason: 'cost_unknown' } } })))
+      .toMatchObject({ status: 'waiting_for_human_authorization', selectedProvider: null });
+  });
 });

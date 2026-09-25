@@ -1,4 +1,4 @@
-import { decideComputeRoute, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureSignalV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
+import { decideComputeRoute, deriveLocalFailureSignal, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureHistoryEventV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
@@ -58,6 +58,31 @@ export function resumeLatestRetryCheckpoint(contract: ExecutionContract, events:
 const computeRouterEnabled = (): boolean => process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED === '1';
 
 /**
+ * Histórico (read-only) dos predecessores na lineage de recuperação do item: o original e
+ * os successors de sequência MENOR. Falha de leitura ⇒ vazio (o sinal volta ao do próprio
+ * item — nunca inventa falha). Bounded: até 200 eventos por predecessor.
+ */
+async function readLineagePredecessorHistory(
+  client: SupabaseClient<Database>,
+  workItemId: string,
+): Promise<LocalFailureHistoryEventV1[]> {
+  const own = await client.from('work_recovery_lineage').select('original_work_item_id,recovery_sequence')
+    .eq('successor_work_item_id', workItemId).maybeSingle();
+  if (own.error || !own.data) return [];
+  const siblings = await client.from('work_recovery_lineage').select('successor_work_item_id')
+    .eq('original_work_item_id', own.data.original_work_item_id).lt('recovery_sequence', own.data.recovery_sequence);
+  if (siblings.error) return [];
+  const ids = [own.data.original_work_item_id, ...(siblings.data ?? []).map(row => row.successor_work_item_id)];
+  const events: LocalFailureHistoryEventV1[] = [];
+  for (const id of ids) {
+    const history = await client.from('work_events').select('event_type,payload')
+      .eq('work_item_id', id).order('seq', { ascending: false }).limit(200);
+    if (!history.error) events.push(...(history.data ?? []));
+  }
+  return events;
+}
+
+/**
  * Decisão do Compute Router V1 para uma entrada da fila. O núcleo é PURO
  * (`decideComputeRoute`); a única impureza é a LEITURA (read-only) da autoridade paga
  * — apenas quando há `OPENAI_API_KEY` de operador — e da política de capacidade local.
@@ -78,12 +103,9 @@ async function routeCompute(
   const openAIModel = process.env.ANIMA_CODER_MODEL ?? process.env.OPENAI_MODEL ?? 'gpt-5.6-terra';
   const policy = resolveCoderCapacityPolicy();
   const modelSelection = policy ? selectGovernedCoderModel(localModel, policy) : null;
-  const historyText = JSON.stringify(historyData);
-  const localFailure: LocalFailureSignalV1 =
-    /ollama_read_round_limit|context_limit|context_window_exceeded/.test(historyText) ? 'model_capability'
-    : /ollama_no_effective_edits|no_progress|loop_detected/.test(historyText) ? 'no_progress'
-    : /ollama_timeout|ollama_transport_error|provider_unavailable/.test(historyText) ? 'temporary_infrastructure'
-    : 'none';
+  // O sinal considera o próprio item E os predecessores da lineage de recuperação: um
+  // successor recém-criado não pode "esquecer" que o compute local já esgotou a unidade.
+  const localFailure = deriveLocalFailureSignal([...historyData, ...await readLineagePredecessorHistory(client, entry.workItemId)]);
   // OpenAI só é candidata quando há credencial de operador. Sem ela, o Router decide
   // exclusivamente sobre o compute local (nunca "espera autorização" no vazio).
   const openAIAvailable = typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.trim().length > 0;
