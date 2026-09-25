@@ -15,4 +15,12 @@ describe('getEraForLevel', () => {
   ] as const)('retorna a era correta para o nível %i', (level, expectedEra) => {
     expect(getEraForLevel(level).name).toBe(expectedEra);
   });
+
+  it('retorna a primeira era para um nível abaixo de MIN_LEVEL', () => {
+    expect(getEraForLevel(MIN_LEVEL - 1).name).toBe('Despertar');
+  });
+
+  it('retorna a última era para um nível acima de MAX_LEVEL', () => {
+    expect(getEraForLevel(MAX_LEVEL + 1).name).toBe('Lenda');
+  });
 });
