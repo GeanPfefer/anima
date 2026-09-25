@@ -18,7 +18,7 @@ import {
   type WorktreeHandoffV1,
 } from '@anima/core';
 import { GitWorktree, runProcess } from './worktree';
-import { ScriptedCoderBackend, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
+import { ScriptedCoderBackend, withCoderFailureUsage, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { WorktreeExecutorAdapter, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, verifyGateTargetScope, type WorktreeTargetResolver } from './worktree-executor';
 
@@ -84,6 +84,23 @@ test('transcript survives backend failure through the host observation channel',
     expect(signals.at(-1)?.kind).toBe('error');
     expect(observations).toHaveLength(1);
     expect(observations[0]).toMatchObject({ outcome: 'failed', transcripts: [{ termination: 'ollama_ambiguous_replacement' }] });
+  } finally { await ctx.cleanup(); }
+});
+
+// Barreira real (2ª prova paga, attempt c284f09c): a attempt falhou e a evidência não
+// registrou tokens nem chamadas — o uso pago de uma falha era descartado.
+test('uso de provider de uma chamada que FALHOU chega à observação host-side', async () => {
+  const ctx = await makeNpmRepo();
+  const observations: ObservedCoderInput[] = [];
+  const usage = { schemaVersion: 1 as const, inputTokens: 120, outputTokens: 30, totalTokens: 150, cachedInputTokens: 40 };
+  try {
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      onCoderObserved: observation => { observations.push(observation); },
+      backend: { id: 'fixture', edit: async () => { throw withCoderFailureUsage(new Error('esgotamento'), { providerUsage: usage, providerCallCount: 7 }); } },
+    });
+    const signals = await collect(adapter, request(), new AbortController().signal);
+    expect(signals.at(-1)?.kind).toBe('error');
+    expect(observations).toEqual([expect.objectContaining({ outcome: 'failed', providerUsage: usage, providerCallCount: 7 })]);
   } finally { await ctx.cleanup(); }
 });
 

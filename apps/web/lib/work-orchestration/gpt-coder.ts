@@ -7,7 +7,7 @@ import {
   resolveAgenticRuntimePolicy,
   STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1,
 } from '@anima/core';
-import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
+import { coderBackendId, withCoderFailureUsage, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderFailureUsage, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend, type CoderProtocolTransport } from './ollama-coder';
 import type { ContextBudget } from './ollama-protocol';
 
@@ -403,11 +403,17 @@ export class GptCoderBackend implements CoderBackend {
       ? { workItemId: request.workItemId, attemptId: request.attemptId, approvedProposalVersion: request.approvedProposalVersion, maxDurationMs: request.maxDurationMs }
       : null;
     let result: CoderEditResult;
+    // Falha também consumiu provider: o uso acumulado acompanha o erro até a evidência.
     try { result = await this.delegate.edit(request, workspace, signal); }
+    catch (error) { throw withCoderFailureUsage(error, this.usageSnapshot()); }
     finally { this.activePaidContext = null; }
+    return { ...result, ...this.usageSnapshot() };
+  }
+
+  private usageSnapshot(): CoderFailureUsage {
     const providerCallCount = this.callIndex;
-    if (!this.usages.length) return { ...result, providerCallCount };
-    return { ...result, providerUsage: {
+    if (!this.usages.length) return { providerCallCount };
+    return { providerUsage: {
       schemaVersion: 1,
       inputTokens: this.usages.reduce((sum, value) => sum + value.inputTokens, 0),
       outputTokens: this.usages.reduce((sum, value) => sum + value.outputTokens, 0),

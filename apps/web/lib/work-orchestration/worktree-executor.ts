@@ -20,7 +20,7 @@ import {
   type WorktreeGateOutcome,
 } from '@anima/core';
 import { createHash } from 'node:crypto';
-import type { CoderBackend, CoderWorkspace, HostValidationFeedback } from './coder-backend';
+import { coderFailureUsage, type CoderBackend, type CoderWorkspace, type HostValidationFeedback } from './coder-backend';
 import { analyzeCoderOutputFiles, collectCoderOutputForHarness } from './coder-output-analysis';
 import { summarizeCommandOutput } from './output-sanitization';
 import { GitWorktree, parseGateCommand, runGate } from './worktree';
@@ -460,6 +460,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           providerCallCount = editResult.providerCallCount;
           observeCoder(false);
         } catch (error) {
+          // Uma chamada paga que falhou também é observada com o uso que consumiu.
+          ({ providerUsage, providerCallCount } = coderFailureUsage(error));
           observeCoder(true);
 
           const restored = durableCheckpointSha

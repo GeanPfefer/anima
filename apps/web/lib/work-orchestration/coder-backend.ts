@@ -172,6 +172,24 @@ export interface CoderEditResult {
   readonly providerCallCount?: number;
 }
 
+/** Uso de provider acumulado por uma chamada ao coder que FALHOU. Uma attempt paga que
+ * falha também consumiu tokens: a evidência host-observada precisa registrá-los. */
+export type CoderFailureUsage = Pick<CoderEditResult, 'providerUsage' | 'providerCallCount'>;
+
+// Associação erro → uso, sem mutar o objeto de erro (que pode ser congelado/de terceiros).
+const failureUsage = new WeakMap<object, CoderFailureUsage>();
+
+/** Associa ao erro lançado o uso já consumido e devolve o MESMO erro para relançar. */
+export function withCoderFailureUsage<E>(error: E, usage: CoderFailureUsage): E {
+  if (error !== null && typeof error === 'object') failureUsage.set(error, usage);
+  return error;
+}
+
+/** Uso de provider associado a um erro do coder (ou `{}` quando não há). */
+export function coderFailureUsage(error: unknown): CoderFailureUsage {
+  return error !== null && typeof error === 'object' ? failureUsage.get(error) ?? {} : {};
+}
+
 export interface CoderBackend {
   readonly id: string;
   /** Identidade conhecida pelo host para evidência; nunca vem da resposta do node. */

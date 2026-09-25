@@ -2,7 +2,7 @@
 import { resolveCommandExecutionPolicy, supervisedWorkspaceAccessPolicy } from '@anima/core';
 import type { OpenAIAdmissionControl } from '@/lib/ai/openai-paid-transport';
 import { OpenAIAdmissionDenied } from '@/lib/ai/openai-paid-transport';
-import type { CoderWorkspace } from './coder-backend';
+import { coderFailureUsage, type CoderWorkspace } from './coder-backend';
 import {
   GptCoderBackend,
   resolveOpenAICoderContextCap,
@@ -63,6 +63,19 @@ describe('GptCoderBackend — mesmo protocolo host-mediated do Ollama, fail-clos
     expect(JSON.parse(calls[0]!.body)).toMatchObject({ model: 'gpt-test', store: false });
     expect(JSON.stringify(JSON.parse(calls[0]!.body))).not.toContain('secret-test-key');
     expect(calls[0]!.headers).toMatchObject({ Authorization: 'Bearer secret-test-key' });
+  });
+  test('falha do coder preserva o uso já consumido (tokens + chamadas) junto ao erro', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return response({ output_text: JSON.stringify({ action: 'nonsense' }), usage: { input_tokens: 50, output_tokens: 5, total_tokens: 55 } });
+    }) as typeof fetch;
+    const backend = new GptCoderBackend({ model: 'gpt-test', apiKey: 'k', fetchImpl, admission: grant });
+    const error = await backend.edit(request, workspace({ 'src/a.ts': 'x = 1;' }), new AbortController().signal).then(() => null, e => e);
+    expect(error).toBeInstanceOf(Error);
+    const usage = coderFailureUsage(error);
+    expect(usage.providerCallCount).toBe(calls);
+    expect(usage.providerUsage).toMatchObject({ schemaVersion: 1, inputTokens: 50 * calls, outputTokens: 5 * calls, totalTokens: 55 * calls });
   });
   test('traduz function_call para o vocabulário interno sem autoridade direta', async () => {
     const original = 'x = 1\n';
