@@ -260,3 +260,39 @@ describe('WorkProposalCard', () => {
     }
   });
 });
+
+// Barreira real (item 2c7afe1d): a correção persistiu v2, mas a resposta do POST se perdeu
+// (página recarregada durante o planejamento de ~54 s) e o card ficou em v1 para sempre.
+describe('WorkProposalCard — convergência com a versão persistida', () => {
+  const v1 = presentation({ item: { ...item, proposalVersion: 1 } });
+  const v2 = presentation({ item: { ...item, proposalVersion: 2 } });
+  test('card v1 relê o item ao voltar o foco e projeta a v2 persistida', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, value: { presentation: v2 } }) }) as jest.Mock;
+    const onChange = jest.fn();
+    render(<WorkProposalCard presentation={v1} onChange={onChange} />);
+    expect(global.fetch).not.toHaveBeenCalled();
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(v2));
+    expect(global.fetch).toHaveBeenCalledWith('/api/work-orchestration/items/item', expect.objectContaining({ cache: 'no-store' }));
+  });
+  test('sem mudança de versão/estado o foco não reescreve o card', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, value: { presentation: v1 } }) }) as jest.Mock;
+    const onChange = jest.fn();
+    render(<WorkProposalCard presentation={v1} onChange={onChange} />);
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+  test('resposta perdida do pedido de correção não presume nada: relê o persistido', async () => {
+    global.fetch = jest.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true, value: { presentation: v2 } }) }) as jest.Mock;
+    const onChange = jest.fn();
+    render(<WorkProposalCard presentation={v1} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Pedir correção' }));
+    fireEvent.change(screen.getByLabelText('O que deve mudar?'), { target: { value: 'incluir a rota e o teste' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Criar nova versão coerente' }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(v2));
+    expect(screen.getByText(/estado foi relido do servidor/)).toBeInTheDocument();
+  });
+});

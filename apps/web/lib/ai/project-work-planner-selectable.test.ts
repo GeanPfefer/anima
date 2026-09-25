@@ -413,7 +413,10 @@ describe('replanejamento de correção de proposta', () => {
     if (!result.ok) return;
 
     expect(receivedMessage).toContain('adicione diagnóstico do planner');
-    expect(receivedMessage).not.toContain('arquivo-antigo.ts');
+    // Contrato de revisão: o planner VÊ a proposta anterior (para saber o que corrigir),
+    // rotulada como não autoritativa — e o resultado nunca a reaproveita mecanicamente.
+    expect(receivedMessage).toContain('Proposta anterior (v1) — apenas para saber o que corrigir:');
+    expect(receivedMessage).toContain('arquivo-antigo.ts');
     expect(receivedMessage).toContain(
       'Não reutilize fatos da proposta anterior: ela pode estar errada ou desatualizada.',
     );
@@ -426,6 +429,7 @@ describe('replanejamento de correção de proposta', () => {
     expect(result.revision.proposal.data.includedScope).toEqual([
       'apps/web/lib/ai/project-work-planner.ts',
     ]);
+    expect(result.revision.proposal.data.includedScope).not.toContain('arquivo-antigo.ts');
     expect(result.revision.proposal.data.includedScope).not.toContain(
       'use somente o menor escopo correto',
     );

@@ -48,7 +48,7 @@ describe('normalizeClaimKind — fail-closed sem heurística', () => {
 
 describe('SUBMIT_PARAMETERS — schema enviado ao modelo exige claim_kind', () => {
   test('validation_claim_kind é enum obrigatório', () => {
-    const props = SUBMIT_PARAMETERS.properties as Record<string, { enum?: readonly string[] }>;
+    const props = SUBMIT_PARAMETERS.properties as unknown as Record<string, { enum?: readonly unknown[] }>;
     expect(props.validation_claim_kind?.enum).toEqual(['gate_assertion', 'substantive']);
     expect(SUBMIT_PARAMETERS.required as readonly string[]).toContain('validation_claim_kind');
   });

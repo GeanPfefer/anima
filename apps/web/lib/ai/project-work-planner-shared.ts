@@ -29,6 +29,8 @@ export type PlannerArguments = {
   risks: string[];
   validation_label: string;
   validation_command: string;
+  /** Teto de tentativas da unidade (1–3). Ausente ⇒ 3 (default histórico do host). */
+  max_attempts?: number;
   /** Itens EXATOS de expected_effects demonstrados pelo gate principal. */
   validation_covers: string[];
   /**
@@ -94,6 +96,7 @@ export const SUBMIT_PARAMETERS = {
       description: 'Classe do que o gate principal DEMONSTRA. Use "gate_assertion" quando o(s) item(ns) de covers afirmam o PRÓPRIO resultado do gate (ex.: "as validações declaradas passam", "o typecheck passa"). Use "substantive" quando covers descreve um COMPORTAMENTO material que um gate verde apenas associa, mas não demonstra sozinho (ex.: "o parser rejeita entrada inválida"). Na dúvida use "substantive". Não escolha por palavra-chave/nome de teste/comando: declare a intenção real do critério.',
     },
     validation_target_paths: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Paths relativos exatos que este gate exercita. Use [] quando a investigação não sustentar uma superfície precisa.' },
+    max_attempts: { type: 'integer', enum: [1, 2, 3], description: 'Teto de tentativas de execução da unidade. Use 3 salvo pedido explícito do usuário por menos tentativas; nunca afirme um teto em texto sem declará-lo aqui.' },
     additional_validations: {
       type: 'array',
       description: 'Provas ADICIONAIS além da principal, SÓ quando múltiplas verificações independentes são realmente necessárias. Cada item é UM único comando npm (test/typecheck/build); nunca encadeie comandos com &&. Use [] quando uma única prova basta.',
@@ -112,7 +115,7 @@ export const SUBMIT_PARAMETERS = {
       maxItems: 6,
     },
   },
-  required: ['summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command', 'validation_covers', 'validation_claim_kind', 'validation_target_paths', 'additional_validations'],
+  required: ['summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command', 'validation_covers', 'validation_claim_kind', 'validation_target_paths', 'max_attempts', 'additional_validations'],
   additionalProperties: false,
 } as const;
 
@@ -151,7 +154,7 @@ export const PLANNER_CHAT_TOOLS = [
 ];
 
 export const PLANNER_SYSTEM_INSTRUCTIONS =
-  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Para cada gate, `covers` deve repetir literalmente os itens de `expected_effects` que aquela prova demonstra; TODO expected_effect deve ser coberto por ao menos um gate. Para cada gate, declare também `claim_kind`: use "gate_assertion" quando os itens de `covers` afirmam o PRÓPRIO resultado do gate (ex.: "as validações declaradas passam", "o typecheck passa"); use "substantive" quando `covers` descreve um COMPORTAMENTO material que um gate verde apenas associa, mas não demonstra sozinho (ex.: "o parser rejeita entrada inválida"). Na dúvida, use "substantive". A escolha é a intenção real do critério, nunca uma inferência por palavra-chave, nome de teste ou comando. Declare ainda `target_paths` por gate: somente paths relativos exatos que a investigação demonstrou serem a superfície material exercitada por aquela prova (incluindo testes quando aplicável), nunca o projeto inteiro; use [] quando não houver evidência suficiente. Quando o trabalho exigir MAIS DE UMA prova independente, registre a primeira em validation_label/validation_command/validation_covers/validation_claim_kind/validation_target_paths e as demais em additional_validations, cada uma com seu label, command, covers, claim_kind e target_paths. Use additional_validations = [] quando uma única prova basta. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS de strings. Executar um teste NÃO concede permissão de editar o arquivo testado: só o included_scope autoriza escrita. Quando houver evidência suficiente, chame submit_project_work_proposal.';
+  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Para cada gate, `covers` deve repetir literalmente os itens de `expected_effects` que aquela prova demonstra; TODO expected_effect deve ser coberto por ao menos um gate. Para cada gate, declare também `claim_kind`: use "gate_assertion" quando os itens de `covers` afirmam o PRÓPRIO resultado do gate (ex.: "as validações declaradas passam", "o typecheck passa"); use "substantive" quando `covers` descreve um COMPORTAMENTO material que um gate verde apenas associa, mas não demonstra sozinho (ex.: "o parser rejeita entrada inválida"). Na dúvida, use "substantive". A escolha é a intenção real do critério, nunca uma inferência por palavra-chave, nome de teste ou comando. Declare ainda `target_paths` por gate: somente paths relativos exatos que a investigação demonstrou serem a superfície material exercitada por aquela prova (incluindo testes quando aplicável), nunca o projeto inteiro; use [] quando não houver evidência suficiente. Quando o trabalho exigir MAIS DE UMA prova independente, registre a primeira em validation_label/validation_command/validation_covers/validation_claim_kind/validation_target_paths e as demais em additional_validations, cada uma com seu label, command, covers, claim_kind e target_paths. Use additional_validations = [] quando uma única prova basta. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS de strings. Inclua no included_scope TODOS os arquivos que o trabalho cria ou altera — inclusive arquivos novos e seus testes —, nunca arquivos não relacionados só porque já existem. Um arquivo novo pode ficar em uma pasta nova quando a pasta acima dela já existe (ex.: uma nova rota apps/web/app/api/<nome>/route.ts). Executar um teste NÃO concede permissão de editar o arquivo testado: só o included_scope autoriza escrita. Quando houver evidência suficiente, chame submit_project_work_proposal.';
 
 export function buildPlannerUserPrompt(message: string): string {
   return `Prepare uma proposta executável para este pedido:\n\n${message}\n\nInvestigue primeiro o repositório com as ferramentas locais (project_search, project_read_file, project_list_files, project_git_status, project_git_diff). Leia AGENTS.md e os arquivos relevantes. Não altere nada. O alvo será fixado pelo servidor como anima. Escolha somente caminhos exatos de arquivos necessários. Quando houver informação suficiente, chame submit_project_work_proposal.`;
@@ -207,9 +210,13 @@ export const safePath = (value: string): boolean => {
  * Ancora o included_scope na topologia REAL do checkout autorizado.
  *
  * - arquivo existente: permitido;
- * - arquivo novo: permitido somente se o diretório-pai já existir;
- * - diretório inexistente/inventado: rejeitado fail-closed.
+ * - arquivo novo com diretório-pai existente: permitido;
+ * - arquivo novo cujo ÚNICO diretório novo é o pai imediato (ex.: rota Next.js
+ *   `app/api/<nova>/route.ts`): permitido quando o avô existe e NÃO é a raiz do repo;
+ * - mais de um nível de diretório inventado, ou diretório novo na raiz: rejeitado.
  *
+ * Sem o segundo caso, todo trabalho que cria uma pasta nova era recusado e o planner
+ * recuava para arquivos existentes não relacionados (escopo desonesto).
  * Segurança sintática continua em safePath; esta checagem é de realidade do repo.
  */
 export function includedScopeAnchoredInProject(
@@ -230,12 +237,19 @@ export function includedScopeAnchoredInProject(
     const parent = dirname(target);
 
     try {
-      return existsSync(parent) && statSync(parent).isDirectory();
+      if (existsSync(parent)) return statSync(parent).isDirectory();
+      const grandparent = dirname(parent);
+      return grandparent !== resolve(repoRoot)
+        && existsSync(grandparent) && statSync(grandparent).isDirectory();
     } catch {
       return false;
     }
   });
 }
+
+/** Regra de ancoragem em linguagem do planner — o MESMO contrato de `includedScopeAnchoredInProject`. */
+export const INCLUDED_SCOPE_ANCHORING_RULE =
+  'Cada caminho do included_scope deve ser um arquivo existente, ou um arquivo novo cujo diretório-pai existe, ou um arquivo novo em UMA pasta nova cujo diretório acima existe (ex.: apps/web/app/api/<nova-rota>/route.ts e o teste ao lado). Mais de um nível de pasta inventada, ou pasta nova na raiz do repositório, é recusado.';
 
 /** `target_paths` usa semântica de ARQUIVO EXATO. Um path ausente é permitido
  * (teste/arquivo novo e fato `existedAtBase=false`), mas um diretório existente é
@@ -377,6 +391,8 @@ export function parseProposal(raw: string): PlannerArguments | null {
     if (validationTargetPaths === null) return null;
     const additionalValidations = parseAdditionalValidations(value.additional_validations);
     if (additionalValidations === null) return null;
+    // Teto de tentativas: declarado estruturalmente (1–3); ausência ⇒ 3; qualquer outro valor reprova.
+    if (value.max_attempts !== undefined && value.max_attempts !== 1 && value.max_attempts !== 2 && value.max_attempts !== 3) return null;
     const expected = new Set(value.expected_effects);
     const allCovered = [value.validation_covers, ...(additionalValidations ?? []).map(v => v.covers)].flat();
     if (allCovered.some(criterion => !expected.has(criterion))

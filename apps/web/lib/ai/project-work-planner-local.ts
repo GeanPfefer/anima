@@ -3,6 +3,7 @@ import {
   buildPlannerUserPrompt,
   coercePlannerArrayFields,
   includedScopeAnchoredInProject,
+  INCLUDED_SCOPE_ANCHORING_RULE,
   parseProposal,
   PLANNER_CHAT_TOOLS,
   PLANNER_SYSTEM_INSTRUCTIONS,
@@ -229,7 +230,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
           tool_call_id: submitted.id ?? `call_${turn}_submit`,
           content: JSON.stringify({
             ok: false,
-            error: 'O included_scope não está ancorado na topologia real do repositório. Investigue os caminhos e submeta novamente.',
+            error: `O included_scope não está ancorado na topologia real do repositório. ${INCLUDED_SCOPE_ANCHORING_RULE} Investigue os caminhos e submeta novamente.`,
           }),
         });
         noProgress = 0;

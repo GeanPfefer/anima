@@ -186,7 +186,7 @@ export async function planExecutableProjectWork(
               ...(validation.target_paths ? { target_paths: validation.target_paths } : {}),
             })),
           ],
-          limits: { max_attempts: 3, max_duration_minutes: 30 },
+          limits: { max_attempts: proposal.max_attempts ?? 3, max_duration_minutes: 30 },
         },
       },
       proposal: {
@@ -220,6 +220,30 @@ export type ProjectWorkRevisionPlanningResult =
  * mas continua sem autoridade sobre execução: planExecutableProjectWork reaplica
  * validação de paths/gates e reconstrói execution_spec/base_sha no host.
  */
+const revisionSpec = (intent: unknown) => {
+  const spec = (intent as { execution_spec?: { validation_criteria?: unknown; limits?: unknown } } | null)?.execution_spec;
+  return { validation_criteria: spec?.validation_criteria ?? null, limits: spec?.limits ?? null };
+};
+
+/** Resumo estrutural da versão vigente para o planner saber o que corrigir. */
+function describeProposalForRevision(item: WorkItem): string {
+  const spec = revisionSpec(item.intent);
+  return JSON.stringify({
+    summary: item.proposal.data.summary,
+    included_scope: item.proposal.data.includedScope,
+    excluded_scope: item.proposal.data.excludedScope,
+    expected_effects: item.proposal.data.expectedEffects,
+    validation_criteria: spec.validation_criteria,
+    limits: spec.limits,
+    impact_level: item.impactLevel,
+  });
+}
+
+function sameRevisableContent(item: WorkItem, command: CreateWorkProposalCommand): boolean {
+  return JSON.stringify(item.proposal.data) === JSON.stringify(command.proposal.data)
+    && JSON.stringify(revisionSpec(item.intent)) === JSON.stringify(revisionSpec(command.intent));
+}
+
 export async function planExecutableProjectWorkRevision(
   item: WorkItem,
   requestedChanges: string,
@@ -232,12 +256,16 @@ export async function planExecutableProjectWorkRevision(
 
   const planningMessage = [
     'Replaneje semanticamente o trabalho a partir das fontes autoritativas abaixo.',
-    'Produza uma proposta COMPLETA substituta.',
+    'Produza uma proposta COMPLETA substituta que ATENDA a correção pedida.',
     'Não reutilize fatos da proposta anterior: ela pode estar errada ou desatualizada.',
     'Investigue novamente o repositório real antes de afirmar paths, defaults ou comportamento existente.',
+    'Tudo o que a correção pedir e o contrato permitir (included_scope, gates, max_attempts) deve estar nos CAMPOS estruturados; nunca só no texto.',
     '',
     'Pedido original:',
     item.originalRequest,
+    '',
+    `Proposta anterior (v${item.proposalVersion}) — apenas para saber o que corrigir:`,
+    describeProposalForRevision(item),
     '',
     'Correção mais recente solicitada pelo usuário:',
     feedback,
@@ -256,6 +284,10 @@ export async function planExecutableProjectWorkRevision(
   );
 
   if (!planned.ok) return planned;
+  // Uma revisão precisa REVISAR: reenviar a mesma proposta não gera versão nova.
+  if (sameRevisableContent(item, planned.command)) {
+    return { ok: false, message: 'O planejador devolveu a mesma proposta; nenhuma nova versão foi criada. A versão atual e o pedido continuam intactos.' };
+  }
 
   return {
     ok: true,

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { describeCostClass, describeExecutionAdvisory, describeMachinePressure, describeValidationOutcome, evaluateAutonomousEligibility, formatObservedDurationMs, parseWorkResultValidations, type ApprovalDecision, type MachinePressure, type ResultReviewDecision, type WorkItem, type WorkloadAdvisory, type WorkPresentation, type WorkVerificationVerdict } from '@anima/core';
 import styles from './chat.module.css';
 import { WorkExecutionCard } from './WorkExecutionCard';
@@ -85,7 +85,28 @@ export function WorkProposalCard({presentation,onChange,focused=false,onFocus,on
     const timer=window.setInterval(()=>void poll(),5_000);
     return()=>{active=false;window.clearInterval(timer);};
   },[trackAutonomousProgress,item.id,item.state,presentation.pendingDecision,onChange]);
-  async function mutate(endpoint:string,payload:Record<string,unknown>){if(status!=='idle')return;setStatus('submitting');setError('');const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion,...payload})});const body=await response.json().catch(()=>({}));if(response.ok&&body.ok){setMode('none');setDetail('');setReferences('');setValidations('');setLimitations('');setCustomDeferReason('');await reload();return;}const message=body.error?.message??'Não foi possível atualizar o trabalho.';setError(message);setStatus('idle');if(body.error?.code==='version_conflict'||body.error?.code==='ambiguous_outcome'){await reload();setError(message);}}
+  // Convergência com o estado PERSISTIDO: um card não-terminal relê o item quando a janela
+  // volta ao foco/fica visível. Sem isso, uma mutação cuja resposta se perdeu (reload da
+  // página, aba em segundo plano durante um planejamento longo) deixava o card preso numa
+  // versão antiga — o banco já estava em vN+1 e a UI seguia mostrando vN.
+  const statusRef=useRef(status);statusRef.current=status;
+  useEffect(()=>{
+    if(['completed','cancelled','rejected'].includes(item.state))return;
+    let active=true;
+    const revalidate=async()=>{
+      if(document.visibilityState!=='visible'||statusRef.current!=='idle')return;
+      try{const response=await fetch(`/api/work-orchestration/items/${item.id}`,{cache:'no-store'});const body=await response.json().catch(()=>null);
+        const next=body?.value?.presentation as WorkPresentationView|undefined;
+        if(active&&response.ok&&body?.ok&&next&&(next.item.proposalVersion!==item.proposalVersion||next.item.state!==item.state))onChange(next);
+      }catch{/* próxima volta ao foco tenta novamente */}
+    };
+    const onVisible=()=>void revalidate();
+    window.addEventListener('focus',onVisible);document.addEventListener('visibilitychange',onVisible);
+    return()=>{active=false;window.removeEventListener('focus',onVisible);document.removeEventListener('visibilitychange',onVisible);};
+  },[item.id,item.state,item.proposalVersion,onChange]);
+  async function mutate(endpoint:string,payload:Record<string,unknown>){if(status!=='idle')return;setStatus('submitting');setError('');let response:Response;try{response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workItemId:item.id,expectedProposalVersion:item.proposalVersion,...payload})});}catch{
+      // A resposta se perdeu, mas o servidor pode ter concluído: nada é presumido — relê o persistido.
+      setError('A conexão falhou antes da resposta; o estado foi relido do servidor.');await reload(true);return;}const body=await response.json().catch(()=>({}));if(response.ok&&body.ok){setMode('none');setDetail('');setReferences('');setValidations('');setLimitations('');setCustomDeferReason('');await reload();return;}const message=body.error?.message??'Não foi possível atualizar o trabalho.';setError(message);setStatus('idle');if(body.error?.code==='version_conflict'||body.error?.code==='ambiguous_outcome'){await reload();setError(message);}}
   async function createReviewCorrection(){
     if(status!=='idle')return;
     setStatus('submitting');setError('');

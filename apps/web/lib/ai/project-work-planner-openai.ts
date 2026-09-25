@@ -8,6 +8,7 @@ import {
   buildPlannerUserPrompt,
   FORCE_SUBMISSION_AFTER_EVIDENCE,
   includedScopeAnchoredInProject,
+  INCLUDED_SCOPE_ANCHORING_RULE,
   nonBlank,
   parseProposal,
   PLANNER_SYSTEM_INSTRUCTIONS,
@@ -189,7 +190,7 @@ export class OpenAIProjectWorkPlanner implements ProjectWorkPlanner {
             ? 'Investigue o repositório antes de enviar a proposta.'
             : parseProposal(call.arguments) === null
               ? 'A proposta não passou na validação estrutural do host (campos obrigatórios, caminhos seguros no included_scope, até 12 caminhos, comando de validação permitido). Corrija e submeta novamente.'
-              : 'O included_scope não está ancorado na topologia real do repositório. Investigue os caminhos e submeta novamente.';
+              : `O included_scope não está ancorado na topologia real do repositório. ${INCLUDED_SCOPE_ANCHORING_RULE} Investigue os caminhos e submeta novamente.`;
           return { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify({ ok: false, error }) };
         }
 
