@@ -11,7 +11,8 @@ import { readWorkRetryReadiness } from '@/lib/work-orchestration/retry-readiness
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
 import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/lib/work-orchestration/paid-compute-authorization-store';
-import { runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkSetCompute } from './app';
+import { runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
+import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recovery';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
 import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { renderHuman } from './render';
@@ -106,6 +107,10 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
         },
         grant: input => grantPaidComputeAuthorization(client, input),
       }, command.id, { maxCostUsd: command.maxCostUsd, maxMinutes: command.maxMinutes, validHours: command.validHours });
+    case 'work-recover-harness':
+      return runWorkRecoverHarness(() => recoverFromHarnessDefect(client, command.id, {
+        fixCommits: command.fixCommits, evidenceReference: command.evidenceReference, reason: command.reason,
+      }), command.id);
     case 'work-set-compute':
       return runWorkSetCompute(service, async ({ workItemId, expectedProposalVersion, preference }) => {
         const res = await client.rpc('record_compute_preference', {

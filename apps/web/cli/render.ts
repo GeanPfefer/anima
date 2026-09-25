@@ -178,6 +178,14 @@ export function renderHuman(payload: CliPayload): string {
     case 'work-unsupervise': return `${payload.workItemId} ${DOT} ${payload.message}`;
     case 'work-prepare-autonomous': return `${payload.workItemId} ${DOT} v${payload.proposalVersion} ${DOT} ${payload.message}`;
     case 'work-set-compute': return `${payload.workItemId} ${DOT} v${payload.proposalVersion} ${DOT} ${payload.message}`;
+    case 'work-recover-harness':
+      return [
+        `${payload.workItemId} ${DOT} ${payload.message}`,
+        `Sucessor: ${payload.successorWorkItemId}`,
+        `Lineage: ${payload.lineageId} ${DOT} attempt de origem ${payload.sourceAttemptId}`,
+        `Fix: ${payload.fixCommits.map(sha => sha.slice(0, 7)).join(', ')}`,
+        `Próximo passo: anima work show ${payload.successorWorkItemId}`,
+      ].join('\n');
     case 'work-authorize-compute':
       return [
         `${payload.workItemId} ${DOT} ${payload.message}`,

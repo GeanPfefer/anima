@@ -224,6 +224,11 @@ export interface WorkAuthorizeComputePayload {
   readonly maxCostUsd: number; readonly maxDurationMs: number; readonly validFrom: string; readonly validUntil: string;
   readonly message: string;
 }
+export interface WorkRecoverHarnessPayload {
+  readonly ok: true; readonly kind: 'work-recover-harness'; readonly workItemId: string;
+  readonly successorWorkItemId: string; readonly lineageId: string; readonly recoveryId: string;
+  readonly sourceAttemptId: string; readonly fixCommits: readonly string[]; readonly replayed: boolean; readonly message: string;
+}
 export interface WorkSetComputePayload {
   readonly ok: true; readonly kind: 'work-set-compute'; readonly workItemId: string;
   readonly proposalVersion: number; readonly preference: ComputePreferenceV1; readonly replayed: boolean;
@@ -251,7 +256,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
+  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -556,6 +561,30 @@ export function projectComputePreferencePayload(item: WorkItem, events: readonly
   const spec = (item.intent as { execution_spec?: { coder_backend?: unknown; coder_backend_source?: unknown } } | null)?.execution_spec;
   if (spec?.coder_backend === 'openai' && spec.coder_backend_source !== 'runtime_default') return { status: 'legacy_contract', provider: 'openai' };
   return { status: 'router_default', cleared: false };
+}
+
+/**
+ * Ato HUMANO de recuperação após defeito de harness corrigido: materializa exatamente um
+ * sucessor `proposed` (mesma proposta, 1 tentativa). Não aprova, não define preferência de
+ * compute e não concede authority — esses continuam sendo atos separados.
+ */
+export async function runWorkRecoverHarness(
+  recover: () => Promise<
+    | { ok: true; recoveryId: string; successorWorkItemId: string; lineageId: string; sourceAttemptId: string; replayed: boolean; authorization: { fixCommits: readonly string[] } }
+    | { ok: false; code: string; message: string; rejected: boolean }>,
+  id: string,
+): Promise<CommandResult> {
+  const result = await recover();
+  if (!result.ok) return errorResult(result.message, result.code, result.rejected ? EXIT.REJECTED : EXIT.ERROR);
+  return {
+    exitCode: EXIT.OK,
+    payload: {
+      ok: true, kind: 'work-recover-harness', workItemId: id, successorWorkItemId: result.successorWorkItemId,
+      lineageId: result.lineageId, recoveryId: result.recoveryId, sourceAttemptId: result.sourceAttemptId,
+      fixCommits: result.authorization.fixCommits, replayed: result.replayed,
+      message: `Sucessor de recuperação ${result.replayed ? 'já existente (replay)' : 'criado'} em proposed. Aprovação, preferência de compute e authority continuam atos separados.`,
+    },
+  };
 }
 
 /** Porta do ato humano `record_compute_preference` (RPC; RLS do usuário). */

@@ -81,3 +81,4 @@ export * from './resource-advisory';
 export * from './coder-transcript';
 
 export * from './human-resume';
+export * from './harness-recovery';

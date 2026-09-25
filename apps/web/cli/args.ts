@@ -24,7 +24,8 @@ export type ParsedCommand =
   | { readonly kind: 'work-retry'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-prepare-autonomous'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-authorize-compute'; readonly id: string; readonly maxCostUsd: number; readonly maxMinutes: number; readonly validHours: number; readonly json: boolean }
-  | { readonly kind: 'work-set-compute'; readonly id: string; readonly preference: ComputePreferenceV1; readonly json: boolean };
+  | { readonly kind: 'work-set-compute'; readonly id: string; readonly preference: ComputePreferenceV1; readonly json: boolean }
+  | { readonly kind: 'work-recover-harness'; readonly id: string; readonly fixCommits: readonly string[]; readonly evidenceReference: string; readonly reason: string; readonly json: boolean };
 
 export type ParseResult =
   | { readonly ok: true; readonly command: ParsedCommand }
@@ -38,6 +39,8 @@ interface Extracted {
   readonly planPath: string | null;
   readonly limits: Readonly<Record<'maxUsd' | 'maxMinutes' | 'validHours', string | null>>;
   readonly compute: Readonly<Record<'strategy' | 'provider' | 'model', string | null>>;
+  readonly fixes: readonly string[];
+  readonly evidence: string | null;
   readonly help: boolean;
   readonly unknownFlag: string | null;
 }
@@ -51,6 +54,8 @@ function extract(argv: readonly string[]): Extracted {
   let planPath: string | null = null;
   const limits: Record<'maxUsd' | 'maxMinutes' | 'validHours', string | null> = { maxUsd: null, maxMinutes: null, validHours: null };
   const compute: Record<'strategy' | 'provider' | 'model', string | null> = { strategy: null, provider: null, model: null };
+  const fixes: string[] = [];
+  let evidence: string | null = null;
   let help = false;
   let unknownFlag: string | null = null;
   for (let i = 0; i < argv.length; i++) {
@@ -64,13 +69,15 @@ function extract(argv: readonly string[]): Extracted {
     if (token === '--strategy') { compute.strategy = argv[++i] ?? ''; continue; }
     if (token === '--provider') { compute.provider = argv[++i] ?? ''; continue; }
     if (token === '--model') { compute.model = argv[++i] ?? ''; continue; }
+    if (token === '--fix') { fixes.push(argv[++i] ?? ''); continue; }
+    if (token === '--evidence') { evidence = argv[++i] ?? ''; continue; }
     if (token === '--help' || token === '-h') { help = true; continue; }
     if (token === '--reason' || token === '-m') { reason = argv[++i] ?? ''; continue; }
     if (token.startsWith('--reason=')) { reason = token.slice('--reason='.length); continue; }
     if (token.startsWith('-') && token !== '-') { if (unknownFlag === null) unknownFlag = token; continue; }
     positionals.push(token);
   }
-  return { positionals, json, reason, diagnosisPath, planPath, limits, compute, help, unknownFlag };
+  return { positionals, json, reason, diagnosisPath, planPath, limits, compute, fixes, evidence, help, unknownFlag };
 }
 
 /** Limites da authority paga: EXPLÍCITOS (sem default de dinheiro) e dentro de faixas sãs. */
@@ -86,7 +93,7 @@ const boundedNumber = (raw: string | null, bounds: { readonly min: number; reado
 };
 
 export function parseArgs(argv: readonly string[]): ParseResult {
-  const { positionals, json, reason, diagnosisPath, planPath, limits, compute, help, unknownFlag } = extract(argv);
+  const { positionals, json, reason, diagnosisPath, planPath, limits, compute, fixes, evidence, help, unknownFlag } = extract(argv);
 
   if (help || positionals[0] === 'help' || positionals.length === 0) return { ok: true, command: { kind: 'help' } };
   if (unknownFlag !== null) return { ok: false, error: `Flag desconhecida: ${unknownFlag}` };
@@ -101,6 +108,9 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   const anyLimit = limits.maxUsd !== null || limits.maxMinutes !== null || limits.validHours !== null;
   if (anyLimit && (group !== 'work' || sub !== 'authorize-compute')) {
     return { ok: false, error: '--max-usd/--max-minutes/--valid-hours só valem para work authorize-compute.' };
+  }
+  if ((fixes.length > 0 || evidence !== null) && (group !== 'work' || sub !== 'recover-harness')) {
+    return { ok: false, error: '--fix/--evidence só valem para work recover-harness.' };
   }
   const anyCompute = compute.strategy !== null || compute.provider !== null || compute.model !== null;
   if (anyCompute && (group !== 'work' || sub !== 'set-compute')) {
@@ -193,6 +203,13 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       if (!preference) return { ok: false, error: `${usage} — provider suportado: openai; modelo [A-Za-z0-9._:-].` };
       return { ok: true, command: { kind: 'work-set-compute', id, preference, json } };
     }
+    if (sub === 'recover-harness') {
+      const usage = 'Uso: anima work recover-harness <id> --fix <commit> [--fix <commit>] --evidence docs/registros/<registro>.md --reason "<motivo>"';
+      if (!id || rest.length !== 1 || fixes.length === 0 || fixes.some(f => !f.trim()) || !evidence?.trim() || !reason?.trim()) {
+        return { ok: false, error: usage };
+      }
+      return { ok: true, command: { kind: 'work-recover-harness', id, fixCommits: fixes, evidenceReference: evidence.trim(), reason: reason.trim(), json } };
+    }
     if (sub === 'retry') {
       if (!id) return { ok: false, error: 'Uso: anima work retry <id>' };
       return { ok: true, command: { kind: 'work-retry', id, json } };
@@ -226,6 +243,8 @@ Uso:
                                                Autoridade humana paga p/ uma unidade que o Router pôs em espera
   anima work set-compute <id> --strategy provider_api --provider openai --model M
                                                Preferência de compute da unidade (NÃO autoriza gasto)
+  anima work recover-harness <id> --fix C --evidence docs/registros/R.md --reason "..."
+                                               Recuperação após defeito de HARNESS corrigido: 1 sucessor proposed (sem aprovar/pagar)
   anima work set-compute <id> --strategy router_default
                                                Volta a unidade ao Router padrão (local-first)
   anima help                                  Esta ajuda
