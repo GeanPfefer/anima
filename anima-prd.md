@@ -1,4 +1,12 @@
 # Anima — Product Requirements Document
+> Prova real paga de correção do `GET /api/dev-readiness` em 2026-09-25:
+> o successor `7610b066…` consumiu exatamente uma authority OpenAI
+> (`gpt-5.6-sol`) e uma attempt, mas terminou `failed` antes do submit. O coder
+> removeu as variáveis residentes e o export incompatível, porém esgotou a
+> reserva pós-edit ainda com o teste focal vermelho (`Response` ausente no
+> ambiente Jest); typecheck, build, Verifier e review não chegaram a executar.
+> A reserva permanece `cost_unknown`; não houve retry, settlement artificial,
+> push ou uso de Ollama. [Registro](docs/registros/2026-09-25j-correcao-dev-readiness-primeira-barreira.md).
 > Prova real de self-development fechou duas lacunas em 2026-09-22: a derivação
 > de correção retomada agora separa o `remaining_scope` host-observado do rework
 > textual e só reabre arquivo do checkpoint sob diretiva positiva inequívoca;

@@ -1,5 +1,13 @@
 # Plano 002 — Modo Autônomo V0
 
+> Atualização operacional (2026-09-25): a correção real `7610b066…` exerceu o
+> caminho authority → Resident Host → Router → OpenAI `gpt-5.6-sol` → worktree,
+> mas a única attempt terminou `failed` antes do submit: o teste focal ainda
+> falhava porque `Response` não existia no ambiente Jest. Nenhum gate host-side,
+> Verifier ou review foi alcançado; sem retry e com reserva `cost_unknown`
+> preservada. Registro:
+> [`2026-09-25j-correcao-dev-readiness-primeira-barreira.md`](../registros/2026-09-25j-correcao-dev-readiness-primeira-barreira.md).
+
 > Atualização operacional (2026-09-21): o recorte de Continuous Self-Dev foi
 > endurecido contra três formas de duplicação/sucesso fabricado: completion sem
 > timestamp verificável agora fica `indeterminate`; a cobertura é lida com
