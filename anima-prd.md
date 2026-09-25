@@ -1891,3 +1891,17 @@ prompt somente o corpo da observação EXEC mais recente e reduz as anteriores a
 cabeçalhos factuais; o transcript host-observed continua preservando as saídas para
 auditoria. Não houve aumento de `num_ctx`, enfraquecimento de gate ou nova attempt.
 Registro: [hardening de validação e contexto](docs/registros/2026-09-22-worktree-validation-context-compaction.md).
+
+## Estado operacional — prova paga gpt-5.6-sol na lineage de correção (2026-09-25)
+
+A seq3 `bd4092af` da lineage `a703e92f` foi executada com `gpt-5.6-sol`
+(`reasoning=high`) sob authority humana `43509ab1` (US$3, 30 min): em 26,8 s o coder
+adicionou os dois testes de fronteira em `levels.test.ts` (commit `7ccc777`), gate host
+verde, escopo limpo, item em `review`. Duas barreiras estruturais foram corrigidas: o
+Compute Router V1 agora deriva o sinal de falha local também dos predecessores da
+lineage, só de attempts locais e sem realimentar suas próprias razões (`fc53649`); e
+sucessores de recuperação não herdam mais `covers` do aceite do original, que
+condenavam todo sucessor a `criterion_covers_unknown_acceptance` (`a97ad40`) — causa
+do parecer `rejected` de `bd4092af`. A reserva de US$3 permanece aberta (`cost_unknown`,
+barreira B1). Registro:
+[prova Sol e correções](docs/registros/2026-09-25-prova-sol-bd4092af-router-lineage-e-covers.md).
