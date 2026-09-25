@@ -54,6 +54,8 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work withdraw <id> --reason "..."` | Retira um plano APROVADO não iniciado (`approved → cancelled`) via `withdraw_approved_work` |
 | `anima work retry <id>` | Solicita o retry governado (ato humano) de um item `failed`/RETRY_READY via `request_work_retry` |
 | `anima work authorize-resume <id> [--plan f]` | Autoridade humana de +1: recovery antigo de `failed` cria successor; bloqueio pré-attempt por orçamento readmite o mesmo item |
+| `anima work prepare-autonomous <id>` | Paridade com o botão da UI "Preparar elegibilidade autônoma": classifica a versão aprovada vigente (sem executar) |
+| `anima work authorize-compute <id> --max-usd N --max-minutes M --valid-hours H` | Ato humano: concede a authority paga EXATA que o Compute Router registrou como espera (provider/classe/modelo derivados da decisão; limites explícitos; recusa sem espera, com authority ativa ou duração < a pedida). Não executa |
 | `anima help` | Ajuda |
 
 `work retry` reusa a MESMA capability da rota web `retries`: lê `current_work_retry_readiness`

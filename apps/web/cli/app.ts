@@ -211,6 +211,10 @@ export interface WorkAuthorizeComputePayload {
   readonly maxCostUsd: number; readonly maxDurationMs: number; readonly validFrom: string; readonly validUntil: string;
   readonly message: string;
 }
+export interface WorkPrepareAutonomousPayload {
+  readonly ok: true; readonly kind: 'work-prepare-autonomous'; readonly workItemId: string;
+  readonly proposalVersion: number; readonly replayed: boolean; readonly message: string;
+}
 export interface WorkSupervisionPayload {
   readonly ok: true; readonly kind: 'work-supervise' | 'work-unsupervise'; readonly workItemId: string;
   readonly leaseId: string | null; readonly expiresAt: string | null; readonly replayed: boolean; readonly readmitted: boolean;
@@ -229,7 +233,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | ErrorPayload | HelpPayload
+  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -517,6 +521,33 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
       suggestedDecision,
       provenance: { status: presentation.provenance?.status ?? 'unknown', issues: presentation.provenance?.issues ?? [] },
       computeRouting,
+    },
+  };
+}
+
+/**
+ * Paridade com o botão "Preparar elegibilidade autônoma" da UI: classifica, pela política
+ * vigente, a versão APROVADA vigente de um plano do planejador. Sem isso um plano aprovado
+ * pela CLI nunca entra na fila autônoma. Não executa, não autoriza gasto.
+ */
+export async function runWorkPrepareAutonomous(
+  service: WorkOrchestrationPort,
+  prepare: (workItemId: string, proposalVersion: number) => Promise<{ ok: true; replayed: boolean } | { ok: false; code: string; message: string }>,
+  id: string,
+): Promise<CommandResult> {
+  const item = await service.getItem(id);
+  if (!item.ok) return errorResult(item.error.message, item.error.code, exitCodeForError(item.error.code));
+  if (item.value.state !== 'approved') {
+    return errorResult(`O item está em "${item.value.state}"; só um plano approved pode ser preparado.`, 'not_approved', EXIT.REJECTED);
+  }
+  const prepared = await prepare(item.value.id, item.value.proposalVersion);
+  if (!prepared.ok) return errorResult(prepared.message, prepared.code, prepared.code === 'work_item_not_found' ? EXIT.ERROR : EXIT.REJECTED);
+  return {
+    exitCode: EXIT.OK,
+    payload: {
+      ok: true, kind: 'work-prepare-autonomous', workItemId: item.value.id, proposalVersion: item.value.proposalVersion,
+      replayed: prepared.replayed,
+      message: `Elegibilidade autônoma preparada${prepared.replayed ? ' (replay)' : ''}. O Resident Host pode selecionar a unidade.`,
     },
   };
 }

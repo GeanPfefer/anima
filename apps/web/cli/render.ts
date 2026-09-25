@@ -165,6 +165,7 @@ export function renderHuman(payload: CliPayload): string {
       ].join('\n');
     case 'work-supervise':
     case 'work-unsupervise': return `${payload.workItemId} ${DOT} ${payload.message}`;
+    case 'work-prepare-autonomous': return `${payload.workItemId} ${DOT} v${payload.proposalVersion} ${DOT} ${payload.message}`;
     case 'work-authorize-compute':
       return [
         `${payload.workItemId} ${DOT} ${payload.message}`,

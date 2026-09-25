@@ -1,5 +1,5 @@
 import type { WorkEvent, WorkItem, WorkOperationResult } from '@anima/core';
-import { runWorkAuthorizeCompute, runWorkShow, type ComputeAuthorityGrantPort, type WorkOrchestrationPort } from './app';
+import { runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkShow, type ComputeAuthorityGrantPort, type WorkOrchestrationPort } from './app';
 import { parseArgs } from './args';
 import { renderHuman } from './render';
 import { EXIT } from './exit-codes';
@@ -104,5 +104,22 @@ describe('parse de work authorize-compute', () => {
   });
   test('limites fora de authorize-compute são uso inválido', () => {
     expect(parseArgs(['work', 'show', 'w1', '--max-usd', '3']).ok).toBe(false);
+  });
+});
+
+describe('work prepare-autonomous (paridade com o botão da UI)', () => {
+  test('classifica a versão aprovada vigente e não executa nada', async () => {
+    const seen: Array<[string, number]> = [];
+    const result = await runWorkPrepareAutonomous(port([]), async (id, version) => { seen.push([id, version]); return { ok: true, replayed: false }; }, 'w1');
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(seen).toEqual([['w1', 1]]);
+    expect(parseArgs(['work', 'prepare-autonomous', 'w1'])).toEqual({ ok: true, command: { kind: 'work-prepare-autonomous', id: 'w1', json: false } });
+  });
+  test('plano não aprovado é recusado sem classificar', async () => {
+    let called = false;
+    const proposed = { ...approvedItem, state: 'proposed' } satisfies WorkItem;
+    const result = await runWorkPrepareAutonomous(port([], proposed), async () => { called = true; return { ok: true, replayed: false }; }, 'w1');
+    expect(result.exitCode).toBe(EXIT.REJECTED);
+    expect(called).toBe(false);
   });
 });

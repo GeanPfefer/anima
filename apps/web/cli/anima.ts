@@ -10,7 +10,8 @@ import { readWorkRetryReadiness } from '@/lib/work-orchestration/retry-readiness
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
 import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/lib/work-orchestration/paid-compute-authorization-store';
-import { runWorkAuthorizeCompute } from './app';
+import { runWorkAuthorizeCompute, runWorkPrepareAutonomous } from './app';
+import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
 import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
@@ -93,6 +94,8 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
       return runWorkReview(service, command.id, { type: 'accept' });
     case 'work-withdraw':
       return runWorkWithdraw(service, command.id, command.reason);
+    case 'work-prepare-autonomous':
+      return runWorkPrepareAutonomous(service, (workItemId, version) => ensurePlannedProjectClassification(client, workItemId, version), command.id);
     case 'work-authorize-compute':
       return runWorkAuthorizeCompute(service, {
         activeFor: async (workItemId, resourceClass) => {

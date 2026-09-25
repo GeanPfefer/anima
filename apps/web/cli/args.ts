@@ -20,6 +20,7 @@ export type ParsedCommand =
   | { readonly kind: 'work-accept'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-withdraw'; readonly id: string; readonly reason: string; readonly json: boolean }
   | { readonly kind: 'work-retry'; readonly id: string; readonly json: boolean }
+  | { readonly kind: 'work-prepare-autonomous'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-authorize-compute'; readonly id: string; readonly maxCostUsd: number; readonly maxMinutes: number; readonly validHours: number; readonly json: boolean };
 
 export type ParseResult =
@@ -154,6 +155,10 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       if (reason === null || reason.trim().length === 0) return { ok: false, error: 'withdraw exige --reason "<motivo>" não vazio.' };
       return { ok: true, command: { kind: 'work-withdraw', id, reason: reason.trim(), json } };
     }
+    if (sub === 'prepare-autonomous') {
+      if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: 'Uso: anima work prepare-autonomous <id>' };
+      return { ok: true, command: { kind: 'work-prepare-autonomous', id, json } };
+    }
     if (sub === 'authorize-compute') {
       const usage = 'Uso: anima work authorize-compute <id> --max-usd <US$> --max-minutes <min> --valid-hours <h>';
       if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: usage };
@@ -193,6 +198,7 @@ Uso:
   anima work accept <id>                       Aceita o RESULTADO em review (review → completed)
   anima work withdraw <id> --reason "..."      Retira um plano APROVADO não iniciado (approved → cancelled)
   anima work retry <id>                        Solicita o retry governado de um item failed/RETRY_READY
+  anima work prepare-autonomous <id>           Prepara a elegibilidade autônoma (classificação) de um plano aprovado
   anima work authorize-compute <id> --max-usd N --max-minutes M --valid-hours H
                                                Autoridade humana paga p/ uma unidade que o Router pôs em espera
   anima help                                  Esta ajuda
