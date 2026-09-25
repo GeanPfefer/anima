@@ -27,6 +27,47 @@ import {
 // ============================================================
 
 type ChatToolCall = { id?: string; type?: string; function?: { name?: string; arguments?: unknown } };
+
+const TEXTUAL_TOOL_CALL = /<function=([A-Za-z_][\w-]*)>([\s\S]*?)<\/function>/g;
+const TEXTUAL_PARAMETER = /<parameter=([A-Za-z_][\w-]*)>([\s\S]*?)<\/parameter>/g;
+const MAX_TEXTUAL_TOOL_CALLS = 8;
+
+/**
+ * Fallback de protocolo: o `qwen3-coder` emite chamadas de ferramenta no seu formato
+ * NATIVO em texto (`<function=nome><parameter=chave>valor</parameter></function>`) e o
+ * endpoint OpenAI-compat do Ollama nem sempre as converte em `tool_calls`. Sem isto o
+ * planejador tratava toda chamada como conversa e falhava com "não produziu uma proposta
+ * estruturada" — falha do harness, não do modelo. Só nomes de ferramentas CONHECIDAS são
+ * aceitos; valores JSON válidos (listas, números) são decodificados, o resto fica texto.
+ * Bounded e puro; não amplia o que o modelo pode fazer — só o que o harness entende.
+ */
+export function parseTextualToolCalls(content: string | null | undefined, knownTools: ReadonlySet<string>): ChatToolCall[] {
+  if (typeof content !== 'string' || !content.includes('<function=')) return [];
+  const calls: ChatToolCall[] = [];
+  for (const match of content.matchAll(TEXTUAL_TOOL_CALL)) {
+    if (calls.length >= MAX_TEXTUAL_TOOL_CALLS) break;
+    const name = match[1]!;
+    if (!knownTools.has(name)) continue;
+    const args: Record<string, unknown> = {};
+    for (const parameter of match[2]!.matchAll(TEXTUAL_PARAMETER)) {
+      const raw = parameter[2]!.replace(/^\s*\n/, '').replace(/\n\s*$/, '');
+      const trimmed = raw.trim();
+      let value: unknown = raw;
+      if (/^[[{]/.test(trimmed) || /^-?\d+(\.\d+)?$/.test(trimmed) || trimmed === 'true' || trimmed === 'false') {
+        try { value = JSON.parse(trimmed); } catch { value = raw; }
+      }
+      args[parameter[1]!] = value;
+    }
+    calls.push({ id: `text_call_${calls.length}`, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+  }
+  return calls;
+}
+
+const KNOWN_PLANNER_TOOLS: ReadonlySet<string> = new Set(
+  [...PLANNER_CHAT_TOOLS, SUBMIT_CHAT_TOOL]
+    .map(tool => (tool as { function?: { name?: unknown } }).function?.name)
+    .filter((name): name is string => typeof name === 'string'),
+);
 type ChatMessage = { role: string; content?: string | null; tool_calls?: ChatToolCall[]; tool_call_id?: string };
 type ChatResponse = { choices?: Array<{ message?: ChatMessage }>; error?: { message?: string } };
 
@@ -126,7 +167,8 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
       const assistant = body.choices?.[0]?.message;
       if (!assistant) return { ok: false, message: 'O modelo local não retornou uma resposta utilizável.' };
 
-      const toolCalls = Array.isArray(assistant.tool_calls) ? assistant.tool_calls : [];
+      const nativeToolCalls = Array.isArray(assistant.tool_calls) ? assistant.tool_calls : [];
+      const toolCalls = nativeToolCalls.length > 0 ? nativeToolCalls : parseTextualToolCalls(assistant.content, KNOWN_PLANNER_TOOLS);
       if (toolCalls.length === 0) {
         // Sem tool call: o modelo conversou. Cutuca para submeter (se já investigou)
         // ou para investigar; fail-closed se não progredir.
