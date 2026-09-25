@@ -15,3 +15,46 @@ describe('redactSecrets', () => {
     expect(redactSecrets('planejamento concluído')).toBe('planejamento concluído');
   });
 });
+
+
+import { resolveTaskMessage } from './prove-openai-strong-e2e';
+
+describe('resolveTaskMessage', () => {
+  it('exige uma fonte de mensagem', () => {
+    expect(() => resolveTaskMessage([])).toThrow('Informe uma mensagem usando --message ou --message-file.');
+  });
+
+  it('aceita mensagem direta nas formas separada e inline sem alterar seu conteúdo', () => {
+    expect(resolveTaskMessage(['--message', '  corrija o planner  '])).toBe('  corrija o planner  ');
+    expect(resolveTaskMessage(['--message=adicione testes'])).toBe('adicione testes');
+  });
+
+  it('lê mensagem de arquivo nas formas separada e inline sem alterar seu conteúdo', () => {
+    const readFile = jest.fn(() => '  mensagem do arquivo  ');
+
+    expect(resolveTaskMessage(['--message-file', 'tarefa.txt'], readFile)).toBe('  mensagem do arquivo  ');
+    expect(resolveTaskMessage(['--message-file=tarefa.txt'], readFile)).toBe('  mensagem do arquivo  ');
+    expect(readFile).toHaveBeenCalledWith('tarefa.txt');
+  });
+
+  it('rejeita fontes conflitantes, conteúdo vazio e falha de leitura sem expor detalhes', () => {
+    expect(() => resolveTaskMessage(['--message', 'direta', '--message-file', 'tarefa.txt'])).toThrow(
+      'Use somente uma entre --message e --message-file.',
+    );
+    expect(() => resolveTaskMessage(['--message', '   '])).toThrow('A opção --message exige uma mensagem não vazia.');
+    expect(() => resolveTaskMessage(['--message-file', 'tarefa.txt'], jest.fn(() => '  '))).toThrow(
+      'O arquivo informado em --message-file contém uma mensagem vazia.',
+    );
+    expect(() => resolveTaskMessage(['--message-file', 'segredo.txt'], jest.fn(() => {
+      throw new Error('conteúdo secreto');
+    }))).toThrow('Não foi possível ler a mensagem informada em --message-file.');
+  });
+
+  it('rejeita opções legadas, flags desconhecidas e argumentos posicionais', () => {
+    for (const argument of ['--task', '--task-file', '--desconhecida', 'tarefa antiga']) {
+      expect(() => resolveTaskMessage([argument, 'valor', '--message', 'válida'])).toThrow(
+        `Argumento não suportado: ${argument}. Use somente --message ou --message-file.`,
+      );
+    }
+  });
+});
