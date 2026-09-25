@@ -1,4 +1,4 @@
-import { COMPUTE_ROUTER_REQUESTED_DURATION_MS, decideComputeRoute, deriveLocalFailureSignal, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureHistoryEventV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
+import { COMPUTE_PREFERENCE_EVENT_TYPE, COMPUTE_ROUTER_REQUESTED_DURATION_MS, decideComputeRoute, projectComputePreference, resolveEffectiveComputePreference, type ComputePreferenceV1, deriveLocalFailureSignal, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureHistoryEventV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
@@ -58,6 +58,28 @@ export function resumeLatestRetryCheckpoint(contract: ExecutionContract, events:
  * Enquanto OFF, o Router é semanticamente invisível: nenhuma decisão, nenhum lookup
  * de authority/economics, nenhum evento `compute_routing_decided`. */
 const computeRouterEnabled = (): boolean => process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED === '1';
+
+/**
+ * Preferência de compute VIGENTE da unidade (ato humano `record_compute_preference`).
+ * Leitura dedicada — não depende da janela do histórico recente. Falha de leitura ⇒
+ * `error` (a volta NÃO executa às cegas: poderia contrariar a escolha humana).
+ */
+async function readRecordedComputePreference(
+  client: SupabaseClient<Database>,
+  workItemId: string,
+): Promise<{ ok: true; preference: ComputePreferenceV1 | null } | { ok: false }> {
+  let res;
+  try {
+    res = await client.from('work_events').select('event_type,payload')
+      .eq('work_item_id', workItemId).eq('event_type', COMPUTE_PREFERENCE_EVENT_TYPE)
+      .order('seq', { ascending: false }).limit(20);
+  } catch {
+    return { ok: false };
+  }
+  if (res.error) return { ok: false };
+  const ascending = [...(res.data ?? [])].reverse().map(row => ({ type: row.event_type, payload: row.payload }));
+  return { ok: true, preference: projectComputePreference(ascending)?.preference ?? null };
+}
 
 /**
  * `decision_id` DETERMINÍSTICO de uma decisão não-selecionada (espera/bloqueio): mesma
@@ -131,6 +153,7 @@ async function routeCompute(
   historyData: readonly { readonly event_type: string; readonly payload: unknown }[],
   admittedPressure: ReturnType<typeof readMachinePressure>,
   taskClass: string,
+  recordedPreference: ComputePreferenceV1 | null,
 ): Promise<ComputeRouteDecisionV1> {
   const localModel = contract.coderBackend === 'ollama' && contract.model
     ? contract.model : process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
@@ -161,7 +184,13 @@ async function routeCompute(
   return decideComputeRoute({
     schemaVersion: 1, workItemId: entry.workItemId, approvedProposalVersion: entry.approvedProposalVersion,
     capability: entry.capability, taskClass,
-    preferred: contract.coderBackend === 'openai' ? { provider: 'openai', model: openAIModel } : null,
+    // Preferência da UNIDADE (ato humano) é autoritativa; sem ela, só o contrato legado
+    // não carimbado conta. `coder_backend` vindo do env de deploy nunca é preferência.
+    preferred: resolveEffectiveComputePreference({
+      recorded: recordedPreference,
+      contract: { coderBackend: contract.coderBackend, coderBackendSource: contract.coderBackendSource ?? null },
+      runtimeOpenAIModel: openAIModel,
+    }),
     local: {
       provider: 'ollama', model: modelSelection?.ok ? modelSelection.evidence.selected : localModel,
       available: true, supportsCapability: entry.capability === 'programming',
@@ -245,9 +274,19 @@ export function buildProjectBacklogCycleDeps(
       // decisão, nenhum lookup de authority/economics, nenhum evento. O caminho legado
       // abaixo é idêntico ao anterior. LIGADO ⇒ decide entre Ollama local e OpenAI API;
       // uma decisão não-selecionada vira EVIDÊNCIA (sem tentativa) e a volta para.
+      const preference = await readRecordedComputePreference(client, entry.workItemId);
+      if (!preference.ok) {
+        return notExecutable(entry, 'compute_preference_unavailable', 'A preferência de compute da unidade não pôde ser lida; nada é executado às cegas.');
+      }
       let computeDecision: ComputeRouteDecisionV1 | null = null;
+      // Preferência provider_api só é honrável pelo Router: com ele desligado o caminho
+      // legado executaria o backend do contrato (local) — um downgrade silencioso. Para.
+      if (!computeRouterEnabled() && preference.preference?.strategy === 'provider_api') {
+        return notExecutable(entry, 'compute_preference_requires_router',
+          `A unidade prefere ${preference.preference.provider}/${preference.preference.model}, mas o Compute Router está desligado; o compute local não a substitui.`);
+      }
       if (computeRouterEnabled()) {
-        const decision = await routeCompute(client, entry, contract, history.error ? [] : history.data ?? [], admittedPressure, economicTaskClass(item.data.intent));
+        const decision = await routeCompute(client, entry, contract, history.error ? [] : history.data ?? [], admittedPressure, economicTaskClass(item.data.intent), preference.preference);
         if (decision.status !== 'selected') {
           await client.rpc('record_compute_routing_decision', {
             p_work_item_id: entry.workItemId, p_expected_proposal_version: entry.approvedProposalVersion,

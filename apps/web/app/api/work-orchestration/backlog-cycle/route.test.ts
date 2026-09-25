@@ -98,7 +98,7 @@ test('porto consulta o Resource Governor a cada admissao e bloqueia defer/fail-c
 
 test('o runTurn injetado resolve o executor de worktree, chama o Supervisor e observa a volta', async () => {
   const maybeSingle = jest.fn().mockResolvedValue({ data: { intent: { execution_spec: {} } }, error: null });
-  const client = { from: jest.fn(() => ({ select: () => ({ eq: () => ({ maybeSingle, order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) })) };
+  const client = { from: jest.fn(() => { const chain: Record<string, unknown> = { eq: () => chain, maybeSingle, order: () => ({ limit: async () => ({ data: [], error: null }) }) }; return { select: () => chain }; }) };
   auth.mockResolvedValue({ client, userId: 'u' });
   readContract.mockReturnValue({ executor: 'worktree', targetReference: 'anima' });
   resolveRoute.mockReturnValue({ ok: true, route: { adapter: { id: 'worktree-v1' }, candidate: {} } });
@@ -122,7 +122,7 @@ test('o runTurn injetado resolve o executor de worktree, chama o Supervisor e ob
 
 test('runTurn com executor não resolvível → selection_not_executable, sem Supervisor', async () => {
   const maybeSingle = jest.fn().mockResolvedValue({ data: { intent: {} }, error: null });
-  const client = { from: jest.fn(() => ({ select: () => ({ eq: () => ({ maybeSingle, order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) })) };
+  const client = { from: jest.fn(() => { const chain: Record<string, unknown> = { eq: () => chain, maybeSingle, order: () => ({ limit: async () => ({ data: [], error: null }) }) }; return { select: () => chain }; }) };
   auth.mockResolvedValue({ client, userId: 'u' });
   readContract.mockReturnValue({ executor: null, targetReference: 'other' });
   resolveRoute.mockReturnValue({ ok: false, error: { code: 'executor_unknown', message: 'x' } });

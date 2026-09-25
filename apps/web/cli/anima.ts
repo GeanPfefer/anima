@@ -4,13 +4,14 @@ import { replanFailedWorkItem } from '@/lib/work-orchestration/replan-orchestrat
 import { authorizeResume } from '@/lib/work-orchestration/authorize-resume';
 import { runWorkReplan, runWorkAuthorizeResume } from './app';
 import type { ResultReviewDecision } from '@anima/core';
+import type { Json } from '@anima/types';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { correctReviewedWorkItem } from '@/lib/work-orchestration/review-correction-orchestration';
 import { readWorkRetryReadiness } from '@/lib/work-orchestration/retry-readiness';
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
 import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/lib/work-orchestration/paid-compute-authorization-store';
-import { runWorkAuthorizeCompute, runWorkPrepareAutonomous } from './app';
+import { runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkSetCompute } from './app';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
 import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { renderHuman } from './render';
@@ -105,6 +106,14 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
         },
         grant: input => grantPaidComputeAuthorization(client, input),
       }, command.id, { maxCostUsd: command.maxCostUsd, maxMinutes: command.maxMinutes, validHours: command.validHours });
+    case 'work-set-compute':
+      return runWorkSetCompute(service, async ({ workItemId, expectedProposalVersion, preference }) => {
+        const res = await client.rpc('record_compute_preference', {
+          p_work_item_id: workItemId, p_expected_proposal_version: expectedProposalVersion, p_preference: preference as unknown as Json,
+        });
+        if (res.error) return { ok: false, code: res.error.code ?? null, message: res.error.message };
+        return { ok: true, replayed: (res.data as { action?: unknown } | null)?.action === 'replayed' };
+      }, command.id, command.preference);
     case 'work-retry': {
       const retry: WorkRetryCapability = {
         readReadiness: (workItemId) => readWorkRetryReadiness(client, workItemId),

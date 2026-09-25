@@ -93,7 +93,9 @@ describe('planejador executável do projeto', () => {
       const result = await planExecutableProjectWork('adicione o teste', base, new OpenAIProjectWorkPlanner({ admission: grant }));
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-      expect(result.command.intent).toMatchObject({ execution_spec: { coder_backend: 'openai', model: 'gpt-5.6-sol' } });
+      // O backend vem do env do deploy: fica carimbado como capacidade do runtime, nunca
+      // como decisão da unidade (essa é `compute_preference_recorded`, ato humano).
+      expect(result.command.intent).toMatchObject({ execution_spec: { coder_backend: 'openai', model: 'gpt-5.6-sol', coder_backend_source: 'runtime_default' } });
     } finally {
       delete process.env.ANIMA_CODER_PROVIDER;
       delete process.env.ANIMA_CODER_MODEL;

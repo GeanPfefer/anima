@@ -107,13 +107,18 @@ function makeClient(cfg: ClientConfig, spy: ClientSpy): SupabaseClient<Database>
     }
     if (table === 'work_events') {
       let itemId: unknown = null;
+      let eventType: unknown = null;
       const chain: Record<string, unknown> = {
         select: () => chain, order: () => chain,
-        eq: (column: string, value: unknown) => { if (column === 'work_item_id') itemId = value; return chain; },
-        limit: async () => ({
-          data: typeof itemId === 'string' && cfg.historyByItem?.[itemId] ? cfg.historyByItem[itemId] : cfg.historyEvents ?? [],
-          error: null,
-        }),
+        eq: (column: string, value: unknown) => {
+          if (column === 'work_item_id') itemId = value;
+          if (column === 'event_type') eventType = value;
+          return chain;
+        },
+        limit: async () => {
+          const rows: readonly HistoryEvent[] = (typeof itemId === 'string' && cfg.historyByItem?.[itemId]) || cfg.historyEvents || [];
+          return { data: eventType === null ? rows : rows.filter(row => row.event_type === eventType), error: null };
+        },
       };
       return chain;
     }
@@ -382,6 +387,172 @@ describe('buildProjectBacklogCycleDeps — Compute Router V1 atrás do feature g
       .toMatchObject({ status: 'waiting_for_human_authorization', selectedProvider: null, fallbackChain: [] });
     expect(runTurnMock).not.toHaveBeenCalled();
     expect(ProvisionerMock).not.toHaveBeenCalled();
+  });
+
+  // ── Preferência de compute POR UNIDADE (ato humano `compute_preference_recorded`) ──
+  // Distinta da authority paga: registrar a preferência não autoriza gasto.
+  const SOL = 'gpt-5.6-sol';
+  const preferenceEvent = (preference: unknown): HistoryEvent => ({
+    event_type: 'compute_preference_recorded',
+    payload: { schema_version: 1, data: { preference } },
+  });
+  const solPreference = preferenceEvent({ schemaVersion: 1, strategy: 'provider_api', provider: 'openai', model: SOL });
+  // Unidade planejada HOJE: backend local carimbado como capacidade do runtime.
+  const runtimeDefaultIntent = { execution_spec: { ...workItemIntent.execution_spec, coder_backend: 'ollama', coder_backend_source: 'runtime_default' } };
+  const solAuthRow = (overrides: Record<string, unknown> = {}) => ({
+    ...validAuthRow(), node_id: 'openai-api', resource_class: `provider_api:${SOL}`, work_item_id: entry.workItemId, ...overrides,
+  });
+  const routerOnWithSol = () => {
+    process.env.ANIMA_COMPUTE_ROUTER_V1_ENABLED = '1';
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    process.env.ANIMA_CODER_MODEL = SOL;
+  };
+
+  test('PREF-A · sem preferência: unidade nova (backend do runtime) segue local-first ⇒ Ollama', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    routerOnWithSol();
+    const intent = { execution_spec: { ...runtimeDefaultIntent.execution_spec, coder_backend: 'openai' } };
+    const deps = buildProjectBacklogCycleDeps(makeClient({ historyEvents: [], authRows: [], intent }, spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.outcome).toBe('turn_recorded');
+    const decision = runTurnMock.mock.calls[0][0].computeRoutingDecision;
+    // `coder_backend: openai` vindo do env do deploy NÃO é preferência da unidade.
+    expect(decision).toMatchObject({ status: 'selected', selectedProvider: 'ollama', reasonCode: 'local_sufficient' });
+    expect('preference' in decision).toBe(false);
+  });
+
+  test('PREF-B · preferência OpenAI/Sol sem authority ⇒ waiting; 0 attempt, 0 provider, 0 Ollama, 0 authority criada', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    routerOnWithSol();
+    const deps = buildProjectBacklogCycleDeps(makeClient({ historyEvents: [solPreference], authRows: [], intent: runtimeDefaultIntent }, spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.outcome).toBe('selection_not_executable');
+    expect(turn.refusal?.code).toBe('paid_authorization_required');
+    expect(turn.attemptId).toBeNull();
+    const decision = spy.rpcCalls.find(c => c.fn === 'record_compute_routing_decision')!.args.p_decision as Record<string, unknown>;
+    expect(decision).toMatchObject({
+      status: 'waiting_for_human_authorization', selectedProvider: null, authorizationId: null, fallbackChain: [],
+      preference: { provider: 'openai', model: SOL, source: 'work_item_preference' },
+    });
+    // Local era admissível — ainda assim a preferência humana não vira Ollama.
+    expect(decision.alternativesConsidered).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: 'ollama', admissible: true }),
+      expect.objectContaining({ provider: 'openai', model: SOL, reasons: ['paid_authority_missing'] }),
+    ]));
+    expect(runTurnMock).not.toHaveBeenCalled();      // nenhuma attempt ⇒ nenhuma chamada de provider/coder
+    expect(ProvisionerMock).not.toHaveBeenCalled();  // nenhum node/Ollama
+    expect(spy.rpcCalls.map(c => c.fn)).toEqual(['record_compute_routing_decision']); // nenhuma authority/reserva
+  });
+
+  test('PREF-C · mesma unidade com authority compatível ⇒ Router seleciona openai/gpt-5.6-sol', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    routerOnWithSol();
+    const deps = buildProjectBacklogCycleDeps(makeClient({ historyEvents: [solPreference], authRows: [solAuthRow()], intent: runtimeDefaultIntent }, spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.outcome).toBe('turn_recorded');
+    expect(runTurnMock.mock.calls[0][0].computeRoutingDecision).toMatchObject({
+      status: 'selected', selectedProvider: 'openai', selectedModel: SOL, placement: 'provider_api',
+      reasonCode: 'preferred_candidate', authorizationId: '00000000-0000-0000-0000-0000000000f1',
+    });
+    expect(ProvisionerMock).not.toHaveBeenCalled();
+    expect(spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision')).toHaveLength(0);
+  });
+
+  test.each([
+    ['outro modelo (terra)', { resource_class: 'provider_api:gpt-5.6-terra' }],
+    ['outro work item', { work_item_id: '00000000-0000-0000-0000-00000000dead' }],
+    ['duração abaixo da volta do Router', { max_duration_ms: 60_000 }],
+  ])('PREF-D · authority incompatível (%s) ⇒ não executa e não cai para local', async (_label, overrides) => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    routerOnWithSol();
+    const deps = buildProjectBacklogCycleDeps(makeClient({ historyEvents: [solPreference], authRows: [solAuthRow(overrides)], intent: runtimeDefaultIntent }, spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.outcome).toBe('selection_not_executable');
+    expect(turn.refusal?.code).toBe('paid_authorization_required');
+    expect(runTurnMock).not.toHaveBeenCalled();
+    expect(ProvisionerMock).not.toHaveBeenCalled();
+    expect(spy.rpcCalls.map(c => c.fn)).toEqual(['record_compute_routing_decision']);
+  });
+
+  test('PREF-E · reavaliação/restart: preferência persistida continua valendo e o decision_id é o mesmo (replay)', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    routerOnWithSol();
+    const client = makeClient({ historyEvents: [solPreference], authRows: [], intent: runtimeDefaultIntent }, spy);
+    const before = buildProjectBacklogCycleDeps(client, 'host-before-restart');
+    expect(before.hostPermitsAutonomousWork()).toBe(true);
+    await before.runTurn(entry, new AbortController().signal);
+    const restarted = buildProjectBacklogCycleDeps(client, 'host-after-restart');
+    expect(restarted.hostPermitsAutonomousWork()).toBe(true);
+    await restarted.runTurn(entry, new AbortController().signal);
+    const recorded = spy.rpcCalls.filter(c => c.fn === 'record_compute_routing_decision');
+    expect(recorded).toHaveLength(2);
+    expect(recorded[0]!.args.p_decision_id).toBe(recorded[1]!.args.p_decision_id);
+    expect(recorded.map(c => (c.args.p_decision as { status: string }).status)).toEqual(['waiting_for_human_authorization', 'waiting_for_human_authorization']);
+    expect(runTurnMock).not.toHaveBeenCalled();
+  });
+
+  test('PREF · preferência por modelo que o runtime não oferece ⇒ bloqueio governado, nunca downgrade', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    routerOnWithSol();
+    process.env.ANIMA_CODER_MODEL = 'gpt-5.6-terra';
+    const deps = buildProjectBacklogCycleDeps(makeClient({ historyEvents: [solPreference], authRows: [], intent: runtimeDefaultIntent }, spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.refusal?.code).toBe('preferred_model_unavailable');
+    expect(runTurnMock).not.toHaveBeenCalled();
+  });
+
+  test('PREF · Router desligado com preferência provider_api ⇒ para (o legado local não a substitui)', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    process.env.OPENAI_API_KEY = 'sk-test-fixture';
+    const deps = buildProjectBacklogCycleDeps(makeClient({ historyEvents: [solPreference], intent: runtimeDefaultIntent }, spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.refusal?.code).toBe('compute_preference_requires_router');
+    expect(runTurnMock).not.toHaveBeenCalled();
+    expect(spy.authQueried).toBe(0);
+    expect(spy.rpcCalls).toHaveLength(0);
+  });
+
+  test('PREF · router_default explícito limpa até a preferência legada do contrato ⇒ local-first', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    routerOnWithSol();
+    const legacyOpenAI = { execution_spec: { ...workItemIntent.execution_spec, coder_backend: 'openai', model: SOL } };
+    const cleared = preferenceEvent({ schemaVersion: 1, strategy: 'router_default' });
+    const deps = buildProjectBacklogCycleDeps(makeClient({ historyEvents: [cleared], authRows: [], intent: legacyOpenAI }, spy), 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    await deps.runTurn(entry, new AbortController().signal);
+    expect(runTurnMock.mock.calls[0][0].computeRoutingDecision).toMatchObject({ selectedProvider: 'ollama', reasonCode: 'local_sufficient' });
+  });
+
+  test('PREF · falha ao ler a preferência ⇒ não executa às cegas', async () => {
+    const spy: ClientSpy = { rpcCalls: [], authQueried: 0 };
+    routerOnWithSol();
+    const base = makeClient({ historyEvents: [], intent: runtimeDefaultIntent }, spy);
+    const client = { rpc: base.rpc, from: (table: string) => {
+      const chain = base.from(table as never) as unknown as Record<string, unknown>;
+      if (table !== 'work_events') return chain;
+      let preferenceQuery = false;
+      const wrapped: Record<string, unknown> = {
+        select: () => wrapped, order: () => wrapped,
+        eq: (column: string, value: unknown) => {
+          if (column === 'event_type') preferenceQuery = true;
+          (chain.eq as (c: string, v: unknown) => unknown)(column, value);
+          return wrapped;
+        },
+        limit: async (n: number) => preferenceQuery ? { data: null, error: { message: 'down' } } : (chain.limit as (n: number) => unknown)(n),
+      };
+      return wrapped;
+    } } as unknown as SupabaseClient<Database>;
+    const deps = buildProjectBacklogCycleDeps(client, 'router-test');
+    expect(deps.hostPermitsAutonomousWork()).toBe(true);
+    const turn = await deps.runTurn(entry, new AbortController().signal);
+    expect(turn.refusal?.code).toBe('compute_preference_unavailable');
+    expect(runTurnMock).not.toHaveBeenCalled();
   });
 
   // E — "cloud inalterado": sob Router ON com Ollama selecionado, o ciclo de vida

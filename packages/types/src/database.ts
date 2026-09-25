@@ -2554,6 +2554,14 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_compute_preference: {
+        Args: {
+          p_expected_proposal_version: number
+          p_preference: Json
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
       record_compute_routing_decision: {
         Args: {
           p_attempt_id?: string
@@ -3240,6 +3248,7 @@ export type Database = {
         | "manual_work_released"
         | "host_observed_node_lifecycle_recorded"
         | "compute_routing_decided"
+        | "compute_preference_recorded"
       work_impact_level:
         | "low"
         | "significant"
@@ -3587,6 +3596,7 @@ export const Constants = {
         "manual_work_released",
         "host_observed_node_lifecycle_recorded",
         "compute_routing_decided",
+        "compute_preference_recorded",
       ],
       work_impact_level: [
         "low",

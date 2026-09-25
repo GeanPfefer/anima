@@ -37,6 +37,9 @@ export interface ExecutionContract {
    * governada). Ausente ⇒ nova tentativa a partir da base. O diff continua
    * medido contra `baseSha`. */
   readonly resumeCheckpointCommitSha: string | null;
+  /** Proveniência do `coderBackend`. `runtime_default` = carimbado pelo planner a partir do
+   * env de deploy (capacidade do runtime, NÃO decisão da unidade). Ausente ⇒ contrato legado. */
+  readonly coderBackendSource?: string | null;
 }
 
 export type ExecutorSelection =
@@ -87,6 +90,7 @@ export function readExecutionContract(intent: unknown): ExecutionContract {
   const target = objectOf(spec['target']);
   const resume = objectOf(spec['resume_from_checkpoint']);
   const resumeCommit = str(resume['commit_sha']);
+  const coderBackendSource = str(spec['coder_backend_source']);
   return {
     executor: str(spec['executor']),
     coderBackend: str(spec['coder_backend']),
@@ -97,6 +101,7 @@ export function readExecutionContract(intent: unknown): ExecutionContract {
     // Só um SHA bem-formado habilita a retomada; qualquer coisa fora disso é
     // ignorada (parte da base, sempre seguro) — nunca um commit arbitrário.
     resumeCheckpointCommitSha: resumeCommit && SHA.test(resumeCommit) ? resumeCommit : null,
+    ...(coderBackendSource ? { coderBackendSource } : {}),
   };
 }
 

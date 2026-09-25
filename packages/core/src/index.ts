@@ -11,6 +11,7 @@ export * from './project-conversation-governance';
 export * from './project-backlog-proposal';
 export * from './project-intake';
 export * from './compute-economics';
+export * from './compute-preference';
 export * from './compute-router';
 export * from './compute-routing-wait';
 export * from './economic-observations';

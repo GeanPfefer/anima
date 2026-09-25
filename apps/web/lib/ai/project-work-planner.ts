@@ -143,6 +143,10 @@ export async function planExecutableProjectWork(
           // worktree isolada com o backend de código local selecionável por deploy.
           executor: 'worktree',
           coder_backend: coderBackend,
+          // Proveniência: o backend acima é a CAPACIDADE configurada no deploy (env), não uma
+          // decisão sobre esta unidade. A escolha de compute da unidade é um ato humano
+          // separado (`anima work set-compute` → `compute_preference_recorded`).
+          coder_backend_source: 'runtime_default',
           // O modelo acompanha o backend: um contrato `openai` com modelo Ollama era
           // incoerente (e, com o Router desligado, chamaria a OpenAI com `qwen…`).
           model: coderBackend === 'openai'

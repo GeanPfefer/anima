@@ -61,7 +61,12 @@ describe('Compute Router V1 — preferência OpenAI aprovada é autoritativa', (
   });
   test('preferência por um modelo diferente do configurado não é honrada nem substituída', () => {
     expect(decideComputeRoute(input({ preferred: { provider: 'openai', model: 'outro' } })))
-      .toMatchObject({ status: 'blocked', selectedProvider: null });
+      .toMatchObject({ status: 'blocked', selectedProvider: null, reasonCode: 'preferred_model_unavailable', fallbackChain: [] });
+  });
+  test('a decisão registra a preferência honrada (com a origem) só quando ela existe', () => {
+    expect(decideComputeRoute(input({ preferred: { ...preferred, source: 'work_item_preference' }, paidAuthority: missing })).preference)
+      .toEqual({ provider: 'openai', model: preferred.model, source: 'work_item_preference' });
+    expect('preference' in decideComputeRoute(input())).toBe(false);
   });
 });
 

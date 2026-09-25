@@ -89,9 +89,18 @@ export function renderHuman(payload: CliPayload): string {
         lines.push('');
         lines.push(`Proveniência: ${payload.provenance.status} (${payload.provenance.issues.join(', ')})`);
       }
+      lines.push('');
+      const pref = payload.computePreference;
+      if (pref.status === 'explicit') {
+        lines.push(`Compute (preferência da unidade): ${pref.strategy} ${DOT} ${pref.provider}/${pref.model}${pref.recordedAt ? ` (ato humano em ${pref.recordedAt})` : ''}`);
+        lines.push('  Preferência não autoriza gasto; o Router não a troca por compute local.');
+      } else if (pref.status === 'legacy_contract') {
+        lines.push(`Compute (preferência da unidade): ${pref.provider} ${DOT} legado do contrato aprovado (coder_backend)`);
+      } else {
+        lines.push(`Compute (preferência da unidade): nenhuma${pref.cleared ? ' (limpa por ato humano)' : ''} ${DOT} Router padrão (local-first)`);
+      }
       if (payload.computeRouting) {
         const wait = payload.computeRouting;
-        lines.push('');
         if (wait.status === 'waiting_for_human_authorization') {
           const need = wait.requiredAuthority;
           lines.push(`Compute: AGUARDANDO AUTORIDADE PAGA ${DOT} ${need.providerId} / ${need.resourceClass} (desde ${wait.decidedAt})`);
@@ -100,6 +109,8 @@ export function renderHuman(payload: CliPayload): string {
         } else {
           lines.push(`Compute: BLOQUEADO no Router (${wait.reasonCode}) ${DOT} ${wait.reason}`);
         }
+      } else if (payload.state === 'approved') {
+        lines.push('Compute: sem espera registrada no Router para a versão aprovada vigente.');
       }
       lines.push('');
       lines.push(`Ações disponíveis: ${payload.availableActions.length ? payload.availableActions.join(', ') : '(nenhuma)'}`);
@@ -166,6 +177,7 @@ export function renderHuman(payload: CliPayload): string {
     case 'work-supervise':
     case 'work-unsupervise': return `${payload.workItemId} ${DOT} ${payload.message}`;
     case 'work-prepare-autonomous': return `${payload.workItemId} ${DOT} v${payload.proposalVersion} ${DOT} ${payload.message}`;
+    case 'work-set-compute': return `${payload.workItemId} ${DOT} v${payload.proposalVersion} ${DOT} ${payload.message}`;
     case 'work-authorize-compute':
       return [
         `${payload.workItemId} ${DOT} ${payload.message}`,

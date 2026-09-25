@@ -16,6 +16,7 @@ export type ComputeRouteReasonCodeV1 =
   | 'local_temporary_infrastructure'
   | 'openai_unavailable'
   | 'paid_authorization_required'
+  | 'preferred_model_unavailable'
   | 'no_admissible_provider';
 
 export interface ComputeRouteCandidateV1 {
@@ -44,7 +45,9 @@ export interface DecideComputeRouteInputV1 {
   readonly approvedProposalVersion: number;
   readonly capability: WorkCapability;
   readonly taskClass: string | null;
-  readonly preferred: { readonly provider: ComputeProviderV1; readonly model: string } | null;
+  /** Preferência de compute da UNIDADE (decisão humana, nunca env de deploy). `source`
+   * distingue a preferência explícita registrada do contrato legado. */
+  readonly preferred: { readonly provider: ComputeProviderV1; readonly model: string; readonly source?: string } | null;
   readonly local: ComputeRouteCandidateV1;
   readonly resourceGovernor: 'permit' | 'deny' | 'unavailable';
   readonly localFailure: LocalFailureSignalV1;
@@ -87,6 +90,8 @@ export interface ComputeRouteDecisionV1 {
     readonly localDataQuality: CohortMetricsV1['dataQuality'] | null;
     readonly openaiDataQuality: CohortMetricsV1['dataQuality'] | null;
   };
+  /** Presente só quando a unidade declara preferência: a escolha que o Router honrou. */
+  readonly preference?: { readonly provider: ComputeProviderV1; readonly model: string; readonly source: string | null };
 }
 
 const candidateReasons = (candidate: ComputeRouteCandidateV1): string[] => {
@@ -127,7 +132,9 @@ export function decideComputeRoute(input: DecideComputeRouteInputV1): ComputeRou
   const base = { schemaVersion: 1 as const, policyVersion: 'compute-router-v1' as const,
     workItemId: input.workItemId, approvedProposalVersion: input.approvedProposalVersion,
     capability: input.capability, taskClass: input.taskClass, alternativesConsidered,
-    paidAuthorityRequired: true, economicsBasis: basis };
+    paidAuthorityRequired: true, economicsBasis: basis,
+    // Só quando existe: decisões sem preferência mantêm a forma (e o decision_id) anteriores.
+    ...(input.preferred ? { preference: { provider: input.preferred.provider, model: input.preferred.model, source: input.preferred.source ?? null } } : {}) };
   const selected = (provider: ComputeProviderV1, reasonCode: ComputeRouteReasonCodeV1, reason: string): ComputeRouteDecisionV1 => ({
     ...base, status: 'selected', selectedProvider: provider,
     selectedModel: provider === 'ollama' ? input.local.model : input.openai.model,
@@ -146,6 +153,12 @@ export function decideComputeRoute(input: DecideComputeRouteInputV1): ComputeRou
     if (input.preferred.model === input.openai.model && openaiTechnicallyAdmissible) {
       return { ...base, status: 'waiting_for_human_authorization', selectedProvider: null, selectedModel: null, placement: null,
         reasonCode: 'paid_authorization_required', reason: 'A preferência aprovada é OpenAI e não existe autoridade paga válida e compatível; o compute local não a substitui.',
+        fallbackChain: [], authorizationId: null };
+    }
+    if (input.openai.available && input.preferred.model !== input.openai.model) {
+      return { ...base, status: 'blocked', selectedProvider: null, selectedModel: null, placement: null,
+        reasonCode: 'preferred_model_unavailable',
+        reason: `A preferência da unidade é OpenAI/${input.preferred.model}, mas o runtime oferece OpenAI/${input.openai.model}; nenhum downgrade é feito.`,
         fallbackChain: [], authorizationId: null };
     }
     return { ...base, status: 'blocked', selectedProvider: null, selectedModel: null, placement: null,

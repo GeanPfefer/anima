@@ -1,6 +1,8 @@
 import {
   COMPUTE_ROUTER_REQUESTED_DURATION_MS,
+  projectComputePreference,
   projectComputeRoutingWait,
+  type ComputePreferenceV1,
   type ComputeRoutingWaitV1,
   planResultReview,
   readAutonomousExecutionSpec,
@@ -93,7 +95,18 @@ export interface WorkShowPayload {
   readonly provenance: { readonly status: string; readonly issues: readonly string[] };
   /** A unidade aprovada está parada no Compute Router (espera por authority ou bloqueio). */
   readonly computeRouting: ComputeRoutingWaitV1 | null;
+  /** Preferência de compute da UNIDADE (ato humano), distinta da authority paga. */
+  readonly computePreference: ComputePreferencePayload;
 }
+/**
+ * `explicit`       → escolha registrada por `work set-compute` (autoritativa no Router);
+ * `legacy_contract`→ item antigo cujo contrato aprovado declara `coder_backend: openai`;
+ * `router_default` → sem escolha da unidade: Router padrão (local-first).
+ */
+export type ComputePreferencePayload =
+  | { readonly status: 'explicit'; readonly strategy: 'provider_api'; readonly provider: 'openai'; readonly model: string; readonly recordedAt: string | null }
+  | { readonly status: 'legacy_contract'; readonly provider: 'openai' }
+  | { readonly status: 'router_default'; readonly cleared: boolean };
 export interface WorkEvidencePayload {
   readonly ok: true;
   readonly kind: 'work-evidence';
@@ -211,6 +224,11 @@ export interface WorkAuthorizeComputePayload {
   readonly maxCostUsd: number; readonly maxDurationMs: number; readonly validFrom: string; readonly validUntil: string;
   readonly message: string;
 }
+export interface WorkSetComputePayload {
+  readonly ok: true; readonly kind: 'work-set-compute'; readonly workItemId: string;
+  readonly proposalVersion: number; readonly preference: ComputePreferenceV1; readonly replayed: boolean;
+  readonly message: string;
+}
 export interface WorkPrepareAutonomousPayload {
   readonly ok: true; readonly kind: 'work-prepare-autonomous'; readonly workItemId: string;
   readonly proposalVersion: number; readonly replayed: boolean; readonly message: string;
@@ -233,7 +251,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
+  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -491,6 +509,7 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
   const computeRouting = projectComputeRoutingWait({
     workItemId: item.id, state: item.state, proposalVersion: item.proposalVersion, events,
   });
+  const computePreference = projectComputePreferencePayload(item, events);
   const suggestedDecision: 'request_changes' | null =
     inReview && ((live && live.verdict !== 'verified') || missing > 0) ? 'request_changes' : null;
   const spec = readAutonomousExecutionSpec(item.intent);
@@ -521,6 +540,61 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
       suggestedDecision,
       provenance: { status: presentation.provenance?.status ?? 'unknown', issues: presentation.provenance?.issues ?? [] },
       computeRouting,
+      computePreference,
+    },
+  };
+}
+
+/** Projeção PURA da preferência de compute para `work show` (mesma precedência do Router). */
+export function projectComputePreferencePayload(item: WorkItem, events: readonly WorkEvent[]): ComputePreferencePayload {
+  const recorded = projectComputePreference(events.map(event => ({ type: event.type, payload: event.payload, occurredAt: event.occurredAt })));
+  if (recorded?.preference.strategy === 'provider_api') {
+    const { strategy, provider, model } = recorded.preference;
+    return { status: 'explicit', strategy, provider, model, recordedAt: recorded.recordedAt };
+  }
+  if (recorded) return { status: 'router_default', cleared: true };
+  const spec = (item.intent as { execution_spec?: { coder_backend?: unknown; coder_backend_source?: unknown } } | null)?.execution_spec;
+  if (spec?.coder_backend === 'openai' && spec.coder_backend_source !== 'runtime_default') return { status: 'legacy_contract', provider: 'openai' };
+  return { status: 'router_default', cleared: false };
+}
+
+/** Porta do ato humano `record_compute_preference` (RPC; RLS do usuário). */
+export type RecordComputePreferencePort = (input: {
+  readonly workItemId: string; readonly expectedProposalVersion: number; readonly preference: ComputePreferenceV1;
+}) => Promise<{ ok: true; replayed: boolean } | { ok: false; code: string | null; message: string }>;
+
+/**
+ * Registra, como ATO HUMANO, a estratégia de compute da unidade. NÃO concede authority,
+ * NÃO cria reserva e NÃO executa: com `provider_api` e sem authority o Resident Host deixa
+ * a unidade em `waiting_for_human_authorization`; o gasto continua exigindo
+ * `anima work authorize-compute`. Só antes de executar (proposed/approved).
+ */
+export async function runWorkSetCompute(
+  service: WorkOrchestrationPort,
+  record: RecordComputePreferencePort,
+  id: string,
+  preference: ComputePreferenceV1,
+): Promise<CommandResult> {
+  const item = await service.getItem(id);
+  if (!item.ok) return errorResult(item.error.message, item.error.code, exitCodeForError(item.error.code));
+  if (item.value.state !== 'proposed' && item.value.state !== 'approved') {
+    return errorResult(`O item está em "${item.value.state}"; a preferência de compute só pode ser definida antes da execução (proposed/approved).`,
+      'compute_preference_state', EXIT.REJECTED);
+  }
+  const recorded = await record({ workItemId: item.value.id, expectedProposalVersion: item.value.proposalVersion, preference });
+  if (!recorded.ok) {
+    return errorResult(recorded.message, recorded.code, recorded.code === '22023' || recorded.code === '55000' ? EXIT.REJECTED : EXIT.ERROR);
+  }
+  const chosen = preference.strategy === 'provider_api'
+    ? `provider_api · ${preference.provider}/${preference.model}`
+    : 'router_default (local-first)';
+  return {
+    exitCode: EXIT.OK,
+    payload: {
+      ok: true, kind: 'work-set-compute', workItemId: item.value.id, proposalVersion: item.value.proposalVersion,
+      preference, replayed: recorded.replayed,
+      message: `Preferência de compute ${recorded.replayed ? 'já vigente' : 'registrada'}: ${chosen}. Não autoriza gasto${
+        preference.strategy === 'provider_api' ? '; sem authority o Router mantém a unidade em waiting_for_human_authorization' : ''}.`,
     },
   };
 }
