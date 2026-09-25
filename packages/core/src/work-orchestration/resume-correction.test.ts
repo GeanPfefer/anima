@@ -324,3 +324,40 @@ const SCOPE_REMAINING = `A revisão é cumprida alterando apenas ${TEST} (rework
     expect(report.findings.map(f => f.code)).toContain('change_in_excluded_scope');
   });
 });
+
+// Revisão humana pode EXIGIR provas adicionais (ex.: o build real do Next.js, que pega
+// exports inválidos de Route Handler que jest + tsc não pegam). Só acrescenta prova.
+describe('deriveResumeCorrectionSuccessor — gates adicionais exigidos pela revisão', () => {
+  const build = { label: 'Gate exigido pela revisão: npm run build --workspace=@anima/web', command: 'npm run build --workspace=@anima/web' };
+  const criteriaOf = (candidate: ReturnType<typeof ok>) =>
+    (candidate.intent as { execution_spec: { validation_criteria: Array<Record<string, unknown>> } }).execution_spec.validation_criteria;
+
+  test('o gate exigido entra no spec como prova por comando do critério funcional (gate_assertion)', () => {
+    const candidate = ok(deriveResumeCorrectionSuccessor(input({ additionalValidations: [build] })));
+    const criteria = criteriaOf(candidate);
+    expect(criteria).toContainEqual(expect.objectContaining({
+      label: build.label, command: build.command, proof: 'gate', claim_kind: 'gate_assertion',
+      covers: ['As validações declaradas da unidade (gates) passam sobre a correção retomada.'],
+    }));
+    // Os gates herdados continuam lá (nada é removido nem afrouxado).
+    expect(criteria.filter(c => typeof c.command === 'string').map(c => c.command))
+      .toEqual(['npm test --workspace=apps/web -- chat-surface.test.ts', build.command]);
+    expect(candidate.proposal.data.objective).toContain('Gates adicionais exigidos pela revisão: npm run build --workspace=@anima/web');
+    expect(validateCorrectionSuccessor(original, candidate)).toMatchObject({ valid: true });
+  });
+
+  test('gate repetido ou já herdado não duplica', () => {
+    const inherited = { label: 'dup', command: 'npm test --workspace=apps/web -- chat-surface.test.ts' };
+    const candidate = ok(deriveResumeCorrectionSuccessor(input({ additionalValidations: [build, build, inherited] })));
+    expect(criteriaOf(candidate).filter(c => typeof c.command === 'string')).toHaveLength(2);
+  });
+
+  test('gate sem rótulo ou comando é recusado (fail-closed)', () => {
+    const result = deriveResumeCorrectionSuccessor(input({ additionalValidations: [{ label: ' ', command: 'npm run build' }] }));
+    expect(result).toMatchObject({ ok: false, refusals: expect.arrayContaining(['additional_validation_invalid']) });
+  });
+
+  test('sem gates adicionais o candidato é idêntico ao anterior (compatibilidade)', () => {
+    expect(ok(deriveResumeCorrectionSuccessor(input({ additionalValidations: [] })))).toEqual(ok(deriveResumeCorrectionSuccessor(input())));
+  });
+});

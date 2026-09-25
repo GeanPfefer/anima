@@ -324,6 +324,26 @@ function buildSuccessorIntent(
 
 const dedupe = <T>(values: readonly T[]): readonly T[] => [...new Set(values)];
 
+/** Intent com os gates exigidos na revisão ACRESCENTADOS ao `validation_criteria`
+ * (prova por comando). Não altera nenhum outro campo do spec. */
+function withAdditionalGates(
+  intent: WorkIntent,
+  gates: readonly { readonly label: string; readonly command: string }[],
+): WorkIntent {
+  if (gates.length === 0) return intent;
+  const rawSpec = intent['execution_spec'];
+  if (typeof rawSpec !== 'object' || rawSpec === null || Array.isArray(rawSpec)) return intent;
+  const spec = rawSpec as Record<string, Json>;
+  const criteria = Array.isArray(spec['validation_criteria']) ? spec['validation_criteria'] as Json[] : [];
+  return {
+    ...intent,
+    execution_spec: {
+      ...spec,
+      validation_criteria: [...criteria, ...gates.map(gate => ({ label: gate.label.trim(), command: gate.command.trim(), proof: 'gate' }))],
+    },
+  };
+}
+
 // ============================================================
 // Correção governada por RETOMADA de uma revisão (`changes_requested`).
 //
@@ -361,6 +381,10 @@ export interface ResumeCorrectionInput {
   readonly reworkFiles: readonly string[];
   readonly recoverySequence: number;
   readonly idempotencyKey: string;
+  /** Gates ADICIONAIS exigidos pelo humano na revisão (ex.: o build real do framework).
+   * Só ACRESCENTAM prova — nunca removem nem afrouxam gates herdados; a allowlist do
+   * comando é verificada pelo host antes daqui. */
+  readonly additionalValidations?: readonly { readonly label: string; readonly command: string }[];
 }
 
 export type ResumeCorrectionRefusal =
@@ -371,6 +395,7 @@ export type ResumeCorrectionRefusal =
   | 'preserved_files_out_of_scope'
   | 'rework_files_out_of_scope'
   | 'remaining_scope_empty'
+  | 'additional_validation_invalid'
   | 'lineage_input_invalid';
 
 export type ResumeCorrectionResult =
@@ -396,6 +421,8 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
 
   const spec = readAutonomousExecutionSpec(original.intent);
   if (!spec) refusals.push('spec_unreadable');
+  const additional = input.additionalValidations ?? [];
+  if (additional.some(gate => !gate.label.trim() || !gate.command.trim())) refusals.push('additional_validation_invalid');
 
   if (!spec || refusals.length > 0) return { ok: false, refusals: dedupe(refusals) };
 
@@ -436,7 +463,13 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
   const functionalCriterion = 'As validações declaradas da unidade (gates) passam sobre a correção retomada.';
   const scopeRemainingCriterion = `A revisão é cumprida alterando apenas ${effectiveScope.join(', ')} (rework explícito: ${reworkScope.join(', ') || 'nenhum'}; restante: ${remainingScope.join(', ') || 'nenhum'}).`;
   const scopeIntactCriterion = `A implementação já verificada (${preservedScope.join(', ')}) permanece intacta, retomada do checkpoint ${shortCommit}.`;
-  const hasGate = spec.validationCriteria.some(criterion => typeof criterion.command === 'string' && criterion.command.trim().length > 0);
+  // Gates exigidos na revisão entram no spec do sucessor (dedupe por comando) e, como
+  // os herdados, provam o critério funcional quando passam.
+  const inheritedCommands = new Set(spec.validationCriteria.map(criterion => (criterion.command ?? '').trim()));
+  const addedGates = additional.filter((gate, index) => !inheritedCommands.has(gate.command.trim())
+    && additional.findIndex(other => other.command.trim() === gate.command.trim()) === index);
+  const hasGate = addedGates.length > 0
+    || spec.validationCriteria.some(criterion => typeof criterion.command === 'string' && criterion.command.trim().length > 0);
   const scopeCriteria = [scopeRemainingCriterion, scopeIntactCriterion];
 
   const proposal: WorkProposal = {
@@ -449,6 +482,7 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
       objective: clip(
         `Retomando do checkpoint durável ${shortCommit} (implementação já verificada preservada em `
         + `${preservedScope.join(', ') || 'nenhum'}; rework explicitamente autorizado em ${reworkScope.join(', ') || 'nenhum'}), `
+        + (addedGates.length > 0 ? `Gates adicionais exigidos pela revisão: ${addedGates.map(gate => gate.command.trim()).join('; ')}. ` : '')
         + `cumprir a correção solicitada na revisão: ${feedback}. `
         + `Alterar SOMENTE ${effectiveScope.join(', ')}; não modificar os arquivos preservados nem ampliar `
         + `objetivo, capacidade, impacto, permissões ou budget da unidade original.`,
@@ -466,7 +500,7 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
     },
   };
 
-  const intent = buildSuccessorIntent(original.intent, checkpoint, {
+  const intent = buildSuccessorIntent(withAdditionalGates(original.intent, addedGates), checkpoint, {
     functional: hasGate ? functionalCriterion : null,
     scopeCriteria,
     correctionScope: { reworkScope, remainingScope, effectiveScope },

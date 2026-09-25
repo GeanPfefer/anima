@@ -61,7 +61,7 @@ async function dispatch(command: ParsedCommand): Promise<CommandResult> {
       return runWorkReview(service, command.id, decision);
     }
     case 'work-correct':
-      return runWorkCorrect((workItemId) => correctReviewedWorkItem(client, workItemId), command.id);
+      return runWorkCorrect((workItemId) => correctReviewedWorkItem(client, workItemId, { requiredGates: command.requiredGates }), command.id);
     case 'work-replan': {
       let diagnosis: unknown;
       if (command.diagnosisPath !== null) {

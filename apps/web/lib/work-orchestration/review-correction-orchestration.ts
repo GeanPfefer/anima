@@ -7,6 +7,8 @@ import {
   type WorkEvent,
   type WorkItem,
 } from '@anima/core';
+import { safeValidationCommand } from '@/lib/ai/project-work-planner-shared';
+import { parseGateCommand } from './worktree';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { uuidFromSeed } from './decomposition-orchestration';
@@ -49,6 +51,16 @@ export interface ReviewCorrectionFacts {
   /** Sequência não terminal já materializada. Quando existe, a operação deve
    * replayar essa unidade em vez de criar uma concorrente. */
   readonly activeRecoverySequence?: number;
+  /** Gates ADICIONAIS exigidos pelo humano no ato de correção (só acrescentam prova). */
+  readonly additionalValidations?: readonly { readonly label: string; readonly command: string }[];
+}
+
+/** Gate exigido na revisão: precisa caber na allowlist de validação do planner E na do
+ * executor de gates. Fora dela ⇒ recusa (nunca vira comando arbitrário). */
+export function requiredReviewGate(command: string): { readonly label: string; readonly command: string } | null {
+  const trimmed = command.trim();
+  if (!safeValidationCommand(trimmed) || !parseGateCommand(trimmed)) return null;
+  return { label: `Gate exigido pela revisão: ${trimmed}`, command: trimmed };
 }
 
 export type ReviewCorrectionPlanResult =
@@ -146,6 +158,7 @@ export function planCorrectionFromReview(facts: ReviewCorrectionFacts): ReviewCo
     reworkFiles: deriveExplicitReworkScope(requestedChanges, original.proposal.data.includedScope),
     recoverySequence,
     idempotencyKey,
+    ...(facts.additionalValidations?.length ? { additionalValidations: facts.additionalValidations } : {}),
   });
   if (!derivation.ok) return { ok: false, reason: 'derivation_refused', refusals: derivation.refusals };
   return { ok: true, candidate: derivation.candidate, recoverySequence, idempotencyKey };
@@ -163,7 +176,12 @@ export type ReviewCorrectionResult =
 export async function correctReviewedWorkItem(
   client: SupabaseClient<Database>,
   workItemId: string,
+  options: { readonly requiredGates?: readonly string[] } = {},
 ): Promise<ReviewCorrectionResult> {
+  const additionalValidations = (options.requiredGates ?? []).map(requiredReviewGate);
+  if (additionalValidations.some(gate => gate === null)) {
+    return { ok: false, reason: 'derivation_refused', refusals: ['additional_validation_invalid'], message: 'Gate exigido fora da allowlist de validação (npm test | npm run typecheck | npm run build, com --workspace opcional).' };
+  }
   const service = createWorkOrchestrationService(client);
   const [itemResult, eventsResult] = await Promise.all([
     service.getItem(workItemId),
@@ -194,6 +212,7 @@ export async function correctReviewedWorkItem(
     events: eventsResult.value,
     existingRecoverySequences,
     activeRecoverySequence,
+    additionalValidations: additionalValidations as readonly { label: string; command: string }[],
   });
   if (!planned.ok) return { ok: false, reason: planned.reason, refusals: planned.refusals };
 

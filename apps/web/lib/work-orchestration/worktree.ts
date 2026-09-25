@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { lstat, mkdtemp, mkdir, readFile, readdir, rm, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 
 // ============================================================
 // Primitivas de execução em git worktree isolada (ADR-001, Opção A).
@@ -122,6 +122,19 @@ const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promi
  * denied", lock de ref, arquivo em uso). Esses casos somem numa nova tentativa. Erros
  * DETERMINÍSTICOS (SHA inválido, argumento malformado) NÃO casam aqui e sobem na hora,
  * sem re-tentar. Puro e testável — não amplia nenhuma permissão. */
+/**
+ * Diretório-pai das worktrees efêmeras. Por padrão o TEMP do SO; quando o TEMP está em
+ * OUTRO volume que o repositório (Windows: C:\…\Temp × G:\repo), usa `<repo>/.worktrees`.
+ * Junctions de node_modules entre volumes quebram a resolução de módulos de bundlers — o
+ * webpack do `next build` passa a resolver `./G:/…` a partir de C: — e o gate REAL do
+ * framework falharia por ambiente, nunca pelo código. `.worktrees` já é ignorado pelas
+ * leituras do coder (SECRET_SEGMENTS). Puro e testável.
+ */
+export function worktreeParentDir(repoRoot: string, tempDir: string = tmpdir()): string {
+  const volume = (path: string): string => parse(resolve(path)).root.toLowerCase();
+  return volume(tempDir) === volume(repoRoot) ? tempDir : join(repoRoot, '.worktrees');
+}
+
 export function isTransientWorktreeError(stderr: string): boolean {
   const text = stderr.toLowerCase();
   return (
@@ -186,7 +199,9 @@ export class GitWorktree {
     const maxAttempts = 3;
     let lastError = '';
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const base = await mkdtemp(join(tmpdir(), 'anima-wt-'));
+      const parent = worktreeParentDir(input.repoRoot);
+      await mkdir(parent, { recursive: true });
+      const base = await mkdtemp(join(parent, 'anima-wt-'));
       const root = join(base, 'tree');
       const created = await git(input.repoRoot, ['worktree', 'add', '-b', input.branch, root, start], input.signal);
       if (created.exitCode === 0) {

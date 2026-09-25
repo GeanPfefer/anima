@@ -27,7 +27,9 @@ describe('parser de argumentos da CLI', () => {
   });
 
   test('work correct <id>', () => {
-    expect(parseArgs(['work', 'correct', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'work-correct', id: 'abc', json: true } });
+    expect(parseArgs(['work', 'correct', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'work-correct', id: 'abc', requiredGates: [], json: true } });
+    expect(parseArgs(['work', 'correct', 'abc', '--require-gate', 'npm run build --workspace=@anima/web'])).toEqual({ ok: true, command: { kind: 'work-correct', id: 'abc', requiredGates: ['npm run build --workspace=@anima/web'], json: false } });
+    expect(parseArgs(['work', 'show', 'abc', '--require-gate', 'npm run build']).ok).toBe(false);
   });
 
   test('work correct sem id → uso inválido', () => {

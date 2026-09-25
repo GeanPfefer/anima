@@ -13,7 +13,7 @@ export type ParsedCommand =
   | { readonly kind: 'work-show'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-evidence'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-request-changes'; readonly id: string; readonly reason: string; readonly json: boolean }
-  | { readonly kind: 'work-correct'; readonly id: string; readonly json: boolean }
+  | { readonly kind: 'work-correct'; readonly id: string; readonly requiredGates: readonly string[]; readonly json: boolean }
   | { readonly kind: 'work-replan'; readonly id: string; readonly diagnosisPath: string | null; readonly json: boolean }
   | { readonly kind: 'work-authorize-resume'; readonly id: string; readonly planPath: string | null; readonly json: boolean }
   | { readonly kind: 'work-supervise'; readonly id: string; readonly json: boolean }
@@ -41,6 +41,7 @@ interface Extracted {
   readonly compute: Readonly<Record<'strategy' | 'provider' | 'model', string | null>>;
   readonly fixes: readonly string[];
   readonly evidence: string | null;
+  readonly requiredGates: readonly string[];
   readonly help: boolean;
   readonly unknownFlag: string | null;
 }
@@ -56,6 +57,7 @@ function extract(argv: readonly string[]): Extracted {
   const compute: Record<'strategy' | 'provider' | 'model', string | null> = { strategy: null, provider: null, model: null };
   const fixes: string[] = [];
   let evidence: string | null = null;
+  const requiredGates: string[] = [];
   let help = false;
   let unknownFlag: string | null = null;
   for (let i = 0; i < argv.length; i++) {
@@ -71,13 +73,14 @@ function extract(argv: readonly string[]): Extracted {
     if (token === '--model') { compute.model = argv[++i] ?? ''; continue; }
     if (token === '--fix') { fixes.push(argv[++i] ?? ''); continue; }
     if (token === '--evidence') { evidence = argv[++i] ?? ''; continue; }
+    if (token === '--require-gate') { requiredGates.push(argv[++i] ?? ''); continue; }
     if (token === '--help' || token === '-h') { help = true; continue; }
     if (token === '--reason' || token === '-m') { reason = argv[++i] ?? ''; continue; }
     if (token.startsWith('--reason=')) { reason = token.slice('--reason='.length); continue; }
     if (token.startsWith('-') && token !== '-') { if (unknownFlag === null) unknownFlag = token; continue; }
     positionals.push(token);
   }
-  return { positionals, json, reason, diagnosisPath, planPath, limits, compute, fixes, evidence, help, unknownFlag };
+  return { positionals, json, reason, diagnosisPath, planPath, limits, compute, fixes, evidence, requiredGates, help, unknownFlag };
 }
 
 /** Limites da authority paga: EXPLÍCITOS (sem default de dinheiro) e dentro de faixas sãs. */
@@ -93,7 +96,7 @@ const boundedNumber = (raw: string | null, bounds: { readonly min: number; reado
 };
 
 export function parseArgs(argv: readonly string[]): ParseResult {
-  const { positionals, json, reason, diagnosisPath, planPath, limits, compute, fixes, evidence, help, unknownFlag } = extract(argv);
+  const { positionals, json, reason, diagnosisPath, planPath, limits, compute, fixes, evidence, requiredGates, help, unknownFlag } = extract(argv);
 
   if (help || positionals[0] === 'help' || positionals.length === 0) return { ok: true, command: { kind: 'help' } };
   if (unknownFlag !== null) return { ok: false, error: `Flag desconhecida: ${unknownFlag}` };
@@ -108,6 +111,9 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   const anyLimit = limits.maxUsd !== null || limits.maxMinutes !== null || limits.validHours !== null;
   if (anyLimit && (group !== 'work' || sub !== 'authorize-compute')) {
     return { ok: false, error: '--max-usd/--max-minutes/--valid-hours só valem para work authorize-compute.' };
+  }
+  if (requiredGates.length > 0 && (group !== 'work' || sub !== 'correct' || requiredGates.some(gate => !gate.trim()))) {
+    return { ok: false, error: '--require-gate "<comando npm>" só vale para work correct.' };
   }
   if ((fixes.length > 0 || evidence !== null) && (group !== 'work' || sub !== 'recover-harness')) {
     return { ok: false, error: '--fix/--evidence só valem para work recover-harness.' };
@@ -162,7 +168,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     }
     if (sub === 'correct') {
       if (!id) return { ok: false, error: 'Uso: anima work correct <id>' };
-      return { ok: true, command: { kind: 'work-correct', id, json } };
+      return { ok: true, command: { kind: 'work-correct', id, requiredGates, json } };
     }
     if (sub === 'approve') {
       if (!id) return { ok: false, error: 'Uso: anima work approve <id>' };
@@ -229,7 +235,7 @@ Uso:
   anima work show <id>                        Estado, versão, tentativa, Verifier e cobertura
   anima work evidence <id>                    Critérios de aceite, provas e lacunas (Verifier)
   anima work request-changes <id> --reason "" Registra REQUEST_CHANGES pelo fluxo canônico
-  anima work correct <id>                      Materializa o sucessor de correção (proposed)
+  anima work correct <id> [--require-gate C]   Materializa o sucessor de correção (proposed); gates extras exigidos pela revisão
   anima work replan <id> [--diagnosis arquivo] Replaneja unidade mínima; sem diagnóstico, replay persistido
   anima work authorize-resume <id> [--plan f]  Autoridade humana: +1 tentativa após saldo esgotado (sucessor proposed)
   anima work supervise <id>                    Inicia/renova supervisão humana por 30 minutos
