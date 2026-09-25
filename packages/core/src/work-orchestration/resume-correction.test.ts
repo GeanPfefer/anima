@@ -240,6 +240,54 @@ const SCOPE_REMAINING = `A revisão é cumprida alterando apenas ${TEST} (rework
     expect(covered).toEqual(expect.arrayContaining([FUNCTIONAL, SCOPE_REMAINING, SCOPE_INTACT]));
   });
 
+  // Regressão (prova real bd4092af, 2026-09-25): o gate do ORIGINAL já declarava `covers`
+  // apontando para o aceite do ORIGINAL. O sucessor substitui o aceite pelos critérios da
+  // correção; herdar aqueles `covers` gerava `criterion_covers_unknown_acceptance` (Verifier
+  // rejected) em TODO sucessor — e marcá-los `gate_assertion` superestimaria afirmações
+  // substantivas como provadas por um gate verde.
+  test('covers herdados do aceite do original não viajam para o sucessor ⇒ VERIFIED sem violações', () => {
+    const ORIGINAL_ACCEPTANCE = 'dedup ordenado preserva a primeira ocorrência';
+    const withCovers: WorkItem = {
+      ...original,
+      proposal: { ...original.proposal, data: { ...original.proposal.data, expectedEffects: [ORIGINAL_ACCEPTANCE] } },
+      intent: { execution_spec: {
+        ...(original.intent['execution_spec'] as Record<string, unknown>),
+        validation_criteria: [{ label: 'test', command: 'npm test --workspace=apps/web -- chat-surface.test.ts', covers: [ORIGINAL_ACCEPTANCE], claim_kind: 'substantive' }],
+      } } as WorkItem['intent'],
+    };
+    const candidate = ok(deriveResumeCorrectionSuccessor(input({ original: withCovers })));
+    const spec = readAutonomousExecutionSpec(candidate.intent)!;
+    const gate = spec.validationCriteria.find(c => c.label === 'test')!;
+    expect(gate.covers).toEqual([FUNCTIONAL]);
+    expect(gate.claimKind).toBe('gate_assertion');
+    const attemptId = 'b0000000-0000-4000-8000-0000000000ab';
+    const handoff = buildWorktreeHandoff({
+      workItemId: 'successor-1', attemptId, approvedProposalVersion: 1,
+      executorId: 'worktree-v1', backendId: 'fake', model: null,
+      baseSha: BASE_SHA, branch: `anima-work/${attemptId}`, commitSha: COMMIT_SHA, status: 'succeeded',
+      changedFiles: [TEST], diffFiles: [{ path: TEST, insertions: 8, deletions: 0 }],
+      gates: [{ label: 'test', command: gate.command!, exitCode: 0, outcome: 'passed' }],
+    });
+    if (!handoff.ok) throw new Error(handoff.explanation);
+    const observed = buildHostObservedGitEvidence({
+      workItemId: 'successor-1', attemptId, approvedProposalVersion: 1,
+      baseSha: BASE_SHA, observedCommitSha: COMMIT_SHA,
+      observedChangedFiles: [TEST], observedDiffFiles: [{ path: TEST, insertions: 8, deletions: 0 }],
+      observedAt: '2026-09-25T06:24:07.000Z',
+    });
+    if (!observed.ok) throw new Error(observed.explanation);
+    const report = verifyWorkResult({
+      expected: { workItemId: 'successor-1', attemptId, approvedProposalVersion: 1 },
+      authorized: {
+        includedScope: candidate.proposal.data.includedScope, excludedScope: candidate.proposal.data.excludedScope,
+        validationCriteria: spec.validationCriteria, acceptanceCriteria: candidate.proposal.data.expectedEffects,
+      },
+      handoff: handoff.value, observed: observed.value,
+    });
+    expect(report.findings.filter(f => f.code === 'criterion_covers_unknown_acceptance')).toEqual([]);
+    expect(report.verdict).toBe('verified');
+  });
+
   // Prova NEGATIVA: se o coder tocar a implementação preservada (escopo excluído),
   // o Verifier detecta e NUNCA classifica como verified.
   test('prova negativa: tocar a implementação preservada ⇒ violação, nunca verified', () => {

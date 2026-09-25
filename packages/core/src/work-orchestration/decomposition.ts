@@ -272,6 +272,17 @@ function buildSuccessorIntent(
     commit_sha: checkpoint.commitSha,
   };
 
+  // O aceite do sucessor é SEMPRE próprio (substitui o do original): `covers` herdados
+  // apontariam para critérios inexistentes nele (`criterion_covers_unknown_acceptance`).
+  // Sem enriquecimento, a ausência de associação vira lacuna explícita, nunca violação.
+  if (Array.isArray(executionSpec['validation_criteria'])) {
+    executionSpec['validation_criteria'] = (executionSpec['validation_criteria'] as Json[]).map(entry => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return entry;
+      const { covers: _inherited, ...rest } = entry as Record<string, Json>;
+      return rest;
+    });
+  }
+
   // Enriquecimento de PROVA (só na correção governada). Amarra os critérios de aceite
   // às suas fontes de prova, para que o Verifier v2 possa classificar cada um pelo
   // requisito certo (gate para funcional, escopo para invariante) — sem afrouxar nada.
@@ -290,15 +301,15 @@ function buildSuccessorIntent(
         const criterion = entry as Record<string, Json>;
         const command = criterion['command'];
         if (proof.functional !== null && typeof command === 'string' && command.trim().length > 0) {
-          const existing = Array.isArray(criterion['covers'])
-            ? (criterion['covers'] as Json[]).filter((value): value is string => typeof value === 'string')
-            : [];
           // `proof.functional` é o META-critério "as validações declaradas passam" —
           // estruturalmente conhecido por ESTE código como uma gate-assertion (a
           // afirmação É o resultado do gate). Marca `claim_kind:'gate_assertion'` para
           // que o Verifier o aceite como prova suficiente ao passar. Critérios funcionais
           // substantivos NÃO são classificados aqui (o código não os conhece).
-          return { ...criterion, covers: [...new Set([...existing, proof.functional])], claim_kind: 'gate_assertion' };
+          // Os `covers` do original NÃO são herdados: apontam para o aceite do ORIGINAL,
+          // que o sucessor substitui — herdá-los viraria `criterion_covers_unknown_acceptance`
+          // e, sob `gate_assertion`, superestimaria afirmações substantivas como provadas.
+          return { ...criterion, covers: [proof.functional], claim_kind: 'gate_assertion' };
         }
         return criterion;
       });

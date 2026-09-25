@@ -151,6 +151,22 @@ describe('deriveDecompositionSuccessor — caminho governado', () => {
   });
 });
 
+describe('deriveDecompositionSuccessor — covers do original não são herdados', () => {
+  test('o aceite substituído nunca recebe covers apontando para o aceite do original', () => {
+    const withCovers: WorkItem = { ...original, intent: { execution_spec: {
+      ...(original.intent['execution_spec'] as Record<string, unknown>),
+      validation_criteria: [{ label: 'test', command: 'npm test', covers: ['política'], claim_kind: 'substantive' }],
+    } } as WorkItem['intent'] };
+    const candidate = ok(deriveDecompositionSuccessor(input({ original: withCovers })));
+    const spec = readAutonomousExecutionSpec(candidate.intent)!;
+    const acceptance = new Set(candidate.proposal.data.expectedEffects);
+    for (const criterion of spec.validationCriteria) {
+      for (const covered of criterion.covers ?? []) expect(acceptance.has(covered)).toBe(true);
+    }
+    expect(spec.validationCriteria[0]).toMatchObject({ label: 'test', command: 'npm test' });
+  });
+});
+
 describe('deriveDecompositionSuccessor — recusas fail-closed', () => {
   test('recusa quando a estratégia decidida não é decompose', () => {
     const retry: WorkRecoveryAssessment = {
