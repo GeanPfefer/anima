@@ -1927,3 +1927,9 @@ planejador local entende chamadas textuais do qwen3-coder e tem timeout configur
 mas não planeja com qualidade o pedido pendente de `c41ad2ff`. B1 segue congelado: falta
 preço versionado externo e a fiação pós-attempt. Registro:
 [caminho normal até a authority](docs/registros/2026-09-25b-caminho-normal-ate-authority-sem-scripts.md).
+
+## Estado operacional — recovery evidence e successor dev-readiness pré-authority (2026-09-26)
+
+Recoveries agora reutilizam somente evidência host-observed comprovada e bounded da lineage: mesmo gate FAIL, edição aplicada autorizada e PASS posterior, máximo quatro itens, com redaction e referências de work item/attempt/evento; transcript livre e raciocínio do provider não entram. A migration `20260926000000_harness_recovery_descendants.sql` permite novo incidente governado em descendant que herdou provenance anterior, sem remover as travas de novo failure event, nova autorização, um successor por item falho, replay, `max_attempts=1` e aprovação/compute separados.
+
+O successor `843669bd-44f6-4d36-8129-19db12cb573c` da falha `92607a82-e382-44e2-ac6b-784372246f1b` está `approved` v1, zero attempts, escopo restrito aos dois arquivos de `/api/dev-readiness`, preferência `provider_api/openai/gpt-5.6-sol` e Router em `waiting_for_human_authorization`. Nenhuma authority/reservation nova ou chamada de provider foi criada; B1 segue congelado. Registro: [sessão de 2026-09-26](docs/registros/2026-09-26-continuidade-evidencia-recovery-dev-readiness.md).

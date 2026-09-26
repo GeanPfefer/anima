@@ -2424,3 +2424,9 @@ ou quando a mensagem é uma referência ordinal conversacional inteira sobre lis
 realmente apresentada. Mandatos autônomos exigem verbo positivo; negação anterior
 ao verbo na mesma oração falha fechado. UUID/prefixo e anáforas válidas continuam
 preservados, inclusive para consulta read-only de itens encerrados.
+
+## Continuação — evidência comprovada entre recoveries e descendants governados (2026-09-26)
+
+O Supervisor reconstrói a lineage persistida e entrega ao coder no máximo quatro fatos host-observed em que o mesmo gate falhou, houve edição aplicada dentro do escopo autorizado e o gate passou numa revisão posterior. Diagnóstico e patch são bounded/redigidos; texto livre e raciocínio não são fontes. A RPC de harness recovery deixou de recusar um descendant apenas porque ele herdou `harness_recovery`, preservando todas as demais travas e a cadeia append-only.
+
+Prova: pgTAP 32/32 + lineage 16/16; core 2.035, web 1.807, focais 135, typecheck e build verdes. O successor real `843669bd` está aprovado, zero attempts e parado em `waiting_for_human_authorization` para OpenAI/Sol. Detalhes e próximo comando no [registro](../registros/2026-09-26-continuidade-evidencia-recovery-dev-readiness.md).
