@@ -48,6 +48,8 @@ export interface CoderEditRequest {
   readonly excludedScope: readonly string[];
   /** Contexto informativo de uma tentativa anterior; nunca amplia escopo. */
   readonly carriedContext?: WorkExecutorRequest['carriedContext'];
+  /** Continuidade seletiva entre successors/recoveries da mesma lineage. */
+  readonly recoveryEvidence?: WorkExecutorRequest['recoveryEvidence'];
   /**
    * Política canônica do harness (runner de teste canônico, runners incompatíveis,
    * fontes de backend não autoritativas), transportada no contrato COMPARTILHADO para

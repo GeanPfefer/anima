@@ -16,6 +16,9 @@ export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
   readonly validationCriteria: readonly AutonomousValidationCriterion[];
   readonly limits: AutonomousExecutionLimits;
   readonly contextReferences: readonly WorkContextReference[];
+  /** Evidência host-observed, seletiva e bounded, herdada de ancestors da lineage.
+   * Nunca contém transcript livre/raciocínio do provider e nunca amplia autoridade. */
+  readonly recoveryEvidence?: RecoveryEvidenceContextV1;
   /** Contexto informativo de uma tentativa anterior; nunca amplia permissões. */
   readonly carriedContext?: {
     readonly isNewAttempt: true;
@@ -26,6 +29,27 @@ export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
     readonly touchedResources: readonly string[];
     readonly previousFailures: readonly string[];
   };
+}
+
+export interface RecoveryEvidenceItemV1 {
+  readonly sourceWorkItemId: string;
+  readonly sourceAttemptId: string;
+  readonly sourceEventId: string;
+  readonly failedCommand: string;
+  readonly observedFailure: string;
+  readonly provenCorrection?: {
+    readonly passedCommand: string;
+    readonly changedFiles: readonly string[];
+    readonly patchExcerpt?: string;
+  };
+  readonly references: readonly WorkContextReference[];
+}
+
+export interface RecoveryEvidenceContextV1 {
+  readonly schemaVersion: 1;
+  readonly items: readonly RecoveryEvidenceItemV1[];
+  readonly truncated: boolean;
+  readonly references: readonly WorkContextReference[];
 }
 
 // WorkCheckpointV1 — AUTO-04/AUTO-05: snapshot estruturado de uma tentativa

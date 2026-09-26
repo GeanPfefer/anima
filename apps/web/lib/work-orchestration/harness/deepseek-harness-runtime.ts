@@ -5,6 +5,7 @@ import type {
   HarnessRunTurnResult,
   HarnessRuntime,
 } from '../deepseek-harness-coder';
+import { renderRecoveryEvidence } from '../recovery-evidence-render';
 import {
   HARNESS_DEFAULT_RETRYABLE_LLM_CODES,
   HARNESS_DEFAULT_STREAM_IDLE_TIMEOUT_MS,
@@ -135,6 +136,7 @@ export function composeHarnessTask(input: HarnessRunTurnInput): string {
       );
     }
   }
+  if (input.recoveryEvidence) parts.push('', renderRecoveryEvidence(input.recoveryEvidence));
 
   const feedback = input.hostValidationFeedback;
   if (feedback?.kind === 'no-change') {

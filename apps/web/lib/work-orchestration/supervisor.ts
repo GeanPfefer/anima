@@ -21,6 +21,7 @@ import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildExecutorRequest, recordExecutionTerminal, recordWorkDecisionRequired, runExecutorStreamed, type CheckpointSink } from './execution';
 import { createWorkOrchestrationService } from './server';
+import { loadRecoveryEvidenceContext } from './recovery-evidence-context';
 
 // ============================================================
 // Laço operacional mínimo do Supervisor V0 (Fase E).
@@ -114,6 +115,12 @@ export interface SupervisorTurnDependencies {
     readonly workItemId: string;
     readonly expectedProposalVersion: number;
   };
+  /** Seam determinístico; produção reconstrói do ledger/lineage a cada volta. */
+  readonly recoveryEvidenceLoader?: (input: {
+    readonly workItemId: string;
+    readonly relevantCommands: readonly string[];
+    readonly includedScope: readonly string[];
+  }) => Promise<WorkExecutorRequest['recoveryEvidence'] | null>;
 }
 
 const base = (reconciliation: readonly ReconciliationFinding[]): SupervisorTurnResult => ({
@@ -310,6 +317,23 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     });
     if (persisted.error) return { ...started, outcome: 'routing_refused', refusal: refusalOf(persisted.error) };
   }
+  let recoveryEvidence: WorkExecutorRequest['recoveryEvidence'];
+  try {
+    const evidenceInput = {
+      workItemId: selection.workItemId,
+      relevantCommands: eligibility.spec.validationCriteria.flatMap(criterion => criterion.command ? [criterion.command] : []),
+      includedScope: item.value.proposal.data.includedScope,
+    };
+    recoveryEvidence = await (dependencies.recoveryEvidenceLoader
+      ? dependencies.recoveryEvidenceLoader(evidenceInput)
+      : loadRecoveryEvidenceContext(client, evidenceInput)) ?? undefined;
+  } catch (error) {
+    return {
+      ...started,
+      outcome: 'selection_not_executable',
+      refusal: { code: 'recovery_evidence_unavailable', message: error instanceof Error ? error.message : String(error) },
+    };
+  }
   const classificationRead = await client.rpc('current_work_intelligence_classification', {
     p_work_item_id: selection.workItemId,
   });
@@ -503,8 +527,12 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   // ---------- (6) Execução real, com persistência de checkpoint em stream ----------
   const request = buildExecutorRequest({
     item: item.value, spec: eligibility.spec, attemptId,
-    contextReferences: contexts.value.at(-1)?.references ?? [],
+    contextReferences: [
+      ...(contexts.value.at(-1)?.references ?? []),
+      ...(recoveryEvidence?.references ?? []),
+    ],
     carriedContext,
+    recoveryEvidence,
   });
   // Porta de persistência: cada checkpoint é gravado IMEDIATAMENTE, antes do
   // próximo sinal. Replay idempotente (`record_work_checkpoint`) não devolve

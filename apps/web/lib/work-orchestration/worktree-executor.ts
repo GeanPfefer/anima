@@ -449,6 +449,9 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
               ...(request.carriedContext
                 ? { carriedContext: request.carriedContext }
                 : {}),
+              ...(request.recoveryEvidence
+                ? { recoveryEvidence: request.recoveryEvidence }
+                : {}),
               ...(retryFeedback
                 ? { hostValidationFeedback: retryFeedback }
                 : {}),

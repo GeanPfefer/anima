@@ -516,6 +516,30 @@ describe('WorktreeExecutorAdapter', () => {
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
   });
 
+  test('successor entrega evidência seletiva de ancestors ao backend sem ampliar escopo', async () => {
+    let received: CoderEditRequest['recoveryEvidence'];
+    const backend: CoderBackend = {
+      id: 'capture-recovery-evidence',
+      async edit(req, ws): Promise<CoderEditResult> {
+        received = req.recoveryEvidence;
+        await ws.writeFile(added.path, added.content);
+        return { summary: 'ok', touchedResources: [added.path] };
+      },
+    };
+    const recoveryEvidence = { schemaVersion: 1 as const, truncated: false, references: [{ kind: 'work_event', id: 'event-1' }], items: [{
+      sourceWorkItemId: 'ancestor', sourceAttemptId: 'attempt-1', sourceEventId: 'event-1',
+      failedCommand: 'npm test -- src/added.ts', observedFailure: 'ReferenceError',
+      provenCorrection: { passedCommand: 'npm test -- src/added.ts', changedFiles: ['src/added.ts'] },
+      references: [{ kind: 'work_event', id: 'event-1' }],
+    }] };
+    const req = request({ recoveryEvidence });
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, backend });
+    const terminal = (await collect(adapter, req, new AbortController().signal)).at(-1)!;
+    expect(received).toEqual(recoveryEvidence);
+    expect(terminal.kind).toBe('result');
+    await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
+  });
+
   test('retomada permite o diff herdado fora do novo escopo e fiscaliza somente o delta da attempt', async () => {
     await writeFile(join(ctx.repo, 'src', 'implementation.ts'), 'export const value = 1;\n');
     await git(ctx.repo, ['add', '.']);

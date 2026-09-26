@@ -16,6 +16,7 @@ import {
 } from '@anima/core';
 import { OllamaTranscript } from './ollama-transcript';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace, type WorkspaceExecResult, type WorkspaceSearchHit } from './coder-backend';
+import { renderRecoveryEvidence } from './recovery-evidence-render';
 import {
   applyExperimentalAnchorOperations,
   createServedAnchor,
@@ -318,6 +319,9 @@ export class OllamaCoderBackend implements CoderBackend {
     const carried = request.carriedContext
       ? `\nRetomada — próximo passo: ${request.carriedContext.nextStep}. Restantes: ${request.carriedContext.remainingSteps.join('; ')}.`
       : '';
+    const inheritedEvidence = request.recoveryEvidence
+      ? `\n${renderRecoveryEvidence(request.recoveryEvidence)}`
+      : '';
     const feedback = request.hostValidationFeedback;
     const repairContext = feedback?.kind === 'gate-failure'
       ? [
@@ -353,6 +357,7 @@ export class OllamaCoderBackend implements CoderBackend {
         'Antes do submit, faça também self-review com git diff (read-only) depois da edição mais recente. O diff não substitui o gate.',
       ] : []),
       ...(repairContext ? [repairContext] : []),
+      ...(inheritedEvidence ? [inheritedEvidence] : []),
     ].join('\n') + carried;
 
     const servedBlocks: string[] = [];

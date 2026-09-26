@@ -79,6 +79,7 @@ export interface HarnessRunTurnInput {
   readonly includedScope: readonly string[];
   readonly excludedScope: readonly string[];
   readonly carriedContext?: CoderEditRequest['carriedContext'];
+  readonly recoveryEvidence?: CoderEditRequest['recoveryEvidence'];
   /** Feedback de valida??o observado pelo host NESTA tentativa; usado somente
    * para retry interno e nunca confundido com retomada persistida. */
   readonly hostValidationFeedback?: CoderEditRequest['hostValidationFeedback'];
@@ -175,6 +176,7 @@ export class DeepSeekHarnessCoderBackend implements CoderBackend {
       includedScope: request.includedScope,
       excludedScope: request.excludedScope,
       ...(request.carriedContext ? { carriedContext: request.carriedContext } : {}),
+      ...(request.recoveryEvidence ? { recoveryEvidence: request.recoveryEvidence } : {}),
       ...(request.hostValidationFeedback
         ? { hostValidationFeedback: request.hostValidationFeedback }
         : {}),

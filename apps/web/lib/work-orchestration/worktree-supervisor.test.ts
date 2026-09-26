@@ -128,6 +128,7 @@ describe('Supervisor → executor de worktree (integração determinística)', (
       }],
       ownerInstanceId: 'sup-test', newId: ids(['claim-1', 'attempt-1']),
       signal: new AbortController().signal, reader: reader(workItem(target, ctx.sha)),
+      recoveryEvidenceLoader: async () => null,
     });
 
     expect(result.outcome).toBe('execution_completed');

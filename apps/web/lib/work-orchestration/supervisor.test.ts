@@ -1,7 +1,7 @@
 import type { WorkCheckpointV1, WorkContextSnapshot, WorkExecutorAdapter, WorkExecutorRequest, WorkExecutorSignal, WorkItem, WorkRoutingAdjustmentContextV1 } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { runSupervisorTurn, type SupervisorReader } from './supervisor';
+import { runSupervisorTurn, type SupervisorReader, type SupervisorTurnDependencies } from './supervisor';
 
 // ============================================================
 // Modelo fiel das fronteiras ratificadas.
@@ -572,7 +572,7 @@ const scriptedExecutor = (specs: readonly SignalSpec[], opts: { readonly throwAt
 
 const ids = (values: readonly string[]) => { let index = 0; return () => values[index++]!; };
 
-const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: readonly WorkItem[], identifiers: readonly string[], contexts?: readonly WorkContextSnapshot[], requestedWork?: { readonly workItemId: string; readonly expectedProposalVersion: number }) =>
+const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: readonly WorkItem[], identifiers: readonly string[], contexts?: readonly WorkContextSnapshot[], requestedWork?: { readonly workItemId: string; readonly expectedProposalVersion: number }, recoveryEvidenceLoader: SupervisorTurnDependencies['recoveryEvidenceLoader'] = async () => null) =>
   runSupervisorTurn({
     client: database.asClient(),
     routes: [{
@@ -585,6 +585,7 @@ const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: reado
     }],
     ownerInstanceId: 'supervisor-test',
     newId: ids(identifiers), signal: new AbortController().signal, reader: reader(items, contexts),
+    recoveryEvidenceLoader,
     requestedWork,
   });
 
@@ -603,6 +604,25 @@ test('fila vazia encerra a volta sem posse, tentativa ou executor', async () => 
   expect(calls).toHaveLength(0);
   expect(database.claims.size).toBe(0);
   expect(database.events).toHaveLength(0);
+});
+
+test('successor recebe evidência da lineage e references junto do contexto normal', async () => {
+  const database = new FakeDatabase({ items: [{ id: 'item-1', version: 1, state: 'approved', target: 'alvo-1', approvalSeq: 10, classification: 'complete' }] });
+  const runner = executor();
+  const evidence = { schemaVersion: 1 as const, truncated: false,
+    references: [{ kind: 'attempt', id: 'ancestor-attempt' }, { kind: 'work_event', id: 'evidence-event' }],
+    items: [{ sourceWorkItemId: 'ancestor', sourceAttemptId: 'ancestor-attempt', sourceEventId: 'evidence-event',
+      failedCommand: 'npm test', observedFailure: 'ReferenceError',
+      provenCorrection: { passedCommand: 'npm test', changedFiles: ['src/a.ts'] },
+      references: [{ kind: 'work_event', id: 'evidence-event' }] }] };
+  const contexts: WorkContextSnapshot[] = [{ id: 'ctx', workItemId: 'item-1', version: 1,
+    references: [{ kind: 'message', id: 'm1' }], createdAt: new Date() }];
+  const result = await turn(database, runner.adapter, [workItem('item-1')], ['claim-1', 'attempt-1'], contexts, undefined, async () => evidence);
+  expect(result.outcome).toBe('execution_completed');
+  expect(runner.calls[0]?.recoveryEvidence).toEqual(evidence);
+  expect(runner.calls[0]?.contextReferences).toEqual([
+    { kind: 'message', id: 'm1' }, { kind: 'attempt', id: 'ancestor-attempt' }, { kind: 'work_event', id: 'evidence-event' },
+  ]);
 });
 
 test('seleção explícita nunca substitui o cartão solicitado pela cabeça da fila', async () => {

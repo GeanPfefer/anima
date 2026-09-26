@@ -107,6 +107,23 @@ describe('composeHarnessTask', () => {
     expect(task).toContain('ajustar projector');
   });
 
+  test('injeta evidência host-observed de ancestor com references, sem transcript livre', () => {
+    const task = composeHarnessTask(input({ recoveryEvidence: {
+      schemaVersion: 1, truncated: false,
+      references: [{ kind: 'work_event', id: 'event-1' }],
+      items: [{
+        sourceWorkItemId: 'ancestor', sourceAttemptId: 'attempt-1', sourceEventId: 'event-1',
+        failedCommand: 'npm test -- focal.test.ts', observedFailure: 'ReferenceError: primitive missing',
+        provenCorrection: { passedCommand: 'npm test -- focal.test.ts', changedFiles: ['focal.test.ts'], patchExcerpt: '+class RuntimeShim {}' },
+        references: [{ kind: 'work_event', id: 'event-1' }],
+      }],
+    } }));
+    expect(task).toContain('do not repeat solved investigation');
+    expect(task).toContain('ReferenceError: primitive missing');
+    expect(task).toContain('+class RuntimeShim {}');
+    expect(task).toContain('work_event:event-1');
+  });
+
   test('hostValidationFeedback no-change exige edicao real', () => {
     const task = composeHarnessTask(input({
       hostValidationFeedback: {
