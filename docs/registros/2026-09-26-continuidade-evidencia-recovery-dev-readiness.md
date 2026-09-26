@@ -61,3 +61,27 @@ Somente após novo ato humano explícito:
 `npm.cmd run anima -- work authorize-compute 843669bd-44f6-4d36-8129-19db12cb573c --max-usd 3 --max-minutes 30 --valid-hours 2`
 
 Esse comando ainda não foi executado. Depois dele, deixar o Resident Host executar no máximo a attempt autorizada e parar em review/terminal; sem integração, push, merge ou deploy.
+## Prova paga autorizada — resultado terminal
+
+O checkpoint pré-authority acima foi aceito pelo humano, que autorizou exatamente uma authority e uma attempt. O comando canônico criou authority `e90a3c2a-3dba-4bcf-8229-5b812a601884` para `openai/openai-api/provider_api:gpt-5.6-sol`, USD 3, 30 min, 2 h. O Resident Host normal iniciou com Router V1 e reasoning `high`; decision `519d5d09-24a6-4c35-a9b5-aa23216507b7` selecionou OpenAI/Sol.
+
+- Attempt única: `98402f85-833b-40c0-84c3-1bba2954f316`.
+- Reservation: `0e2f8afa-cf41-46d5-a8b0-9c143cd6692d`, lease `provider-api:98402f85-833b-40c0-84c3-1bba2954f316`, USD 3, aberta e `cost_unknown`; B1 não foi alterado.
+- Provider: 16 chamadas; 104.464 input tokens (28.225 cached), 7.417 output, 111.881 total; duração host-observed 124.869 ms.
+- Estado terminal: `failed`, `ollama_submit_gate_unsatisfied` legado; nenhum retry, segunda authority ou segunda attempt.
+
+### Resultado da prova de recovery evidence
+
+A função de produção `loadRecoveryEvidenceContext` foi reconstruída read-only com o item, os três comandos e o escopo vigentes e retornou `null`. Portanto zero recovery evidence items foram selecionados e nenhum bloco `recoveryEvidence` chegou ao coder. Não houve transcript livre ou raciocínio oculto injetado, mas a propriedade principal não foi provada.
+
+Causa confirmada: `commandObservations.command` é persistido após sanitização de paths (`npm test --workspace=@anima/web -- app<path>`), enquanto `relevantCommands` contém o gate canônico completo (`... app/api/dev-readiness/route.test.ts`). O seletor de `9035cef` usa igualdade textual exata, então rejeitou a evidência ancestral apesar da lineage correta `2c7afe1d → f19ac716 → 7610b066 → 843669bd`. A evidência ancestral elegível está no evento `5ebf4d94-e6e5-40f5-b6ac-3e0a8a734f44`, attempt `c284f09c-dc43-4e4e-a8a1-592f3fadd561`, work item `2c7afe1d-996a-419c-994c-f142d18be0cd`: FAIL em revision 1, edição aplicada em `route.test.ts` na round 13 e PASS do mesmo gate em revision 2. A sanitização destruiu a identidade textual necessária ao matching.
+
+### Transcript e resultado funcional
+
+Sem o contexto herdado, o coder repetiu a investigação: editou os dois arquivos, rodou o teste focal e encontrou `Response is not defined` na revision 1; trocou a rota para `NextResponse`, encontrou `Request is not defined` na revision 2; então adicionou o shim necessário no teste e obteve PASS 6/6 na revision 3. Isso mostra que a evidência seria relevante, mas não foi útil porque não chegou ao coder.
+
+A reserva pós-edit terminou logo após o focal verde, antes de `git diff`/SUBMIT. Não houve checkpoint/commit novo: a branch `anima-work/98402f85-833b-40c0-84c3-1bba2954f316` permanece em `d1d6c5d`; a worktree efêmera foi limpa. Typecheck web e Next build não rodaram; gates host-side e Verifier não rodaram; estado final `failed`. Nenhum push, integração, merge ou deploy.
+
+## Nova barreira e próxima retomada
+
+Corrigir a identidade estável do gate no recovery evidence sem depender do comando já redigido (por exemplo fingerprint/ID canônico correlacionado ao validation criterion), com teste que usa a forma realmente persistida. Não aumentar reserves/budgets. Depois, nova recovery/authority/attempt só mediante nova autorização humana explícita. A authority atual permanece item-scoped e o budget 1/1 impede retry; nenhuma nova execução foi criada.
