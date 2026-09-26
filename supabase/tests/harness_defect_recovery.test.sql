@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(17);
+SELECT plan(32);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 VALUES('96000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','harness-recovery@test.invalid','',now(),'{}','{}',now(),now());
@@ -73,9 +73,66 @@ SELECT throws_ok($$SELECT public.authorize_harness_fix_recovery('96000000-0000-0
 SELECT throws_ok($$SELECT public.authorize_harness_fix_recovery('96000000-0000-0000-0000-0000000000f3',3,
   (SELECT id FROM failure WHERE work_item_id='96000000-0000-0000-0000-0000000000f3'),pg_temp.auth('96000000-0000-0000-0000-0000000000b7')||'{"fixCommits":["abc"]}')$$,
   '22023','invalid harness recovery authorization','commit do fix precisa ser SHA completo');
+-- A mera presença de provenance ancestral não bloqueia um NOVO incidente do descendant.
+SELECT throws_ok(format($q$SELECT public.authorize_harness_fix_recovery(%L,1,%L,pg_temp.auth('96000000-0000-0000-0000-0000000000b8'))$q$,
+  (SELECT v->>'successorWorkItemId' FROM r1),(SELECT id FROM failure WHERE work_item_id='96000000-0000-0000-0000-0000000000f1')),
+  '55000','predecessor_not_current_failed','sem novo failure event o descendant proposed é recusado');
+
+RESET ROLE;
+CREATE TEMP TABLE descendant AS SELECT (v->>'successorWorkItemId')::uuid AS id FROM r1;
+UPDATE public.work_items SET state='failed' WHERE id=(SELECT id FROM descendant);
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES
+  ((SELECT id FROM descendant),'execution_started','anima',1,jsonb_build_object('schema_version',1,'data',jsonb_build_object('attempt_id','96000000-0000-0000-0000-0000000000a2'))),
+  ((SELECT id FROM descendant),'execution_failed','executor',1,jsonb_build_object('schema_version',1,'data',jsonb_build_object('attempt_id','96000000-0000-0000-0000-0000000000a2','retryable',true,'reason','execution_failed'))),
+  ((SELECT id FROM descendant),'host_observed_coder_evidence_recorded','system',1,jsonb_build_object('schema_version',1,'data',jsonb_build_object('origin','host',
+    'evidence',jsonb_build_object('attemptId','96000000-0000-0000-0000-0000000000a2','workItemId',(SELECT id FROM descendant),'outcome','failed'))));
+CREATE TEMP TABLE failure2 AS SELECT id FROM public.work_events WHERE work_item_id=(SELECT id FROM descendant) AND event_type='execution_failed' ORDER BY seq DESC LIMIT 1;
+GRANT SELECT ON descendant,failure2 TO authenticated;
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub','96000000-0000-0000-0000-000000000001',true);
+
+SELECT throws_ok(format($q$SELECT public.authorize_harness_fix_recovery(%L,1,%L,'{}')$q$,
+  (SELECT id FROM descendant),(SELECT id FROM failure2)),
+  '22023','invalid harness recovery authorization','novo incidente sem nova autorização é recusado');
+
+CREATE TEMP TABLE r2 AS SELECT public.authorize_harness_fix_recovery((SELECT id FROM descendant),1,
+  (SELECT id FROM failure2),pg_temp.auth('96000000-0000-0000-0000-0000000000b8') || jsonb_build_object(
+    'fixCommits',jsonb_build_array(repeat('b',40)),'evidenceReference','docs/registros/2026-09-26-x.md')) AS v;
+SELECT is((SELECT v->>'replayed' FROM r2),'false','novo incidente materializa exatamente a segunda recovery');
+SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT (v->>'successorWorkItemId')::uuid FROM r2)),'proposed','segunda recovery também nasce proposed');
+SELECT is((SELECT intent#>>'{execution_spec,limits,max_attempts}' FROM public.work_items WHERE id=(SELECT (v->>'successorWorkItemId')::uuid FROM r2)),'1','segunda recovery mantém max_attempts 1');
+SELECT is((SELECT intent#>>'{execution_spec,harness_recovery,source_attempt_id}' FROM public.work_items WHERE id=(SELECT (v->>'successorWorkItemId')::uuid FROM r2)),
+  '96000000-0000-0000-0000-0000000000a2','proveniência aponta para a attempt do incidente atual');
+SELECT is((SELECT intent#>>'{execution_spec,harness_recovery,failure_event_id}' FROM public.work_items WHERE id=(SELECT (v->>'successorWorkItemId')::uuid FROM r2)),
+  (SELECT id::text FROM failure2),'proveniência aponta para o failure event atual');
+SELECT is((SELECT intent#>>'{execution_spec,harness_recovery,authorization,evidenceReference}' FROM public.work_items WHERE id=(SELECT (v->>'successorWorkItemId')::uuid FROM r2)),
+  'docs/registros/2026-09-26-x.md','proveniência preserva a evidência do novo fix autorizado');
+SELECT is((SELECT intent#>>'{execution_spec,harness_recovery,source_attempt_id}' FROM public.work_items WHERE id=(SELECT id FROM descendant)),
+  '96000000-0000-0000-0000-0000000000a1','predecessor preserva provenance da recovery ancestral');
+SELECT is((SELECT jsonb_agg(jsonb_build_array(original_work_item_id,successor_work_item_id,recovery_sequence) ORDER BY created_at)
+  FROM public.work_recovery_lineage WHERE original_work_item_id IN ('96000000-0000-0000-0000-0000000000f1'::uuid,(SELECT id FROM descendant))),
+  (SELECT jsonb_build_array(
+    jsonb_build_array('96000000-0000-0000-0000-0000000000f1'::uuid,(SELECT id FROM descendant),1),
+    jsonb_build_array((SELECT id FROM descendant),(SELECT (v->>'successorWorkItemId')::uuid FROM r2),1))),
+  'lineage append-only preserva os dois elos sem achatamento');
+SELECT is((public.authorize_harness_fix_recovery((SELECT id FROM descendant),1,(SELECT id FROM failure2),
+  pg_temp.auth('96000000-0000-0000-0000-0000000000b8') || jsonb_build_object('fixCommits',jsonb_build_array(repeat('b',40)),'evidenceReference','docs/registros/2026-09-26-x.md')))->>'replayed',
+  'true','replay da segunda recovery retorna o mesmo successor');
+SELECT throws_ok(format($q$SELECT public.authorize_harness_fix_recovery(%L,1,%L,%L::jsonb)$q$,
+  (SELECT id FROM descendant),(SELECT id FROM failure2),
+  pg_temp.auth('96000000-0000-0000-0000-0000000000b9') || jsonb_build_object('fixCommits',jsonb_build_array(repeat('c',40)),'evidenceReference','docs/registros/2026-09-26-y.md')),
+  '55000','harness_recovery_conflict','novo pedido concorrente não cria sibling duplicado');
+SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT (v->>'successorWorkItemId')::uuid FROM r2)
+  AND event_type IN ('work_approved','compute_preference_recorded','execution_started')),0::bigint,
+  'segunda recovery não aprova, prefere compute nem executa automaticamente');
+SELECT is((SELECT count(*) FROM public.paid_compute_authorizations WHERE work_item_id=(SELECT (v->>'successorWorkItemId')::uuid FROM r2))
+  + (SELECT count(*) FROM public.paid_compute_budget_events WHERE work_item_id=(SELECT (v->>'successorWorkItemId')::uuid FROM r2)),0::bigint,
+  'segunda recovery não herda authority nem reservation');
+SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT (v->>'successorWorkItemId')::uuid FROM r2) AND event_type='compute_preference_recorded'),0::bigint,
+  'segunda recovery não herda compute preference');
 SELECT is((SELECT count(*) FROM public.paid_compute_authorizations WHERE work_item_id IN (SELECT (v->>'successorWorkItemId')::uuid FROM r1)),0::bigint,'nenhuma authority paga criada');
-SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT (v->>'successorWorkItemId')::uuid FROM r1) AND event_type IN ('work_approved','compute_preference_recorded','execution_started')),
-  0::bigint,'sem aprovação, preferência ou execução automáticas');
+SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT (v->>'successorWorkItemId')::uuid FROM r1) AND event_type IN ('work_approved','compute_preference_recorded')),
+  0::bigint,'primeira recovery nasceu sem aprovação ou preferência automáticas');
 
 SELECT * FROM finish();
 ROLLBACK;
