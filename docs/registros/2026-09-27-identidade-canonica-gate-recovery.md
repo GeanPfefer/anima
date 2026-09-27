@@ -30,3 +30,11 @@
 - Nenhuma OpenAI attempt, retry, nova paid authority, reservation, compute, push, merge, deploy ou alteração de `origin/main`. B1 permaneceu congelado; custo desta sessão: **US$0**.
 - A prova viva foi somente leitura. O script scratch criado para ela foi removido; `.worktrees/`, `apps/web/scripts/_session/` e `watch4-sensors.txt` preexistentes permaneceram preservados.
 - Próximo passo autorizado pelo mandato: derivar recovery governada da falha `98402f85-833b-40c0-84c3-1bba2954f316`, preservar apenas `route.ts` e `route.test.ts` e os três gates existentes, registrar preferência `provider_api/openai/gpt-5.6-sol`, preparar autonomous e parar em `waiting_for_human_authorization`. Não autorizar compute.
+
+## Checkpoint operacional final
+
+- Commit da implementação: `6580be262594e00b99ae5bb53e5db68445a412b4` (`Estabilize a identidade dos gates de recovery`).
+- Successor: `f6c326b1-955c-4bbe-ac1d-cac3857ce40a`; recovery `ccbba04d-9ec5-459f-841b-8b86c517cee0`; lineage `1955df37-0f74-4d73-90c8-5713773b91b0`; source attempt `98402f85-833b-40c0-84c3-1bba2954f316`.
+- A proposta v1 preserva exatamente `apps/web/app/api/dev-readiness/route.ts` e `route.test.ts` e os gates focal, typecheck web e Next build. Está `approved`, preparada para autonomous, zero attempts, preferência `provider_api/openai/gpt-5.6-sol`.
+- Uma iteração bounded do Resident Host (`maxIterations=1`) tocou apenas o successor e terminou `turn_not_executable/paid_authorization_required`. Router em `waiting_for_human_authorization` desde `2026-09-27T17:01:10.421Z`.
+- Nenhuma paid authority, reservation, provider call, retry ou compute. **US$0**. Parar aqui; o próximo ato é exclusivamente humano e não foi executado.
