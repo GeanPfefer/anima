@@ -1,4 +1,14 @@
 # Anima — Product Requirements Document
+> Research Web V1 (read-only) implementado em 2026-09-27 (`515ba65`), a primeira
+> capacidade reuse-first: `research.web.search` via SearXNG e
+> `research.web.open/navigate/extract` via agent-browser, sem buscador nem browser
+> próprios. O ANIMA governa:
+> - classificação de privacidade antes de qualquer rede (`private_blocked` nunca sai);
+> - sessão efêmera, allowlist, content boundaries e policy default-deny com nomes reais;
+> - proveniência por `contentHash`.
+> Prova viva: consulta pública → doc oficial do SearXNG aberta e extraída, sem processos residuais.
+> compare/cite/persist/reuse_discovery e o Capability Map ficam para unidades próprias.
+> [Registro](docs/registros/2026-09-27b-research-web-v1.md) · [Arquitetura](docs/arquitetura/research-web-v1.md).
 > Prova real paga de correção do `GET /api/dev-readiness` em 2026-09-25:
 > o successor `7610b066…` consumiu exatamente uma authority OpenAI
 > (`gpt-5.6-sol`) e uma attempt, mas terminou `failed` antes do submit. O coder
