@@ -17,6 +17,7 @@ import {
 import { OllamaTranscript } from './ollama-transcript';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace, type WorkspaceExecResult, type WorkspaceSearchHit } from './coder-backend';
 import { renderRecoveryEvidence } from './recovery-evidence-render';
+import { gateIdentityFromExecution } from './gate-identity';
 import {
   applyExperimentalAnchorOperations,
   createServedAnchor,
@@ -301,6 +302,10 @@ export class OllamaCoderBackend implements CoderBackend {
     const execMode = typeof workspace.exec === 'function' && commandPolicy !== undefined;
     const validationCommands = execMode ? (request.validationCommands ?? []) : [];
     const validationKeys = new Set(validationCommands.map(command => commandKey(command.program, command.args)));
+    const validationGateIdentities = new Map(validationCommands.map(command => [
+      commandKey(command.program, command.args),
+      command.gateIdentity ?? gateIdentityFromExecution({ kind: 'test', program: command.program, args: command.args }),
+    ]));
     const validateBeforeSubmit = validationCommands.length > 0;
 
     // Lê o conteúdo do escopo de ESCRITA UMA vez (manifesto + aplicação). Leituras
@@ -670,6 +675,7 @@ export class OllamaCoderBackend implements CoderBackend {
           runtimeEvent('exec', 'refused', round);
           // Observabilidade V3: comando recusado + motivo sanitizado (editRevision/state fotografados).
           transcript.command({ round, editRevision, state: gateStateNow(), kind: obsKind(req.program, req.args),
+            gateIdentity: validationGateIdentities.get(commandKey(req.program, req.args)) ?? null,
             command: `${req.program} ${req.args.join(' ')}`, stdout: '', stderr: '', exitCode: null, timedOut: false,
             refused: true, refusedReason: decision.reason });
           servedBlocks.push(`Comando recusado pela política: ${decision.reason}`);
@@ -690,6 +696,7 @@ export class OllamaCoderBackend implements CoderBackend {
         const isFocalTest = validationKeys.has(key);
         // Observabilidade V3 (bounded + redigida): comando, exit, stdout/stderr/diff da revisão.
         transcript.command({ round, editRevision, state: gateStateNow(), kind: obsKind(decision.program, decision.args),
+          gateIdentity: validationGateIdentities.get(key) ?? null,
           command: `${decision.program} ${decision.args.join(' ')}`, stdout: result.stdout, stderr: result.stderr,
           exitCode: result.exitCode, timedOut: result.timedOut });
         // Distinção TEST focal × demais EXECs: só um comando de validação LISTADO cria prova.

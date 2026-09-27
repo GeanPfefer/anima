@@ -34,6 +34,8 @@ export interface CoderCommandObservationV1 {
   readonly editRevision: number;
   readonly state: SubmitGateStateV1;
   readonly kind: 'exec' | 'test' | 'git_diff';
+  /** SHA-256 canônico derivado antes da sanitização; null quando não é gate. */
+  readonly gateIdentity?: string | null;
   /** Programa + subcomando + args, redigido e bounded (≤ 300). Sem segredo/caminho local. */
   readonly command: string;
   /** Rótulo LÓGICO do cwd (ex.: "worktree"); NUNCA caminho absoluto do host (≤ 120). */
@@ -132,9 +134,12 @@ const RESIDUAL_SECRET = /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|\beyJ[a-z0-9_-]{8
 function validCommandObservations(value: unknown): boolean {
   if (!Array.isArray(value) || value.length > 256) return false;
   return value.every(o => object(o)
-    && exact(o, 'round,editRevision,state,kind,command,cwd,outcome,exitCode,refusedReason,stdout,stderr,outputTruncated,outputSha256')
+    && (exact(o, 'round,editRevision,state,kind,command,cwd,outcome,exitCode,refusedReason,stdout,stderr,outputTruncated,outputSha256')
+      || exact(o, 'round,editRevision,state,kind,gateIdentity,command,cwd,outcome,exitCode,refusedReason,stdout,stderr,outputTruncated,outputSha256'))
     && natural(o.round) && natural(o.editRevision) && SUBMIT_GATE_STATES.includes(String(o.state))
     && OBSERVATION_KINDS.includes(String(o.kind)) && OBSERVATION_OUTCOMES.includes(String(o.outcome))
+    && (!('gateIdentity' in o) || o.gateIdentity === null || hash(o.gateIdentity))
+    && (!(typeof o.gateIdentity === 'string') || o.kind === 'test')
     // command/cwd/refusedReason: curtos, controlados, sem segredo/caminho local.
     && typeof o.command === 'string' && o.command.length > 0 && o.command.length <= COMMAND_OBSERVATION_COMMAND_MAX && !containsSensitiveData(o.command)
     && typeof o.cwd === 'string' && o.cwd.length > 0 && o.cwd.length <= COMMAND_OBSERVATION_CWD_MAX && !containsSensitiveData(o.cwd)

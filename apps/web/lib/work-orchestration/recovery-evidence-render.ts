@@ -6,6 +6,7 @@ export function renderRecoveryEvidence(context: RecoveryEvidenceContextV1): stri
   for (const item of context.items) {
     lines.push(
       `- source attempt ${item.sourceAttemptId}; event ${item.sourceEventId}`,
+      `  gate identity: ${item.gateIdentity}`,
       `  failed gate: ${item.failedCommand}`,
       `  observed failure: ${item.observedFailure}`,
     );

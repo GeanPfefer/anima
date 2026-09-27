@@ -113,6 +113,7 @@ describe('composeHarnessTask', () => {
       references: [{ kind: 'work_event', id: 'event-1' }],
       items: [{
         sourceWorkItemId: 'ancestor', sourceAttemptId: 'attempt-1', sourceEventId: 'event-1',
+        gateIdentity: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         failedCommand: 'npm test -- focal.test.ts', observedFailure: 'ReferenceError: primitive missing',
         provenCorrection: { passedCommand: 'npm test -- focal.test.ts', changedFiles: ['focal.test.ts'], patchExcerpt: '+class RuntimeShim {}' },
         references: [{ kind: 'work_event', id: 'event-1' }],

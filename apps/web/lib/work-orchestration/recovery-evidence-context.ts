@@ -1,13 +1,15 @@
 import type { RecoveryEvidenceContextV1, RecoveryEvidenceItemV1, WorkContextReference } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { sanitizeDiff, summarizeCommandOutput } from './output-sanitization';
+import { redactSecrets, sanitizeDiff, summarizeCommandOutput } from './output-sanitization';
+import { gateIdentityFromCommand } from './gate-identity';
 
 const MAX_ANCESTORS = 8;
 const MAX_ITEMS = 4;
 const MAX_FAILURE_CHARS = 700;
 const MAX_PATCH_CHARS = 1_200;
 const MAX_PATCH_LINES = 24;
+const ERROR_CAUSE = /\b(?:ReferenceError|TypeError|SyntaxError|RangeError|EvalError|URIError|Error):\s+\S/;
 
 const object = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -31,6 +33,7 @@ interface Observation {
   readonly editRevision: number;
   readonly command: string;
   readonly kind: string;
+  readonly gateIdentity: string | null;
   readonly outcome: string;
   readonly stdout: string;
   readonly stderr: string;
@@ -48,6 +51,7 @@ const observations = (payload: Json): { attemptId: string; entries: readonly Rec
       editRevision: typeof entry.editRevision === 'number' ? entry.editRevision : -1,
       command: typeof entry.command === 'string' ? entry.command : '',
       kind: typeof entry.kind === 'string' ? entry.kind : '',
+      gateIdentity: typeof entry.gateIdentity === 'string' && /^[a-f0-9]{64}$/.test(entry.gateIdentity) ? entry.gateIdentity : null,
       outcome: typeof entry.outcome === 'string' ? entry.outcome : '',
       stdout: typeof entry.stdout === 'string' ? entry.stdout : '',
       stderr: typeof entry.stderr === 'string' ? entry.stderr : '',
@@ -63,6 +67,20 @@ const refsFor = (row: PersistedCoderEvidenceRow, attemptId: string): readonly Wo
   { kind: 'work_event', id: row.eventId },
 ];
 
+/** Preserva a primeira causa tipada além do tail. Genérico: não conhece runtime,
+ * símbolo, teste ou mensagem específicos. A saída persistida já é bounded e volta
+ * a passar pela mesma redaction antes de entrar no contexto. */
+const observedFailureSummary = (stdout: string, stderr: string): string | undefined => {
+  const cause = `${stderr}\n${stdout}`.split(/\r?\n/).map(line => line.trim())
+    .find(line => ERROR_CAUSE.test(line));
+  const sanitizedCause = cause ? redactSecrets(cause, true).trim() : '';
+  const tail = summarizeCommandOutput(stdout, stderr, {
+    maxChars: MAX_FAILURE_CHARS, maxLines: 8, dropFooters: true, redactPaths: true,
+  }) ?? '';
+  const combined = [sanitizedCause, tail.includes(sanitizedCause) ? '' : tail].filter(Boolean).join('\n').slice(0, MAX_FAILURE_CHARS).trim();
+  return combined || undefined;
+};
+
 /** Deriva apenas fatos observados pelo host: comandos, saídas sanitizadas, edits aplicados
  * e diff observado. Respostas textuais/raciocínio do provider nunca são lidos. */
 export function deriveRecoveryEvidenceContext(input: {
@@ -70,7 +88,22 @@ export function deriveRecoveryEvidenceContext(input: {
   readonly relevantCommands: readonly string[];
   readonly includedScope: readonly string[];
 }): RecoveryEvidenceContextV1 | null {
-  const relevant = new Set(input.relevantCommands);
+  const relevantGates = input.relevantCommands.flatMap(command => {
+    const identity = gateIdentityFromCommand(command);
+    return identity ? [{ identity, command, legacyDisplay: redactSecrets(command, true).slice(0, 300) }] : [];
+  });
+  const relevant = new Map(relevantGates.map(gate => [gate.identity, gate.command]));
+  // Fallback LEGADO bounded: igualdade exata de display sanitizado, somente se a
+  // forma identifica UM gate atual. Nunca transforma o display em identidade.
+  const legacyDisplays = new Map<string, string | null>();
+  for (const gate of relevantGates) {
+    const previous = legacyDisplays.get(gate.legacyDisplay);
+    legacyDisplays.set(gate.legacyDisplay, previous === undefined ? gate.identity : null);
+  }
+  const matchedIdentity = (observation: Observation): string | null => {
+    if (observation.gateIdentity) return relevant.has(observation.gateIdentity) ? observation.gateIdentity : null;
+    return legacyDisplays.get(observation.command) ?? null;
+  };
   const scope = new Set(input.includedScope.map(path => path.replace(/\\/g, '/')));
   const candidates: RecoveryEvidenceItemV1[] = [];
   for (const row of input.rows) {
@@ -78,9 +111,10 @@ export function deriveRecoveryEvidenceContext(input: {
 
     for (let passIndex = 0; passIndex < parsed.commands.length; passIndex += 1) {
       const pass = parsed.commands[passIndex]!;
-      if (pass.kind !== 'test' || pass.outcome !== 'exit0' || !relevant.has(pass.command)) continue;
+      const passIdentity = matchedIdentity(pass);
+      if (pass.kind !== 'test' || pass.outcome !== 'exit0' || !passIdentity) continue;
       const failure = parsed.commands.slice(0, passIndex).reverse()
-        .find(candidate => candidate.command === pass.command
+        .find(candidate => matchedIdentity(candidate) === passIdentity
           && candidate.outcome === 'exit_nonzero'
           && candidate.editRevision >= 0
           && pass.editRevision > candidate.editRevision);
@@ -94,15 +128,14 @@ export function deriveRecoveryEvidenceContext(input: {
           && entry.round <= pass.round)
         .map(entry => String(entry.path).replace(/\\/g, '/')).filter(path => scope.has(path)))];
       if (changedFiles.length === 0) continue;
-      const observedFailure = summarizeCommandOutput(failure.stdout, failure.stderr, {
-        maxChars: MAX_FAILURE_CHARS, maxLines: 8, dropFooters: true, redactPaths: true,
-      });
+      const observedFailure = observedFailureSummary(failure.stdout, failure.stderr);
       if (!observedFailure) continue;
       const diff = parsed.commands.slice(passIndex + 1).find(candidate => candidate.kind === 'git_diff' && candidate.stdout);
       const patch = diff ? sanitizeDiff(diff.stdout, MAX_PATCH_CHARS, MAX_PATCH_LINES).text.trim() : '';
       const references = refsFor(row, parsed.attemptId);
       candidates.push({
         sourceWorkItemId: row.workItemId, sourceAttemptId: parsed.attemptId, sourceEventId: row.eventId,
+        gateIdentity: passIdentity,
         failedCommand: failure.command, observedFailure,
         provenCorrection: { passedCommand: pass.command, changedFiles, ...(patch ? { patchExcerpt: patch } : {}) },
         references,

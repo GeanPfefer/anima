@@ -612,6 +612,7 @@ test('successor recebe evidência da lineage e references junto do contexto norm
   const evidence = { schemaVersion: 1 as const, truncated: false,
     references: [{ kind: 'attempt', id: 'ancestor-attempt' }, { kind: 'work_event', id: 'evidence-event' }],
     items: [{ sourceWorkItemId: 'ancestor', sourceAttemptId: 'ancestor-attempt', sourceEventId: 'evidence-event',
+      gateIdentity: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       failedCommand: 'npm test', observedFailure: 'ReferenceError',
       provenCorrection: { passedCommand: 'npm test', changedFiles: ['src/a.ts'] },
       references: [{ kind: 'work_event', id: 'evidence-event' }] }] };

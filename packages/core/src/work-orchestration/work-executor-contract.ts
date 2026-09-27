@@ -35,6 +35,7 @@ export interface RecoveryEvidenceItemV1 {
   readonly sourceWorkItemId: string;
   readonly sourceAttemptId: string;
   readonly sourceEventId: string;
+  readonly gateIdentity: string;
   readonly failedCommand: string;
   readonly observedFailure: string;
   readonly provenCorrection?: {

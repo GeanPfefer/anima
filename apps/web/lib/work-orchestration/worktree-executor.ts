@@ -24,6 +24,7 @@ import { coderFailureUsage, type CoderBackend, type CoderWorkspace, type HostVal
 import { analyzeCoderOutputFiles, collectCoderOutputForHarness } from './coder-output-analysis';
 import { summarizeCommandOutput } from './output-sanitization';
 import { GitWorktree, parseGateCommand, runGate } from './worktree';
+import { gateIdentityFromExecution } from './gate-identity';
 
 // ============================================================
 // Executor da Opção A (ADR-001): roda o toolchain real do Anima numa git
@@ -281,7 +282,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         if (!parsed) return [];
         const program = parsed.file.toLowerCase().replace(/\.cmd$/, '');
         const decision = resolveCommandExecution({ program, args: parsed.args }, commandPolicy);
-        return decision.ok ? [{ label: criterion.label, program: decision.program, args: decision.args }] : [];
+        return decision.ok ? [{ label: criterion.label, program: decision.program, args: decision.args,
+          gateIdentity: gateIdentityFromExecution({ kind: 'test', program: decision.program, args: decision.args }) }] : [];
       });
       const gateRetryLimit =
         Number.isInteger(this.options.gateRetryLimit) && (this.options.gateRetryLimit ?? 0) > 0

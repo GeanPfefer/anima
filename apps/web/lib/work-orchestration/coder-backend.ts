@@ -81,6 +81,8 @@ export interface CoderEditRequest {
     readonly label: string;
     readonly program: string;
     readonly args: readonly string[];
+    /** Identidade canônica calculada do critério antes de sanitização/display. */
+    readonly gateIdentity?: string;
   }[];
   /**
    * Host-observed validation feedback from the CURRENT execution attempt.

@@ -21,6 +21,7 @@ import { GitWorktree, runProcess } from './worktree';
 import { ScriptedCoderBackend, withCoderFailureUsage, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { WorktreeExecutorAdapter, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, verifyGateTargetScope, type WorktreeTargetResolver } from './worktree-executor';
+import { gateIdentityFromExecution } from './gate-identity';
 
 // Operações git reais podem ficar lentas sob carga paralela; folga o timeout
 // para não flakar por contenção (o padrão de 5s do jest é curto demais aqui).
@@ -409,7 +410,7 @@ describe('WorktreeExecutorAdapter', () => {
     expect(policy!.incompatibleTestRunners).toContain('vitest');
     expect(policy!.forbiddenBackendSources).toContain('entry.coderBackend');
     expect(captured!.validationCommands).toEqual([
-      { label: 'testes', program: 'npm', args: ['test'] },
+      { label: 'testes', program: 'npm', args: ['test'], gateIdentity: gateIdentityFromExecution({ kind: 'test', program: 'npm', args: ['test'] }) },
     ]);
     await git(ctx.repo, ['branch', '-D', `anima-work/${req.attemptId}`]);
   });
@@ -528,6 +529,7 @@ describe('WorktreeExecutorAdapter', () => {
     };
     const recoveryEvidence = { schemaVersion: 1 as const, truncated: false, references: [{ kind: 'work_event', id: 'event-1' }], items: [{
       sourceWorkItemId: 'ancestor', sourceAttemptId: 'attempt-1', sourceEventId: 'event-1',
+      gateIdentity: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       failedCommand: 'npm test -- src/added.ts', observedFailure: 'ReferenceError',
       provenCorrection: { passedCommand: 'npm test -- src/added.ts', changedFiles: ['src/added.ts'] },
       references: [{ kind: 'work_event', id: 'event-1' }],
