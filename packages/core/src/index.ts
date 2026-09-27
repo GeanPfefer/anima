@@ -23,3 +23,4 @@ export * from './capability-proof-assessment';
 export * from './capability-assessment-explanation';
 export * from './self-deficiency';
 export * from './self-improvement';
+export * from './research-web';
