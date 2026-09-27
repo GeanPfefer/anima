@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
 import { persistPostTurnHostObservations } from './post-turn-observation';
+import { loadProviderPricingCatalog, providerApiSettlementStoreFor, settleProviderApiAttemptCost } from './provider-api-settlement';
 import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
 import { readMachinePressure, readResourceAdmission } from './resource-governor';
@@ -373,6 +374,16 @@ export function buildProjectBacklogCycleDeps(
       // Observação host-side pós-volta (evidência de gate/coder/git + parecer do
       // Verifier) — a MESMA da rota supervisor-turn. Fail-open: nunca altera o desfecho.
       await persistPostTurnHostObservations({ client, result: turn, contract, gateObservations, coderObservations, ...(changeAuthorization ? { changeAuthorization } : {}) });
+      // B1: settlement pós-attempt da reserva `provider_api` — em QUALQUER desfecho (o provider
+      // cobra tokens, não resultado). Só liquida com usage completa + preço versionado vigente;
+      // senão a reserva segue aberta (`cost_unknown`). Fail-open: nunca altera o turno.
+      if (contract.coderBackend === 'openai' && turn.attemptId) {
+        const pricing = loadProviderPricingCatalog();
+        await settleProviderApiAttemptCost(providerApiSettlementStoreFor(client), {
+          attemptId: turn.attemptId, provider: 'openai', coderObservations,
+          catalog: pricing.status === 'loaded' ? pricing.catalog : null,
+        }).catch(() => undefined);
+      }
       return turn;
     },
   };

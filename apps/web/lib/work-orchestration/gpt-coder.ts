@@ -289,6 +289,9 @@ export class GptCoderBackend implements CoderBackend {
   private readonly requestIds: string[] = [];
   private activePaidContext: CoderPaidContext | null = null;
   private callIndex = 0;
+  /** Chamadas DESPACHADAS ao provider sem usage observável (erro de transporte, HTTP não-ok,
+   * corpo sem usage). Recusa de admissão não conta (nada foi enviado). */
+  private unreportedCalls = 0;
   readonly transportConfig: OpenAICoderTransportConfig;
   constructor(options: GptCoderOptions) {
     const model = options.model ?? resolveOpenAICoderModel();
@@ -326,6 +329,7 @@ export class GptCoderBackend implements CoderBackend {
         });
         response = admitted.response;
       } catch (error) {
+        if (!(error instanceof OpenAIAdmissionDenied)) this.unreportedCalls += 1;
         if (error instanceof OpenAIAdmissionDenied) {
           // Chave ausente preserva a classe histórica `openai_auth`; qualquer outra
           // recusa da borda é falha de admissão paga.
@@ -335,10 +339,11 @@ export class GptCoderBackend implements CoderBackend {
         throw new OpenAICoderError(code, code === 'openai_timeout' ? 'A chamada da OpenAI excedeu o timeout.' : code === 'openai_cancelled' ? 'A chamada da OpenAI foi cancelada.' : 'Falha de transporte ao chamar a OpenAI.');
       } finally { bounded.dispose(); }
       if (!response.ok) {
+        this.unreportedCalls += 1;
         const code: OpenAICoderErrorCode = response.status === 401 || response.status === 403 ? 'openai_auth' : response.status === 429 ? 'openai_rate_limit' : 'openai_api';
         throw new OpenAICoderError(code, `A OpenAI recusou a chamada (HTTP ${response.status}).`, response.status);
       }
-      const body: unknown = await response.json().catch(() => null); const usage = parseUsage(body); if (usage) { this.usages.push(usage); options.onUsage?.(usage); }
+      const body: unknown = await response.json().catch(() => null); const usage = parseUsage(body); if (usage) { this.usages.push(usage); options.onUsage?.(usage); } else this.unreportedCalls += 1;
       // Id estável da resposta do provider (Responses API `id`): preservado para
       // correlação/idempotência/auditoria. Nunca é segredo.
       const requestId = (body as { id?: unknown } | null)?.id;
@@ -399,6 +404,7 @@ export class GptCoderBackend implements CoderBackend {
     this.usages.length = 0;
     this.requestIds.length = 0;
     this.callIndex = 0;
+    this.unreportedCalls = 0;
     this.activePaidContext = request.workItemId && request.attemptId && request.approvedProposalVersion && request.maxDurationMs
       ? { workItemId: request.workItemId, attemptId: request.attemptId, approvedProposalVersion: request.approvedProposalVersion, maxDurationMs: request.maxDurationMs }
       : null;
@@ -420,6 +426,9 @@ export class GptCoderBackend implements CoderBackend {
       totalTokens: this.usages.reduce((sum, value) => sum + value.totalTokens, 0),
       cachedInputTokens: this.usages.reduce((sum, value) => sum + (value.cachedInputTokens ?? 0), 0),
       ...(this.requestIds.length ? { providerRequestIds: [...this.requestIds] } : {}),
+      // Cobertura: permite ao settlement distinguir usage completa de parcial.
+      reportedCallCount: this.usages.length,
+      unreportedCallCount: this.unreportedCalls,
     }, providerCallCount };
   }
 }

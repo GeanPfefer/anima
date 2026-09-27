@@ -57,7 +57,7 @@ describe('GptCoderBackend — mesmo protocolo host-mediated do Ollama, fail-clos
     expect(ws.files.get('src/a.ts')).toBe('export const value = 2;\n');
     expect(result.touchedResources).toEqual(['src/a.ts']); expect(backend.id).toBe('openai:gpt-test');
     expect(backend.observation).toEqual({ placement: 'remote', nodeId: 'openai-api', model: 'gpt-test' });
-    expect(result.providerUsage).toEqual({ schemaVersion: 1, inputTokens: 40, outputTokens: 20, totalTokens: 60, cachedInputTokens: 8 });
+    expect(result.providerUsage).toEqual({ schemaVersion: 1, inputTokens: 40, outputTokens: 20, totalTokens: 60, cachedInputTokens: 8, reportedCallCount: 2, unreportedCallCount: 0 });
     expect(result.providerCallCount).toBe(2);
     expect(usage).toEqual([{ inputTokens: 20, outputTokens: 10, totalTokens: 30, cachedInputTokens: 4 }, { inputTokens: 20, outputTokens: 10, totalTokens: 30, cachedInputTokens: 4 }]);
     expect(JSON.parse(calls[0]!.body)).toMatchObject({ model: 'gpt-test', store: false });
@@ -76,6 +76,33 @@ describe('GptCoderBackend — mesmo protocolo host-mediated do Ollama, fail-clos
     const usage = coderFailureUsage(error);
     expect(usage.providerCallCount).toBe(calls);
     expect(usage.providerUsage).toMatchObject({ schemaVersion: 1, inputTokens: 50 * calls, outputTokens: 5 * calls, totalTokens: 55 * calls });
+  });
+  // B1: cobertura de usage — uma chamada DESPACHADA sem usage (HTTP 500) torna a usage parcial;
+  // uma recusa de admissão (nada enviado) não conta como chamada não reportada.
+  test('cobertura: chamada despachada sem usage é contada como não reportada', async () => {
+    let n = 0;
+    const fetchImpl = (async () => {
+      n += 1;
+      return n === 1
+        ? response({ output_text: JSON.stringify({ action: 'read', reads: [{ path: 'src/a.ts', lineRange: [1, 1], maxLines: 10 }] }), usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } })
+        : response({}, 500);
+    }) as typeof fetch;
+    const error = await new GptCoderBackend({ model: 'gpt-test', apiKey: 'k', fetchImpl, admission: grant })
+      .edit(request, workspace({ 'src/a.ts': 'x = 1;' }), new AbortController().signal).then(() => null, e => e);
+    const usage = coderFailureUsage(error);
+    expect(usage.providerUsage).toMatchObject({ inputTokens: 10, reportedCallCount: 1, unreportedCallCount: 1 });
+  });
+  test('cobertura: recusa de admissão não é chamada despachada', async () => {
+    let admitted = 0;
+    const secondDenied: OpenAIAdmissionControl = { admit: async intent => {
+      admitted += 1;
+      if (admitted > 1) throw new OpenAIAdmissionDenied('authorization_expired', intent.consumer);
+      return { consumer: intent.consumer, authorizationRef: 'test-auth', reservationId: 'r1' };
+    } };
+    const fetchImpl = (async () => response({ output_text: JSON.stringify({ action: 'read', reads: [{ path: 'src/a.ts', lineRange: [1, 1], maxLines: 10 }] }), usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } })) as typeof fetch;
+    const error = await new GptCoderBackend({ model: 'gpt-test', apiKey: 'k', fetchImpl, admission: secondDenied })
+      .edit(request, workspace({ 'src/a.ts': 'x = 1;' }), new AbortController().signal).then(() => null, e => e);
+    expect(coderFailureUsage(error).providerUsage).toMatchObject({ reportedCallCount: 1, unreportedCallCount: 0 });
   });
   test('traduz function_call para o vocabulário interno sem autoridade direta', async () => {
     const original = 'x = 1\n';

@@ -46,6 +46,7 @@ export * from './node-lifecycle';
 export * from './paid-compute-authorization';
 export * from './paid-compute-settlement';
 export * from './paid-compute-node-settlement';
+export * from './provider-api-settlement';
 export * from './cloud-session';
 export * from './node-lease';
 export * from './node-provisioner';

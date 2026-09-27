@@ -120,6 +120,13 @@ export async function persistHostObservedCoderEvidence(
     outputTokens: usages.reduce((sum, value) => sum + value.outputTokens, 0),
     totalTokens: usages.reduce((sum, value) => sum + value.totalTokens, 0),
     cachedInputTokens: usages.reduce((sum, value) => sum + (value.cachedInputTokens ?? 0), 0),
+    // Cobertura só é agregada quando TODO turno com chamadas a declara; um turno sem cobertura
+    // (ou com chamadas e nenhuma usage) torna a completude desconhecida — o settlement não liquida.
+    ...(usages.every(value => value.reportedCallCount !== undefined && value.unreportedCallCount !== undefined)
+      && validated.every(turn => (turn.providerCallCount ?? 0) === 0 || turn.providerUsage !== undefined) ? {
+      reportedCallCount: usages.reduce((sum, value) => sum + (value.reportedCallCount ?? 0), 0),
+      unreportedCallCount: usages.reduce((sum, value) => sum + (value.unreportedCallCount ?? 0), 0),
+    } : {}),
   } : undefined;
   const providerCallCount = validated.reduce((sum, turn) => sum + (turn.providerCallCount ?? 0), 0);
   const built = buildHostObservedCoderEvidence({

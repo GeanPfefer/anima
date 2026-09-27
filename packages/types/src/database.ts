@@ -593,6 +593,7 @@ export type Database = {
           reason: string | null
           reservation_id: string
           resource_class: string | null
+          settlement_provenance: Json | null
           user_id: string
           work_item_id: string
         }
@@ -611,6 +612,7 @@ export type Database = {
           reason?: string | null
           reservation_id: string
           resource_class?: string | null
+          settlement_provenance?: Json | null
           user_id: string
           work_item_id: string
         }
@@ -629,6 +631,7 @@ export type Database = {
           reason?: string | null
           reservation_id?: string
           resource_class?: string | null
+          settlement_provenance?: Json | null
           user_id?: string
           work_item_id?: string
         }
@@ -3075,6 +3078,15 @@ export type Database = {
       settle_paid_compute_budget_reservation: {
         Args: {
           cost_source: string
+          reservation_id: string
+          settled_amount: number
+          settled_currency: string
+        }
+        Returns: Json
+      }
+      settle_paid_compute_usage_priced_reservation: {
+        Args: {
+          provenance: Json
           reservation_id: string
           settled_amount: number
           settled_currency: string

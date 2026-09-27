@@ -16,7 +16,7 @@ const budgetEvent = (over: Partial<BudgetEventRow>): BudgetEventRow => ({
   id: 'e', user_id: 'user-1', authorization_id: 'auth-1', reservation_id: 'r1', idempotency_key: 'k',
   event_type: 'reserved', provider_id: 'runpod', node_id: 'n', resource_class: null,
   work_item_id: 'w1', attempt_id: null, lease_id: 'lease-1', currency: 'USD', amount: 0.245,
-  reason: null, created_at: '2026-09-10T00:00:00.000Z', ...over,
+  reason: null, settlement_provenance: null, created_at: '2026-09-10T00:00:00.000Z', ...over,
 });
 
 const auditClient = (

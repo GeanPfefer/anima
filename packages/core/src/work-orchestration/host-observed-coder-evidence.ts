@@ -43,6 +43,13 @@ export interface ProviderReportedUsageV1 {
    * idempotência/accounting e auditoria. Nunca segredos. Ausente ⇒ o provider
    * não os forneceu (não fabricamos). */
   readonly providerRequestIds?: readonly string[];
+  /** Cobertura: chamadas DESPACHADAS ao provider cujo response trouxe usage. Ausente ⇒
+   * cobertura desconhecida (evidência legada) — o settlement não presume completude. */
+  readonly reportedCallCount?: number;
+  /** Chamadas DESPACHADAS ao provider SEM usage observável (erro HTTP, timeout, corpo sem
+   * usage). > 0 ⇒ a usage é parcial: pode ter havido consumo não observado. Recusas de
+   * admissão (nada enviado) não contam. */
+  readonly unreportedCallCount?: number;
 }
 
 const CODER_OUTCOMES: ReadonlySet<HostObservedCoderOutcome> = new Set<HostObservedCoderOutcome>([
@@ -125,7 +132,9 @@ const validUsage = (value: ProviderReportedUsageV1): boolean => value.schemaVers
   && [value.inputTokens, value.outputTokens, value.totalTokens].every(v => isInt(v) && v >= 0)
   && value.totalTokens === value.inputTokens + value.outputTokens
   && (value.cachedInputTokens === undefined || (isInt(value.cachedInputTokens) && value.cachedInputTokens >= 0 && value.cachedInputTokens <= value.inputTokens))
-  && (value.providerRequestIds === undefined || (Array.isArray(value.providerRequestIds) && value.providerRequestIds.every(nonBlank)));
+  && (value.providerRequestIds === undefined || (Array.isArray(value.providerRequestIds) && value.providerRequestIds.every(nonBlank)))
+  && (value.reportedCallCount === undefined || (isInt(value.reportedCallCount) && value.reportedCallCount >= 0))
+  && (value.unreportedCallCount === undefined || (isInt(value.unreportedCallCount) && value.unreportedCallCount >= 0));
 
 const fail = (defect: HostObservedCoderEvidenceDefect, explanation: string): HostObservedCoderEvidenceResult =>
   ({ ok: false, defect, explanation });

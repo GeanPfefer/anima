@@ -85,6 +85,22 @@ describe('persistHostObservedCoderEvidence (fail-open)', () => {
     expect(calls[0]?.providerUsage).toEqual({ schemaVersion: 1, inputTokens: 13, outputTokens: 6, totalTokens: 19, cachedInputTokens: 1 });
   });
 
+  test('B1: agrega a cobertura de usage só quando todo turno com chamadas a declara', async () => {
+    const covered = { schemaVersion: 1 as const, inputTokens: 10, outputTokens: 2, totalTokens: 12, reportedCallCount: 2, unreportedCallCount: 0 };
+    const full = capturing();
+    await persistHostObservedCoderEvidence(correlation, [
+      { ...succeeded, providerCallCount: 2, providerUsage: covered },
+      { ...succeeded, providerCallCount: 1, providerUsage: { ...covered, reportedCallCount: 0, unreportedCallCount: 1 } },
+    ], full.sink, at);
+    expect(full.calls[0]?.providerUsage).toMatchObject({ reportedCallCount: 2, unreportedCallCount: 1 });
+    // Um turno com chamadas e SEM usage torna a completude desconhecida: cobertura omitida.
+    const partial = capturing();
+    await persistHostObservedCoderEvidence(correlation, [
+      { ...succeeded, providerCallCount: 2, providerUsage: covered }, { ...succeeded, providerCallCount: 1 },
+    ], partial.sink, at);
+    expect(partial.calls[0]?.providerUsage).not.toHaveProperty('reportedCallCount');
+  });
+
   test('agrega chamadas observadas sem fabricar usage ausente', async () => {
     const { sink, calls } = capturing();
     await persistHostObservedCoderEvidence(correlation, [

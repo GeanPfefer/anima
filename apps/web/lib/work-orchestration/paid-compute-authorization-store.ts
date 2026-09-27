@@ -1,4 +1,4 @@
-import { parsePaidComputeAuthorization, type CloudCapabilityScopeV1, type NodeCostSourceV1, type PaidComputeAuthorizationV1 } from '@anima/core';
+import { parsePaidComputeAuthorization, type CloudCapabilityScopeV1, type NodeCostSourceV1, type PaidComputeAuthorizationV1, type ProviderApiReservationStateV1, type ProviderApiSettlementProvenanceV1 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -84,6 +84,13 @@ export interface PaidComputeAuthorizationView {
   readonly active: boolean;
 }
 
+/** Fonte do custo liquidado no ledger: tempo de node (`estimated`), fatura do provider
+ * (`provider_confirmed`) ou usage reportada × preço versionado (`usage_priced`, com proveniência). */
+export type PaidComputeCostSourceV1 = NodeCostSourceV1 | 'usage_priced';
+
+const asCostSource = (reason: string | null): PaidComputeCostSourceV1 | null =>
+  reason === 'estimated' || reason === 'provider_confirmed' || reason === 'usage_priced' ? reason : null;
+
 export interface PaidComputeBudgetAuditView {
   readonly authorizationId: string;
   readonly ceiling: { readonly currency: string; readonly amount: number } | null;
@@ -101,7 +108,7 @@ export interface PaidComputeBudgetAuditView {
     readonly settled: boolean;
     readonly settledCost: number | null;
     readonly releasedExcess: number | null;
-    readonly costSource: NodeCostSourceV1 | null;
+    readonly costSource: PaidComputeCostSourceV1 | null;
   }[];
 }
 
@@ -190,8 +197,6 @@ export async function listPaidComputeBudgetAudit(
     const committed = reserved - voided - settledExcess;
     const ceiling = auth.max_cost_currency === null || auth.max_cost_amount === null
       ? null : { currency: auth.max_cost_currency, amount: Number(auth.max_cost_amount) };
-    const asCostSource = (reason: string | null): NodeCostSourceV1 | null =>
-      reason === 'estimated' || reason === 'provider_confirmed' ? reason : null;
     return {
       authorizationId: auth.id, ceiling, reserved, voided, settledExcess, committed,
       remaining: ceiling === null ? null : Math.max(0, ceiling.amount - committed),
@@ -232,8 +237,6 @@ export async function readPaidComputeBudgetAudit(
   const committed = reserved - voided - settledExcess;
   const ceiling = auth.data.max_cost_currency === null || auth.data.max_cost_amount === null
     ? null : { currency: auth.data.max_cost_currency, amount: Number(auth.data.max_cost_amount) };
-  const asCostSource = (reason: string | null): NodeCostSourceV1 | null =>
-    reason === 'estimated' || reason === 'provider_confirmed' ? reason : null;
   return { ok: true, budget: {
     authorizationId: auth.data.id, ceiling, reserved, voided, settledExcess, committed,
     remaining: ceiling === null ? null : Math.max(0, ceiling.amount - committed),
@@ -355,6 +358,67 @@ export async function settlePaidComputeBudgetReservation(
     return { ok: true, action: value.action, settledAmount: value.settled_amount, releasedExcess: value.released, currency: value.currency, costSource: value.cost_source };
   }
   return { ok: false, code: 'unavailable', message: 'Settlement financeiro sem confirmação durável.' };
+}
+
+/** Lê o estado da reserva `provider_api` de UMA attempt (lease `provider-api:<attemptId>`), com o
+ * settlement/void já existentes. READ-ONLY (RLS select-own). `null` ⇒ a attempt não abriu reserva. */
+export async function readProviderApiReservationForAttempt(
+  client: SupabaseClient<Database>, attemptId: string,
+): Promise<{ readonly ok: true; readonly reservation: ProviderApiReservationStateV1 | null } | PaidComputeStoreError> {
+  const { data, error } = await client.from('paid_compute_budget_events').select('*')
+    .eq('lease_id', `provider-api:${attemptId}`).order('created_at', { ascending: true });
+  if (error) return mapPgError(error);
+  const rows = data ?? [];
+  const reserves = rows.filter(e => e.event_type === 'reserved');
+  if (reserves.length === 0) return { ok: true, reservation: null };
+  if (reserves.length > 1) return { ok: false, code: 'ambiguous_reservation', message: 'Mais de uma reserva para a mesma attempt.' };
+  const reserved = reserves[0]!;
+  const settled = rows.find(e => e.event_type === 'settled' && e.reservation_id === reserved.reservation_id);
+  const provenance = settled?.settlement_provenance as { pricingVersion?: unknown } | null | undefined;
+  return { ok: true, reservation: {
+    reservationId: reserved.reservation_id, providerId: reserved.provider_id, resourceClass: reserved.resource_class,
+    attemptId: reserved.attempt_id, currency: reserved.currency, amount: reserved.amount, createdAt: reserved.created_at,
+    voided: rows.some(e => e.event_type === 'voided' && e.reservation_id === reserved.reservation_id),
+    settlement: settled ? {
+      costSource: settled.reason,
+      // O ledger grava o excesso liberado (R − S); o core deriva S em decimal exato.
+      releasedExcess: settled.amount,
+      pricingVersion: typeof provenance?.pricingVersion === 'string' ? provenance.pricingVersion : null,
+    } : null,
+  } };
+}
+
+export type UsagePricedSettlementResult =
+  | { readonly ok: true; readonly action: 'settled' | 'replayed'; readonly settledAmount: number; readonly releasedExcess: number; readonly currency: string; readonly pricingVersion: string }
+  | PaidComputeStoreError;
+
+/**
+ * B1: liquida uma reserva `provider_api` com custo DERIVADO de usage reportada × preço versionado
+ * (fonte `usage_priced`). A RPC re-impõe S ≤ R, void⊕settle, coerência provider/modelo/attempt da
+ * proveniência e replay idempotente por versão de preço (versão/valor divergente ⇒ conflito 55000).
+ */
+export async function settlePaidComputeUsagePricedReservation(
+  client: SupabaseClient<Database>,
+  input: {
+    readonly reservationId: string;
+    readonly currency: string;
+    /** Decimal canônico (≤ 15 casas) produzido pelo core. */
+    readonly settledAmount: string;
+    readonly provenance: ProviderApiSettlementProvenanceV1;
+  },
+): Promise<UsagePricedSettlementResult> {
+  const { data, error } = await client.rpc('settle_paid_compute_usage_priced_reservation', {
+    reservation_id: input.reservationId, settled_currency: input.currency,
+    settled_amount: Number(input.settledAmount), provenance: input.provenance as unknown as Json,
+  });
+  if (error) return mapPgError(error);
+  const value = data as { action?: string; settled_amount?: number; released?: number; currency?: string; cost_source?: string; pricing_version?: string } | null;
+  if ((value?.action === 'settled' || value?.action === 'replayed')
+    && typeof value.settled_amount === 'number' && typeof value.released === 'number'
+    && typeof value.currency === 'string' && value.cost_source === 'usage_priced' && typeof value.pricing_version === 'string') {
+    return { ok: true, action: value.action, settledAmount: value.settled_amount, releasedExcess: value.released, currency: value.currency, pricingVersion: value.pricing_version };
+  }
+  return { ok: false, code: 'unavailable', message: 'Settlement usage_priced sem confirmação durável.' };
 }
 
 /** Anula uma reserva somente quando existe prova de que nenhum efeito financeiro ocorreu. */
