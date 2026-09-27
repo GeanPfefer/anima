@@ -1,6 +1,6 @@
 'use client';
 
-// EvolutionClient — o MAPA DE EVOLUÇÃO do próprio Anima (Evolution UX V1).
+// EvolutionClient — o MAPA DE EVOLUÇÃO do próprio Anima (Evolution UX V1 → V2).
 //
 // Não é um "grafo técnico de capabilities": é uma superfície explorável que
 // responde, à primeira vista, o que o Anima já conquistou, o que sabe fazer
@@ -14,6 +14,10 @@
 // A superfície tem viewport própria: pan por arraste, zoom por roda/botões,
 // Ajustar (fit) e Resetar. O modelo canônico de Capability (packages/core) NÃO
 // é reescrito; esta camada é só UX/visualização/linguagem.
+//
+// V2 (Evolution Reconciliation): domínio `research`; origem (interna × reuso
+// integrado × candidata externa); lentes "Evolução recente" e "Reuso externo",
+// ambas projetando só o que o registry declara (history/reuse) — nada inferido.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
@@ -23,6 +27,7 @@ import type {
   CapabilityMaturity,
   CapabilityProofRef,
   DomainMaturitySummary,
+  RecentEvolutionEntry,
   TargetProgress,
 } from '@anima/core';
 import type { CapabilityAssessmentProjection } from '@anima/core';
@@ -38,6 +43,7 @@ const DOMAIN_ORDER: CapabilityDomain[] = [
   'governance',
   'compute',
   'interaction',
+  'research',
 ];
 
 const DOMAIN_LABEL: Record<CapabilityDomain, string> = {
@@ -47,7 +53,39 @@ const DOMAIN_LABEL: Record<CapabilityDomain, string> = {
   governance: 'Governança',
   compute: 'Compute',
   interaction: 'Interação',
+  research: 'Pesquisa externa',
 };
+
+const REUSE_STRATEGY_LABEL: Record<NonNullable<Capability['reuse']>['strategy'], string> = {
+  adopt: 'ADOPT',
+  wrap: 'WRAP',
+  fork: 'FORK',
+  contribute_upstream: 'UPSTREAM',
+  build: 'BUILD',
+  undecided: 'A DECIDIR',
+};
+
+const HISTORY_CHANGE_LABEL: Record<RecentEvolutionEntry['entry']['change'], string> = {
+  introduced: 'Surgiu',
+  maturity_changed: 'Maturidade',
+  proof_added: 'Nova prova',
+  relation_added: 'Nova relação',
+};
+
+type Lens = 'all' | 'recent' | 'external';
+
+// Rótulo curto de origem para o chip (a linha de maturidade tem pouco espaço).
+function originSuffix(cap: Capability): string {
+  if (!cap.reuse) return '';
+  return cap.reuse.status === 'candidate' ? ' · externa' : ` · ${REUSE_STRATEGY_LABEL[cap.reuse.strategy]}`;
+}
+
+function originAria(cap: Capability): string {
+  if (!cap.reuse) return '';
+  return cap.reuse.status === 'candidate'
+    ? ` · candidata externa (${cap.reuse.tool})`
+    : ` · reuso integrado ${REUSE_STRATEGY_LABEL[cap.reuse.strategy]} (${cap.reuse.tool})`;
+}
 
 const MATURITY_LADDER: CapabilityMaturity[] = [
   'projected',
@@ -286,12 +324,21 @@ export type EvolutionCapabilityAssessmentState =
         | 'event_history_invalid'
         | 'canonical_contract_incompatibility';
     };
+export interface EvolutionBaseline {
+  commit: string;
+  date: string;
+  label: string;
+}
+
 export interface EvolutionClientProps {
   nodes: CapabilityGraphNode[];
   domainSummaries: DomainMaturitySummary[];
   objectives: EvolutionObjective[];
   featuredTargetId: string;
   capabilityAssessment: EvolutionCapabilityAssessmentState;
+  /** Mudanças registradas no registry desde a baseline (nunca inferidas). */
+  recentEvolution: RecentEvolutionEntry[];
+  evolutionBaseline: EvolutionBaseline;
 }
 
 interface View {
@@ -306,9 +353,12 @@ export default function EvolutionClient({
   objectives,
   featuredTargetId,
   capabilityAssessment,
+  recentEvolution,
+  evolutionBaseline,
 }: EvolutionClientProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [domainFilter, setDomainFilter] = useState<CapabilityDomain | null>(null);
+  const [lens, setLens] = useState<Lens>('all');
   const [objectiveId, setObjectiveId] = useState<string>(featuredTargetId);
   const [view, setView] = useState<View>({ tx: 0, ty: 0, k: 1 });
 
@@ -341,6 +391,14 @@ export default function EvolutionClient({
   }, [selectedId, byId]);
 
   const selectedNode = selectedId ? byId.get(selectedId) ?? null : null;
+
+  const recentIds = useMemo(() => new Set(recentEvolution.map((r) => r.capabilityId)), [recentEvolution]);
+  const externalIds = useMemo(
+    () => new Set(nodes.filter((n) => n.capability.reuse).map((n) => n.capability.id)),
+    [nodes],
+  );
+  const lensIds = lens === 'recent' ? recentIds : lens === 'external' ? externalIds : null;
+  const inLens = (id: string): boolean => lensIds === null || lensIds.has(id);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const pan = useRef({ active: false, sx: 0, sy: 0, ox: 0, oy: 0, moved: false, fromChip: false });
@@ -428,7 +486,8 @@ export default function EvolutionClient({
       if (focus.chain.has(cap.id)) return 'related';
       return 'dim';
     }
-    if (domainFilter) return cap.domain === domainFilter ? 'strong' : 'dim';
+    if (domainFilter) return cap.domain === domainFilter && inLens(cap.id) ? 'strong' : 'dim';
+    if (lensIds) return lensIds.has(cap.id) ? 'strong' : 'dim';
     if (objectivePathSet.has(cap.id)) return 'path';
     return 'normal';
   };
@@ -442,8 +501,9 @@ export default function EvolutionClient({
     if (domainFilter) {
       const a = byId.get(depId)?.capability.domain;
       const b = byId.get(tgtId)?.capability.domain;
-      return a === domainFilter && b === domainFilter ? 'normal' : 'dim';
+      return a === domainFilter && b === domainFilter && inLens(depId) && inLens(tgtId) ? 'normal' : 'dim';
     }
+    if (lensIds) return lensIds.has(depId) && lensIds.has(tgtId) ? 'normal' : 'dim';
     if (objectiveEdgeKeys.has(`${depId}>${tgtId}`)) return 'path';
     return 'normal';
   };
@@ -468,7 +528,7 @@ export default function EvolutionClient({
               imagem fixa.
             </p>
           </div>
-          <span className={styles.marker}>Evolution UX V1</span>
+          <span className={styles.marker}>Evolution V2</span>
         </div>
 
         <div className={styles.controls}>
@@ -497,6 +557,34 @@ export default function EvolutionClient({
             })}
           </div>
 
+          <div className={styles.filterRow} role="group" aria-label="Lente do mapa">
+            <button
+              type="button"
+              className={`${styles.filterChip} ${lens === 'all' ? styles.filterActive : ''}`}
+              aria-pressed={lens === 'all'}
+              onClick={() => setLens('all')}
+            >
+              Mapa completo
+            </button>
+            <button
+              type="button"
+              className={`${styles.filterChip} ${lens === 'recent' ? styles.filterActive : ''}`}
+              aria-pressed={lens === 'recent'}
+              title={`Mudanças registradas desde ${evolutionBaseline.label} (${evolutionBaseline.commit}, ${evolutionBaseline.date})`}
+              onClick={() => setLens((prev) => (prev === 'recent' ? 'all' : 'recent'))}
+            >
+              Evolução recente <span className={styles.filterCount}>{recentIds.size}</span>
+            </button>
+            <button
+              type="button"
+              className={`${styles.filterChip} ${lens === 'external' ? styles.filterActive : ''}`}
+              aria-pressed={lens === 'external'}
+              onClick={() => setLens((prev) => (prev === 'external' ? 'all' : 'external'))}
+            >
+              Reuso externo <span className={styles.filterCount}>{externalIds.size}</span>
+            </button>
+          </div>
+
           <label className={styles.objectivePicker}>
             <span>Objetivo</span>
             <select value={objectiveId} onChange={(e) => setObjectiveId(e.target.value)} aria-label="Escolher objetivo futuro">
@@ -518,6 +606,12 @@ export default function EvolutionClient({
               {MATURITY_LABEL[m]}
             </span>
           ))}
+          <span className={styles.legendItem} title="Ferramenta externa já chamada por código do Anima, sob governança do Anima">
+            <span className={styles.legendReuse}>WRAP</span> Reuso integrado
+          </span>
+          <span className={styles.legendItem} title="Só POC/arquitetura externa: não é capacidade do Anima">
+            <span className={styles.legendCandidate} /> Candidata externa
+          </span>
           <span className={styles.legendItem} title="Limite entre o que já existe e o que ainda é futuro">
             <span className={styles.legendFrontier} /> Fronteira atual
           </span>
@@ -603,6 +697,7 @@ export default function EvolutionClient({
                 const cap = p.node.capability;
                 const color = MATURITY_COLOR[cap.maturity];
                 const future = isFuture(cap.maturity);
+                const candidate = cap.reuse?.status === 'candidate';
                 const state = chipState(cap);
                 const lines = wrapName(cap.name);
                 const cls = [
@@ -622,11 +717,13 @@ export default function EvolutionClient({
                     key={cap.id}
                     role="button"
                     tabIndex={0}
-                    aria-label={`${cap.name} — ${MATURITY_LABEL[cap.maturity]}${future ? ' (a conquistar)' : ''}`}
+                    aria-label={`${cap.name} — ${MATURITY_LABEL[cap.maturity]}${future ? ' (a conquistar)' : ''}${originAria(cap)}`}
                     aria-pressed={state === 'selected'}
                     data-capid={cap.id}
                     data-state={state}
                     data-future={future ? 'true' : 'false'}
+                    data-origin={cap.reuse ? cap.reuse.status : 'internal'}
+                    data-recent={recentIds.has(cap.id) ? 'true' : 'false'}
                     className={cls}
                     transform={`translate(${p.x} ${p.y})`}
                     onPointerDown={(e) => {
@@ -649,7 +746,7 @@ export default function EvolutionClient({
                       style={{
                         stroke,
                         strokeWidth: state === 'selected' ? 2.4 : state === 'strong' || state === 'path' ? 1.8 : 1,
-                        strokeDasharray: future ? '5 4' : undefined,
+                        strokeDasharray: candidate ? '1.5 3' : future ? '5 4' : undefined,
                         opacity: future ? 0.92 : 1,
                       }}
                     />
@@ -664,7 +761,8 @@ export default function EvolutionClient({
                     ))}
                     <text x={30} y={CHIP_H - 10} className={styles.chipMaturity} style={{ fill: color }}>
                       {MATURITY_LABEL[cap.maturity]}
-                      {future ? ' · a conquistar' : ''}
+                      {candidate ? '' : future ? ' · a conquistar' : ''}
+                      {originSuffix(cap)}
                     </text>
                   </g>
                 );
@@ -701,6 +799,15 @@ export default function EvolutionClient({
               onSelect={selectCapability}
               onClose={() => setSelectedId(null)}
             />
+          ) : lens === 'recent' ? (
+            <RecentEvolutionSummary
+              entries={recentEvolution}
+              baseline={evolutionBaseline}
+              nameById={nameById}
+              onSelect={selectCapability}
+            />
+          ) : lens === 'external' ? (
+            <ReuseSummary nodes={nodes} onSelect={selectCapability} />
           ) : (
             <ObjectiveSummary
               objective={currentObjective}
@@ -878,6 +985,28 @@ function CapabilityDetail({
       )}
 
       <section className={styles.detailSection}>
+        <h3 className={styles.detailLabel}>Origem</h3>
+        {!cap.reuse ? (
+          <p className={styles.detailText}>Interna — construída e governada pelo Anima.</p>
+        ) : cap.reuse.status === 'integrated' ? (
+          <p className={styles.detailText}>
+            Reuso integrado · <strong>{REUSE_STRATEGY_LABEL[cap.reuse.strategy]}</strong> sobre <strong>{cap.reuse.tool}</strong>. A ferramenta
+            executa; o Anima governa.
+          </p>
+        ) : (
+          <p className={styles.detailText}>
+            Candidata externa · <strong>{REUSE_STRATEGY_LABEL[cap.reuse.strategy]}</strong> · <strong>{cap.reuse.tool}</strong>. Ainda não é
+            capacidade do Anima.
+          </p>
+        )}
+        {cap.reuse?.externalEvidence && (
+          <p className={styles.detailHint}>
+            Evidência externa (não conta como prova do Anima): {cap.reuse.externalEvidence}
+          </p>
+        )}
+      </section>
+
+      <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>Depende de</h3>
         <ChipList ids={node.dependsOn} nameById={nameById} onSelect={onSelect} empty="Fundação — não depende de nenhuma outra capacidade." />
       </section>
@@ -901,6 +1030,17 @@ function CapabilityDetail({
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section className={styles.detailSection}>
+        <h3 className={styles.detailLabel}>História</h3>
+        {(cap.history?.length ?? 0) === 0 ? (
+          <p className={styles.detailEmpty}>
+            Sem mudança registrada desde a reconciliação. História derivada (commits, attempts, decisões) fica para a Evolution History V3.
+          </p>
+        ) : (
+          <HistoryList entries={cap.history!} />
         )}
       </section>
 
@@ -996,6 +1136,120 @@ function ObjectiveSummary({
       </section>
 
       <p className={styles.detailHint}>Clique em qualquer capacidade no mapa para ver seu estado, dependências e provas.</p>
+    </div>
+  );
+}
+
+function HistoryList({ entries }: { entries: NonNullable<Capability['history']> }) {
+  return (
+    <ol className={styles.historyList}>
+      {[...entries].reverse().map((entry, i) => (
+        <li key={i} className={styles.historyItem}>
+          <span className={styles.historyHead}>
+            <time className={styles.historyDate}>{entry.at}</time>
+            <span className={styles.proofKind}>{HISTORY_CHANGE_LABEL[entry.change]}</span>
+            {entry.change === 'maturity_changed' && entry.from && entry.to && (
+              <span className={styles.historyMaturity}>
+                <span style={{ color: MATURITY_COLOR[entry.from] }}>{MATURITY_LABEL[entry.from]}</span> →{' '}
+                <span style={{ color: MATURITY_COLOR[entry.to] }}>{MATURITY_LABEL[entry.to]}</span>
+              </span>
+            )}
+          </span>
+          <span className={styles.detailText}>{entry.note}</span>
+          <span className={styles.historyRefs}>
+            {entry.refs.map((r, k) => (
+              <code key={k} className={styles.proofRef} title={r.note}>
+                {PROOF_KIND_LABEL[r.kind]} {r.ref}
+              </code>
+            ))}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function RecentEvolutionSummary({
+  entries,
+  baseline,
+  nameById,
+  onSelect,
+}: {
+  entries: RecentEvolutionEntry[];
+  baseline: EvolutionBaseline;
+  nameById: Map<string, string>;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className={styles.detail}>
+      <span className={styles.detailKicker}>Evolução recente</span>
+      <h2 className={styles.detailName}>Desde {baseline.label}</h2>
+      <p className={styles.detailHint}>
+        Baseline {baseline.commit} ({baseline.date}). Só mudanças registradas no modelo com refs reais — nada é inferido por data de arquivo.
+      </p>
+      {entries.length === 0 ? (
+        <p className={styles.detailEmpty}>Nenhuma mudança registrada desde a baseline.</p>
+      ) : (
+        <ol className={styles.historyList}>
+          {entries.map(({ capabilityId, entry }, i) => (
+            <li key={`${capabilityId}-${i}`} className={styles.historyItem}>
+              <span className={styles.historyHead}>
+                <time className={styles.historyDate}>{entry.at}</time>
+                <span className={styles.proofKind}>{HISTORY_CHANGE_LABEL[entry.change]}</span>
+                {entry.change === 'maturity_changed' && entry.from && entry.to && (
+                  <span className={styles.historyMaturity}>
+                    {MATURITY_LABEL[entry.from]} → {MATURITY_LABEL[entry.to]}
+                  </span>
+                )}
+              </span>
+              <button type="button" className={styles.pathStep} onClick={() => onSelect(capabilityId)}>
+                {nameById.get(capabilityId) ?? capabilityId}
+              </button>
+              <span className={styles.detailText}>{entry.note}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function ReuseSummary({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; onSelect: (id: string) => void }) {
+  const caps = nodes.map((n) => n.capability);
+  const integrated = caps.filter((c) => c.reuse?.status === 'integrated');
+  const candidates = caps.filter((c) => c.reuse?.status === 'candidate');
+  const internalRealized = caps.filter((c) => !c.reuse && !isFuture(c.maturity)).length;
+  const internalFuture = caps.filter((c) => !c.reuse && isFuture(c.maturity)).length;
+  const item = (c: Capability) => (
+    <li key={c.id}>
+      <button type="button" className={styles.pathStep} onClick={() => onSelect(c.id)}>
+        <span style={{ color: MATURITY_COLOR[c.maturity] }} title={MATURITY_LABEL[c.maturity]}>
+          {MATURITY_GLYPH[c.maturity]}
+        </span>{' '}
+        {c.name} · {REUSE_STRATEGY_LABEL[c.reuse!.strategy]} {c.reuse!.tool}
+      </button>
+    </li>
+  );
+  return (
+    <div className={styles.detail}>
+      <span className={styles.detailKicker}>Reuso externo</span>
+      <h2 className={styles.detailName}>Temos × podemos reutilizar × falta compor</h2>
+      <section className={styles.detailSection}>
+        <h3 className={styles.detailLabel}>Temos internamente</h3>
+        <p className={styles.detailText}>
+          <strong>{internalRealized}</strong> capacidades internas já existem; <strong>{internalFuture}</strong> internas ainda são futuro (a
+          compor/implementar).
+        </p>
+      </section>
+      <section className={styles.detailSection}>
+        <h3 className={styles.detailLabel}>Reuso já integrado ({integrated.length})</h3>
+        <ul className={styles.reuseList}>{integrated.map(item)}</ul>
+      </section>
+      <section className={styles.detailSection}>
+        <h3 className={styles.detailLabel}>Candidatas externas ({candidates.length})</h3>
+        <p className={styles.detailHint}>POC externo que funcionou ≠ capacidade do Anima: todas ficam no futuro.</p>
+        <ul className={styles.reuseList}>{candidates.map(item)}</ul>
+      </section>
     </div>
   );
 }

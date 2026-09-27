@@ -12,7 +12,23 @@
 // existem de fato. Na dúvida, o estado é rebaixado. Capacidades futuras aparecem
 // como `projected`/`specified` — nunca como se já existissem.
 
+//
+// Evolution Reconciliation V2 (2026-09-27): conteúdo reconciliado com o estado
+// real desde a baseline `7f276d8` (última edição do registry, Evolution UX V1).
+// O nome `..._V0` é do CONTRATO e foi mantido para não quebrar consumidores.
+// Toda mudança feita nesta reconciliação está em `history` com refs reais; ver
+// docs/registros/2026-09-27c-evolution-reconciliation-v2.md.
+
 import { buildCapabilityGraph, type Capability, type CapabilityGraph } from './capability-map';
+
+/** Baseline da última Evolution relevante: "Evolução recente" = mudanças desde aqui. */
+export const EVOLUTION_BASELINE = {
+  commit: '7f276d8',
+  date: '2026-09-16',
+  label: 'Evolution UX V1',
+} as const;
+
+const RECONCILIATION_V2_RECORD = 'docs/registros/2026-09-27c-evolution-reconciliation-v2.md';
 
 export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   // ─── COMPREENSÃO ──────────────────────────────────────────────────────────
@@ -87,6 +103,33 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement: 'Falta o mecanismo de reorganização emergente e a memória narrativa que o alimenta.',
   },
 
+  {
+    id: 'understanding.github-attention',
+    name: 'Atenção multi-repo (GitHub)',
+    description: 'Derivar o que espera atenção nos repositórios (PRs/issues abertos, draft, alertas, repo parado).',
+    domain: 'understanding',
+    maturity: 'projected',
+    dependsOn: ['understanding.projects'],
+    reuse: {
+      strategy: 'contribute_upstream',
+      tool: 'ghpending',
+      status: 'candidate',
+      externalEvidence:
+        'POC ghpending (G:\\anima-labs): lógica útil, mas sem JSON e sem suporte a Windows ⇒ --json upstream ou fork leve. Teste autenticado pendente (PAT read-only criado pelo humano). Adiado.',
+    },
+    meaning: 'Baixo valor enquanto o Anima acompanha um único repositório.',
+    advancement: 'Depende de saída JSON upstream e de um POC autenticado.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Candidata externa (Reuse Architecture V1), adiada.',
+        refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+    ],
+  },
+
   // ─── MEMÓRIA ────────────────────────────────────────────────────────────────
   {
     id: 'memory.persistence',
@@ -136,6 +179,18 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     proofRefs: [
       { kind: 'commit', ref: 'e090013', note: 'retomada da worktree do checkpoint na decomposição' },
       { kind: 'milestone', ref: 'docs/marcos/008-dev-local-v1-review-rework-incremental.md' },
+      { kind: 'commit', ref: '25198a5', note: 'attempt 515c4d83 retomou o checkpoint durável d1d6c5d após 3 falhas na lineage e chegou a completed' },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'proof_added',
+        note: 'Retomada do checkpoint d1d6c5d através de uma lineage de 4 sucessores até aceite humano. Ainda uma cadeia, não rotina: maturidade mantida.',
+        refs: [
+          { kind: 'work_item', ref: 'f6c326b1', note: 'completed' },
+          { kind: 'attempt', ref: '515c4d83' },
+        ],
+      },
     ],
   },
   {
@@ -148,6 +203,101 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     target: { description: 'Memória que relaciona no tempo, narra a evolução e resolve contradições — base da proatividade cognitiva.' },
     meaning: 'O Anima passa de "receber → armazenar → exibir" para "lembrar → relacionar → refletir", percebendo e reconciliando conflitos (Prisma como capacidade interna).',
     advancement: 'Falta a síntese narrativa sobre o histórico e a detecção/resolução de contradições que a mantém coerente.',
+  },
+  {
+    id: 'memory.durability',
+    name: 'Durabilidade do progresso',
+    description: 'Nenhum progresso importante existe somente em uma máquina: o Anima garante sozinho a cópia remota do que conquistou.',
+    domain: 'memory',
+    maturity: 'projected',
+    dependsOn: ['memory.persistence', 'memory.event-history'],
+    target: { description: 'Progresso importante sempre recuperável fora da máquina que o produziu, sem depender de lembrança humana.' },
+    meaning:
+      'Hoje a durabilidade é um PROCESSO HUMANO comprovado (push de dev e branch de backup remota), não capacidade do sistema. O Anima nem detecta progresso não publicado.',
+    advancement: 'Falta detectar progresso só-local e propor/executar a publicação sob authority. Push é efeito externo: continua ato humano até haver mandato.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Princípio adotado pelo humano. A prova manual (dev e backup/marco-research-web-dev-readiness-2026-09-27 em 117fb46) não conta como capacidade.',
+        refs: [
+          { kind: 'commit', ref: '117fb46', note: 'publicado por ato humano' },
+          { kind: 'record', ref: RECONCILIATION_V2_RECORD },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'memory.evolution-history',
+    name: 'História da evolução',
+    description:
+      'Explicar como e por que cada capacidade chegou ao estado atual: quando surgiu, commits, work items, attempts/falhas, decisões e mudanças de maturidade.',
+    domain: 'memory',
+    maturity: 'projected',
+    dependsOn: ['memory.event-history', 'governance.attempt'],
+    target: { description: 'O Anima explica não só o que é hoje, mas como e por que chegou até aqui.' },
+    meaning:
+      'Legibilidade histórica. A Evolution V2 tem só uma semente: entradas `history` escritas à mão numa reconciliação, com refs reais. Não é derivação.',
+    advancement:
+      'Evolution History V3: derivar entradas de git + work_events + registros com proveniência, sem historiador LLM e sem banco histórico novo até haver contrato.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Direção registrada; semente declarativa (history) criada nesta reconciliação.',
+        refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+    ],
+  },
+  {
+    id: 'memory.architectural-memory',
+    name: 'Memória arquitetural',
+    description:
+      'Antes de alterar uma arquitetura, o self-dev consulta tentativas e decisões anteriores para não repetir abordagens que falharam ou foram abandonadas.',
+    domain: 'memory',
+    maturity: 'projected',
+    dependsOn: ['memory.evolution-history', 'agency.detect-deficiency'],
+    target: { description: 'Self-dev que aprende com a própria história antes de mudar a arquitetura.' },
+    meaning:
+      'Exemplos reais do que ela evitaria: o oráculo 0bea4c8 congelado, a igualdade textual de gate que a sanitização quebrou e o export extra em Route Handler que quebrou o next build.',
+    advancement: 'Depende da história da evolução existir como dado consultável.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Direção registrada; não implementada.',
+        refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+    ],
+  },
+  {
+    id: 'memory.cross-harness',
+    name: 'Continuidade entre harnesses',
+    description: 'Ledger e resume de sessão entre Claude Code e Codex correlacionados a attempt/lineage do Anima.',
+    domain: 'memory',
+    maturity: 'projected',
+    dependsOn: ['agency.external-harness', 'memory.continuity'],
+    reuse: {
+      strategy: 'wrap',
+      tool: 'ai-memory',
+      status: 'candidate',
+      externalEvidence:
+        'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado com ids em repo descartável. Riscos: o ledger guarda prompts e arquivos em texto claro; autowire global.',
+    },
+    meaning: '≠ memory.continuity (checkpoint interno do Anima). Não fundir: esta é continuidade técnica de harnesses externos.',
+    advancement: 'Só tem valor junto com o harness externo; entram juntos na mesma porta de runtime.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Candidata externa (Reuse Architecture V1).',
+        refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+    ],
   },
 
   // ─── AGÊNCIA ────────────────────────────────────────────────────────────────
@@ -171,14 +321,35 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     name: 'Executar testes e comandos governados',
     description: 'Rodar testes escopados ao workspace como gate (host-observed) e comandos sob política (git read-only, rede negada).',
     domain: 'agency',
-    maturity: 'proven',
+    maturity: 'operational',
     dependsOn: ['agency.isolated-workspace', 'governance.authority'],
     meaning: 'EXEC/TEST é uma autoridade distinta de READ/WRITE: o Anima não confia no próprio código sem prova, e comandos rodam num envelope explícito.',
     advancement:
-      'Gates são operacionais; o loop governado edit→test→exec→submit do Harness V3 ainda espera prova viva end-to-end e sandbox de rede em nível de kernel.',
+      'Autonomia exige sandbox de rede em nível de kernel (hoje a negação de rede é política de comando, não isolamento) e gates rodando sem supervisão.',
     proofRefs: [
       { kind: 'commit', ref: '533ce86', note: 'escopo do gate ao workspace (causa raiz do fan-out)' },
       { kind: 'record', ref: 'docs/registros', note: 'independência dos gates + Coding Harness V3 command-execution-policy' },
+      {
+        kind: 'event',
+        ref: 'host_observed_gate_evidence_recorded',
+        note: 'Proof Engine sobre o histórico real (2026-09-27, 1343 eventos): 15 ocasiões independentes positivas, 0 negativas',
+      },
+      { kind: 'record', ref: 'docs/registros/2026-09-25h-recovery-harness-dev-readiness-ate-review.md', note: 'loop vivo edit→teste vermelho→edit→verde→diff→submit (attempt 2a145ca1)' },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'maturity_changed',
+        from: 'proven',
+        to: 'operational',
+        note:
+          'O critério pendente ("prova viva end-to-end do loop edit→test→submit") foi cumprido em attempts pagas reais e os gates host-side reproduziram em 15 ocasiões. O sandbox de kernel continua ausente e agora é critério de autonomia.',
+        refs: [
+          { kind: 'attempt', ref: '2a145ca1' },
+          { kind: 'attempt', ref: '515c4d83' },
+          { kind: 'record', ref: RECONCILIATION_V2_RECORD },
+        ],
+      },
     ],
   },
   {
@@ -203,7 +374,8 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     maturity: 'proven',
     dependsOn: ['agency.edit-file', 'agency.run-tests', 'compute.selection'],
     meaning: 'O núcleo da agência: transformar uma intenção aprovada em código real, por um executor substituível.',
-    advancement: 'Barreira local de RAM (qwen3-coder 30B derrama) e capacidade do agente pago; operacional exige reprodutibilidade.',
+    advancement:
+      'O Proof Engine deriva "operacional" (8 ocasiões verificadas), mas conta sucessos, não taxa: na lineage dev-readiness só 2 de 5 attempts pagas chegaram a verified e 1 foi aceita. Declarado segue comprovada até a produção ser confiável (e a barreira local de RAM ser resolvida).',
     proofRefs: [
       { kind: 'commit', ref: '87a3ad8', note: 'PIN-02 provado ao vivo pelo self-dev' },
       { kind: 'commit', ref: 'fbf0baa', note: 'fallback governado de coder por capacidade' },
@@ -218,7 +390,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     dependsOn: ['agency.run-tests', 'governance.verifier'],
     meaning: 'Verificar é separado de produzir: o Anima confere a própria obra contra o que foi aprovado antes de pedir revisão.',
     advancement:
-      'Falso positivo já observado (Verifier "verified" para mudança trivial); operacional exige verificação que não engane a revisão humana.',
+      'O Proof Engine deriva "operacional" (8 ocasiões), mas o critério é a verificação não enganar a revisão humana: das 7 decisões humanas sobre resultados verified, 5 pediram mudanças. Declarado segue comprovada.',
     proofRefs: [
       { kind: 'commit', ref: '824c714', note: 'requisitos de prova heterogêneos pós-review' },
       { kind: 'record', ref: 'docs/registros', note: 'seq4→seq5: verified foi falso positivo, corrigido por request_changes' },
@@ -232,10 +404,33 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     maturity: 'proven',
     dependsOn: ['agency.produce-change', 'governance.recovery-authority', 'governance.attempt'],
     meaning: 'Falhar não é o fim: o Anima produz o sucessor correto, preserva o que já valia e retoma com +1 tentativa autorizada.',
-    advancement: 'Reproduzir correções bem-sucedidas de forma rotineira até virar operacional.',
+    advancement:
+      'Reproduzir correções bem-sucedidas de forma rotineira até virar operacional. Hoje há três lineages de correção que terminaram aceitas, mas a de dev-readiness precisou de 6 unidades e 5 attempts pagas: não é rotina.',
     proofRefs: [
       { kind: 'commit', ref: '4b5c500', note: 'replanejamento após falha determinística' },
       { kind: 'commit', ref: '1c6c656', note: 'Human Recovery Authority' },
+      { kind: 'work_item', ref: 'bd4092af', note: 'seq3 da lineage de correção de a703e92f, aceito (2026-09-25)' },
+      { kind: 'work_item', ref: 'f6c326b1', note: 'fim da lineage 2c7afe1d→f19ac716→7610b066→843669bd→f6c326b1, aceito (2026-09-27)' },
+    ],
+    history: [
+      {
+        at: '2026-09-25',
+        change: 'proof_added',
+        note: 'Correção por lineage com compute forte (Sol) aceita; Router passou a considerar a lineage.',
+        refs: [
+          { kind: 'commit', ref: 'fc53649' },
+          { kind: 'record', ref: 'docs/registros/2026-09-25-prova-sol-bd4092af-router-lineage-e-covers.md' },
+        ],
+      },
+      {
+        at: '2026-09-27',
+        change: 'proof_added',
+        note: 'Cadeia falha→recovery de harness→recoveries sucessivas→Sol→gates host→Verifier verified→aceite humano. Maturidade mantida: 3 lineages aceitas não são rotina.',
+        refs: [
+          { kind: 'work_item', ref: 'f6c326b1' },
+          { kind: 'commit', ref: '117fb46', note: 'resultado integrado localmente em dev' },
+        ],
+      },
     ],
   },
   {
@@ -251,6 +446,19 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     proofRefs: [
       { kind: 'work_item', ref: '8a2515d8', note: 'work item que foi fim-a-fim até review→completed com OpenAI forte (2026-09-11)' },
       { kind: 'milestone', ref: 'docs/marcos/008-dev-local-v1-review-rework-incremental.md' },
+      { kind: 'verifier', ref: 'f6c326b1/515c4d83', note: 'verified (0 violações, 0 lacunas, 13 checks) + aceite humano (result_accepted 54738)' },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'proof_added',
+        note:
+          'Proof Engine: depois de 5 decisões humanas negativas, o aceite de f6c326b1 reabriu a janela positiva, e o nível derivado voltou a comprovada. Supervisionado ≠ autônomo.',
+        refs: [
+          { kind: 'work_item', ref: 'f6c326b1' },
+          { kind: 'event', ref: '54738', note: 'result_accepted' },
+        ],
+      },
     ],
   },
   {
@@ -258,22 +466,59 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     name: 'Detectar deficiência própria',
     description: 'O Anima percebe sozinho uma limitação/lacuna na própria capacidade.',
     domain: 'agency',
-    maturity: 'projected',
+    maturity: 'proven',
     dependsOn: ['agency.supervised-self-development', 'governance.verifier', 'memory.event-history'],
     target: { description: 'Primeiro degrau rumo ao self-development contínuo.' },
     meaning: 'Em vez de esperar um humano apontar o que falta, o Anima infere as próprias deficiências a partir de attempts, verifier e histórico.',
-    advancement: 'Falta o motor que lê event log + attempts + verifier e formula uma deficiência acionável.',
+    advancement:
+      'Três detectores determinísticos (falha repetida, regressão de capacidade, verifier recorrente) rodaram sobre o histórico real. Operacional exige detecção recorrente no host residente sem dry-run manual, e classes além das três atuais.',
+    proofRefs: [
+      { kind: 'commit', ref: '09b3bc7', note: 'Self-Development Continuous Loop V0 (detectores + dedup + proveniência)' },
+      { kind: 'record', ref: 'docs/registros/2026-09-18d-self-development-loop-v0-prova-e2e-real.md', note: '1130 eventos reais → 6 deficiências, 100% dos refs resolvem' },
+      { kind: 'commit', ref: 'ab47402', note: 'lifecycle de deficiência fail-closed' },
+    ],
+    history: [
+      {
+        at: '2026-09-18',
+        change: 'maturity_changed',
+        from: 'projected',
+        to: 'proven',
+        note: 'O detector existe e foi executado read-only contra o histórico residente real, com auditoria manual dos refs (registrado só agora).',
+        refs: [
+          { kind: 'commit', ref: '09b3bc7' },
+          { kind: 'commit', ref: '2c4cbb1' },
+        ],
+      },
+    ],
   },
   {
     id: 'agency.formulate-improvement',
     name: 'Formular melhoria própria',
     description: 'Transformar uma deficiência detectada numa proposta de melhoria concreta.',
     domain: 'agency',
-    maturity: 'projected',
+    maturity: 'implemented',
     dependsOn: ['agency.detect-deficiency'],
     target: { description: 'Segundo degrau rumo ao self-development contínuo.' },
     meaning: 'O Anima propõe a própria evolução: dada uma deficiência, formula o que mudar e por quê.',
-    advancement: 'Depende de detectar deficiência própria de forma confiável.',
+    advancement:
+      'Existem templates determinísticos (sem LLM) e a materialização idle no host residente (máximo `proposed`, sempre estrutural). Nenhuma proposta real foi materializada: falta a primeira prova viva, atrás de ANIMA_RESIDENT_MATERIALIZE_SELF_IMPROVEMENT.',
+    proofRefs: [
+      { kind: 'commit', ref: '09b3bc7', note: 'formulateImprovementProposal + materializeSelfImprovementProposal' },
+      { kind: 'commit', ref: 'bfdf1fa', note: 'materialização quando o host residente fica idle' },
+    ],
+    history: [
+      {
+        at: '2026-09-21',
+        change: 'maturity_changed',
+        from: 'projected',
+        to: 'implemented',
+        note: 'Formulação e materialização existem em código e testes; sem execução viva.',
+        refs: [
+          { kind: 'commit', ref: '09b3bc7' },
+          { kind: 'commit', ref: 'bfdf1fa' },
+        ],
+      },
+    ],
   },
   {
     id: 'agency.validate-improvement',
@@ -281,10 +526,22 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     description: 'Provar que uma melhoria auto-formulada de fato melhora, sem regressão.',
     domain: 'agency',
     maturity: 'projected',
-    dependsOn: ['agency.formulate-improvement', 'agency.verify-change'],
+    dependsOn: ['agency.formulate-improvement', 'agency.verify-change', 'governance.differential-evidence'],
     target: { description: 'Terceiro degrau rumo ao self-development contínuo.' },
     meaning: 'Antes de incorporar, o Anima valida a própria melhoria com evidência — auto-modificação sob prova.',
-    advancement: 'Depende de formular melhoria e de verificação forte o suficiente para autojulgamento.',
+    advancement:
+      'Depende de formular melhoria e de verificação forte o suficiente para autojulgamento. O substrato diferencial (FAIL no base → PASS no resultado) existe em shadow, mas nenhuma execução real chegou a `eligible`.',
+    history: [
+      {
+        at: '2026-09-19',
+        change: 'relation_added',
+        note: 'Passa a depender da evidência diferencial de gate (shadow), o substrato de "melhorou sem regressão".',
+        refs: [
+          { kind: 'commit', ref: '2e67da6' },
+          { kind: 'record', ref: RECONCILIATION_V2_RECORD },
+        ],
+      },
+    ],
   },
   {
     id: 'agency.continuous-self-development',
@@ -292,13 +549,108 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     description: 'O Anima detecta, formula, valida e incorpora melhorias próprias dentro da authority, sem loop humano constante.',
     domain: 'agency',
     maturity: 'projected',
-    dependsOn: ['agency.validate-improvement', 'agency.recovery-correction', 'governance.progressive-autonomy'],
+    dependsOn: ['agency.validate-improvement', 'agency.recovery-correction', 'governance.progressive-autonomy', 'memory.architectural-memory'],
     target: {
       description: 'Norte do arco de agência: evolução própria contínua e segura sob mandato.',
       milestone: 'docs/marcos/005-autonomia-progressiva-e-identidade-una.md',
     },
     meaning: 'A capacidade mais ambiciosa do arco: o Anima evolui a si mesmo continuamente, dentro de limites explícitos e revogáveis.',
-    advancement: 'Falta toda a cadeia detectar → formular → validar → incorporar operando sob autonomia progressiva comprovada.',
+    advancement:
+      'Detectar já é comprovado e formular já está implementado; faltam validar e incorporar sob autonomia progressiva comprovada, e consultar a própria história arquitetural antes de mudar.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'relation_added',
+        note: 'Passa a depender da memória arquitetural: não repetir abordagens que já falharam ou foram abandonadas.',
+        refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+    ],
+  },
+
+  {
+    id: 'agency.recovery-evidence',
+    name: 'Evidência entre recoveries',
+    description:
+      'Levar ao sucessor a evidência host-observada de ancestors da lineage (mesmo gate FAIL → edição → PASS), com identidade canônica de gate.',
+    domain: 'agency',
+    maturity: 'implemented',
+    dependsOn: ['agency.recovery-correction', 'memory.event-history', 'agency.run-tests'],
+    meaning:
+      'O sucessor não recomeça do zero: recebe o que a lineage já provou, sem transcript livre nem raciocínio do provider, com referências rastreáveis.',
+    advancement:
+      'A 1ª prova viva falhou: a sanitização quebrava o matching, e zero itens chegaram ao coder. Depois da identidade canônica, a seleção foi provada por reconstrução read-only (2 itens). A entrega na attempt 515c4d83 não fica registrada em evento tipado, e o sucesso dela não pode ser atribuído a isso. Comprovar exige registrar a entrega.',
+    proofRefs: [
+      { kind: 'commit', ref: '9035cef', note: 'continuidade de evidência entre recoveries' },
+      { kind: 'commit', ref: '6580be2', note: 'identidade canônica (fingerprint) do gate' },
+      { kind: 'record', ref: 'docs/registros/2026-09-26-continuidade-evidencia-recovery-dev-readiness.md', note: 'prova viva NEGATIVA (98402f85): 0 itens entregues' },
+      { kind: 'record', ref: 'docs/registros/2026-09-27-identidade-canonica-gate-recovery.md', note: 'reconstrução read-only: 2 itens selecionados' },
+    ],
+    history: [
+      {
+        at: '2026-09-26',
+        change: 'introduced',
+        to: 'implemented',
+        note: 'Contrato de recovery evidence; a 1ª execução viva não entregou nada, porque a identidade do gate ficou textual e sanitizada.',
+        refs: [
+          { kind: 'commit', ref: '9035cef' },
+          { kind: 'commit', ref: '73b37f7' },
+        ],
+      },
+      {
+        at: '2026-09-27',
+        change: 'proof_added',
+        note: 'Identidade canônica de gate. A seleção foi provada read-only; a entrega à attempt não foi registrada.',
+        refs: [{ kind: 'commit', ref: '6580be2' }],
+      },
+    ],
+  },
+  {
+    id: 'agency.reuse-discovery',
+    name: 'Descoberta de reuso',
+    description:
+      'Antes de construir, pesquisar ferramentas existentes e anexar à proposta a decisão ADOPT/WRAP/FORK/BUILD com evidência citada.',
+    domain: 'agency',
+    maturity: 'projected',
+    dependsOn: ['research.web.search', 'research.web.extract', 'research.web.cite', 'agency.formulate-improvement'],
+    target: { description: 'O self-dev deixa de construir o que já existe: reuso decidido com evidência da web citada.' },
+    meaning: 'Hoje o reuso foi decidido por humanos com POCs manuais; o Anima ainda não faz essa pesquisa para si.',
+    advancement: 'Falta citar e persistir findings (cite/persist) e o plano que usa research.web antes de propor BUILD.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Direção da Reuse Architecture V1 (G:\\anima-labs, fora do repo); não há código.',
+        refs: [{ kind: 'doc', ref: 'docs/arquitetura/research-web-v1.md', note: 'lista selfdev.reuse_discovery como não implementado' }],
+      },
+    ],
+  },
+  {
+    id: 'agency.external-harness',
+    name: 'Harness externo (Claude Code / Codex)',
+    description: 'Usar um harness de código externo como CoderBackend enraizado, sob os mesmos gates, escopo e Verifier.',
+    domain: 'agency',
+    maturity: 'projected',
+    dependsOn: ['agency.produce-change', 'governance.authority'],
+    reuse: {
+      strategy: 'undecided',
+      tool: 'Claude Code / Codex CLI',
+      status: 'candidate',
+      externalEvidence:
+        'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado em repo descartável. Bloqueios: auth dedicada do CLI e decisão sobre a classe de autoridade da quota de assinatura.',
+    },
+    meaning:
+      'O seam CoderBackend (ADR-001) permite trocar o executor. Um harness por assinatura é outra classe de compute, não um provider de API.',
+    advancement: 'Decisões humanas pendentes: login dedicado em home isolado, e se quota de assinatura é authority ou preferência.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Candidata externa registrada a partir da Reuse Architecture V1. POC externo ≠ capacidade do Anima.',
+        refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+    ],
   },
 
   // ─── GOVERNANÇA ─────────────────────────────────────────────────────────────
@@ -314,6 +666,20 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     proofRefs: [
       { kind: 'milestone', ref: 'docs/marcos/005-autonomia-progressiva-e-identidade-una.md' },
       { kind: 'route', ref: 'apps/web/app/api/work-orchestration/paid-compute-authorizations' },
+      { kind: 'commit', ref: 'af3d215', note: 'espera por authority paga visível e ato humano de concessão' },
+      { kind: 'commit', ref: 'd6968d5', note: 'espera estável (mesmo decision_id no replay)' },
+    ],
+    history: [
+      {
+        at: '2026-09-25',
+        change: 'proof_added',
+        note:
+          'Caminho normal até a authority paga sem scripts (CLI authorize-compute). Em 2026-09-25/27 houve 5 authorities item-scoped, cada uma consumida por exatamente uma attempt. Não virou operacional: as authorities ainda são efêmeras, sem envelope reutilizável.',
+        refs: [
+          { kind: 'commit', ref: '341564f' },
+          { kind: 'record', ref: 'docs/registros/2026-09-25b-caminho-normal-ate-authority-sem-scripts.md' },
+        ],
+      },
     ],
   },
   {
@@ -385,19 +751,134 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     proofRefs: [{ kind: 'commit', ref: '1c6c656', note: 'authorize_work_resume' }],
   },
   {
+    id: 'governance.harness-recovery',
+    name: 'Recovery governada de defeito de harness',
+    description:
+      'Quando a falha é do harness (não do trabalho), derivar exatamente um sucessor honesto, com o SHA do fix conferido pelo host, sem aprovar, preferir nem pagar.',
+    domain: 'governance',
+    maturity: 'proven',
+    dependsOn: ['governance.recovery-authority', 'governance.attempt'],
+    meaning:
+      'Um defeito do próprio Anima não vira diagnóstico falso do trabalho: a recovery registra o fix, preserva proposta e escopo e mantém a lineage (inclusive em descendants).',
+    advancement:
+      'Usada ao vivo 3 vezes (f19ac716, 843669bd, f6c326b1); o 2º uso esbarrou numa recusa de descendants corrigida por migration. Operacional exige usos sem barreira nova.',
+    proofRefs: [
+      { kind: 'commit', ref: 'd30f9bb', note: 'authorize_harness_fix_recovery + CLI work recover-harness' },
+      { kind: 'commit', ref: '8437570', note: 'recoveries governadas em descendants' },
+      { kind: 'work_item', ref: 'f6c326b1', note: 'sucessor de recovery que chegou a completed' },
+    ],
+    history: [
+      {
+        at: '2026-09-25',
+        change: 'introduced',
+        to: 'proven',
+        note: 'Primeiro sucessor por defeito de harness (f19ac716) chegou a review na mesma sessão.',
+        refs: [
+          { kind: 'commit', ref: 'd30f9bb' },
+          { kind: 'record', ref: 'docs/registros/2026-09-25h-recovery-harness-dev-readiness-ate-review.md' },
+        ],
+      },
+      {
+        at: '2026-09-26',
+        change: 'proof_added',
+        note: 'Recovery em descendant (843669bd) depois da migration que removeu a recusa por presença ancestral.',
+        refs: [{ kind: 'commit', ref: '8437570' }],
+      },
+    ],
+  },
+  {
+    id: 'governance.differential-evidence',
+    name: 'Evidência diferencial e readiness (shadow)',
+    description:
+      'Rodar o gate no base e no resultado (FAIL→PASS), avaliar policy/readiness e calibrar contra a revisão humana — só como telemetria.',
+    domain: 'governance',
+    maturity: 'implemented',
+    dependsOn: ['agency.run-tests', 'governance.verifier'],
+    meaning:
+      'O substrato para um dia promover autoridade por evidência: distinguir um gate que discrimina de um gate que sempre passa. Evidência ≠ policy ≠ readiness ≠ enforcement.',
+    advancement:
+      'Shadow absoluto: nada o consome. Um teste de integração provou que a saída real do executor pode chegar a `eligible`; ao vivo, a calibração tem 0 `eligible` (histórico anterior à cadeia).',
+    proofRefs: [
+      { kind: 'commit', ref: '2e67da6', note: 'classifyDifferentialGate' },
+      { kind: 'commit', ref: '10229a5', note: 'baseline diferencial por gate no executor' },
+      { kind: 'commit', ref: 'eb6449a', note: 'Enforcement Readiness V0 (shadow)' },
+      { kind: 'commit', ref: '30cd600', note: 'Readiness Calibration V0' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/worktree-executor.test.ts', note: 'a163c5f: executor real → eligible' },
+    ],
+    history: [
+      {
+        at: '2026-09-19',
+        change: 'introduced',
+        to: 'implemented',
+        note: 'Cadeia shadow: evidência diferencial → Policy V0 → Enforcement Readiness V0 → Change Authorization Evidence.',
+        refs: [
+          { kind: 'commit', ref: '68558b9' },
+          { kind: 'commit', ref: '8eb00a8' },
+        ],
+      },
+      {
+        at: '2026-09-21',
+        change: 'proof_added',
+        note: 'Calibração ao vivo (0 eligible, dado histórico) e prova de integração do executor real até eligible.',
+        refs: [
+          { kind: 'commit', ref: 'a163c5f' },
+          { kind: 'record', ref: 'docs/registros/2026-09-21-prova-eligible-fim-a-fim-e-auditoria-baseline.md' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'governance.external-tool-boundary',
+    name: 'Fronteira de ferramentas externas',
+    description:
+      'Envelope de observação externa, política de execução externa e rótulo `untrusted_external_content`: o que uma ferramenta devolve é dado, nunca instrução.',
+    domain: 'governance',
+    maturity: 'implemented',
+    dependsOn: ['governance.authority'],
+    meaning:
+      'ANIMA governa, ferramentas executam ou observam. Status/degradação/erro estruturados, allowlist e limites vivem numa política explícita, não no humor da ferramenta.',
+    advancement:
+      'V1 tem um único consumidor (research.web). A defesa contra prompt injection é estrutural (o conteúdo nunca dispara ferramenta), não semântica. Comprovar exige um segundo consumidor ou uma prova adversarial viva.',
+    proofRefs: [
+      { kind: 'commit', ref: '515ba65', note: 'ExternalObservationEnvelopeV1, ExternalExecutionPolicyV1, UNTRUSTED_EXTERNAL_CONTENT' },
+      { kind: 'test', ref: 'packages/core/src/research-web/research-web.test.ts' },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'implemented',
+        note: 'Nasce com o primeiro consumidor (Research Web V1), sem framework genérico.',
+        refs: [{ kind: 'commit', ref: '515ba65' }],
+      },
+    ],
+  },
+  {
     id: 'governance.progressive-autonomy',
     name: 'Autonomia progressiva',
     description: 'Capacidades conquistam autoridade por evidência de segurança e a perdem por evidência de risco.',
     domain: 'governance',
     maturity: 'specified',
-    dependsOn: ['governance.authority', 'governance.verifier', 'memory.event-history'],
+    dependsOn: ['governance.authority', 'governance.verifier', 'memory.event-history', 'governance.differential-evidence'],
     target: {
       description: 'Motor que promove/rebaixa autoridade por evidência — sem teto filosófico, alterar a própria política é o ato mais protegido.',
       milestone: 'docs/marcos/006-politica-de-seguranca-como-maturidade-maxima.md',
     },
     meaning: 'O princípio central da maturidade do Anima está ESPECIFICADO (Marcos 005/006), mas o motor genérico que move autoridade por evidência ainda não existe.',
-    advancement: 'Falta o mecanismo que lê evidência e ajusta authority automaticamente, com processo reforçado para a política máxima.',
+    advancement:
+      'Falta o mecanismo que lê evidência e ajusta authority automaticamente, com processo reforçado para a política máxima. A readiness shadow existe, mas a promoção automática segue bloqueada por decisão ratificada.',
     proofRefs: [{ kind: 'milestone', ref: 'docs/marcos/005-autonomia-progressiva-e-identidade-una.md' }],
+    history: [
+      {
+        at: '2026-09-19',
+        change: 'relation_added',
+        note: 'Passa a depender da evidência diferencial/readiness (shadow), o sinal que um motor de promoção leria.',
+        refs: [
+          { kind: 'commit', ref: 'eb6449a' },
+          { kind: 'record', ref: RECONCILIATION_V2_RECORD },
+        ],
+      },
+    ],
   },
 
   // ─── COMPUTE ────────────────────────────────────────────────────────────────
@@ -440,10 +921,78 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     maturity: 'proven',
     dependsOn: ['compute.local-execution', 'compute.external-provider', 'memory.event-history'],
     meaning: 'A escolha do provider é decisão de capacidade e política — nunca parte da identidade. O Router decide; OFF é invisível.',
-    advancement: 'Reproduzir seleção sob cargas reais variadas; matching de recurso de cloud ainda é WIP.',
+    advancement:
+      'O Router V1 selecionou ao vivo em várias unidades pagas, mas sempre a mesma rota (preferência Sol + authority) e ainda como feature gate de processo. Operacional exige seleção variada e Router ligado por padrão; o matching de recurso de cloud ainda é WIP.',
     proofRefs: [
       { kind: 'commit', ref: '38494d5', note: 'Compute Router V1 (feature gate)' },
       { kind: 'commit', ref: '9fa181c', note: 'ponte economic observations → Router' },
+      { kind: 'commit', ref: 'fc53649', note: 'sinal de falha local agregado pela lineage de recovery' },
+    ],
+    history: [
+      {
+        at: '2026-09-25',
+        change: 'proof_added',
+        note: 'Router consciente da lineage (deixa de insistir no local depois de no_progress) e preferência aprovada autoritativa.',
+        refs: [
+          { kind: 'commit', ref: 'fc53649' },
+          { kind: 'commit', ref: '33ffe01' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'compute.unit-preference',
+    name: 'Preferência de compute por unidade',
+    description:
+      'O humano registra, por work item, a estratégia de compute (ex.: provider_api/openai/gpt-5.6-sol), separada da authority paga; o Router a honra sem trocar por local.',
+    domain: 'compute',
+    maturity: 'proven',
+    dependsOn: ['compute.selection', 'governance.authority'],
+    meaning: 'Preferência ≠ authority: escolher o executor não autoriza gasto, e autorizar gasto não escolhe executor.',
+    advancement:
+      'Honrada ao vivo em 5 unidades (2c7afe1d, f19ac716, 7610b066, 843669bd, f6c326b1). Fica comprovada, não operacional, enquanto depender do Router V1 como feature gate de processo.',
+    proofRefs: [
+      { kind: 'commit', ref: '9faf2d0', note: 'record_compute_preference + CLI work set-compute' },
+      { kind: 'event', ref: '54721', note: 'compute_preference_recorded em f6c326b1' },
+      { kind: 'record', ref: 'docs/registros/2026-09-25d-preferencia-de-compute-por-unidade.md' },
+    ],
+    history: [
+      {
+        at: '2026-09-25',
+        change: 'introduced',
+        to: 'proven',
+        note: 'Correção da barreira "coder_backend só por env": preferência por unidade, fail-closed.',
+        refs: [
+          { kind: 'commit', ref: '9faf2d0' },
+          { kind: 'record', ref: 'docs/registros/2026-09-25c-integracao-8a2515d8-e-barreira-preferencia-executor.md' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'compute.subscription-availability',
+    name: 'Disponibilidade de quota de assinatura',
+    description: 'Observar janelas de quota das assinaturas Claude/Codex como sinal do Router, nunca como autoridade.',
+    domain: 'compute',
+    maturity: 'projected',
+    dependsOn: ['compute.selection', 'agency.external-harness'],
+    reuse: {
+      strategy: 'wrap',
+      tool: 'ai-usagebar',
+      status: 'candidate',
+      externalEvidence:
+        'POC ai-usagebar (G:\\anima-labs): formato `usage --json` bom. WRAP condicionado a uma credencial de observador dedicada: o refresh com write-back rotacionaria o token vivo do Codex. Leitura real não executada.',
+    },
+    meaning: 'Só faz sentido quando houver harness por assinatura como opção do Router.',
+    advancement: 'Depende do harness externo e de um POC de auth com credencial de observador.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Candidata externa (Reuse Architecture V1).',
+        refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
     ],
   },
   {
@@ -570,6 +1119,252 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     },
     meaning: 'A proatividade é COGNITIVA, não operacional: o Anima nota mudanças e conversa sobre o futuro — sem iniciar execuções sozinho.',
     advancement: 'Depende da memória narrativa e do world model existirem para relacionar dados no tempo.',
+  },
+
+  // ─── PESQUISA EXTERNA (Research Web V1, 2026-09-27) ────────────────────────
+  // "Comprovada" aqui = prova viva controlada real (SearXNG em contêiner +
+  // agent-browser local, 2 execuções, mesmo contentHash). Nenhuma é operacional:
+  // não há consumidor do Anima (chat/host/self-dev) e o runtime seguro não existe.
+  {
+    id: 'research.query-privacy',
+    name: 'Privacidade da consulta',
+    description: 'Classificar toda consulta (public / project_public / private_blocked) antes de qualquer rede; private_blocked nunca sai.',
+    domain: 'research',
+    maturity: 'proven',
+    dependsOn: ['governance.external-tool-boundary'],
+    meaning: 'Self-hosted ≠ privado: o SearXNG repassa a consulta aos buscadores com o IP do host. A classificação é conservadora e explicável, não DLP universal.',
+    advancement:
+      'Ao vivo só o caminho `public` foi exercido; o bloqueio está provado por testes da função pura (por design, nunca sai). Operacional exige um consumidor real e revisão de falsos negativos.',
+    proofRefs: [
+      { kind: 'test', ref: 'packages/core/src/research-web/research-web.test.ts', note: 'segredos, .env, URLs/IPs privados, caminhos, stack traces, e-mails' },
+      { kind: 'record', ref: 'docs/registros/2026-09-27b-research-web-v1.md', note: 'consulta viva classificada public' },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'proven',
+        note: 'Research Web V1.',
+        refs: [
+          { kind: 'commit', ref: '515ba65' },
+          { kind: 'commit', ref: '5260316' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'research.web.search',
+    name: 'Busca web',
+    description: 'Buscar na web por um metabuscador self-hosted e normalizar resultados, degradação e engines silenciosas.',
+    domain: 'research',
+    maturity: 'proven',
+    dependsOn: ['research.query-privacy', 'governance.external-tool-boundary'],
+    reuse: { strategy: 'wrap', tool: 'SearXNG', status: 'integrated', externalEvidence: 'POC SearXNG (G:\\anima-labs): CAPTCHA/429 por volta de 60 consultas; vazio silencioso em algumas engines.' },
+    meaning: 'O Anima não constrói buscador: governa um. Ausência de resultado nunca prova inexistência (`silent_empty` ⇒ complete=false).',
+    advancement:
+      'Não há consumidor no Anima (só o probe manual). O SearXNG degrada sob carga num IP residencial, e o fallback de API (escape hatch) não foi implementado.',
+    proofRefs: [
+      { kind: 'commit', ref: '515ba65', note: 'searchWeb + normalizeSearxngResponse' },
+      { kind: 'record', ref: 'docs/registros/2026-09-27b-research-web-v1.md', note: 'prova viva: degraded (github/stackoverflow silent_empty), rank 1 = docs oficiais' },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'proven',
+        note: 'Research Web V1 com prova viva controlada.',
+        refs: [
+          { kind: 'commit', ref: '515ba65' },
+          { kind: 'commit', ref: '5260316' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'research.web.network-boundary',
+    name: 'Política de alvo e rede web',
+    description: 'Só http/https públicos; recusa localhost/IP/porta/credencial e domínio que resolve para rede privada; allowlist por operação.',
+    domain: 'research',
+    maturity: 'implemented',
+    dependsOn: ['governance.external-tool-boundary'],
+    meaning: 'Pré-validação do Anima antes de abrir qualquer página. Não é boundary de segurança.',
+    advancement:
+      'A checagem de DNS tem TOCTOU (rebinding) e o Windows não isola a rede do processo. A defesa real é o egress controlado do runtime isolado, que ainda não existe.',
+    proofRefs: [
+      { kind: 'commit', ref: '515ba65', note: 'evaluateWebTarget, isPublicIpAddress, --allowed-domains' },
+      { kind: 'test', ref: 'apps/web/lib/research-web/research-web.test.ts' },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'implemented',
+        note: 'Executada ao vivo no caminho permitido; a propriedade de segurança não está provada.',
+        refs: [{ kind: 'commit', ref: '515ba65' }],
+      },
+    ],
+  },
+  {
+    id: 'research.web.isolated-runtime',
+    name: 'Runtime web isolado',
+    description: 'Rodar o metabuscador e o browser em contêiner Linux com egress controlado (sem daemon TCP sem auth, sem rede privada).',
+    domain: 'research',
+    maturity: 'projected',
+    dependsOn: ['research.web.network-boundary'],
+    meaning: 'O ambiente Windows atual é de desenvolvimento, não boundary: o daemon do agent-browser escuta TCP sem autenticação.',
+    advancement: 'Só existe a abstração `browserRuntime` (valor `local`); o modo contêiner não foi implementado.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Gap declarado do Research Web V1.',
+        refs: [{ kind: 'doc', ref: 'docs/arquitetura/research-web-v1.md' }],
+      },
+    ],
+  },
+  {
+    id: 'research.web.open',
+    name: 'Abrir página web',
+    description: 'Abrir uma URL validada numa sessão de browser efêmera, com policy default-deny de ações reais, close garantido e limpeza.',
+    domain: 'research',
+    maturity: 'proven',
+    dependsOn: ['research.web.network-boundary', 'governance.external-tool-boundary'],
+    reuse: {
+      strategy: 'wrap',
+      tool: 'agent-browser',
+      status: 'integrated',
+      externalEvidence: 'POC agent-browser (G:\\anima-labs): allow vazio não restringe; `evaluate` (não `eval`); `close` precisa estar na allowlist.',
+    },
+    meaning: 'O Anima não automatiza browser: governa sessão, allowlist, limites e encerramento.',
+    advancement: 'Sem consumidor no Anima e sem runtime isolado; comprovada só em Windows local.',
+    proofRefs: [
+      { kind: 'commit', ref: '515ba65', note: 'openAndExtractWebPage (sessão efêmera, kill por PID, rm com retentativa)' },
+      { kind: 'record', ref: 'docs/registros/2026-09-27b-research-web-v1.md', note: 'docs.searxng.org aberto; 0 processos e 0 diretórios residuais' },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'proven',
+        note: 'Research Web V1 com prova viva controlada.',
+        refs: [
+          { kind: 'commit', ref: '515ba65' },
+          { kind: 'commit', ref: '5260316' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'research.web.extract',
+    name: 'Extrair conteúdo web',
+    description: 'Extrair texto legível da página aberta como `untrusted_external_content`, com contentHash para proveniência.',
+    domain: 'research',
+    maturity: 'proven',
+    dependsOn: ['research.web.open'],
+    reuse: { strategy: 'wrap', tool: 'agent-browser', status: 'integrated' },
+    meaning: 'Conteúdo externo é dado, nunca instrução; a proveniência aponta para a página aberta, não para o snippet da busca.',
+    advancement: 'Não há findings persistidos nem citados: o conteúdo extraído ainda não alimenta nada.',
+    proofRefs: [
+      { kind: 'commit', ref: '515ba65' },
+      {
+        kind: 'record',
+        ref: 'docs/registros/2026-09-27b-research-web-v1.md',
+        note: 'sha256:4a88cfe9… idêntico nas 2 execuções e ao do POC; 5614 caracteres',
+      },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'proven',
+        note: 'Research Web V1 com prova viva controlada.',
+        refs: [
+          { kind: 'commit', ref: '515ba65' },
+          { kind: 'commit', ref: '5260316' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'research.web.navigate',
+    name: 'Navegar na web (mínimo)',
+    description: 'Seguir para outra URL validada — na V1, numa NOVA sessão efêmera; sem clique nem sessão contínua.',
+    domain: 'research',
+    maturity: 'implemented',
+    dependsOn: ['research.web.open'],
+    reuse: { strategy: 'wrap', tool: 'agent-browser', status: 'integrated' },
+    meaning: 'Navegação mínima por reabertura validada: cada salto passa de novo por política e allowlist.',
+    advancement: 'Não foi exercida separadamente na prova viva (uma abertura só). Clique/seguimento na mesma sessão estão fora da V1.',
+    proofRefs: [{ kind: 'commit', ref: '515ba65' }],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'implemented',
+        note: 'Mesmo primitivo de open; sem prova própria.',
+        refs: [{ kind: 'commit', ref: '515ba65' }],
+      },
+    ],
+  },
+  {
+    id: 'research.web.cite',
+    name: 'Citar evidência web',
+    description: 'Citar um finding pela página aberta (URL final + contentHash + observedAt), nunca pelo resultado de busca.',
+    domain: 'research',
+    maturity: 'specified',
+    dependsOn: ['research.web.extract'],
+    meaning:
+      'O contrato existe em código (`WebExtractedFindingV1`, `webFindingCitation`), mas nada no Anima produz findings: a capacidade não se realiza.',
+    advancement: 'Falta o produtor de findings, que extrai claims de uma página aberta, e o uso da citação numa saída real.',
+    proofRefs: [{ kind: 'doc', ref: 'packages/core/src/research-web/web-page.ts', note: 'contrato futuro' }],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'specified',
+        note: 'Contrato nasceu com o Research Web V1.',
+        refs: [{ kind: 'commit', ref: '515ba65' }],
+      },
+    ],
+  },
+  {
+    id: 'research.web.compare',
+    name: 'Comparar fontes web',
+    description: 'Confrontar findings de fontes diferentes e registrar concordância/divergência.',
+    domain: 'research',
+    maturity: 'projected',
+    dependsOn: ['research.web.cite'],
+    meaning: 'Composição própria do Anima (modelo sobre evidência); nenhuma ferramenta a fornece.',
+    advancement: 'Depende de findings citáveis existirem.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Não implementado no Research Web V1.',
+        refs: [{ kind: 'doc', ref: 'docs/arquitetura/research-web-v1.md' }],
+      },
+    ],
+  },
+  {
+    id: 'research.web.persist-findings',
+    name: 'Persistir findings web',
+    description: 'Guardar findings citados como evidência do work item, com proveniência.',
+    domain: 'research',
+    maturity: 'projected',
+    dependsOn: ['research.web.cite', 'memory.event-history'],
+    meaning: 'O que o Anima aprendeu na web vira evidência auditável da unidade de trabalho, não texto solto.',
+    advancement: 'Depende de cite e de um contrato de evidência no work item.',
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Não implementado no Research Web V1.',
+        refs: [{ kind: 'doc', ref: 'docs/arquitetura/research-web-v1.md' }],
+      },
+    ],
   },
 ];
 

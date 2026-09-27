@@ -298,7 +298,7 @@ describe('readCapabilityAssessments', () => {
     ).toEqual([
       expect.objectContaining({
         capabilityId: 'agency.run-tests',
-        declaredMaturity: 'proven',
+        declaredMaturity: 'operational', // promovida na Evolution Reconciliation V2
         definitionMaturity: 'implemented',
         derivedMaturity: 'proven',
       }),

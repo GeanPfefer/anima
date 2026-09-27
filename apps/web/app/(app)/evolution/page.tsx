@@ -3,7 +3,9 @@ import { createClient } from '@/lib/supabase/server';
 import { readCapabilityAssessments } from '@/lib/evolution/capability-assessment-read';
 import {
   ANIMA_CAPABILITY_REGISTRY_V0,
+  EVOLUTION_BASELINE,
   getAnimaCapabilityGraph,
+  listRecentEvolution,
   longestDependencyPath,
   summarizeByDomain,
   summarizeTargetProgress,
@@ -69,6 +71,8 @@ export default async function EvolutionPage() {
       objectives={objectives}
       featuredTargetId={FEATURED_TARGET_ID}
       capabilityAssessment={capabilityAssessment}
+      recentEvolution={listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date)}
+      evolutionBaseline={{ ...EVOLUTION_BASELINE }}
     />
   );
 }

@@ -115,4 +115,4 @@ ANIMA_RESEARCH_SEARXNG_URL=http://127.0.0.1:8888 ANIMA_RESEARCH_AGENT_BROWSER_BI
 - **Não implementados:** `research.web.compare`, `research.web.cite`, `research.web.persist_findings`, `selfdev.reuse_discovery`
   (o contrato `WebExtractedFindingV1` já aponta a citação para a página aberta).
   Também não há download, upload, login, formulário nem crawler.
-- **Capability Map não alterado:** o registry não tem domínio `research`; registrar essas capacidades é unidade separada.
+- **Capability Map:** registrado na [Evolution Reconciliation V2](../registros/2026-09-27c-evolution-reconciliation-v2.md) (domínio `research`; search/open/extract comprovadas, navigate implementada, cite especificada).

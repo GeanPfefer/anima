@@ -82,13 +82,17 @@ export function nextMaturity(maturity: CapabilityMaturity): CapabilityMaturity |
 
 // ─── Domínio ─────────────────────────────────────────────────────────────────
 
+// `research` (Evolution V2): observar o mundo EXTERNO (web) sob governança. Não
+// cabe em `understanding` (modelo do mundo do USUÁRIO) nem em `interaction`
+// (superfícies do próprio Anima).
 export type CapabilityDomain =
   | 'understanding'
   | 'memory'
   | 'agency'
   | 'governance'
   | 'compute'
-  | 'interaction';
+  | 'interaction'
+  | 'research';
 
 export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
   'understanding',
@@ -97,6 +101,7 @@ export const CAPABILITY_DOMAINS: readonly CapabilityDomain[] = [
   'governance',
   'compute',
   'interaction',
+  'research',
 ] as const;
 
 export const CAPABILITY_DOMAIN_LABEL_PT: Record<CapabilityDomain, string> = {
@@ -106,6 +111,7 @@ export const CAPABILITY_DOMAIN_LABEL_PT: Record<CapabilityDomain, string> = {
   governance: 'Governança',
   compute: 'Compute',
   interaction: 'Interação',
+  research: 'Pesquisa externa',
 };
 
 // ─── Prova ───────────────────────────────────────────────────────────────────
@@ -131,6 +137,48 @@ export interface CapabilityProofRef {
   kind: CapabilityProofKind;
   ref: string;
   note?: string;
+}
+
+// ─── Origem / reuso externo (Evolution V2) ────────────────────────────────────
+
+// Princípio ADOPT → WRAP → FORK → BUILD: uma capacidade pode ser FORNECIDA por
+// ferramenta externa e GOVERNADA pelo Anima. Ausência de `reuse` = capacidade
+// interna. `undecided` = há candidato externo, mas a estratégia ainda depende de
+// decisão humana (não se inventa uma).
+export type CapabilityReuseStrategy = 'adopt' | 'wrap' | 'fork' | 'contribute_upstream' | 'build' | 'undecided';
+
+// `integrated` = a ferramenta já é chamada por código do Anima.
+// `candidate`  = só POC/arquitetura externa. Um POC externo que funcionou NÃO é
+// capacidade do Anima: candidata nunca pode estar em maturidade realizada.
+export type CapabilityReuseStatus = 'integrated' | 'candidate';
+
+export interface CapabilityReuse {
+  strategy: CapabilityReuseStrategy;
+  /** Ferramenta externa (nome público do projeto). */
+  tool: string;
+  status: CapabilityReuseStatus;
+  /**
+   * Evidência EXTERNA (POC, arquitetura fora do repo). Mantida separada de
+   * `proofRefs` de propósito: nunca conta como prova de funcionamento do Anima.
+   */
+  externalEvidence?: string;
+}
+
+// ─── História (Evolution V2 — semente; derivação completa = Evolution History V3) ──
+
+// Registro DECLARATIVO e mínimo de mudanças da capacidade, sempre ancorado em
+// refs reais. Não é derivado do git nem do event log: só registra o que uma
+// reconciliação explícita auditou. Ausência de entrada ≠ ausência de história.
+export type CapabilityHistoryChange = 'introduced' | 'maturity_changed' | 'proof_added' | 'relation_added';
+
+export interface CapabilityHistoryEntry {
+  /** Data (YYYY-MM-DD) do FATO subjacente (commit/prova), não da edição do registry. */
+  at: string;
+  change: CapabilityHistoryChange;
+  from?: CapabilityMaturity;
+  to?: CapabilityMaturity;
+  note: string;
+  refs: CapabilityProofRef[];
 }
 
 // ─── Capacidade ──────────────────────────────────────────────────────────────
@@ -172,6 +220,12 @@ export interface Capability {
 
   /** Evidência real de funcionamento (separada da definição). */
   proofRefs?: CapabilityProofRef[];
+
+  /** Origem externa (reuso). Ausente = capacidade interna. */
+  reuse?: CapabilityReuse;
+
+  /** Mudanças auditadas desta capacidade (ordem cronológica). */
+  history?: CapabilityHistoryEntry[];
 }
 
 // ─── Validação do registro ──────────────────────────────────────────────────
@@ -186,7 +240,12 @@ export type CapabilityRegistryIssueCode =
   | 'missing_parent'
   | 'self_parent'
   | 'missing_unlock'
-  | 'dependency_cycle';
+  | 'dependency_cycle'
+  // Evolution V2 — regras epistemológicas:
+  | 'strong_maturity_without_proof' // proven/operational/autonomous sem proofRefs
+  | 'external_candidate_realized' //  candidata externa marcada como já existente no Anima
+  | 'invalid_history' //              data inválida ou maturity_changed incompleto/sem refs
+  | 'history_maturity_mismatch'; //   último `to` (introduced/maturity_changed) ≠ maturidade atual
 
 export interface CapabilityRegistryIssue {
   code: CapabilityRegistryIssueCode;
@@ -198,6 +257,41 @@ export interface CapabilityRegistryIssue {
 
 const MATURITY_SET = new Set<string>(CAPABILITY_MATURITIES);
 const DOMAIN_SET = new Set<string>(CAPABILITY_DOMAINS);
+const STRONG_MATURITIES = new Set<CapabilityMaturity>(['proven', 'operational', 'autonomous']);
+const HISTORY_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidHistoryDate(value: string): boolean {
+  return HISTORY_DATE.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
+}
+
+function validateHistory(cap: Capability): CapabilityRegistryIssue[] {
+  const issues: CapabilityRegistryIssue[] = [];
+  const entries = cap.history ?? [];
+  let previousAt = '';
+  let lastMaturityChange: CapabilityHistoryEntry | undefined;
+  for (const entry of entries) {
+    const problems: string[] = [];
+    if (!isValidHistoryDate(entry.at)) problems.push(`data inválida "${entry.at}"`);
+    else if (entry.at < previousAt) problems.push(`fora de ordem cronológica (${entry.at})`);
+    if (entry.refs.length === 0) problems.push('sem refs');
+    if (entry.change === 'maturity_changed') {
+      if (!entry.from || !entry.to || entry.from === entry.to) problems.push('maturity_changed exige from ≠ to');
+    }
+    if ((entry.change === 'maturity_changed' || entry.change === 'introduced') && entry.to) lastMaturityChange = entry;
+    for (const problem of problems) {
+      issues.push({ code: 'invalid_history', capabilityId: cap.id, message: `história de ${cap.id}: ${problem}` });
+    }
+    if (isValidHistoryDate(entry.at)) previousAt = entry.at;
+  }
+  if (lastMaturityChange?.to && lastMaturityChange.to !== cap.maturity) {
+    issues.push({
+      code: 'history_maturity_mismatch',
+      capabilityId: cap.id,
+      message: `${cap.id}: última mudança registrada leva a ${lastMaturityChange.to}, mas a maturidade atual é ${cap.maturity}`,
+    });
+  }
+  return issues;
+}
 
 /**
  * Valida um registro de capacidades e devolve TODAS as violações encontradas
@@ -252,6 +346,18 @@ export function validateCapabilityRegistry(
         issues.push({ code: 'missing_unlock', capabilityId: cap.id, message: `${cap.id} desbloqueia capacidade inexistente: ${unlock}` });
       }
     }
+
+    if (STRONG_MATURITIES.has(cap.maturity) && (cap.proofRefs?.length ?? 0) === 0) {
+      issues.push({ code: 'strong_maturity_without_proof', capabilityId: cap.id, message: `${cap.id} declara ${cap.maturity} sem prova` });
+    }
+    if (cap.reuse?.status === 'candidate' && isRealizedMaturity(cap.maturity)) {
+      issues.push({
+        code: 'external_candidate_realized',
+        capabilityId: cap.id,
+        message: `${cap.id} é candidata externa (${cap.reuse.tool}) e não pode estar ${cap.maturity}`,
+      });
+    }
+    issues.push(...validateHistory(cap));
   }
 
   for (const cycle of findDependencyCycles(capabilities)) {
@@ -493,4 +599,26 @@ export function longestDependencyPath(graph: CapabilityGraph, targetId: string):
     return full;
   };
   return pathTo(targetId);
+}
+
+// ─── Evolução recente (Evolution V2) ─────────────────────────────────────────
+
+export interface RecentEvolutionEntry {
+  capabilityId: string;
+  entry: CapabilityHistoryEntry;
+}
+
+/**
+ * Mudanças registradas em `history` a partir de `since` (YYYY-MM-DD, inclusive),
+ * da mais recente para a mais antiga. Só projeta o que o registry declara com
+ * refs reais — nunca infere "recente" por timestamp de arquivo ou de git.
+ */
+export function listRecentEvolution(capabilities: readonly Capability[], since: string): RecentEvolutionEntry[] {
+  const out: RecentEvolutionEntry[] = [];
+  for (const cap of capabilities) {
+    for (const entry of cap.history ?? []) {
+      if (isValidHistoryDate(entry.at) && entry.at >= since) out.push({ capabilityId: cap.id, entry });
+    }
+  }
+  return out.sort((a, b) => (a.entry.at === b.entry.at ? a.capabilityId.localeCompare(b.capabilityId) : a.entry.at < b.entry.at ? 1 : -1));
 }

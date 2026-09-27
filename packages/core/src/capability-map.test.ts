@@ -10,6 +10,7 @@ import {
   summarizeByDomain,
   summarizeTargetProgress,
   validateCapabilityRegistry,
+  listRecentEvolution,
   type Capability,
 } from './capability-map';
 
@@ -169,5 +170,70 @@ describe('análise do grafo', () => {
     const path = longestDependencyPath(graph, 'future');
     expect(path).toEqual(['root', 'mid', 'spec', 'future']);
     expect(longestDependencyPath(graph, 'ghost')).toBeNull();
+  });
+});
+
+describe('regras epistemológicas (Evolution V2)', () => {
+  const proof = [{ kind: 'commit' as const, ref: 'abc1234' }];
+  const codes = (caps: Capability[]) => validateCapabilityRegistry(caps).map((i) => i.code);
+
+  test('estado forte sem prova é recusado; implemented sem prova é aceito', () => {
+    expect(codes([cap({ id: 'a', maturity: 'proven' })])).toEqual(['strong_maturity_without_proof']);
+    expect(codes([cap({ id: 'a', maturity: 'operational', proofRefs: proof })])).toEqual([]);
+    expect(codes([cap({ id: 'a', maturity: 'implemented' })])).toEqual([]);
+  });
+
+  test('candidata externa (POC fora do Anima) nunca pode estar realizada', () => {
+    const reuse = { strategy: 'wrap' as const, tool: 'x', status: 'candidate' as const };
+    expect(codes([cap({ id: 'a', maturity: 'implemented', reuse })])).toEqual(['external_candidate_realized']);
+    expect(codes([cap({ id: 'a', maturity: 'projected', reuse })])).toEqual([]);
+    // reuso integrado pode estar realizado
+    expect(codes([cap({ id: 'a', maturity: 'implemented', reuse: { ...reuse, status: 'integrated' } })])).toEqual([]);
+  });
+
+  test('história exige data válida, ordem, refs e maturity_changed com from ≠ to', () => {
+    expect(codes([cap({ id: 'a', history: [{ at: '2026-13-40', change: 'proof_added', note: 'x', refs: proof }] })])).toEqual(['invalid_history']);
+    expect(codes([cap({ id: 'a', history: [{ at: '2026-09-27', change: 'proof_added', note: 'x', refs: [] }] })])).toEqual(['invalid_history']);
+    expect(
+      codes([
+        cap({
+          id: 'a',
+          history: [
+            { at: '2026-09-27', change: 'proof_added', note: 'x', refs: proof },
+            { at: '2026-09-20', change: 'proof_added', note: 'y', refs: proof },
+          ],
+        }),
+      ]),
+    ).toEqual(['invalid_history']);
+    expect(
+      codes([cap({ id: 'a', history: [{ at: '2026-09-27', change: 'maturity_changed', from: 'implemented', note: 'x', refs: proof }] })]),
+    ).toContain('invalid_history');
+  });
+
+  test('a última mudança de maturidade registrada precisa bater com a maturidade atual', () => {
+    const history = [{ at: '2026-09-27', change: 'maturity_changed' as const, from: 'implemented' as const, to: 'proven' as const, note: 'x', refs: proof }];
+    expect(codes([cap({ id: 'a', maturity: 'implemented', history })])).toEqual(['history_maturity_mismatch']);
+    expect(codes([cap({ id: 'a', maturity: 'proven', proofRefs: proof, history })])).toEqual([]);
+    const introduced = [{ at: '2026-09-27', change: 'introduced' as const, to: 'projected' as const, note: 'x', refs: proof }];
+    expect(codes([cap({ id: 'a', maturity: 'specified', history: introduced })])).toEqual(['history_maturity_mismatch']);
+  });
+});
+
+describe('listRecentEvolution', () => {
+  const ref = [{ kind: 'commit' as const, ref: 'abc1234' }];
+  test('lista só entradas registradas desde a baseline, da mais recente para a mais antiga', () => {
+    const caps = [
+      cap({
+        id: 'a',
+        history: [
+          { at: '2026-09-10', change: 'proof_added', note: 'antiga', refs: ref },
+          { at: '2026-09-20', change: 'proof_added', note: 'meio', refs: ref },
+        ],
+      }),
+      cap({ id: 'b', history: [{ at: '2026-09-27', change: 'introduced', to: 'implemented', note: 'nova', refs: ref }] }),
+      cap({ id: 'c' }), // sem história ⇒ nunca "recente" por inferência
+    ];
+    const recent = listRecentEvolution(caps, '2026-09-16');
+    expect(recent.map((r) => `${r.capabilityId}:${r.entry.note}`)).toEqual(['b:nova', 'a:meio']);
   });
 });

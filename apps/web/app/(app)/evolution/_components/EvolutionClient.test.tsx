@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import {
   ANIMA_CAPABILITY_REGISTRY_V0,
+  EVOLUTION_BASELINE,
   getAnimaCapabilityGraph,
+  listRecentEvolution,
   longestDependencyPath,
   summarizeByDomain,
   summarizeTargetProgress,
@@ -33,6 +35,8 @@ function buildProps(): EvolutionClientProps {
         issues: [],
       },
     },
+    recentEvolution: listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date),
+    evolutionBaseline: { ...EVOLUTION_BASELINE },
   };
 }
 
@@ -488,5 +492,81 @@ describe('EvolutionClient (Evolution UX V1)', () => {
         '— comprovada de maneira confiável',
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
+  test('domínio Pesquisa externa aparece com as capacidades reais do Research Web', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    expect(screen.getByRole('button', { name: /Pesquisa externa/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Busca web — Comprovada · reuso integrado WRAP (SearXNG)' })).toBeInTheDocument();
+    expect(container.querySelector('[data-capid="research.web.search"]')?.getAttribute('data-origin')).toBe('integrated');
+    expect(container.querySelector('[data-capid="research.web.navigate"]')?.getAttribute('data-future')).toBe('false');
+  });
+
+  test('futuro nunca aparece como operacional; candidatas externas ficam no futuro e marcadas', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    for (const id of ['research.web.cite', 'research.web.compare', 'research.web.persist-findings', 'agency.reuse-discovery', 'memory.evolution-history']) {
+      const el = container.querySelector(`[data-capid="${id}"]`);
+      expect(el?.getAttribute('data-future')).toBe('true');
+      expect(el?.getAttribute('aria-label')).not.toMatch(/Operacional/);
+    }
+    const candidates = container.querySelectorAll('[data-origin="candidate"]');
+    expect(candidates.length).toBe(4);
+    candidates.forEach((el) => expect(el.getAttribute('data-future')).toBe('true'));
+    expect(screen.getByRole('button', { name: 'Continuidade entre harnesses — Projetada (a conquistar) · candidata externa (ai-memory)' })).toBeInTheDocument();
+  });
+
+  test('lente Evolução recente destaca só o que foi registrado desde a baseline e lista no painel', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Evolução recente/ }));
+    expect(stateOf(container, 'research.web.search')).toBe('strong');
+    expect(stateOf(container, 'agency.run-tests')).toBe('strong');
+    expect(stateOf(container, 'interaction.chat')).toBe('dim');
+    const panel = screen.getByText(/Desde Evolution UX V1/).closest('div') as HTMLElement;
+    expect(within(panel).getByText(/Baseline 7f276d8/)).toBeInTheDocument();
+    // clicar numa entrada seleciona a capacidade
+    fireEvent.click(within(panel).getAllByRole('button', { name: 'Executar testes e comandos governados' })[0]!);
+    expect(stateOf(container, 'agency.run-tests')).toBe('selected');
+  });
+
+  test('lente Reuso externo separa temos × integrado × candidatas', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Reuso externo/ }));
+    expect(stateOf(container, 'research.web.open')).toBe('strong');
+    expect(stateOf(container, 'memory.cross-harness')).toBe('strong');
+    expect(stateOf(container, 'governance.review')).toBe('dim');
+    expect(screen.getByRole('heading', { name: /Reuso já integrado/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Candidatas externas (4)' })).toBeInTheDocument();
+    expect(screen.getByText(/POC externo que funcionou ≠ capacidade do Anima/)).toBeInTheDocument();
+  });
+
+  test('painel mostra origem e história tipada da capacidade', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Executar testes e comandos governados — / }));
+    expect(screen.getByRole('heading', { name: 'Origem' })).toBeInTheDocument();
+    expect(screen.getByText(/Interna — construída e governada pelo Anima/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'História' })).toBeInTheDocument();
+    expect(screen.getAllByText('Maturidade').length).toBeGreaterThan(0);
+    expect(screen.getByText(/ATTEMPT 515c4d83/)).toBeInTheDocument();
+  });
+
+  test('candidata externa explica que a evidência externa não é prova do Anima', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Disponibilidade de quota de assinatura — / }));
+    expect(screen.getByText(/Ainda não é/)).toBeInTheDocument();
+    expect(screen.getByText(/Evidência externa .não conta como prova do Anima./)).toBeInTheDocument();
+    expect(screen.getByText(/Sem prova declarada/)).toBeInTheDocument();
+  });
+
+  test('lente combina com filtro de domínio sem perder o foco por relações', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Reuso externo/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Pesquisa externa/ }));
+    expect(stateOf(container, 'research.web.search')).toBe('strong');
+    expect(stateOf(container, 'research.query-privacy')).toBe('dim'); // interna
+    fireEvent.click(screen.getByRole('button', { name: /^Busca web — / }));
+    expect(stateOf(container, 'research.web.search')).toBe('selected');
+    expect(stateOf(container, 'research.query-privacy')).toBe('strong'); // dependência direta
   });
 });

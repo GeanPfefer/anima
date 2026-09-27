@@ -375,10 +375,10 @@ describe('deriveCapabilityAssessmentsFromWorkHistory', () => {
       capabilityId: 'agency.run-tests',
 
       /**
-       * O registry atual declara proven, mas a prova dinâmica precisa
-       * rederivar isso a partir de implemented.
+       * O registry declara operational (Evolution V2), mas a prova dinâmica
+       * precisa rederivar isso a partir de implemented: 1 ocasião ⇒ proven.
        */
-      declaredMaturity: 'proven',
+      declaredMaturity: 'operational',
       definitionMaturity: 'implemented',
       derivedMaturity: 'proven',
 
@@ -456,7 +456,7 @@ describe('deriveCapabilityAssessmentsFromWorkHistory', () => {
 
     expect(projection.assessments[0]).toMatchObject({
       capabilityId: 'agency.run-tests',
-      declaredMaturity: 'proven',
+      declaredMaturity: 'operational',
       definitionMaturity: 'implemented',
       derivedMaturity: 'operational',
       assessment: {

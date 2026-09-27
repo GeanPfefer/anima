@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Evolution Reconciliation V2 em 2026-09-27: o Capability Map foi reconciliado com o estado
+> real desde a baseline `7f276d8` (40 → 63 capacidades, novo domínio `research`). Promoções só
+> com critério cumprido: `run-tests` operacional, `detect-deficiency` comprovada,
+> `formulate-improvement` implementada. Research Web aparece comprovado/implementado, nunca
+> operacional; POCs externos viram candidatas (reuso), nunca prova. A `/evolution` ganhou
+> origem, história declarativa e as lentes "Evolução recente" e "Reuso externo".
+> [Registro](docs/registros/2026-09-27c-evolution-reconciliation-v2.md).
 > Research Web V1 (read-only) implementado em 2026-09-27 (`515ba65`), a primeira
 > capacidade reuse-first: `research.web.search` via SearXNG e
 > `research.web.open/navigate/extract` via agent-browser, sem buscador nem browser
