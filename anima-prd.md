@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Completed → Integrated V0 em 2026-09-28: completed ≠ integrated. Nova autorização HUMANA de um efeito Git
+> exato (`integration_effect_authorized`, author=user; `integration_decided` V1 NÃO serve) congela resultado
+> aceito, commit (derivado do handoff), repositório, `refs/heads/dev`, SHA-alvo esperado e `merge_no_ff`.
+> `executeAuthorizedIntegration` (só ids opacos) revalida, prepara com merge-tree, faz merge --no-ff do commit
+> exato, avança dev por compare-and-swap, observa e grava `integration_completed` (receipt idempotente,
+> reconciliável Git×Postgres). main sempre negada; dev em checkout ⇒ recusa. Item segue `completed`. Registro
+> `docs/registros/2026-09-28-completed-integrated-v0.md`.
 > Mandated Verifier Enforcement V0.1 em 2026-09-28: fronteira de REVIEW fechada no banco. No lane com
 > Verifier obrigatório o terminal grava resultado CANDIDATO (item segue `in_progress`); `record_verifier_opinion`
 > libera para `review` na mesma transação só com parecer conclusivo e correlação completa (git com commit do

@@ -2212,6 +2212,19 @@ export type Database = {
         }
         Returns: Json
       }
+      authorize_integration_effect: {
+        Args: {
+          accepted_result_event_id: string
+          authorization_id: string
+          expected_proposal_version: number
+          expected_target_sha: string
+          mode: string
+          repository_id: string
+          target_ref: string
+          work_item_id: string
+        }
+        Returns: Json
+      }
       authorize_work_resume:
         | {
             Args: {
@@ -2676,6 +2689,15 @@ export type Database = {
         Args: {
           evidence: Json
           expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
+      record_integration_completed: {
+        Args: {
+          authorization_id: string
+          expected_proposal_version: number
+          receipt: Json
           work_item_id: string
         }
         Returns: Json
@@ -3331,6 +3353,8 @@ export type Database = {
         | "host_observed_node_lifecycle_recorded"
         | "compute_routing_decided"
         | "compute_preference_recorded"
+        | "integration_effect_authorized"
+        | "integration_completed"
       work_impact_level:
         | "low"
         | "significant"
@@ -3679,6 +3703,8 @@ export const Constants = {
         "host_observed_node_lifecycle_recorded",
         "compute_routing_decided",
         "compute_preference_recorded",
+        "integration_effect_authorized",
+        "integration_completed",
       ],
       work_impact_level: [
         "low",
