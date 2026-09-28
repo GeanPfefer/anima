@@ -25,12 +25,59 @@ export type CapabilityEvidenceClass =
   | 'implementation'
   | 'verified_execution'
   | 'reproduced_operation'
-  | 'autonomous_operation';
+  | 'autonomous_operation'
+  /**
+   * Proof Evaluation V0 (2026-09-28): um PROCEDIMENTO assistido (humano/dev fora do
+   * runtime do Anima — backup/restore manual, script de prova controlada)
+   * comprovadamente funcionou. Prova o procedimento, NUNCA a capacidade do
+   * sistema: é preservado como evidência, mas não participa da maturidade.
+   * Ex.: restore PASS por ato humano ≠ "o Anima garante a própria durabilidade".
+   */
+  | 'assisted_procedure';
 
+/** Classes que participam da escada de maturidade. */
+export type CapabilityMaturityEvidenceClass = Exclude<
+  CapabilityEvidenceClass,
+  'assisted_procedure'
+>;
+
+/**
+ * Desfecho da observação.
+ *
+ * `inconclusive` NÃO é ausência de evidência: preserva fatos que demonstram
+ * PARTE do caminho sem demonstrar a capacidade (ex.: gates executados e
+ * observados pelo host, mas falhos — prova execução, não conclusão correta).
+ * É guardado e exibido; nunca promove nem regride.
+ */
 export type CapabilityEvidenceOutcome =
   | 'positive'
   | 'negative'
   | 'inconclusive';
+
+/**
+ * DE ONDE a observação veio (proveniência da fonte, não o que ela demonstra):
+ *
+ * - `canonical_event_log`: derivada automaticamente de `work_events` (estado
+ *   canônico append-only; o Anima operou sobre trabalho real);
+ * - `recorded_proof`: prova controlada/registro estruturado com proveniência
+ *   (registro append-only + commit), escrito à mão. É evidência, não juízo: a
+ *   maturidade continua saindo da régua. Prova controlada NUNCA conta como
+ *   ocasião de reprodução — `operational` exige uso real, não repetição de prova.
+ *
+ * Ausente = `canonical_event_log` (compatibilidade com o V1/V1.1).
+ */
+export type CapabilityEvidenceSource =
+  | 'canonical_event_log'
+  | 'recorded_proof';
+
+/**
+ * Frescor modelado, NÃO aplicado no V0:
+ * - `durable`: o fato não envelhece (código exercitado, execução observada);
+ * - `perishable`: depende de algo que pode desaparecer/mudar (ferramenta
+ *   externa instalada, preço de provider, runtime disponível). Política de
+ *   recência fica para versão futura; hoje só é exposto para leitura humana.
+ */
+export type CapabilityEvidenceFreshness = 'durable' | 'perishable';
 
 export interface CapabilityEvidenceObservation {
   /** Identidade estável da observação. */
@@ -67,11 +114,35 @@ export interface CapabilityEvidenceObservation {
    * independente.
    */
   readonly occasionId?: string;
+
+  /** Proveniência da fonte. Ausente = `canonical_event_log`. */
+  readonly source?: CapabilityEvidenceSource;
+
+  /**
+   * Ambiente em que o fato foi observado (ex.: `windows-local-dev`). Só para
+   * leitura humana — nunca decide maturidade.
+   */
+  readonly environment?: string;
+
+  /**
+   * O que a observação cobre — e o que NÃO cobre (ex.: "funcionalidade, não
+   * isolamento de segurança"). Só para leitura humana.
+   */
+  readonly scope?: string;
+
+  /** Frescor (modelado; sem política de expiração no V0). */
+  readonly freshness?: CapabilityEvidenceFreshness;
+}
+
+export function evidenceSourceOf(
+  evidence: CapabilityEvidenceObservation,
+): CapabilityEvidenceSource {
+  return evidence.source ?? 'canonical_event_log';
 }
 
 export type CapabilityProofBasis =
   | 'definition'
-  | CapabilityEvidenceClass
+  | CapabilityMaturityEvidenceClass
   | 'regression';
 
 export interface CapabilityProofAssessment {
@@ -112,6 +183,8 @@ export interface AssessCapabilityMaturityInput {
 }
 
 const EVIDENCE_RANK: Record<CapabilityEvidenceClass, number> = {
+  // Nunca chega à janela forte (isStrongEvidence o exclui); rank só por totalidade.
+  assisted_procedure: -1,
   implementation: 0,
   verified_execution: 1,
   reproduced_operation: 2,
@@ -127,7 +200,7 @@ const EVIDENCE_RANK: Record<CapabilityEvidenceClass, number> = {
 export const REPRODUCTION_THRESHOLD = 2 as const;
 
 const EVIDENCE_MATURITY: Record<
-  Exclude<CapabilityEvidenceClass, 'implementation'>,
+  Exclude<CapabilityMaturityEvidenceClass, 'implementation'>,
   CapabilityMaturity
 > = {
   verified_execution: 'proven',
@@ -166,7 +239,10 @@ function isStrongEvidence(
     | 'reproduced_operation'
     | 'autonomous_operation';
 } {
-  return evidence.evidenceClass !== 'implementation';
+  return (
+    evidence.evidenceClass !== 'implementation' &&
+    evidence.evidenceClass !== 'assisted_procedure'
+  );
 }
 
 /**
@@ -294,7 +370,7 @@ export function assessCapabilityMaturity(
 
   // `positiveWindow` contém somente evidência forte aqui.
   const bestClass = best.evidenceClass as Exclude<
-    CapabilityEvidenceClass,
+    CapabilityMaturityEvidenceClass,
     'implementation'
   >;
 
@@ -320,9 +396,12 @@ export function assessCapabilityMaturity(
     const occasions = new Set<string>();
 
     for (const evidence of positiveWindow) {
+      // Prova controlada registrada não é uso real: nunca conta como ocasião
+      // de reprodução (Proof Evaluation V0, 2026-09-28).
       if (
         evidence.evidenceClass === 'verified_execution' &&
-        evidence.occasionId !== undefined
+        evidence.occasionId !== undefined &&
+        evidenceSourceOf(evidence) === 'canonical_event_log'
       ) {
         occasions.add(evidence.occasionId);
       }

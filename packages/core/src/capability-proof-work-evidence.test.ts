@@ -693,11 +693,28 @@ describe('Capability Attribution V0', () => {
   });
 
   test('gate terminal falho não produz evidência positiva de run-tests', () => {
-    expect(
-      capabilityIds([
-        gateEvent(gateEvidence(1)),
-      ]),
-    ).toEqual([]);
+    const evidence = deriveCanonicalWorkCapabilityEvidenceFromEvents([
+      gateEvent(gateEvidence(1)),
+    ]);
+
+    // Proof Evaluation V0 (2026-09-28): falha também é evidência — preservada como
+    // inconclusiva (executou, não concluiu), nunca positiva.
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]!.capabilityId).toBe('agency.run-tests');
+    expect(evidence[0]!.outcome).toBe('inconclusive');
+    expect(evidence.some((entry) => entry.outcome === 'positive')).toBe(false);
+  });
+
+  test('gate falho preservado não promove nem regride run-tests', () => {
+    const projection = deriveCapabilityAssessmentsFromWorkHistory([
+      gateEvent(gateEvidence(1)),
+    ]);
+    const runTests = projection.assessments.find(
+      (entry) => entry.capabilityId === 'agency.run-tests',
+    );
+
+    expect(runTests?.assessment.basis).toBe('definition');
+    expect(runTests?.assessment.contradictingEvidenceIds).toEqual([]);
   });
 
   test('a atribuição continua independente de WorkCapability e texto livre', () => {

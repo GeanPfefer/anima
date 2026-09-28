@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { readCapabilityAssessments } from '@/lib/evolution/capability-assessment-read';
+import { readCapabilityEvolution } from '@/lib/evolution/capability-assessment-read';
 import {
   ANIMA_CAPABILITY_REGISTRY_V0,
   EVOLUTION_BASELINE,
@@ -28,8 +28,8 @@ export default async function EvolutionPage() {
    * O mapa declarado continua existindo mesmo quando o histórico não pode ser
    * reconstruído. Falha de telemetria nunca vira rebaixamento implícito.
    */
-  const assessmentRead =
-    await readCapabilityAssessments(supabase);
+  const evolutionRead = await readCapabilityEvolution(supabase);
+  const assessmentRead = evolutionRead.assessment;
 
   const capabilityAssessment: EvolutionCapabilityAssessmentState =
     assessmentRead.ok
@@ -71,6 +71,7 @@ export default async function EvolutionPage() {
       objectives={objectives}
       featuredTargetId={FEATURED_TARGET_ID}
       capabilityAssessment={capabilityAssessment}
+      proofEvaluations={evolutionRead.evaluations}
       recentEvolution={listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date)}
       evolutionBaseline={{ ...EVOLUTION_BASELINE }}
     />

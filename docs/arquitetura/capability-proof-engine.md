@@ -232,3 +232,56 @@ veredito conclusivo, decisão humana). A régua de maturidade (engine) e a proje
 (UI) **não** mudam. A UI nunca codifica maturidade: ela renderiza a conclusão e a
 explicação que o core produz; a linguagem de domínio por capacidade vive no core
 (`capability-assessment-explanation.ts`), nunca em React.
+
+## Proof Evaluation V0 — declarado × derivado (2026-09-28)
+
+Camada sobre o motor V1.1 (não é motor paralelo): responde, para **toda**
+capacidade, "qual evidência real sustenta a maturidade declarada?". Registro:
+[`2026-09-28-capability-proof-engine-v0.md`](../registros/2026-09-28-capability-proof-engine-v0.md).
+
+### Conceitos separados
+
+Capability ≠ Tool ≠ primitiva de implementação ≠ Proof ≠ disponibilidade de
+runtime ≠ Maturity claim. `agent-browser` instalado não é `research.web.open`
+operacional; um helper implementado não é a capacidade implementada; um
+procedimento humano que funcionou (restore manual) não é o Anima garantindo a
+própria durabilidade.
+
+### Contrato de evidência (extensão mínima de `CapabilityEvidenceObservation`)
+
+| Campo | Papel |
+|---|---|
+| `evidenceClass` | o que a observação demonstra; nova classe `assisted_procedure` (procedimento humano/dev) é preservada e **nunca** decide maturidade |
+| `outcome` | `positive` / `negative` / `inconclusive`; inconclusivo = fato parcial preservado (executou, não concluiu) |
+| `source` | `canonical_event_log` (ausente = este) ou `recorded_proof` (prova controlada com proveniência, `capability-proof-recorded.ts`) |
+| `occasionId` | ocasião independente; prova registrada **nunca** conta como ocasião de reprodução |
+| `environment`, `scope` | leitura humana (ex.: "funcionalidade, não isolamento") |
+| `freshness` | `durable` / `perishable` — modelado, sem política de expiração no V0 |
+
+### Regras e avaliação (`capability-proof-evaluation.ts`)
+
+- `CAPABILITY_PROOF_RULES_V0`: por capacidade, fontes aceitas, o que conta como
+  evidência, critério concreto por degrau, teto de derivação e (opcional) degrau
+  terminal. **Sem regra ⇒ `not_evaluated`** (maturidade declarada segue manual).
+- `evaluateCapabilityProofs` / `evaluateCapabilityProof(id)` /
+  `evaluateCapabilityProofsFromHistory({ events | null })` → por capacidade:
+  declarado, derivado, `status` (`aligned` · `underclaimed` · `overclaimed` ·
+  `insufficient_evidence` · `not_evaluated`), `maturitySource` (`manual` ·
+  `derived` · `hybrid`), evidência, resumo, `gaps` e explicação.
+- A régua continua sendo `assessCapabilityMaturity`. A avaliação **nunca muta** o
+  registry; divergência é reportada.
+- Histórico canônico ilegível ⇒ regras canônicas `not_evaluated` (fonte
+  indisponível); prova registrada continua avaliada. Nada é rebaixado por falta de
+  telemetria.
+
+### Semântica de maturidade (critérios)
+
+- **specified**: contrato suficiente para construir (ex.: Durable State).
+- **implemented**: código **da capacidade** exercitado (teste/implementação
+  positiva). Primitiva de apoio entra como `implementation` + `inconclusive`.
+- **proven**: ≥1 execução **observada** (canônica ou prova controlada registrada).
+- **operational**: ≥2 ocasiões independentes de **uso real** (event log canônico);
+  prova controlada repetida não conta.
+- **autonomous**: exige `autonomous_operation`, ainda não produzido por nenhum
+  adapter; **não é destino universal** — a regra pode declarar `terminalMaturity`
+  (ex.: `agency.supervised-self-development` termina em `operational`).

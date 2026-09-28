@@ -504,6 +504,112 @@ export function deriveSupervisedSelfDevelopmentEvidenceFromEvents(
  * - uma mesma attempt pode provar mais de uma capability quando realmente
  *   exercitou mais de um comportamento.
  *
+ * Providers EXTERNOS reconhecidos pelo prefixo estruturado do backend do coder
+ * (`coderBackendId(provider, model)` = `${provider}:${model}`). Casamento EXATO do
+ * prefixo — nunca substring de texto livre. Ollama (local/remoto) não é externo.
+ */
+const EXTERNAL_CODER_PROVIDERS: ReadonlySet<string> = new Set(['openai']);
+
+function externalProviderOf(backendId: string): string | null {
+  const separator = backendId.indexOf(':');
+  if (separator <= 0) return null;
+
+  const provider = backendId.slice(0, separator);
+  return EXTERNAL_CODER_PROVIDERS.has(provider) ? provider : null;
+}
+
+/**
+ * COMPUTE.EXTERNAL-PROVIDER (Proof Evaluation V0, 2026-09-28).
+ *
+ * Sinal: evidência do coder observada pelo host numa attempt governada cujo
+ * backend é um provider externo. A borda paga é única (admite antes do fetch),
+ * então todo uso aqui passou pela governança por construção.
+ *
+ * - `succeeded` + uso reportado pelo PROVIDER (`providerUsage` ou
+ *   `providerCallCount >= 1`) → execução verificada positiva (1 ocasião por
+ *   attempt). O uso reportado é o fato externo: o provider respondeu;
+ * - provider alcançado, mas coder `failed`/`cancelled` → `inconclusive`: prova o
+ *   transporte, não a conclusão;
+ * - backend externo SEM uso reportado → `inconclusive` (fail-closed: não se
+ *   presume que o provider respondeu).
+ *
+ * Isto credita a capacidade de CHAMAR o provider sob governança — não a de
+ * liquidar custo (`compute.paid-settlement`) nem a de produzir uma boa mudança.
+ */
+export function deriveExternalProviderEvidenceFromEvents(
+  events: readonly WorkEvent[],
+): readonly CapabilityEvidenceObservation[] {
+  // Última evidência do coder por attempt (ordem canônica do caller).
+  const latest = new Map<
+    string,
+    {
+      readonly event: WorkEvent;
+      readonly evidence: NonNullable<
+        ReturnType<typeof projectHostObservedCoderEvidence>
+      >;
+    }
+  >();
+
+  for (const event of events) {
+    if (event.type !== 'host_observed_coder_evidence_recorded') continue;
+
+    const evidence = projectHostObservedCoderEvidence([event]);
+    if (evidence === null) continue;
+    if (externalProviderOf(evidence.backendId) === null) continue;
+
+    latest.set(
+      [evidence.workItemId, evidence.attemptId].join(':'),
+      { event, evidence },
+    );
+  }
+
+  const observations: CapabilityEvidenceObservation[] = [];
+
+  for (const { event, evidence } of latest.values()) {
+    const provider = externalProviderOf(evidence.backendId)!;
+    const reached =
+      evidence.providerUsage !== undefined ||
+      (evidence.providerCallCount ?? 0) >= 1;
+    const positive = reached && evidence.outcome === 'succeeded';
+
+    observations.push({
+      id: [
+        'external-provider',
+        'compute.external-provider',
+        evidence.attemptId,
+        event.id,
+      ].join(':'),
+      capabilityId: 'compute.external-provider',
+      evidenceClass: 'verified_execution',
+      outcome: positive ? 'positive' : 'inconclusive',
+      observedAt: evidence.observedAt,
+      occasionId: evidence.attemptId,
+      source: 'canonical_event_log',
+      freshness: 'perishable',
+      proofRefs: [
+        {
+          kind: 'attempt',
+          ref: evidence.attemptId,
+          note: 'attempt governada que usou o provider externo',
+        },
+        {
+          kind: 'event',
+          ref: event.id,
+          note: `coder ${evidence.backendId} observado pelo host (${evidence.outcome})`,
+        },
+      ],
+      note: positive
+        ? `Provider ${provider} chamado pela borda governada e respondeu (uso reportado pelo provider).`
+        : reached
+          ? `Provider ${provider} alcançado, mas o coder terminou ${evidence.outcome}: prova transporte, não conclusão.`
+          : `Backend ${provider} sem uso reportado pelo provider: não se presume resposta (fail-closed).`,
+    });
+  }
+
+  return observations;
+}
+
+/**
  * V0:
  *
  * host-observed Git change
@@ -644,12 +750,50 @@ export function deriveCanonicalWorkCapabilityEvidenceFromEvents(
       const terminal =
         terminalObservedGates(observedGates.gates);
 
+      if (terminal.length === 0) continue;
+
+      /**
+       * FALHA TAMBÉM É EVIDÊNCIA (Proof Evaluation V0, 2026-09-28).
+       *
+       * Gate terminal falho: o host EXECUTOU e observou os comandos (prova de
+       * execução), mas a execução não concluiu verde (não prova conclusão
+       * correta). Preservado como `inconclusive` — nunca promove, nunca regride
+       * (a falha pode ser do código sob teste, não da capacidade de testar).
+       */
       if (
-        terminal.length === 0 ||
         terminal.some(
           (gate) => gate.outcome !== 'passed',
         )
       ) {
+        observations.push({
+          id: [
+            'host-observed-gates-failed',
+            'agency.run-tests',
+            observedGates.attemptId,
+            event.id,
+          ].join(':'),
+          capabilityId: 'agency.run-tests',
+          evidenceClass: 'verified_execution',
+          outcome: 'inconclusive',
+          observedAt: observedGates.observedAt,
+          occasionId: observedGates.attemptId,
+          source: 'canonical_event_log',
+          proofRefs: [
+            {
+              kind: 'attempt',
+              ref: observedGates.attemptId,
+              note: 'attempt em que os gates foram executados',
+            },
+            {
+              kind: 'event',
+              ref: event.id,
+              note: 'gates observados pelo host — ao menos um terminal falhou',
+            },
+          ],
+          note:
+            'Gates executados e observados pelo host, mas ao menos um terminal falhou: prova execução, não conclusão correta.',
+        });
+
         continue;
       }
 
@@ -839,6 +983,15 @@ export function deriveCanonicalWorkCapabilityEvidenceFromEvents(
    */
   observations.push(
     ...deriveSupervisedSelfDevelopmentEvidenceFromEvents(canonicalEvents),
+  );
+
+  /**
+   * COMPUTE.EXTERNAL-PROVIDER (Proof Evaluation V0, 2026-09-28)
+   *
+   * Uso reportado pelo provider externo numa attempt governada.
+   */
+  observations.push(
+    ...deriveExternalProviderEvidenceFromEvents(canonicalEvents),
   );
 
   return observations.sort((left, right) => {

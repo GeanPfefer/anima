@@ -30,7 +30,13 @@ import type {
   RecentEvolutionEntry,
   TargetProgress,
 } from '@anima/core';
-import type { CapabilityAssessmentProjection } from '@anima/core';
+import type {
+  CapabilityAssessmentProjection,
+  CapabilityEvidenceObservation,
+  CapabilityMaturitySource,
+  CapabilityProofEvaluation,
+  CapabilityProofStatus,
+} from '@anima/core';
 import { explainCapabilityAssessment } from '@anima/core';
 import styles from './EvolutionClient.module.css';
 
@@ -336,6 +342,11 @@ export interface EvolutionClientProps {
   objectives: EvolutionObjective[];
   featuredTargetId: string;
   capabilityAssessment: EvolutionCapabilityAssessmentState;
+  /**
+   * Proof Evaluation V0: declarado × derivado por capacidade (core). Opcional para
+   * compatibilidade; ausente = só a avaliação dinâmica do V1.
+   */
+  proofEvaluations?: readonly CapabilityProofEvaluation[];
   /** Mudanças registradas no registry desde a baseline (nunca inferidas). */
   recentEvolution: RecentEvolutionEntry[];
   evolutionBaseline: EvolutionBaseline;
@@ -353,6 +364,7 @@ export default function EvolutionClient({
   objectives,
   featuredTargetId,
   capabilityAssessment,
+  proofEvaluations,
   recentEvolution,
   evolutionBaseline,
 }: EvolutionClientProps) {
@@ -794,6 +806,7 @@ export default function EvolutionClient({
           {selectedNode ? (
             <CapabilityDetail
               capabilityAssessment={capabilityAssessment}
+              proofEvaluation={proofEvaluations?.find((entry) => entry.capabilityId === selectedNode.capability.id) ?? null}
               node={selectedNode}
               nameById={nameById}
               onSelect={selectCapability}
@@ -853,14 +866,86 @@ function ChipList({
   );
 }
 
+// ─── Proof Evaluation V0: declarado × derivado ─────────────────────────────────────
+
+const PROOF_STATUS_LABEL: Record<CapabilityProofStatus, string> = {
+  aligned: 'Alinhada',
+  underclaimed: 'Divergência: evidência sustenta mais que o declarado',
+  overclaimed: 'Divergência: declarado acima da evidência',
+  insufficient_evidence: 'Evidência insuficiente',
+  not_evaluated: 'Não avaliada pelo motor',
+};
+
+const MATURITY_SOURCE_LABEL: Record<CapabilityMaturitySource, string> = {
+  manual: 'manual (registry)',
+  derived: 'derivada do event log',
+  hybrid: 'híbrida (inclui prova registrada)',
+};
+
+// Evidência preservada que NÃO decide maturidade: fato parcial ou procedimento
+// assistido. Mostrada para que falha/processo não vire "zero evidência".
+function isPreservedOnly(observation: CapabilityEvidenceObservation): boolean {
+  return observation.evidenceClass === 'assisted_procedure' || observation.outcome === 'inconclusive';
+}
+
+function ProofEvaluationSummary({ evaluation }: { evaluation: CapabilityProofEvaluation }) {
+  const preserved = evaluation.evidence.filter(isPreservedOnly);
+  const divergent = evaluation.status === 'underclaimed' || evaluation.status === 'overclaimed';
+
+  return (
+    <div data-testid="proof-evaluation" data-status={evaluation.status}>
+      <p className={styles.detailText}>
+        Declarado: {MATURITY_LABEL[evaluation.declaredMaturity]} · Derivado:{' '}
+        {evaluation.derivedMaturity ? MATURITY_LABEL[evaluation.derivedMaturity] : '—'}
+      </p>
+      <p className={divergent ? styles.detailText : styles.detailEmpty}>
+        <span className={styles.whyLabel}>{PROOF_STATUS_LABEL[evaluation.status]}</span> · fonte da maturidade:{' '}
+        {MATURITY_SOURCE_LABEL[evaluation.maturitySource]}
+      </p>
+      <p className={styles.detailEmpty}>{evaluation.explanation}</p>
+
+      {evaluation.gaps.length > 0 && (
+        <>
+          <p className={styles.detailHint}>O que falta</p>
+          <ul className={styles.proofList}>
+            {evaluation.gaps.map((gap, i) => (
+              <li key={`gap-${i}`} className={styles.proofItem}>
+                <span className={styles.proofNote}>{gap}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {preserved.length > 0 && (
+        <>
+          <p className={styles.detailHint}>Evidência preservada (não decide a maturidade)</p>
+          <ul className={styles.proofList}>
+            {preserved.map((observation) => (
+              <li key={observation.id} className={styles.proofItem}>
+                <span className={styles.proofKind}>
+                  {observation.evidenceClass === 'assisted_procedure' ? 'procedimento' : 'parcial'}
+                </span>
+                <span className={styles.proofNote}>{observation.scope ?? observation.note ?? observation.id}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CapabilityDetail({
   capabilityAssessment,
+  proofEvaluation,
   node,
   nameById,
   onSelect,
   onClose,
 }: {
   capabilityAssessment: EvolutionCapabilityAssessmentState;
+  proofEvaluation: CapabilityProofEvaluation | null;
   node: CapabilityGraphNode;
   nameById: Map<string, string>;
   onSelect: (id: string) => void;
@@ -870,12 +955,15 @@ function CapabilityDetail({
   const color = MATURITY_COLOR[cap.maturity];
   const next = nextStage(cap.maturity);
 
+  // A avaliação V0 (quando presente) já carrega a conclusão do engine sobre
+  // evidência canônica + registrada; senão, a projeção V1 só-canônica.
   const dynamicAssessment =
-    capabilityAssessment.status === 'available'
+    proofEvaluation?.assessment ??
+    (capabilityAssessment.status === 'available'
       ? capabilityAssessment.projection.assessments.find(
           (entry) => entry.capabilityId === cap.id,
         ) ?? null
-      : null;
+      : null);
 
   // A explicação é a PROJEÇÃO humana da conclusão do Proof Engine (core, pura):
   // por que a capacidade está no nível derivado e QUAIS provas o sustentam. A
@@ -901,6 +989,8 @@ function CapabilityDetail({
       <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>Avaliação dinâmica</h3>
 
+        {proofEvaluation && <ProofEvaluationSummary evaluation={proofEvaluation} />}
+
         {capabilityAssessment.status === 'unavailable' ? (
           <p className={styles.detailEmpty}>
             {capabilityAssessment.reason === 'canonical_contract_incompatibility'
@@ -910,20 +1000,26 @@ function CapabilityDetail({
               : 'Indisponível: não foi possível ler o histórico de evidências. O estado declarado continua visível sem inferência dinâmica.'}
           </p>
         ) : dynamicAssessment === null ? (
-          <p className={styles.detailEmpty}>
-            Sem avaliação dinâmica para esta capacidade — ausência de telemetria não implica rebaixamento.
-          </p>
+          proofEvaluation ? null : (
+            <p className={styles.detailEmpty}>
+              Sem avaliação dinâmica para esta capacidade — ausência de telemetria não implica rebaixamento.
+            </p>
+          )
         ) : (
           <>
-            <p className={styles.detailText}>
-              Declarado: {MATURITY_LABEL[dynamicAssessment.declaredMaturity]}
-            </p>
-            <p className={styles.detailText}>
-              Base: {MATURITY_LABEL[dynamicAssessment.definitionMaturity]}
-            </p>
-            <p className={styles.detailText}>
-              Derivado: {MATURITY_LABEL[dynamicAssessment.derivedMaturity]}
-            </p>
+            {!proofEvaluation && (
+              <>
+                <p className={styles.detailText}>
+                  Declarado: {MATURITY_LABEL[dynamicAssessment.declaredMaturity]}
+                </p>
+                <p className={styles.detailText}>
+                  Base: {MATURITY_LABEL[dynamicAssessment.definitionMaturity]}
+                </p>
+                <p className={styles.detailText}>
+                  Derivado: {MATURITY_LABEL[dynamicAssessment.derivedMaturity]}
+                </p>
+              </>
+            )}
             <p className={styles.detailEmpty}>
               Evidências usadas: {dynamicAssessment.evidence.length} · eventos lidos: {capabilityAssessment.eventCount}. O derivado não substitui o estado declarado.
             </p>

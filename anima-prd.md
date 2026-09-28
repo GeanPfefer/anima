@@ -1,4 +1,14 @@
 # Anima — Product Requirements Document
+> Capability Proof Evaluation V0 em 2026-09-28: sobre o Proof Engine V1.1, cada capacidade
+> agora tem avaliação declarado × derivado (`evaluateCapabilityProofs`): status
+> aligned/underclaimed/overclaimed/insufficient_evidence/not_evaluated, fonte
+> manual/derived/hybrid e critérios concretos por degrau. Evidência registrada (provas
+> controladas com proveniência) entra no mesmo contrato, sem reproduzir para `operational`;
+> falha e procedimento assistido são preservados sem promover. 12 capacidades com regra;
+> no histórico real (1343 eventos): 7 alinhadas, 4 subdeclaradas (produce-change,
+> verify-change, governance.verifier, compute.external-provider — derivado operacional,
+> declarado comprovado), 1 insuficiente (memory.durability). Divergências reportadas, registry
+> intacto. [Registro](docs/registros/2026-09-28-capability-proof-engine-v0.md).
 > Evolution Reconciliation V2 em 2026-09-27: o Capability Map foi reconciliado com o estado
 > real desde a baseline `7f276d8` (40 → 63 capacidades, novo domínio `research`). Promoções só
 > com critério cumprido: `run-tests` operacional, `detect-deficiency` comprovada,

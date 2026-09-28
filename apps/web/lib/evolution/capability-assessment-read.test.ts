@@ -1,7 +1,7 @@
 import { buildHostObservedCoderEvidence } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { readCapabilityAssessments } from './capability-assessment-read';
+import { readCapabilityAssessments, readCapabilityEvolution } from './capability-assessment-read';
 
 type EventRow =
   Database['public']['Tables']['work_events']['Row'];
@@ -587,5 +587,23 @@ describe('readCapabilityAssessments', () => {
       ok: false,
       reason: 'event_history_invalid',
     });
+  });
+});
+describe('readCapabilityEvolution (Proof Evaluation V0)', () => {
+  test('falha de leitura: projeção fechada, avaliação só com prova registrada e regras canônicas não avaliadas', async () => {
+    const read = await readCapabilityEvolution(fakeClient({ failAtFrom: 0 }));
+
+    expect(read.assessment).toEqual({ ok: false, reason: 'event_history_read_failed' });
+    const byId = new Map(read.evaluations.map((entry) => [entry.capabilityId, entry]));
+    expect(byId.get('agency.run-tests')).toMatchObject({ status: 'not_evaluated', derivedMaturity: null });
+    expect(byId.get('research.web.search')).toMatchObject({ status: 'aligned', derivedMaturity: 'proven' });
+  });
+
+  test('histórico lido: mesma leitura alimenta projeção e avaliação', async () => {
+    const read = await readCapabilityEvolution(fakeClient());
+
+    expect(read.assessment).toMatchObject({ ok: true, eventCount: 0 });
+    const runTests = read.evaluations.find((entry) => entry.capabilityId === 'agency.run-tests');
+    expect(runTests).toMatchObject({ status: 'insufficient_evidence', declaredMaturity: 'operational' });
   });
 });

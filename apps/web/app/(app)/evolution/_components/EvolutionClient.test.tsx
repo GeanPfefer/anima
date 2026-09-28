@@ -570,3 +570,62 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     expect(stateOf(container, 'research.query-privacy')).toBe('strong'); // dependência direta
   });
 });
+
+// ─── Proof Evaluation V0: declarado × derivado ──────────────────────────────────
+
+describe('EvolutionClient — Proof Evaluation V0 (declarado × derivado)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const core = require('@anima/core') as typeof import('@anima/core');
+
+  const panel = (): HTMLElement => screen.getByTestId('proof-evaluation');
+
+  test('prova registrada: alinhada, fonte híbrida e provas que sustentam', () => {
+    render(<EvolutionClient {...buildProps()} proofEvaluations={core.evaluateCapabilityProofsFromHistory({ events: [] })} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Busca web — Comprovada/ }));
+
+    expect(panel().getAttribute('data-status')).toBe('aligned');
+    expect(within(panel()).getByText('Declarado: Comprovada · Derivado: Comprovada')).toBeInTheDocument();
+    expect(within(panel()).getByText(/híbrida/)).toBeInTheDocument();
+    // Provas que sustentam o nível derivado (decisivas) vêm da prova registrada.
+    expect(screen.getAllByText('docs/registros/2026-09-27b-research-web-v1.md').length).toBeGreaterThan(0);
+    expect(screen.getByText('Provas que sustentam este nível')).toBeInTheDocument();
+  });
+
+  test('durabilidade: evidência insuficiente, dimensões preservadas e o que falta', () => {
+    render(<EvolutionClient {...buildProps()} proofEvaluations={core.evaluateCapabilityProofsFromHistory({ events: [] })} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Durabilidade do progresso — Projetada/ }));
+
+    expect(panel().getAttribute('data-status')).toBe('insufficient_evidence');
+    expect(within(panel()).getByText('Declarado: Projetada · Derivado: —')).toBeInTheDocument();
+    expect(within(panel()).getAllByText('procedimento')).toHaveLength(3);
+    expect(within(panel()).getByText(/Durable State/)).toBeInTheDocument();
+  });
+
+  test('divergência é exibida sem alterar o estado declarado do nó', () => {
+    const evidence = ['a1', 'a2'].map((attempt, i) => ({
+      id: `ev-${attempt}`,
+      capabilityId: 'compute.external-provider',
+      evidenceClass: 'verified_execution' as const,
+      outcome: 'positive' as const,
+      observedAt: `2026-09-2${i}T10:00:00Z`,
+      occasionId: attempt,
+      proofRefs: [{ kind: 'attempt' as const, ref: attempt }],
+    }));
+    render(<EvolutionClient {...buildProps()} proofEvaluations={core.evaluateCapabilityProofs({ evidence })} />);
+    // O derivado nunca reescreve o declarado: o nó continua "Comprovada".
+    fireEvent.click(screen.getByRole('button', { name: 'Provider externo — Comprovada' }));
+
+    expect(panel().getAttribute('data-status')).toBe('underclaimed');
+    expect(within(panel()).getByText(/evidência sustenta mais que o declarado/)).toBeInTheDocument();
+    expect(within(panel()).getByText('Declarado: Comprovada · Derivado: Operacional')).toBeInTheDocument();
+  });
+
+  test('capacidade sem regra: não avaliada, maturidade manual', () => {
+    render(<EvolutionClient {...buildProps()} proofEvaluations={core.evaluateCapabilityProofsFromHistory({ events: [] })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat — Operacional' }));
+
+    expect(panel().getAttribute('data-status')).toBe('not_evaluated');
+    expect(within(panel()).getByText('Não avaliada pelo motor')).toBeInTheDocument();
+    expect(within(panel()).getByText(/manual \(registry\)/)).toBeInTheDocument();
+  });
+});

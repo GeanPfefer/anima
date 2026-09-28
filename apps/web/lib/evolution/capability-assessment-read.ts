@@ -1,6 +1,8 @@
 import {
   classifyCanonicalResidentEvent,
   deriveCapabilityAssessmentsFromWorkHistory,
+  evaluateCapabilityProofsFromHistory,
+  type CapabilityProofEvaluation,
   type CapabilityAssessmentProjection,
   type WorkEvent,
 } from '@anima/core';
@@ -189,5 +191,38 @@ export async function readCapabilityAssessments(
     ok: true,
     projection: deriveCapabilityAssessmentsFromWorkHistory(history.events),
     eventCount: history.events.length,
+  };
+}
+export interface CapabilityEvolutionRead {
+  readonly assessment: CapabilityAssessmentReadResult;
+  /**
+   * Proof Evaluation V0: declarado × derivado de TODAS as capacidades. Sempre
+   * presente: se o histórico canônico não pôde ser lido, as regras canônicas
+   * ficam `not_evaluated` (fonte indisponível) e só a prova registrada conta —
+   * falha de leitura nunca rebaixa nem promove.
+   */
+  readonly evaluations: readonly CapabilityProofEvaluation[];
+}
+
+/** Uma leitura do histórico alimenta a projeção V1 e a avaliação V0. */
+export async function readCapabilityEvolution(
+  client: SupabaseClient<Database>,
+): Promise<CapabilityEvolutionRead> {
+  const history = await readCanonicalWorkHistory(client);
+
+  if (!history.ok) {
+    return {
+      assessment: { ok: false, reason: history.reason },
+      evaluations: evaluateCapabilityProofsFromHistory({ events: null }),
+    };
+  }
+
+  return {
+    assessment: {
+      ok: true,
+      projection: deriveCapabilityAssessmentsFromWorkHistory(history.events),
+      eventCount: history.events.length,
+    },
+    evaluations: evaluateCapabilityProofsFromHistory({ events: history.events }),
   };
 }
