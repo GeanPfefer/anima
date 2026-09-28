@@ -127,6 +127,16 @@ export async function persistHostObservedCoderEvidence(
       reportedCallCount: usages.reduce((sum, value) => sum + (value.reportedCallCount ?? 0), 0),
       unreportedCallCount: usages.reduce((sum, value) => sum + (value.unreportedCallCount ?? 0), 0),
     } : {}),
+    // Fatos de precificação: mesma regra — só quando TODO turno com usage os reportou, para que a
+    // evidência persistida recompute a mesma decisão de settlement.
+    ...(usages.every(value => value.cacheWriteInputTokens !== undefined)
+      ? { cacheWriteInputTokens: usages.reduce((sum, value) => sum + (value.cacheWriteInputTokens ?? 0), 0) } : {}),
+    ...(usages.every(value => value.maxCallInputTokens !== undefined)
+      ? { maxCallInputTokens: Math.max(...usages.map(value => value.maxCallInputTokens ?? 0)) } : {}),
+    ...(usages.every(value => value.serviceTiers !== undefined)
+      ? { serviceTiers: [...new Set(usages.flatMap(value => value.serviceTiers ?? []))].sort() } : {}),
+    ...(usages.every(value => value.providerModels !== undefined)
+      ? { providerModels: [...new Set(usages.flatMap(value => value.providerModels ?? []))].sort() } : {}),
   } : undefined;
   const providerCallCount = validated.reduce((sum, turn) => sum + (turn.providerCallCount ?? 0), 0);
   const built = buildHostObservedCoderEvidence({

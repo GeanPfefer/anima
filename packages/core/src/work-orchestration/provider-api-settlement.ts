@@ -36,6 +36,16 @@ export interface ProviderPricingEntryV1 extends ProviderPricingV1 {
   readonly effectiveFrom: string;
   /** Exclusivo. Ausente ⇒ vigente em aberto. */
   readonly effectiveUntil?: string;
+  // Dimensões de cobrança que a versão DECLARA. Declarada ⇒ o settlement exige o fato de usage
+  // correspondente reportado pelo provider (ausente ⇒ `cost_unknown`, nunca presunção).
+  /** Tarifa de input ESCRITO em cache por milhão. Ausente ⇒ cache writes observados (> 0) não
+   * são precificáveis por esta versão. */
+  readonly cacheWriteInputPerMillion?: number;
+  /** Maior input de UMA requisição coberto por estas tarifas. Requisição acima ⇒ tarifa de long
+   * context, que esta versão não precifica ⇒ `cost_unknown`. */
+  readonly longContextInputThresholdTokens?: number;
+  /** Tier de processamento cujo preço esta versão descreve, como ecoado pelo provider. */
+  readonly serviceTier?: string;
 }
 
 export interface ProviderPricingCatalogV1 {
@@ -114,6 +124,14 @@ export function parseProviderPricingCatalog(value: unknown): ProviderPricingCata
       || (e.cachedInputPerMillion !== undefined && !validRate(e.cachedInputPerMillion))) {
       return { ok: false, reason: `entry_${index}_rate_invalid` };
     }
+    if (e.cacheWriteInputPerMillion !== undefined && !validRate(e.cacheWriteInputPerMillion)) {
+      return { ok: false, reason: `entry_${index}_rate_invalid` };
+    }
+    if (e.longContextInputThresholdTokens !== undefined
+      && !(isNonNegInt(e.longContextInputThresholdTokens) && e.longContextInputThresholdTokens > 0)) {
+      return { ok: false, reason: `entry_${index}_long_context_threshold_invalid` };
+    }
+    if (e.serviceTier !== undefined && !nonBlank(e.serviceTier)) return { ok: false, reason: `entry_${index}_service_tier_invalid` };
     if (!validInstant(e.effectiveFrom)) return { ok: false, reason: `entry_${index}_effective_from_invalid` };
     if (e.effectiveUntil !== undefined
       && (!validInstant(e.effectiveUntil) || Date.parse(e.effectiveUntil) <= Date.parse(e.effectiveFrom))) {
@@ -158,6 +176,11 @@ export interface ProviderApiAttemptUsageV1 {
   readonly totalTokens: number;
   /** Chamadas despachadas cujo response trouxe usage. */
   readonly reportedCallCount: number;
+  // Fatos de precificação — presentes só quando TODA observação os reportou (senão: desconhecidos).
+  readonly cacheWriteInputTokens?: number;
+  readonly maxCallInputTokens?: number;
+  readonly serviceTiers?: readonly string[];
+  readonly providerModels?: readonly string[];
 }
 
 export type ProviderApiUsageAggregation =
@@ -185,7 +208,9 @@ export function aggregateProviderApiAttemptUsage(observations: readonly Pick<Obs
     if (usage.schemaVersion !== 1
       || ![usage.inputTokens, usage.outputTokens, usage.totalTokens, usage.cachedInputTokens ?? 0].every(isNonNegInt)
       || usage.totalTokens !== usage.inputTokens + usage.outputTokens
-      || (usage.cachedInputTokens ?? 0) > usage.inputTokens) {
+      || (usage.cacheWriteInputTokens !== undefined && !isNonNegInt(usage.cacheWriteInputTokens))
+      || (usage.cachedInputTokens ?? 0) + (usage.cacheWriteInputTokens ?? 0) > usage.inputTokens
+      || (usage.maxCallInputTokens !== undefined && (!isNonNegInt(usage.maxCallInputTokens) || usage.maxCallInputTokens > usage.inputTokens))) {
       return { status: 'inconsistent' };
     }
     if (!isNonNegInt(usage.reportedCallCount) || !isNonNegInt(usage.unreportedCallCount)
@@ -196,6 +221,8 @@ export function aggregateProviderApiAttemptUsage(observations: readonly Pick<Obs
   }
   if (usages.length === 0) return incomplete ? { status: 'incomplete' } : { status: 'absent' };
   if (incomplete) return { status: 'incomplete' };
+  const everyHas = (key: keyof ProviderReportedUsageV1): boolean => usages.every(u => u[key] !== undefined);
+  const distinct = (key: 'serviceTiers' | 'providerModels'): readonly string[] => [...new Set(usages.flatMap(u => u[key] ?? []))].sort();
   return {
     status: 'complete',
     usage: {
@@ -204,6 +231,10 @@ export function aggregateProviderApiAttemptUsage(observations: readonly Pick<Obs
       outputTokens: usages.reduce((sum, u) => sum + u.outputTokens, 0),
       totalTokens: usages.reduce((sum, u) => sum + u.totalTokens, 0),
       reportedCallCount: usages.reduce((sum, u) => sum + (u.reportedCallCount ?? 0), 0),
+      ...(everyHas('cacheWriteInputTokens') ? { cacheWriteInputTokens: usages.reduce((sum, u) => sum + (u.cacheWriteInputTokens ?? 0), 0) } : {}),
+      ...(everyHas('maxCallInputTokens') ? { maxCallInputTokens: Math.max(...usages.map(u => u.maxCallInputTokens ?? 0)) } : {}),
+      ...(everyHas('serviceTiers') ? { serviceTiers: distinct('serviceTiers') } : {}),
+      ...(everyHas('providerModels') ? { providerModels: distinct('providerModels') } : {}),
     },
   };
 }
@@ -248,7 +279,10 @@ export interface ProviderApiSettlementProvenanceV1 {
   readonly pricingSourceRef: string;
   readonly pricingEffectiveFrom: string;
   readonly currency: string;
-  readonly rates: { readonly inputPerMillion: string; readonly cachedInputPerMillion: string; readonly outputPerMillion: string };
+  readonly rates: { readonly inputPerMillion: string; readonly cachedInputPerMillion: string; readonly outputPerMillion: string; readonly cacheWriteInputPerMillion?: string };
+  /** Dimensões declaradas pela versão de preço e provadas pela usage (quando declaradas). */
+  readonly serviceTier?: string;
+  readonly longContextInputThresholdTokens?: number;
   readonly usage: ProviderApiAttemptUsageV1;
   /** Custo EXATO antes do arredondamento (decimal canônico). */
   readonly exactCost: string;
@@ -266,7 +300,14 @@ export type ProviderApiCostUnknownReason =
   | 'provider_mismatch'
   | 'model_mismatch'
   | 'currency_mismatch'
-  | 'reservation_invalid';
+  | 'reservation_invalid'
+  /** A versão declara uma dimensão (tier, long context, cache write) cujo fato o provider não reportou. */
+  | 'usage_pricing_facts_missing'
+  | 'service_tier_mismatch'
+  /** Alguma requisição excedeu o limiar de long context da versão (tarifa não precificada). */
+  | 'long_context_unpriced'
+  /** Usage tem categoria cobrável (cache writes) sem tarifa na versão. */
+  | 'pricing_category_missing';
 
 export type ProviderApiSettlementDecisionV1 =
   /** Liquidar: gravar S (decimal canônico) com fonte `usage_priced` e a proveniência. */
@@ -324,14 +365,32 @@ export function deriveProviderApiSettlement(input: DeriveProviderApiSettlementIn
   const pricing = resolved.entry;
   if (pricing.currency.trim().toUpperCase() !== reservation.currency.trim().toUpperCase()) return unknown('currency_mismatch');
 
+  // Modelo ecoado pelo provider, quando reportado, precisa ser EXATAMENTE o precificado (sem
+  // equivalência implícita entre alias e snapshot).
+  if (usage.providerModels && usage.providerModels.some(model => model !== input.model)) return unknown('model_mismatch');
+  if (pricing.serviceTier !== undefined) {
+    if (!usage.serviceTiers || usage.serviceTiers.length === 0) return unknown('usage_pricing_facts_missing');
+    if (usage.serviceTiers.some(tier => tier !== pricing.serviceTier)) return unknown('service_tier_mismatch');
+  }
+  if (pricing.longContextInputThresholdTokens !== undefined) {
+    if (usage.maxCallInputTokens === undefined) return unknown('usage_pricing_facts_missing');
+    if (usage.maxCallInputTokens > pricing.longContextInputThresholdTokens) return unknown('long_context_unpriced');
+  }
+  if (pricing.cacheWriteInputPerMillion !== undefined && usage.cacheWriteInputTokens === undefined) return unknown('usage_pricing_facts_missing');
+  const cacheWriteTokens = usage.cacheWriteInputTokens ?? 0;
+  if (cacheWriteTokens > 0 && pricing.cacheWriteInputPerMillion === undefined) return unknown('pricing_category_missing');
+
   const inputRate = toScaledDecimal(pricing.inputPerMillion, PRICING_RATE_MAX_DECIMALS);
   const outputRate = toScaledDecimal(pricing.outputPerMillion, PRICING_RATE_MAX_DECIMALS);
   const cachedRate = toScaledDecimal(pricing.cachedInputPerMillion ?? pricing.inputPerMillion, PRICING_RATE_MAX_DECIMALS);
-  if (inputRate === null || outputRate === null || cachedRate === null) return unknown('pricing_invalid');
+  const cacheWriteRate = pricing.cacheWriteInputPerMillion === undefined ? 0n : toScaledDecimal(pricing.cacheWriteInputPerMillion, PRICING_RATE_MAX_DECIMALS);
+  if (inputRate === null || outputRate === null || cachedRate === null || cacheWriteRate === null) return unknown('pricing_invalid');
 
   // custo(USD) = tokens × tarifa/1e6; tarifa = r9/1e9 ⇒ custo em femto-USD (1e-15) = tokens × r9. EXATO.
-  const uncached = BigInt(usage.inputTokens - usage.cachedInputTokens);
-  const exactFemto = uncached * inputRate + BigInt(usage.cachedInputTokens) * cachedRate + BigInt(usage.outputTokens) * outputRate;
+  // input = não-cacheado + lido do cache + escrito em cache (partição reportada pelo provider).
+  const uncached = BigInt(usage.inputTokens - usage.cachedInputTokens - cacheWriteTokens);
+  const exactFemto = uncached * inputRate + BigInt(usage.cachedInputTokens) * cachedRate
+    + BigInt(cacheWriteTokens) * cacheWriteRate + BigInt(usage.outputTokens) * outputRate;
   if (exactFemto > reservedFemto) {
     return {
       kind: 'requires_human_reconciliation', reservationId, reason: 'derived_cost_exceeds_reservation',
@@ -369,7 +428,12 @@ export function deriveProviderApiSettlement(input: DeriveProviderApiSettlementIn
       provider: input.provider, model: input.model, catalogRef: input.catalog.catalogRef,
       pricingVersion: pricing.pricingVersion, pricingSourceRef: pricing.sourceRef, pricingEffectiveFrom: pricing.effectiveFrom,
       currency: pricing.currency.trim().toUpperCase(),
-      rates: { inputPerMillion: rate(inputRate), cachedInputPerMillion: rate(cachedRate), outputPerMillion: rate(outputRate) },
+      rates: {
+        inputPerMillion: rate(inputRate), cachedInputPerMillion: rate(cachedRate), outputPerMillion: rate(outputRate),
+        ...(pricing.cacheWriteInputPerMillion !== undefined ? { cacheWriteInputPerMillion: rate(cacheWriteRate) } : {}),
+      },
+      ...(pricing.serviceTier !== undefined ? { serviceTier: pricing.serviceTier } : {}),
+      ...(pricing.longContextInputThresholdTokens !== undefined ? { longContextInputThresholdTokens: pricing.longContextInputThresholdTokens } : {}),
       usage, exactCost: formatScaledDecimal(exactFemto, FEMTO_DECIMALS),
       rounding: 'ceil_to_1e-6_capped_at_reservation',
     },

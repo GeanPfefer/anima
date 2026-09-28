@@ -50,6 +50,17 @@ export interface ProviderReportedUsageV1 {
    * usage). > 0 ⇒ a usage é parcial: pode ter havido consumo não observado. Recusas de
    * admissão (nada enviado) não contam. */
   readonly unreportedCallCount?: number;
+  // Fatos de PRECIFICAÇÃO reportados pelo provider. Cada um só é emitido quando TODA chamada
+  // com usage o reportou; ausente ⇒ desconhecido (nunca zero). O settlement os exige quando a
+  // versão de preço declara a dimensão correspondente.
+  /** Tokens de input escritos em cache (subconjunto de `inputTokens`, tarifa própria). */
+  readonly cacheWriteInputTokens?: number;
+  /** Maior `inputTokens` de UMA chamada (limiar de long context é por requisição). */
+  readonly maxCallInputTokens?: number;
+  /** Tiers de processamento efetivamente usados, como ecoados pelo provider (distintos). */
+  readonly serviceTiers?: readonly string[];
+  /** Modelos ecoados pelo provider nas respostas (distintos). */
+  readonly providerModels?: readonly string[];
 }
 
 const CODER_OUTCOMES: ReadonlySet<HostObservedCoderOutcome> = new Set<HostObservedCoderOutcome>([
@@ -134,7 +145,11 @@ const validUsage = (value: ProviderReportedUsageV1): boolean => value.schemaVers
   && (value.cachedInputTokens === undefined || (isInt(value.cachedInputTokens) && value.cachedInputTokens >= 0 && value.cachedInputTokens <= value.inputTokens))
   && (value.providerRequestIds === undefined || (Array.isArray(value.providerRequestIds) && value.providerRequestIds.every(nonBlank)))
   && (value.reportedCallCount === undefined || (isInt(value.reportedCallCount) && value.reportedCallCount >= 0))
-  && (value.unreportedCallCount === undefined || (isInt(value.unreportedCallCount) && value.unreportedCallCount >= 0));
+  && (value.unreportedCallCount === undefined || (isInt(value.unreportedCallCount) && value.unreportedCallCount >= 0))
+  && (value.cacheWriteInputTokens === undefined || (isInt(value.cacheWriteInputTokens) && value.cacheWriteInputTokens >= 0
+    && value.cacheWriteInputTokens + (value.cachedInputTokens ?? 0) <= value.inputTokens))
+  && (value.maxCallInputTokens === undefined || (isInt(value.maxCallInputTokens) && value.maxCallInputTokens >= 0 && value.maxCallInputTokens <= value.inputTokens))
+  && [value.serviceTiers, value.providerModels].every(list => list === undefined || (Array.isArray(list) && list.every(nonBlank)));
 
 const fail = (defect: HostObservedCoderEvidenceDefect, explanation: string): HostObservedCoderEvidenceResult =>
   ({ ok: false, defect, explanation });

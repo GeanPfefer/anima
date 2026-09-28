@@ -113,16 +113,116 @@ describe('settlement pós-attempt provider_api', () => {
 });
 
 describe('carregamento do catálogo de preços', () => {
-  test('env ausente ⇒ absent (nenhum preço inventado)', () => {
-    expect(loadProviderPricingCatalog({})).toEqual({ status: 'absent' });
+  test('env ausente ⇒ catálogo versionado do repositório', () => {
+    expect(loadProviderPricingCatalog({})).toMatchObject({ status: 'loaded', source: 'repository', catalog: { catalogRef: 'anima/provider-pricing-catalog@2026-09-28' } });
+  });
+  test('sem env e sem catálogo do repositório ⇒ absent (nenhum preço inventado)', () => {
+    expect(loadProviderPricingCatalog({}, () => '', null)).toEqual({ status: 'absent' });
   });
   test('arquivo ilegível ou inválido ⇒ invalid', () => {
     const env = { [PROVIDER_PRICING_CATALOG_ENV]: '/x.json' };
-    expect(loadProviderPricingCatalog(env, () => '{not json')).toEqual({ status: 'invalid', reason: 'catalog_unreadable' });
+    expect(loadProviderPricingCatalog(env, () => '{not json')).toEqual({ status: 'invalid', source: 'env', reason: 'catalog_unreadable' });
     expect(loadProviderPricingCatalog(env, () => JSON.stringify({ schemaVersion: 1, catalogRef: 'c', entries: [{}] })).status).toBe('invalid');
   });
-  test('arquivo válido ⇒ loaded', () => {
+  test('env válida SUBSTITUI o catálogo do repositório', () => {
     const env = { [PROVIDER_PRICING_CATALOG_ENV]: '/x.json' };
-    expect(loadProviderPricingCatalog(env, () => JSON.stringify(catalog))).toMatchObject({ status: 'loaded', catalog: { catalogRef: 'fixture@1' } });
+    expect(loadProviderPricingCatalog(env, () => JSON.stringify(catalog))).toMatchObject({ status: 'loaded', source: 'env', catalog: { catalogRef: 'fixture@1' } });
+  });
+});
+
+describe('catálogo OFICIAL versionado (OpenAI, consultado em 2026-09-28)', () => {
+  type Usage = NonNullable<ObservedCoderInput['providerUsage']>;
+  const official = (): ProviderPricingCatalogV1 => {
+    const load = loadProviderPricingCatalog({});
+    if (load.status !== 'loaded') throw new Error(`catálogo oficial inválido: ${JSON.stringify(load)}`);
+    return load.catalog;
+  };
+  const SOL = 'gpt-5.6-sol';
+  const solReservation = (over: Partial<ProviderApiReservationStateV1> = {}) =>
+    reservation({ resourceClass: `provider_api:${SOL}`, createdAt: '2026-10-01T12:00:00Z', amount: 3, ...over });
+  const solObservation = (usage: Partial<Usage> = {}, model = SOL) => observation({
+    backendId: `openai:${model}`, model, providerCallCount: 3,
+    providerUsage: {
+      schemaVersion: 1, inputTokens: 190_000, cachedInputTokens: 100_000, cacheWriteInputTokens: 50_000, outputTokens: 6_000, totalTokens: 196_000,
+      reportedCallCount: 3, unreportedCallCount: 0, maxCallInputTokens: 70_000, serviceTiers: ['default'], providerModels: [model], ...usage,
+    },
+  });
+  const settle = (res: ProviderApiReservationStateV1, obs: ObservedCoderInput[], cat: ProviderPricingCatalogV1 = official()) =>
+    settleProviderApiAttemptCost(fakeStore(res).store, { attemptId: 'att-1', provider: 'openai', coderObservations: obs, catalog: cat });
+
+  test('parseia; identidade exata openai/gpt-5.6-sol e openai/gpt-5.6-terra; sourceRef oficial', () => {
+    const cat = official();
+    expect(cat.entries.map(e => [e.provider, e.model, e.pricingVersion])).toEqual([
+      ['openai', 'gpt-5.6-sol', 'openai/gpt-5.6-sol@2026-09-28'],
+      ['openai', 'gpt-5.6-terra', 'openai/gpt-5.6-terra@2026-09-28'],
+    ]);
+    for (const e of cat.entries) {
+      expect(e.sourceRef).toContain('https://developers.openai.com/api/docs/pricing');
+      expect(e).toMatchObject({ currency: 'USD', serviceTier: 'default', longContextInputThresholdTokens: 272_000, effectiveFrom: '2026-09-28T00:00:00Z' });
+    }
+  });
+
+  test('gpt-5.6-sol: aritmética exata com cache read + cache write e proveniência completa', async () => {
+    // (40k × 4 + 100k × 0.4 + 50k × 5 + 6k × 20) / 1e6 = 0.16 + 0.04 + 0.25 + 0.12 = 0.57
+    const outcome = await settle(solReservation(), [solObservation()]);
+    expect(outcome).toMatchObject({
+      kind: 'settled', decision: { settledAmount: '0.57', provenance: {
+        model: SOL, catalogRef: 'anima/provider-pricing-catalog@2026-09-28', pricingVersion: 'openai/gpt-5.6-sol@2026-09-28',
+        pricingEffectiveFrom: '2026-09-28T00:00:00Z', exactCost: '0.57', serviceTier: 'default',
+        rates: { inputPerMillion: '4', cachedInputPerMillion: '0.4', cacheWriteInputPerMillion: '5', outputPerMillion: '20' },
+      } },
+    });
+    expect(outcome.kind === 'settled' && outcome.decision.provenance.pricingSourceRef).toContain('developers.openai.com');
+  });
+
+  test('gpt-5.6-terra resolve a PRÓPRIA versão; alias não casa por acidente', async () => {
+    const terra = 'gpt-5.6-terra';
+    const outcome = await settle(solReservation({ resourceClass: `provider_api:${terra}` }), [solObservation({}, terra)]);
+    // (40k × 2 + 100k × 0.2 + 50k × 2.5 + 6k × 12) / 1e6 = 0.08 + 0.02 + 0.125 + 0.072 = 0.297
+    expect(outcome).toMatchObject({ kind: 'settled', decision: { settledAmount: '0.297', provenance: { pricingVersion: 'openai/gpt-5.6-terra@2026-09-28' } } });
+    for (const alias of ['gpt-5.6', 'gpt-5.6-sol-latest', 'GPT-5.6-SOL', 'gpt-5.6-luna']) {
+      expect(await settle(solReservation({ resourceClass: `provider_api:${alias}` }), [solObservation({}, alias)]))
+        .toMatchObject({ kind: 'not_settled', decision: { kind: 'cost_unknown', reason: 'pricing_missing' } });
+    }
+  });
+
+  test('temporal: reservas anteriores à consulta NÃO são reprecificadas; promo do Sol encerra fail-closed', async () => {
+    for (const createdAt of ['2026-09-25T19:29:00Z', '2026-09-27T23:59:59Z', '2026-11-21T00:00:00Z']) {
+      expect(await settle(solReservation({ createdAt }), [solObservation()]))
+        .toMatchObject({ kind: 'not_settled', decision: { kind: 'cost_unknown', reason: 'pricing_missing' } });
+    }
+    expect((await settle(solReservation({ createdAt: '2026-11-20T23:59:59Z' }), [solObservation()])).kind).toBe('settled');
+  });
+
+  test('nova versão futura não retroage; sobreposição de janelas ⇒ ambiguous', async () => {
+    const base = official();
+    const { effectiveUntil: _drop, ...sol } = base.entries.find(e => e.model === SOL)!;
+    const next = { ...sol, pricingVersion: 'openai/gpt-5.6-sol@2026-11-21', inputPerMillion: 8, effectiveFrom: '2026-11-21T00:00:00Z' };
+    expect(await settle(solReservation(), [solObservation()], { ...base, entries: [...base.entries, next] }))
+      .toMatchObject({ kind: 'settled', decision: { provenance: { pricingVersion: 'openai/gpt-5.6-sol@2026-09-28' } } });
+    const overlap = { ...base, entries: [...base.entries, { ...next, effectiveFrom: '2026-10-01T00:00:00Z' }] };
+    expect(await settle(solReservation(), [solObservation()], overlap))
+      .toMatchObject({ kind: 'not_settled', decision: { kind: 'cost_unknown', reason: 'pricing_ambiguous' } });
+  });
+
+  test('fatos exigidos pelo catálogo oficial ausentes ou fora do precificado ⇒ cost_unknown', async () => {
+    const cases: Array<[Partial<Usage>, string]> = [
+      [{ cacheWriteInputTokens: undefined }, 'usage_pricing_facts_missing'],
+      [{ serviceTiers: undefined }, 'usage_pricing_facts_missing'],
+      [{ maxCallInputTokens: undefined }, 'usage_pricing_facts_missing'],
+      [{ serviceTiers: ['flex'] }, 'service_tier_mismatch'],
+      [{ maxCallInputTokens: 272_001, inputTokens: 300_000, totalTokens: 306_000 }, 'long_context_unpriced'],
+      [{ providerModels: ['gpt-5.6-sol-2026-06-01'] }, 'model_mismatch'],
+    ];
+    for (const [usage, reason] of cases) {
+      expect(await settle(solReservation(), [solObservation(usage)])).toMatchObject({ kind: 'not_settled', decision: { kind: 'cost_unknown', reason } });
+    }
+  });
+
+  test('evidência B1 anterior a esta unidade (sem fatos de precificação) permanece cost_unknown', async () => {
+    const legacyB1 = observation({ model: SOL, providerCallCount: 20,
+      providerUsage: { schemaVersion: 1, inputTokens: 192_000, cachedInputTokens: 0, outputTokens: 6_700, totalTokens: 198_700, reportedCallCount: 20, unreportedCallCount: 0 } });
+    expect(await settle(solReservation(), [legacyB1]))
+      .toMatchObject({ kind: 'not_settled', decision: { kind: 'cost_unknown', reason: 'usage_pricing_facts_missing' } });
   });
 });

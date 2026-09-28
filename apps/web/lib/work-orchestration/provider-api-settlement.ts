@@ -11,6 +11,7 @@ import {
 } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import repositoryPricingCatalog from './provider-pricing-catalog.json';
 import {
   readProviderApiReservationForAttempt,
   settlePaidComputeUsagePricedReservation,
@@ -31,26 +32,38 @@ import {
 // a reserva aberta e reconciliável (a decisão é recomputável a partir do ledger + evidência).
 // ============================================================
 
-/** Caminho de um JSON `ProviderPricingCatalogV1` curado por humano. Ausente ⇒ sem preço
- * autoritativo ⇒ toda attempt `provider_api` permanece `cost_unknown`. */
+/** Caminho de um JSON `ProviderPricingCatalogV1` que SUBSTITUI o catálogo versionado do
+ * repositório (override de operador). Ausente ⇒ vale o catálogo do repositório. */
 export const PROVIDER_PRICING_CATALOG_ENV = 'ANIMA_PROVIDER_PRICING_CATALOG';
+
+/** Catálogo AUTORITATIVO versionado no repositório (`provider-pricing-catalog.json`): preços
+ * oficiais publicados pelo provider, cada versão com `sourceRef`, janela de vigência e as
+ * dimensões de cobrança que declara. Atualizar preço = ADICIONAR versão (e fechar a anterior),
+ * nunca editar uma existente — ver docs/arquitetura/provider-api-cost-settlement.md. */
+export const REPOSITORY_PROVIDER_PRICING_CATALOG: unknown = repositoryPricingCatalog;
 
 export type ProviderPricingCatalogLoad =
   | { readonly status: 'absent' }
-  | { readonly status: 'invalid'; readonly reason: string }
-  | { readonly status: 'loaded'; readonly catalog: ProviderPricingCatalogV1 };
+  | { readonly status: 'invalid'; readonly source: 'env' | 'repository'; readonly reason: string }
+  | { readonly status: 'loaded'; readonly source: 'env' | 'repository'; readonly catalog: ProviderPricingCatalogV1 };
 
 /** Carrega e valida o catálogo (fail-closed no catálogo inteiro). Nunca inventa preço. */
 export function loadProviderPricingCatalog(
   env: Readonly<Record<string, string | undefined>> = process.env,
   readFile: (path: string) => string = path => readFileSync(path, 'utf8'),
+  repositoryCatalog: unknown = REPOSITORY_PROVIDER_PRICING_CATALOG,
 ): ProviderPricingCatalogLoad {
   const path = env[PROVIDER_PRICING_CATALOG_ENV]?.trim();
-  if (!path) return { status: 'absent' };
   let parsed: unknown;
-  try { parsed = JSON.parse(readFile(path)); } catch { return { status: 'invalid', reason: 'catalog_unreadable' }; }
+  const source = path ? 'env' : 'repository';
+  if (path) {
+    try { parsed = JSON.parse(readFile(path)); } catch { return { status: 'invalid', source, reason: 'catalog_unreadable' }; }
+  } else {
+    if (repositoryCatalog === null || repositoryCatalog === undefined) return { status: 'absent' };
+    parsed = repositoryCatalog;
+  }
   const result = parseProviderPricingCatalog(parsed);
-  return result.ok ? { status: 'loaded', catalog: result.catalog } : { status: 'invalid', reason: result.reason };
+  return result.ok ? { status: 'loaded', source, catalog: result.catalog } : { status: 'invalid', source, reason: result.reason };
 }
 
 export interface ProviderApiSettlementStore {

@@ -57,12 +57,33 @@ describe('GptCoderBackend — mesmo protocolo host-mediated do Ollama, fail-clos
     expect(ws.files.get('src/a.ts')).toBe('export const value = 2;\n');
     expect(result.touchedResources).toEqual(['src/a.ts']); expect(backend.id).toBe('openai:gpt-test');
     expect(backend.observation).toEqual({ placement: 'remote', nodeId: 'openai-api', model: 'gpt-test' });
-    expect(result.providerUsage).toEqual({ schemaVersion: 1, inputTokens: 40, outputTokens: 20, totalTokens: 60, cachedInputTokens: 8, reportedCallCount: 2, unreportedCallCount: 0 });
+    expect(result.providerUsage).toEqual({ schemaVersion: 1, inputTokens: 40, outputTokens: 20, totalTokens: 60, cachedInputTokens: 8, reportedCallCount: 2, unreportedCallCount: 0, maxCallInputTokens: 20 });
     expect(result.providerCallCount).toBe(2);
     expect(usage).toEqual([{ inputTokens: 20, outputTokens: 10, totalTokens: 30, cachedInputTokens: 4 }, { inputTokens: 20, outputTokens: 10, totalTokens: 30, cachedInputTokens: 4 }]);
-    expect(JSON.parse(calls[0]!.body)).toMatchObject({ model: 'gpt-test', store: false });
+    expect(JSON.parse(calls[0]!.body)).toMatchObject({ model: 'gpt-test', store: false, service_tier: 'default' });
     expect(JSON.stringify(JSON.parse(calls[0]!.body))).not.toContain('secret-test-key');
     expect(calls[0]!.headers).toMatchObject({ Authorization: 'Bearer secret-test-key' });
+  });
+  test('fatos de precificação (cache write, tier, modelo ecoado) só quando TODA chamada os reportou', async () => {
+    const original = 'export const value = 1;\n';
+    const run = async (second: Record<string, unknown>) => {
+      let n = 0;
+      const fetchImpl = (async () => {
+        n += 1;
+        const content = n === 1
+          ? JSON.stringify({ action: 'read', reads: [{ path: 'src/a.ts', lineRange: [1, 1], maxLines: 10 }] })
+          : JSON.stringify({ action: 'edit', operations: [{ kind: 'replace_exact', path: 'src/a.ts', expected_file_sha256: sha256(original), before: 'value = 1', after: 'value = 2', expected_occurrences: 1 }] });
+        const full = { model: 'gpt-test', service_tier: 'default', usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110, input_tokens_details: { cached_tokens: 40, cache_write_tokens: 30 } } };
+        return response({ output_text: content, ...(n === 1 ? full : { ...full, ...second }) });
+      }) as typeof fetch;
+      return new GptCoderBackend({ model: 'gpt-test', apiKey: 'k', fetchImpl, admission: grant })
+        .edit(request, workspace({ 'src/a.ts': original }), new AbortController().signal);
+    };
+    expect((await run({})).providerUsage).toMatchObject({ cacheWriteInputTokens: 60, maxCallInputTokens: 100, serviceTiers: ['default'], providerModels: ['gpt-test'] });
+    const partial = (await run({ model: undefined, service_tier: undefined, usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110 } })).providerUsage!;
+    expect(partial.cacheWriteInputTokens).toBeUndefined();
+    expect(partial.serviceTiers).toBeUndefined();
+    expect(partial.providerModels).toBeUndefined();
   });
   test('falha do coder preserva o uso já consumido (tokens + chamadas) junto ao erro', async () => {
     let calls = 0;

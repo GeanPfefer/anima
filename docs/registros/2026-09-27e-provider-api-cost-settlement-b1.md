@@ -99,3 +99,11 @@ Fica como próxima unidade separada (migration aditiva que reúna os corpos).
   reconciliá-las exige decisão humana e evidência de completude que a evidência legada não tem.
 - Próximo passo técnico sugerido (fora deste mandato): restaurar a correlação provider_api no
   `reserve`.
+
+## Adendo 2026-09-28 — B1.C (catálogo de preços)
+
+A fronteira "humano fornece o catálogo" acima foi resolvida em
+[`2026-09-28-pricing-catalog-v1-b1c.md`](2026-09-28-pricing-catalog-v1-b1c.md): catálogo oficial
+OpenAI versionado no repositório para `gpt-5.6-sol`/`gpt-5.6-terra` (Standard), com dimensões
+novas (cache write, long context, tier) que o settlement original não observava. O texto acima
+fica como registro histórico do estado em 2026-09-27.

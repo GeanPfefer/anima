@@ -101,6 +101,10 @@ export function resolveOpenAICoderReasoningEffort(
   return raw as OpenAICoderReasoningEffort;
 }
 
+/** Tier de processamento pedido pelo coder: Standard (`default`). Preços de outros tiers
+ * (flex/batch/fast) não são liquidáveis pelo catálogo. */
+export const OPENAI_CODER_SERVICE_TIER = 'default';
+
 /** Modelo do coder OpenAI escolhido pelo OPERADOR: `ANIMA_CODER_MODEL` ⇒ `OPENAI_MODEL` ⇒
  * default histórico. Fonte única para o Router (candidato) e para o backend (chamada). */
 export function resolveOpenAICoderModel(env: Record<string, string | undefined> = process.env): string {
@@ -224,7 +228,11 @@ export function resolveOpenAICoderContext(
   };
 }
 
-export interface OpenAIUsage { readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number; readonly cachedInputTokens?: number }
+export interface OpenAIUsage {
+  readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number; readonly cachedInputTokens?: number;
+  /** Fatos de precificação ecoados pela resposta; ausentes ⇒ o provider não os reportou. */
+  readonly cacheWriteInputTokens?: number; readonly serviceTier?: string; readonly responseModel?: string;
+}
 export interface GptCoderOptions {
   readonly model?: string;
   /** Admissão financeira OBRIGATÓRIA (borda única). Sem ela o adapter não é
@@ -276,8 +284,17 @@ const parseUsage = (body: unknown): OpenAIUsage | null => {
   const usage = (body as { usage?: Record<string, unknown> } | null)?.usage;
   const input = usage?.input_tokens, output = usage?.output_tokens, total = usage?.total_tokens;
   if (!Number.isSafeInteger(input) || !Number.isSafeInteger(output) || !Number.isSafeInteger(total)) return null;
-  const cached = (usage?.input_tokens_details as Record<string, unknown> | undefined)?.cached_tokens;
-  return { inputTokens: input as number, outputTokens: output as number, totalTokens: total as number, ...(Number.isSafeInteger(cached) ? { cachedInputTokens: cached as number } : {}) };
+  const details = usage?.input_tokens_details as Record<string, unknown> | undefined;
+  const cached = details?.cached_tokens, cacheWrite = details?.cache_write_tokens;
+  const root = body as { service_tier?: unknown; model?: unknown };
+  const text = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+  return {
+    inputTokens: input as number, outputTokens: output as number, totalTokens: total as number,
+    ...(Number.isSafeInteger(cached) ? { cachedInputTokens: cached as number } : {}),
+    ...(Number.isSafeInteger(cacheWrite) ? { cacheWriteInputTokens: cacheWrite as number } : {}),
+    ...(text(root.service_tier) ? { serviceTier: root.service_tier } : {}),
+    ...(text(root.model) ? { responseModel: root.model } : {}),
+  };
 };
 
 export class GptCoderBackend implements CoderBackend {
@@ -320,7 +337,9 @@ export class GptCoderBackend implements CoderBackend {
           // de geração equivalente ao `num_predict` do Ollama, honrando a invariante no
           // request REAL enviado à OpenAI. `num_ctx`/`num_predict` NUNCA vão à OpenAI.
           body: {
-            model, store: false, input: messages, max_output_tokens: maxOutputTokens,
+            // Tier Standard EXPLÍCITO: o preço versionado do catálogo é o do tier Standard e a
+            // resposta ecoa o tier efetivo (`service_tier`), que o settlement exige.
+            model, store: false, service_tier: OPENAI_CODER_SERVICE_TIER, input: messages, max_output_tokens: maxOutputTokens,
             ...(reasoningEffort !== null ? { reasoning: { effort: reasoningEffort } } : {}),
           },
           signal: bounded.signal,
@@ -429,6 +448,12 @@ export class GptCoderBackend implements CoderBackend {
       // Cobertura: permite ao settlement distinguir usage completa de parcial.
       reportedCallCount: this.usages.length,
       unreportedCallCount: this.unreportedCalls,
+      // Fatos de precificação: só quando TODA chamada com usage os reportou (senão: desconhecido).
+      ...(this.usages.every(u => u.cacheWriteInputTokens !== undefined)
+        ? { cacheWriteInputTokens: this.usages.reduce((sum, value) => sum + value.cacheWriteInputTokens!, 0) } : {}),
+      maxCallInputTokens: Math.max(...this.usages.map(u => u.inputTokens)),
+      ...(this.usages.every(u => u.serviceTier !== undefined) ? { serviceTiers: [...new Set(this.usages.map(u => u.serviceTier!))] } : {}),
+      ...(this.usages.every(u => u.responseModel !== undefined) ? { providerModels: [...new Set(this.usages.map(u => u.responseModel!))] } : {}),
     }, providerCallCount };
   }
 }

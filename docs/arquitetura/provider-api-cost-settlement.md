@@ -26,7 +26,8 @@ completude da usage e a fiação no fim da attempt.
   `requires_human_reconciliation` (reserva segue aberta).
 - Settlement é append-only, idempotente por (reserva, versão de preço, valor); versão, valor ou
   fonte divergentes conflitam (`55000`) — nunca liquida duas vezes.
-- Nenhum preço é embutido no código. Nenhuma reserva histórica é liquidada automaticamente.
+- Nenhum preço é embutido no código: preços vivem num catálogo de dados versionado com fonte
+  oficial. Nenhuma reserva histórica é liquidada automaticamente.
 
 ## Contrato
 
@@ -67,32 +68,49 @@ reserva + replay por versão de preço. A RPC legada continua recusando `usage_p
 
 1. lê a reserva da attempt (`readProviderApiReservationForAttempt`, lease `provider-api:<attempt>`);
 2. agrega a usage das `coderObservations` e usa o modelo **observado** do backend;
-3. carrega o catálogo de `ANIMA_PROVIDER_PRICING_CATALOG` (caminho de um JSON curado por humano);
+3. carrega o catálogo versionado do repositório (ou o override `ANIMA_PROVIDER_PRICING_CATALOG`);
 4. decide no core; só `settle` escreve (`settlePaidComputeUsagePricedReservation`).
 
 Fail-open em relação à attempt: erro de leitura/escrita devolve `store_error` e deixa a reserva
 aberta e reconciliável (a decisão é recomputável a partir do ledger + evidência).
 
-## Preço real — fronteira humana
+## Catálogo de preços (Pricing Catalog V1, 2026-09-28)
 
-O repositório **não contém preço real**. Sem `ANIMA_PROVIDER_PRICING_CATALOG`, toda attempt
-`provider_api` continua `cost_unknown` (comportamento idêntico ao anterior, agora explícito). Para
-liquidar em produção, um humano precisa fornecer um catálogo com, por modelo usado
-(ex.: `gpt-5.6-sol`, `gpt-5.6-terra`): moeda, tarifa de input, de input em cache e de output por
-milhão de tokens, `effectiveFrom`, `pricingVersion` imutável e `sourceRef` rastreável à fonte
-oficial.
+> Até 2026-09-27 esta seção dizia que o repositório não continha preço real e que um humano
+> precisava fornecer o catálogo por `ANIMA_PROVIDER_PRICING_CATALOG`. Desde o registro
+> [`2026-09-28-pricing-catalog-v1-b1c.md`](../registros/2026-09-28-pricing-catalog-v1-b1c.md)
+> o catálogo oficial é versionado no repositório.
 
-Formato:
+- **Onde vive:** [`apps/web/lib/work-orchestration/provider-pricing-catalog.json`](../../apps/web/lib/work-orchestration/provider-pricing-catalog.json),
+  importado estaticamente pelo loader. `ANIMA_PROVIDER_PRICING_CATALOG` (caminho de JSON) é
+  **override** de operador e substitui o catálogo inteiro. Catálogo inválido ⇒ `cost_unknown`.
+- **Conteúdo:** preços oficiais OpenAI (tier Standard) para os model IDs **exatos** enviados à
+  API — `gpt-5.6-sol` e `gpt-5.6-terra`. Não há alias no ANIMA: a string do `model` do request
+  é a da reserva (`provider_api:<model>`) e a do catálogo.
+- **Dimensões declaradas por versão** (opcionais no schema; o catálogo oficial declara todas):
+  `cacheWriteInputPerMillion` (cache writes, 1,25× input no GPT-5.6),
+  `longContextInputThresholdTokens` (requisição acima ⇒ `long_context_unpriced`),
+  `serviceTier` (a resposta precisa ecoar esse tier). Declarada ⇒ o fato de usage
+  correspondente precisa ter sido reportado pelo provider em **toda** chamada; senão
+  `usage_pricing_facts_missing`.
+- **Fatos de usage** (`ProviderReportedUsageV1`): `cacheWriteInputTokens`,
+  `maxCallInputTokens`, `serviceTiers`, `providerModels`, capturados pelo `GptCoderBackend`
+  (que agora envia `service_tier: 'default'`).
+- **Custo:** `(input − cached − cacheWrite)×input + cached×cachedInput + cacheWrite×cacheWrite + output×output`.
+- **Temporal:** versão escolhida no instante da reserva; `effectiveFrom` = data da consulta à
+  fonte (nada anterior é reprecificado); preço promocional ganha `effectiveUntil` no fim da
+  garantia publicada. Atualizar = **adicionar** versão e fechar a anterior; nunca editar uma
+  versão existente. Sobreposição ⇒ `pricing_ambiguous`.
+
+Formato de uma entrada:
 
 ```json
 {
-  "schemaVersion": 1,
-  "catalogRef": "<revisão do catálogo>",
-  "entries": [{
-    "schemaVersion": 1, "pricingVersion": "<provider>/<modelo>@<data>", "provider": "openai",
-    "model": "<modelo>", "currency": "USD", "inputPerMillion": 0, "cachedInputPerMillion": 0,
-    "outputPerMillion": 0, "effectiveFrom": "<ISO-8601>", "sourceRef": "<fonte oficial>"
-  }]
+  "schemaVersion": 1, "pricingVersion": "<provider>/<modelo>@<data>", "provider": "openai",
+  "model": "<model ID exato>", "currency": "USD", "serviceTier": "default",
+  "inputPerMillion": 0, "cachedInputPerMillion": 0, "cacheWriteInputPerMillion": 0, "outputPerMillion": 0,
+  "longContextInputThresholdTokens": 272000,
+  "effectiveFrom": "<ISO-8601>", "effectiveUntil": "<ISO-8601 opcional, exclusivo>", "sourceRef": "<URL oficial + data da consulta>"
 }
 ```
 
@@ -111,4 +129,6 @@ decisão humana explícita e evidência de completude externa; o primitive puro 
   inteira (conservador: não se sabe se houve cobrança).
 - `provider_confirmed` (fatura/API de custo do provider) não é consultado; `usage_priced` é custo
   derivado, não faturado.
+- Long context (> 272K input por requisição) não é precificado ⇒ `cost_unknown`.
+- Ainda sem prova viva de que a resposta real ecoa `service_tier`/`cache_write_tokens`/`model`.
 - O planner OpenAI não reserva exposição (por design) e portanto não entra neste settlement.

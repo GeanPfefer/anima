@@ -101,6 +101,24 @@ describe('persistHostObservedCoderEvidence (fail-open)', () => {
     expect(partial.calls[0]?.providerUsage).not.toHaveProperty('reportedCallCount');
   });
 
+  test('B1.C: fatos de precificação persistem só quando todo turno com usage os reportou', async () => {
+    const facts = { schemaVersion: 1 as const, inputTokens: 100, outputTokens: 2, totalTokens: 102, cachedInputTokens: 40, cacheWriteInputTokens: 30,
+      maxCallInputTokens: 60, serviceTiers: ['default'], providerModels: ['gpt-test'], reportedCallCount: 2, unreportedCallCount: 0 };
+    const full = capturing();
+    await persistHostObservedCoderEvidence(correlation, [
+      { ...succeeded, providerCallCount: 2, providerUsage: facts },
+      { ...succeeded, providerCallCount: 2, providerUsage: { ...facts, maxCallInputTokens: 90 } },
+    ], full.sink, at);
+    expect(full.calls[0]?.providerUsage).toMatchObject({ cacheWriteInputTokens: 60, maxCallInputTokens: 90, serviceTiers: ['default'], providerModels: ['gpt-test'] });
+    const partial = capturing();
+    const { cacheWriteInputTokens: _c, serviceTiers: _s, ...withoutFacts } = facts;
+    await persistHostObservedCoderEvidence(correlation, [
+      { ...succeeded, providerCallCount: 2, providerUsage: facts }, { ...succeeded, providerCallCount: 2, providerUsage: withoutFacts },
+    ], partial.sink, at);
+    expect(partial.calls[0]?.providerUsage).not.toHaveProperty('cacheWriteInputTokens');
+    expect(partial.calls[0]?.providerUsage).not.toHaveProperty('serviceTiers');
+  });
+
   test('agrega chamadas observadas sem fabricar usage ausente', async () => {
     const { sink, calls } = capturing();
     await persistHostObservedCoderEvidence(correlation, [

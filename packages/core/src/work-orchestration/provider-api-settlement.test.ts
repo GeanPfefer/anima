@@ -232,3 +232,77 @@ describe('catálogo de preços (fail-closed)', () => {
     expect(parseProviderPricingCatalog(value).ok).toBe(false);
   });
 });
+
+describe('dimensões de cobrança declaradas pela versão (tier, long context, cache write)', () => {
+  // FIXTURE — tarifas FICTÍCIAS; o catálogo oficial é testado em apps/web.
+  const strict = (over: Partial<ProviderPricingEntryV1> = {}) => catalog([entry({
+    cacheWriteInputPerMillion: 2.5, longContextInputThresholdTokens: 272_000, serviceTier: 'default', ...over,
+  })]);
+  const facts = (over: Partial<ProviderReportedUsageV1> = {}) => aggregateProviderApiAttemptUsage([{
+    providerUsage: usage({ cacheWriteInputTokens: 20_000, maxCallInputTokens: 30_000, serviceTiers: ['default'], providerModels: ['test-model'], ...over }),
+    providerCallCount: 4,
+  }]);
+
+  test('cache write precificado à parte: partição input = não-cacheado + lido + escrito (exato)', () => {
+    // (40k × 2 + 40k × 0.5 + 20k × 2.5 + 5k × 8) / 1e6 = 0.08 + 0.02 + 0.05 + 0.04 = 0.19
+    const d = derive({ catalog: strict(), usage: facts() });
+    expect(d).toMatchObject({
+      kind: 'settle', settledAmount: '0.19',
+      provenance: {
+        exactCost: '0.19', serviceTier: 'default', longContextInputThresholdTokens: 272_000,
+        rates: { inputPerMillion: '2', cachedInputPerMillion: '0.5', cacheWriteInputPerMillion: '2.5', outputPerMillion: '8' },
+        usage: { cacheWriteInputTokens: 20_000, maxCallInputTokens: 30_000, serviceTiers: ['default'], providerModels: ['test-model'] },
+      },
+    });
+  });
+
+  test('fato declarado mas não reportado pelo provider ⇒ usage_pricing_facts_missing (nunca presume zero)', () => {
+    const missing = (key: keyof ProviderReportedUsageV1) => aggregateProviderApiAttemptUsage([{
+      providerUsage: { ...usage({ cacheWriteInputTokens: 0, maxCallInputTokens: 30_000, serviceTiers: ['default'] }), [key]: undefined },
+      providerCallCount: 4,
+    }]);
+    for (const key of ['cacheWriteInputTokens', 'maxCallInputTokens', 'serviceTiers'] as const) {
+      expect(derive({ catalog: strict(), usage: missing(key) })).toMatchObject({ kind: 'cost_unknown', reason: 'usage_pricing_facts_missing' });
+    }
+  });
+
+  test('fato só conta quando TODA observação o reportou', () => {
+    const mixed = aggregateProviderApiAttemptUsage([
+      { providerUsage: usage({ cacheWriteInputTokens: 0, maxCallInputTokens: 10, serviceTiers: ['default'] }), providerCallCount: 4 },
+      { providerUsage: usage({ maxCallInputTokens: 10, serviceTiers: ['default'] }), providerCallCount: 4 },
+    ]);
+    expect(mixed.status === 'complete' && mixed.usage.cacheWriteInputTokens).toBeUndefined();
+    expect(derive({ catalog: strict(), usage: mixed })).toMatchObject({ kind: 'cost_unknown', reason: 'usage_pricing_facts_missing' });
+  });
+
+  test('tier diferente do precificado (flex/priority) ⇒ service_tier_mismatch', () => {
+    expect(derive({ catalog: strict(), usage: facts({ serviceTiers: ['default', 'priority'] }) }))
+      .toMatchObject({ kind: 'cost_unknown', reason: 'service_tier_mismatch' });
+  });
+
+  test('requisição acima do limiar de long context ⇒ long_context_unpriced; no limiar ainda precifica', () => {
+    expect(derive({ catalog: strict(), usage: facts({ inputTokens: 300_000, totalTokens: 305_000, maxCallInputTokens: 272_001 }) }))
+      .toMatchObject({ kind: 'cost_unknown', reason: 'long_context_unpriced' });
+    expect(derive({ catalog: strict(), usage: facts({ inputTokens: 300_000, totalTokens: 305_000, maxCallInputTokens: 272_000 }) }).kind).toBe('settle');
+  });
+
+  test('cache writes observados sem tarifa na versão ⇒ pricing_category_missing', () => {
+    expect(derive({ catalog: strict({ cacheWriteInputPerMillion: undefined }), usage: facts() }))
+      .toMatchObject({ kind: 'cost_unknown', reason: 'pricing_category_missing' });
+  });
+
+  test('modelo ecoado pelo provider diferente do precificado (alias/snapshot) ⇒ model_mismatch', () => {
+    expect(derive({ catalog: strict(), usage: facts({ providerModels: ['test-model-2026-05-01'] }) }))
+      .toMatchObject({ kind: 'cost_unknown', reason: 'model_mismatch' });
+  });
+
+  test('usage com lido + escrito > input ⇒ inconsistent', () => {
+    expect(facts({ cacheWriteInputTokens: 60_001 })).toEqual({ status: 'inconsistent' });
+  });
+
+  test('catálogo rejeita dimensões malformadas', () => {
+    for (const bad of [{ cacheWriteInputPerMillion: -1 }, { longContextInputThresholdTokens: 0 }, { serviceTier: ' ' }]) {
+      expect(parseProviderPricingCatalog({ schemaVersion: 1, catalogRef: 'c', entries: [entry(bad as Partial<ProviderPricingEntryV1>)] }).ok).toBe(false);
+    }
+  });
+});
