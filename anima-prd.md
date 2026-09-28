@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Produce-Change Evidence Projection V0 em 2026-09-28: `projectProduceChangeOperationalEvidence` (core puro) avalia
+> produce-change pelo DENOMINADOR — toda lineage de programação com attempt governada (ocasião = lineage) — como
+> qualified_positive / attributed_negative / inconclusive / not_attributable, com causa (reuso de recovery codes,
+> findings do Verifier, baseline de gate), human review cause (contrato fechado; histórico = undetermined), recovery
+> burden, classe estrutural e fingerprint. Positiva exige evidência técnica system_proven (fronteira de geração do
+> writer; sem ela nada qualifica). Histórico real: 33 elegíveis, 0 positivas, 8 negativas, 23 inconclusivas, 2 não
+> atribuíveis. NÃO promove: produce-change segue proven. Registro `docs/registros/2026-09-28-produce-change-evidence-projection-v0.md`.
 > Pending Verification Human Recovery V0 em 2026-09-28: controle humano ≠ bypass do Verifier. O candidato retido
 > (lane obrigatório, `in_progress`, Verifier inconclusive/missing/timeout/erro/evidência incompleta) pode ser
 > encerrado pelo DONO via `resolve_pending_verification` (author=user; sem Trusted System Writer): `request_changes`

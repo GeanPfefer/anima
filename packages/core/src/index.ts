@@ -19,6 +19,7 @@ export * from './capability-map';
 export * from './capability-registry';
 export * from './capability-proof-engine';
 export * from './capability-proof-work-evidence';
+export * from './produce-change-operational-evidence';
 export * from './capability-proof-assessment';
 export * from './capability-assessment-explanation';
 export * from './capability-proof-recorded';
