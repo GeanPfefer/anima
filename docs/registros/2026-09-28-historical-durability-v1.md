@@ -131,3 +131,86 @@ também não foram publicadas.
 - Arquivamento dos 12 UNKNOWN depende do ledger.
 
 US$0. Nenhum provider, nenhum banco, nenhum force, nenhum rewrite, nenhuma worktree alterada.
+
+---
+
+## V1.1 — Fechamento da classificação pelo ledger (2026-09-28, append-only)
+
+A V1 acima foi escrita com **12 UNKNOWN_NEEDS_LEDGER** pendentes. Esta seção
+não reescreve a V1: ela registra a resolução posterior.
+
+### Resolução read-only dos 12
+
+Os 12 foram resolvidos por consulta **read-only** ao ledger (relatório
+externo, que não foi reinterpretado aqui):
+
+| Resultado | Qtde |
+|---|---|
+| MUST_PRESERVE | 6 |
+| EPHEMERAL | 6 |
+| UNKNOWN | 0 |
+
+Corroboração no Git: cada um dos 6 MUST é o tip de uma branch local
+`anima-work/<attempt-uuid>`, cujo UUID bate com o attempt informado pelo
+ledger. `9512fc1` (attempt `c0edc775`, work item `8fe633eb`) também aparece
+em `2026-09-11b-...` e `2026-09-11c-...`. Os pais dos 6 (`d783a5d`,
+`90fd892`, `bf9e028`) já eram alcançáveis pelo remoto, então cada tag carrega
+exatamente 1 commit novo. Nenhum dos 6 é ancestral de outro.
+
+### Lifecycle comum dos 6 MUST
+
+`proposed → revised → approved → routed → claimed → execution_started →
+checkpoint_recorded → execution_failed → host evidence`, com
+`observedCommitSha` registrado no ledger. Nenhum teve `result_submitted`,
+Verifier, review, accept, changes_requested ou recovery successor.
+
+### Por que attempts falhas são histórico necessário
+
+O checkpoint é a identidade Git de uma attempt real que o ledger referencia
+por `observedCommitSha`. Sem o objeto, o ledger aponta para um SHA
+irrecuperável e a prova negativa (o que foi tentado, com qual diff, e falhou)
+se perde. Falha não é descartável: é evidência de capacidade/limite, do mesmo
+modo que um sucesso.
+
+### As 6 novas tags anotadas
+
+| Ref | Commit | Work item | Attempt | Estado | Mudança |
+|---|---|---|---|---|---|
+| `archive/anima/backlog-placement-failed-attempt` | `9512fc1` | `8fe633eb…` | `c0edc775` | attempt failed | guarda de placement + teste do router de deps do backlog |
+| `archive/anima/openai-strong-e2e-failed-01-args-module` | `83ad063` | `8c4e4489…` | `380a3759` | execution_failed | 1ª (04:05): módulo de args separado |
+| `archive/anima/openai-strong-e2e-failed-02-message-flag` | `3969ebd` | `ffa62a23…` | `8ab895b7` | execution_failed | 2ª (04:09): mensagem via flag |
+| `archive/anima/openai-strong-e2e-failed-03-validated-message` | `7551787` | `8238a4a3…` | `1e6c39e5` | execution_failed | 3ª (04:14): resolve e valida mensagem |
+| `archive/anima/openai-strong-e2e-failed-04-exclusive-message` | `4b2724e` | `36d6d611…` | `d7db2de7` | execution_failed | 4ª (04:17): só mensagem explícita |
+| `archive/anima/openai-strong-e2e-failed-05-exported-resolver` | `19e3e64` | `36bccdf2…` | `572f52d7` | execution_failed | 5ª (04:38, base `bf9e028`): resolvedor exportado |
+
+A ordem 01–05 é a ordem histórica (data de autor em 2026-09-05). As
+mensagens das tags não reproduzem prompts.
+
+### Contagens finais
+
+- **33 MUST_PRESERVE** (27 V1 + 6 V1.1), todos alcançáveis por refs remotas.
+- **22 non-MUST classificados** (5 ALREADY_SUPERSEDED + 11 EPHEMERAL + 6 EPHEMERAL):
+  - 21 seguem **apenas locais**, sem archival ref;
+  - 1 (`42aeba3`, superseded) é alcançável só como pai estrutural da Prisma (V1), sem ref própria.
+  - O pedido da V1.1 falava em "21 non-MUST". Isso bate com os 21 que continuam locais. O total classificado é 22 (55 − 33).
+- **0 UNKNOWN.**
+- **Archival refs: 21**, sendo 20 tags anotadas (14 V1 + 6 V1.1) e 1 branch (Prisma).
+
+Os 21 non-MUST ainda locais:
+
+```
+06bcff2 072211c 0f5bd6b 1078d1f 3eaa656 4527a5d 4cc7e0b 58450a7 5f5f1f3
+7373a85 745959e 8b08ffb a97110b b4a94a0 b4bb3a3 b6438df ba227b7 c084e1f
+e71a0a5 f1ba1e7 f5b033c
+```
+
+### Historical Code Durable ≠ Operational Durable
+
+Com a V1.1, **toda** a história de código classificada como necessária está
+Historical Code Durable. Isso **não** torna o ledger durável: os registros
+que dão sentido a esses SHAs (work items, attempts, eventos, reservas) moram
+no Postgres local da Goma e dependem de backup/restore próprio (Operational
+Durable), ainda não resolvido.
+
+Snapshot do marco: `backup/marco-historical-durability-v1-1-2026-09-28`.
+US$0. Nenhum provider, nenhum banco, nenhum force, nenhum rewrite, refs V1 inalteradas.
