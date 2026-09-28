@@ -213,7 +213,7 @@ async function main(): Promise<void> {
           workItemId: r.workItemId,
           authorization: authorization.action,
           authorizationDetail: authorization.action === 'human_required'
-            ? authorization.reason
+            ? (authorization.detail ? `${authorization.reason}:${authorization.detail}` : authorization.reason)
             : authorization.action === 'already_approved' ? 'no_op' : String(authorization.eventSeq),
         };
       } catch (error) {

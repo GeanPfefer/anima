@@ -24,6 +24,7 @@ export * from './capability-assessment-explanation';
 export * from './capability-proof-recorded';
 export * from './capability-proof-evaluation';
 export * from './autonomy-readiness';
+export * from './autonomy-readiness-enforcement';
 export * from './self-deficiency';
 export * from './self-improvement';
 export * from './research-web';

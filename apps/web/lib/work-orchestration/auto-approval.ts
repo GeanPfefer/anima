@@ -1,16 +1,35 @@
 import {
   AUTONOMOUS_AUTHORIZATION_ENVELOPE_VERSION,
+  DEFAULT_AUTHORIZED_LOCAL_CODER_BACKENDS,
+  enforceAutonomyReadinessForAutoApproval,
+  evaluateCapabilityProofsFromHistory,
   evaluateAutonomousApprovalEnvelope,
   type AutonomousAuthorizationDecision,
+  type AutonomyReadinessEnforcementDecision,
+  type AutonomyReadinessRule,
+  type CapabilityProofEvaluation,
+  type CapabilityProofRule,
 } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AdmissionVerdict } from '../resident-host/resident-host';
+import { readCanonicalWorkHistory } from '../evolution/capability-assessment-read';
 
 export type AutonomousApprovalAttempt =
   | { readonly action: 'approved' | 'replayed'; readonly eventSeq: number; readonly sourceId: string }
   | { readonly action: 'already_approved' }
-  | { readonly action: 'human_required'; readonly reason: string };
+  | { readonly action: 'human_required'; readonly reason: string; readonly detail?: string };
+
+/** Proof Evaluation V0.1 canônica, ou `null` quando o histórico não pôde ser lido. */
+export type LoadProofEvaluations = () => Promise<readonly CapabilityProofEvaluation[] | null>;
+
+/** Caminho SEGURO: work_events → Proof Evaluation V0.1 (nunca a projeção V1 crua). */
+export function canonicalProofEvaluationsLoader(client: SupabaseClient<Database>): LoadProofEvaluations {
+  return async () => {
+    const history = await readCanonicalWorkHistory(client);
+    return history.ok ? evaluateCapabilityProofsFromHistory({ events: history.events }) : null;
+  };
+}
 
 type PersistedCandidate = Pick<
   Database['public']['Tables']['work_items']['Row'],
@@ -28,6 +47,11 @@ export async function autoApproveAutonomousWork(
     readonly workItemId: string;
     readonly readGovernorVerdict: () => AdmissionVerdict | Promise<AdmissionVerdict>;
     readonly now?: () => Date;
+    /** Default: `canonicalProofEvaluationsLoader(client)`. */
+    readonly loadProofEvaluations?: LoadProofEvaluations;
+    /** Regras injetáveis SÓ para fixtures sintéticas de teste (default = canônicas). */
+    readonly readinessRules?: readonly AutonomyReadinessRule[];
+    readonly proofRules?: readonly CapabilityProofRule[];
   },
 ): Promise<AutonomousApprovalAttempt> {
   let item: PersistedCandidate;
@@ -68,6 +92,33 @@ export async function autoApproveAutonomousWork(
   }
   if (!decision.authorized) return { action: 'human_required', reason: decision.failClosedReason };
 
+  // Autonomy Readiness Enforcement V0 (opção B): TETO ADICIONAL ao envelope V1.
+  // A auto-aprovação `system` concede delegação `mandated`; ela só prossegue se a
+  // readiness da capacidade, avaliada sobre o item REAL, for ≥ mandated. Ponto
+  // único de enforcement, imediatamente antes da RPC. Fail-closed: histórico,
+  // avaliação ou contexto indisponíveis ⇒ o item permanece `proposed` para o humano.
+  let readinessDecision: AutonomyReadinessEnforcementDecision;
+  try {
+    const load = input.loadProofEvaluations ?? canonicalProofEvaluationsLoader(input.client);
+    readinessDecision = enforceAutonomyReadinessForAutoApproval({
+      facts: {
+        impactLevel: item.impact_level,
+        capability: item.capability,
+        intent: item.intent,
+        proposal: item.proposal,
+        allowedLocalCoderBackends: DEFAULT_AUTHORIZED_LOCAL_CODER_BACKENDS,
+      },
+      proofEvaluations: await load(),
+      rules: input.readinessRules,
+      proofRules: input.proofRules,
+    });
+  } catch (error) {
+    return { action: 'human_required', reason: 'autonomy_readiness_history_unavailable', detail: errorText(error) };
+  }
+  if (!readinessDecision.allowed) {
+    return { action: 'human_required', reason: readinessDecision.reason, detail: readinessDecision.detail };
+  }
+
   const envelope = {
     schema_version: 1,
     authority: 'autonomous_policy',
@@ -75,7 +126,9 @@ export async function autoApproveAutonomousWork(
     source_id: decision.sourceId,
     decision_reason: 'canonical_local_slice_within_authorized_envelope',
     execution_class: 'canonical_local_isolated_worktree',
-    checks: [...decision.checks],
+    checks: [...decision.checks, 'autonomy_readiness_mandated'],
+    // Evidência mínima (TOCTOU/auditoria): qual readiness sustentou o mandato.
+    autonomy_readiness: { ...readinessDecision.audit },
   } satisfies Json;
 
   // Ordem CAUSAL (INTEL-01): a classificação de inteligência é um FATO POST-APROVAÇÃO —

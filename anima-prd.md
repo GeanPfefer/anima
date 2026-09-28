@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Autonomy Readiness Enforcement V0 em 2026-09-28 (opção B): a auto-aprovação do sistema (Envelope V1)
+> não pode conceder delegação acima da readiness. `autoApproveAutonomousWork` exige readiness ≥ mandated
+> (Proof Evaluation V0.1 + contexto do item real) antes da RPC; senão o item fica `proposed` com
+> `autonomy_readiness_insufficient`. Hoje produce-change é proven/supervised ⇒ auto-aprovação NEGADA;
+> aprovação humana inalterada. Envelope aprovado grava `autonomy_readiness` (observed ≥ required).
+> Reativação = opção C (critérios operacionais), não implementada. Registro
+> `docs/registros/2026-09-28-autonomy-readiness-enforcement-v0.md`.
 > Autonomy Readiness V0 em 2026-09-28: maturidade ≠ readiness ≠ authority. `evaluateAutonomyReadiness`
 > (core puro, sem score) consome SÓ a Proof Evaluation V0.1 e diz até que nível de delegação
 > (manual/supervised/mandated/autonomous) uma ação poderia ir, com salvaguardas e blockers
