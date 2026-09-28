@@ -3,6 +3,7 @@ import { failure, type WorkOperationResult } from './errors';
 import type { DecideIntegrationCommand, IntegrationDecisionOutcome } from './integration-decision';
 import type { WorkOrchestrationRepository } from './repository';
 import type { ApprovalDecision, WorkContextSnapshot, WorkEvent, WorkItem, WorkItemId } from './types';
+import { evaluateVerifierRequirement } from './verifier-requirement';
 import { isValidApprovalDecision, isValidProposalVersion, isValidResultReviewDecision, isValidWorkContextReferences, isValidWorkExecutionOutcome, isValidWorkIntent, isValidWorkProposal, isValidWorkResult } from './validation';
 const invalid = <T>(message: string): WorkOperationResult<T> => failure('invalid_input', message);
 export class WorkOrchestrationService {
@@ -47,8 +48,21 @@ export class WorkOrchestrationService {
     if(!this.validVersion(command.expectedProposalVersion)||!command.requestedChanges.trim()||!isValidWorkIntent(command.intent)||!isValidWorkProposal(command.proposal))return Promise.resolve(invalid('Revisão solicitada inválida.'));
     return this.repository.requestProposalRevision(command);
   }
-  reviewResult(command: ReviewWorkResultCommand): Promise<WorkOperationResult<WorkItem>> {
-    if (!this.validVersion(command.expectedProposalVersion) || !command.reviewedResultEventId || !isValidResultReviewDecision(command.decision)) return Promise.resolve(invalid('Decisão de revisão inválida.'));
+  async reviewResult(command: ReviewWorkResultCommand): Promise<WorkOperationResult<WorkItem>> {
+    if (!this.validVersion(command.expectedProposalVersion) || !command.reviewedResultEventId || !isValidResultReviewDecision(command.decision)) return invalid('Decisão de revisão inválida.');
+    // Mandated Verifier Enforcement V0: fronteira fail-closed do lane com Verifier
+    // obrigatório. Só o ACEITE é condicionado; `request_changes` segue livre. Itens
+    // `advisory` (sem o marcador no execution_spec) passam como antes. Falha ao ler
+    // item/eventos ⇒ não se prova o lane ⇒ recusa (nunca aceita por omissão).
+    if (command.decision.type === 'accept') {
+      const [item, events] = await Promise.all([this.repository.getItem(command.workItemId), this.repository.listEvents(command.workItemId)]);
+      if (!item.ok) return item;
+      if (!events.ok) return events;
+      const verifier = evaluateVerifierRequirement(item.value, events.value, command.reviewedResultEventId);
+      if (!verifier.satisfied) {
+        return failure('invalid_transition', `Aceite recusado: o lane exige parecer do Verifier verificado e correlacionado a este resultado (verifier_requirement_unsatisfied:${verifier.reason}). Peça mudanças ou aguarde um parecer válido.`);
+      }
+    }
     return this.repository.reviewResult(command);
   }
   decideIntegration(command: DecideIntegrationCommand): Promise<WorkOperationResult<IntegrationDecisionOutcome>> {

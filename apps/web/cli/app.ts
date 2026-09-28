@@ -764,6 +764,8 @@ export async function runWorkReview(
     const message =
       plan.reason === 'not_in_review' ? `O item está em "${item.state}", não em "review": não há resultado a revisar.`
       : plan.reason === 'no_reviewable_result' ? 'Não há resultado submetido reconstituível para revisar.'
+      : plan.reason === 'verifier_requirement_unsatisfied'
+        ? `Este lane exige parecer do Verifier "verified" correlacionado a este resultado (${plan.verifier ?? 'sem parecer'}); o aceite fica bloqueado. Use "request-changes" para retrabalho.`
       : 'O resultado mais recente pertence a outra versão de proposta; revise a versão vigente.';
     return errorResult(message, plan.reason, EXIT.REJECTED);
   }

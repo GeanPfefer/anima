@@ -1,6 +1,7 @@
 import type { ReviewWorkResultCommand } from './commands';
 import { availableWorkActions, projectLatestWorkResult, type WorkAction } from './presentation';
 import type { ResultReviewDecision, WorkEvent, WorkItem } from './types';
+import { evaluateVerifierRequirement, type VerifierRequirementRefusal } from './verifier-requirement';
 
 // ============================================================
 // Montagem PURA e compartilhada do comando de revisão de RESULTADO
@@ -26,11 +27,14 @@ export type ResultReviewRefusal =
   /** Não há resultado submetido reconstituível para revisar. */
   | 'no_reviewable_result'
   /** Há resultado, mas ele pertence a uma versão de proposta diferente da vigente. */
-  | 'result_version_mismatch';
+  | 'result_version_mismatch'
+  /** Lane com Verifier obrigatório (fail-closed): sem parecer `verified` correlacionado,
+   * o aceite é recusado; pedir mudanças continua disponível. */
+  | 'verifier_requirement_unsatisfied';
 
 export type ResultReviewPlan =
   | { readonly ok: true; readonly command: ReviewWorkResultCommand }
-  | { readonly ok: false; readonly reason: ResultReviewRefusal };
+  | { readonly ok: false; readonly reason: ResultReviewRefusal; readonly verifier?: VerifierRequirementRefusal };
 
 /**
  * Deriva o comando de revisão de resultado para a decisão dada, ou recusa fechado
@@ -53,6 +57,10 @@ export function planResultReview(
   }
   // `latestResult` é não-nulo aqui: a ação só está disponível quando ele existe e
   // casa a versão vigente (invariante de `availableWorkActions`).
+  if (decision.type === 'accept') {
+    const verifier = evaluateVerifierRequirement(item, events, latestResult!.eventId);
+    if (!verifier.satisfied) return { ok: false, reason: 'verifier_requirement_unsatisfied', verifier: verifier.reason };
+  }
   return {
     ok: true,
     command: {

@@ -1,5 +1,6 @@
 import { readCanonicalProvenanceFromIntent } from './canonical-materialization';
 import { isAllowedGateCommand } from './gate-command-policy';
+import { readVerifierRequirement } from './verifier-requirement';
 
 // ============================================================
 // Envelope de AUTORIZAÇÃO AUTÔNOMA V1 — evaluator PURO (autonomia progressiva).
@@ -186,6 +187,14 @@ export function evaluateAutonomousApprovalEnvelope(
   }
   checks.push('validation_criteria_present');
   checks.push('validation_commands_allowlisted');
+
+  // 5f'. Verifier OBRIGATÓRIO e fail-closed (Mandated Verifier Enforcement V0): o item
+  //      auto-aprovado precisa declarar `verifier_requirement: required_fail_closed` —
+  //      o aceite do seu resultado então exige parecer `verified` correlacionado.
+  if (spec.verifier_requirement !== 'required_fail_closed' || readVerifierRequirement(input.intent) !== 'required_fail_closed') {
+    return fail('verifier_requirement_not_fail_closed');
+  }
+  checks.push('verifier_required_fail_closed');
 
   // 5g. limites de execução coerentes (defesa em profundidade contra loop ilimitado).
   const limits = asObject(spec.limits);

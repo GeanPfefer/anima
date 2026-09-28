@@ -4,6 +4,7 @@ import {
   buildCanonicalSlicePlanningMessage,
   buildCanonicalMaterializationMessage,
   CANONICAL_PROVENANCE_KEY,
+  VERIFIER_REQUIREMENT_KEY,
   type CanonicalBacklogCandidate,
   type CanonicalMaterializationProvenance,
   type CreateWorkProposalCommand,
@@ -107,13 +108,22 @@ export async function materializeNextCanonicalCandidate(
   if (!sourceMessageId) return { ok: false, reason: 'source_message_persist_failed' };
 
   // O DRIVER garante a proveniência canônica no intent (não confia só no planner).
+  // Mandated Verifier Enforcement V0: o item canônico é o lane candidato a mandato;
+  // ele carrega `verifier_requirement: required_fail_closed` no execution_spec — o
+  // aceite do resultado passa a exigir parecer `verified` correlacionado, seja o item
+  // aprovado pelo sistema ou por um humano. Itens do chat não recebem o marcador.
+  const plannedIntent = planned.command.intent as Record<string, unknown>;
+  const plannedSpec = plannedIntent.execution_spec;
   const command: CreateWorkProposalCommand = {
     ...planned.command,
     sourceMessageId,
     // A proveniência é JSON-serializável (só strings/números/optional string); o cast via
     // `unknown` só contorna o fato de a INTERFACE ter um campo opcional (não estrutura Json).
     intent: {
-      ...(planned.command.intent as Record<string, unknown>),
+      ...plannedIntent,
+      ...(plannedSpec && typeof plannedSpec === 'object' && !Array.isArray(plannedSpec)
+        ? { execution_spec: { ...(plannedSpec as Record<string, unknown>), [VERIFIER_REQUIREMENT_KEY]: 'required_fail_closed' } }
+        : {}),
       [CANONICAL_PROVENANCE_KEY]: provenance,
     } as unknown as CreateWorkProposalCommand['intent'],
   };

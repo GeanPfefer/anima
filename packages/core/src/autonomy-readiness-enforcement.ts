@@ -34,6 +34,7 @@ import {
   ISOLATED_WORKSPACE_PERMISSIONS,
 } from './work-orchestration/autonomous-authorization';
 import { isAllowedGateCommand } from './work-orchestration/gate-command-policy';
+import { readVerifierRequirement } from './work-orchestration/verifier-requirement';
 
 /** Nível que uma auto-aprovação `system`/`autonomous_policy` concede (mandato). */
 export const AUTO_APPROVAL_DELEGATION_LEVEL: AutonomyLevel = 'mandated';
@@ -106,8 +107,13 @@ export interface MandatedLaneRuntimeGuarantees {
   /** `selectExecutor(worktree)` constrói `WorktreeExecutorAdapter` com `emitCheckpoint: true`. */
   readonly checkpointEmitted: boolean;
   /**
-   * Verifier no caminho: `advisory_fail_open` (hoje: `computeAndPersistVerifierOpinion`
-   * nunca bloqueia o resultado) ou `required_fail_closed` (ainda não existe).
+   * Verifier no caminho: `advisory_fail_open` (parecer nunca bloqueia) ou
+   * `required_fail_closed` — Mandated Verifier Enforcement V0: para itens com
+   * `execution_spec.verifier_requirement = required_fail_closed`,
+   * `WorkOrchestrationService.reviewResult` (web + CLI) e `planResultReview` recusam o
+   * ACEITE sem parecer `verified` correlacionado ao resultado revisado
+   * (`evaluateVerifierRequirement`). Ausente/inconclusivo/rejeitado/descorrelacionado
+   * ⇒ aceite negado; `request_changes` continua disponível.
    */
   readonly verifier: 'advisory_fail_open' | 'required_fail_closed';
   /** Rede: permissão negada (aplicacional) ≠ isolamento provado (kernel). */
@@ -125,9 +131,10 @@ export interface MandatedLaneRuntimeGuarantees {
 }
 
 export const MANDATED_LANE_RUNTIME_GUARANTEES_V0: MandatedLaneRuntimeGuarantees = {
-  version: 'mandated-worktree-lane-v0',
+  version: 'mandated-worktree-lane-v1',
   checkpointEmitted: true,
-  verifier: 'advisory_fail_open',
+  // Só depois do enforcement real (verifier-requirement.ts + service.reviewResult).
+  verifier: 'required_fail_closed',
   network: 'permission_denied',
   budget: 'attempts_and_runtime',
   humanAcceptance: true,
@@ -153,9 +160,12 @@ export const MANDATED_LANE_RUNTIME_GUARANTEES_V0: MandatedLaneRuntimeGuarantees 
  * - `budget_cap`: perfil `attempts_and_runtime` (não é teto de custo);
  * - `checkpoint`, `human_acceptance`, `no_auto_integration`, `recovery_path`:
  *   perfil de garantias do runtime;
- * - `verifier`: só se o perfil exigir parecer FAIL-CLOSED (hoje não ⇒ ausente);
- * - `fail_closed`: só se TODA precondição obrigatória nega ao falhar — inclui o
- *   Verifier; com Verifier fail-open, ausente.
+ * - `verifier`: só se o perfil garante o enforcement fail-closed E o PRÓPRIO item
+ *   declara `verifier_requirement: required_fail_closed` (é o marcador que ativa o
+ *   gate de aceite para este item);
+ * - `fail_closed`: só se TODA precondição obrigatória nega ao falhar — envelope,
+ *   histórico/avaliação/contexto (este módulo), gates allowlisted, escopo, limites,
+ *   provider local e Verifier obrigatório.
  *
  * Reversibilidade: pré-aprovação não há classificação persistida (INTEL-01 grava
  * depois); derivada `reversible` da mutação confinada à worktree descartável sem
@@ -195,7 +205,8 @@ export function deriveAutoApprovalActionContext(
   const scope = asObject(asObject(facts.proposal)?.data)?.included_scope;
   const allowedPaths = Array.isArray(scope) && scope.length > 0 && scope.every(isNonBlankString);
 
-  const verifierFailClosed = guarantees.verifier === 'required_fail_closed';
+  const verifierFailClosed =
+    guarantees.verifier === 'required_fail_closed' && readVerifierRequirement(facts.intent) === 'required_fail_closed';
   const failClosed =
     verifierFailClosed && gatesAllowlisted && allowedPaths && attemptsBounded && timeBounded && localBackend;
 

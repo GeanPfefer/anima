@@ -147,6 +147,14 @@ describe('materializeNextCanonicalCandidate — 15 regressões', () => {
     expect(spies.lastCommand!.sourceMessageId).toBe('msg-1');
   });
 
+  test('(12b) lane canônico carrega Verifier obrigatório fail-closed no execution_spec (preservando o resto)', async () => {
+    const { deps, spies } = makeDeps({});
+    await materializeNextCanonicalCandidate({ allCandidates: [cand('SUP-01', 'not_started')] }, deps);
+    const spec = (spies.lastCommand!.intent as Record<string, unknown>).execution_spec as Record<string, unknown>;
+    expect(spec.verifier_requirement).toBe('required_fail_closed');
+    expect(spec.executor).toBe('worktree');
+  });
+
   test('(13) replay: com o sourceId já materializado, é idempotente (não duplica)', async () => {
     // 1ª materialização
     const first = makeDeps({ materialized: new Set() });

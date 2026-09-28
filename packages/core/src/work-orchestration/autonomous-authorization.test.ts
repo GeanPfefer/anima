@@ -28,6 +28,7 @@ const validExecutionSpec = {
   permissions: ['workspace_read', 'workspace_write_isolated'],
   validation_criteria: [{ label: 'Criar arquivo', command: 'npm run build' }],
   limits: { max_attempts: 3, max_duration_minutes: 30 },
+  verifier_requirement: 'required_fail_closed',
 };
 
 const validProposal = {
@@ -73,6 +74,20 @@ describe('evaluateAutonomousApprovalEnvelope — happy path', () => {
     expect(decision.checks).toContain('provenance_canonical_ratified');
     expect(decision.checks).toContain('permissions_isolated_workspace');
     expect(decision.checks).toContain('governor_permit');
+    expect(decision.checks).toContain('verifier_required_fail_closed');
+  });
+});
+
+describe('evaluateAutonomousApprovalEnvelope — Verifier obrigatório (Mandated Verifier Enforcement V0)', () => {
+  test.each([
+    ['ausente', undefined],
+    ['advisory', 'advisory'],
+    ['valor desconhecido', 'required'],
+  ])('verifier_requirement %s ⇒ fora do lane mandatado', (_name, value) => {
+    const spec: Record<string, unknown> = { ...validExecutionSpec };
+    if (value === undefined) delete spec.verifier_requirement; else spec.verifier_requirement = value;
+    const decision = evaluateAutonomousApprovalEnvelope({ ...baseInput(), intent: { canonical_provenance: { ...validProvenance }, execution_spec: spec } });
+    expect(decision).toEqual({ authorized: false, failClosedReason: 'verifier_requirement_not_fail_closed' });
   });
 });
 

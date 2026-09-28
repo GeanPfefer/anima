@@ -63,6 +63,7 @@ export * from './agentic-runtime-policy';
 export * from './workspace-access-policy';
 export * from './command-execution-policy';
 export * from './gate-command-policy';
+export * from './verifier-requirement';
 export * from './coder-output-harness';
 export * from './work-verification';
 export * from './verifier-opinion';

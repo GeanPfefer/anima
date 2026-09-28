@@ -35,6 +35,7 @@ const SPEC = {
   permissions: ['workspace_read', 'workspace_write_isolated'],
   validation_criteria: [{ label: 'gate', command: 'npm test' }],
   limits: { max_attempts: 1, max_duration_minutes: 10 },
+  verifier_requirement: 'required_fail_closed',
 };
 
 function facts(over: { spec?: Record<string, unknown>; scope?: unknown; impactLevel?: string; capability?: string } = {}): AutoApprovalCandidateFacts {
@@ -76,12 +77,11 @@ function synthetic(declared: CapabilityMaturity = 'operational', evidence = occa
   });
 }
 
-/** Perfil HIPOTÉTICO: Verifier obrigatório e fail-closed (não existe hoje). */
-const HYPOTHETICAL_FAIL_CLOSED_VERIFIER: MandatedLaneRuntimeGuarantees = {
-  ...MANDATED_LANE_RUNTIME_GUARANTEES_V0,
-  version: 'hypothetical-fail-closed-verifier',
-  verifier: 'required_fail_closed',
-};
+/** Perfil do runtime REAL (Verifier obrigatório fail-closed desde o Verifier Enforcement V0). */
+const REAL = MANDATED_LANE_RUNTIME_GUARANTEES_V0;
+/** Perfil ANTERIOR (Hardening V0): Verifier advisory/fail-open. */
+const ADVISORY_VERIFIER: MandatedLaneRuntimeGuarantees = { ...REAL, version: 'advisory-verifier', verifier: 'advisory_fail_open' };
+const HYPOTHETICAL_FAIL_CLOSED_VERIFIER = REAL;
 
 const readinessUnder = (f: AutoApprovalCandidateFacts, guarantees: MandatedLaneRuntimeGuarantees, evaluations = synthetic()) => {
   const derived = deriveAutoApprovalActionContext(f, guarantees);
@@ -114,6 +114,7 @@ describe('Mandated Envelope Hardening V0 — salvaguarda declarada = salvaguarda
         'budget_cap',
         'checkpoint',
         'command_allowlist',
+        'fail_closed',
         'gates',
         'human_acceptance',
         'isolated_worktree',
@@ -123,18 +124,21 @@ describe('Mandated Envelope Hardening V0 — salvaguarda declarada = salvaguarda
         'no_paid_compute',
         'recovery_path',
         'timeout',
+        'verifier',
       ].sort(),
     );
-    // Removidos por serem suposição: Verifier fail-open, fail_closed da cadeia, isolamento de rede.
-    expect(present).not.toContain('verifier');
-    expect(present).not.toContain('fail_closed');
+    // Isolamento de rede continua não garantido por nenhum caminho.
     expect(present).not.toContain('network_isolation');
   });
 
-  it('2. Verifier advisory/fail-open não é declarado; só um Verifier fail-closed contaria', () => {
-    expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.verifier).toBe('advisory_fail_open');
-    expect(safeguardsOf(facts())).not.toContain('verifier');
-    expect(safeguardsOf(facts(), HYPOTHETICAL_FAIL_CLOSED_VERIFIER)).toContain('verifier');
+  it('2. Verifier só é presente com enforcement real E o marcador do próprio item', () => {
+    expect(REAL.verifier).toBe('required_fail_closed');
+    expect(safeguardsOf(facts())).toContain('verifier');
+    // Item sem marcador (ex.: planejado pelo chat) não ativa o gate de aceite.
+    expect(safeguardsOf(facts({ spec: { verifier_requirement: undefined } }))).not.toContain('verifier');
+    expect(safeguardsOf(facts({ spec: { verifier_requirement: 'advisory' } }))).not.toContain('verifier');
+    // Runtime advisory (antes do enforcement) nunca declarava.
+    expect(safeguardsOf(facts(), ADVISORY_VERIFIER)).not.toContain('verifier');
   });
 
   it('3. checkpoint exigido ausente ⇒ mandato negado', () => {
@@ -209,8 +213,9 @@ describe('Mandated Envelope Hardening V0 — salvaguarda declarada = salvaguarda
   });
 
   it('9. fail_closed só quando TODA precondição obrigatória nega ao falhar', () => {
-    // Verifier fail-open ⇒ cadeia não é fail-closed, mesmo com o resto completo.
-    expect(safeguardsOf(facts())).not.toContain('fail_closed');
+    // Verifier fail-open (perfil anterior) ou item sem marcador ⇒ cadeia não é fail-closed.
+    expect(safeguardsOf(facts(), ADVISORY_VERIFIER)).not.toContain('fail_closed');
+    expect(safeguardsOf(facts({ spec: { verifier_requirement: 'advisory' } }))).not.toContain('fail_closed');
     expect(safeguardsOf(facts(), HYPOTHETICAL_FAIL_CLOSED_VERIFIER)).toContain('fail_closed');
     // Com Verifier fail-closed, qualquer outra precondição faltando derruba.
     for (const f of [
@@ -225,7 +230,8 @@ describe('Mandated Envelope Hardening V0 — salvaguarda declarada = salvaguarda
 
   it('10. contexto não é forjável por booleans/campos do chamador', () => {
     const forged = {
-      ...facts({ spec: { coder_backend: 'openai' } }),
+      // Item SEM marcador de Verifier e com backend pago, alegando tudo por campos extras.
+      ...facts({ spec: { coder_backend: 'openai', verifier_requirement: undefined } }),
       allowedLocalCoderBackends: ['openai'],
       actionContext: { effect: 'read_only', safeguards: ['verifier', 'fail_closed', 'no_paid_compute'] },
       safeguards: ['verifier', 'fail_closed'],
@@ -240,27 +246,36 @@ describe('Mandated Envelope Hardening V0 — salvaguarda declarada = salvaguarda
     expect(present).not.toContain('no_paid_compute');
   });
 
-  it('11. produce-change real continua negado por readiness', () => {
+  it('11/13/14. produce-change real: manual → supervised; mandato negado SÓ por operational_criteria_pending', () => {
     const decision = enforce(facts(), CURRENT());
     expect(decision).toMatchObject({ allowed: false, reason: 'autonomy_readiness_insufficient' });
     if (decision.allowed) return;
     expect(decision.readiness?.capabilityMaturity).toBe('proven');
-    // Sem Verifier fail-closed o lane nem chega a supervised.
-    expect(decision.readiness?.readinessLevel).toBe('manual');
-    expect(decision.detail).toContain('verifier_required');
-    expect(decision.detail).toContain('operational_criteria_pending');
+    expect(decision.readiness?.readinessLevel).toBe('supervised');
+    expect(decision.detail).toBe('agency.produce-change: readiness supervised < mandated (operational_criteria_pending).');
+    expect(decision.detail).not.toContain('verifier_required');
+    // Antes do enforcement (perfil advisory) o mesmo item era manual.
+    const before = evaluateAutonomyReadiness({
+      capabilityId: 'agency.produce-change',
+      actionContext: (deriveAutoApprovalActionContext(facts(), ADVISORY_VERIFIER) as { ok: true; context: Parameters<typeof evaluateAutonomyReadiness>[0]['actionContext'] }).context,
+      proofEvaluations: CURRENT(),
+    });
+    expect(before.readinessLevel).toBe('manual');
   });
 
   it('12. sintético operacional só passa com TODAS as salvaguardas realmente aplicadas', () => {
-    // Com o runtime real: negado (Verifier fail-open ⇒ sem verifier/fail_closed).
-    const real = enforce(facts(), synthetic(), SYNTHETIC_PROOF_RULES);
-    expect(real).toMatchObject({ allowed: false, reason: 'autonomy_readiness_insufficient' });
-    if (!real.allowed) {
-      expect(real.readiness?.safeguards.missingForNext).toEqual(expect.arrayContaining(['verifier']));
+    // Runtime real (Verifier obrigatório) + item completo: permitido.
+    expect(enforce(facts(), synthetic(), SYNTHETIC_PROOF_RULES).allowed).toBe(true);
+    // Qualquer salvaguarda aplicada faltando derruba.
+    for (const f of [
+      facts({ spec: { verifier_requirement: undefined } }),
+      facts({ scope: [] }),
+      facts({ spec: { limits: { max_attempts: 1 } } }),
+      facts({ spec: { validation_criteria: [{ label: 'g', command: 'bash x.sh' }] } }),
+    ]) {
+      expect(enforce(f, synthetic(), SYNTHETIC_PROOF_RULES).allowed).toBe(false);
     }
-    // Só num perfil em que todas as garantias existem a readiness chega a mandated.
-    expect(readinessUnder(facts(), HYPOTHETICAL_FAIL_CLOSED_VERIFIER).readinessLevel).toBe('mandated');
-    expect(readinessUnder(facts(), MANDATED_LANE_RUNTIME_GUARANTEES_V0).readinessLevel).toBe('manual');
+    expect(readinessUnder(facts(), ADVISORY_VERIFIER).readinessLevel).toBe('manual');
   });
 });
 
@@ -338,8 +353,8 @@ describe('Autonomy Readiness Enforcement V0 — authority não excede readiness'
         }
       }
     }
-    // Com as regras canônicas e o runtime real, NENHUMA combinação libera.
-    expect(allowedCount).toBe(0);
+    // Só a combinação SINTÉTICA operacional + fatos completos libera (registry real nunca).
+    expect(allowedCount).toBe(1);
   });
 
   it('não altera as regras canônicas nem promove produce-change', () => {

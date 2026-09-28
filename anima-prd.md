@@ -1,4 +1,10 @@
 # Anima — Product Requirements Document
+> Mandated Verifier Enforcement V0 em 2026-09-28: itens canônicos carregam `execution_spec.verifier_requirement:
+> required_fail_closed` (o Envelope V1 exige). O aceite do resultado (service.reviewResult/planResultReview)
+> é recusado sem parecer `verified` correlacionado ao resultado revisado; rejected/inconclusive/ausente/stale
+> ⇒ só `request_changes`. Chat segue advisory. Lane real: readiness manual → supervised; mandato negado só por
+> `operational_criteria_pending`. Residual: RPC SQL de revisão sem gate. Registro
+> `docs/registros/2026-09-28-mandated-verifier-enforcement-v0.md`.
 > Mandated Envelope Hardening V0 em 2026-09-28: salvaguarda declarada = aplicada. O contexto do lane de
 > auto-aprovação vem do item + perfil versionado de garantias do runtime (`mandated-worktree-lane-v0`);
 > Verifier (advisory/fail-open) e `fail_closed` deixaram de ser declarados; Envelope V1 recusa gate fora da
