@@ -14,7 +14,7 @@ import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/
 import { runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
 import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recovery';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
-import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
+import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
 import { checkRecoveryConfig, renderRecoveryConfigReport } from '@/lib/recovery-config/check';
@@ -100,6 +100,10 @@ async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config
       return runWorkReview(service, command.id, { type: 'accept' });
     case 'work-withdraw':
       return runWorkWithdraw(service, command.id, command.reason);
+    case 'work-resolve-pending':
+      return runWorkResolvePending(service, command.id, command.decision === 'request_changes'
+        ? { type: 'request_changes', requestedChanges: command.reason ?? '' }
+        : command.reason === null ? { type: 'cancel' } : { type: 'cancel', reason: command.reason });
     case 'work-prepare-autonomous':
       return runWorkPrepareAutonomous(service, (workItemId, version) => ensurePlannedProjectClassification(client, workItemId, version), command.id);
     case 'work-authorize-compute':

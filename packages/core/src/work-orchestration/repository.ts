@@ -1,4 +1,4 @@
-import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, ReleaseManualWorkCommand, RequestProposalRevisionCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand, WithdrawApprovedWorkCommand } from './commands';
+import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, ReleaseManualWorkCommand, RequestProposalRevisionCommand, ResolvePendingVerificationCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand, WithdrawApprovedWorkCommand } from './commands';
 import type { WorkOperationResult } from './errors';
 import type { DecideIntegrationCommand, IntegrationDecisionOutcome } from './integration-decision';
 import type { ApprovalDecision, WorkContextSnapshot, WorkEvent, WorkItem, WorkItemId } from './types';
@@ -14,6 +14,10 @@ export interface WorkOrchestrationRepository {
   // (approved → work_cancelled → cancelled). Ato do dono; fail-closed em qualquer
   // outro estado ou com histórico de execução.
   withdrawApprovedWork(command: WithdrawApprovedWorkCommand): Promise<WorkOperationResult<WorkItem>>;
+  // Pending Verification Human Recovery V0: decisão HUMANA sobre o resultado candidato
+  // retido do lane com Verifier obrigatório (request_changes | cancel). Nunca libera
+  // review, nunca verifica, nunca aceita.
+  resolvePendingVerification(command: ResolvePendingVerificationCommand): Promise<WorkOperationResult<WorkItem>>;
   submitResult(command: SubmitWorkResultCommand): Promise<WorkOperationResult<WorkItem>>;
   startExecution(command: StartWorkExecutionCommand): Promise<WorkOperationResult<WorkItem>>;
   finishExecution(command: FinishWorkExecutionCommand): Promise<WorkOperationResult<WorkItem>>;

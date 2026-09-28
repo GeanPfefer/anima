@@ -161,6 +161,9 @@ export function renderHuman(payload: CliPayload): string {
     case 'withdraw':
       return `${payload.workItemId} ${DOT} ${payload.message}`;
 
+    case 'resolve-pending':
+      return `${payload.workItemId} ${DOT} ${payload.decision} ${DOT} resultado ${payload.resultEventId} ${DOT} ${payload.message}`;
+
     case 'retry':
       return [
         `${payload.workItemId} ${DOT} ${payload.message}`,

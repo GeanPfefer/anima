@@ -1,9 +1,10 @@
-import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, ReleaseManualWorkCommand, RequestProposalRevisionCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand, WithdrawApprovedWorkCommand } from './commands';
+import type { AttachWorkContextCommand, CreateWorkProposalCommand, FinishWorkExecutionCommand, ReleaseManualWorkCommand, RequestProposalRevisionCommand, ResolvePendingVerificationCommand, ResolveWorkApprovalCommand, ReviewWorkResultCommand, ReviseWorkProposalCommand, StartWorkCommand, StartWorkExecutionCommand, SubmitWorkResultCommand, WithdrawApprovedWorkCommand } from './commands';
 import { failure, type WorkOperationResult } from './errors';
 import type { DecideIntegrationCommand, IntegrationDecisionOutcome } from './integration-decision';
 import type { WorkOrchestrationRepository } from './repository';
 import type { ApprovalDecision, WorkContextSnapshot, WorkEvent, WorkItem, WorkItemId } from './types';
 import { evaluateVerifierRequirement } from './verifier-requirement';
+import { isValidPendingVerificationDecision } from './pending-verification-recovery';
 import { isValidApprovalDecision, isValidProposalVersion, isValidResultReviewDecision, isValidWorkContextReferences, isValidWorkExecutionOutcome, isValidWorkIntent, isValidWorkProposal, isValidWorkResult } from './validation';
 const invalid = <T>(message: string): WorkOperationResult<T> => failure('invalid_input', message);
 export class WorkOrchestrationService {
@@ -31,6 +32,10 @@ export class WorkOrchestrationService {
   withdrawApprovedWork(command: WithdrawApprovedWorkCommand): Promise<WorkOperationResult<WorkItem>> {
     if (!this.validVersion(command.expectedProposalVersion) || !command.reason.trim()) return Promise.resolve(invalid('Retirada inválida: versão e motivo são obrigatórios.'));
     return this.repository.withdrawApprovedWork(command);
+  }
+  resolvePendingVerification(command: ResolvePendingVerificationCommand): Promise<WorkOperationResult<WorkItem>> {
+    if (!command.workItemId || !command.resultEventId || !isValidPendingVerificationDecision(command.decision)) return Promise.resolve(invalid('Decisão sobre candidato pendente inválida.'));
+    return this.repository.resolvePendingVerification(command);
   }
   submitResult(command: SubmitWorkResultCommand): Promise<WorkOperationResult<WorkItem>> {
     if (!this.validVersion(command.expectedProposalVersion) || !isValidWorkResult(command.result)) return Promise.resolve(invalid('Resultado inválido.'));

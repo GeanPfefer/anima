@@ -1,4 +1,4 @@
-import { readVerifierRequirement, type VerifierOpinionV1, type WorkEvent, type WorkItem, type WorkOperationResult } from '@anima/core';
+import { projectPendingVerificationCandidate, readVerifierRequirement, type VerifierOpinionV1, type WorkEvent, type WorkItem, type WorkOperationResult } from '@anima/core';
 import { computeAndPersistVerifierOpinion, type VerifierOpinionOutcome, type VerifierOpinionSink } from './verifier-opinion';
 
 // ============================================================
@@ -30,7 +30,10 @@ export type MandatedVerificationHoldReason =
   | 'persist_failed'
   | 'not_conclusive'
   | 'release_not_observed'
-  | 'readback_failed';
+  | 'readback_failed'
+  /** Pending Verification Human Recovery V0: o humano encerrou o candidato. */
+  | 'candidate_not_pending'
+  | 'candidate_resolved_by_human';
 
 export type MandatedVerificationOutcome =
   | { readonly status: 'advisory'; readonly opinion: VerifierOpinionOutcome | null }
@@ -83,6 +86,13 @@ export async function verifyAndReleaseCandidate(workItemId: string, deps: Mandat
     const opinion = await compute({ item, events }, deps.sink).catch(() => null);
     return { status: 'advisory', opinion };
   }
+
+  // Pending Verification Human Recovery V0: candidato encerrado por decisão humana
+  // (`changes_requested`/`cancelled`, ou marcado como resolvido) não é re-verificado.
+  // Defesa de aplicação; a fronteira real é o banco (`human_resolved` nunca libera).
+  if (item.state !== 'in_progress' && item.state !== 'review') return held('candidate_not_pending', item.state);
+  const candidate = projectPendingVerificationCandidate(item, events);
+  if (!candidate.pending && candidate.gap === 'already_resolved') return held('candidate_resolved_by_human');
 
   let outcome: VerifierOpinionOutcome | typeof TIMEOUT;
   try {

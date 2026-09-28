@@ -64,6 +64,7 @@ export * from './workspace-access-policy';
 export * from './command-execution-policy';
 export * from './gate-command-policy';
 export * from './verifier-requirement';
+export * from './pending-verification-recovery';
 export * from './integration-effect';
 export * from './coder-output-harness';
 export * from './work-verification';

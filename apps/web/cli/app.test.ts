@@ -283,3 +283,31 @@ describe('runners da CLI sobre o application service', () => {
     expect(result.payload).toMatchObject({ ok: true, kind: 'status', userId: 'user-1', autonomyEnabled: true, resumable: { total: 3, byState: { review: 1, proposed: 2 } } });
   });
 });
+
+describe('work resolve-pending (Pending Verification Human Recovery V0)', () => {
+  const mandated = { ...reviewItem, state: 'in_progress', proposalVersion: 1, intent: { execution_spec: { verifier_requirement: 'required_fail_closed' } } } as unknown as WorkItem;
+  const events: readonly WorkEvent[] = [
+    { id: 's', workItemId: 'i', type: 'execution_started', author: 'system', proposalVersion: 1, payload: { schema_version: 1, data: { attempt_id: 'a' } }, occurredAt: new Date() },
+    { id: 'r', workItemId: 'i', type: 'result_submitted', author: 'executor', proposalVersion: 1, payload: { schema_version: 1, data: { attempt_id: 'a' } }, occurredAt: new Date() },
+  ];
+
+  test('deriva o candidato e encaminha a decisão humana (exit 0)', async () => {
+    const { runWorkResolvePending } = await import('./app');
+    const resolvePendingVerification = jest.fn(async () => ok({ ...mandated, state: 'changes_requested' } as WorkItem));
+    const result = await runWorkResolvePending({ getItem: async () => ok(mandated), listEvents: async () => ok(events), resolvePendingVerification },
+      'i', { type: 'request_changes', requestedChanges: 'refazer' });
+    expect(resolvePendingVerification).toHaveBeenCalledWith({ workItemId: 'i', resultEventId: 'r', decision: { type: 'request_changes', requestedChanges: 'refazer' } });
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(result.payload).toMatchObject({ ok: true, kind: 'resolve-pending', decision: 'request_changes', resultEventId: 'r', state: 'changes_requested' });
+  });
+
+  test('item em review não usa esta primitive: exit 3 sem chamar o serviço', async () => {
+    const { runWorkResolvePending } = await import('./app');
+    const resolvePendingVerification = jest.fn();
+    const result = await runWorkResolvePending({ getItem: async () => ok({ ...mandated, state: 'review' } as WorkItem), listEvents: async () => ok(events), resolvePendingVerification },
+      'i', { type: 'cancel' });
+    expect(resolvePendingVerification).not.toHaveBeenCalled();
+    expect(result.exitCode).toBe(EXIT.REJECTED);
+    expect(result.payload).toMatchObject({ ok: false, code: 'not_pending_verification:not_in_progress' });
+  });
+});

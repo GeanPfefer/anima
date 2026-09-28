@@ -1,4 +1,14 @@
 # Anima — Product Requirements Document
+> Pending Verification Human Recovery V0 em 2026-09-28: controle humano ≠ bypass do Verifier. O candidato retido
+> (lane obrigatório, `in_progress`, Verifier inconclusive/missing/timeout/erro/evidência incompleta) pode ser
+> encerrado pelo DONO via `resolve_pending_verification` (author=user; sem Trusted System Writer): `request_changes`
+> (→ `changes_requested`, shape do review ⇒ correção por retomada existente) ou `cancel` (→ `cancelled`). Exige o
+> `result_event_id` mais recente da versão/attempt vigentes, sem veredito conclusivo; replay idempotente, decisão
+> divergente ⇒ 55000. Nunca produz review, parecer, aceite ou integração: o candidato vira `human_resolved` no
+> veredito SQL (trigger/release/aceite recusam para sempre); reconcile não o relata; Supervisor não re-verifica.
+> CLI `anima work resolve-pending <id> request-changes --reason "…" | cancel`; rota POST
+> `/api/work-orchestration/pending-verification-resolutions`; botões na UI = futuro. Registro
+> `docs/registros/2026-09-28-pending-verification-human-recovery-v0.md`.
 > Trusted System Writer V0 em 2026-09-28: `author=system` é fronteira de confiança, não rótulo. Evidência do host
 > (git/gate/coder), parecer do Verifier e receipt de integração só são gravados pelo papel Postgres
 > `anima_system_writer` (identidade GoTrue dedicada via `auth.users.role`, registrada para o dono; sem service_role);

@@ -1359,3 +1359,20 @@ test('19. result_pending_verification ⇒ re-verifica UMA vez; nenhum claim/star
     { workItemId: 'item-pending', attemptId: 'a-9', claimId: null, finding: 'result_pending_verification', action: 'requires_verification', itemState: 'in_progress' },
   ]);
 });
+
+// Pending Verification Human Recovery V0 — candidato encerrado pelo humano não é re-verificado.
+test('17. candidato resolvido por humano (reconcile não relata pendência) ⇒ Supervisor não re-verifica', async () => {
+  const database = new FakeDatabase({ items: [], reconciliation: [] });
+  const verify = jest.fn(async () => ({ status: 'released' as const, verdict: 'verified' as const }));
+  const { adapter, calls } = executor();
+  const result = await runSupervisorTurn({
+    client: database.asClient(),
+    routes: [{ adapter, candidate: { schemaVersion: 1, routeId: 'test-route', executorId: adapter.id, providerRef: 'test-provider', modelRef: 'test-model', effort: 'standard', capabilities: ['programming'], availability: 'available', latency: 'normal', priority: 1 } }],
+    ownerInstanceId: 'supervisor-test', newId: ids(['claim-1', 'attempt-1']), signal: new AbortController().signal, reader: reader([]),
+    verifyPendingCandidate: verify,
+  });
+  expect(verify).not.toHaveBeenCalled();
+  expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work', 'next_autonomous_work']);
+  expect(calls).toHaveLength(0);
+  expect(result.reconciliation).toEqual([]);
+});

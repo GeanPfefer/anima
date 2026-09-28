@@ -5,6 +5,8 @@ import {
   type ComputePreferenceV1,
   type ComputeRoutingWaitV1,
   planResultReview,
+  projectPendingVerificationCandidate,
+  type PendingVerificationDecision,
   readAutonomousExecutionSpec,
   reconstructWorkPresentation,
   type ResolveWorkApprovalCommand,
@@ -195,6 +197,15 @@ export interface WithdrawPayload {
   readonly state: string;
   readonly message: string;
 }
+export interface ResolvePendingPayload {
+  readonly ok: true;
+  readonly kind: 'resolve-pending';
+  readonly workItemId: string;
+  readonly decision: PendingVerificationDecision['type'];
+  readonly resultEventId: string;
+  readonly state: string;
+  readonly message: string;
+}
 export interface RetryPayload {
   readonly ok: true;
   readonly kind: 'retry';
@@ -256,7 +267,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
+  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -797,6 +808,35 @@ export async function runWorkWithdraw(service: WorkOrchestrationPort, id: string
   return {
     exitCode: EXIT.OK,
     payload: { ok: true, kind: 'withdraw', workItemId: result.value.id, state: result.value.state, message: `Plano aprovado retirado antes da execução. Novo estado: ${result.value.state}.` },
+  };
+}
+
+/** Subconjunto do serviço usado por `work resolve-pending` (não amplia o port geral). */
+export type PendingVerificationPort = Pick<WorkOrchestrationService, 'getItem' | 'listEvents' | 'resolvePendingVerification'>;
+
+/**
+ * Pending Verification Human Recovery V0: decisão HUMANA sobre o resultado CANDIDATO
+ * retido do lane com Verifier obrigatório — `request_changes` (→ changes_requested) ou
+ * `cancel` (→ cancelled). A CLI só DERIVA o candidato exato (resultado mais recente da
+ * versão/attempt vigentes) pela projeção pura do core; a RPC revalida sob lock. Nunca
+ * verifica, nunca libera review, nunca aceita nem integra.
+ */
+export async function runWorkResolvePending(service: PendingVerificationPort, id: string, decision: PendingVerificationDecision): Promise<CommandResult> {
+  const [item, events] = await Promise.all([service.getItem(id), service.listEvents(id)]);
+  if (!item.ok) return errorResult(item.error.message, item.error.code, exitCodeForError(item.error.code));
+  if (!events.ok) return errorResult(events.error.message, events.error.code, exitCodeForError(events.error.code));
+  const projection = projectPendingVerificationCandidate(item.value, events.value);
+  if (!projection.pending) {
+    return errorResult(`O item não retém um resultado candidato pendente de verificação (${projection.gap}).`, `not_pending_verification:${projection.gap}`, EXIT.REJECTED);
+  }
+  const result = await service.resolvePendingVerification({ workItemId: item.value.id, resultEventId: projection.candidate.resultEventId, decision });
+  if (!result.ok) return errorResult(result.error.message, result.error.code, exitCodeForError(result.error.code));
+  const message = decision.type === 'request_changes'
+    ? `Candidato encerrado para retrabalho (sem verificação, sem review). Novo estado: ${result.value.state}.`
+    : `Candidato cancelado (sem verificação, sem review). Novo estado: ${result.value.state}.`;
+  return {
+    exitCode: EXIT.OK,
+    payload: { ok: true, kind: 'resolve-pending', workItemId: result.value.id, decision: decision.type, resultEventId: projection.candidate.resultEventId, state: result.value.state, message },
   };
 }
 

@@ -102,3 +102,23 @@ describe('verifyAndReleaseCandidate — lane com Verifier obrigatório (V0.1)', 
     expect(d.getItem).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('verifyAndReleaseCandidate — Pending Verification Human Recovery V0', () => {
+  test.each(['changes_requested', 'cancelled'] as const)('17. candidato encerrado pelo humano (%s) ⇒ não re-verifica', async (state) => {
+    const d = deps({ states: [state, state] });
+    await expect(verifyAndReleaseCandidate('work-1', d)).resolves.toEqual({ status: 'held', reason: 'candidate_not_pending', detail: state });
+    expect(d.compute).not.toHaveBeenCalled();
+  });
+
+  test('17. candidato marcado como resolvido (item de volta a in_progress) ⇒ não re-verifica', async () => {
+    const at = new Date();
+    const events: readonly WorkEvent[] = [
+      { id: 'e-start', workItemId: 'work-1', type: 'execution_started', author: 'system', proposalVersion: 1, payload: { schema_version: 1, data: { attempt_id: 'a-1' } }, occurredAt: at },
+      { id: 'e-result', workItemId: 'work-1', type: 'result_submitted', author: 'executor', proposalVersion: 1, payload: { schema_version: 1, data: { attempt_id: 'a-1' } }, occurredAt: at },
+      { id: 'e-human', workItemId: 'work-1', type: 'changes_requested', author: 'user', proposalVersion: 1, payload: { schema_version: 1, data: { origin: 'pending_verification_recovery', resolved_result_event_id: 'e-result', requested_changes: 'x' } }, occurredAt: at },
+    ];
+    const d = { ...deps({ states: ['in_progress', 'in_progress'] }), listEvents: jest.fn(async () => ok(events)) };
+    await expect(verifyAndReleaseCandidate('work-1', d)).resolves.toEqual({ status: 'held', reason: 'candidate_resolved_by_human' });
+    expect(d.compute).not.toHaveBeenCalled();
+  });
+});

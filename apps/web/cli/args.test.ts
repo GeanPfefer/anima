@@ -47,6 +47,16 @@ describe('parser de argumentos da CLI', () => {
       .toEqual({ ok: true, command: { kind: 'work-withdraw', id: 'abc', reason: 'plano obsoleto', json: false } });
   });
 
+  test('work resolve-pending: request-changes exige --reason; cancel aceita motivo opcional', () => {
+    expect(parseArgs(['work', 'resolve-pending', 'abc', 'request-changes'])).toMatchObject({ ok: false });
+    expect(parseArgs(['work', 'resolve-pending', 'abc', 'verify'])).toMatchObject({ ok: false });
+    expect(parseArgs(['work', 'resolve-pending', 'abc'])).toMatchObject({ ok: false });
+    expect(parseArgs(['work', 'resolve-pending', 'abc', 'request-changes', '--reason', 'refazer']))
+      .toEqual({ ok: true, command: { kind: 'work-resolve-pending', id: 'abc', decision: 'request_changes', reason: 'refazer', json: false } });
+    expect(parseArgs(['work', 'resolve-pending', 'abc', 'cancel']))
+      .toEqual({ ok: true, command: { kind: 'work-resolve-pending', id: 'abc', decision: 'cancel', reason: null, json: false } });
+  });
+
   test('work retry <id> (deriva o resto do estado persistido)', () => {
     expect(parseArgs(['work', 'retry', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'work-retry', id: 'abc', json: true } });
     expect(parseArgs(['work', 'retry'])).toEqual({ ok: false, error: 'Uso: anima work retry <id>' });

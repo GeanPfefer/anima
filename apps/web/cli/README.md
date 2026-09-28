@@ -52,6 +52,7 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work approve <id>` | Aprova uma PROPOSTA (`proposed → approved`) via `resolveApproval` |
 | `anima work accept <id>` | Aceita o RESULTADO em review (`review → completed`) via `reviewResult` |
 | `anima work withdraw <id> --reason "..."` | Retira um plano APROVADO não iniciado (`approved → cancelled`) via `withdraw_approved_work` |
+| `anima work resolve-pending <id> request-changes --reason "..."` / `... cancel [--reason "..."]` | Encerra um resultado CANDIDATO retido pelo Verifier obrigatório (`in_progress → changes_requested`/`cancelled`) via `resolve_pending_verification`; nunca verifica, nunca libera review |
 | `anima work retry <id>` | Solicita o retry governado (ato humano) de um item `failed`/RETRY_READY via `request_work_retry` |
 | `anima work authorize-resume <id> [--plan f]` | Autoridade humana de +1: recovery antigo de `failed` cria successor; bloqueio pré-attempt por orçamento readmite o mesmo item |
 | `anima work prepare-autonomous <id>` | Paridade com o botão da UI "Preparar elegibilidade autônoma": classifica a versão aprovada vigente (sem executar) |
@@ -86,6 +87,13 @@ execução (base mudou, o contrato de domínio evoluiu, um sucessor melhor o sub
 Fail-closed: só atinge `approved` sem histórico de execução; não satisfaz dependências
 nem apaga lineage. Distinto de `reject` (proposta nunca aprovada) e `failed` (execução
 que falhou).
+
+`work resolve-pending` é a saída HUMANA de um resultado candidato que o Verifier obrigatório
+não conseguiu concluir (inconclusive/missing/timeout/erro/evidência incompleta). A CLI deriva o
+candidato exato (resultado mais recente da versão e attempt vigentes) e a RPC revalida sob lock.
+`request-changes` leva a `changes_requested` (daí `work correct` segue como após um review);
+`cancel` leva a `cancelled`. Controle humano ≠ bypass: nada aqui produz `review`, parecer,
+aceite ou integração. Item em `review` usa `work accept`/`work request-changes`.
 
 `work approve` (aprovar proposta) e `work accept` (aceitar resultado) são operações
 de domínio DISTINTAS — a CLI as mantém separadas em vez de colapsá-las.
