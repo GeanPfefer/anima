@@ -17,6 +17,8 @@ import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/pla
 import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
+import { checkRecoveryConfig, renderRecoveryConfigReport } from '@/lib/recovery-config/check';
+import { loadMobileEnv, pathExists } from '@/lib/recovery-config/node-env';
 
 // ============================================================
 // `anima` — entrypoint FINO da CLI operacional do Anima (adapter oficial).
@@ -37,7 +39,7 @@ function jsonFlag(command: ParsedCommand): boolean {
   return command.kind !== 'help' && command.json;
 }
 
-async function dispatch(command: ParsedCommand): Promise<CommandResult> {
+async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config-check' }>): Promise<CommandResult> {
   if (command.kind === 'help') return { exitCode: EXIT.OK, payload: { ok: true, kind: 'help', usage: USAGE } };
 
   const identity = await resolveCliIdentity();
@@ -157,6 +159,14 @@ async function main(): Promise<void> {
   if (!parsed.ok) {
     process.stderr.write(`${parsed.error}\n\n${USAGE}\n`);
     finish(EXIT.USAGE);
+    return;
+  }
+
+  // Read-only e local: não autentica, não toca banco nem rede. Nunca imprime valores.
+  if (parsed.command.kind === 'recovery-config-check') {
+    const report = checkRecoveryConfig({ web: process.env, mobile: loadMobileEnv(), pathExists });
+    process.stdout.write(`${parsed.command.json ? JSON.stringify(report, null, 2) : renderRecoveryConfigReport(report)}\n`);
+    finish(report.core === 'READY' ? EXIT.OK : EXIT.ERROR);
     return;
   }
 
