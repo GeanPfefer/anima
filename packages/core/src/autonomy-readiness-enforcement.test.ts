@@ -81,7 +81,8 @@ function synthetic(declared: CapabilityMaturity = 'operational', evidence = occa
 const REAL = MANDATED_LANE_RUNTIME_GUARANTEES_V0;
 /** Perfil ANTERIOR (Hardening V0): Verifier advisory/fail-open. */
 const ADVISORY_VERIFIER: MandatedLaneRuntimeGuarantees = { ...REAL, version: 'advisory-verifier', verifier: 'advisory_fail_open' };
-const HYPOTHETICAL_FAIL_CLOSED_VERIFIER = REAL;
+/** HIPOTÉTICO: autoria do parecer provada (identidade de sistema distinta — não existe hoje). */
+const HYPOTHETICAL_FAIL_CLOSED_VERIFIER: MandatedLaneRuntimeGuarantees = { ...REAL, version: 'hypothetical-system-proven', verifierAuthorship: 'system_proven' };
 
 const readinessUnder = (f: AutoApprovalCandidateFacts, guarantees: MandatedLaneRuntimeGuarantees, evaluations = synthetic()) => {
   const derived = deriveAutoApprovalActionContext(f, guarantees);
@@ -114,7 +115,6 @@ describe('Mandated Envelope Hardening V0 — salvaguarda declarada = salvaguarda
         'budget_cap',
         'checkpoint',
         'command_allowlist',
-        'fail_closed',
         'gates',
         'human_acceptance',
         'isolated_worktree',
@@ -129,6 +129,9 @@ describe('Mandated Envelope Hardening V0 — salvaguarda declarada = salvaguarda
     );
     // Isolamento de rede continua não garantido por nenhum caminho.
     expect(present).not.toContain('network_isolation');
+    // V0.1: autoria do parecer não provada ⇒ cadeia não é integralmente fail-closed.
+    expect(REAL.verifierAuthorship).toBe('user_session_unproven');
+    expect(present).not.toContain('fail_closed');
   });
 
   it('2. Verifier só é presente com enforcement real E o marcador do próprio item', () => {
@@ -264,16 +267,20 @@ describe('Mandated Envelope Hardening V0 — salvaguarda declarada = salvaguarda
   });
 
   it('12. sintético operacional só passa com TODAS as salvaguardas realmente aplicadas', () => {
-    // Runtime real (Verifier obrigatório) + item completo: permitido.
-    expect(enforce(facts(), synthetic(), SYNTHETIC_PROOF_RULES).allowed).toBe(true);
-    // Qualquer salvaguarda aplicada faltando derruba.
+    // Runtime real: Verifier obrigatório, mas autoria não provada ⇒ sem fail_closed ⇒ negado.
+    const real = enforce(facts(), synthetic(), SYNTHETIC_PROOF_RULES);
+    expect(real).toMatchObject({ allowed: false, reason: 'autonomy_readiness_insufficient' });
+    if (!real.allowed) expect(real.readiness?.blockers.map((b) => b.safeguard)).toContain('fail_closed');
+    // Só num perfil com autoria provada o sintético chega a mandated.
+    expect(readinessUnder(facts(), HYPOTHETICAL_FAIL_CLOSED_VERIFIER).readinessLevel).toBe('mandated');
+    // Qualquer salvaguarda aplicada faltando derruba (mesmo sob o perfil hipotético).
     for (const f of [
       facts({ spec: { verifier_requirement: undefined } }),
       facts({ scope: [] }),
       facts({ spec: { limits: { max_attempts: 1 } } }),
       facts({ spec: { validation_criteria: [{ label: 'g', command: 'bash x.sh' }] } }),
     ]) {
-      expect(enforce(f, synthetic(), SYNTHETIC_PROOF_RULES).allowed).toBe(false);
+      expect(readinessUnder(f, HYPOTHETICAL_FAIL_CLOSED_VERIFIER).readinessLevel).not.toBe('mandated');
     }
     expect(readinessUnder(facts(), ADVISORY_VERIFIER).readinessLevel).toBe('manual');
   });
@@ -353,8 +360,8 @@ describe('Autonomy Readiness Enforcement V0 — authority não excede readiness'
         }
       }
     }
-    // Só a combinação SINTÉTICA operacional + fatos completos libera (registry real nunca).
-    expect(allowedCount).toBe(1);
+    // V0.1: com o runtime real (autoria do parecer não provada), NENHUMA combinação libera.
+    expect(allowedCount).toBe(0);
   });
 
   it('não altera as regras canônicas nem promove produce-change', () => {

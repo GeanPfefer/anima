@@ -1,9 +1,11 @@
 import {
   ANIMA_CAPABILITY_REGISTRY_V0,
+  AUTONOMY_READINESS_RULES_V0,
   CAPABILITY_PROOF_RULES_V0,
   DEFAULT_AUTHORIZED_LOCAL_CODER_BACKENDS,
   MANDATED_LANE_RUNTIME_GUARANTEES_V0,
   evaluateCapabilityProofs,
+  type AutonomyReadinessRule,
   type CapabilityEvidenceObservation,
   type CapabilityProofEvaluation,
   type CapabilityProofRule,
@@ -42,11 +44,23 @@ const syntheticOperationalEvaluations = (): readonly CapabilityProofEvaluation[]
     evidence: occasions('agency.produce-change', 3),
   });
 /**
- * Opções que tornam produce-change `mandated`: avaliação SINTÉTICA operacional com as
- * regras de readiness CANÔNICAS. Desde o Verifier Enforcement V0 o runtime real garante
- * Verifier obrigatório fail-closed, então nenhuma regra hipotética é necessária.
+ * Regra de readiness HIPOTÉTICA sem `fail_closed` no mandato — a única garantia que o
+ * runtime real ainda não oferece (V0.1: autoria do parecer não provada). Existe só
+ * para exercitar o caminho da RPC; com as regras canônicas nada é auto-aprovado.
  */
+const HYPOTHETICAL_RULES: readonly AutonomyReadinessRule[] = AUTONOMY_READINESS_RULES_V0.map((rule) =>
+  rule.capabilityId === 'agency.produce-change'
+    ? { ...rule, requiredSafeguards: { ...rule.requiredSafeguards, mandated: (rule.requiredSafeguards.mandated ?? []).filter((s) => s !== 'fail_closed') } }
+    : rule,
+);
+/** Opções que tornam produce-change `mandated` (sintético + regra hipotética). */
 const MANDATED = {
+  loadProofEvaluations: async () => syntheticOperationalEvaluations(),
+  proofRules: SYNTHETIC_PROOF_RULES,
+  readinessRules: HYPOTHETICAL_RULES,
+};
+/** Sintético operacional com as regras de readiness CANÔNICAS. */
+const SYNTHETIC_CANONICAL_RULES = {
   loadProofEvaluations: async () => syntheticOperationalEvaluations(),
   proofRules: SYNTHETIC_PROOF_RULES,
 };
@@ -192,13 +206,20 @@ describe('autoApproveAutonomousWork — Autonomy Readiness Enforcement V0 (opç�
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  test('6. sintético operacional + regras canônicas + runtime real (Verifier obrigatório) ⇒ permitido', async () => {
+  test('6. sintético operacional + regras canônicas: autoria do parecer não provada ⇒ negado (sem fail_closed)', async () => {
+    const { result, rpc } = await run(SYNTHETIC_CANONICAL_RULES);
+    expect(result).toMatchObject({ action: 'human_required', reason: 'autonomy_readiness_insufficient' });
+    expect((result as { detail?: string }).detail).toMatch(/safeguard_missing/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  test('6b. só sob regra HIPOTÉTICA sem fail_closed o caminho da RPC é exercitado', async () => {
     const { result, rpc } = await run(MANDATED);
     expect(result).toEqual({ action: 'approved', eventSeq: 7, sourceId: 'FIX-01' });
     expect(rpc).toHaveBeenCalledWith('auto_approve_autonomous_work', expect.objectContaining({
       envelope: expect.objectContaining({
         checks: expect.arrayContaining(['validation_commands_allowlisted', 'verifier_required_fail_closed', 'autonomy_readiness_mandated']),
-        autonomy_readiness: expect.objectContaining({ lane_guarantees_version: 'mandated-worktree-lane-v1', observed_level: 'mandated' }),
+        autonomy_readiness: expect.objectContaining({ lane_guarantees_version: 'mandated-worktree-lane-v2', observed_level: 'mandated' }),
       }),
     }));
   });
@@ -257,7 +278,7 @@ describe('autoApproveAutonomousWork — Autonomy Readiness Enforcement V0 (opç�
 
   test('11/13. INVARIANTE: nenhuma auto-aprovação do sistema concede nível acima da readiness', async () => {
     const rank = ['manual', 'supervised', 'mandated', 'autonomous'];
-    const scenarios = [CURRENT, MANDATED, { loadProofEvaluations: async () => null }, { loadProofEvaluations: async () => [] }];
+    const scenarios = [CURRENT, MANDATED, SYNTHETIC_CANONICAL_RULES, { loadProofEvaluations: async () => null }, { loadProofEvaluations: async () => [] }];
     let approvals = 0;
     for (const options of scenarios) {
       const { rpc } = await run(options);
@@ -270,7 +291,7 @@ describe('autoApproveAutonomousWork — Autonomy Readiness Enforcement V0 (opç�
         expect(rank.indexOf(audit!.observed_level)).toBeGreaterThanOrEqual(rank.indexOf(audit!.required_level));
       }
     }
-    // Só o cenário SINTÉTICO operacional aprova; o estado real (proven) nunca.
+    // Só o cenário com a regra HIPOTÉTICA aprova; com regras canônicas, nenhum.
     expect(approvals).toBe(1);
   });
 });
@@ -317,6 +338,7 @@ describe('Mandated Envelope Hardening V0 — perfil de garantias amarrado ao run
 
   test('Verifier e rede declarados com a semântica real (Verifier obrigatório; permissão ≠ isolamento)', () => {
     expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.verifier).toBe('required_fail_closed');
+    expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.verifierAuthorship).toBe('user_session_unproven');
     expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.network).toBe('permission_denied');
     expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.budget).toBe('attempts_and_runtime');
   });

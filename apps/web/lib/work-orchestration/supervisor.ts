@@ -21,6 +21,8 @@ import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildExecutorRequest, recordExecutionTerminal, recordWorkDecisionRequired, runExecutorStreamed, type CheckpointSink } from './execution';
 import { createWorkOrchestrationService } from './server';
+import { verifyAndReleaseCandidate } from './mandated-verification';
+import { verifierOpinionSinkFor } from './verifier-opinion';
 import { loadRecoveryEvidenceContext } from './recovery-evidence-context';
 
 // ============================================================
@@ -185,6 +187,25 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     workItemId: row.work_item_id, attemptId: row.attempt_id, claimId: row.claim_id,
     finding: row.finding, action: row.action, itemState: row.item_state,
   }));
+
+  // ---------- (1a) Re-verificação de resultado candidato (Verifier V0.1) ----------
+  //
+  // Um resultado do lane com Verifier obrigatório que ficou retido (crash entre o
+  // terminal e o Verifier, timeout, persistência falha) é relatado pela reconciliação
+  // e NUNCA materializado em `review`. Aqui o host recomputa o parecer sobre o log
+  // persistido; só um parecer conclusivo e correlacionado o libera (na RPC). Falha
+  // mantém retido — nada é aceito, integrado ou executado.
+  const pendingVerification = reconciliation.filter(finding => finding.finding === 'result_pending_verification');
+  if (pendingVerification.length > 0) {
+    const verification = createWorkOrchestrationService(client);
+    for (const finding of pendingVerification) {
+      await verifyAndReleaseCandidate(finding.workItemId, {
+        getItem: (id) => verification.getItem(id),
+        listEvents: (id) => verification.listEvents(id),
+        sink: verifierOpinionSinkFor(client),
+      });
+    }
+  }
 
   // ---------- (1b) Re-admissão por orçamento, antes da seleção ----------
   //

@@ -129,3 +129,113 @@ detail: agency.produce-change: readiness supervised < mandated (operational_crit
 
 Calibração Verifier × `changes_requested`, taxa de falso positivo, taxa de sucesso, frescor, reliability,
 maturidade operacional de produce-change. Gate SQL no aceite (residual acima).
+
+---
+
+## V0.1 (2026-09-28) — fechar a fronteira de REVIEW + defesa persistente
+
+HEAD inicial `59eb37e`. Uma auditoria independente apontou que o V0 era **acceptance-gated**, não
+**lane-gated**. O residual declarado acima (RPC SQL de revisão sem gate) era real: o item entrava em
+`review` na RPC terminal **antes** do Verifier, e uma chamada direta ao PostgREST aceitava sem parecer.
+Esse fato do V0 fica preservado aqui. A migração é `20260928000000_mandated_verifier_review_gate.sql`.
+
+### Resultado candidato (sem estado novo)
+
+No lane (`verifier_requirement` ≠ `advisory`), `record_commanded_work_terminal` grava `result_submitted`,
+que é o **resultado candidato**, durável e com identidade própria, e mantém o item em `in_progress`.
+Nenhum enum novo: reuso de `in_progress` + evento existente. `review` **não** é usado como "pendente de
+verificação". Lanes advisory continuam indo direto a `review`.
+
+### Ponto de liberação para review
+
+`record_verifier_opinion` persiste o parecer e, **na mesma transação**, chama
+`private.release_mandated_result`. Ela move `in_progress → review` só quando o veredito decisivo
+(`private.mandated_result_verdict`) é conclusivo: `verified`, ou `rejected` para inspeção/retrabalho.
+A transição é justificada pelo próprio `verifier_opinion_recorded` (linha nova da matriz normativa
+`in_progress × verifier_opinion_recorded → review`); nenhum evento sintético é criado. Replay: sem evento
+novo, liberação reavaliada. Retorno: `released_for_review`.
+
+Ordem host-side (pós-turno, agora obrigatória): evidência de gate → coder → git → Verifier → persistência →
+**releitura** (`verifyAndReleaseCandidate`). Só o `review` relido conta como liberado.
+
+### Persistence / read-back
+
+Parecer em memória não conta. A liberação relê o log no SQL, e o host relê o item depois de persistir.
+Persistência recusada ⇒ `persist_failed` (retido). Item relido fora de `review` ⇒ `release_not_observed`
+(retido). Releitura falha ⇒ `readback_failed` (retido).
+
+### Correlação (`private.mandated_result_verdict`)
+
+O parecer **mais recente** com: item, `proposal_version` do item, `attempt_id` do resultado,
+`result_event_id` = **último** `result_submitted`. A base dele precisa de: evidência git do host da
+mesma attempt/versão **com `observedCommitSha` = `commitSha` do handoff do resultado**, evidência de gate
+da mesma attempt/versão e evidência do coder da mesma attempt/versão. Saídas: `verified | rejected |
+inconclusive | missing | result_mismatch | evidence_incomplete | commit_mismatch`. Parecer antigo nunca
+libera resultado novo, e resultado antigo não é aceitável. O core (`evaluateVerifierRequirement`)
+espelha a exigência de evidência git+gate (`verifier_evidence_incomplete`).
+
+### Defesa SQL
+
+- **Trigger** `guard_mandated_review_release` (BEFORE UPDATE OF state em `work_items`): recusa (55000)
+  **qualquer** transição do lane para `review` sem veredito conclusivo. Cobre terminal, submissão manual,
+  reconciliação e escrita direta. Consequência declarada: a submissão manual (`submit_work_result`) de
+  um item do lane é recusada; ele só chega a `review` pelo Verifier.
+- **`review_work_result_versioned`**: `accept` do lane exige `mandated_result_verdict = 'verified'`
+  para o resultado aceito (`verifier requirement not satisfied`). `request_changes` segue livre.
+- **`reconcile_supervised_work`**: um candidato pendente **não** é materializado em `review` nem
+  abandonado. É relatado como `result_pending_verification` / `requires_verification`, e o supervisor
+  re-verifica (`verifyAndReleaseCandidate`) antes da seleção. Crash entre candidato e Verifier ⇒ o
+  restart não abre janela de review.
+
+### Autoria do Verifier (residual — NÃO resolvido)
+
+`record_verifier_opinion` é `SECURITY DEFINER`, chamável por qualquer usuário autenticado da allowlist,
+e carimba `author='system'`/`origin='verifier'`. O host residente usa a **mesma** identidade do usuário
+(GoTrue → Bearer → RLS). Não existe mecanismo para distinguir um parecer do Verifier do host de uma
+submissão arbitrária do cliente sem uma identidade de sistema nova (fora do escopo; sem PKI).
+Consequência: `MANDATED_LANE_RUNTIME_GUARANTEES_V0` (agora `mandated-worktree-lane-v2`) declara
+`verifier: required_fail_closed` (o enforcement existe) e `verifierAuthorship: user_session_unproven`,
+e **`fail_closed` NÃO é declarado**.
+
+### Timeout
+
+`MANDATED_VERIFIER_TIMEOUT_MS = 60_000` explícito (compute + persistência). Estouro ⇒ `verifier_timeout`
+(retido; a reconciliação relata e a próxima volta re-verifica). Não depende de timeout de transporte.
+
+### Readiness
+
+Lane real (histórico real, read-only, sem RPC): **supervised**; o mandato é bloqueado **só** por
+`operational_criteria_pending` (a maturidade nem chega a avaliar as salvaguardas do mandato).
+`fail_closed` aparece em `missingForNext`. Auto-aprovação: **DENY** (`autonomy_readiness_insufficient`).
+Nenhum item real carrega o marcador ainda (88 itens lidos): nada existente muda de comportamento.
+
+### Testes V0.1
+
+- pgTAP `supabase/tests/mandated_verifier_review_gate.test.sql` (29): candidato fica `in_progress`;
+  resultado durável; replay do terminal sem duplicata; advisory direto a review; reconciliação relata
+  pendente, não materializa, não abandona; trigger recusa escrita direta; inconclusive não libera;
+  verified sem gate não libera; commit incoerente não libera; attempt/versão/resultEventId errados
+  recusados; verified correlacionado libera (atômico); verified não gera `result_accepted`; replay do
+  parecer sem duplicata; rejected mais recente ⇒ aceite direto recusado; aceite com resultado errado
+  recusado; rejected libera para inspeção, aceite recusado, `request_changes` funciona; aceite humano com
+  verified corrente funciona; advisory aceita sem parecer.
+- Web `mandated-verification.test.ts` (12): released (verified/rejected), inconclusive, throw, timeout,
+  persistência recusada, sem resultado, read-back divergente, read-back falho, nunca aceita, advisory
+  inalterado.
+- Core: `verifier-requirement.test.ts` (18, +evidência incompleta); `autonomy-readiness-enforcement.test.ts`
+  (30: `fail_closed` ausente por autoria; invariante 0 liberações com o runtime real).
+  Web `auto-approval.test.ts` (25): sintético + regras canônicas negado por `fail_closed`; caminho da RPC
+  só com regra hipotética explícita; perfil com `verifierAuthorship`.
+- Suíte SQL completa: 3 arquivos falharam, nenhum toca as funções alteradas nem usa o marcador:
+  `compute_routing_decision` (assinatura de função inexistente), `budget_blocked_human_resume` e
+  `work_budget_local_vs_external` (política de orçamento posterior). Pré-existentes.
+- Core 2270/2270; typecheck OK; `git diff --check` OK. Web 1957/1959: `project-tools` e
+  `worktree-executor` são flakes de carga conhecidos (4/4 e 56/56 isolados).
+- Não testado por unidade: o wiring da re-verificação no supervisor (o fake não suporta o repositório);
+  a garantia de "sem janela de review" está provada no SQL.
+
+### Residuais após V0.1
+
+Autoria do parecer (acima). Um candidato persistentemente inconclusivo fica `in_progress` sem saída
+humana dedicada (a reconciliação o relata; saída governada = trabalho futuro). Submissão manual de item
+do lane recusada por construção.

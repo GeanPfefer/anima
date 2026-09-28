@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Mandated Verifier Enforcement V0.1 em 2026-09-28: fronteira de REVIEW fechada no banco. No lane com
+> Verifier obrigatório o terminal grava resultado CANDIDATO (item segue `in_progress`); `record_verifier_opinion`
+> libera para `review` na mesma transação só com parecer conclusivo e correlação completa (git com commit do
+> handoff, gate, coder, attempt, versão, último resultado); um trigger recusa qualquer outra entrada em review;
+> o aceite SQL exige `verified`; a reconciliação relata `result_pending_verification` e o supervisor re-verifica.
+> Residual: autoria do parecer (sessão do usuário) ⇒ `fail_closed` NÃO declarado. Lane real: supervised; mandato
+> só bloqueado por `operational_criteria_pending`.
 > Mandated Verifier Enforcement V0 em 2026-09-28: itens canônicos carregam `execution_spec.verifier_requirement:
 > required_fail_closed` (o Envelope V1 exige). O aceite do resultado (service.reviewResult/planResultReview)
 > é recusado sem parecer `verified` correlacionado ao resultado revisado; rejected/inconclusive/ausente/stale

@@ -70,10 +70,15 @@ const resultEvent = (id = 'ev-result', attemptId = 'attempt-1', proposalVersion 
 });
 
 /** Parecer REAL computado sobre os eventos, com o veredito opcionalmente forçado. */
-const opinionEvent = (events: readonly WorkEvent[], verdict?: VerifierOpinionV1['verdict'], id = `ev-op-${clock}`): WorkEvent => {
+const opinionEvent = (events: readonly WorkEvent[], verdict?: VerifierOpinionV1['verdict'], id = `ev-op-${clock}`, evidence: 'complete' | 'incomplete' = 'complete'): WorkEvent => {
   const computed = computeVerifierOpinion(item(), events);
   if (!computed) throw new Error('sem parecer');
-  const opinion: VerifierOpinionV1 = verdict === undefined ? computed : { ...computed, verdict };
+  // Base de evidência: no fluxo real a evidência git/gate do host é persistida ANTES
+  // do Verifier; aqui ela é referenciada diretamente (o predicado só lê a base).
+  const basis = evidence === 'complete'
+    ? { ...computed.evidenceBasis, observedEventId: 'ev-git', observedGateEventId: 'ev-gate', coverage: { git: true, gates: true } }
+    : computed.evidenceBasis;
+  const opinion: VerifierOpinionV1 = { ...computed, ...(verdict === undefined ? {} : { verdict }), evidenceBasis: basis };
   return {
     id, workItemId: 'work-1', type: 'verifier_opinion_recorded', author: 'system', proposalVersion: 2,
     payload: {
@@ -105,6 +110,12 @@ describe('evaluateVerifierRequirement — lane com Verifier obrigatório', () =>
   test('1. verified correlacionado ⇒ satisfeito', () => {
     const evaluation = evaluateVerifierRequirement(item(), withOpinion(), 'ev-result');
     expect(evaluation).toMatchObject({ requirement: 'required_fail_closed', satisfied: true });
+  });
+
+  test('V0.1: parecer sem evidência git+gate do host ⇒ incompleto', () => {
+    const result = resultEvent();
+    const events = [result, opinionEvent([result], 'verified', 'ev-op-inc', 'incomplete')];
+    expect(evaluateVerifierRequirement(item(), events, 'ev-result')).toMatchObject({ satisfied: false, reason: 'verifier_evidence_incomplete' });
   });
 
   test('2. rejected ⇒ recusado (não é resultado "bom")', () => {

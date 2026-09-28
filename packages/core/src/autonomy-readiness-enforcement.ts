@@ -116,6 +116,14 @@ export interface MandatedLaneRuntimeGuarantees {
    * ⇒ aceite negado; `request_changes` continua disponível.
    */
   readonly verifier: 'advisory_fail_open' | 'required_fail_closed';
+  /**
+   * Autoria do parecer (V0.1). `user_session_unproven`: `record_verifier_opinion` é
+   * chamável por qualquer usuário autenticado da allowlist e o host residente usa a
+   * MESMA identidade — um parecer `verified` não prova que veio do Verifier do host.
+   * `system_proven`: identidade de sistema distinta (não existe hoje). Sem autoria
+   * provada a cadeia NÃO é integralmente fail-closed.
+   */
+  readonly verifierAuthorship: 'user_session_unproven' | 'system_proven';
   /** Rede: permissão negada (aplicacional) ≠ isolamento provado (kernel). */
   readonly network: 'permission_denied' | 'isolation_proven';
   /** Semântica exata do budget: attempts+tempo (autonomous-work-budget-v1). Sem custo/resource units. */
@@ -131,10 +139,12 @@ export interface MandatedLaneRuntimeGuarantees {
 }
 
 export const MANDATED_LANE_RUNTIME_GUARANTEES_V0: MandatedLaneRuntimeGuarantees = {
-  version: 'mandated-worktree-lane-v1',
+  version: 'mandated-worktree-lane-v2',
   checkpointEmitted: true,
-  // Só depois do enforcement real (verifier-requirement.ts + service.reviewResult).
+  // Enforcement real: V0 (aceite na aplicação) + V0.1 (candidato fora de `review` até
+  // parecer conclusivo persistido; trigger, reconciliação e aceite no SQL).
   verifier: 'required_fail_closed',
+  verifierAuthorship: 'user_session_unproven',
   network: 'permission_denied',
   budget: 'attempts_and_runtime',
   humanAcceptance: true,
@@ -165,7 +175,8 @@ export const MANDATED_LANE_RUNTIME_GUARANTEES_V0: MandatedLaneRuntimeGuarantees 
  *   gate de aceite para este item);
  * - `fail_closed`: só se TODA precondição obrigatória nega ao falhar — envelope,
  *   histórico/avaliação/contexto (este módulo), gates allowlisted, escopo, limites,
- *   provider local e Verifier obrigatório.
+ *   provider local, Verifier obrigatório E autoria do parecer provada (hoje não ⇒
+ *   ausente).
  *
  * Reversibilidade: pré-aprovação não há classificação persistida (INTEL-01 grava
  * depois); derivada `reversible` da mutação confinada à worktree descartável sem
@@ -207,8 +218,11 @@ export function deriveAutoApprovalActionContext(
 
   const verifierFailClosed =
     guarantees.verifier === 'required_fail_closed' && readVerifierRequirement(facts.intent) === 'required_fail_closed';
+  // Autoria do parecer não provada ⇒ um `verified` pode não ter vindo do Verifier do
+  // host ⇒ a cadeia não é integralmente fail-closed (V0.1: residual declarado).
   const failClosed =
-    verifierFailClosed && gatesAllowlisted && allowedPaths && attemptsBounded && timeBounded && localBackend;
+    verifierFailClosed && guarantees.verifierAuthorship === 'system_proven'
+    && gatesAllowlisted && allowedPaths && attemptsBounded && timeBounded && localBackend;
 
   const safeguards: AutonomySafeguard[] = ['isolated_worktree', 'no_network'];
   if (guarantees.network === 'isolation_proven') safeguards.push('network_isolation');

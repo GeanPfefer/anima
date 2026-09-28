@@ -39,7 +39,10 @@ export type VerifierRequirementRefusal =
   /** Há pareceres, mas nenhum correlacionado a ESTE resultado/attempt/versão. */
   | 'verifier_uncorrelated'
   | 'verifier_inconclusive'
-  | 'verifier_rejected';
+  | 'verifier_rejected'
+  /** V0.1: o parecer decisivo não se apoia em evidência git E gate observadas pelo host
+   * (espelho de `private.mandated_result_verdict`, que também confere coder e commit). */
+  | 'verifier_evidence_incomplete';
 
 export type VerifierRequirementEvaluation =
   | { readonly requirement: 'advisory'; readonly satisfied: true }
@@ -92,6 +95,9 @@ export function evaluateVerifierRequirement(
     && opinion.evidenceBasis.resultEventId === latest.eventId);
   const decisive = correlated[correlated.length - 1];
   if (!decisive) return deny('verifier_uncorrelated');
+  if (decisive.evidenceBasis.observedEventId === null || decisive.evidenceBasis.observedGateEventId === null) {
+    return deny('verifier_evidence_incomplete');
+  }
   if (decisive.verdict === 'rejected') return deny('verifier_rejected');
   if (decisive.verdict !== 'verified') return deny('verifier_inconclusive');
   return { requirement: 'required_fail_closed', satisfied: true, opinion: decisive };

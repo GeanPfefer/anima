@@ -4,7 +4,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from './gate-evidence';
 import { coderEvidenceSinkFor, persistHostObservedCoderEvidence } from './coder-evidence';
 import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from './host-evidence';
-import { computeAndPersistVerifierOpinion, verifierOpinionSinkFor } from './verifier-opinion';
+import { verifierOpinionSinkFor } from './verifier-opinion';
+import { verifyAndReleaseCandidate, type MandatedVerificationOutcome } from './mandated-verification';
 import { projectRoot, type ExecutionContract } from './executor-selection';
 import { createWorkOrchestrationService } from './server';
 import type { SupervisorTurnResult } from './supervisor';
@@ -41,9 +42,9 @@ export interface PostTurnObservationInput {
  * que iniciou uma tentativa. Idempotente e fail-open. Só age quando a volta
  * produziu uma tentativa correlacionada (attempt + selection).
  */
-export async function persistPostTurnHostObservations(input: PostTurnObservationInput): Promise<void> {
+export async function persistPostTurnHostObservations(input: PostTurnObservationInput): Promise<MandatedVerificationOutcome | null> {
   const { client, result, contract, gateObservations, coderObservations, changeAuthorization } = input;
-  if (!result.attemptId || !result.selection) return;
+  if (!result.attemptId || !result.selection) return null;
 
   const correlation = {
     workItemId: result.selection.workItemId,
@@ -87,17 +88,15 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
 
   // (2) PARECER do Verifier sobre o estado FRESCO — só no terminal `result` (sem
   // handoff durável de sucesso não há parecer). Inclui as evidências observadas
-  // recém-persistidas. Advisory e recomputável.
-  if (result.terminalKind !== 'result') return;
+  // recém-persistidas (passos 0–1 acima, na ordem obrigatória). Lane advisory:
+  // recomputável e fail-open, como antes. Lane com Verifier obrigatório (V0.1): o
+  // resultado é CANDIDATO até o parecer persistido liberar para `review`; timeout
+  // explícito e releitura — qualquer falha deixa o candidato retido.
+  if (result.terminalKind !== 'result') return null;
   const service = createWorkOrchestrationService(client);
-  const [freshItem, freshEvents] = await Promise.all([
-    service.getItem(correlation.workItemId),
-    service.listEvents(correlation.workItemId),
-  ]);
-  if (freshItem.ok && freshEvents.ok) {
-    await computeAndPersistVerifierOpinion(
-      { item: freshItem.value, events: freshEvents.value },
-      verifierOpinionSinkFor(client),
-    ).catch(() => undefined);
-  }
+  return verifyAndReleaseCandidate(correlation.workItemId, {
+    getItem: (id) => service.getItem(id),
+    listEvents: (id) => service.listEvents(id),
+    sink: verifierOpinionSinkFor(client),
+  });
 }
