@@ -33,9 +33,18 @@ import type { ObservedCoderInput, ProviderReportedUsageV1 } from './host-observe
 export interface ProviderPricingEntryV1 extends ProviderPricingV1 {
   /** Identidade estável e imutável desta versão de preço (ex.: `openai/<modelo>@2026-10-01`). */
   readonly pricingVersion: string;
+  /** Primeiro instante a partir do qual o ANIMA possui evidência AUTORITATIVA para usar esta
+   * versão. NÃO é, necessariamente, a data em que o provider começou a cobrar esse preço (a fonte
+   * pode não publicá-la): é o limite inferior da evidência. Nada anterior é precificado. */
   readonly effectiveFrom: string;
-  /** Exclusivo. Ausente ⇒ vigente em aberto. */
+  /** Exclusivo. Só com evidência REAL de que a versão deixa de valer nesse instante (ex.: nova
+   * versão publicada). Ausente ⇒ vigente em aberto. */
   readonly effectiveUntil?: string;
+  /** Data (`YYYY-MM-DD`, como publicada) até a qual a FONTE garante o preço ("at least through").
+   * NÃO é `effectiveUntil`: não expira a versão nem seleciona outra. Reserva com data UTC
+   * posterior ⇒ preço não mais garantido ⇒ `cost_unknown` (`pricing_guarantee_lapsed`) até um
+   * humano reverificar a fonte e registrar nova versão/garantia. */
+  readonly sourceGuaranteedThrough?: string;
   // Dimensões de cobrança que a versão DECLARA. Declarada ⇒ o settlement exige o fato de usage
   // correspondente reportado pelo provider (ausente ⇒ `cost_unknown`, nunca presunção).
   /** Tarifa de input ESCRITO em cache por milhão. Ausente ⇒ cache writes observados (> 0) não
@@ -68,6 +77,8 @@ const FEMTO_DECIMALS = 15;
 const nonBlank = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 const isNonNegInt = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const validInstant = (value: unknown): value is string => nonBlank(value) && !Number.isNaN(Date.parse(value));
+const validCalendarDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 
 /** Converte um decimal (número JSON ou string) em inteiro escalado por 10^decimals, SEM perda.
  * Recusa notação exponencial, negativos, não-finitos e mais casas do que `decimals`. */
@@ -133,6 +144,10 @@ export function parseProviderPricingCatalog(value: unknown): ProviderPricingCata
     }
     if (e.serviceTier !== undefined && !nonBlank(e.serviceTier)) return { ok: false, reason: `entry_${index}_service_tier_invalid` };
     if (!validInstant(e.effectiveFrom)) return { ok: false, reason: `entry_${index}_effective_from_invalid` };
+    if (e.sourceGuaranteedThrough !== undefined && (!validCalendarDate(e.sourceGuaranteedThrough)
+      || Date.parse(`${e.sourceGuaranteedThrough}T23:59:59.999Z`) < Date.parse(e.effectiveFrom))) {
+      return { ok: false, reason: `entry_${index}_source_guaranteed_through_invalid` };
+    }
     if (e.effectiveUntil !== undefined
       && (!validInstant(e.effectiveUntil) || Date.parse(e.effectiveUntil) <= Date.parse(e.effectiveFrom))) {
       return { ok: false, reason: `entry_${index}_effective_window_invalid` };
@@ -278,6 +293,8 @@ export interface ProviderApiSettlementProvenanceV1 {
   readonly pricingVersion: string;
   readonly pricingSourceRef: string;
   readonly pricingEffectiveFrom: string;
+  /** Garantia temporal publicada pela fonte ("at least through"), quando houver. */
+  readonly pricingSourceGuaranteedThrough?: string;
   readonly currency: string;
   readonly rates: { readonly inputPerMillion: string; readonly cachedInputPerMillion: string; readonly outputPerMillion: string; readonly cacheWriteInputPerMillion?: string };
   /** Dimensões declaradas pela versão de preço e provadas pela usage (quando declaradas). */
@@ -297,6 +314,9 @@ export type ProviderApiCostUnknownReason =
   | 'pricing_missing'
   | 'pricing_ambiguous'
   | 'pricing_invalid'
+  /** A reserva é posterior à garantia publicada pela fonte: o preço pode ter mudado; ninguém
+   * reverificou. Não presume mudança nem continuidade. */
+  | 'pricing_guarantee_lapsed'
   | 'provider_mismatch'
   | 'model_mismatch'
   | 'currency_mismatch'
@@ -364,6 +384,11 @@ export function deriveProviderApiSettlement(input: DeriveProviderApiSettlementIn
   if (!resolved.ok) return unknown(resolved.reason);
   const pricing = resolved.entry;
   if (pricing.currency.trim().toUpperCase() !== reservation.currency.trim().toUpperCase()) return unknown('currency_mismatch');
+  // Garantia "at least through": coberta enquanto a data UTC da reserva ≤ data publicada.
+  if (pricing.sourceGuaranteedThrough !== undefined
+    && new Date(reservation.createdAt).toISOString().slice(0, 10) > pricing.sourceGuaranteedThrough) {
+    return unknown('pricing_guarantee_lapsed');
+  }
 
   // Modelo ecoado pelo provider, quando reportado, precisa ser EXATAMENTE o precificado (sem
   // equivalência implícita entre alias e snapshot).
@@ -427,6 +452,7 @@ export function deriveProviderApiSettlement(input: DeriveProviderApiSettlementIn
       schemaVersion: 1, method: USAGE_PRICED_COST_SOURCE, attemptId: input.attemptId,
       provider: input.provider, model: input.model, catalogRef: input.catalog.catalogRef,
       pricingVersion: pricing.pricingVersion, pricingSourceRef: pricing.sourceRef, pricingEffectiveFrom: pricing.effectiveFrom,
+      ...(pricing.sourceGuaranteedThrough !== undefined ? { pricingSourceGuaranteedThrough: pricing.sourceGuaranteedThrough } : {}),
       currency: pricing.currency.trim().toUpperCase(),
       rates: {
         inputPerMillion: rate(inputRate), cachedInputPerMillion: rate(cachedRate), outputPerMillion: rate(outputRate),

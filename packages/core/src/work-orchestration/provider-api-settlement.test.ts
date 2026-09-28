@@ -306,3 +306,37 @@ describe('dimensões de cobrança declaradas pela versão (tier, long context, c
     }
   });
 });
+
+describe('garantia temporal da fonte (sourceGuaranteedThrough ≠ effectiveUntil)', () => {
+  const guaranteed = catalog([entry({ sourceGuaranteedThrough: '2026-11-21' })]);
+
+  test('dentro da garantia (data UTC ≤ publicada) liquida e registra a garantia na proveniência', () => {
+    for (const createdAt of ['2026-09-27T10:00:00Z', '2026-11-21T23:59:59Z']) {
+      expect(derive({ catalog: guaranteed, reservation: { createdAt } }))
+        .toMatchObject({ kind: 'settle', provenance: { pricingSourceGuaranteedThrough: '2026-11-21' } });
+    }
+  });
+
+  test('após a garantia: a versão NÃO expira (segue resolvida), mas o settlement recusa explicitamente', () => {
+    const at = '2026-11-22T00:00:00Z';
+    expect(resolveProviderPricing(guaranteed, { provider: 'openai', model: 'test-model', at })).toMatchObject({ ok: true });
+    expect(derive({ catalog: guaranteed, reservation: { createdAt: at } })).toEqual({ kind: 'cost_unknown', reservationId: 'res-1', reason: 'pricing_guarantee_lapsed' });
+  });
+
+  test('garantia não seleciona versão futura nem encerra janela: versão nova sem fechar a antiga ⇒ ambiguous', () => {
+    const next = entry({ pricingVersion: 'v-next', effectiveFrom: '2026-11-22T00:00:00Z' });
+    expect(derive({ catalog: catalog([entry({ sourceGuaranteedThrough: '2026-11-21' }), next]), reservation: { createdAt: '2026-11-23T00:00:00Z' } }))
+      .toMatchObject({ kind: 'cost_unknown', reason: 'pricing_ambiguous' });
+  });
+
+  test('sem garantia declarada: comportamento anterior (sem proveniência extra)', () => {
+    const d = derive();
+    expect(d.kind === 'settle' && 'pricingSourceGuaranteedThrough' in d.provenance).toBe(false);
+  });
+
+  test('catálogo rejeita garantia malformada ou anterior ao effectiveFrom', () => {
+    for (const bad of ['2026-11-21T00:00:00Z', '2026-02-30', '21/11/2026', '2025-12-31']) {
+      expect(parseProviderPricingCatalog({ schemaVersion: 1, catalogRef: 'c', entries: [entry({ sourceGuaranteedThrough: bad })] }).ok).toBe(false);
+    }
+  });
+});

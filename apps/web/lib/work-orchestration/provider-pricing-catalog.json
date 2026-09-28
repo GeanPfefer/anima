@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogRef": "anima/provider-pricing-catalog@2026-09-28",
+  "catalogRef": "anima/provider-pricing-catalog@2026-09-28.1",
   "entries": [
     {
       "schemaVersion": 1,
@@ -15,7 +15,7 @@
       "outputPerMillion": 20,
       "longContextInputThresholdTokens": 272000,
       "effectiveFrom": "2026-09-28T00:00:00Z",
-      "effectiveUntil": "2026-11-21T00:00:00Z",
+      "sourceGuaranteedThrough": "2026-11-21",
       "sourceRef": "https://developers.openai.com/api/docs/pricing (Standard: gpt-5.6-sol $4.00 input / $0.40 cached input / $20.00 output per 1M; promotional pricing 'at least through November 21, 2026') + https://developers.openai.com/api/docs/models/gpt-5.6-sol (cache writes 1.25x uncached input; >272K input tokens = long context, not priced here) + https://developers.openai.com/api/docs/guides/prompt-caching; consulted 2026-09-28"
     },
     {

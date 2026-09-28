@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import type { ObservedCoderInput, ProviderApiReservationStateV1, ProviderPricingCatalogV1 } from '@anima/core';
+import { resolveProviderPricing, type ObservedCoderInput, type ProviderApiReservationStateV1, type ProviderPricingCatalogV1 } from '@anima/core';
 import {
   loadProviderPricingCatalog,
   settleProviderApiAttemptCost,
@@ -114,7 +114,7 @@ describe('settlement pós-attempt provider_api', () => {
 
 describe('carregamento do catálogo de preços', () => {
   test('env ausente ⇒ catálogo versionado do repositório', () => {
-    expect(loadProviderPricingCatalog({})).toMatchObject({ status: 'loaded', source: 'repository', catalog: { catalogRef: 'anima/provider-pricing-catalog@2026-09-28' } });
+    expect(loadProviderPricingCatalog({})).toMatchObject({ status: 'loaded', source: 'repository', catalog: { catalogRef: 'anima/provider-pricing-catalog@2026-09-28.1' } });
   });
   test('sem env e sem catálogo do repositório ⇒ absent (nenhum preço inventado)', () => {
     expect(loadProviderPricingCatalog({}, () => '', null)).toEqual({ status: 'absent' });
@@ -167,7 +167,7 @@ describe('catálogo OFICIAL versionado (OpenAI, consultado em 2026-09-28)', () =
     const outcome = await settle(solReservation(), [solObservation()]);
     expect(outcome).toMatchObject({
       kind: 'settled', decision: { settledAmount: '0.57', provenance: {
-        model: SOL, catalogRef: 'anima/provider-pricing-catalog@2026-09-28', pricingVersion: 'openai/gpt-5.6-sol@2026-09-28',
+        model: SOL, catalogRef: 'anima/provider-pricing-catalog@2026-09-28.1', pricingVersion: 'openai/gpt-5.6-sol@2026-09-28',
         pricingEffectiveFrom: '2026-09-28T00:00:00Z', exactCost: '0.57', serviceTier: 'default',
         rates: { inputPerMillion: '4', cachedInputPerMillion: '0.4', cacheWriteInputPerMillion: '5', outputPerMillion: '20' },
       } },
@@ -186,22 +186,44 @@ describe('catálogo OFICIAL versionado (OpenAI, consultado em 2026-09-28)', () =
     }
   });
 
-  test('temporal: reservas anteriores à consulta NÃO são reprecificadas; promo do Sol encerra fail-closed', async () => {
-    for (const createdAt of ['2026-09-25T19:29:00Z', '2026-09-27T23:59:59Z', '2026-11-21T00:00:00Z']) {
+  test('temporal: reservas anteriores ao effectiveFrom NÃO são reprecificadas', async () => {
+    for (const createdAt of ['2026-09-25T19:29:00Z', '2026-09-27T23:59:59Z']) {
       expect(await settle(solReservation({ createdAt }), [solObservation()]))
         .toMatchObject({ kind: 'not_settled', decision: { kind: 'cost_unknown', reason: 'pricing_missing' } });
     }
-    expect((await settle(solReservation({ createdAt: '2026-11-20T23:59:59Z' }), [solObservation()])).kind).toBe('settled');
   });
 
-  test('nova versão futura não retroage; sobreposição de janelas ⇒ ambiguous', async () => {
+  test('Sol: "at least through 2026-11-21" é garantia (metadata), NÃO effectiveUntil; Terra sem prazo artificial', async () => {
+    const cat = official();
+    const sol = cat.entries.find(e => e.model === SOL)!;
+    const terra = cat.entries.find(e => e.model === 'gpt-5.6-terra')!;
+    expect(sol.effectiveUntil).toBeUndefined();
+    expect(sol.sourceGuaranteedThrough).toBe('2026-11-21');
+    expect(sol.sourceRef).toContain('at least through November 21, 2026');
+    expect(terra.effectiveUntil).toBeUndefined();
+    expect(terra.sourceGuaranteedThrough).toBeUndefined();
+    // O dia 21/11 inteiro (UTC) está coberto; a versão não expira por inferência.
+    expect(await settle(solReservation({ createdAt: '2026-11-21T12:00:00Z' }), [solObservation()]))
+      .toMatchObject({ kind: 'settled', decision: { provenance: { pricingSourceGuaranteedThrough: '2026-11-21' } } });
+    // Depois: a versão continua a ÚNICA vigente, mas o preço não é mais garantido ⇒ recusa visível.
+    expect(resolveProviderPricing(cat, { provider: 'openai', model: SOL, at: '2026-12-01T00:00:00Z' })).toMatchObject({ ok: true, entry: { pricingVersion: 'openai/gpt-5.6-sol@2026-09-28' } });
+    expect(await settle(solReservation({ createdAt: '2026-12-01T00:00:00Z' }), [solObservation()]))
+      .toMatchObject({ kind: 'not_settled', decision: { kind: 'cost_unknown', reason: 'pricing_guarantee_lapsed' } });
+    // Terra não tem garantia publicada nem prazo: segue precificável (sem data inventada).
+    expect((await settle(solReservation({ createdAt: '2027-01-15T00:00:00Z', resourceClass: 'provider_api:gpt-5.6-terra' }), [solObservation({}, 'gpt-5.6-terra')])).kind).toBe('settled');
+  });
+
+  test('nova versão futura (com a anterior FECHADA por evidência real) não retroage; sem fechar ⇒ ambiguous', async () => {
     const base = official();
-    const { effectiveUntil: _drop, ...sol } = base.entries.find(e => e.model === SOL)!;
-    const next = { ...sol, pricingVersion: 'openai/gpt-5.6-sol@2026-11-21', inputPerMillion: 8, effectiveFrom: '2026-11-21T00:00:00Z' };
-    expect(await settle(solReservation(), [solObservation()], { ...base, entries: [...base.entries, next] }))
+    const sol = base.entries.find(e => e.model === SOL)!;
+    const next = { ...sol, pricingVersion: 'openai/gpt-5.6-sol@2026-12-01', inputPerMillion: 8, effectiveFrom: '2026-12-01T00:00:00Z', sourceGuaranteedThrough: undefined };
+    const closed = { ...base, entries: [{ ...sol, effectiveUntil: '2026-12-01T00:00:00Z' }, base.entries.find(e => e.model !== SOL)!, next] };
+    expect(await settle(solReservation(), [solObservation()], closed))
       .toMatchObject({ kind: 'settled', decision: { provenance: { pricingVersion: 'openai/gpt-5.6-sol@2026-09-28' } } });
-    const overlap = { ...base, entries: [...base.entries, { ...next, effectiveFrom: '2026-10-01T00:00:00Z' }] };
-    expect(await settle(solReservation(), [solObservation()], overlap))
+    expect(await settle(solReservation({ createdAt: '2026-12-02T00:00:00Z' }), [solObservation()], closed))
+      .toMatchObject({ kind: 'settled', decision: { provenance: { pricingVersion: 'openai/gpt-5.6-sol@2026-12-01' } } });
+    const open = { ...base, entries: [...base.entries, next] };
+    expect(await settle(solReservation({ createdAt: '2026-12-02T00:00:00Z' }), [solObservation()], open))
       .toMatchObject({ kind: 'not_settled', decision: { kind: 'cost_unknown', reason: 'pricing_ambiguous' } });
   });
 

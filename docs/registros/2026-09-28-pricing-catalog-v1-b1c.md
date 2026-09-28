@@ -146,3 +146,47 @@ O settlement `provider_api` fica **pronto para operar** a partir de 2026-09-28 p
 prova viva paga, em unidade separada, com authority humana explícita, verificando que a resposta
 real ecoa `service_tier`, `cache_write_tokens` e `model` e que o evento `usage_priced` é gravado.
 Reiniciar o Resident Host no HEAD novo antes dela.
+
+## Adendo V1.1 — correção temporal após revisão humana (2026-09-28)
+
+**Erro semântico da V1 (`a68eada`).** A V1 registrou o Sol com `effectiveUntil =
+2026-11-21T00:00:00Z`. A fonte (revalidada nesta data, texto idêntico nas páginas de pricing e
+do modelo) diz: "GPT-5.6 Sol's promotional pricing is available at least through November 21,
+2026." Isso é uma **garantia mínima** (*guaranteed-through*), não um **fim de vigência**: a fonte
+não afirma que o preço termina nessa data. `effectiveUntil` inventava um término e ainda
+excluía o próprio dia 21, que a fonte cobre.
+
+**Contrato final.** `ProviderPricingEntryV1` ganha `sourceGuaranteedThrough?: 'YYYY-MM-DD'`
+(data como publicada; validada; não pode ser anterior a `effectiveFrom`). Semânticas:
+
+| Campo | Significado | Efeito na resolução |
+|---|---|---|
+| `effectiveFrom` | Primeiro instante em que o ANIMA possui evidência **autoritativa** para usar a versão (aqui: data da consulta, 2026-09-28). **Não** é a data em que a OpenAI começou a cobrar — a fonte não publica essa data e ela não é inventada. | Limite inferior: nada antes é precificado. |
+| `effectiveUntil` | Instante em que se **sabe** que a versão deixa de valer (ex.: nova versão publicada). Só com evidência real. | Fecha a janela. |
+| `sourceGuaranteedThrough` | A fonte garante o preço **pelo menos** até essa data. | Nenhum: não expira a versão nem seleciona outra. |
+
+**Comportamento após 21/11/2026 (Sol).** A versão continua sendo a única vigente
+(`resolveProviderPricing` a devolve); o settlement, porém, recusa reservas cuja data UTC seja
+posterior à garantia com `cost_unknown`/`pricing_guarantee_lapsed`. Não se presume que o preço
+mudou nem que continuou — a incerteza fica visível e fail-closed até um humano reverificar a
+fonte e registrar: (a) garantia estendida (nova versão com nova `sourceGuaranteedThrough`), ou
+(b) preço novo (nova versão, fechando a anterior com `effectiveUntil`). O dia 21/11 inteiro
+(UTC) está coberto; em qualquer fuso dos EUA isso é ainda 21/11.
+
+**Terra.** Sem garantia nem prazo publicados: nenhum dos dois campos; segue precificável até
+evidência de mudança (nova versão ⇒ fechar a anterior; sem fechar ⇒ `pricing_ambiguous`).
+
+**Histórico.** Continua sem reprecificação: reservas anteriores a `effectiveFrom` ⇒
+`pricing_missing`; evidência sem fatos de precificação ⇒ `usage_pricing_facts_missing`; e o
+settlement só roda no fim de attempt nova. Nenhum preço mudou nesta correção.
+
+**Mudanças V1.1.** `provider-api-settlement.ts` (core): campo, validação, razão
+`pricing_guarantee_lapsed`, proveniência `pricingSourceGuaranteedThrough`. Catálogo:
+`catalogRef` `anima/provider-pricing-catalog@2026-09-28.1`; Sol troca `effectiveUntil` por
+`sourceGuaranteedThrough: "2026-11-21"`; `pricingVersion` inalterada (tarifas idênticas; nenhum
+settlement foi gravado com a V1).
+
+**Provas V1.1.** Core focal 43/43; core completo 102 suítes / 2.136; web focal
+(`provider-api-settlement` + `gpt-coder` + `coder-evidence`) 94/94; web
+`autonomous-backlog-deps*` + `paid-compute*` 71/71; `npm run typecheck` verde; `git diff --check`
+limpo. US$0.

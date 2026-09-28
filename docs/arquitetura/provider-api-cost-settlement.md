@@ -97,10 +97,18 @@ aberta e reconciliável (a decisão é recomputável a partir do ledger + evidê
   `maxCallInputTokens`, `serviceTiers`, `providerModels`, capturados pelo `GptCoderBackend`
   (que agora envia `service_tier: 'default'`).
 - **Custo:** `(input − cached − cacheWrite)×input + cached×cachedInput + cacheWrite×cacheWrite + output×output`.
-- **Temporal:** versão escolhida no instante da reserva; `effectiveFrom` = data da consulta à
-  fonte (nada anterior é reprecificado); preço promocional ganha `effectiveUntil` no fim da
-  garantia publicada. Atualizar = **adicionar** versão e fechar a anterior; nunca editar uma
-  versão existente. Sobreposição ⇒ `pricing_ambiguous`.
+- **Temporal (V1.1):** versão escolhida no instante da reserva.
+  - `effectiveFrom` = primeiro instante em que o ANIMA tem evidência **autoritativa** para a
+    versão (data da consulta), não a data em que o provider passou a cobrar; nada anterior é
+    precificado.
+  - `effectiveUntil` só com evidência real de término (ex.: nova versão); fecha a janela.
+  - `sourceGuaranteedThrough` (`YYYY-MM-DD`) = garantia "at least through" publicada. **Não**
+    expira a versão nem seleciona outra; reserva com data UTC posterior ⇒
+    `pricing_guarantee_lapsed` (`cost_unknown`) até reverificação humana da fonte.
+  - Atualizar = **adicionar** versão e fechar a anterior; nunca editar uma versão existente.
+    Sobreposição ⇒ `pricing_ambiguous`.
+  - Histórico da decisão: a V1 (`a68eada`) usou `effectiveUntil` para a garantia do Sol; corrigido
+    na V1.1 ([registro](../registros/2026-09-28-pricing-catalog-v1-b1c.md#adendo-v11--correção-temporal-após-revisão-humana-2026-09-28)).
 
 Formato de uma entrada:
 
@@ -110,7 +118,8 @@ Formato de uma entrada:
   "model": "<model ID exato>", "currency": "USD", "serviceTier": "default",
   "inputPerMillion": 0, "cachedInputPerMillion": 0, "cacheWriteInputPerMillion": 0, "outputPerMillion": 0,
   "longContextInputThresholdTokens": 272000,
-  "effectiveFrom": "<ISO-8601>", "effectiveUntil": "<ISO-8601 opcional, exclusivo>", "sourceRef": "<URL oficial + data da consulta>"
+  "effectiveFrom": "<ISO-8601>", "effectiveUntil": "<ISO-8601 opcional, exclusivo>",
+  "sourceGuaranteedThrough": "<YYYY-MM-DD opcional>", "sourceRef": "<URL oficial + data da consulta>"
 }
 ```
 
