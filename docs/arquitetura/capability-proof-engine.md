@@ -280,8 +280,41 @@ própria durabilidade.
 - **implemented**: código **da capacidade** exercitado (teste/implementação
   positiva). Primitiva de apoio entra como `implementation` + `inconclusive`.
 - **proven**: ≥1 execução **observada** (canônica ou prova controlada registrada).
-- **operational**: ≥2 ocasiões independentes de **uso real** (event log canônico);
-  prova controlada repetida não conta.
+- **operational**: critério **específico da capacidade** (V0.1, abaixo). ≥2
+  ocasiões independentes de uso real (event log canônico) são **reprodução
+  observada** — necessária, mas só suficiente quando a regra declara
+  `reproductionSatisfiesOperational: true`. Prova controlada repetida não conta.
 - **autonomous**: exige `autonomous_operation`, ainda não produzido por nenhum
   adapter; **não é destino universal** — a regra pode declarar `terminalMaturity`
   (ex.: `agency.supervised-self-development` termina em `operational`).
+
+### V0.1 — reprodução observada ≠ satisfação operacional (2026-09-28)
+
+Motivo: revisão independente READ-ONLY do Codex sobre o V0 ("NEEDS V0.1 BEFORE USING
+DERIVED OPERATIONAL CLAIMS"). A régua V1 promovia **globalmente** a `operational`
+com duas ocasiões positivas — forte demais para capacidades amplas.
+
+- **Contrato da regra:** `reproductionSatisfiesOperational: boolean` (obrigatório).
+  `true` só em capacidades **estreitas** em que repetir a execução observada É o uso
+  operacional: `agency.run-tests` (controle positivo da revisão) e `agency.edit-file`
+  (edição observada pelo host + Git + handoff correlacionados; não afirma que a
+  mudança é correta). `false` em `produce-change`, `verify-change`,
+  `governance.verifier`, `compute.external-provider`,
+  `supervised-self-development` e nas regras de prova registrada.
+- **Engine:** `assessCapabilityMaturity` recebe `reproductionSatisfiesOperational`
+  e `maturityCeiling`. Reprodução observada mas não satisfatória ⇒ fica em
+  `proven`, com `reproducedOccasions` e `limitedFrom: operational` preservados.
+- **Teto programático:** `derivationCeiling` agora **limita** a maturidade derivada
+  (antes só aparecia nos gaps); `limitedFrom` guarda o que a evidência alcançaria.
+  `degraded` nunca é limitada. As regras `false` têm teto `proven`.
+- **Status:** declarado `proven` + derivado `proven` com reprodução pendente =
+  `aligned` (nunca `underclaimed`). A explicação e o gap dizem "reprodução
+  observada, critérios de operacional pendentes".
+- **Projeção V1 crua** (`deriveCapabilityAssessmentsFromWorkHistory`) segue com a
+  régua global (sem regras); a `/evolution` usa a avaliação, e o Self-Deficiency
+  só reage a `degraded`. Não usar a projeção crua para alegar `operational`.
+
+Limitações mantidas explícitas (sem reliability engine): attempts falhas de
+produce/verify ainda não geram evidência negativa; `changes_requested` não calibra
+verify-change/verifier; falhas inconclusivas do provider não reduzem confiança de
+disponibilidade; taxa de sucesso e frescor não entram na derivação.

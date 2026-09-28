@@ -156,3 +156,59 @@ fica fora do commit.
 Decisão humana sobre os 4 subdeclarados; depois conectar a próxima capacidade com sinal estruturado
 (ex.: `governance.authority` via authorities consumidas, `memory.persistence` via uso real) ou
 especificar o contrato Durable State.
+
+---
+
+## V0.1 — reprodução observada ≠ satisfação operacional (2026-09-28)
+
+- **HEAD inicial:** `3b6378b`. Origem: revisão independente READ-ONLY do Codex —
+  "NEEDS V0.1 BEFORE USING DERIVED OPERATIONAL CLAIMS". As 4 subdeclaradas acima
+  **não eram defensáveis**: a régua promovia `operational` globalmente com 2 ocasiões.
+- **Princípios registrados:** *reproduction evidence ≠ operational satisfaction*;
+  *operational criteria are capability-specific*.
+
+**Rule contract.** `reproductionSatisfiesOperational: boolean` obrigatório em toda regra.
+`true`: `agency.run-tests` (controle positivo) e `agency.edit-file` (avaliada: capacidade
+estreita — edição observada pelo host + Git + handoff correlacionados; não afirma correção).
+`false`: `produce-change`, `verify-change`, `governance.verifier`, `compute.external-provider`,
+`supervised-self-development` (conservador) e as regras de prova registrada. Critérios de
+operacional dessas regras reescritos como "critério próprio pendente" (o que falta de fato).
+
+**Operational semantics.** Engine recebe a flag da regra; reprodução não satisfatória fica em
+`proven` com `reproducedOccasions` e `limitedFrom` preservados. Avaliação expõe
+`reproduction: { occasions, satisfiesOperational }`, gap "reprodução observada… critérios de
+operacional pendentes" e status `aligned` (sem status novo).
+
+**Derivation ceiling.** Agora programático (`maturityCeiling` no engine; `limitedFrom`
+registra o limitado; `degraded` nunca limitado). Regras `false` passam a teto `proven`.
+
+**Histórico real (read-only, 1343 eventos):**
+
+| Capacidade | Declarado | Derivado | Status | Reprodução |
+|---|---|---|---|---|
+| `agency.edit-file` | operational | operational | aligned | 15, satisfaz |
+| `agency.run-tests` | operational | operational | aligned | 15, satisfaz |
+| `agency.produce-change` | proven | proven | aligned | 8, pendente |
+| `agency.verify-change` | proven | proven | aligned | 8, pendente |
+| `governance.verifier` | proven | proven | aligned | 12, pendente |
+| `agency.supervised-self-development` | proven | proven | aligned | — (janela pós-regressão < 2) |
+| `compute.external-provider` | proven | proven | aligned | 21, pendente |
+| `research.web.search/open/extract` | proven | proven | aligned | — (prova registrada) |
+| `compute.paid-settlement` | implemented | implemented | aligned | — |
+| `memory.durability` | projected | — | insufficient_evidence | — |
+
+Totais: **11 aligned · 0 underclaimed · 0 overclaimed · 1 insufficient · 51 not_evaluated**.
+As "discrepâncias" do V0 ficam **retiradas**: não havia base para promover.
+
+**UI.** Linha "Reprodução: observada (N ocasiões) · Critérios de operacional: pendentes|satisfeitos";
+não aparece como divergência.
+
+**Limitações mantidas (sem reliability engine):** attempts falhas de produce/verify ainda não
+geram evidência negativa; `changes_requested` não calibra verify-change/verifier; falhas
+inconclusivas do provider não reduzem confiança de disponibilidade; taxa de sucesso e frescor
+não entram na derivação; a projeção V1 crua (`deriveCapabilityAssessmentsFromWorkHistory`)
+mantém a régua global — não usá-la para alegar `operational`.
+
+**Gates.** Core completo **103 suítes / 2182 PASS** (12 testes obrigatórios + extras).
+Web completo **150 suítes / 1929 PASS** (focais 52); `npm run typecheck` 0; `git diff --check` limpo.
+US$ 0, sem provider, sem escrita em banco.

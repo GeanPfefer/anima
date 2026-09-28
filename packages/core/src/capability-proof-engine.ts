@@ -1,6 +1,7 @@
-import type {
-  CapabilityMaturity,
-  CapabilityProofRef,
+import {
+  maturityRank,
+  type CapabilityMaturity,
+  type CapabilityProofRef,
 } from './capability-map';
 
 /**
@@ -166,6 +167,21 @@ export interface CapabilityProofAssessment {
 
   /** Evidências negativas fortes observadas no histórico recebido. */
   readonly contradictingEvidenceIds: readonly string[];
+
+  /**
+   * V0.1: ocasiões independentes (canônicas) de execução verificada positiva
+   * na janela válida, quando atingem `REPRODUCTION_THRESHOLD`. Presente = a
+   * REPRODUÇÃO FOI OBSERVADA — mesmo que ela não satisfaça `operational` para
+   * esta capacidade (reprodução ≠ satisfação operacional).
+   */
+  readonly reproducedOccasions?: number;
+
+  /**
+   * V0.1: maturidade que a evidência alcançaria antes de uma limitação
+   * (critério operacional da regra não satisfeito ou teto de derivação).
+   * Ausente = nada foi limitado.
+   */
+  readonly limitedFrom?: CapabilityMaturity;
 }
 
 export interface AssessCapabilityMaturityInput {
@@ -180,6 +196,20 @@ export interface AssessCapabilityMaturityInput {
   readonly definitionMaturity: CapabilityDefinitionMaturity;
 
   readonly evidence: readonly CapabilityEvidenceObservation[];
+
+  /**
+   * V0.1: a reprodução observada (≥ `REPRODUCTION_THRESHOLD` ocasiões
+   * canônicas independentes) SATISFAZ `operational` para esta capacidade?
+   * Ausente = `true` (compatibilidade V1). Critério operacional é específico
+   * da capacidade: quem decide é a regra, nunca o engine.
+   */
+  readonly reproductionSatisfiesOperational?: boolean;
+
+  /**
+   * V0.1: teto programático — a maturidade derivada nunca o ultrapassa.
+   * `degraded` nunca é limitada (regressão sempre vence).
+   */
+  readonly maturityCeiling?: CapabilityMaturity;
 }
 
 const EVIDENCE_RANK: Record<CapabilityEvidenceClass, number> = {
@@ -254,7 +284,7 @@ function isStrongEvidence(
  * - NÃO recebe `proven`/`operational`/`autonomous` como input autoritativo;
  * - regressão posterior invalida provas fortes anteriores até nova prova.
  */
-export function assessCapabilityMaturity(
+function assessUncappedCapabilityMaturity(
   input: AssessCapabilityMaturityInput,
 ): CapabilityProofAssessment {
   const relevant = input.evidence
@@ -376,6 +406,8 @@ export function assessCapabilityMaturity(
 
   let maturity: CapabilityMaturity = EVIDENCE_MATURITY[bestClass];
   let basis: CapabilityProofBasis = bestClass;
+  let reproducedOccasions: number | undefined;
+  let limitedFrom: CapabilityMaturity | undefined;
 
   /**
    * REPRODUÇÃO.
@@ -408,8 +440,15 @@ export function assessCapabilityMaturity(
     }
 
     if (occasions.size >= REPRODUCTION_THRESHOLD) {
-      maturity = 'operational';
-      basis = 'reproduced_operation';
+      reproducedOccasions = occasions.size;
+
+      // V0.1: reprodução observada ≠ satisfação operacional. A regra decide.
+      if (input.reproductionSatisfiesOperational ?? true) {
+        maturity = 'operational';
+        basis = 'reproduced_operation';
+      } else {
+        limitedFrom = 'operational';
+      }
     }
   }
 
@@ -421,6 +460,41 @@ export function assessCapabilityMaturity(
       (evidence) => evidence.id,
     ),
     contradictingEvidenceIds,
+    ...(reproducedOccasions !== undefined ? { reproducedOccasions } : {}),
+    ...(limitedFrom !== undefined ? { limitedFrom } : {}),
+  };
+}
+
+const CEILING_BASIS: Partial<Record<CapabilityMaturity, CapabilityProofBasis>> = {
+  implemented: 'implementation',
+  proven: 'verified_execution',
+  operational: 'reproduced_operation',
+};
+
+/**
+ * Deriva maturidade e aplica o teto da regra (V0.1). A maturidade derivada
+ * nunca ultrapassa `maturityCeiling`; `limitedFrom` preserva o que a
+ * evidência alcançaria. Regressão (`degraded`) nunca é limitada.
+ */
+export function assessCapabilityMaturity(
+  input: AssessCapabilityMaturityInput,
+): CapabilityProofAssessment {
+  const assessment = assessUncappedCapabilityMaturity(input);
+  const ceiling = input.maturityCeiling;
+
+  if (
+    ceiling === undefined ||
+    assessment.maturity === 'degraded' ||
+    maturityRank(assessment.maturity) <= maturityRank(ceiling)
+  ) {
+    return assessment;
+  }
+
+  return {
+    ...assessment,
+    maturity: ceiling,
+    basis: CEILING_BASIS[ceiling] ?? 'definition',
+    limitedFrom: assessment.limitedFrom ?? assessment.maturity,
   };
 }
 

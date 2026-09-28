@@ -1,7 +1,7 @@
 import type { Json } from '@anima/types';
 import type { Capability } from './capability-map';
 import { ANIMA_CAPABILITY_REGISTRY_V0 } from './capability-registry';
-import type { CapabilityEvidenceObservation } from './capability-proof-engine';
+import { assessCapabilityMaturity, type CapabilityEvidenceObservation } from './capability-proof-engine';
 import { RECORDED_CAPABILITY_EVIDENCE_V0 } from './capability-proof-recorded';
 import {
   CAPABILITY_PROOF_RULES_V0,
@@ -88,6 +88,7 @@ const RULE: CapabilityProofRule = {
   evidence: 'teste',
   criteria: { proven: 'P', operational: 'O', autonomous: 'A' },
   derivationCeiling: 'operational',
+  reproductionSatisfiesOperational: true,
 };
 
 const RECORDED_RULE: CapabilityProofRule = {
@@ -144,7 +145,7 @@ describe('compute.external-provider — adapter canônico', () => {
     expect(evidence[0]!.outcome).toBe('positive');
   });
 
-  test('entra no adapter canônico e 2 attempts independentes derivam operacional', () => {
+  test('entra no adapter canônico; 2 attempts = reprodução observada, mas fica comprovada (V0.1)', () => {
     const events = [
       coderEvent({ attemptId: 'a1', observedAt: '2026-09-20T10:00:00.000Z' }),
       coderEvent({ attemptId: 'a2', observedAt: '2026-09-21T10:00:00.000Z' }),
@@ -158,9 +159,10 @@ describe('compute.external-provider — adapter canônico', () => {
     const evaluation = evaluateCapabilityProofsFromHistory({ events }).find(
       (entry) => entry.capabilityId === 'compute.external-provider',
     )!;
-    expect(evaluation.derivedMaturity).toBe('operational');
+    expect(evaluation.derivedMaturity).toBe('proven');
     expect(evaluation.declaredMaturity).toBe('proven');
-    expect(evaluation.status).toBe('underclaimed');
+    expect(evaluation.status).toBe('aligned');
+    expect(evaluation.reproduction).toEqual({ occasions: 2, satisfiesOperational: false });
     expect(evaluation.maturitySource).toBe('derived');
   });
 });
@@ -427,5 +429,167 @@ describe('regras V0 sobre o registry real', () => {
     const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
     expect(total).toBe(ANIMA_CAPABILITY_REGISTRY_V0.length);
     expect(counts.not_evaluated).toBe(ANIMA_CAPABILITY_REGISTRY_V0.length - CAPABILITY_PROOF_RULES_V0.length);
+  });
+});
+
+// ─── V0.1: reprodução ≠ satisfação operacional ───────────────────────────────
+
+describe('V0.1 — reprodução observada ≠ satisfação operacional', () => {
+  const twoOccasions = (capabilityId: string, source?: 'recorded_proof'): CapabilityEvidenceObservation[] =>
+    ['o1', 'o2'].map((occasion, i) =>
+      obs({
+        id: `${capabilityId}:${occasion}`,
+        capabilityId,
+        occasionId: occasion,
+        observedAt: `2026-09-2${i}T10:00:00Z`,
+        ...(source ? { source } : {}),
+      }),
+    );
+
+  const realEvaluation = (capabilityId: string, evidence: readonly CapabilityEvidenceObservation[]) =>
+    evaluateCapabilityProof(capabilityId, { evidence })!;
+
+  test('1. duas ocasiões + reproductionSatisfiesOperational=true ⇒ operacional', () => {
+    const [evaluation] = evaluateCapabilityProofs({
+      capabilities: [cap('x.cap', 'operational')],
+      rules: [{ ...RULE, reproductionSatisfiesOperational: true }],
+      evidence: twoOccasions('x.cap'),
+    });
+    expect(evaluation!.derivedMaturity).toBe('operational');
+    expect(evaluation!.reproduction).toEqual({ occasions: 2, satisfiesOperational: true });
+  });
+
+  test('2. duas ocasiões + reproductionSatisfiesOperational=false ⇒ comprovada', () => {
+    const [evaluation] = evaluateCapabilityProofs({
+      capabilities: [cap('x.cap', 'proven')],
+      rules: [{ ...RULE, reproductionSatisfiesOperational: false }],
+      evidence: twoOccasions('x.cap'),
+    });
+    expect(evaluation!.derivedMaturity).toBe('proven');
+    expect(evaluation!.status).toBe('aligned');
+  });
+
+  test('3. a reprodução continua visível quando a maturidade é limitada', () => {
+    const [evaluation] = evaluateCapabilityProofs({
+      capabilities: [cap('x.cap', 'proven')],
+      rules: [{ ...RULE, reproductionSatisfiesOperational: false }],
+      evidence: twoOccasions('x.cap'),
+    });
+    expect(evaluation!.reproduction).toEqual({ occasions: 2, satisfiesOperational: false });
+    expect(evaluation!.assessment!.assessment.reproducedOccasions).toBe(2);
+    expect(evaluation!.assessment!.assessment.limitedFrom).toBe('operational');
+    expect(evaluation!.evidence).toHaveLength(2);
+    expect(evaluation!.gaps[0]).toMatch(/Reprodução observada em 2 ocasiões.*reprodução ≠ satisfação operacional/);
+    expect(evaluation!.explanation).toMatch(/reprodução observada em 2 ocasiões.*pendentes/);
+  });
+
+  test('4. derivationCeiling limita programaticamente (engine e avaliação)', () => {
+    const [evaluation] = evaluateCapabilityProofs({
+      capabilities: [cap('x.cap', 'implemented')],
+      rules: [{ ...RULE, derivationCeiling: 'implemented' }],
+      evidence: twoOccasions('x.cap'),
+    });
+    expect(evaluation!.derivedMaturity).toBe('implemented');
+    expect(evaluation!.assessment!.assessment.basis).toBe('implementation');
+    expect(evaluation!.assessment!.assessment.limitedFrom).toBe('operational');
+
+    const direct = assessCapabilityMaturity({
+      capabilityId: 'x.cap',
+      definitionMaturity: 'implemented',
+      maturityCeiling: 'proven',
+      evidence: [obs({ id: 'auto', evidenceClass: 'autonomous_operation' })],
+    });
+    expect(direct.maturity).toBe('proven');
+    expect(direct.limitedFrom).toBe('autonomous');
+  });
+
+  test('4b. regressão nunca é limitada pelo teto', () => {
+    const direct = assessCapabilityMaturity({
+      capabilityId: 'x.cap',
+      definitionMaturity: 'implemented',
+      maturityCeiling: 'proven',
+      evidence: [
+        obs({ id: 'ok', occasionId: 'o1' }),
+        obs({ id: 'neg', outcome: 'negative', occasionId: 'o2', observedAt: '2026-09-21T10:00:00Z' }),
+      ],
+    });
+    expect(direct.maturity).toBe('degraded');
+  });
+
+  test('5. agency.run-tests continua operacional', () => {
+    const evaluation = realEvaluation('agency.run-tests', twoOccasions('agency.run-tests'));
+    expect(evaluation.derivedMaturity).toBe('operational');
+    expect(evaluation.status).toBe('aligned');
+  });
+
+  test('5b. agency.edit-file (capacidade estreita) também aceita reprodução', () => {
+    const evaluation = realEvaluation('agency.edit-file', twoOccasions('agency.edit-file'));
+    expect(evaluation.derivedMaturity).toBe('operational');
+    expect(evaluation.status).toBe('aligned');
+  });
+
+  test.each([
+    ['6', 'agency.produce-change'],
+    ['7', 'agency.verify-change'],
+    ['8', 'governance.verifier'],
+    ['9', 'compute.external-provider'],
+    ['9b', 'agency.supervised-self-development'],
+  ])('%s. %s fica comprovada com reprodução observada (alinhada, não subdeclarada)', (_n, capabilityId) => {
+    const evaluation = realEvaluation(capabilityId, twoOccasions(capabilityId));
+    expect(evaluation.derivedMaturity).toBe('proven');
+    expect(evaluation.status).toBe('aligned');
+    expect(evaluation.reproduction).toEqual({ occasions: 2, satisfiesOperational: false });
+  });
+
+  test('10. prova registrada continua sem contar como reprodução', () => {
+    const [evaluation] = evaluateCapabilityProofs({
+      capabilities: [cap('x.cap', 'proven')],
+      rules: [{ ...RECORDED_RULE, reproductionSatisfiesOperational: true, derivationCeiling: 'operational' }],
+      evidence: twoOccasions('x.cap', 'recorded_proof'),
+    });
+    expect(evaluation!.derivedMaturity).toBe('proven');
+    expect(evaluation!.reproduction).toBeNull();
+  });
+
+  test('11. procedimento assistido continua sem promover', () => {
+    const [evaluation] = evaluateCapabilityProofs({
+      capabilities: [cap('x.cap', 'projected')],
+      rules: [{ ...RECORDED_RULE, reproductionSatisfiesOperational: true }],
+      evidence: ['p1', 'p2'].map((id) =>
+        obs({ id, evidenceClass: 'assisted_procedure', source: 'recorded_proof', occasionId: id }),
+      ),
+    });
+    expect(evaluation!.status).toBe('insufficient_evidence');
+    expect(evaluation!.derivedMaturity).toBeNull();
+  });
+
+  test('12. autônoma continua impossível sem autonomous_operation', () => {
+    const [evaluation] = evaluateCapabilityProofs({
+      capabilities: [cap('x.cap', 'operational')],
+      rules: [{ ...RULE, derivationCeiling: 'autonomous', reproductionSatisfiesOperational: true }],
+      evidence: ['o1', 'o2', 'o3', 'o4'].map((occasion) => obs({ id: occasion, occasionId: occasion })),
+    });
+    expect(evaluation!.derivedMaturity).toBe('operational');
+  });
+
+  test('provas registradas reais inalteradas: research proven, settlement implemented, durabilidade sem promoção', () => {
+    const byId = new Map(
+      evaluateCapabilityProofsFromHistory({ events: [] }).map((entry) => [entry.capabilityId, entry]),
+    );
+    for (const id of ['research.web.search', 'research.web.open', 'research.web.extract']) {
+      expect(byId.get(id)!.derivedMaturity).toBe('proven');
+    }
+    expect(byId.get('compute.paid-settlement')!.derivedMaturity).toBe('implemented');
+    expect(byId.get('memory.durability')!.status).toBe('insufficient_evidence');
+  });
+
+  test('toda regra declara explicitamente reproductionSatisfiesOperational', () => {
+    for (const rule of CAPABILITY_PROOF_RULES_V0) {
+      expect(typeof rule.reproductionSatisfiesOperational).toBe('boolean');
+    }
+    const accepting = CAPABILITY_PROOF_RULES_V0.filter((rule) => rule.reproductionSatisfiesOperational)
+      .map((rule) => rule.capabilityId)
+      .sort();
+    expect(accepting).toEqual(['agency.edit-file', 'agency.run-tests']);
   });
 });

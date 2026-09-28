@@ -902,6 +902,13 @@ function ProofEvaluationSummary({ evaluation }: { evaluation: CapabilityProofEva
         <span className={styles.whyLabel}>{PROOF_STATUS_LABEL[evaluation.status]}</span> · fonte da maturidade:{' '}
         {MATURITY_SOURCE_LABEL[evaluation.maturitySource]}
       </p>
+      {evaluation.reproduction && (
+        // V0.1: reprodução observada ≠ satisfação operacional.
+        <p className={styles.detailText} data-testid="proof-reproduction">
+          Reprodução: observada ({evaluation.reproduction.occasions} ocasiões) · Critérios de operacional:{' '}
+          {evaluation.reproduction.satisfiesOperational ? 'satisfeitos' : 'pendentes'}
+        </p>
+      )}
       <p className={styles.detailEmpty}>{evaluation.explanation}</p>
 
       {evaluation.gaps.length > 0 && (

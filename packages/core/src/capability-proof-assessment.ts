@@ -5,6 +5,7 @@ import type {
 import { ANIMA_CAPABILITY_REGISTRY_V0 } from './capability-registry';
 import {
   assessCapabilityMaturity,
+  type AssessCapabilityMaturityInput,
   type CapabilityDefinitionMaturity,
   type CapabilityEvidenceObservation,
   type CapabilityProofAssessment,
@@ -96,9 +97,19 @@ function compareEvidence(
  * - NÃO produz assessment para capability sem evidência dinâmica;
  * - evidencia para capability desconhecida falha fechado como issue explícita.
  */
+/**
+ * V0.1: opções de derivação por capacidade, vindas da REGRA (critério
+ * operacional específico e teto). Ausente = semântica V1 (reprodução global).
+ */
+export type CapabilityAssessmentOptions = Pick<
+  AssessCapabilityMaturityInput,
+  'reproductionSatisfiesOperational' | 'maturityCeiling'
+>;
+
 export function assessCapabilitiesFromEvidence(
   capabilities: readonly Capability[],
   evidence: readonly CapabilityEvidenceObservation[],
+  optionsFor?: (capabilityId: string) => CapabilityAssessmentOptions | undefined,
 ): CapabilityAssessmentProjection {
   const issues: CapabilityAssessmentIssue[] = [];
   const definitions = new Map<string, Capability>();
@@ -177,6 +188,7 @@ export function assessCapabilitiesFromEvidence(
       capabilityDefinitionMaturity(capability.maturity);
 
     const assessment = assessCapabilityMaturity({
+      ...(optionsFor?.(capability.id) ?? {}),
       capabilityId: capability.id,
       definitionMaturity,
       evidence: capabilityEvidence,

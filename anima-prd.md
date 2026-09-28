@@ -4,11 +4,13 @@
 > aligned/underclaimed/overclaimed/insufficient_evidence/not_evaluated, fonte
 > manual/derived/hybrid e critérios concretos por degrau. Evidência registrada (provas
 > controladas com proveniência) entra no mesmo contrato, sem reproduzir para `operational`;
-> falha e procedimento assistido são preservados sem promover. 12 capacidades com regra;
-> no histórico real (1343 eventos): 7 alinhadas, 4 subdeclaradas (produce-change,
-> verify-change, governance.verifier, compute.external-provider — derivado operacional,
-> declarado comprovado), 1 insuficiente (memory.durability). Divergências reportadas, registry
-> intacto. [Registro](docs/registros/2026-09-28-capability-proof-engine-v0.md).
+> falha e procedimento assistido são preservados sem promover. 12 capacidades com regra.
+> V0.1 (revisão Codex): reprodução observada ≠ satisfação operacional — cada regra declara
+> `reproductionSatisfiesOperational` (true só em run-tests e edit-file) e o teto de derivação
+> limita de fato. Histórico real (1343 eventos): 11 alinhadas, 0 divergentes, 1 insuficiente
+> (memory.durability); produce/verify/verifier/external-provider ficam comprovadas com
+> reprodução observada e critério operacional pendente. Registry intacto.
+> [Registro](docs/registros/2026-09-28-capability-proof-engine-v0.md).
 > Evolution Reconciliation V2 em 2026-09-27: o Capability Map foi reconciliado com o estado
 > real desde a baseline `7f276d8` (40 → 63 capacidades, novo domínio `research`). Promoções só
 > com critério cumprido: `run-tests` operacional, `detect-deficiency` comprovada,

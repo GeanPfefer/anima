@@ -615,9 +615,50 @@ describe('EvolutionClient — Proof Evaluation V0 (declarado × derivado)', () =
     // O derivado nunca reescreve o declarado: o nó continua "Comprovada".
     fireEvent.click(screen.getByRole('button', { name: 'Provider externo — Comprovada' }));
 
-    expect(panel().getAttribute('data-status')).toBe('underclaimed');
-    expect(within(panel()).getByText(/evidência sustenta mais que o declarado/)).toBeInTheDocument();
-    expect(within(panel()).getByText('Declarado: Comprovada · Derivado: Operacional')).toBeInTheDocument();
+    // V0.1: reprodução observada não satisfaz operacional para o provider —
+    // alinhada, nunca "subdeclarada".
+    expect(panel().getAttribute('data-status')).toBe('aligned');
+    expect(within(panel()).queryByText(/evidência sustenta mais que o declarado/)).not.toBeInTheDocument();
+    expect(within(panel()).getByText('Declarado: Comprovada · Derivado: Comprovada')).toBeInTheDocument();
+    expect(screen.getByTestId('proof-reproduction').textContent).toBe(
+      'Reprodução: observada (2 ocasiões) · Critérios de operacional: pendentes',
+    );
+  });
+
+  test('divergência real continua exibida (declarado acima da evidência)', () => {
+    const evidence = [
+      {
+        id: 'impl',
+        capabilityId: 'compute.external-provider',
+        evidenceClass: 'implementation' as const,
+        outcome: 'positive' as const,
+        observedAt: '2026-09-20T10:00:00Z',
+        proofRefs: [{ kind: 'commit' as const, ref: 'abc' }],
+      },
+    ];
+    render(<EvolutionClient {...buildProps()} proofEvaluations={core.evaluateCapabilityProofs({ evidence })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Provider externo — Comprovada' }));
+
+    expect(panel().getAttribute('data-status')).toBe('overclaimed');
+    expect(within(panel()).getByText(/declarado acima da evidência/)).toBeInTheDocument();
+    expect(screen.queryByTestId('proof-reproduction')).not.toBeInTheDocument();
+  });
+
+  test('reprodução que satisfaz operacional (run-tests) aparece como satisfeita', () => {
+    const evidence = ['a1', 'a2'].map((attempt, i) => ({
+      id: `rt-${attempt}`,
+      capabilityId: 'agency.run-tests',
+      evidenceClass: 'verified_execution' as const,
+      outcome: 'positive' as const,
+      observedAt: `2026-09-2${i}T10:00:00Z`,
+      occasionId: attempt,
+      proofRefs: [{ kind: 'attempt' as const, ref: attempt }],
+    }));
+    render(<EvolutionClient {...buildProps()} proofEvaluations={core.evaluateCapabilityProofs({ evidence })} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Executar testes e comandos governados — / }));
+
+    expect(panel().getAttribute('data-status')).toBe('aligned');
+    expect(screen.getByTestId('proof-reproduction').textContent).toMatch(/satisfeitos$/);
   });
 
   test('capacidade sem regra: não avaliada, maturidade manual', () => {

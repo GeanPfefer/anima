@@ -68,6 +68,20 @@ export interface CapabilityProofRule {
   readonly derivationCeiling: CapabilityMaturity;
 
   /**
+   * V0.1 — REPRODUÇÃO ≠ SATISFAÇÃO OPERACIONAL. Duas ocasiões canônicas
+   * independentes positivas bastam para `operational` NESTA capacidade?
+   *
+   * - `true` só para capacidades ESTREITAS em que repetir a execução observada
+   *   é o próprio uso operacional (executar gates; editar arquivo observado);
+   * - `false`: a reprodução é preservada e exibida, mas a maturidade para em
+   *   `proven` até existir um critério operacional próprio (taxa de sucesso,
+   *   falhas contabilizadas, calibração contra revisão humana…).
+   *
+   * Critério operacional é específico da capacidade; o engine não decide.
+   */
+  readonly reproductionSatisfiesOperational: boolean;
+
+  /**
    * Degrau terminal saudável. `autonomous` NÃO é destino universal (revisão
    * humana 2026-09-27 §6): fundações podem terminar em `operational`.
    * Ausente = decisão conceitual ainda pendente (não se inventa).
@@ -96,6 +110,11 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
       autonomous: AUTONOMOUS_NOT_DERIVABLE,
     },
     derivationCeiling: 'operational',
+    // Capacidade ESTREITA: editar arquivo com edição observada pelo host e
+    // correlacionada a Git + handoff (mesmo commit/arquivos). Repetir isso em
+    // attempts independentes É o uso operacional; não afirma que a mudança é
+    // correta (isso é produce-change).
+    reproductionSatisfiesOperational: true,
   },
   {
     capabilityId: 'agency.run-tests',
@@ -107,6 +126,9 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
       autonomous: AUTONOMOUS_NOT_DERIVABLE,
     },
     derivationCeiling: 'operational',
+    // Capacidade ESTREITA: executar gates/testes governados. Controle positivo
+    // da revisão independente (2026-09-28).
+    reproductionSatisfiesOperational: true,
   },
   {
     capabilityId: 'agency.produce-change',
@@ -114,10 +136,11 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
     evidence: 'cadeia forte: resultado + Git + gates + Verifier independente correlacionados.',
     criteria: {
       proven: '1 attempt com cadeia forte verificada.',
-      operational: '≥2 attempts independentes com cadeia forte verificada.',
+      operational: "Critério operacional próprio ainda pendente — produção sustentada contabilizando attempts falhas (hoje não geram evidência negativa) e resultados rejeitados na revisão humana. Reprodução de sucessos, sozinha, não basta.",
       autonomous: AUTONOMOUS_NOT_DERIVABLE,
     },
-    derivationCeiling: 'operational',
+    derivationCeiling: 'proven',
+    reproductionSatisfiesOperational: false,
   },
   {
     capabilityId: 'agency.verify-change',
@@ -125,10 +148,11 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
     evidence: 'a mesma cadeia forte: a mudança foi conferida contra gates e Verifier independente.',
     criteria: {
       proven: '1 attempt com cadeia forte verificada.',
-      operational: '≥2 attempts independentes com cadeia forte verificada.',
+      operational: "Critério operacional próprio ainda pendente — verificação calibrada contra o desfecho humano (changes_requested ainda não calibra verify-change) e attempts falhas contabilizadas. Reprodução de sucessos, sozinha, não basta.",
       autonomous: AUTONOMOUS_NOT_DERIVABLE,
     },
-    derivationCeiling: 'operational',
+    derivationCeiling: 'proven',
+    reproductionSatisfiesOperational: false,
   },
   {
     capabilityId: 'governance.verifier',
@@ -136,10 +160,11 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
     evidence: 'parecer conclusivo (verified ou rejected) sobre observação independente (Git + gates) da attempt.',
     criteria: {
       proven: '1 parecer conclusivo com cobertura independente.',
-      operational: '≥2 attempts independentes com parecer conclusivo.',
+      operational: "Critério operacional próprio ainda pendente — acerto do parecer calibrado contra a revisão humana (falso-positivo como seq4→seq5 não é sinal persistido; changes_requested não calibra o verifier). Reprodução de sucessos, sozinha, não basta.",
       autonomous: AUTONOMOUS_NOT_DERIVABLE,
     },
-    derivationCeiling: 'operational',
+    derivationCeiling: 'proven',
+    reproductionSatisfiesOperational: false,
   },
   {
     capabilityId: 'agency.supervised-self-development',
@@ -147,9 +172,10 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
     evidence: 'cadeia forte verificada + decisão humana de revisão (aceite = positiva; changes_requested = negativa).',
     criteria: {
       proven: '1 resultado verificado e aceito pela revisão humana.',
-      operational: '≥2 resultados independentes verificados e aceitos.',
+      operational: "Critério operacional próprio ainda pendente — aceite humano sustentado com as rejeições (changes_requested) contabilizadas, não só aceites repetidos. Reprodução de sucessos, sozinha, não basta.",
     },
-    derivationCeiling: 'operational',
+    derivationCeiling: 'proven',
+    reproductionSatisfiesOperational: false,
     // Supervisionado é, por definição, com humano no ciclo: o degrau seguinte é
     // outra capacidade (continuous self-development), não "supervised autônomo".
     terminalMaturity: 'operational',
@@ -160,10 +186,11 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
     evidence: 'coder de provider externo (prefixo estruturado do backend) com uso reportado pelo provider numa attempt governada.',
     criteria: {
       proven: '1 attempt governada em que o provider externo respondeu (uso reportado).',
-      operational: '≥2 attempts governadas independentes com resposta do provider — uso real, não prova controlada.',
+      operational: "Critério operacional próprio ainda pendente — disponibilidade/uso rotineiro com as falhas inconclusivas do provider contabilizadas e custo real liquidado; respostas repetidas sob authorities pagas efêmeras não são uso rotineiro. Reprodução de sucessos, sozinha, não basta.",
       autonomous: AUTONOMOUS_NOT_DERIVABLE,
     },
-    derivationCeiling: 'operational',
+    derivationCeiling: 'proven',
+    reproductionSatisfiesOperational: false,
   },
   {
     capabilityId: 'research.web.search',
@@ -175,6 +202,7 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
       autonomous: AUTONOMOUS_NOT_DERIVABLE,
     },
     derivationCeiling: 'proven',
+    reproductionSatisfiesOperational: false,
   },
   {
     capabilityId: 'research.web.open',
@@ -186,6 +214,7 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
       autonomous: AUTONOMOUS_NOT_DERIVABLE,
     },
     derivationCeiling: 'proven',
+    reproductionSatisfiesOperational: false,
   },
   {
     capabilityId: 'research.web.extract',
@@ -197,6 +226,7 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
       autonomous: AUTONOMOUS_NOT_DERIVABLE,
     },
     derivationCeiling: 'proven',
+    reproductionSatisfiesOperational: false,
   },
   {
     capabilityId: 'memory.durability',
@@ -210,6 +240,7 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
       operational: 'Detecção e cópia ocorrendo em uso real em ≥2 ocasiões, com restore verificável.',
     },
     derivationCeiling: 'proven',
+    reproductionSatisfiesOperational: false,
   },
   {
     capabilityId: 'compute.paid-settlement',
@@ -221,6 +252,7 @@ export const CAPABILITY_PROOF_RULES_V0: readonly CapabilityProofRule[] = [
       operational: 'Liquidações reais em ≥2 attempts pagas independentes, sem reserva `cost_unknown` nova.',
     },
     derivationCeiling: 'implemented',
+    reproductionSatisfiesOperational: false,
     terminalMaturity: 'operational',
   },
 ];
@@ -260,10 +292,24 @@ export interface CapabilityProofEvaluation {
   /** Toda evidência recebida para a capacidade, em ordem determinística. */
   readonly evidence: readonly CapabilityEvidenceObservation[];
   readonly summary: CapabilityEvidenceSummary;
+  /**
+   * V0.1 — reprodução OBSERVADA (≥2 ocasiões canônicas independentes) e se ela
+   * satisfaz `operational` para esta capacidade. `null` = sem reprodução.
+   * Reprodução ≠ satisfação operacional: a reprodução é preservada mesmo
+   * quando a maturidade para em `proven`.
+   */
+  readonly reproduction: CapabilityReproductionView | null;
   /** O que falta, em critérios concretos da regra. */
   readonly gaps: readonly string[];
   /** Frase única em PT explicando a conclusão. */
   readonly explanation: string;
+}
+
+export interface CapabilityReproductionView {
+  /** Ocasiões canônicas independentes positivas na janela válida. */
+  readonly occasions: number;
+  /** A regra aceita a reprodução como critério operacional? */
+  readonly satisfiesOperational: boolean;
 }
 
 export interface EvaluateCapabilityProofsInput {
@@ -398,6 +444,7 @@ function evaluateOne(
       assessment: null,
       evidence: ordered,
       summary,
+      reproduction: null,
       gaps: [],
       explanation:
         'Sem regra de derivação: a maturidade declarada é manual (proofRefs do registry, não avaliados pelo motor).',
@@ -417,6 +464,7 @@ function evaluateOne(
       assessment: null,
       evidence: ordered,
       summary,
+      reproduction: null,
       gaps: [`Fonte indisponível: ${sourcesLabel(new Set(missingSources))}.`],
       explanation:
         'Há regra, mas a fonte de evidência não pôde ser lida agora — ausência de telemetria não rebaixa o declarado.',
@@ -453,6 +501,7 @@ function evaluateOne(
       assessment,
       evidence: ordered,
       summary,
+      reproduction: null,
       gaps,
       explanation:
         preserved.length > 0
@@ -469,7 +518,18 @@ function evaluateOne(
   const maturitySource: CapabilityMaturitySource =
     contributingSources.has('recorded_proof') ? 'hybrid' : 'derived';
 
+  const reproducedOccasions = assessment!.assessment.reproducedOccasions;
+  const reproduction: CapabilityReproductionView | null =
+    reproducedOccasions === undefined
+      ? null
+      : { occasions: reproducedOccasions, satisfiesOperational: rule.reproductionSatisfiesOperational };
+
   const gaps: string[] = [];
+  if (reproduction !== null && !reproduction.satisfiesOperational) {
+    gaps.push(
+      `Reprodução observada em ${reproduction.occasions} ocasiões independentes, mas os critérios de operacional desta capacidade não estão satisfeitos (reprodução ≠ satisfação operacional).`,
+    );
+  }
   if (status === 'overclaimed') {
     gaps.push(
       `O registry declara ${MATURITY_PT[declared]}, mas a evidência sustenta ${MATURITY_PT[derived]} — revisar a declaração (o motor não a altera).`,
@@ -495,6 +555,7 @@ function evaluateOne(
     assessment,
     evidence: ordered,
     summary,
+    reproduction,
     gaps,
     explanation: `${statusText[status]} ${rationale} Fonte: ${sourcesLabel(contributingSources)}.`,
   };
@@ -528,7 +589,16 @@ export function evaluateCapabilityProofs(
     const rule = ruleById.get(observation.capabilityId);
     return rule !== undefined && rule.sources.includes(evidenceSourceOf(observation));
   });
-  const projection = assessCapabilitiesFromEvidence(capabilities, ruled);
+  // V0.1: o critério operacional e o teto vêm da REGRA, aplicados no engine.
+  const projection = assessCapabilitiesFromEvidence(capabilities, ruled, (capabilityId) => {
+    const rule = ruleById.get(capabilityId);
+    return rule === undefined
+      ? undefined
+      : {
+          reproductionSatisfiesOperational: rule.reproductionSatisfiesOperational,
+          maturityCeiling: rule.derivationCeiling,
+        };
+  });
   const assessmentById = new Map(
     projection.assessments.map((entry) => [entry.capabilityId, entry]),
   );

@@ -178,6 +178,14 @@ export function explainCapabilityAssessment(
       break;
 
     case 'verified_execution':
+      // V0.1: reprodução observada, mas a regra não a aceita como critério
+      // operacional (reprodução ≠ satisfação operacional).
+      if (assessment.reproducedOccasions !== undefined) {
+        rationale = `Comprovada: reprodução observada em ${assessment.reproducedOccasions} ocasiões independentes, mas os critérios de operacional desta capacidade ainda estão pendentes.`;
+        nextProof =
+          'Operacional exige um critério próprio desta capacidade, além da reprodução de sucessos.';
+        break;
+      }
       rationale = subject
         ? `Comprovada: ${subject.proven} (1 ocasião; falta reproduzir para operacional).`
         : distinctOccasions <= 1
