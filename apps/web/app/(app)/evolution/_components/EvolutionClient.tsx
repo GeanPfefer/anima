@@ -984,6 +984,7 @@ const AUTONOMY_BLOCKER_LABEL: Record<AutonomyBlockerCode, string> = {
   supervised_by_definition: 'supervisionada por definição',
   paid_authority_missing: 'authority paga ausente',
   network_boundary_unproven: 'boundary de rede não provado',
+  network_permission_not_denied: 'permissão de rede não negada',
   safeguard_missing: 'salvaguarda ausente',
 };
 

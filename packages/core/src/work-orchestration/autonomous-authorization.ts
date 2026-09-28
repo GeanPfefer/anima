@@ -1,4 +1,5 @@
 import { readCanonicalProvenanceFromIntent } from './canonical-materialization';
+import { isAllowedGateCommand } from './gate-command-policy';
 
 // ============================================================
 // Envelope de AUTORIZAÇÃO AUTÔNOMA V1 — evaluator PURO (autonomia progressiva).
@@ -178,8 +179,13 @@ export function evaluateAutonomousApprovalEnvelope(
   for (const c of criteria) {
     const co = asObject(c);
     if (!co || !isNonBlankString(co.label) || !isNonBlankString(co.command)) return fail('validation_criteria_malformed');
+    // Mandated Envelope Hardening V0: o comando de gate precisa estar na MESMA
+    // allowlist que o executor de worktree aplica na entrada. Sem isto, o planner
+    // poderia pôr execução arbitrária num gate de um item auto-aprovado.
+    if (!isAllowedGateCommand(co.command)) return fail('validation_command_not_allowlisted');
   }
   checks.push('validation_criteria_present');
+  checks.push('validation_commands_allowlisted');
 
   // 5g. limites de execução coerentes (defesa em profundidade contra loop ilimitado).
   const limits = asObject(spec.limits);

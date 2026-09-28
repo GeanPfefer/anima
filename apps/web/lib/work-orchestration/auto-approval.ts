@@ -1,6 +1,5 @@
 import {
   AUTONOMOUS_AUTHORIZATION_ENVELOPE_VERSION,
-  DEFAULT_AUTHORIZED_LOCAL_CODER_BACKENDS,
   enforceAutonomyReadinessForAutoApproval,
   evaluateCapabilityProofsFromHistory,
   evaluateAutonomousApprovalEnvelope,
@@ -106,7 +105,6 @@ export async function autoApproveAutonomousWork(
         capability: item.capability,
         intent: item.intent,
         proposal: item.proposal,
-        allowedLocalCoderBackends: DEFAULT_AUTHORIZED_LOCAL_CODER_BACKENDS,
       },
       proofEvaluations: await load(),
       rules: input.readinessRules,

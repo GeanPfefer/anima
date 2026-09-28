@@ -29,7 +29,11 @@ import {
   type AutonomySafeguard,
 } from './autonomy-readiness';
 import type { CapabilityProofEvaluation, CapabilityProofRule } from './capability-proof-evaluation';
-import { ISOLATED_WORKSPACE_PERMISSIONS } from './work-orchestration/autonomous-authorization';
+import {
+  DEFAULT_AUTHORIZED_LOCAL_CODER_BACKENDS,
+  ISOLATED_WORKSPACE_PERMISSIONS,
+} from './work-orchestration/autonomous-authorization';
+import { isAllowedGateCommand } from './work-orchestration/gate-command-policy';
 
 /** Nível que uma auto-aprovação `system`/`autonomous_policy` concede (mandato). */
 export const AUTO_APPROVAL_DELEGATION_LEVEL: AutonomyLevel = 'mandated';
@@ -57,6 +61,8 @@ export interface AutonomyReadinessAuditV0 {
   readonly proof_status: string;
   readonly contributing_evidence: number;
   readonly contradicting_evidence: number;
+  /** Perfil de garantias do runtime usado para derivar as salvaguardas. */
+  readonly lane_guarantees_version: string;
 }
 
 export type AutonomyReadinessEnforcementDecision =
@@ -79,8 +85,6 @@ export interface AutoApprovalCandidateFacts {
   readonly intent: unknown;
   /** `proposal` cru (`data.included_scope`). */
   readonly proposal: unknown;
-  /** Backends locais autorizados (o mesmo default do envelope V1). */
-  readonly allowedLocalCoderBackends: readonly string[];
 }
 
 const asObject = (value: unknown): Record<string, unknown> | null =>
@@ -91,29 +95,75 @@ const isPositiveInt = (value: unknown): value is number => typeof value === 'num
 const IMPACT_LEVELS = new Set(['low', 'significant', 'structural', 'strategic', 'financial', 'irreversible', 'external']);
 
 /**
- * Deriva o contexto da ação a partir do item REAL. Cada salvaguarda só é
- * declarada quando um fato do item a sustenta:
+ * Perfil VERSIONADO do que o runtime GARANTE para o lane de auto-aprovação
+ * (item `programming`, executor `worktree`, coder local). Cada campo aponta o
+ * ponto de enforcement real e é amarrado ao runtime por teste de contrato em
+ * `apps/web/lib/work-orchestration/auto-approval.test.ts` (seleção do executor).
+ * Não é parâmetro do chamador: o enforcement usa sempre esta constante.
+ */
+export interface MandatedLaneRuntimeGuarantees {
+  readonly version: string;
+  /** `selectExecutor(worktree)` constrói `WorktreeExecutorAdapter` com `emitCheckpoint: true`. */
+  readonly checkpointEmitted: boolean;
+  /**
+   * Verifier no caminho: `advisory_fail_open` (hoje: `computeAndPersistVerifierOpinion`
+   * nunca bloqueia o resultado) ou `required_fail_closed` (ainda não existe).
+   */
+  readonly verifier: 'advisory_fail_open' | 'required_fail_closed';
+  /** Rede: permissão negada (aplicacional) ≠ isolamento provado (kernel). */
+  readonly network: 'permission_denied' | 'isolation_proven';
+  /** Semântica exata do budget: attempts+tempo (autonomous-work-budget-v1). Sem custo/resource units. */
+  readonly budget: 'attempts_and_runtime' | 'none';
+  /** Executor `worktree` termina em `review`: aceite é decisão humana. */
+  readonly humanAcceptance: boolean;
+  /** Integração/merge/PR exige decisão humana (INT-05); o executor não integra. */
+  readonly noAutoIntegration: boolean;
+  /** Mutação só na worktree descartável; falha ⇒ recovery governado (humano). */
+  readonly recoveryByWorktreeDisposal: boolean;
+  /** Backends que a SQL (`work_item_cost_class`) e o envelope tratam como locais. */
+  readonly localCoderBackends: readonly string[];
+}
+
+export const MANDATED_LANE_RUNTIME_GUARANTEES_V0: MandatedLaneRuntimeGuarantees = {
+  version: 'mandated-worktree-lane-v0',
+  checkpointEmitted: true,
+  verifier: 'advisory_fail_open',
+  network: 'permission_denied',
+  budget: 'attempts_and_runtime',
+  humanAcceptance: true,
+  noAutoIntegration: true,
+  recoveryByWorktreeDisposal: true,
+  localCoderBackends: DEFAULT_AUTHORIZED_LOCAL_CODER_BACKENDS,
+};
+
+/**
+ * Deriva o contexto da ação SÓ de fatos demonstráveis: item persistido,
+ * `execution_spec`, policy versionada (allowlist de gate) e o perfil de garantias
+ * do runtime. PRESENTE = garantida para ESTE caminho, não "existe no código".
  *
- * - `isolated_worktree`, `no_network`: executor `worktree` + permissões ⊆
- *   {workspace_read, workspace_write_isolated} (nenhuma permissão de rede/efeito);
+ * - `isolated_worktree`: executor `worktree` + permissões ⊆ {workspace_read,
+ *   workspace_write_isolated};
+ * - `no_network`: mesma condição (nenhuma permissão de rede) — PERMISSÃO negada;
+ *   `network_isolation` só com isolamento provado (nunca hoje);
  * - `allowed_paths`: `included_scope` não-vazio;
- * - `gates`: `validation_criteria` com comando;
- * - `max_attempts`/`timeout`: `limits` positivos;
- * - `no_paid_compute`: coder backend local autorizado;
- * - `human_acceptance`, `no_auto_integration`, `verifier`, `recovery_path`,
- *   `checkpoint`: garantias ESTRUTURAIS do executor `worktree` ratificado (teto
- *   `review`, sem PR/merge/push; Verifier na attempt; descarte da worktree +
- *   recovery governado; checkpoints de attempt);
- * - `budget_cap`: a fila autônoma aplica orçamento a toda execução autônoma;
- * - `fail_closed`: o próprio envelope V1 já autorizou (este teto roda depois).
+ * - `gates` + `command_allowlist`: TODO comando de gate na allowlist
+ *   gate-command-allowlist-v1 (a mesma do executor e do Envelope V1);
+ * - `max_attempts`/`timeout`: `limits` inteiros positivos;
+ * - `no_paid_compute`: coder backend no conjunto local do perfil;
+ * - `budget_cap`: perfil `attempts_and_runtime` (não é teto de custo);
+ * - `checkpoint`, `human_acceptance`, `no_auto_integration`, `recovery_path`:
+ *   perfil de garantias do runtime;
+ * - `verifier`: só se o perfil exigir parecer FAIL-CLOSED (hoje não ⇒ ausente);
+ * - `fail_closed`: só se TODA precondição obrigatória nega ao falhar — inclui o
+ *   Verifier; com Verifier fail-open, ausente.
  *
- * `command_allowlist` NÃO é declarada: o envelope não restringe o comando dos
- * gates (gap registrado para a opção C). Reversibilidade: pré-aprovação não há
- * classificação persistida (INTEL-01 grava depois); ela é derivada das mesmas
- * garantias estruturais (mutação só na worktree descartável, sem integração).
+ * Reversibilidade: pré-aprovação não há classificação persistida (INTEL-01 grava
+ * depois); derivada `reversible` da mutação confinada à worktree descartável sem
+ * integração — só quando o perfil garante as duas coisas.
  */
 export function deriveAutoApprovalActionContext(
   facts: AutoApprovalCandidateFacts,
+  guarantees: MandatedLaneRuntimeGuarantees = MANDATED_LANE_RUNTIME_GUARANTEES_V0,
 ): { readonly ok: true; readonly context: AutonomyActionContext } | { readonly ok: false; readonly missing: string } {
   if (!IMPACT_LEVELS.has(facts.impactLevel)) return { ok: false, missing: 'impact_level' };
 
@@ -130,35 +180,41 @@ export function deriveAutoApprovalActionContext(
   const writes = permissions.includes('workspace_write_isolated');
 
   if (!isNonBlankString(spec.coder_backend)) return { ok: false, missing: 'coder_backend' };
-  const localBackend = facts.allowedLocalCoderBackends.includes(spec.coder_backend);
+  const localBackend = guarantees.localCoderBackends.includes(spec.coder_backend);
 
   const limits = asObject(spec.limits);
   if (!limits) return { ok: false, missing: 'limits' };
+  const attemptsBounded = isPositiveInt(limits.max_attempts);
+  const timeBounded = isPositiveInt(limits.max_duration_minutes);
 
   const criteria = spec.validation_criteria;
   if (!Array.isArray(criteria)) return { ok: false, missing: 'validation_criteria' };
-  const gates =
-    criteria.length > 0 && criteria.every((criterion) => isNonBlankString(asObject(criterion)?.command));
+  const gatesAllowlisted =
+    criteria.length > 0 && criteria.every((criterion) => isAllowedGateCommand(asObject(criterion)?.command));
 
   const scope = asObject(asObject(facts.proposal)?.data)?.included_scope;
   const allowedPaths = Array.isArray(scope) && scope.length > 0 && scope.every(isNonBlankString);
 
-  const safeguards: AutonomySafeguard[] = [
-    'isolated_worktree',
-    'no_network',
-    'human_acceptance',
-    'no_auto_integration',
-    'verifier',
-    'recovery_path',
-    'checkpoint',
-    'budget_cap',
-    'fail_closed',
-  ];
+  const verifierFailClosed = guarantees.verifier === 'required_fail_closed';
+  const failClosed =
+    verifierFailClosed && gatesAllowlisted && allowedPaths && attemptsBounded && timeBounded && localBackend;
+
+  const safeguards: AutonomySafeguard[] = ['isolated_worktree', 'no_network'];
+  if (guarantees.network === 'isolation_proven') safeguards.push('network_isolation');
   if (allowedPaths) safeguards.push('allowed_paths');
-  if (gates) safeguards.push('gates');
-  if (isPositiveInt(limits.max_attempts)) safeguards.push('max_attempts');
-  if (isPositiveInt(limits.max_duration_minutes)) safeguards.push('timeout');
+  if (gatesAllowlisted) safeguards.push('gates', 'command_allowlist');
+  if (attemptsBounded) safeguards.push('max_attempts');
+  if (timeBounded) safeguards.push('timeout');
   if (localBackend) safeguards.push('no_paid_compute');
+  if (guarantees.budget === 'attempts_and_runtime') safeguards.push('budget_cap');
+  if (guarantees.checkpointEmitted) safeguards.push('checkpoint');
+  if (guarantees.humanAcceptance) safeguards.push('human_acceptance');
+  if (guarantees.noAutoIntegration) safeguards.push('no_auto_integration');
+  if (guarantees.recoveryByWorktreeDisposal) safeguards.push('recovery_path');
+  if (verifierFailClosed) safeguards.push('verifier');
+  if (failClosed) safeguards.push('fail_closed');
+
+  const reversible = writes ? guarantees.recoveryByWorktreeDisposal && guarantees.noAutoIntegration : true;
 
   return {
     ok: true,
@@ -166,7 +222,8 @@ export function deriveAutoApprovalActionContext(
       description: 'Auto-aprovação V1: attempt em worktree isolada do item materializado.',
       effect: writes ? 'isolated_mutation' : 'read_only',
       impactLevel: facts.impactLevel as AutonomyActionContext['impactLevel'],
-      reversibility: 'reversible',
+      reversibility: reversible ? 'reversible' : 'unknown',
+      // Requisito de rede DA AÇÃO: nenhuma permissão de rede foi pedida.
       network: 'none',
       paidCompute: localBackend ? 'none' : 'required',
       safeguards,
@@ -248,6 +305,7 @@ export function enforceAutonomyReadinessForAutoApproval(input: {
       proof_status: evaluation.status,
       contributing_evidence: readiness.evidence.contributing,
       contradicting_evidence: readiness.evidence.contradicting,
+      lane_guarantees_version: MANDATED_LANE_RUNTIME_GUARANTEES_V0.version,
     },
   };
 }

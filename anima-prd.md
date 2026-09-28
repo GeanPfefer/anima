@@ -1,4 +1,10 @@
 # Anima — Product Requirements Document
+> Mandated Envelope Hardening V0 em 2026-09-28: salvaguarda declarada = aplicada. O contexto do lane de
+> auto-aprovação vem do item + perfil versionado de garantias do runtime (`mandated-worktree-lane-v0`);
+> Verifier (advisory/fail-open) e `fail_closed` deixaram de ser declarados; Envelope V1 recusa gate fora da
+> allowlist (`validation_command_not_allowlisted`, predicado único no core); budget = attempts+tempo;
+> permissão de rede ≠ isolamento. Lane real: readiness manual ⇒ auto-aprovação segue NEGADA. Registro
+> `docs/registros/2026-09-28-mandated-envelope-hardening-v0.md`.
 > Autonomy Readiness Enforcement V0 em 2026-09-28 (opção B): a auto-aprovação do sistema (Envelope V1)
 > não pode conceder delegação acima da readiness. `autoApproveAutonomousWork` exige readiness ≥ mandated
 > (Proof Evaluation V0.1 + contexto do item real) antes da RPC; senão o item fica `proposed` com

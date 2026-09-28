@@ -77,21 +77,35 @@ function minLevel(a: AutonomyLevel, b: AutonomyLevel): AutonomyLevel {
 
 /**
  * Salvaguardas que o CONTEXTO da ação declara presentes. Cada uma corresponde a
- * uma primitiva que já existe no Anima (não é policy engine novo):
+ * uma primitiva que já existe no Anima (não é policy engine novo).
+ *
+ * PRESENTE ≠ "existe em algum lugar do código". PRESENTE = GARANTIDA para ESTE
+ * caminho de execução (Mandated Envelope Hardening V0). No lane de auto-aprovação
+ * o contexto é derivado do item real + perfil versionado de garantias do runtime
+ * (`autonomy-readiness-enforcement.ts`); as ações de referência das regras abaixo
+ * são ilustrativas (projeção da UI) e NÃO decidem delegação.
  *
  * - `isolated_worktree`   — executor de worktree (ADR-001; `workspace_write_isolated`);
- * - `allowed_paths`       — `included_scope` explícito na proposta;
- * - `command_allowlist`   — política de comando do Coding Harness V3;
- * - `timeout`/`max_attempts` — `execution_spec.limits`;
- * - `gates`               — gates host-observed;
- * - `verifier`            — parecer do Verifier (advisory);
+ * - `allowed_paths`       — `included_scope` explícito, reforçado pelo host (contract_violation);
+ * - `command_allowlist`   — comandos restritos a allowlist (gates: gate-command-allowlist-v1;
+ *                           laço do coder: CommandExecutionPolicy);
+ * - `timeout`/`max_attempts` — `execution_spec.limits` aplicados pelo executor/orçamento;
+ * - `gates`               — gates allowlisted rodados pelo host;
+ * - `verifier`            — parecer do Verifier OBRIGATÓRIO e FAIL-CLOSED no caminho
+ *                           (parecer advisory/fail-open NÃO conta);
  * - `human_acceptance`    — review request + decisão humana (`accept`/`request_changes`);
- * - `no_network`          — negação de rede por política de comando;
+ * - `no_network`          — PERMISSÃO de rede negada (política aplicacional). NÃO é
+ *                           isolamento: ver `network_isolation`;
+ * - `network_isolation`   — isolamento de rede PROVADO (kernel/contêiner). Nenhum
+ *                           caminho atual o garante;
  * - `no_paid_compute`     — sem node/provider pago (authority paga ausente);
- * - `budget_cap`          — orçamento local/externo com bloqueio (governance.budgets);
+ * - `budget_cap`          — teto de ATTEMPTS e TEMPO de execução aplicado pela
+ *                           política de orçamento (anti-loop por item + reserva
+ *                           interativa). NÃO é teto de custo nem de resource units;
  * - `recovery_path`       — descarte da worktree + recovery/successor governado;
- * - `checkpoint`          — checkpoints de attempt (retomada);
- * - `fail_closed`         — evaluator determinístico que nega na dúvida;
+ * - `checkpoint`          — checkpoint emitido pelo executor configurado deste caminho;
+ * - `fail_closed`         — TODAS as precondições obrigatórias do caminho negam ao
+ *                           falhar (se alguma é fail-open, NÃO está presente);
  * - `no_auto_integration` — integração/merge exige decisão humana (INT-05).
  */
 export type AutonomySafeguard =
@@ -104,6 +118,7 @@ export type AutonomySafeguard =
   | 'verifier'
   | 'human_acceptance'
   | 'no_network'
+  | 'network_isolation'
   | 'no_paid_compute'
   | 'budget_cap'
   | 'recovery_path'
@@ -214,7 +229,11 @@ export interface AutonomyReadinessRule {
   readonly delegableEffects: readonly AutonomyActionEffect[];
   /** Salvaguardas exigidas por nível (cumulativas: cada nível exige também as do anterior). */
   readonly requiredSafeguards: Readonly<Partial<Record<Exclude<AutonomyLevel, 'manual'>, readonly AutonomySafeguard[]>>>;
-  /** Ação de referência: o uso governado atual (projeção da UI). */
+  /**
+   * Ação de referência: o uso governado atual DECLARADO (projeção da UI). Não é
+   * derivada de enforcement e nunca decide delegação real — o lane de
+   * auto-aprovação deriva o próprio contexto do item + garantias do runtime.
+   */
   readonly referenceAction: AutonomyActionContext;
 }
 
@@ -400,6 +419,7 @@ export type AutonomyBlockerCode =
   | 'supervised_by_definition'
   | 'paid_authority_missing'
   | 'network_boundary_unproven'
+  | 'network_permission_not_denied'
   | 'safeguard_missing';
 
 export interface AutonomyBlocker {
@@ -516,7 +536,9 @@ const SAFEGUARD_BLOCKER: Partial<Record<AutonomySafeguard, AutonomyBlockerCode>>
   allowed_paths: 'scope_not_bounded',
   isolated_worktree: 'isolation_absent',
   no_paid_compute: 'paid_authority_missing',
-  no_network: 'network_boundary_unproven',
+  // Permissão negada ≠ isolamento provado: blockers distintos.
+  no_network: 'network_permission_not_denied',
+  network_isolation: 'network_boundary_unproven',
 };
 
 function cumulativeSafeguards(rule: AutonomyReadinessRule, level: AutonomyLevel): AutonomySafeguard[] {

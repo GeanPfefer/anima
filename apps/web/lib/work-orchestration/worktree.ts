@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { lstat, mkdtemp, mkdir, readFile, readdir, rm, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { isAllowedGateCommand } from '@anima/core';
 import { delimiter, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 
 // ============================================================
@@ -81,16 +82,13 @@ export function runProcess(
   });
 }
 
-// Allowlist explícita de comandos de gate. Só npm test/typecheck/build/lint,
-// opcionalmente escopado por workspace ou com argumentos passthrough restritos.
-// Qualquer outra coisa é recusada fechada, antes de spawnar.
-// Charset restrito nos passthrough: sem metacaracteres de encadeamento,
-// redirecionamento ou expansão (`& | ; > < $ * ? ( )`), então nem com shell há
-// como injetar um segundo comando.
-const GATE_PATTERN = /^npm(?:\.cmd)? (?:run (?:typecheck|test|build|lint)|test)(?: --workspace=[@a-z0-9._/-]+)?(?: -- [\w./@:=-]+(?: [\w./@:=-]+)*)?$/i;
+// Allowlist explícita de comandos de gate: fonte única no core
+// (`isAllowedGateCommand`, gate-command-allowlist-v1), a MESMA aplicada pelo
+// Envelope V1 de auto-aprovação. Qualquer outra coisa é recusada fechada, antes de
+// spawnar.
 
 export function parseGateCommand(command: string): { readonly file: string; readonly args: string[] } | null {
-  if (typeof command !== 'string' || !GATE_PATTERN.test(command.trim())) return null;
+  if (!isAllowedGateCommand(command)) return null;
   const tokens = command.trim().split(/\s+/);
   const [head, ...rest] = tokens;
   // No Windows o executável é npm.cmd; normaliza para não depender do que o
