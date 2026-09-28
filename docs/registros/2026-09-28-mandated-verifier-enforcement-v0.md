@@ -239,3 +239,105 @@ Nenhum item real carrega o marcador ainda (88 itens lidos): nada existente muda 
 Autoria do parecer (acima). Um candidato persistentemente inconclusivo fica `in_progress` sem saída
 humana dedicada (a reconciliação o relata; saída governada = trabalho futuro). Submissão manual de item
 do lane recusada por construção.
+
+---
+
+## V0.2 (2026-09-28) — Trusted System Writer: autoria sistêmica do Verifier
+
+HEAD inicial `61bdf2f`. O residual declarado no V0.1 (autoria do parecer) foi fechado. Duas auditorias
+independentes read-only acharam o mesmo problema: `record_host_observed_evidence`,
+`record_host_observed_gate_evidence`, `record_host_observed_coder_evidence` e `record_verifier_opinion`
+eram executáveis por `authenticated`. Uma sessão humana produzia eventos gravados como `author=system`.
+O V0.1 registrou esse fato, e ele permanece registrado.
+
+**Princípio: `author=system` é fronteira de confiança, não rótulo de payload.**
+
+### Trust model
+
+- **HUMAN WRITER** (`authenticated`, `auth.uid()` = dono): aprova, revisa, aceita, pede mudanças e
+  autoriza o efeito de integração.
+- **TRUSTED SYSTEM WRITER** (papel Postgres `anima_system_writer`): só persiste fatos observados ou
+  produzidos pelo sistema.
+
+Primitive reusada: identidade GoTrue **dedicada** cujo `auth.users.role` = `anima_system_writer`. O
+GoTrue emite o papel no claim `role` e o PostgREST faz `SET ROLE` para ele. Isso foi provado localmente:
+o JWT sai com esse papel, o PostgREST aceita, e o papel não lê tabelas. Não há `service_role` (o runtime
+o proíbe por decisão ratificada), nem PKI, nem sistema de auth novo. O papel não herda `authenticated`.
+
+### Banco (migração `20260928000003_trusted_system_writer.sql`, aplicada só local)
+
+- `CREATE ROLE anima_system_writer NOLOGIN NOINHERIT`; `GRANT … TO authenticator`; `USAGE` em `public`.
+- `private.trusted_system_writers(writer_user_id, owner_user_id, revoked_at, …)`: o writer serve UM
+  dono; o writer nunca é o dono; sem acesso de clientes.
+- `private.trusted_system_writer_owner()`: dono servido pela sessão atual, exigindo o claim `role` =
+  `anima_system_writer` do JWT verificado + registro ativo + writer fora da allowlist humana.
+- Nos cinco sinks, corpos vigentes reproduzidos com mudança **única**: `auth.uid()` →
+  `private.trusted_system_writer_owner()`. Todas as correlações foram preservadas (dono do item, versão,
+  attempt, resultado, evidência git/gate/coder, commit). NULL ⇒ `42501 trusted system writer required`.
+- `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role`; `GRANT EXECUTE … TO
+  anima_system_writer` nos cinco.
+- Defesa em profundidade: com um GRANT acidental de volta, a função ainda recusa a sessão humana.
+  `author`/`origin` do payload nunca são prova.
+
+### Aplicação
+
+`apps/web/lib/work-orchestration/trusted-system-writer.ts`: expõe **só** os cinco sinks, nunca o cliente.
+A credencial vem do ambiente do servidor (`ANIMA_SYSTEM_WRITER_EMAIL`/`_PASSWORD`, nunca NEXT_PUBLIC,
+distinta da residente) e reusa `createGoTrueIdentityProvider` + `createBearerClient`, com um cliente por
+operação. `persistPostTurnHostObservations` e a re-verificação do supervisor passam a gravar pelo
+writer; a sessão humana/residente continua lendo o estado e orquestrando. **Sem writer provisionado,
+todo sink falha fechado.** No lane obrigatório o candidato fica retido; nos lanes advisory, a
+evidência/parecer simplesmente não é gravada.
+
+### Provisionamento (ato do operador — NÃO feito nesta unidade)
+
+1. Criar um usuário GoTrue dedicado para o writer (distinto do residente).
+2. `UPDATE auth.users SET role='anima_system_writer' WHERE id=<writer>`.
+3. `INSERT INTO private.trusted_system_writers(writer_user_id, owner_user_id) VALUES (<writer>, <dono>)`.
+4. `ANIMA_SYSTEM_WRITER_EMAIL`/`ANIMA_SYSTEM_WRITER_PASSWORD` no `.env.local` do web/host.
+
+Até isso, o runtime local **não grava** evidência do host nem parecer (fail-closed).
+
+### Autoria e fail_closed
+
+Humano e anon não gravam nenhuma das quatro evidências/pareceres; o writer grava (Postgres com papéis
+reais + prova viva local). Perfil `mandated-worktree-lane-v3`: `verifier = required_fail_closed`,
+`verifierAuthorship = system_proven` e, portanto, **`fail_closed` presente**. `agency.produce-change`
+segue **proven → supervised**; o mandato continua bloqueado **só** por `operational_criteria_pending`.
+
+### Restart do supervisor (teste que faltava)
+
+`result_pending_verification` ⇒ re-verificação **uma** vez (injetável:
+`SupervisorTurnDependencies.verifyPendingCandidate`), sem claim, start ou terminal novo, com estado
+preservado quando retido.
+
+### Testes V0.2
+
+- pgTAP `trusted_system_writer.test.sql` (33, papéis **reais** via `SET LOCAL ROLE`): humano e anon negados
+  nos cinco; GRANT acidental ainda recusado pela função; writer sem claim `role`, não registrado,
+  revogado ou de outro dono recusados; writer grava git/gate/coder, não lê tabelas, não aceita e não
+  autoriza integração; `author=system` só pelo writer; parecer verified via writer libera review; aceite
+  humano funciona; integração com autorização humana, humano sem receipt, writer grava o receipt, replay,
+  `author` das autorizações preservado.
+- Sete suítes legadas adaptadas com wrappers de teste que assumem o writer registrado do dono corrente
+  (a semântica "outro usuário não vê" foi preservada); a fronteira de GRANT é provada à parte.
+- Prova viva local (GoTrue + PostgREST reais, usuários descartáveis, zero eventos, limpeza completa):
+  humano/anon `permission denied`; writer atravessa a fronteira até a validação de negócio; writer negado
+  no aceite.
+- Web: `trusted-system-writer.test.ts` (9: fail-closed sem config, NEXT_PUBLIC ignorado, writer ≠ residente,
+  cliente por operação, credencial fora dos argumentos, nenhum cliente exposto, lane obrigatório retido
+  sem writer, varredura estática sem NEXT_PUBLIC, sem import em componente client e sem leitura da senha
+  fora do módulo). Supervisor: teste de restart. Seam de auto-aprovação atualizado (sintético + regras
+  canônicas agora permitido; o real continua negado).
+- Core 2308/2308; typecheck OK; web 1985/1988 (`resident-on-demand-node` e `worktree-executor`: falharam
+  só sob carga, 30/30 e 56/56 isolados, sem acoplamento); suíte SQL: as mesmas 3 falhas pré-existentes.
+
+### Residuais
+
+- Provisionamento do writer (acima) é ato do operador.
+- `record_host_observed_node_lifecycle` (evidência de nó de compute) segue `authenticated`: fora do lane
+  e da lista desta unidade.
+- O terminal do executor (resultado candidato) é **atestado** pela sessão residente, não fato de
+  sistema. O Verifier o cruza com a evidência do host (sistema); se isso deve virar fato de sistema,
+  é trabalho separado.
+- Pending Verification Human Recovery V0 (candidato persistentemente inconclusivo) segue aberto.

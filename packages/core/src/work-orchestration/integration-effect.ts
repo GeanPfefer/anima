@@ -116,17 +116,63 @@ const isReceipt = (value: Json | undefined): value is Json => {
   return r !== null && r.kind === 'integration_effect' && Array.isArray(r.mergeParents);
 };
 
-/** Receipt persistido do item (V0: no máximo um). */
+/**
+ * Receipt persistido do item (V0: no máximo um). Trusted System Writer V0: só conta evento
+ * `author=system` (a RPC só executa para o writer de sistema). Defesa em profundidade — NÃO
+ * substitui a fronteira de identidade, e o banco sozinho não prova Git.
+ */
 export function projectIntegrationCompleted(
   events: readonly WorkEvent[],
 ): { readonly authorizationId: string; readonly receipt: IntegrationEffectReceiptV1 } | null {
   for (const event of events) {
-    if (event.type !== COMPLETED) continue;
+    if (event.type !== COMPLETED || event.author !== 'system') continue;
     const d = dataOf(event);
     if (!str(d?.authorization_id) || !isReceipt(d?.receipt)) return null;
     return { authorizationId: d.authorization_id, receipt: d.receipt as unknown as IntegrationEffectReceiptV1 };
   }
   return null;
+}
+
+/** O receipt reproduz INTEGRALMENTE a autorização e descreve o merge exato esperado? */
+export function integrationReceiptMatchesAuthorization(
+  authorization: IntegrationEffectAuthorizationV1,
+  receipt: IntegrationEffectReceiptV1,
+): boolean {
+  const parents = receipt.mergeParents;
+  return receipt.kind === 'integration_effect'
+    && receipt.operationKey === authorization.operationKey
+    && receipt.authorizationId === authorization.authorizationId
+    && receipt.workItemId === authorization.workItemId
+    && receipt.proposalVersion === authorization.proposalVersion
+    && receipt.attemptId === authorization.attemptId
+    && receipt.acceptedResultEventId === authorization.acceptedResultEventId
+    && receipt.resultCommitSha === authorization.resultCommitSha
+    && receipt.repositoryId === authorization.repositoryId
+    && receipt.targetRef === authorization.targetRef
+    && isAllowedIntegrationTargetRef(receipt.targetRef)
+    && receipt.mode === authorization.mode
+    && receipt.previousTargetSha === authorization.expectedTargetSha
+    && SHA.test(receipt.mergeCommitSha)
+    && receipt.resultingTargetSha === receipt.mergeCommitSha
+    && Array.isArray(parents) && parents.length === 2
+    && parents[0] === authorization.expectedTargetSha && parents[1] === authorization.resultCommitSha
+    && receipt.observed === true
+    && (receipt.disposition === 'effected' || receipt.disposition === 'reconciled');
+}
+
+export type IntegrationProjectionStatus = 'integrated' | 'not_integrated' | 'invalid_receipt';
+
+/**
+ * `integrated` é PROJEÇÃO: só com receipt `author=system` cuja autorização humana
+ * (`author=user`) exista no log e que a reproduza integralmente. `work_items.state`
+ * continua `completed`.
+ */
+export function projectIntegrationStatus(events: readonly WorkEvent[]): IntegrationProjectionStatus {
+  const completed = projectIntegrationCompleted(events);
+  if (!completed) return 'not_integrated';
+  const authorization = projectIntegrationEffectAuthorization(events, completed.authorizationId);
+  if (!authorization || !integrationReceiptMatchesAuthorization(authorization, completed.receipt)) return 'invalid_receipt';
+  return 'integrated';
 }
 
 export type IntegrationEffectPlanDefect =
@@ -150,6 +196,8 @@ export interface IntegrationEffectPlan {
   readonly handoff: WorktreeHandoffV1;
   /** Receipt já persistido (idempotência / verificação de drift), se houver. */
   readonly persisted: IntegrationEffectReceiptV1 | null;
+  /** O receipt persistido NÃO reproduz esta autorização (integridade). */
+  readonly persistedMismatch: boolean;
 }
 
 export type IntegrationEffectPlanResult =
@@ -194,7 +242,10 @@ export function planIntegrationEffect(input: {
   if (integrationOperationKey(auth) !== auth.operationKey) return deny('operation_key_mismatch');
 
   const completed = projectIntegrationCompleted(events);
-  return { ok: true, plan: { authorization: auth, handoff, persisted: completed?.receipt ?? null } };
+  const persisted = completed?.receipt ?? null;
+  const persistedMismatch = completed !== null
+    && (completed.authorizationId !== auth.authorizationId || !integrationReceiptMatchesAuthorization(auth, completed.receipt));
+  return { ok: true, plan: { authorization: auth, handoff, persisted, persistedMismatch } };
 }
 
 /** Fatos Git observados sobre o alvo (inspeção independente do efeito). */

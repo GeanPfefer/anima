@@ -1334,3 +1334,28 @@ describe('UX-01 — controle cooperativo no laço', () => {
     expect(database.events.map(event => event.type)).toContain('result_submitted');
   });
 });
+
+// Mandated Verifier V0.1 / Trusted System Writer V0 — restart com candidato pendente.
+test('19. result_pending_verification ⇒ re-verifica UMA vez; nenhum claim/start novo; estado preservado quando retido', async () => {
+  const database = new FakeDatabase({
+    items: [],
+    reconciliation: [{ work_item_id: 'item-pending', attempt_id: 'a-9', claim_id: null, finding: 'result_pending_verification', action: 'requires_verification', item_state: 'in_progress', detail: { verifier_status: 'missing' } }],
+  });
+  const verify = jest.fn(async () => ({ status: 'held' as const, reason: 'persist_failed' as const, detail: 'trusted_system_writer_unavailable' }));
+  const { adapter, calls } = executor();
+  const result = await runSupervisorTurn({
+    client: database.asClient(),
+    routes: [{ adapter, candidate: { schemaVersion: 1, routeId: 'test-route', executorId: adapter.id, providerRef: 'test-provider', modelRef: 'test-model', effort: 'standard', capabilities: ['programming'], availability: 'available', latency: 'normal', priority: 1 } }],
+    ownerInstanceId: 'supervisor-test', newId: ids(['claim-1', 'attempt-1']), signal: new AbortController().signal, reader: reader([]),
+    verifyPendingCandidate: verify,
+  });
+  expect(verify).toHaveBeenCalledTimes(1);
+  expect(verify).toHaveBeenCalledWith('item-pending');
+  // Nenhuma posse, início ou terminal: só reconciliação, re-admissões e seleção (vazia).
+  expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work', 'next_autonomous_work']);
+  expect(database.claims.size).toBe(0);
+  expect(calls).toHaveLength(0);
+  expect(result.reconciliation).toEqual([
+    { workItemId: 'item-pending', attemptId: 'a-9', claimId: null, finding: 'result_pending_verification', action: 'requires_verification', itemState: 'in_progress' },
+  ]);
+});

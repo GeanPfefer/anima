@@ -1,4 +1,10 @@
 # Anima — Product Requirements Document
+> Trusted System Writer V0 em 2026-09-28: `author=system` é fronteira de confiança, não rótulo. Evidência do host
+> (git/gate/coder), parecer do Verifier e receipt de integração só são gravados pelo papel Postgres
+> `anima_system_writer` (identidade GoTrue dedicada via `auth.users.role`, registrada para o dono; sem service_role);
+> humano/anon recusados pelo GRANT e pela função. `TrustedSystemWriter` expõe só os cinco sinks. Verifier:
+> autoria `system_proven` ⇒ `fail_closed` presente; produce-change segue supervised (só `operational_criteria_pending`).
+> Provisionamento do writer = ato do operador (até lá, fatos de sistema não são gravados).
 > Completed → Integrated V0 em 2026-09-28: completed ≠ integrated. Nova autorização HUMANA de um efeito Git
 > exato (`integration_effect_authorized`, author=user; `integration_decided` V1 NÃO serve) congela resultado
 > aceito, commit (derivado do handoff), repositório, `refs/heads/dev`, SHA-alvo esperado e `merge_no_ff`.

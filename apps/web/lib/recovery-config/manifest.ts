@@ -156,6 +156,21 @@ export const RECOVERY_CONFIG_MANIFEST: readonly RecoveryConfigEntry[] = [
     reprovisionStrategy: 'reset_credential', hostSpecific: false, secret: true, validation: { kind: 'non_empty' },
     description: 'Senha residente. Em máquina nova: redefinir a credencial da identidade restaurada; no .env.local deve estar entre aspas se tiver `#`.',
   },
+  // ---------- Trusted System Writer (fatos de sistema: evidência do host, Verifier, receipt) ----------
+  {
+    key: 'ANIMA_SYSTEM_WRITER_EMAIL', envFile: web, classes: ['non_secret_required'],
+    requiredFor: [{ group: 'self-development' }],
+    source: { kind: 'operator', reference: 'identidade GoTrue DEDICADA com auth.users.role = anima_system_writer, registrada em private.trusted_system_writers' },
+    reprovisionStrategy: 'operator_choice', hostSpecific: false, secret: false, validation: { kind: 'email' },
+    description: 'Email do writer de sistema (distinto do residente). Sem ele, nenhum fato de sistema é gravado (fail-closed).',
+  },
+  {
+    key: 'ANIMA_SYSTEM_WRITER_PASSWORD', envFile: web, classes: ['secret_required'],
+    requiredFor: [{ group: 'self-development' }],
+    source: { kind: 'secret_store', reference: 'credencial do writer de sistema (GoTrue)' },
+    reprovisionStrategy: 'reset_credential', hostSpecific: false, secret: true, validation: { kind: 'non_empty' },
+    description: 'Senha do writer de sistema. Somente servidor; nunca NEXT_PUBLIC; nunca impressa.',
+  },
   {
     key: 'ANIMA_DEVELOPMENT_CHAT_USER_IDS', envFile: web, classes: ['non_secret_required'],
     requiredFor: [{ group: 'self-development' }],

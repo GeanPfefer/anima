@@ -9,6 +9,113 @@ INSERT INTO public.ai_conversations(id,user_id,role,content) VALUES('9b000000-00
 SET LOCAL ROLE service_role;
 INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('9b000000-0000-0000-0000-000000000000');
 RESET ROLE;
+
+-- Trusted System Writer V0: fatos de sistema são gravados pelo WRITER DE SISTEMA (não pela
+-- sessão humana). Estes wrappers de TESTE assumem a identidade de um writer registrado para o
+-- dono da sessão corrente (claims role=anima_system_writer + sub do writer) e chamam a RPC
+-- real — exercitam a defesa em profundidade da função. A fronteira de GRANT (humano/anon
+-- negados; writer permitido) é provada com SET ROLE real em trusted_system_writer.test.sql.
+CREATE FUNCTION pg_temp.writer_for(p_owner uuid) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $w$
+DECLARE v_writer uuid := md5('trusted-writer:'||coalesce(p_owner::text,'none'))::uuid;
+BEGIN
+  INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+  VALUES(v_writer,'00000000-0000-0000-0000-000000000000','anima_system_writer','anima_system_writer','writer-'||v_writer||'@test.invalid','',now(),'{}','{}',now(),now())
+  ON CONFLICT (id) DO NOTHING;
+  IF p_owner IS NOT NULL AND EXISTS (SELECT 1 FROM public.profiles p WHERE p.id=p_owner) THEN
+    INSERT INTO private.trusted_system_writers(writer_user_id,owner_user_id) VALUES(v_writer,p_owner) ON CONFLICT (writer_user_id) DO NOTHING;
+  END IF;
+  RETURN v_writer;
+END $w$;
+CREATE FUNCTION pg_temp.record_host_observed_evidence(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_host_observed_evidence(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_host_observed_evidence(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_host_observed_gate_evidence(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_host_observed_gate_evidence(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_host_observed_gate_evidence(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_host_observed_coder_evidence(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_host_observed_coder_evidence(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_host_observed_coder_evidence(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_verifier_opinion(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_verifier_opinion(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_verifier_opinion(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_integration_completed(a uuid, b integer, c text, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_integration_completed(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_integration_completed(a uuid, b integer, c text, d jsonb) TO authenticated, anon;
 CREATE TEMP TABLE ids(k text PRIMARY KEY, v text);
 GRANT ALL ON ids TO authenticated;
 CREATE FUNCTION pg_temp.id(p text) RETURNS uuid LANGUAGE sql AS $$ SELECT v::uuid FROM ids WHERE k=p $$;
@@ -81,24 +188,24 @@ INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,p
 VALUES(pg_temp.id('A'),'integration_decided','user',1,jsonb_build_object('schema_version',1,'data',jsonb_build_object(
   'decision','authorize','decision_id','decided-1','accepted_result_event_id',pg_temp.id('res'),'attempt_id',pg_temp.id('att'))));
 SET LOCAL ROLE authenticated;
-SELECT throws_ok($$SELECT public.record_integration_completed(pg_temp.id('A'),1,'decided-1',pg_temp.receipt(jsonb_build_object('authorizationId','decided-1')))$$,
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'decided-1',pg_temp.receipt(jsonb_build_object('authorizationId','decided-1')))$$,
   'P0002','integration effect authorization not found','16. integration_decided não serve como autorização de merge');
 
 -- 15/22. receipt que não reproduz a autorização ou o efeito esperado ⇒ recusado.
-SELECT throws_ok($$SELECT public.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('mergeParents',jsonb_build_array(repeat('b',40),repeat('c',40)))))$$,
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('mergeParents',jsonb_build_array(repeat('b',40),repeat('c',40)))))$$,
   '55000','integration receipt mismatch','22. pais inesperados ⇒ recusado');
-SELECT throws_ok($$SELECT public.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('targetRef','refs/heads/main')))$$,
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('targetRef','refs/heads/main')))$$,
   '55000','integration receipt mismatch','receipt com main ⇒ recusado');
-SELECT throws_ok($$SELECT public.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('previousTargetSha',repeat('e',40))))$$,
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('previousTargetSha',repeat('e',40))))$$,
   '55000','integration receipt mismatch','receipt com SHA anterior ≠ esperado ⇒ recusado');
 
 -- Receipt exato ⇒ integration_completed (author=system); item continua completed.
-SELECT is((public.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt()))->>'action','recorded','15. receipt exato persistido');
+SELECT is((pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt()))->>'action','recorded','15. receipt exato persistido');
 SELECT is((SELECT author::text FROM public.work_events WHERE event_type='integration_completed' AND work_item_id=pg_temp.id('A')),'system','receipt é do sistema');
 -- 10/20. replay idempotente mesmo com disposição diferente (reconciliação); efeito divergente ⇒ conflito.
-SELECT is((public.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('disposition','reconciled'))))->>'action',
+SELECT is((pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('disposition','reconciled'))))->>'action',
   'replayed','10. replay idempotente por identidade do efeito');
-SELECT throws_ok($$SELECT public.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('mergeCommitSha',repeat('f',40),'resultingTargetSha',repeat('f',40))))$$,
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('mergeCommitSha',repeat('f',40),'resultingTargetSha',repeat('f',40))))$$,
   '55000','integration receipt conflict','23. mesmo item com efeito divergente ⇒ conflito');
 
 SELECT * FROM finish();

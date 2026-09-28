@@ -184,7 +184,7 @@ export async function executeAuthorizedIntegration(
     trustedRepositoryId: deps.config.repositoryId,
   });
   if (!planned.ok) return { status: 'denied', reason: planned.defect };
-  const { authorization: auth, handoff, persisted } = planned.plan;
+  const { authorization: auth, handoff, persisted, persistedMismatch } = planned.plan;
   const provider = deps.provider;
 
   try {
@@ -196,7 +196,7 @@ export async function executeAuthorizedIntegration(
 
     // Receipt já persistido: sucesso idempotente SÓ se o Git ainda o comprova.
     if (persisted) {
-      if (persisted.operationKey !== auth.operationKey || persisted.authorizationId !== auth.authorizationId) {
+      if (persistedMismatch || persisted.operationKey !== auth.operationKey || persisted.authorizationId !== auth.authorizationId) {
         return { status: 'integrity_violation', reason: 'receipt_conflict' };
       }
       const proven = (await provider.commitExists(persisted.mergeCommitSha))
@@ -355,10 +355,16 @@ export const supabaseIntegrationReceiptPersistence = (client: SupabaseClient<Dat
     return { action: value.action, eventSeq: value.event_seq };
   };
 
+/**
+ * Leitura/estado com a sessão HUMANA (`client`); o receipt observado sai SOMENTE pelo
+ * Trusted System Writer (`persistReceipt` = `writer.integrationReceipt`): a sessão humana
+ * não consegue gravar `integration_completed` (Trusted System Writer V0).
+ */
 export function executeAuthorizedIntegrationWithSupabase(
   client: SupabaseClient<Database>,
   input: { readonly workItemId: string; readonly integrationAuthorizationId: string },
   config: IntegrationEffectConfig,
+  persistReceipt: PersistIntegrationReceipt,
 ): Promise<IntegrationEffectOutcome> {
   const service = createWorkOrchestrationService(client);
   return executeAuthorizedIntegration(input, {
@@ -366,6 +372,6 @@ export function executeAuthorizedIntegrationWithSupabase(
     listEvents: (id) => service.listEvents(id),
     config,
     provider: new GitIntegrationEffectProvider(config.repoRoot),
-    persist: supabaseIntegrationReceiptPersistence(client),
+    persist: persistReceipt,
   });
 }

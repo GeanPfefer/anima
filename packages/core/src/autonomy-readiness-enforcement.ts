@@ -117,11 +117,12 @@ export interface MandatedLaneRuntimeGuarantees {
    */
   readonly verifier: 'advisory_fail_open' | 'required_fail_closed';
   /**
-   * Autoria do parecer (V0.1). `user_session_unproven`: `record_verifier_opinion` é
-   * chamável por qualquer usuário autenticado da allowlist e o host residente usa a
-   * MESMA identidade — um parecer `verified` não prova que veio do Verifier do host.
-   * `system_proven`: identidade de sistema distinta (não existe hoje). Sem autoria
-   * provada a cadeia NÃO é integralmente fail-closed.
+   * Autoria do parecer. `user_session_unproven` (V0.1): as RPCs de evidência e parecer
+   * eram executáveis pela sessão humana. `system_proven` (Trusted System Writer V0): só o
+   * papel `anima_system_writer` (identidade GoTrue dedicada, registrada para o dono)
+   * executa `record_host_observed_{,gate_,coder_}evidence` e `record_verifier_opinion`;
+   * `authenticated`/`anon` são recusados pelo GRANT e pela própria função (provado no
+   * Postgres com papéis reais). Sem autoria provada a cadeia NÃO é fail-closed.
    */
   readonly verifierAuthorship: 'user_session_unproven' | 'system_proven';
   /** Rede: permissão negada (aplicacional) ≠ isolamento provado (kernel). */
@@ -139,12 +140,13 @@ export interface MandatedLaneRuntimeGuarantees {
 }
 
 export const MANDATED_LANE_RUNTIME_GUARANTEES_V0: MandatedLaneRuntimeGuarantees = {
-  version: 'mandated-worktree-lane-v2',
+  version: 'mandated-worktree-lane-v3',
   checkpointEmitted: true,
   // Enforcement real: V0 (aceite na aplicação) + V0.1 (candidato fora de `review` até
   // parecer conclusivo persistido; trigger, reconciliação e aceite no SQL).
   verifier: 'required_fail_closed',
-  verifierAuthorship: 'user_session_unproven',
+  // Trusted System Writer V0: autoria sistêmica comprovada pela fronteira de papel.
+  verifierAuthorship: 'system_proven',
   network: 'permission_denied',
   budget: 'attempts_and_runtime',
   humanAcceptance: true,

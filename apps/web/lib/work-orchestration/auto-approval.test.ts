@@ -206,20 +206,19 @@ describe('autoApproveAutonomousWork — Autonomy Readiness Enforcement V0 (opç�
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  test('6. sintético operacional + regras canônicas: autoria do parecer não provada ⇒ negado (sem fail_closed)', async () => {
+  test('6. sintético operacional + regras canônicas + autoria sistêmica provada ⇒ permitido', async () => {
     const { result, rpc } = await run(SYNTHETIC_CANONICAL_RULES);
-    expect(result).toMatchObject({ action: 'human_required', reason: 'autonomy_readiness_insufficient' });
-    expect((result as { detail?: string }).detail).toMatch(/safeguard_missing/);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(result).toEqual({ action: 'approved', eventSeq: 7, sourceId: 'FIX-01' });
+    expect(rpc).toHaveBeenCalledWith('auto_approve_autonomous_work', expect.anything());
   });
 
-  test('6b. só sob regra HIPOTÉTICA sem fail_closed o caminho da RPC é exercitado', async () => {
+  test('6b. caminho da RPC com auditoria do perfil vigente', async () => {
     const { result, rpc } = await run(MANDATED);
     expect(result).toEqual({ action: 'approved', eventSeq: 7, sourceId: 'FIX-01' });
     expect(rpc).toHaveBeenCalledWith('auto_approve_autonomous_work', expect.objectContaining({
       envelope: expect.objectContaining({
         checks: expect.arrayContaining(['validation_commands_allowlisted', 'verifier_required_fail_closed', 'autonomy_readiness_mandated']),
-        autonomy_readiness: expect.objectContaining({ lane_guarantees_version: 'mandated-worktree-lane-v2', observed_level: 'mandated' }),
+        autonomy_readiness: expect.objectContaining({ lane_guarantees_version: 'mandated-worktree-lane-v3', observed_level: 'mandated' }),
       }),
     }));
   });
@@ -291,8 +290,8 @@ describe('autoApproveAutonomousWork — Autonomy Readiness Enforcement V0 (opç�
         expect(rank.indexOf(audit!.observed_level)).toBeGreaterThanOrEqual(rank.indexOf(audit!.required_level));
       }
     }
-    // Só o cenário com a regra HIPOTÉTICA aprova; com regras canônicas, nenhum.
-    expect(approvals).toBe(1);
+    // Só os cenários SINTÉTICOS operacionais aprovam; o estado real (proven) nunca.
+    expect(approvals).toBe(2);
   });
 });
 
@@ -338,7 +337,7 @@ describe('Mandated Envelope Hardening V0 — perfil de garantias amarrado ao run
 
   test('Verifier e rede declarados com a semântica real (Verifier obrigatório; permissão ≠ isolamento)', () => {
     expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.verifier).toBe('required_fail_closed');
-    expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.verifierAuthorship).toBe('user_session_unproven');
+    expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.verifierAuthorship).toBe('system_proven');
     expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.network).toBe('permission_denied');
     expect(MANDATED_LANE_RUNTIME_GUARANTEES_V0.budget).toBe('attempts_and_runtime');
   });

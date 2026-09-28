@@ -6,7 +6,9 @@ import {
   integrationOperationKey,
   isAllowedIntegrationTargetRef,
   planIntegrationEffect,
+  projectIntegrationCompleted,
   projectIntegrationEffectAuthorization,
+  projectIntegrationStatus,
   sameIntegrationEffect,
   type IntegrationEffectAuthorizationV1,
   type WorkEvent,
@@ -171,5 +173,45 @@ describe('receipt', () => {
     const reordered = JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(b).reverse())));
     expect(sameIntegrationEffect(a, reordered)).toBe(true);
     expect(sameIntegrationEffect(a, { ...b, mergeCommitSha: '2'.repeat(40), resultingTargetSha: '2'.repeat(40) })).toBe(false);
+  });
+});
+
+describe('Trusted System Writer V0 — projeção endurecida (defesa em profundidade)', () => {
+  const merge = '1'.repeat(40);
+  const auth = projectIntegrationEffectAuthorization(chain(), 'auth-1') as IntegrationEffectAuthorizationV1;
+  const receipt = buildIntegrationEffectReceipt(auth, { mergeCommitSha: merge, mergeParents: [DEV, COMMIT], resultingTargetSha: merge }, 'effected')!;
+  const completed = (author: string, r: unknown = receipt) => ev('ev-integrated', 'integration_completed', { authorization_id: 'auth-1', receipt: r }, author);
+
+  test('21. receipt de sistema válido ⇒ integrated', () => {
+    expect(projectIntegrationStatus([...chain(), completed('system')])).toBe('integrated');
+  });
+
+  test('receipt gravado por sessão humana (author=user) NÃO conta', () => {
+    expect(projectIntegrationCompleted([...chain(), completed('user')])).toBeNull();
+    expect(projectIntegrationStatus([...chain(), completed('user')])).toBe('not_integrated');
+  });
+
+  test.each([
+    ['pais invertidos', { mergeParents: [COMMIT, DEV] }],
+    ['alvo main', { targetRef: 'refs/heads/main' }],
+    ['SHA anterior diferente do esperado', { previousTargetSha: 'e'.repeat(40) }],
+    ['alvo resultante ≠ merge', { resultingTargetSha: DEV }],
+    ['commit diferente', { resultCommitSha: 'd'.repeat(40) }],
+    ['chave de operação diferente', { operationKey: 'integration-effect:x' }],
+    ['não observado', { observed: false }],
+  ])('receipt de sistema que não reproduz a autorização (%s) ⇒ invalid_receipt', (_name, patch) => {
+    expect(projectIntegrationStatus([...chain(), completed('system', { ...receipt, ...patch })])).toBe('invalid_receipt');
+  });
+
+  test('receipt sem autorização humana correspondente ⇒ invalid_receipt', () => {
+    const events = [...chain().filter((e) => e.type !== 'integration_effect_authorized'), completed('system')];
+    expect(projectIntegrationStatus(events)).toBe('invalid_receipt');
+  });
+
+  test('plano sinaliza receipt persistido divergente', () => {
+    const result = plan([...chain(), completed('system', { ...receipt, mergeParents: [COMMIT, DEV] })]);
+    expect(result.ok && result.plan.persistedMismatch).toBe(true);
+    const clean = plan([...chain(), completed('system')]);
+    expect(clean.ok && clean.plan.persistedMismatch).toBe(false);
   });
 });

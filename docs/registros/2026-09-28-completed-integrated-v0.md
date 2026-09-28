@@ -182,3 +182,55 @@ produce-change (registry intacto).
 - Sem superfície UI/CLI para os dois atos (autorizar / executar); só a primitive.
 - Uma integração por item (V0).
 - Readiness/authority próprias de integração: trabalho futuro.
+
+---
+
+## Authorship hardening (2026-09-28, Trusted System Writer V0)
+
+Achado de auditoria independente: `record_integration_completed` era executável por `authenticated`.
+Uma sessão humana podia fornecer um receipt internamente coerente e a função gravava `author=system`
+sem que o Git tivesse sido executado. A validação SQL prova **consistência dos campos com a
+autorização**; ela não prova existência do merge commit, pais reais, avanço de `refs/heads/dev`,
+ancestralidade nem observação Git.
+
+**`author=system` é fronteira de confiança, não rótulo de payload.**
+
+- `record_integration_completed` agora só executa para o papel `anima_system_writer` (a mesma boundary
+  do Verifier; ver `2026-09-28-mandated-verifier-enforcement-v0.md` §V0.2). Humano/anon: recusados pelo
+  GRANT e pela função.
+- `executeAuthorizedIntegration` (inalterado: dev-only, `main` protegida, `expectedTargetSha`,
+  `merge_no_ff`, CAS, inspect → mutate → inspect, reconciliação, idempotência) persiste pelo
+  `TrustedSystemWriter.integrationReceipt`. `executeAuthorizedIntegrationWithSupabase` exige o sink do
+  writer explicitamente; o `client` humano só lê estado.
+- `authorize_integration_effect` **permanece humano** (`author=user`).
+- Projeção endurecida (defesa em profundidade, não substitui a identidade): `projectIntegrationCompleted`
+  só considera `author=system`; `integrationReceiptMatchesAuthorization` valida integralmente o receipt
+  (autorização, item, resultado aceito, attempt, commit, repositório, alvo, SHA esperado, SHA resultante,
+  pais, modo, operationKey, observado). `projectIntegrationStatus` devolve `integrated` só com receipt de
+  sistema válido e autorização humana correspondente (senão `invalid_receipt`/`not_integrated`).
+  O plano marca `persistedMismatch` e o executor o trata como `integrity_violation`.
+
+**O banco sozinho não prova Git.** A prova é a composição: executor confiável → observa o Git →
+TrustedSystemWriter → receipt persistido. O SQL não recomputa o Git.
+
+`integration_completed` passa a significar "receipt produzido pela identidade sistêmica após observação
+pelo executor", e não "um usuário chamou uma SECURITY DEFINER". Maturity/readiness de integração não
+mudam nesta unidade.
+
+### Corrida checkout × CAS
+
+Entre `targetCheckedOut()` e o `update-ref` CAS há uma janela: alguém pode dar checkout em `dev` numa
+worktree desse repositório. O CAS garante que o **ref** não seja corrido (nenhum merge silencioso sobre
+outro valor), mas não impede mover uma branch recém-checada. Com o **clone de integração dedicado** (sem
+operador humano trabalhando nele), a propriedade é aceitável para o V0. Backlog explícito: reconferir o
+checkout depois do CAS e reportar `integrity_violation`, ou travar via `git worktree lock`. Não
+implementado.
+
+### Testes
+
+pgTAP `trusted_system_writer.test.sql` (autorização humana ok; humano não grava receipt, nem um falso
+e coerente; writer grava e faz replay). Core `integration-effect.test.ts` +11 (receipt de sistema válido
+⇒ integrated; `author=user` não conta; 7 receipts que não reproduzem a autorização ⇒ `invalid_receipt`;
+sem autorização humana ⇒ `invalid_receipt`; `persistedMismatch`). Git real temporário +1: sem writer o
+efeito fica `reconciliation_required` sem receipt; com o writer reconcilia sem novo merge; `main`
+intacta; replay idempotente.

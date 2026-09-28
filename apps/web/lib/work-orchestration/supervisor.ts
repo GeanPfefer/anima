@@ -21,8 +21,8 @@ import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildExecutorRequest, recordExecutionTerminal, recordWorkDecisionRequired, runExecutorStreamed, type CheckpointSink } from './execution';
 import { createWorkOrchestrationService } from './server';
-import { verifyAndReleaseCandidate } from './mandated-verification';
-import { verifierOpinionSinkFor } from './verifier-opinion';
+import { verifyAndReleaseCandidate, type MandatedVerificationOutcome } from './mandated-verification';
+import { defaultTrustedSystemWriter, type TrustedSystemWriter } from './trusted-system-writer';
 import { loadRecoveryEvidenceContext } from './recovery-evidence-context';
 
 // ============================================================
@@ -113,6 +113,10 @@ export interface SupervisorTurnDependencies {
   /** Decisão de compute já tomada a montante da resolução do executor. */
   readonly computeRoutingDecision?: ComputeRouteDecisionV1;
   readonly reader?: SupervisorReader;
+  /** Trusted System Writer V0: porta do parecer re-verificado. Default = writer do processo. */
+  readonly systemWriter?: TrustedSystemWriter;
+  /** Injetável (teste): re-verificação do candidato pendente. Default = verifyAndReleaseCandidate. */
+  readonly verifyPendingCandidate?: (workItemId: string) => Promise<MandatedVerificationOutcome>;
   readonly requestedWork?: {
     readonly workItemId: string;
     readonly expectedProposalVersion: number;
@@ -197,14 +201,16 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   // mantém retido — nada é aceito, integrado ou executado.
   const pendingVerification = reconciliation.filter(finding => finding.finding === 'result_pending_verification');
   if (pendingVerification.length > 0) {
-    const verification = createWorkOrchestrationService(client);
-    for (const finding of pendingVerification) {
-      await verifyAndReleaseCandidate(finding.workItemId, {
+    const verify = dependencies.verifyPendingCandidate ?? (() => {
+      const verification = createWorkOrchestrationService(client);
+      const sink = (dependencies.systemWriter ?? defaultTrustedSystemWriter()).verifierOpinion;
+      return (workItemId: string) => verifyAndReleaseCandidate(workItemId, {
         getItem: (id) => verification.getItem(id),
         listEvents: (id) => verification.listEvents(id),
-        sink: verifierOpinionSinkFor(client),
+        sink,
       });
-    }
+    })();
+    for (const finding of pendingVerification) await verify(finding.workItemId);
   }
 
   // ---------- (1b) Re-admissão por orçamento, antes da seleção ----------

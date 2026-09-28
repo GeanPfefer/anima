@@ -1,10 +1,10 @@
 import type { ChangeAuthorizationFactsV1, ObservedCoderInput, ObservedGateInput } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { gateEvidenceSinkFor, persistHostObservedGateEvidence } from './gate-evidence';
-import { coderEvidenceSinkFor, persistHostObservedCoderEvidence } from './coder-evidence';
-import { hostEvidenceSinkFor, observeAndPersistHostGitEvidence } from './host-evidence';
-import { verifierOpinionSinkFor } from './verifier-opinion';
+import { persistHostObservedGateEvidence } from './gate-evidence';
+import { persistHostObservedCoderEvidence } from './coder-evidence';
+import { observeAndPersistHostGitEvidence } from './host-evidence';
+import { defaultTrustedSystemWriter, type TrustedSystemWriter } from './trusted-system-writer';
 import { verifyAndReleaseCandidate, type MandatedVerificationOutcome } from './mandated-verification';
 import { projectRoot, type ExecutionContract } from './executor-selection';
 import { createWorkOrchestrationService } from './server';
@@ -35,6 +35,9 @@ export interface PostTurnObservationInput {
   /** Fatos de AUTORIZAÇÃO DE MUDANÇA host-observados na execução (escopo autorizado +
    * arquivos alterados). OPCIONAL: ausente ⇒ evidência de gate sem change authorization. */
   readonly changeAuthorization?: ChangeAuthorizationFactsV1;
+  /** Trusted System Writer V0: única porta dos fatos de SISTEMA (evidência + parecer).
+   * Default = writer do processo (env do servidor); ausente ⇒ todo sink recusa. */
+  readonly systemWriter?: TrustedSystemWriter;
 }
 
 /**
@@ -45,6 +48,9 @@ export interface PostTurnObservationInput {
 export async function persistPostTurnHostObservations(input: PostTurnObservationInput): Promise<MandatedVerificationOutcome | null> {
   const { client, result, contract, gateObservations, coderObservations, changeAuthorization } = input;
   if (!result.attemptId || !result.selection) return null;
+  // `author=system` é fronteira de confiança: estes fatos NUNCA são gravados com a sessão
+  // humana/residente (`client`), só pelo writer de sistema. `client` segue lendo estado.
+  const writer = input.systemWriter ?? defaultTrustedSystemWriter();
 
   const correlation = {
     workItemId: result.selection.workItemId,
@@ -55,13 +61,13 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // (0) GATE observado pelo host — persiste INCLUSIVE em terminal de erro (um gate
   // falho é a evidência mais valiosa: contradiz um executor que minta que passou).
   if (gateObservations.length > 0) {
-    await persistHostObservedGateEvidence(correlation, gateObservations, gateEvidenceSinkFor(client), undefined, changeAuthorization).catch(() => undefined);
+    await persistHostObservedGateEvidence(correlation, gateObservations, writer.gateEvidence, undefined, changeAuthorization).catch(() => undefined);
   }
 
   // (0b) CODER observado pelo host — UMA evidência por tentativa, agregando a
   // duração wall-clock de todas as chamadas `backend.edit()` observadas.
   if (coderObservations.length > 0) {
-    await persistHostObservedCoderEvidence(correlation, coderObservations, coderEvidenceSinkFor(client)).catch(() => undefined);
+    await persistHostObservedCoderEvidence(correlation, coderObservations, writer.coderEvidence).catch(() => undefined);
   }
 
   // (1) GIT observado pelo host. Só o caminho worktree deixa uma branch real; o
@@ -82,7 +88,7 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
         branch: worktreeBranchFor(result.attemptId),
         ...correlation,
       },
-      hostEvidenceSinkFor(client),
+      writer.hostEvidence,
     ).catch(() => undefined);
   }
 
@@ -97,6 +103,6 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   return verifyAndReleaseCandidate(correlation.workItemId, {
     getItem: (id) => service.getItem(id),
     listEvents: (id) => service.listEvents(id),
-    sink: verifierOpinionSinkFor(client),
+    sink: writer.verifierOpinion,
   });
 }

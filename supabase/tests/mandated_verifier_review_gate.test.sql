@@ -13,6 +13,113 @@ SET LOCAL ROLE service_role;
 INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('9a000000-0000-0000-0000-000000000000');
 RESET ROLE;
 
+-- Trusted System Writer V0: fatos de sistema são gravados pelo WRITER DE SISTEMA (não pela
+-- sessão humana). Estes wrappers de TESTE assumem a identidade de um writer registrado para o
+-- dono da sessão corrente (claims role=anima_system_writer + sub do writer) e chamam a RPC
+-- real — exercitam a defesa em profundidade da função. A fronteira de GRANT (humano/anon
+-- negados; writer permitido) é provada com SET ROLE real em trusted_system_writer.test.sql.
+CREATE FUNCTION pg_temp.writer_for(p_owner uuid) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $w$
+DECLARE v_writer uuid := md5('trusted-writer:'||coalesce(p_owner::text,'none'))::uuid;
+BEGIN
+  INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+  VALUES(v_writer,'00000000-0000-0000-0000-000000000000','anima_system_writer','anima_system_writer','writer-'||v_writer||'@test.invalid','',now(),'{}','{}',now(),now())
+  ON CONFLICT (id) DO NOTHING;
+  IF p_owner IS NOT NULL AND EXISTS (SELECT 1 FROM public.profiles p WHERE p.id=p_owner) THEN
+    INSERT INTO private.trusted_system_writers(writer_user_id,owner_user_id) VALUES(v_writer,p_owner) ON CONFLICT (writer_user_id) DO NOTHING;
+  END IF;
+  RETURN v_writer;
+END $w$;
+CREATE FUNCTION pg_temp.record_host_observed_evidence(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_host_observed_evidence(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_host_observed_evidence(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_host_observed_gate_evidence(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_host_observed_gate_evidence(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_host_observed_gate_evidence(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_host_observed_coder_evidence(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_host_observed_coder_evidence(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_host_observed_coder_evidence(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_verifier_opinion(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_verifier_opinion(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_verifier_opinion(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_integration_completed(a uuid, b integer, c text, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_integration_completed(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_integration_completed(a uuid, b integer, c text, d jsonb) TO authenticated, anon;
+
 -- Helpers de fixture (executam como postgres: evidência do host inserida direto).
 CREATE TEMP TABLE ids(k text PRIMARY KEY, v uuid);
 GRANT ALL ON ids TO authenticated;
@@ -104,35 +211,35 @@ INSERT INTO ids SELECT 'gateA', pg_temp.evidence((SELECT v FROM ids WHERE k='A')
 SET LOCAL ROLE authenticated;
 
 -- 4. inconclusive ⇒ não review-ready.
-SELECT is((public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
+SELECT is((pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'inconclusive',(SELECT v FROM ids WHERE k='rA'),NULL,NULL)))->>'released_for_review',
   'false','4. inconclusive não libera');
 -- Evidência incompleta: verified sem gate/coder correlacionado não libera.
-SELECT is((public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
+SELECT is((pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'verified',(SELECT v FROM ids WHERE k='rA'),(SELECT v FROM ids WHERE k='gitA'),NULL)))->>'released_for_review',
   'false','verified sem evidência de gate não libera');
 -- 12. commit incoerente com o handoff ⇒ não libera (coder ainda ausente também).
 RESET ROLE;
 INSERT INTO ids SELECT 'coderA', pg_temp.evidence((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'host_observed_coder_evidence_recorded',NULL);
 SET LOCAL ROLE authenticated;
-SELECT is((public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
+SELECT is((pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'verified',(SELECT v FROM ids WHERE k='rA'),(SELECT v FROM ids WHERE k='gitBad'),(SELECT v FROM ids WHERE k='gateA'))))->>'released_for_review',
   'false','12. commit observado ≠ commit do handoff não libera');
 SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT v FROM ids WHERE k='A')),'in_progress','ainda in_progress');
 -- 9/11. attempt ou versão errados: recusados na persistência.
-SELECT throws_ok($$SELECT public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,'9a000000-0000-0000-0000-00000000ffff',
+SELECT throws_ok($$SELECT pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,'9a000000-0000-0000-0000-00000000ffff',
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),'9a000000-0000-0000-0000-00000000ffff','verified',(SELECT v FROM ids WHERE k='rA'),(SELECT v FROM ids WHERE k='gitA'),(SELECT v FROM ids WHERE k='gateA')))$$,
   'P0002',NULL,'9. parecer de outra attempt recusado');
-SELECT throws_ok($$SELECT public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),2,(SELECT v FROM ids WHERE k='attA'),
+SELECT throws_ok($$SELECT pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),2,(SELECT v FROM ids WHERE k='attA'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'verified',(SELECT v FROM ids WHERE k='rA'),(SELECT v FROM ids WHERE k='gitA'),(SELECT v FROM ids WHERE k='gateA')))$$,
   '22023',NULL,'11. versão de proposta errada recusada');
 -- 10. resultEventId errado: recusado na persistência.
-SELECT throws_ok($$SELECT public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
+SELECT throws_ok($$SELECT pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'verified',(SELECT v FROM ids WHERE k='gitA'),(SELECT v FROM ids WHERE k='gitA'),(SELECT v FROM ids WHERE k='gateA')))$$,
   'P0002',NULL,'10. resultEventId que não é resultado da attempt recusado');
 
 -- 2. verified persistido + correlação completa ⇒ review (atômico com a persistência).
-SELECT is((public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
+SELECT is((pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'verified',(SELECT v FROM ids WHERE k='rA'),(SELECT v FROM ids WHERE k='gitA'),(SELECT v FROM ids WHERE k='gateA'))))->>'released_for_review',
   'true','2. verified correlacionado libera para review');
 SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT v FROM ids WHERE k='A')),'review','2. item em review');
@@ -140,14 +247,14 @@ SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT v FROM ids
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT v FROM ids WHERE k='A') AND event_type='result_accepted'),
   0::bigint,'16. verified não produz result_accepted');
 -- 20. replay do parecer: sem evento novo.
-SELECT is((public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
+SELECT is((pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'verified',(SELECT v FROM ids WHERE k='rA'),(SELECT v FROM ids WHERE k='gitA'),(SELECT v FROM ids WHERE k='gateA'))))->>'action',
   'replayed','20. parecer idempotente');
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT v FROM ids WHERE k='A') AND event_type='verifier_opinion_recorded'),
   4::bigint,'20. sem parecer duplicado');
 
 -- 13/14. parecer rejected MAIS RECENTE derruba o verified: aceite direto recusado.
-SELECT is((public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
+SELECT is((pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'rejected',(SELECT v FROM ids WHERE k='rA'),(SELECT v FROM ids WHERE k='gitA'),(SELECT v FROM ids WHERE k='gateA'),'work-verifier-v3-b')))->>'action',
   'recorded','parecer rejected mais recente');
 SELECT throws_ok($$SELECT public.review_work_result_versioned((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='rA'),'accept','{}')$$,
@@ -165,7 +272,7 @@ INSERT INTO ids SELECT 'gitB', pg_temp.evidence((SELECT v FROM ids WHERE k='B'),
 INSERT INTO ids SELECT 'gateB', pg_temp.evidence((SELECT v FROM ids WHERE k='B'),(SELECT v FROM ids WHERE k='attB'),'host_observed_gate_evidence_recorded',NULL);
 INSERT INTO ids SELECT 'coderB', pg_temp.evidence((SELECT v FROM ids WHERE k='B'),(SELECT v FROM ids WHERE k='attB'),'host_observed_coder_evidence_recorded',NULL);
 SET LOCAL ROLE authenticated;
-SELECT is((public.record_verifier_opinion((SELECT v FROM ids WHERE k='B'),1,(SELECT v FROM ids WHERE k='attB'),
+SELECT is((pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='B'),1,(SELECT v FROM ids WHERE k='attB'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='B'),(SELECT v FROM ids WHERE k='attB'),'rejected',(SELECT v FROM ids WHERE k='rB'),(SELECT v FROM ids WHERE k='gitB'),(SELECT v FROM ids WHERE k='gateB'))))->>'released_for_review',
   'true','3. rejected libera para inspeção');
 SELECT throws_ok($$SELECT public.review_work_result_versioned((SELECT v FROM ids WHERE k='B'),1,(SELECT v FROM ids WHERE k='rB'),'accept','{}')$$,
@@ -174,7 +281,7 @@ SELECT is((public.review_work_result_versioned((SELECT v FROM ids WHERE k='B'),1
   'changes_requested','3. rejected segue o caminho de retrabalho');
 
 -- 17. aceite humano após verified corrente funciona (novo parecer verified mais recente em A).
-SELECT public.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
+SELECT pg_temp.record_verifier_opinion((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='attA'),
   pg_temp.opinion((SELECT v FROM ids WHERE k='A'),(SELECT v FROM ids WHERE k='attA'),'verified',(SELECT v FROM ids WHERE k='rA'),(SELECT v FROM ids WHERE k='gitA'),(SELECT v FROM ids WHERE k='gateA'),'work-verifier-v3-c'));
 SELECT is((public.review_work_result_versioned((SELECT v FROM ids WHERE k='A'),1,(SELECT v FROM ids WHERE k='rA'),'accept','{}')).state,
   'completed','17. aceite humano com verified corrente funciona');

@@ -18,6 +18,7 @@ import {
   type ExecuteIntegrationDeps,
   type IntegrationEffectConfig,
 } from './integration-effect';
+import { createTrustedSystemWriter, UNAVAILABLE_TRUSTED_SYSTEM_WRITER } from './trusted-system-writer';
 
 // Repositórios TEMPORÁRIOS reais (git init). Nada toca o repositório do Anima.
 const git = (cwd: string, ...args: string[]): string => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
@@ -328,3 +329,29 @@ function commitOn(f: Fixture, file: string): string {
   void file;
   return git(f.repo, 'commit-tree', tree, '-p', devSha(f), '-m', 'avanço externo');
 }
+
+describe('Trusted System Writer V0 — receipt de integração só pelo writer de sistema', () => {
+  test('19/20/24. executor Git legítimo → writer grava o receipt; sem writer ⇒ pendente e reconcilia depois', async () => {
+    const f = make({ devDiverges: 'clean' });
+    authorize(f);
+    // Sem writer: o efeito Git acontece, mas o receipt NÃO é gravado (nunca pela sessão humana).
+    const first = await run(f, { persist: UNAVAILABLE_TRUSTED_SYSTEM_WRITER.integrationReceipt });
+    expect(first.status).toBe('reconciliation_required');
+    const merge = devSha(f);
+    expect(receipts(f)).toHaveLength(0);
+    // Writer disponível (cliente fictício que registra a chamada): reconcilia sem novo merge.
+    const rpc = jest.fn(async (name: string, args: { receipt: IntegrationEffectReceiptV1 }) => {
+      f.events.push(event('ev-integrated', 'integration_completed', 'system', { authorization_id: 'auth-1', receipt: args.receipt }));
+      return { data: { action: 'recorded', event_seq: 1 }, error: null };
+    });
+    const writer = createTrustedSystemWriter(async () => ({ accessToken: 'fake-writer-token' }), () => ({ rpc }) as never);
+    const second = await run(f, { persist: writer.integrationReceipt });
+    expect(second).toMatchObject({ status: 'integrated', disposition: 'reconciled' });
+    expect(rpc).toHaveBeenCalledWith('record_integration_completed', expect.objectContaining({ authorization_id: 'auth-1' }));
+    expect(devSha(f)).toBe(merge);
+    // 23. main intacta.
+    expect(git(f.repo, 'rev-parse', 'refs/heads/main')).not.toBe(merge);
+    // Replay idempotente comprovado pelo Git.
+    await expect(run(f, { persist: writer.integrationReceipt })).resolves.toMatchObject({ status: 'integrated', disposition: 'already_persisted' });
+  }, 60_000);
+});

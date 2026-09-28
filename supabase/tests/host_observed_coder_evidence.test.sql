@@ -22,6 +22,113 @@ SET LOCAL ROLE service_role;
 INSERT INTO private.work_orchestration_allowlist(user_id) VALUES('c8000000-0000-0000-0000-000000000000');
 RESET ROLE;
 
+-- Trusted System Writer V0: fatos de sistema são gravados pelo WRITER DE SISTEMA (não pela
+-- sessão humana). Estes wrappers de TESTE assumem a identidade de um writer registrado para o
+-- dono da sessão corrente (claims role=anima_system_writer + sub do writer) e chamam a RPC
+-- real — exercitam a defesa em profundidade da função. A fronteira de GRANT (humano/anon
+-- negados; writer permitido) é provada com SET ROLE real em trusted_system_writer.test.sql.
+CREATE FUNCTION pg_temp.writer_for(p_owner uuid) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $w$
+DECLARE v_writer uuid := md5('trusted-writer:'||coalesce(p_owner::text,'none'))::uuid;
+BEGIN
+  INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+  VALUES(v_writer,'00000000-0000-0000-0000-000000000000','anima_system_writer','anima_system_writer','writer-'||v_writer||'@test.invalid','',now(),'{}','{}',now(),now())
+  ON CONFLICT (id) DO NOTHING;
+  IF p_owner IS NOT NULL AND EXISTS (SELECT 1 FROM public.profiles p WHERE p.id=p_owner) THEN
+    INSERT INTO private.trusted_system_writers(writer_user_id,owner_user_id) VALUES(v_writer,p_owner) ON CONFLICT (writer_user_id) DO NOTHING;
+  END IF;
+  RETURN v_writer;
+END $w$;
+CREATE FUNCTION pg_temp.record_host_observed_evidence(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_host_observed_evidence(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_host_observed_evidence(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_host_observed_gate_evidence(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_host_observed_gate_evidence(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_host_observed_gate_evidence(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_host_observed_coder_evidence(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_host_observed_coder_evidence(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_host_observed_coder_evidence(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_verifier_opinion(a uuid, b integer, c uuid, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_verifier_opinion(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_verifier_opinion(a uuid, b integer, c uuid, d jsonb) TO authenticated, anon;
+CREATE FUNCTION pg_temp.record_integration_completed(a uuid, b integer, c text, d jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $w$
+DECLARE v_sub text := current_setting('request.jwt.claim.sub', true); v_claims text := current_setting('request.jwt.claims', true); v_w uuid; r jsonb;
+BEGIN
+  v_w := pg_temp.writer_for(nullif(v_sub,'')::uuid);
+  PERFORM set_config('request.jwt.claim.sub', v_w::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role','anima_system_writer','sub',v_w)::text, true);
+  BEGIN
+    r := public.record_integration_completed(a,b,c,d);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+    PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+    RAISE;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', coalesce(v_sub,''), true);
+  PERFORM set_config('request.jwt.claims', coalesce(v_claims,''), true);
+  RETURN r;
+END $w$;
+GRANT EXECUTE ON FUNCTION pg_temp.record_integration_completed(a uuid, b integer, c text, d jsonb) TO authenticated, anon;
+
 \set t1 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"hce-t1"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
 \set t2 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"hce-t2"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
 
@@ -60,7 +167,7 @@ CREATE TEMP TABLE i2 AS SELECT pg_temp.start_attempt('c8000000-0000-0000-0000-00
 -- ============================================================
 
 SELECT is(
-  (public.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
+  (pg_temp.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
     pg_temp.hce((SELECT id FROM i1),'c8000000-0000-0000-0000-0000000000a1')))->>'action',
   'recorded','evidência do coder válida é registrada');
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_coder_evidence_recorded'),1::bigint,'exatamente um evento');
@@ -73,12 +180,12 @@ SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM i1
 -- ============================================================
 
 SELECT is(
-  (public.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
+  (pg_temp.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
     pg_temp.hce((SELECT id FROM i1),'c8000000-0000-0000-0000-0000000000a1',84000,'succeeded','2026-08-17T23:59:00Z')))->>'action',
   'replayed','reobservação idêntica com outro observedAt é replay');
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM i1) AND event_type='host_observed_coder_evidence_recorded'),1::bigint,'replay não cria novo evento');
 SELECT throws_ok(
-  $$ SELECT public.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
+  $$ SELECT pg_temp.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
        pg_temp.hce((SELECT id FROM i1),'c8000000-0000-0000-0000-0000000000a1',99999)) $$,
   '55000',NULL,'mesmo attempt com duração divergente é conflito');
 
@@ -87,15 +194,15 @@ SELECT throws_ok(
 -- ============================================================
 
 SELECT throws_ok(
-  $$ SELECT public.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
+  $$ SELECT pg_temp.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
        pg_temp.hce((SELECT id FROM i1),'c8000000-0000-0000-0000-000000000abc')) $$,
   '22023',NULL,'correlação declarada divergente dos parâmetros é recusada');
 SELECT throws_ok(
-  $$ SELECT public.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-000000000abc',
+  $$ SELECT pg_temp.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-000000000abc',
        pg_temp.hce((SELECT id FROM i1),'c8000000-0000-0000-0000-000000000abc')) $$,
   'P0002',NULL,'tentativa inexistente é recusada');
 SELECT throws_ok(
-  $$ SELECT public.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a2',
+  $$ SELECT pg_temp.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a2',
        pg_temp.hce((SELECT id FROM i1),'c8000000-0000-0000-0000-0000000000a2')) $$,
   'P0002',NULL,'tentativa de outro item é recusada');
 
@@ -105,12 +212,12 @@ SELECT throws_ok(
 
 -- desfecho fora do conjunto succeeded|failed|cancelled.
 SELECT throws_ok(
-  $$ SELECT public.record_host_observed_coder_evidence((SELECT id FROM i2),1,'c8000000-0000-0000-0000-0000000000a2',
+  $$ SELECT pg_temp.record_host_observed_coder_evidence((SELECT id FROM i2),1,'c8000000-0000-0000-0000-0000000000a2',
        pg_temp.hce((SELECT id FROM i2),'c8000000-0000-0000-0000-0000000000a2',84000,'timeout')) $$,
   '22023',NULL,'desfecho fora do conjunto é recusado');
 -- duração negativa.
 SELECT throws_ok(
-  $$ SELECT public.record_host_observed_coder_evidence((SELECT id FROM i2),1,'c8000000-0000-0000-0000-0000000000a2',
+  $$ SELECT pg_temp.record_host_observed_coder_evidence((SELECT id FROM i2),1,'c8000000-0000-0000-0000-0000000000a2',
        pg_temp.hce((SELECT id FROM i2),'c8000000-0000-0000-0000-0000000000a2',-1)) $$,
   '22023',NULL,'duração negativa é recusada');
 
@@ -120,7 +227,7 @@ SELECT throws_ok(
 
 SELECT set_config('request.jwt.claim.sub','c8000000-0000-0000-0000-0000000000ff',true);
 SELECT throws_ok(
-  $$ SELECT public.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
+  $$ SELECT pg_temp.record_host_observed_coder_evidence((SELECT id FROM i1),1,'c8000000-0000-0000-0000-0000000000a1',
        pg_temp.hce((SELECT id FROM i1),'c8000000-0000-0000-0000-0000000000a1')) $$,
   '42501',NULL,'usuário fora da allowlist é recusado');
 SELECT set_config('request.jwt.claim.sub','c8000000-0000-0000-0000-000000000000',true);
