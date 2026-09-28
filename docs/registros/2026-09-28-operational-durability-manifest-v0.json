@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "anima.backup-manifest.v0",
+  "backupId": "opdur-v0-20260928T053307Z",
+  "createdAt": "2026-09-28T05:33:07.512Z",
+  "durability": "NOT DURABLE BACKUP",
+  "purpose": "restore-proof",
+  "destinationClass": "local-temporary-proof",
+  "encrypted": false,
+  "encryptionNote": "plaintext only because the artifacts never left the Goma and were destroyed after the proof",
+  "artifactsDestroyed": true,
+  "gitHead": "d0e64bbda680242711b33ce1babefa21c5022039",
+  "source": {
+    "supabaseProjectId": "anima",
+    "volume": "supabase_db_anima",
+    "postgresVersion": "15.8",
+    "supabasePostgresImage": "public.ecr.aws/supabase/postgres:15.8.1.085",
+    "supabaseAuthImage": "public.ecr.aws/supabase/gotrue:v2.189.0",
+    "supabaseCliVersion": "2.105.0",
+    "dockerVersion": "29.8.0",
+    "migrationVersion": "20260927000001",
+    "migrationCount": 143
+  },
+  "residentIdentityFingerprint": {
+    "value": "6bb3c9ce147b492a",
+    "derivation": "first 16 hex of sha256('anima-resident:' || auth.users.id) for the user whose email = ANIMA_RESIDENT_EMAIL; neither email nor id is recorded"
+  },
+  "counts": {
+    "auth_users": 24,
+    "storage_buckets": 0,
+    "storage_objects": 0,
+    "work_items": 124,
+    "work_events": 1733,
+    "work_recovery_lineage": 30,
+    "work_harness_recoveries": 3,
+    "paid_compute_authorizations": 44,
+    "paid_compute_authorization_events": 1,
+    "budget_reserved": 58,
+    "budget_settled": 18,
+    "budget_voided": 2,
+    "work_claims": 106,
+    "work_resume_authorizations": 1
+  },
+  "ledgerAnchor": {
+    "work_events_last_seq": 54738,
+    "work_events_last_id": "8ae122fc-f0d0-4918-a49d-8d1cdf1facf3",
+    "work_events_digest": "8f46ca2af11ef1b637c7a6413239a151a9ff5a42abfaed614eed078633fdca24",
+    "work_events_digest_projection": "sha256(UTF8(string_agg(concat_ws(TAB, seq, id, work_item_id, event_type, author, coalesce(proposal_version,''), created_at UTC 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"', payload::text), LF ORDER BY seq)))",
+    "digestAuthority": "equality proof of this snapshot only; not a domain authority"
+  },
+  "auxiliaryDigests": {
+    "projection": "sha256(UTF8(string_agg(to_jsonb(row)::text, LF ORDER BY id))) with TIME ZONE UTC",
+    "work_items": "863ad5bcc48ade5d804e15a9d73467cfeca5b45a8033b8651081016e0dab9270",
+    "paid_compute_budget_events": "11d6f91f1d54ad76d46ce4ad708a4f697c4316778c488bb220ec1f341b97cb00",
+    "paid_compute_authorizations": "4976219f68fd66d977a7150cb2e30a134f45ab2c62c6638622b28667a58a4962",
+    "work_recovery_lineage": "f3c6645cbad9c58fbbd59cf395c68728457454b343839969c52b1a8c583c7a52"
+  },
+  "artifacts": [
+    { "name": "roles.sql", "command": "supabase db dump --local --role-only", "bytes": 297, "sha256": "25873cec56a2cc6514e204f420231777f85c03da818caa7090cdcdfa89776ecd" },
+    { "name": "schema.sql", "command": "supabase db dump --local", "bytes": 624578, "sha256": "c953ca04358214a5453b45fb7c9c21de9c20c91a985d5b2d54efba02740bbd65" },
+    { "name": "data.sql", "command": "supabase db dump --local --data-only --use-copy", "bytes": 3927514, "sha256": "2c8e1a598b61ad7f8184138be6ba4c7818cabd71494feedae12c2adca59b136d" },
+    { "name": "history_schema.sql", "command": "supabase db dump --local --schema supabase_migrations", "bytes": 885, "sha256": "9c15cd48dec925fc43383625c328a2fb2202f81797178f87f8b5c005701c12b4" },
+    { "name": "history_data.sql", "command": "supabase db dump --local --data-only --use-copy --schema supabase_migrations", "bytes": 835292, "sha256": "59d7ba97835d06199aa1f8cd1e2afb7fcbb4ee53e50e941924afa3252d82b809" }
+  ],
+  "restoreProof": {
+    "dataEquivalence": "PASS",
+    "securityEquivalence": "FAIL",
+    "restartPersistence": "PASS",
+    "gaps": [
+      "ACL drift: restored DB grants 213 extra table privileges (21 tables, anon/authenticated) and 92 extra EXECUTE on public functions (82 to anon, all SECURITY DEFINER); zero privileges missing",
+      "missing trigger auth.users:on_auth_user_created -> public.handle_new_user (the CLI dump excludes objects in the managed auth schema)"
+    ]
+  }
+}
