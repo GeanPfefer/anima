@@ -19,6 +19,8 @@ import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
 import { checkRecoveryConfig, renderRecoveryConfigReport } from '@/lib/recovery-config/check';
 import { loadMobileEnv, pathExists } from '@/lib/recovery-config/node-env';
+import { checkToolchain, renderToolchainReport } from '@/lib/toolchain/check';
+import { currentPlatform, probeCommand, readRepoFile, repoFileExists, repoRootFrom } from '@/lib/toolchain/node-probe';
 
 // ============================================================
 // `anima` — entrypoint FINO da CLI operacional do Anima (adapter oficial).
@@ -39,7 +41,7 @@ function jsonFlag(command: ParsedCommand): boolean {
   return command.kind !== 'help' && command.json;
 }
 
-async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config-check' }>): Promise<CommandResult> {
+async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config-check' | 'toolchain-check' }>): Promise<CommandResult> {
   if (command.kind === 'help') return { exitCode: EXIT.OK, payload: { ok: true, kind: 'help', usage: USAGE } };
 
   const identity = await resolveCliIdentity();
@@ -166,6 +168,15 @@ async function main(): Promise<void> {
   if (parsed.command.kind === 'recovery-config-check') {
     const report = checkRecoveryConfig({ web: process.env, mobile: loadMobileEnv(), pathExists });
     process.stdout.write(`${parsed.command.json ? JSON.stringify(report, null, 2) : renderRecoveryConfigReport(report)}\n`);
+    finish(report.core === 'READY' ? EXIT.OK : EXIT.ERROR);
+    return;
+  }
+
+  // Read-only e local: só comandos `--version` fixos do manifesto; nunca instala/inicia nada.
+  if (parsed.command.kind === 'toolchain-check') {
+    const root = repoRootFrom();
+    const report = checkToolchain({ platform: currentPlatform(), probe: probeCommand, repoFileExists: repoFileExists(root), readRepoFile: readRepoFile(root) });
+    process.stdout.write(`${parsed.command.json ? JSON.stringify(report, null, 2) : renderToolchainReport(report)}\n`);
     finish(report.core === 'READY' ? EXIT.OK : EXIT.ERROR);
     return;
   }

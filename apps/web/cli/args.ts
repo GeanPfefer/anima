@@ -9,6 +9,7 @@ export type ParsedCommand =
   | { readonly kind: 'help' }
   | { readonly kind: 'status'; readonly json: boolean }
   | { readonly kind: 'recovery-config-check'; readonly json: boolean }
+  | { readonly kind: 'toolchain-check'; readonly json: boolean }
   | { readonly kind: 'budget-status'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-list'; readonly json: boolean }
   | { readonly kind: 'work-show'; readonly id: string; readonly json: boolean }
@@ -134,6 +135,11 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     return { ok: true, command: { kind: 'recovery-config-check', json } };
   }
 
+  if (group === 'toolchain') {
+    if (sub !== 'check' || rest.length > 0 || reason !== null) return { ok: false, error: 'Uso: anima toolchain check [--json]' };
+    return { ok: true, command: { kind: 'toolchain-check', json } };
+  }
+
   if (group === 'budget') {
     if (sub !== 'status' || !rest[0] || rest.length !== 1) {
       return { ok: false, error: 'Uso: anima budget status <id>' };
@@ -237,6 +243,7 @@ export const USAGE = `anima — CLI operacional do Anima (adapter sobre os mesmo
 Uso:
   anima status                                Identidade, conexão e resumo do trabalho
   anima recovery-config check                 Prontidão da configuração recuperável (read-only, sem valores, sem rede)
+  anima toolchain check                       Prontidão do toolchain (read-only; só comandos --version; nunca instala)
   anima budget status <id>                    Orçamento autônomo atual (somente leitura)
   anima work list                             Lista os trabalhos não terminais (retomáveis)
   anima work show <id>                        Estado, versão, tentativa, Verifier e cobertura
