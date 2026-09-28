@@ -31,6 +31,9 @@ import type {
   TargetProgress,
 } from '@anima/core';
 import type {
+  AutonomyBlockerCode,
+  AutonomyLevel,
+  AutonomyReadinessResult,
   CapabilityAssessmentProjection,
   CapabilityEvidenceObservation,
   CapabilityMaturitySource,
@@ -347,6 +350,11 @@ export interface EvolutionClientProps {
    * compatibilidade; ausente = só a avaliação dinâmica do V1.
    */
   proofEvaluations?: readonly CapabilityProofEvaluation[];
+  /**
+   * Autonomy Readiness V0 (core) das capacidades cobertas. Opcional; ausente =
+   * nenhum bloco de readiness. Readiness ≠ authority.
+   */
+  autonomyReadiness?: readonly AutonomyReadinessResult[];
   /** Mudanças registradas no registry desde a baseline (nunca inferidas). */
   recentEvolution: RecentEvolutionEntry[];
   evolutionBaseline: EvolutionBaseline;
@@ -365,6 +373,7 @@ export default function EvolutionClient({
   featuredTargetId,
   capabilityAssessment,
   proofEvaluations,
+  autonomyReadiness,
   recentEvolution,
   evolutionBaseline,
 }: EvolutionClientProps) {
@@ -807,6 +816,7 @@ export default function EvolutionClient({
             <CapabilityDetail
               capabilityAssessment={capabilityAssessment}
               proofEvaluation={proofEvaluations?.find((entry) => entry.capabilityId === selectedNode.capability.id) ?? null}
+              autonomyReadiness={autonomyReadiness?.find((entry) => entry.capabilityId === selectedNode.capability.id) ?? null}
               node={selectedNode}
               nameById={nameById}
               onSelect={selectCapability}
@@ -943,9 +953,73 @@ function ProofEvaluationSummary({ evaluation }: { evaluation: CapabilityProofEva
   );
 }
 
+// ─── Autonomy Readiness V0: maturidade ≠ readiness ≠ authority ─────────────────
+
+const AUTONOMY_LEVEL_LABEL: Record<AutonomyLevel, string> = {
+  manual: 'Manual',
+  supervised: 'Supervisionada',
+  mandated: 'Sob mandato',
+  autonomous: 'Autônoma',
+};
+
+const AUTONOMY_BLOCKER_LABEL: Record<AutonomyBlockerCode, string> = {
+  capability_unknown: 'capacidade desconhecida',
+  readiness_rule_missing: 'fora do recorte de readiness',
+  proof_evaluation_missing: 'sem avaliação de prova',
+  proof_evaluation_inconsistent: 'avaliação de prova incoerente com a regra',
+  capability_not_proven: 'capacidade não comprovada',
+  capability_degraded: 'capacidade regredida',
+  operational_criteria_pending: 'critérios de operacional pendentes',
+  autonomous_operation_evidence_unavailable: 'sem evidência de operação autônoma',
+  negative_evidence_recent: 'evidência negativa recente',
+  action_outside_rule: 'ação fora da classe delegável',
+  impact_requires_human_approval: 'impacto exige aprovação humana',
+  reversibility_not_established: 'reversibilidade não estabelecida',
+  external_side_effects: 'efeito externo',
+  isolation_absent: 'sem isolamento',
+  scope_not_bounded: 'escopo não delimitado',
+  recovery_not_available: 'sem caminho de recuperação',
+  verifier_required: 'Verifier exigido',
+  human_acceptance_required: 'aceite humano exigido',
+  supervised_by_definition: 'supervisionada por definição',
+  paid_authority_missing: 'authority paga ausente',
+  network_boundary_unproven: 'boundary de rede não provado',
+  safeguard_missing: 'salvaguarda ausente',
+};
+
+function AutonomyReadinessSummary({ readiness }: { readiness: AutonomyReadinessResult }) {
+  return (
+    <div data-testid="autonomy-readiness" data-level={readiness.readinessLevel}>
+      <p className={styles.detailText}>
+        Prontidão para delegar: {AUTONOMY_LEVEL_LABEL[readiness.readinessLevel]}
+      </p>
+      <p className={styles.detailText} data-testid="autonomy-authority">
+        Authority vigente: {readiness.authority.source === 'none_observed'
+          ? 'não lida nesta visão (tratada como Manual) — readiness não concede authority'
+          : AUTONOMY_LEVEL_LABEL[readiness.authority.authorizedLevel]}
+      </p>
+      <p className={styles.detailEmpty}>{readiness.explanation}</p>
+      {readiness.blockers.length > 0 && (
+        <>
+          <p className={styles.detailHint}>Bloqueios para níveis acima</p>
+          <ul className={styles.proofList}>
+            {readiness.blockers.map((blocker, i) => (
+              <li key={`${blocker.code}-${blocker.blocksLevel}-${i}`} className={styles.proofItem}>
+                <span className={styles.proofKind}>{AUTONOMY_LEVEL_LABEL[blocker.blocksLevel]}</span>
+                <span className={styles.proofNote}>{AUTONOMY_BLOCKER_LABEL[blocker.code]}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CapabilityDetail({
   capabilityAssessment,
   proofEvaluation,
+  autonomyReadiness,
   node,
   nameById,
   onSelect,
@@ -953,6 +1027,7 @@ function CapabilityDetail({
 }: {
   capabilityAssessment: EvolutionCapabilityAssessmentState;
   proofEvaluation: CapabilityProofEvaluation | null;
+  autonomyReadiness?: AutonomyReadinessResult | null;
   node: CapabilityGraphNode;
   nameById: Map<string, string>;
   onSelect: (id: string) => void;
@@ -1077,6 +1152,13 @@ function CapabilityDetail({
           </>
         )}
       </section>
+
+      {autonomyReadiness && (
+        <section className={styles.detailSection}>
+          <h3 className={styles.detailLabel}>Prontidão para autonomia</h3>
+          <AutonomyReadinessSummary readiness={autonomyReadiness} />
+        </section>
+      )}
 
       <p className={styles.detailDesc}>{cap.description}</p>
 

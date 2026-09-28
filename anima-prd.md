@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Autonomy Readiness V0 em 2026-09-28: maturidade ≠ readiness ≠ authority. `evaluateAutonomyReadiness`
+> (core puro, sem score) consome SÓ a Proof Evaluation V0.1 e diz até que nível de delegação
+> (manual/supervised/mandated/autonomous) uma ação poderia ir, com salvaguardas e blockers
+> factuais; nunca concede authority (`grantsAuthority:false`, sem authority ⇒ manual). Real:
+> run-tests/edit-file mandated; produce/verify/verifier/self-dev supervised. Achado aberto: o
+> envelope de auto-aprovação V1 equivale a `mandated` para produce-change (readiness supervised) —
+> decisão humana. Registro `docs/registros/2026-09-28-autonomy-readiness-v0.md`.
 > Capability Proof Evaluation V0 em 2026-09-28: sobre o Proof Engine V1.1, cada capacidade
 > agora tem avaliação declarado × derivado (`evaluateCapabilityProofs`): status
 > aligned/underclaimed/overclaimed/insufficient_evidence/not_evaluated, fonte

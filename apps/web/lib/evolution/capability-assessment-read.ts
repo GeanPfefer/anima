@@ -2,6 +2,8 @@ import {
   classifyCanonicalResidentEvent,
   deriveCapabilityAssessmentsFromWorkHistory,
   evaluateCapabilityProofsFromHistory,
+  evaluateReferenceAutonomyReadiness,
+  type AutonomyReadinessResult,
   type CapabilityProofEvaluation,
   type CapabilityAssessmentProjection,
   type WorkEvent,
@@ -202,6 +204,12 @@ export interface CapabilityEvolutionRead {
    * falha de leitura nunca rebaixa nem promove.
    */
   readonly evaluations: readonly CapabilityProofEvaluation[];
+  /**
+   * Autonomy Readiness V0: prontidão de delegação das capacidades cobertas, para
+   * a ação de referência, derivada SÓ de `evaluations` (V0.1). Readiness ≠
+   * authority: nenhuma authority é lida nem criada aqui.
+   */
+  readonly autonomyReadiness: readonly AutonomyReadinessResult[];
 }
 
 /** Uma leitura do histórico alimenta a projeção V1 e a avaliação V0. */
@@ -211,18 +219,22 @@ export async function readCapabilityEvolution(
   const history = await readCanonicalWorkHistory(client);
 
   if (!history.ok) {
+    const evaluations = evaluateCapabilityProofsFromHistory({ events: null });
     return {
       assessment: { ok: false, reason: history.reason },
-      evaluations: evaluateCapabilityProofsFromHistory({ events: null }),
+      evaluations,
+      autonomyReadiness: evaluateReferenceAutonomyReadiness(evaluations),
     };
   }
 
+  const evaluations = evaluateCapabilityProofsFromHistory({ events: history.events });
   return {
     assessment: {
       ok: true,
       projection: deriveCapabilityAssessmentsFromWorkHistory(history.events),
       eventCount: history.events.length,
     },
-    evaluations: evaluateCapabilityProofsFromHistory({ events: history.events }),
+    evaluations,
+    autonomyReadiness: evaluateReferenceAutonomyReadiness(evaluations),
   };
 }

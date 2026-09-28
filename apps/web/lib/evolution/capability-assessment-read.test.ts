@@ -597,6 +597,12 @@ describe('readCapabilityEvolution (Proof Evaluation V0)', () => {
     const byId = new Map(read.evaluations.map((entry) => [entry.capabilityId, entry]));
     expect(byId.get('agency.run-tests')).toMatchObject({ status: 'not_evaluated', derivedMaturity: null });
     expect(byId.get('research.web.search')).toMatchObject({ status: 'aligned', derivedMaturity: 'proven' });
+    // Autonomy Readiness V0: fonte indisponível ⇒ fail-closed manual, nunca authority.
+    expect(read.autonomyReadiness.length).toBeGreaterThan(0);
+    for (const readiness of read.autonomyReadiness) {
+      expect(readiness.readinessLevel).toBe('manual');
+      expect(readiness.authority.authorizedLevel).toBe('manual');
+    }
   });
 
   test('histórico lido: mesma leitura alimenta projeção e avaliação', async () => {

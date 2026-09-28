@@ -23,6 +23,7 @@ export * from './capability-proof-assessment';
 export * from './capability-assessment-explanation';
 export * from './capability-proof-recorded';
 export * from './capability-proof-evaluation';
+export * from './autonomy-readiness';
 export * from './self-deficiency';
 export * from './self-improvement';
 export * from './research-web';

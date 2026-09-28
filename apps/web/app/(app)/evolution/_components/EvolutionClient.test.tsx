@@ -670,3 +670,56 @@ describe('EvolutionClient — Proof Evaluation V0 (declarado × derivado)', () =
     expect(within(panel()).getByText(/manual \(registry\)/)).toBeInTheDocument();
   });
 });
+
+describe('EvolutionClient — Autonomy Readiness V0 (maturidade ≠ readiness ≠ authority)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const core = require('@anima/core') as typeof import('@anima/core');
+
+  const evidenceFor = (capabilityId: string) =>
+    ['a1', 'a2', 'a3'].map((attempt, i) => ({
+      id: `${capabilityId}-${attempt}`,
+      capabilityId,
+      evidenceClass: 'verified_execution' as const,
+      outcome: 'positive' as const,
+      observedAt: `2026-09-2${i}T10:00:00Z`,
+      occasionId: attempt,
+      proofRefs: [{ kind: 'attempt' as const, ref: attempt }],
+    }));
+
+  const renderWith = (capabilityIds: string[]) => {
+    const evaluations = core.evaluateCapabilityProofs({ evidence: capabilityIds.flatMap(evidenceFor) });
+    render(
+      <EvolutionClient
+        {...buildProps()}
+        proofEvaluations={evaluations}
+        autonomyReadiness={core.evaluateReferenceAutonomyReadiness(evaluations)}
+      />,
+    );
+  };
+
+  test('run-tests operacional: sob mandato, authority não concedida, autonomia bloqueada', () => {
+    renderWith(['agency.run-tests']);
+    fireEvent.click(screen.getByRole('button', { name: /^Executar testes e comandos governados — / }));
+
+    const panel = screen.getByTestId('autonomy-readiness');
+    expect(panel.getAttribute('data-level')).toBe('mandated');
+    expect(within(panel).getByText('Prontidão para delegar: Sob mandato')).toBeInTheDocument();
+    expect(screen.getByTestId('autonomy-authority').textContent).toMatch(/tratada como Manual/);
+    expect(within(panel).getByText('boundary de rede não provado')).toBeInTheDocument();
+  });
+
+  test('produce-change comprovada: supervisionada, mandato bloqueado por critério operacional', () => {
+    renderWith(['agency.produce-change']);
+    fireEvent.click(screen.getByRole('button', { name: /^Produzir alteração de código — / }));
+
+    const panel = screen.getByTestId('autonomy-readiness');
+    expect(panel.getAttribute('data-level')).toBe('supervised');
+    expect(within(panel).getByText('critérios de operacional pendentes')).toBeInTheDocument();
+  });
+
+  test('capacidade fora do recorte não mostra bloco de readiness', () => {
+    renderWith([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat — Operacional' }));
+    expect(screen.queryByTestId('autonomy-readiness')).not.toBeInTheDocument();
+  });
+});
