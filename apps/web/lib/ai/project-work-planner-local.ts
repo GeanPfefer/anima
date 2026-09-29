@@ -4,7 +4,8 @@ import {
   coercePlannerArrayFields,
   includedScopeAnchoredInProject,
   INCLUDED_SCOPE_ANCHORING_RULE,
-  parseProposal,
+  unanchoredIncludedScopePaths,
+  validatePlannerProposal,
   PLANNER_CHAT_TOOLS,
   PLANNER_SYSTEM_INSTRUCTIONS,
   PLANNER_TOOL_CALL_LIMIT,
@@ -288,14 +289,33 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
         // Normaliza o quirk escalar→lista e valida a proposta ainda no adapter local.
         // O host autoritativo revalida depois em planExecutableProjectWork.
         const rawArguments = coercePlannerArrayFields(argString(submitted.function?.arguments));
-        const parsed = parseProposal(rawArguments);
+        const validation = validatePlannerProposal(rawArguments);
 
-        if (parsed && includedScopeAnchoredInProject(parsed.included_scope)) {
+        if (validation.ok && includedScopeAnchoredInProject(validation.proposal.included_scope)) {
           return { ok: true, rawArguments };
         }
 
+        const rejection = validation.ok
+          ? (() => {
+              const paths = unanchoredIncludedScopePaths(validation.proposal.included_scope);
+              const diagnosticPaths = paths.slice(0, 4).map(path => path.length > 160 ? `${path.slice(0, 157)}...` : path);
+              return {
+                code: 'included_scope_not_anchored' as const,
+                message: `included_scope_not_anchored: ${diagnosticPaths.join(', ')}`,
+                details: {
+                  field: 'included_scope', rule: 'project_topology', paths: diagnosticPaths,
+                  ...(paths.length > diagnosticPaths.length ? { omittedPathCount: paths.length - diagnosticPaths.length } : {}),
+                },
+              };
+            })()
+          : {
+              code: validation.issue.code,
+              message: `${validation.issue.code}: ${validation.issue.message}`,
+              details: { field: validation.issue.field, rule: validation.issue.rule },
+            };
+
         // Mantém a conversa viva: o modelo precisa investigar/corrigir o escopo
-        // em vez de transformar caminhos inventados em proposta executável.
+        // ou o contrato em vez de transformar payload inválido em proposta executável.
         messages.push({
           role: 'assistant',
           content: assistant.content,
@@ -311,7 +331,10 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
           tool_name: SUBMIT_TOOL_NAME,
           content: JSON.stringify({
             ok: false,
-            error: `O included_scope não está ancorado na topologia real do repositório. ${INCLUDED_SCOPE_ANCHORING_RULE} Investigue os caminhos e submeta novamente.`,
+            error: rejection,
+            guidance: rejection.code === 'included_scope_not_anchored'
+              ? `${INCLUDED_SCOPE_ANCHORING_RULE} Investigue os paths listados e submeta novamente.`
+              : 'Corrija somente o campo/regra indicado e submeta novamente.',
           }),
         });
         noProgress = 0;

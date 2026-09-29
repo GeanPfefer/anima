@@ -4,6 +4,7 @@ import {
   parseProposal,
   parseAdditionalValidations,
   normalizeClaimKind,
+  validatePlannerProposal,
 } from './project-work-planner-shared';
 
 // ============================================================
@@ -109,6 +110,43 @@ describe('parseProposal — claim_kind do gate principal', () => {
 
   test('10. covers fora de expected_effects continua inválido (contrato preservado)', () => {
     expect(parseProposal(validArgs({ validation_covers: ['efeito fantasma'] }))).toBeNull();
+  });
+});
+
+describe('validatePlannerProposal — diagnóstico sem relaxar contrato', () => {
+  test.each([
+    ['campo obrigatório', { summary: undefined }, 'summary', 'required_non_blank'],
+    ['gate fora da allowlist', { validation_command: 'python test.py' }, 'validation_command', 'command_not_allowed'],
+    ['claim_kind inválido', { validation_claim_kind: 'gate' }, 'validation_claim_kind', 'unsupported_value'],
+    ['max_attempts inválido', { max_attempts: 4 }, 'max_attempts', 'unsupported_value'],
+    ['covers desconhecido', { validation_covers: ['efeito fantasma'] }, 'validation_covers', 'unknown_criterion'],
+    ['expected_effect sem cobertura', { expected_effects: ['gate verde', 'sem cobertura'] }, 'validation_covers', 'missing_coverage'],
+    ['included_scope inseguro', { included_scope: ['../fora.ts'] }, 'included_scope', 'safe_path'],
+    ['target_paths não exato', { validation_target_paths: ['apps/web/cli/'] }, 'validation_target_paths', 'exact_file_paths'],
+    ['gate adicional fora da allowlist', { additional_validations: [{ label: 'x', command: 'rm -rf /', covers: ['gate verde'], claim_kind: 'substantive' }] },
+      'additional_validations[0].command', 'command_not_allowed'],
+  ])('%s retorna campo e regra estáveis', (_label, override, field, rule) => {
+    const result = validatePlannerProposal(validArgs(override));
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      issue: expect.objectContaining({ code: 'proposal_invalid', field, rule }),
+    }));
+    expect(parseProposal(validArgs(override))).toBeNull();
+  });
+
+  test('JSON inválido é proposal_invalid na raiz', () => {
+    expect(validatePlannerProposal('{nao-json')).toEqual({
+      ok: false,
+      issue: expect.objectContaining({ code: 'proposal_invalid', field: '$', rule: 'invalid_json' }),
+    });
+    expect(parseProposal('{nao-json')).toBeNull();
+  });
+
+  test('proposta válida mantém exatamente a aceitação anterior', () => {
+    const raw = validArgs();
+    const result = validatePlannerProposal(raw);
+    expect(result.ok).toBe(true);
+    expect(parseProposal(raw)).not.toBeNull();
   });
 });
 

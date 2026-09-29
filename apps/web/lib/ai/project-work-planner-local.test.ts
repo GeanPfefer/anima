@@ -307,6 +307,79 @@ describe('LocalOllamaProjectWorkPlanner', () => {
     expect(result.ok).toBe(false);
   });
 
+  test('distingue proposal_invalid de included_scope_not_anchored no tool result', async () => {
+    const invalidProposal = JSON.stringify({
+      ...JSON.parse(VALID_ARGS) as Record<string, unknown>,
+      validation_command: 'python test.py',
+    });
+    const { impl, calls } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"apps/web/cli/args.ts"}')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', invalidProposal)] },
+      { role: 'assistant', content: 'vou corrigir' },
+    ]);
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool, maxTurns: 3 });
+    await planner.proposeArguments('faça');
+    const thirdRequest = JSON.parse(String(calls[2]!.init.body)) as { messages: Array<{ role: string; content?: string }> };
+    const rejection = JSON.parse(thirdRequest.messages.filter(message => message.role === 'tool').at(-1)!.content!) as {
+      error: { code: string; details: { field: string; rule: string } };
+    };
+    expect(rejection.error).toMatchObject({
+      code: 'proposal_invalid',
+      details: { field: 'validation_command', rule: 'command_not_allowed' },
+    });
+  });
+
+  test('fixture semelhante ao submit 14b identifica covers incompatível, não ancoragem', async () => {
+    const observedLike = JSON.stringify({
+      summary: 'Corrigir argumentos extras da CLI',
+      objective: 'Recusar ids extras e reasons ignorados',
+      included_scope: ['apps/web/cli/args.ts', 'apps/web/cli/args.test.ts'],
+      excluded_scope: ['apps/web/cli/app.ts'],
+      expected_effects: ['argumentos extras são recusados', 'formas válidas permanecem'],
+      risks: ['regressão no parser'],
+      validation_label: 'CLI args',
+      validation_command: 'npm test --workspace=apps/web -- cli/args.test.ts',
+      validation_covers: ['testes passam'],
+      validation_claim_kind: 'substantive',
+      validation_target_paths: ['apps/web/cli/args.ts', 'apps/web/cli/args.test.ts'],
+      max_attempts: 1,
+      additional_validations: [],
+    });
+    const { impl, calls } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"apps/web/cli/args.ts"}')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', observedLike)] },
+      { role: 'assistant', content: 'vou corrigir' },
+    ]);
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool, maxTurns: 3 });
+    await planner.proposeArguments('faça');
+    const request = JSON.parse(String(calls[2]!.init.body)) as { messages: Array<{ role: string; content?: string }> };
+    const rejection = JSON.parse(request.messages.filter(message => message.role === 'tool').at(-1)!.content!) as {
+      error: { code: string; details: { field: string; rule: string }; message: string };
+    };
+    expect(rejection.error).toMatchObject({
+      code: 'proposal_invalid',
+      details: { field: 'validation_covers', rule: 'unknown_criterion' },
+    });
+    expect(rejection.error.message).not.toContain('included_scope_not_anchored');
+  });
+
+  test('proposal válida com path inexistente retorna somente included_scope_not_anchored e lista o path', async () => {
+    const path = 'apps/web/inexistente/em-dois-niveis/arquivo.ts';
+    const proposal = JSON.stringify({ ...JSON.parse(VALID_ARGS) as Record<string, unknown>, included_scope: [path] });
+    const { impl, calls } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md"}')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', proposal)] },
+      { role: 'assistant', content: 'vou corrigir' },
+    ]);
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool, maxTurns: 3 });
+    await planner.proposeArguments('faça');
+    const request = JSON.parse(String(calls[2]!.init.body)) as { messages: Array<{ role: string; content?: string }> };
+    const rejection = JSON.parse(request.messages.filter(message => message.role === 'tool').at(-1)!.content!) as {
+      error: { code: string; details: { paths: string[] } };
+    };
+    expect(rejection.error).toMatchObject({ code: 'included_scope_not_anchored', details: { paths: [path] } });
+  });
+
   test('aceita arquivo novo quando o diretorio-pai real existe', async () => {
     const newFile = JSON.stringify({
       summary: 'Diagnostico',

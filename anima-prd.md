@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Local Planner Proposal Rejection Diagnostics V0 em 2026-09-29: a validação autoritativa
+> de proposal agora preserva a compatibilidade de `parseProposal`, mas também expõe a primeira
+> causa estável como `proposal_invalid` (`field`, `rule`, mensagem curta). O adapter local distingue
+> essa classe de `included_scope_not_anchored`, que só ocorre após uma proposal estruturalmente
+> válida e lista paths problemáticos de forma limitada. Nenhuma regra, allowlist, coerção ou
+> política foi relaxada; prova simulada sem provider e sem materializar TPC-01. Registro
+> `docs/registros/2026-09-29-local-planner-proposal-rejection-diagnostics-v0.md`.
 > Local Planner Native Context Contract V0 em 2026-09-29: somente o
 > `LocalOllamaProjectWorkPlanner` migrou do endpoint OpenAI-compatible para o Ollama nativo
 > `/api/chat`; cada request declara `options.num_ctx` via

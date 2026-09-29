@@ -59,6 +59,17 @@ export type PlannerArguments = {
   additional_validations?: { label: string; command: string; covers: string[]; claim_kind: WorkClaimKind; target_paths?: string[] }[];
 };
 
+export type PlannerProposalValidationIssue = {
+  code: 'proposal_invalid';
+  field: string;
+  rule: string;
+  message: string;
+};
+
+export type PlannerProposalValidationResult =
+  | { ok: true; proposal: PlannerArguments }
+  | { ok: false; issue: PlannerProposalValidationIssue };
+
 /** Resultado do PLANEJADOR (parte provider-específica): a string JSON dos
  * argumentos de submit, ou uma falha. O host valida depois (fail-closed). */
 export type PlannerProposalResult =
@@ -223,26 +234,35 @@ export function includedScopeAnchoredInProject(
   paths: readonly string[],
   repoRoot: string = projectRoot(),
 ): boolean {
-  return paths.every(path => {
-    if (!safePath(path)) return false;
+  return unanchoredIncludedScopePaths(paths, repoRoot).length === 0;
+}
+
+/** Retorna somente os paths que falham na mesma regra autoritativa de ancoragem.
+ * Serve para diagnóstico; não altera nem infere escopo. */
+export function unanchoredIncludedScopePaths(
+  paths: readonly string[],
+  repoRoot: string = projectRoot(),
+): string[] {
+  return paths.filter(path => {
+    if (!safePath(path)) return true;
 
     const target = resolve(repoRoot, path);
 
     try {
-      if (existsSync(target)) return statSync(target).isFile();
+      if (existsSync(target)) return !statSync(target).isFile();
     } catch {
-      return false;
+      return true;
     }
 
     const parent = dirname(target);
 
     try {
-      if (existsSync(parent)) return statSync(parent).isDirectory();
+      if (existsSync(parent)) return !statSync(parent).isDirectory();
       const grandparent = dirname(parent);
-      return grandparent !== resolve(repoRoot)
-        && existsSync(grandparent) && statSync(grandparent).isDirectory();
+      return grandparent === resolve(repoRoot)
+        || !existsSync(grandparent) || !statSync(grandparent).isDirectory();
     } catch {
-      return false;
+      return true;
     }
   });
 }
@@ -375,36 +395,106 @@ export function parseAdditionalValidations(
   return out;
 }
 
-/** Valida e normaliza os argumentos BRUTOS do modelo — AUTORIDADE DO HOST. Rejeita
- * fail-closed qualquer coisa fora dos limites permitidos (escopo, path, comando). */
-export function parseProposal(raw: string): PlannerArguments | null {
-  try {
-    const value = JSON.parse(raw) as Partial<PlannerArguments>;
-    if (!nonBlank(value.summary) || !nonBlank(value.objective) || !textList(value.included_scope)
-      || !textList(value.excluded_scope) || !textList(value.expected_effects) || !textList(value.risks)
-      || !nonBlank(value.validation_label) || !nonBlank(value.validation_command) || !textList(value.validation_covers)) return null;
-    if (value.included_scope.length > 12 || !value.included_scope.every(safePath) || !safeValidationCommand(value.validation_command)) return null;
-    // `claim_kind` do gate principal: inválido reprova a proposta; ausência ⇒ substantive conservador.
-    const validationClaimKind = normalizeClaimKind(value.validation_claim_kind);
-    if (validationClaimKind === null) return null;
-    const validationTargetPaths = parseTargetPaths(value.validation_target_paths);
-    if (validationTargetPaths === null) return null;
-    const additionalValidations = parseAdditionalValidations(value.additional_validations);
-    if (additionalValidations === null) return null;
-    // Teto de tentativas: declarado estruturalmente (1–3); ausência ⇒ 3; qualquer outro valor reprova.
-    if (value.max_attempts !== undefined && value.max_attempts !== 1 && value.max_attempts !== 2 && value.max_attempts !== 3) return null;
-    const expected = new Set(value.expected_effects);
-    const allCovered = [value.validation_covers, ...(additionalValidations ?? []).map(v => v.covers)].flat();
-    if (allCovered.some(criterion => !expected.has(criterion))
-      || value.expected_effects.some(criterion => !allCovered.includes(criterion))) return null;
-    const normalized = { ...(value as PlannerArguments), validation_claim_kind: validationClaimKind,
-      additional_validations: additionalValidations };
-    if (validationTargetPaths === undefined) delete normalized.validation_target_paths;
-    else normalized.validation_target_paths = validationTargetPaths;
-    return normalized;
-  } catch {
-    return null;
+const proposalIssue = (field: string, rule: string, message: string): PlannerProposalValidationResult => ({
+  ok: false,
+  issue: { code: 'proposal_invalid', field, rule, message },
+});
+
+function diagnoseTargetPaths(value: unknown, field: string): PlannerProposalValidationResult | null {
+  if (value === undefined || value === null || (Array.isArray(value) && value.length === 0)) return null;
+  if (!Array.isArray(value)) return proposalIssue(field, 'type', `${field} deve ser uma lista de paths.`);
+  if (value.length > 12) return proposalIssue(field, 'max_items', `${field} aceita no máximo 12 paths.`);
+  if (!value.every(nonBlank)) return proposalIssue(field, 'non_blank_items', `${field} deve conter apenas paths não vazios.`);
+  if (!value.every(safePath)) return proposalIssue(field, 'safe_path', `${field} contém path inseguro.`);
+  if (value.some(path => path.includes('*') || path.includes('?') || path.replace(/\\/g, '/').endsWith('/')))
+    return proposalIssue(field, 'exact_file_paths', `${field} deve conter somente paths exatos de arquivos.`);
+  if (new Set(value).size !== value.length) return proposalIssue(field, 'unique_items', `${field} não pode repetir paths.`);
+  return null;
+}
+
+function diagnoseAdditionalValidations(value: unknown): PlannerProposalValidationResult | null {
+  const field = 'additional_validations';
+  if (value === undefined || value === null || (Array.isArray(value) && value.length === 0)) return null;
+  if (!Array.isArray(value)) return proposalIssue(field, 'type', `${field} deve ser uma lista.`);
+  if (value.length > MAX_ADDITIONAL_VALIDATIONS)
+    return proposalIssue(field, 'max_items', `${field} aceita no máximo ${MAX_ADDITIONAL_VALIDATIONS} itens.`);
+  for (const [index, entry] of value.entries()) {
+    const prefix = `${field}[${index}]`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+      return proposalIssue(prefix, 'type', `${prefix} deve ser um objeto.`);
+    const candidate = entry as { label?: unknown; command?: unknown; covers?: unknown; claim_kind?: unknown; target_paths?: unknown };
+    if (!nonBlank(candidate.label)) return proposalIssue(`${prefix}.label`, 'required_non_blank', `${prefix}.label é obrigatório.`);
+    if (!nonBlank(candidate.command)) return proposalIssue(`${prefix}.command`, 'required_non_blank', `${prefix}.command é obrigatório.`);
+    if (!safeValidationCommand(candidate.command))
+      return proposalIssue(`${prefix}.command`, 'command_not_allowed', `${prefix}.command não pertence à allowlist de gates.`);
+    if (!textList(candidate.covers)) return proposalIssue(`${prefix}.covers`, 'required_text_list', `${prefix}.covers deve ser uma lista não vazia de textos.`);
+    if (normalizeClaimKind(candidate.claim_kind) === null)
+      return proposalIssue(`${prefix}.claim_kind`, 'unsupported_value', `${prefix}.claim_kind deve ser gate_assertion ou substantive.`);
+    const targetIssue = diagnoseTargetPaths(candidate.target_paths, `${prefix}.target_paths`);
+    if (targetIssue) return targetIssue;
   }
+  return null;
+}
+
+/** Mesma validação autoritativa de `parseProposal`, com a primeira causa estável
+ * observável. Não corrige, remove, coage ou infere nenhum valor do payload. */
+export function validatePlannerProposal(raw: string): PlannerProposalValidationResult {
+  let unknownValue: unknown;
+  try {
+    unknownValue = JSON.parse(raw) as unknown;
+  } catch {
+    return proposalIssue('$', 'invalid_json', 'O payload da proposta deve ser JSON válido.');
+  }
+  if (!unknownValue || typeof unknownValue !== 'object' || Array.isArray(unknownValue))
+    return proposalIssue('$', 'object_required', 'A proposta deve ser um objeto JSON.');
+  const value = unknownValue as Partial<PlannerArguments>;
+  for (const field of ['summary', 'objective', 'validation_label', 'validation_command'] as const) {
+    if (!nonBlank(value[field])) return proposalIssue(field, 'required_non_blank', `${field} é obrigatório e deve ser texto não vazio.`);
+  }
+  for (const field of ['included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_covers'] as const) {
+    if (!textList(value[field])) return proposalIssue(field, 'required_text_list', `${field} deve ser uma lista não vazia de textos.`);
+  }
+  if (value.included_scope!.length > 12)
+    return proposalIssue('included_scope', 'max_items', 'included_scope aceita no máximo 12 paths.');
+  if (!value.included_scope!.every(safePath))
+    return proposalIssue('included_scope', 'safe_path', 'included_scope contém path inseguro.');
+  if (!safeValidationCommand(value.validation_command!))
+    return proposalIssue('validation_command', 'command_not_allowed', 'validation_command não pertence à allowlist de gates.');
+  // `claim_kind` do gate principal: inválido reprova a proposta; ausência ⇒ substantive conservador.
+  const validationClaimKind = normalizeClaimKind(value.validation_claim_kind);
+  if (validationClaimKind === null)
+    return proposalIssue('validation_claim_kind', 'unsupported_value', 'validation_claim_kind deve ser gate_assertion ou substantive.');
+  const targetIssue = diagnoseTargetPaths(value.validation_target_paths, 'validation_target_paths');
+  if (targetIssue) return targetIssue;
+  const validationTargetPaths = parseTargetPaths(value.validation_target_paths);
+  if (validationTargetPaths === null)
+    return proposalIssue('validation_target_paths', 'invalid', 'validation_target_paths é inválido.');
+  const additionalIssue = diagnoseAdditionalValidations(value.additional_validations);
+  if (additionalIssue) return additionalIssue;
+  const additionalValidations = parseAdditionalValidations(value.additional_validations);
+  if (additionalValidations === null)
+    return proposalIssue('additional_validations', 'invalid', 'additional_validations é inválido.');
+  // Teto de tentativas: declarado estruturalmente (1–3); ausência ⇒ 3; qualquer outro valor reprova.
+  if (value.max_attempts !== undefined && value.max_attempts !== 1 && value.max_attempts !== 2 && value.max_attempts !== 3)
+    return proposalIssue('max_attempts', 'unsupported_value', 'max_attempts deve ser um dos inteiros 1, 2 ou 3.');
+  const expectedEffects = value.expected_effects!;
+  const validationCovers = value.validation_covers!;
+  const expected = new Set(expectedEffects);
+  const allCovered = [validationCovers, ...(additionalValidations ?? []).map(v => v.covers)].flat();
+  if (allCovered.some(criterion => !expected.has(criterion)))
+    return proposalIssue('validation_covers', 'unknown_criterion', 'validation_covers contém item ausente de expected_effects.');
+  if (expectedEffects.some(criterion => !allCovered.includes(criterion)))
+    return proposalIssue('validation_covers', 'missing_coverage', 'Todo item de expected_effects deve aparecer em covers.');
+  const normalized = { ...(value as PlannerArguments), validation_claim_kind: validationClaimKind,
+    additional_validations: additionalValidations };
+  if (validationTargetPaths === undefined) delete normalized.validation_target_paths;
+  else normalized.validation_target_paths = validationTargetPaths;
+  return { ok: true, proposal: normalized };
+}
+
+export function parseProposal(raw: string): PlannerArguments | null {
+  const result = validatePlannerProposal(raw);
+  return result.ok ? result.proposal : null;
 }
 
 export function timeoutSignal(milliseconds: number): AbortSignal {
