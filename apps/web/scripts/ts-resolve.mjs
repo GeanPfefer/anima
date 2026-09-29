@@ -9,6 +9,11 @@
 // ZERO-dependência, escopo estreito: não reescreve `@/`, não toca node_modules, não muda
 // a semântica do que já resolve. Só preenche a extensão dos imports TS relativos. Habilitado
 // SOB DEMANDA (só no transporte in-process) por `enableTsResolution()`.
+//
+// JSON do próprio monorepo: com bundler (Next/ts-jest/tsc + `resolveJsonModule`) o código
+// importa `.json` SEM `with { type: 'json' }`; o ESM do Node exige o atributo
+// (ERR_IMPORT_ATTRIBUTE_MISSING). O hook completa `type: 'json'` só para `.json` fora de
+// node_modules importado sem atributo — mesma semântica do bundler, nada além.
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
@@ -30,6 +35,15 @@ function resolveTsCandidates(basePath) {
 }
 
 export function resolve(specifier, context, nextResolve) {
+  const result = resolveSpecifier(specifier, context, nextResolve);
+  if (result.url.startsWith('file:') && result.url.endsWith('.json') && !result.url.includes('/node_modules/')
+    && context.importAttributes?.type === undefined) {
+    return { ...result, importAttributes: { ...context.importAttributes, type: 'json' } };
+  }
+  return result;
+}
+
+function resolveSpecifier(specifier, context, nextResolve) {
   // Alias `@/…` do tsconfig do apps/web → raiz de apps/web (o resolvedor nativo não o conhece).
   if (specifier.startsWith('@/')) {
     const hit = resolveTsCandidates(resolvePath(APPS_WEB_ROOT, specifier.slice(2)));
