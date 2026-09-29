@@ -31,19 +31,41 @@ type ChatToolCall = { id?: string; type?: string; function?: { name?: string; ar
 
 const TEXTUAL_TOOL_CALL = /<function=([A-Za-z_][\w-]*)>([\s\S]*?)<\/function>/g;
 const TEXTUAL_PARAMETER = /<parameter=([A-Za-z_][\w-]*)>([\s\S]*?)<\/parameter>/g;
+const HERMES_JSON_FENCE = /^```json[ \t]*\r?\n([\s\S]*?)\r?\n```$/i;
 const MAX_TEXTUAL_TOOL_CALLS = 8;
 
+function parseHermesTextualToolCall(content: string, knownTools: ReadonlySet<string>): ChatToolCall[] {
+  const trimmed = content.trim();
+  const fenced = HERMES_JSON_FENCE.exec(trimmed);
+  const candidate = fenced?.[1] ?? trimmed;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+
+  const call = parsed as Record<string, unknown>;
+  const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(call, key);
+  if (Object.keys(call).length !== 2 || !hasOwn('name') || !hasOwn('arguments')) return [];
+  if (typeof call.name !== 'string' || !knownTools.has(call.name)) return [];
+  if (!call.arguments || typeof call.arguments !== 'object' || Array.isArray(call.arguments)) return [];
+
+  return [{ id: 'text_call_0', type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } }];
+}
+
 /**
- * Fallback de protocolo: o `qwen3-coder` emite chamadas de ferramenta no seu formato
- * NATIVO em texto (`<function=nome><parameter=chave>valor</parameter></function>`) e o
- * endpoint OpenAI-compat do Ollama nem sempre as converte em `tool_calls`. Sem isto o
- * planejador tratava toda chamada como conversa e falhava com "não produziu uma proposta
- * estruturada" — falha do harness, não do modelo. Só nomes de ferramentas CONHECIDAS são
- * aceitos; valores JSON válidos (listas, números) são decodificados, o resto fica texto.
- * Bounded e puro; não amplia o que o modelo pode fazer — só o que o harness entende.
+ * Fallback de protocolo: aceita o formato textual nativo legado do `qwen3-coder` e
+ * um único objeto Hermes/JSON emitido pelo `qwen2.5-coder`, puro ou dentro de uma
+ * fence `json` exata. Hermes é deliberadamente estrito: o conteúdo inteiro precisa
+ * ser `{name, arguments}`, `arguments` precisa ser objeto e a ferramenta precisa ser
+ * conhecida. Não extrai JSON de prosa, arrays ou múltiplos objetos ambíguos.
  */
 export function parseTextualToolCalls(content: string | null | undefined, knownTools: ReadonlySet<string>): ChatToolCall[] {
-  if (typeof content !== 'string' || !content.includes('<function=')) return [];
+  if (typeof content !== 'string') return [];
+  if (!content.includes('<function=')) return parseHermesTextualToolCall(content, knownTools);
   const calls: ChatToolCall[] = [];
   for (const match of content.matchAll(TEXTUAL_TOOL_CALL)) {
     if (calls.length >= MAX_TEXTUAL_TOOL_CALLS) break;

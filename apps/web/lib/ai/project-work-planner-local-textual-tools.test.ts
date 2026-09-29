@@ -13,7 +13,7 @@ const VALID = {
   validation_label: 'coder-backend', validation_command: 'npm test -- coder-backend.test.ts',
   validation_covers: '["gate verde"]', additional_validations: '[]',
 };
-const known = new Set(['project_read_file', 'submit_project_work_proposal']);
+const known = new Set(['project_search', 'project_read_file', 'project_git_status', 'submit_project_work_proposal']);
 
 describe('parseTextualToolCalls', () => {
   test('converte a chamada textual do qwen3-coder em tool call estruturada', () => {
@@ -33,6 +33,35 @@ describe('parseTextualToolCalls', () => {
     expect(args.included_scope).toEqual(['apps/web/lib/ai/project-work-planner.ts']);
     expect(args.validation_command).toBe('npm test -- coder-backend.test.ts');
   });
+  test('aceita Hermes/JSON puro observado no qwen2.5-coder:14b', () => {
+    const calls = parseTextualToolCalls('{"name":"project_search","arguments":{"path":"apps/web/cli","query":"work approve"}}', known);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.function!.name).toBe('project_search');
+    expect(JSON.parse(String(calls[0]!.function!.arguments))).toEqual({ path: 'apps/web/cli', query: 'work approve' });
+  });
+  test('aceita Hermes/JSON em fence json, argumentos aninhados e outra ferramenta conhecida', () => {
+    const calls = parseTextualToolCalls('```json\n{"name":"project_git_status","arguments":{"options":{"short":true}}}\n```', known);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.function!.name).toBe('project_git_status');
+    expect(JSON.parse(String(calls[0]!.function!.arguments))).toEqual({ options: { short: true } });
+  });
+  test.each([
+    ['ferramenta desconhecida', '{"name":"rm_rf","arguments":{}}'],
+    ['JSON malformado', '{"name":"project_search","arguments":{'],
+    ['arguments string', '{"name":"project_search","arguments":"x"}'],
+    ['arguments array', '{"name":"project_search","arguments":[]}'],
+    ['arguments null', '{"name":"project_search","arguments":null}'],
+    ['name ausente', '{"arguments":{}}'],
+    ['arguments ausente', '{"name":"project_search"}'],
+    ['array arbitrário', '[{"name":"project_search","arguments":{}}]'],
+    ['JSON incidental em prosa', 'Vou usar {"name":"project_search","arguments":{}} agora.'],
+    ['fence não fechada', '```json\n{"name":"project_search","arguments":{}}'],
+    ['conteúdo extra após fence', '```json\n{"name":"project_search","arguments":{}}\n```\npronto'],
+    ['múltiplos objetos', '{"name":"project_search","arguments":{}}\n{"name":"project_git_status","arguments":{}}'],
+    ['payload extra', '{"name":"project_search","arguments":{},"extra":true}'],
+  ])('rejeita Hermes ambíguo ou inválido: %s', (_label, content) => {
+    expect(parseTextualToolCalls(content, known)).toEqual([]);
+  });
 });
 
 describe('LocalOllamaProjectWorkPlanner com chamadas textuais', () => {
@@ -51,6 +80,28 @@ describe('LocalOllamaProjectWorkPlanner com chamadas textuais', () => {
     expect(tools).toEqual(['project_read_file']);
     expect(result.ok).toBe(true);
     if (result.ok) expect(JSON.parse(result.rawArguments).included_scope).toEqual(['apps/web/lib/ai/project-work-planner.ts']);
+  });
+  test('executa a chamada Hermes observada e mantém validação posterior fail-closed', async () => {
+    const replies = [
+      '{"name":"project_search","arguments":{"path":"apps/web/cli","query":"work approve"}}',
+      JSON.stringify({ name: 'submit_project_work_proposal', arguments: { summary: 'incompleta' } }),
+      'sem chamada',
+      'sem chamada',
+      'sem chamada',
+    ];
+    let i = 0;
+    const fetchImpl = (async () => ({ ok: true, json: async () => ({ choices: [{ message: { role: 'assistant', content: replies[Math.min(i++, replies.length - 1)] } }] }) })) as unknown as typeof fetch;
+    const tools: Array<{ name: string; args: unknown }> = [];
+    const planner = new LocalOllamaProjectWorkPlanner({
+      fetchImpl,
+      executeTool: async (name, rawArguments) => {
+        tools.push({ name, args: JSON.parse(rawArguments) });
+        return JSON.stringify({ ok: true, result: { matches: [] } });
+      },
+    });
+    const result = await planner.proposeArguments('faça');
+    expect(tools).toEqual([{ name: 'project_search', args: { path: 'apps/web/cli', query: 'work approve' } }]);
+    expect(result.ok).toBe(false);
   });
 });
 

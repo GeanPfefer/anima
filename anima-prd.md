@@ -1,4 +1,12 @@
 # Anima — Product Requirements Document
+> Local Planner Hermes Tool-Call Compatibility em 2026-09-29: o fallback textual do planner local
+> agora reconhece, além do formato legado `<function=...>`, exatamente uma chamada Hermes/JSON
+> `{name, arguments}` pura ou em fence `json`, somente para ferramenta conhecida e com arguments
+> objeto. Prosa com JSON incidental, arrays, payload extra/ambíguo, JSON inválido e ferramenta
+> desconhecida continuam fail-closed; validação de argumentos e proposta permanece no contrato
+> posterior existente. Prova sem modelo: 116 testes relacionados verdes e typecheck web verde.
+> TPC-01 segue `not_started`, sem work item/attempt/authority/chamada de provider; projeção 33/0.
+> Registro `docs/registros/2026-09-29-local-planner-hermes-tool-call-compatibility.md`.
 > Local Trust Root Hardening V0 em 2026-09-29: o Supabase local da Goma deixou o segredo JWT e as chaves opacas
 > PÚBLICOS da CLI — `[auth] jwt_secret/publishable_key/secret_key = env(...)` com valores só em `supabase/.env`
 > (gitignored; `env(ANIMA_JWT)` curto ⇒ sem o arquivo a CLI recusa subir). Token forjado com o segredo padrão
