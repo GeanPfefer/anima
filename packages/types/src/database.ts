@@ -3272,6 +3272,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      trusted_system_evidence_since: { Args: never; Returns: string }
       void_paid_compute_budget_reservation: {
         Args: { reason: string; reservation_id: string }
         Returns: Json

@@ -191,13 +191,14 @@ SELECT ok(
 -- (4-5) Carimbo é AUTORITATIVO: sobrescreve valor forjado pelo cliente
 -- ============================================================
 
-SET LOCAL ROLE service_role;
+-- Sessão de OPERADOR: desde 20260929000000 nenhum papel de API (nem service_role) insere fato
+-- reservado direto na tabela; o carimbo continua autoritativo mesmo para o operador.
+RESET ROLE;
 INSERT INTO public.work_events(work_item_id, event_type, author, proposal_version, payload)
 VALUES (:'i2id','host_observed_coder_evidence_recorded','system',1,
   jsonb_build_object('schema_version',1,
     'data',jsonb_build_object('attempt_id','ca000000-0000-0000-0000-0000000000a2'),
     'canonical_contract',jsonb_build_object('id','forjado','version',99)));
-RESET ROLE;
 
 SELECT is(
   (SELECT payload->'canonical_contract'->>'id' FROM public.work_events
