@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Trusted System Evidence Boundary V0 em 2026-09-29: a fronteira temporal de evidência system_proven só vale com
+> exclusividade de escrita. Guard em `work_events` (migração `20260929000000`): os 5 fatos reservados ao writer só
+> entram por RPC do writer registrado do dono (service_role direto recusado; created_at do servidor; fato imutável);
+> registro do writer com created_at carimbado/imutável; `trusted_system_evidence_since()` deriva a fronteira do banco
+> (greatest(ativação do guard, writer ativo mais antigo)). Writer provisionado no Supabase local; fronteira
+> `2026-09-29T03:24:34.618679Z`. Projeção real inalterada (33/0/8/23/2; 0 lineages mudaram; nada promovido).
+> Registro `docs/registros/2026-09-29-trusted-system-evidence-boundary-v0.md`.
 > Produce-Change Evidence Projection V0 em 2026-09-28: `projectProduceChangeOperationalEvidence` (core puro) avalia
 > produce-change pelo DENOMINADOR — toda lineage de programação com attempt governada (ocasião = lineage) — como
 > qualified_positive / attributed_negative / inconclusive / not_attributable, com causa (reuso de recovery codes,
