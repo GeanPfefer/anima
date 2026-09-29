@@ -34,4 +34,12 @@ export function loadMobileEnv(cwd: string = process.cwd()): Record<string, strin
   return null;
 }
 
+/** `supabase/.env` (raiz JWT local) visto a partir de `apps/web` (cwd da CLI) ou da raiz do repo. */
+export function loadSupabaseEnv(cwd: string = process.cwd()): Record<string, string> | null {
+  for (const candidate of [resolve(cwd, '..', '..', 'supabase', '.env'), resolve(cwd, 'supabase', '.env')]) {
+    if (existsSync(candidate)) return parseDotEnv(readFileSync(candidate, 'utf8'));
+  }
+  return null;
+}
+
 export const pathExists = (path: string): boolean => existsSync(path);

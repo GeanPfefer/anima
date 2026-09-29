@@ -122,6 +122,19 @@ describe('Recovery Configuration V0 — checker', () => {
     expect(group(ok, 'mobile').state).toBe('ready');
   });
 
+  it('local-supabase: raiz JWT local exigida só quando o web aponta para o Supabase desta máquina', () => {
+    const missing = run(CORE, null);
+    expect(group(missing, 'local-supabase').state).toBe('not_ready');
+    expect(group(missing, 'local-supabase').blocking).toEqual(['ANIMA_JWT', 'ANIMA_LOCAL_PUBLISHABLE_KEY', 'ANIMA_LOCAL_SECRET_KEY']);
+    expect(item(missing, 'ANIMA_JWT').issue).toBe('env_file_missing');
+    expect(missing.core).toBe('READY');
+    const ok = checkRecoveryConfig({ web: CORE, mobile: null, supabase: { ANIMA_JWT: 'j'.repeat(64), ANIMA_LOCAL_PUBLISHABLE_KEY: 'sb_publishable_x', ANIMA_LOCAL_SECRET_KEY: 'sb_secret_x' }, pathExists: () => false });
+    expect(group(ok, 'local-supabase').state).toBe('ready');
+    expect(renderRecoveryConfigReport(ok)).not.toContain('j'.repeat(64));
+    const thinClient = run({ ...CORE, NEXT_PUBLIC_SUPABASE_URL: 'http://100.64.0.1:54321' });
+    expect(group(thinClient, 'local-supabase').state).toBe('disabled');
+  });
+
   it('chaves desconhecidas aparecem só pelo nome e só com prefixo do Anima', () => {
     const report = run({ ...CORE, ANIMA_SOMETHING_NEW: 'v', PATH: '/usr/bin', HOME: '/home/x' });
     expect(report.unknownKeys).toEqual(['ANIMA_SOMETHING_NEW']);

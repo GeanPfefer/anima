@@ -74,6 +74,8 @@ export interface RecoveryConfigCheckInput {
   readonly web: RecoveryConfigEnv;
   /** `null` = apps/mobile/.env.local não existe. */
   readonly mobile: RecoveryConfigEnv | null;
+  /** `null`/ausente = supabase/.env não existe. */
+  readonly supabase?: RecoveryConfigEnv | null;
   readonly pathExists: (path: string) => boolean;
 }
 
@@ -141,6 +143,7 @@ function validate(value: string, rule: RecoveryConfigValidation, pathExists: (pa
 }
 
 function envFor(entry: RecoveryConfigEntry, input: RecoveryConfigCheckInput): RecoveryConfigEnv | null {
+  if (entry.envFile === 'supabase') return input.supabase ?? null;
   return entry.envFile === 'web' ? input.web : input.mobile;
 }
 
@@ -206,7 +209,7 @@ export function checkRecoveryConfig(
   });
 
   const known = new Set(manifest.map(entry => entry.key));
-  const candidateKeys = [...Object.keys(input.web), ...Object.keys(input.mobile ?? {})];
+  const candidateKeys = [...Object.keys(input.web), ...Object.keys(input.mobile ?? {}), ...Object.keys(input.supabase ?? {})];
   const unknownKeys = [...new Set(candidateKeys)]
     .filter(key => !known.has(key) && RECOVERY_CONFIG_KEY_PREFIXES.some(prefix => key.startsWith(prefix)))
     .sort();

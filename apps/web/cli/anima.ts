@@ -18,7 +18,7 @@ import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvid
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
 import { checkRecoveryConfig, renderRecoveryConfigReport } from '@/lib/recovery-config/check';
-import { loadMobileEnv, pathExists } from '@/lib/recovery-config/node-env';
+import { loadMobileEnv, loadSupabaseEnv, pathExists } from '@/lib/recovery-config/node-env';
 import { checkToolchain, renderToolchainReport } from '@/lib/toolchain/check';
 import { currentPlatform, probeCommand, readRepoFile, repoFileExists, repoRootFrom } from '@/lib/toolchain/node-probe';
 
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
 
   // Read-only e local: não autentica, não toca banco nem rede. Nunca imprime valores.
   if (parsed.command.kind === 'recovery-config-check') {
-    const report = checkRecoveryConfig({ web: process.env, mobile: loadMobileEnv(), pathExists });
+    const report = checkRecoveryConfig({ web: process.env, mobile: loadMobileEnv(), supabase: loadSupabaseEnv(), pathExists });
     process.stdout.write(`${parsed.command.json ? JSON.stringify(report, null, 2) : renderRecoveryConfigReport(report)}\n`);
     finish(report.core === 'READY' ? EXIT.OK : EXIT.ERROR);
     return;

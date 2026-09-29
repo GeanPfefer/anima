@@ -28,14 +28,18 @@ export const READINESS_GROUPS = [
   'research-web',
   'mobile',
   'github-integration',
+  'local-supabase',
 ] as const;
 export type ReadinessGroup = (typeof READINESS_GROUPS)[number];
 
 export type RecoveryConfigSourceKind = 'repository' | 'derived' | 'secret_store' | 'operator' | 'external_auth';
 export type ReprovisionStrategy = 'derive' | 'generate' | 'authenticate' | 'reset_credential' | 'install' | 'operator_choice';
 
-/** Arquivo de ambiente onde a chave vive. `web` = apps/web/.env.local (CLI, Resident Host, Next). */
-export type RecoveryConfigEnvFile = 'web' | 'mobile';
+/**
+ * Arquivo de ambiente onde a chave vive. `web` = apps/web/.env.local (CLI, Resident Host, Next);
+ * `supabase` = supabase/.env (auto-carregado pela Supabase CLI para `env()` do config.toml).
+ */
+export type RecoveryConfigEnvFile = 'web' | 'mobile' | 'supabase';
 
 export type RecoveryConfigValidation =
   | { readonly kind: 'non_empty' }
@@ -107,6 +111,7 @@ export interface ReadinessGroupSpec {
 const OPENAI_CHAT: RecoveryConfigCondition = { key: 'ANIMA_AI_PROVIDER', in: ['openai'], whenUnset: 'openai' };
 const OPENAI_CODER: RecoveryConfigCondition = { key: 'ANIMA_CODER_PROVIDER', in: ['openai'], whenUnset: 'ollama' };
 const RUNPOD_ON: RecoveryConfigCondition = { key: 'ANIMA_ON_DEMAND_NODE_ENABLED', in: ['true'], caseInsensitive: true };
+const LOCAL_SUPABASE: RecoveryConfigCondition = { key: 'NEXT_PUBLIC_SUPABASE_URL', in: ['http://127.0.0.1:54321', 'http://localhost:54321'] };
 
 export const READINESS_GROUP_SPECS: readonly ReadinessGroupSpec[] = [
   { group: 'core', kind: 'core', description: 'Web/CLI conversam com o Supabase restaurado. Não depende de nenhuma capacidade opcional.' },
@@ -118,12 +123,36 @@ export const READINESS_GROUP_SPECS: readonly ReadinessGroupSpec[] = [
   { group: 'research-web', kind: 'capability', description: 'research.web: SearXNG + agent-browser read-only (fail-closed sem config).' },
   { group: 'mobile', kind: 'capability', description: 'App Expo (apps/mobile/.env.local) aponta para Supabase e para o web host.' },
   { group: 'github-integration', kind: 'capability', description: 'Integração governada: alvo de repositório + review request no GitHub.' },
+  { group: 'local-supabase', kind: 'capability', enabledWhenAny: [LOCAL_SUPABASE], description: 'Esta máquina roda o Supabase local: raiz JWT própria em supabase/.env (sem ela a Supabase CLI recusa subir). Cliente fino apontando para outra máquina ⇒ desabilitado.' },
 ];
 
 const web = 'web' as const;
 const mobile = 'mobile' as const;
+const supabase = 'supabase' as const;
 
 export const RECOVERY_CONFIG_MANIFEST: readonly RecoveryConfigEntry[] = [
+  // ---------- Local Trust Root (supabase/.env; docs/arquitetura/local-trust-root.md) ----------
+  {
+    key: 'ANIMA_JWT', envFile: supabase, classes: ['secret_required', 'host_specific'],
+    requiredFor: [{ group: 'local-supabase' }],
+    source: { kind: 'secret_store', reference: 'segredo JWT próprio da máquina (config.toml [auth].jwt_secret = env(ANIMA_JWT))' },
+    reprovisionStrategy: 'generate', hostSpecific: true, secret: true, validation: { kind: 'non_empty' },
+    description: 'Raiz JWT local (≥32 bytes aleatórios). Rotacionar invalida anon/service_role e sessões vigentes; não mexe em writer nem na fronteira de evidência.',
+  },
+  {
+    key: 'ANIMA_LOCAL_PUBLISHABLE_KEY', envFile: supabase, classes: ['secret_required', 'host_specific'],
+    requiredFor: [{ group: 'local-supabase' }],
+    source: { kind: 'secret_store', reference: 'config.toml [auth].publishable_key = env(ANIMA_LOCAL_PUBLISHABLE_KEY); gerar sb_publishable_<aleatório>' },
+    reprovisionStrategy: 'generate', hostSpecific: true, secret: true, validation: { kind: 'non_empty' },
+    description: 'Chave opaca pública do stack local (vira NEXT_PUBLIC_SUPABASE_ANON_KEY/EXPO_PUBLIC_SUPABASE_ANON_KEY). Substitui a padrão publicada da CLI.',
+  },
+  {
+    key: 'ANIMA_LOCAL_SECRET_KEY', envFile: supabase, classes: ['secret_required', 'host_specific'],
+    requiredFor: [{ group: 'local-supabase' }],
+    source: { kind: 'secret_store', reference: 'config.toml [auth].secret_key = env(ANIMA_LOCAL_SECRET_KEY); gerar sb_secret_<aleatório>' },
+    reprovisionStrategy: 'generate', hostSpecific: true, secret: true, validation: { kind: 'non_empty' },
+    description: 'Chave opaca service_role do stack local. Substitui a sb_secret_ padrão publicada da CLI (que o Kong convertia em service_role).',
+  },
   // ---------- Core Supabase ----------
   {
     key: 'NEXT_PUBLIC_SUPABASE_URL', envFile: web, classes: ['non_secret_required'],
