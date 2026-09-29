@@ -28,6 +28,14 @@ enabled = true
 site_url = "http://localhost:3000"
 additional_redirect_urls = ["https://localhost:3000", "anima://"]
 jwt_expiry = 3600
+# Local Trust Root: segredo JWT e chaves opacas próprios da máquina, fora do Git, em
+# supabase/.env (gitignored; auto-carregado pela CLI). anon/service_role são derivados
+# do jwt_secret. O nome curto é deliberado: sem supabase/.env o literal "env(ANIMA_JWT)"
+# tem < 16 caracteres e a CLI RECUSA subir — nunca volta em silêncio a um segredo público.
+# Ver docs/arquitetura/local-trust-root.md.
+jwt_secret = "env(ANIMA_JWT)"
+publishable_key = "env(ANIMA_LOCAL_PUBLISHABLE_KEY)"
+secret_key = "env(ANIMA_LOCAL_SECRET_KEY)"
 enable_signup = true
 
 [auth.email]
