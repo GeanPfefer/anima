@@ -1,5 +1,10 @@
 /** @jest-environment node */
-import { LocalOllamaProjectWorkPlanner, parseTextualToolCalls, resolveLocalPlannerRoundTimeoutMs } from './project-work-planner-local';
+import {
+  LocalOllamaProjectWorkPlanner,
+  parseTextualToolCalls,
+  resolveLocalPlannerContextLength,
+  resolveLocalPlannerRoundTimeoutMs,
+} from './project-work-planner-local';
 
 // Formato nativo observado AO VIVO (qwen3-coder:30b via Ollama, 2026-09-25): a chamada vem
 // no `content` e `tool_calls` fica vazio.
@@ -71,7 +76,7 @@ describe('LocalOllamaProjectWorkPlanner com chamadas textuais', () => {
       nativeText('submit_project_work_proposal', VALID),
     ];
     let i = 0;
-    const fetchImpl = (async () => ({ ok: true, json: async () => ({ choices: [{ message: { role: 'assistant', content: replies[Math.min(i++, 1)] } }] }) })) as unknown as typeof fetch;
+    const fetchImpl = (async () => ({ ok: true, json: async () => ({ message: { role: 'assistant', content: replies[Math.min(i++, 1)] }, done: true }) })) as unknown as typeof fetch;
     const tools: string[] = [];
     const planner = new LocalOllamaProjectWorkPlanner({
       fetchImpl, executeTool: async name => { tools.push(name); return JSON.stringify({ ok: true, result: { text: 'evidência' } }); },
@@ -90,7 +95,7 @@ describe('LocalOllamaProjectWorkPlanner com chamadas textuais', () => {
       'sem chamada',
     ];
     let i = 0;
-    const fetchImpl = (async () => ({ ok: true, json: async () => ({ choices: [{ message: { role: 'assistant', content: replies[Math.min(i++, replies.length - 1)] } }] }) })) as unknown as typeof fetch;
+    const fetchImpl = (async () => ({ ok: true, json: async () => ({ message: { role: 'assistant', content: replies[Math.min(i++, replies.length - 1)] }, done: true }) })) as unknown as typeof fetch;
     const tools: Array<{ name: string; args: unknown }> = [];
     const planner = new LocalOllamaProjectWorkPlanner({
       fetchImpl,
@@ -113,4 +118,17 @@ describe('resolveLocalPlannerRoundTimeoutMs', () => {
     expect(resolveLocalPlannerRoundTimeoutMs({ ANIMA_PROJECT_PLANNER_ROUND_TIMEOUT_MS: '9999999' })).toBe(90_000);
     expect(resolveLocalPlannerRoundTimeoutMs({ ANIMA_PROJECT_PLANNER_ROUND_TIMEOUT_MS: 'x' })).toBe(90_000);
   });
+});
+
+describe('resolveLocalPlannerContextLength', () => {
+  test('usa 16384 por default e aceita inteiro decimal positivo', () => {
+    expect(resolveLocalPlannerContextLength({})).toBe(16_384);
+    expect(resolveLocalPlannerContextLength({ ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH: '24576' })).toBe(24_576);
+  });
+
+  test.each(['', '0', '-1', '1.5', ' 16384', '16384 ', '+16384', 'abc'])(
+    'rejeita valor não estrito: %j', raw => {
+      expect(() => resolveLocalPlannerContextLength({ ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH: raw })).toThrow();
+    },
+  );
 });

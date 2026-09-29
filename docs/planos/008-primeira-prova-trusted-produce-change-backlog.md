@@ -13,6 +13,11 @@ Pré-requisito do planner corrigido em 2026-09-29: chamadas textuais Hermes/JSON
 testada sem chamar modelo e sem materializar este backlog. O status de TPC-01 permanece
 `not_started`; a próxima ação continua sendo UMA materialização governada separada.
 
+O contrato de contexto do mesmo planner também foi corrigido em 2026-09-29: somente ele usa a
+API nativa `/api/chat` e solicita `options.num_ctx=16384` por default, configurável por
+`ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH`. A migração foi provada com transporte simulado, sem
+chamar Ollama e sem materializar TPC-01; rounds, trimming e demais consumidores não mudaram.
+
 ## TPC — Primeira prova trusted de produce-change
 
 ### TPC-01 — Recusar <id> extra e --reason ignorado nos comandos de governança work da CLI

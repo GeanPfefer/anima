@@ -10,8 +10,10 @@ const VALID_ARGS = JSON.stringify({
 });
 
 type Msg = { role: string; content?: string; tool_calls?: unknown[] };
-const resp = (message: Msg) => ({ ok: true, json: async () => ({ choices: [{ message }] }) });
-const toolCall = (name: string, args: string, id = 'c1') => ({ id, type: 'function', function: { name, arguments: args } });
+const resp = (message: Msg) => ({ ok: true, json: async () => ({ message, done: true }) });
+const toolCall = (name: string, args: string, _id = 'c1') => ({
+  function: { name, arguments: JSON.parse(args) as Record<string, unknown> },
+});
 
 function scriptedFetch(messages: Msg[]) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -38,13 +40,86 @@ describe('LocalOllamaProjectWorkPlanner', () => {
 
     const result = await planner.proposeArguments('faça o ajuste');
     expect(result).toEqual({ ok: true, rawArguments: VALID_ARGS });
-    // endpoint OpenAI-compat local
-    expect(calls[0]!.url).toBe('http://localhost:11434/v1/chat/completions');
+    expect(calls[0]!.url).toBe('http://localhost:11434/api/chat');
     // NENHUM header de Authorization (nenhum segredo enviado ao modelo local)
     for (const call of calls) {
       const headers = (call.init.headers ?? {}) as Record<string, string>;
       expect(Object.keys(headers).map(k => k.toLowerCase())).not.toContain('authorization');
     }
+  });
+
+  test('envia contexto default 16384 e preserva opções nativas existentes', async () => {
+    const { impl, calls } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md"}')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', VALID_ARGS)] },
+    ]);
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool, env: {} });
+    await planner.proposeArguments('x'.repeat(5_000));
+    const body = JSON.parse(String(calls[0]!.init.body)) as {
+      model: string; stream: boolean; options: { temperature: number; num_ctx: number };
+      messages: Msg[]; tools: Array<{ function: { name: string } }>;
+    };
+    expect(body.model).toBe('qwen3-coder:latest');
+    expect(body.stream).toBe(false);
+    expect(body.options).toEqual({ temperature: 0, num_ctx: 16_384 });
+    expect(body.messages[0]).toMatchObject({ role: 'system' });
+    expect(body.messages[1]).toMatchObject({ role: 'user' });
+    expect(body.messages[1]!.content).toContain('x'.repeat(5_000));
+    expect(body.tools.map(tool => tool.function.name)).toContain('project_read_file');
+  });
+
+  test('aceita override válido de contexto por configuração', async () => {
+    const { impl, calls } = scriptedFetch([{ role: 'assistant', content: 'texto' }]);
+    const planner = new LocalOllamaProjectWorkPlanner({
+      fetchImpl: impl, executeTool: evidenceTool, maxTurns: 1,
+      env: { ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH: '32768' },
+    });
+    await planner.proposeArguments('faça');
+    const body = JSON.parse(String(calls[0]!.init.body)) as { options: { num_ctx: number } };
+    expect(body.options.num_ctx).toBe(32_768);
+  });
+
+  test.each(['', '0', '-1', '1.5', ' 16384', '16k', '9007199254740992'])(
+    'configuração de contexto inválida falha antes da rede: %j', raw => {
+      const fetchImpl = jest.fn() as unknown as typeof fetch;
+      expect(() => new LocalOllamaProjectWorkPlanner({
+        fetchImpl, env: { ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH: raw },
+      })).toThrow('ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH');
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
+  test('histórico subsequente usa o formato nativo de assistant/tool', async () => {
+    const { impl, calls } = scriptedFetch([
+      { role: 'assistant', tool_calls: [toolCall('project_read_file', '{"path":"AGENTS.md"}')] },
+      { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', VALID_ARGS)] },
+    ]);
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool });
+    await planner.proposeArguments('faça');
+    const second = JSON.parse(String(calls[1]!.init.body)) as { messages: Array<Record<string, unknown>> };
+    const assistant = second.messages.find(message => message.role === 'assistant');
+    const tool = second.messages.find(message => message.role === 'tool');
+    expect(assistant?.tool_calls).toEqual([{
+      function: { name: 'project_read_file', arguments: { path: 'AGENTS.md' } },
+    }]);
+    expect(tool).toMatchObject({ role: 'tool', tool_name: 'project_read_file' });
+    expect(tool).not.toHaveProperty('tool_call_id');
+  });
+
+  test.each([
+    ['JSON malformado', async () => { throw new SyntaxError('bad json'); }],
+    ['sem message', async () => ({ done: true })],
+    ['sem done terminal', async () => ({ message: { role: 'assistant', content: 'oi' } })],
+    ['message vazio', async () => ({ message: { role: 'assistant' }, done: true })],
+    ['tool_calls não-array', async () => ({ message: { role: 'assistant', tool_calls: {} }, done: true })],
+    ['arguments string', async () => ({ message: { role: 'assistant', tool_calls: [{ type: 'function', function: { name: 'project_read_file', arguments: '{}' } }] }, done: true })],
+    ['tool desconhecida', async () => ({ message: { role: 'assistant', tool_calls: [{ type: 'function', function: { name: 'rm_rf', arguments: {} } }] }, done: true })],
+  ])('fail-closed para resposta nativa inválida: %s', async (_label, json) => {
+    const impl = (async () => ({ ok: true, json })) as unknown as typeof fetch;
+    const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool });
+    await expect(planner.proposeArguments('faça')).resolves.toEqual({
+      ok: false, message: 'O modelo local não retornou uma resposta utilizável.',
+    });
   });
 
   test('exige investigação (evidência) antes de aceitar o submit', async () => {
@@ -93,9 +168,9 @@ describe('LocalOllamaProjectWorkPlanner', () => {
     const result = await planner.proposeArguments('faça');
     expect(result).toEqual({ ok: true, rawArguments: VALID_ARGS });
     // A requisição forçada (3ª) oferece SOMENTE a tool de submit.
-    const forcedBody = JSON.parse(String(calls[2]!.init.body)) as { tools: Array<{ function: { name: string } }>; tool_choice: unknown };
+    const forcedBody = JSON.parse(String(calls[2]!.init.body)) as { tools: Array<{ function: { name: string } }>; tool_choice?: unknown };
     expect(forcedBody.tools.map(t => t.function.name)).toEqual(['submit_project_work_proposal']);
-    expect(forcedBody.tool_choice).toEqual({ type: 'function', function: { name: 'submit_project_work_proposal' } });
+    expect(forcedBody.tool_choice).toBeUndefined();
   });
 
   test('não executa tool de investigação emitida fora do catálogo da rodada forçada', async () => {
@@ -152,7 +227,7 @@ describe('LocalOllamaProjectWorkPlanner', () => {
   });
 
   test('fail-closed: HTTP não-ok vira falha', async () => {
-    const impl = (async () => ({ ok: false, json: async () => ({ error: { message: 'ollama fora' } }) })) as unknown as typeof fetch;
+    const impl = (async () => ({ ok: false, json: async () => ({ error: 'ollama fora' }) })) as unknown as typeof fetch;
     const planner = new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool });
     const result = await planner.proposeArguments('faça');
     expect(result).toEqual({ ok: false, message: 'ollama fora' });

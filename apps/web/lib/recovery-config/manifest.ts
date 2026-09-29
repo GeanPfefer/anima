@@ -315,6 +315,12 @@ export const RECOVERY_CONFIG_MANIFEST: readonly RecoveryConfigEntry[] = [
     }),
   ),
   {
+    key: 'ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH', envFile: web, classes: ['optional'], requiredFor: [], tunes: ['self-development'],
+    source: { kind: 'repository', reference: 'lib/ai/project-work-planner-local.ts' }, reprovisionStrategy: 'operator_choice',
+    hostSpecific: false, secret: false, validation: { kind: 'number_positive' }, derivation: { status: 'wired', from: 'default 16384 do código' },
+    description: 'Contexto request-scoped do planner local na API nativa Ollama; inteiro decimal positivo estrito, default 16384.',
+  },
+  {
     key: 'ANIMA_LOCAL_RUNNER_ROOT', envFile: web, classes: ['optional', 'host_specific'], requiredFor: [], tunes: ['self-development'],
     source: { kind: 'derived', reference: '<raiz do projeto>/tools/local-agent' }, reprovisionStrategy: 'derive', hostSpecific: true, secret: false,
     validation: { kind: 'absolute_path', mustExist: true }, derivation: { status: 'derivable_not_wired', from: 'ANIMA_PROJECT_ROOT/tools/local-agent' },

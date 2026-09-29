@@ -16,7 +16,7 @@ import {
 } from './project-work-planner-shared';
 
 // ============================================================
-// Planejador LOCAL (Ollama, OpenAI-compat /v1/chat/completions). Mesmo contrato
+// Planejador LOCAL (Ollama, API nativa /api/chat). Mesmo contrato
 // da porta: investiga com as ferramentas READ-ONLY e devolve os ARGUMENTOS BRUTOS
 // do submit. NÃO edita arquivos, NÃO usa subprocesso/worktree, NÃO recebe nenhuma
 // credencial de nuvem — o único endpoint é o Ollama local (sem Authorization). O
@@ -94,13 +94,66 @@ export function resolveLocalPlannerRoundTimeoutMs(env: Record<string, string | u
   return Number.isInteger(raw) && raw >= 30_000 && raw <= 600_000 ? raw : 90_000;
 }
 
+export const LOCAL_PLANNER_DEFAULT_CONTEXT_LENGTH = 16_384;
+
+/** Contexto request-scoped do planejador local. Ausente => 16k; presente precisa
+ * ser um inteiro decimal positivo estrito. Configuração inválida é erro, nunca
+ * fallback silencioso para o contexto default do servidor Ollama. */
+export function resolveLocalPlannerContextLength(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH;
+  if (raw === undefined) return LOCAL_PLANNER_DEFAULT_CONTEXT_LENGTH;
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new Error('ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH deve ser um inteiro decimal positivo.');
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error('ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH excede o maior inteiro seguro suportado.');
+  }
+  return value;
+}
+
 const KNOWN_PLANNER_TOOLS: ReadonlySet<string> = new Set(
   [...PLANNER_CHAT_TOOLS, SUBMIT_CHAT_TOOL]
     .map(tool => (tool as { function?: { name?: unknown } }).function?.name)
     .filter((name): name is string => typeof name === 'string'),
 );
-type ChatMessage = { role: string; content?: string | null; tool_calls?: ChatToolCall[]; tool_call_id?: string };
-type ChatResponse = { choices?: Array<{ message?: ChatMessage }>; error?: { message?: string } };
+type NativeToolCall = { function: { name: string; arguments: Record<string, unknown> } };
+type NativeChatMessage = {
+  role: string;
+  content?: string;
+  tool_calls?: NativeToolCall[];
+  tool_name?: string;
+};
+type NormalizedAssistantMessage = { content: string; toolCalls: ChatToolCall[] };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeNativeAssistantResponse(value: unknown): NormalizedAssistantMessage | null {
+  if (!isRecord(value) || value.done !== true || !isRecord(value.message)) return null;
+  const message = value.message;
+  if (message.role !== 'assistant') return null;
+  const content = message.content;
+  if (content !== undefined && typeof content !== 'string') return null;
+
+  const rawCalls = message.tool_calls;
+  if (rawCalls !== undefined && !Array.isArray(rawCalls)) return null;
+  const toolCalls: ChatToolCall[] = [];
+  for (const [index, rawCall] of (rawCalls ?? []).entries()) {
+    if (!isRecord(rawCall) || (rawCall.type !== undefined && rawCall.type !== 'function') || !isRecord(rawCall.function)) return null;
+    const fn = rawCall.function;
+    if (typeof fn.name !== 'string' || !KNOWN_PLANNER_TOOLS.has(fn.name) || !isRecord(fn.arguments)) return null;
+    toolCalls.push({
+      id: `native_call_${index}`,
+      type: 'function',
+      function: { name: fn.name, arguments: JSON.stringify(fn.arguments) },
+    });
+  }
+  if (content === undefined && toolCalls.length === 0) return null;
+  if ((content ?? '').length === 0 && toolCalls.length === 0) return null;
+  return { content: content ?? '', toolCalls };
+}
 
 const argString = (value: unknown): string =>
   typeof value === 'string' ? value : JSON.stringify(value ?? {});
@@ -117,6 +170,8 @@ export interface LocalPlannerDeps {
   readonly forceAfterEvidence?: number;
   /** Timeout por rodada; ausente ⇒ `ANIMA_PROJECT_PLANNER_ROUND_TIMEOUT_MS` ⇒ 90 s. */
   readonly roundTimeoutMs?: number;
+  /** Ambiente injetável para configuração determinística em testes. */
+  readonly env?: Record<string, string | undefined>;
 }
 
 export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
@@ -128,19 +183,22 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
   private readonly maxTurns: number;
   private readonly forceAfterEvidence: number;
   private readonly roundTimeoutMs: number;
+  private readonly contextLength: number;
 
   constructor(deps: LocalPlannerDeps = {}) {
+    const env = deps.env ?? process.env;
     this.fetchImpl = deps.fetchImpl ?? fetch;
     this.executeTool = deps.executeTool ?? executeProjectTool;
-    this.baseUrl = (deps.baseUrl ?? process.env.OLLAMA_URL ?? 'http://localhost:11434').replace(/\/+$/, '');
-    this.model = deps.model ?? process.env.ANIMA_PROJECT_PLANNER_MODEL ?? 'qwen3-coder:latest';
+    this.baseUrl = (deps.baseUrl ?? env.OLLAMA_URL ?? 'http://localhost:11434').replace(/\/+$/, '');
+    this.model = deps.model ?? env.ANIMA_PROJECT_PLANNER_MODEL ?? 'qwen3-coder:latest';
     this.maxTurns = deps.maxTurns ?? 16;
     this.forceAfterEvidence = deps.forceAfterEvidence ?? 4;
-    this.roundTimeoutMs = deps.roundTimeoutMs ?? resolveLocalPlannerRoundTimeoutMs();
+    this.roundTimeoutMs = deps.roundTimeoutMs ?? resolveLocalPlannerRoundTimeoutMs(env);
+    this.contextLength = resolveLocalPlannerContextLength(env);
   }
 
   async proposeArguments(message: string): Promise<PlannerProposalResult> {
-    const messages: ChatMessage[] = [
+    const messages: NativeChatMessage[] = [
       { role: 'system', content: PLANNER_SYSTEM_INSTRUCTIONS },
       { role: 'user', content: buildPlannerUserPrompt(message) },
     ];
@@ -152,7 +210,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
     for (let turn = 0; turn < this.maxTurns; turn += 1) {
       const forceSubmit = evidenceCalls >= this.forceAfterEvidence;
       // Ao forçar, RETIRAMOS as ferramentas de investigação: o modelo só pode chamar
-      // submit. Mais robusto que tool_choice (o Ollama nem sempre o honra) e evita o
+      // submit. A API nativa não oferece tool_choice; restringir o catálogo evita o
       // loop de investigação infinita observado ao vivo com o qwen3-coder.
       if (forceSubmit && !directedToSubmit) {
         messages.push({
@@ -164,7 +222,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
       let response: Response | null = null;
       let transportFailure: unknown = null;
       try {
-        response = await this.fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
+        response = await this.fetchImpl(`${this.baseUrl}/api/chat`, {
           method: 'POST',
           signal: timeoutSignal(this.roundTimeoutMs),
           // SEM Authorization: o endpoint é o Ollama local; nenhum segredo é enviado.
@@ -172,12 +230,9 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
           body: JSON.stringify({
             model: this.model,
             stream: false,
-            temperature: 0,
+            options: { temperature: 0, num_ctx: this.contextLength },
             messages,
             tools: forceSubmit ? [SUBMIT_CHAT_TOOL] : PLANNER_CHAT_TOOLS,
-            tool_choice: forceSubmit
-              ? { type: 'function', function: { name: SUBMIT_TOOL_NAME } }
-              : 'auto',
           }),
         });
       } catch (error) {
@@ -195,21 +250,27 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
               : 'Não foi possível comunicar com o modelo local durante o planejamento.',
           };
         }
-        const details = response ? await response.json().catch(() => null) as ChatResponse | null : null;
-        return { ok: false, message: details?.error?.message ?? 'O modelo local recusou a requisição de planejamento sem fornecer detalhes.' };
+        const details: unknown = response ? await response.json().catch(() => null) : null;
+        const nativeError = isRecord(details) && typeof details.error === 'string'
+          ? details.error
+          : isRecord(details) && isRecord(details.error) && typeof details.error.message === 'string'
+            ? details.error.message
+            : null;
+        return { ok: false, message: nativeError ?? 'O modelo local recusou a requisição de planejamento sem fornecer detalhes.' };
       }
-      const body = await response.json() as ChatResponse;
-      const assistant = body.choices?.[0]?.message;
+      const body: unknown = await response.json().catch(() => null);
+      const assistant = normalizeNativeAssistantResponse(body);
       if (!assistant) return { ok: false, message: 'O modelo local não retornou uma resposta utilizável.' };
 
-      const nativeToolCalls = Array.isArray(assistant.tool_calls) ? assistant.tool_calls : [];
-      const toolCalls = nativeToolCalls.length > 0 ? nativeToolCalls : parseTextualToolCalls(assistant.content, KNOWN_PLANNER_TOOLS);
+      const toolCalls = assistant.toolCalls.length > 0
+        ? assistant.toolCalls
+        : parseTextualToolCalls(assistant.content, KNOWN_PLANNER_TOOLS);
       if (toolCalls.length === 0) {
         // Sem tool call: o modelo conversou. Cutuca para submeter (se já investigou)
         // ou para investigar; fail-closed se não progredir.
         noProgress += 1;
         if (noProgress > 2) return { ok: false, message: 'O modelo local não produziu uma proposta estruturada.' };
-        messages.push({ role: 'assistant', content: assistant.content ?? '' });
+        messages.push({ role: 'assistant', content: assistant.content });
         messages.push({
           role: 'user',
           content: evidenceCalls > 0
@@ -237,19 +298,17 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
         // em vez de transformar caminhos inventados em proposta executável.
         messages.push({
           role: 'assistant',
-          content: assistant.content ?? '',
-          tool_calls: toolCalls.map((call, index) => ({
-            id: call.id ?? `call_${turn}_${index}`,
-            type: 'function',
+          content: assistant.content,
+          tool_calls: toolCalls.map(call => ({
             function: {
-              name: call.function?.name,
-              arguments: argString(call.function?.arguments),
+              name: call.function?.name ?? '',
+              arguments: JSON.parse(argString(call.function?.arguments)) as Record<string, unknown>,
             },
           })),
         });
         messages.push({
           role: 'tool',
-          tool_call_id: submitted.id ?? `call_${turn}_submit`,
+          tool_name: SUBMIT_TOOL_NAME,
           content: JSON.stringify({
             ok: false,
             error: `O included_scope não está ancorado na topologia real do repositório. ${INCLUDED_SCOPE_ANCHORING_RULE} Investigue os caminhos e submeta novamente.`,
@@ -259,30 +318,30 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
         continue;
       }
 
-      // Espelha o turno do assistente e responde CADA tool call (o protocolo exige
-      // um `tool` por `tool_call_id`), senão a próxima rodada fica incoerente.
-      const echoed: ChatToolCall[] = toolCalls.map((call, index) => ({
-        id: call.id ?? `call_${turn}_${index}`,
-        type: 'function',
-        function: { name: call.function?.name, arguments: argString(call.function?.arguments) },
+      // Espelha o turno do assistente e responde CADA tool call no formato nativo,
+      // associando a resposta pelo `tool_name`.
+      const echoed: NativeToolCall[] = toolCalls.map(call => ({
+        function: {
+          name: call.function?.name ?? '',
+          arguments: JSON.parse(argString(call.function?.arguments)) as Record<string, unknown>,
+        },
       }));
-      messages.push({ role: 'assistant', content: assistant.content ?? '', tool_calls: echoed });
+      messages.push({ role: 'assistant', content: assistant.content, tool_calls: echoed });
 
-      for (const [index, call] of toolCalls.entries()) {
-        const id = echoed[index]!.id!;
+      for (const call of toolCalls) {
         const name = call.function?.name ?? '';
         if (name === SUBMIT_TOOL_NAME) {
-          messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ ok: false, error: 'Investigue o repositório antes de enviar a proposta.' }) });
+          messages.push({ role: 'tool', tool_name: name, content: JSON.stringify({ ok: false, error: 'Investigue o repositório antes de enviar a proposta.' }) });
           continue;
         }
         // O catálogo da rodada forçada contém SOMENTE submit. Alguns providers locais
         // ainda emitem uma tool antiga fora do catálogo; o host não pode executá-la, pois
-        // tools oferecidas são a fronteira de capacidade desta rodada. Responde ao
-        // tool_call_id para manter o protocolo coerente, mas falha fechado no efeito.
+        // tools oferecidas são a fronteira de capacidade desta rodada. Responde pelo
+        // nome para manter o protocolo nativo coerente, mas falha fechado no efeito.
         if (forceSubmit) {
           messages.push({
             role: 'tool',
-            tool_call_id: id,
+            tool_name: name,
             content: JSON.stringify({
               ok: false,
               error: 'Esta ferramenta não está disponível nesta rodada. Chame submit_project_work_proposal.',
@@ -299,7 +358,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
           // Saída de tool inválida nunca conta como evidência.
         }
 
-        messages.push({ role: 'tool', tool_call_id: id, content: output });
+        messages.push({ role: 'tool', tool_name: name, content: output });
       }
       noProgress = 0;
     }

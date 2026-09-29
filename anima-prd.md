@@ -1,4 +1,13 @@
 # Anima — Product Requirements Document
+> Local Planner Native Context Contract V0 em 2026-09-29: somente o
+> `LocalOllamaProjectWorkPlanner` migrou do endpoint OpenAI-compatible para o Ollama nativo
+> `/api/chat`; cada request declara `options.num_ctx` via
+> `ANIMA_PROJECT_PLANNER_CONTEXT_LENGTH` (inteiro decimal positivo estrito; default 16384) e
+> preserva `temperature=0`, tools, mensagens, `stream=false`, timeout e limites. A fronteira do
+> adapter normaliza tool calls nativas, mantém os fallbacks textuais legado/Hermes e recusa
+> respostas desconhecidas ou malformadas. Prova inteiramente simulada, sem provider e sem
+> materializar TPC-01; projeção e autoridades inalteradas. Registro
+> `docs/registros/2026-09-29-local-planner-native-context-contract-v0.md`.
 > Local Planner Hermes Tool-Call Compatibility em 2026-09-29: o fallback textual do planner local
 > agora reconhece, além do formato legado `<function=...>`, exatamente uma chamada Hermes/JSON
 > `{name, arguments}` pura ou em fence `json`, somente para ferramenta conhecida e com arguments
