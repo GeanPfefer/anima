@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Mandated Verifier is monotonic across proposal revisions (2026-09-29): uma revisão de proposal
+> pode mudar escopo, efeitos, gates e limites, mas nunca remove `verifier_requirement`
+> obrigatório. `planExecutableProjectWorkRevision` reaplica o mandato sobre o execution_spec
+> reconstruído (falha fechada sem spec) e o trigger `work_items_verifier_requirement_monotonic`
+> recusa (42501) qualquer UPDATE de intent que o remova (cobre `revise_work_proposal` e
+> `request_work_proposal_revision`). Advisory → mandatado continua permitido. Registro
+> `docs/registros/2026-09-29-mandated-verifier-monotonic-revisions.md`.
 > Local Planner Proposal Rejection Diagnostics V0 em 2026-09-29: a validação autoritativa
 > de proposal agora preserva a compatibilidade de `parseProposal`, mas também expõe a primeira
 > causa estável como `proposal_invalid` (`field`, `rule`, mensagem curta). O adapter local distingue

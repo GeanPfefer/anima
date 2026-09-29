@@ -1,4 +1,4 @@
-import type { CreateWorkProposalCommand, RequestProposalRevisionCommand, WorkItem } from '@anima/core';
+import { readVerifierRequirement, VERIFIER_REQUIREMENT_KEY, type CreateWorkProposalCommand, type RequestProposalRevisionCommand, type WorkItem } from '@anima/core';
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
 import { resolveOpenAICoderModel } from '@/lib/work-orchestration/gpt-coder';
@@ -289,14 +289,24 @@ export async function planExecutableProjectWorkRevision(
     return { ok: false, message: 'O planejador devolveu a mesma proposta; nenhuma nova versão foi criada. A versão atual e o pedido continuam intactos.' };
   }
 
+  // Mandated Verifier é MONOTÔNICO entre revisões: o host reconstrói o execution_spec e
+  // só o materializer canônico grava o marcador; sem isto, revisar um lane mandatado o
+  // rebaixaria em silêncio para advisory. A revisão pode mudar escopo/gates/limites,
+  // nunca remover o mandato. Sem execution_spec para carregá-lo ⇒ falha fechada.
+  let intent: Record<string, unknown> = { ...planned.command.intent, revision_feedback: feedback };
+  if (readVerifierRequirement(item.intent) === 'required_fail_closed') {
+    const spec = intent.execution_spec;
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+      return { ok: false, message: 'A revisão não pôde preservar o Verifier obrigatório do item (execution_spec ausente); nenhuma nova versão foi criada.' };
+    }
+    intent = { ...intent, execution_spec: { ...(spec as Record<string, unknown>), [VERIFIER_REQUIREMENT_KEY]: 'required_fail_closed' } };
+  }
+
   return {
     ok: true,
     revision: {
       requestedChanges: feedback,
-      intent: {
-        ...planned.command.intent,
-        revision_feedback: feedback,
-      },
+      intent: intent as RequestProposalRevisionCommand['intent'],
       proposal: planned.command.proposal,
     },
   };
