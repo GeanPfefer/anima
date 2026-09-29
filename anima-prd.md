@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Local Trust Root Hardening V0 em 2026-09-29: o Supabase local da Goma deixou o segredo JWT e as chaves opacas
+> PÚBLICOS da CLI — `[auth] jwt_secret/publishable_key/secret_key = env(...)` com valores só em `supabase/.env`
+> (gitignored; `env(ANIMA_JWT)` curto ⇒ sem o arquivo a CLI recusa subir). Token forjado com o segredo padrão
+> (inclusive `anima_system_writer`) e `sb_secret_` padrão agora 401; writer/residente/Realtime ok; fronteira e
+> projeção inalteradas. PENDENTE (ato do operador): API/Postgres seguem em `0.0.0.0` e a regra "Docker Desktop
+> Backend" libera a LAN (Ethernet = perfil Público) — Postgres superuser `postgres` alcançável pela LAN; mitigação
+> por firewall em `docs/arquitetura/local-trust-root.md`. Registro `docs/registros/2026-09-29-local-trust-root-hardening-v0.md`.
 > Trusted System Evidence Boundary V0 em 2026-09-29: a fronteira temporal de evidência system_proven só vale com
 > exclusividade de escrita. Guard em `work_events` (migração `20260929000000`): os 5 fatos reservados ao writer só
 > entram por RPC do writer registrado do dono (service_role direto recusado; created_at do servidor; fato imutável);
@@ -1839,7 +1846,7 @@ O Anima roda em **duas máquinas físicas**, ligadas por Tailscale:
   OLLAMA_URL=http://100.68.239.78:11434
   OLLAMA_MODEL=qwen2.5:14b
   ```
-  - **Nota sobre a anon key:** nenhuma das máquinas customizou o JWT secret do Supabase local, então a anon key padrão de qualquer instância local não customizada funciona em ambas — já vem em `apps/web/.env.example`, não precisa rodar `supabase status` na Goma para pegar uma nova.
+  - **Nota sobre a anon key:** desde 2026-09-29 a Goma usa raiz JWT e chaves opacas **próprias** (Local Trust Root: `supabase/.env`, fora do Git — ver [`docs/arquitetura/local-trust-root.md`](docs/arquitetura/local-trust-root.md)). A anon/publishable padrão da CLI **não funciona mais**: copie `ANIMA_LOCAL_PUBLISHABLE_KEY` da Goma (canal privado, nunca pelo Git) e refaça após cada rotação.
 - **Não precisa Docker nem Ollama/Whisper local** — tudo roda na Goma
 
 ### Subir
