@@ -1,5 +1,7 @@
 /** @jest-environment node */
 import {
+  OLLAMA_ERROR_BODY_READ_MAX_CHARS,
+  OLLAMA_PROVIDER_ERROR_MAX_CHARS,
   OllamaProtocolError,
   assertNotTruncated,
   assertPromptWithinBudget,
@@ -113,6 +115,82 @@ describe('ollama-protocol — Commit 1: orçamento e diagnóstico', () => {
   test('resposta não-ok do servidor vira ollama_transport_error', async () => {
     const call = baseCall((async () => ({ ok: false, status: 503, json: async () => ({}) })) as unknown as typeof fetch);
     await expect(callOllamaChat(call)).rejects.toMatchObject({ code: 'ollama_transport_error' });
+  });
+
+  describe('diagnóstico de resposta não-2xx', () => {
+    const errorFetch = (response: Response): typeof fetch => (async () => response) as unknown as typeof fetch;
+    const failureOf = async (call: OllamaChatInput): Promise<OllamaProtocolError> => {
+      try { await callOllamaChat(call); } catch (error) { return error as OllamaProtocolError; }
+      throw new Error('esperava falha');
+    };
+
+    test('A: HTTP 500 com {"error"} preserva status e o erro CUDA do Ollama', async () => {
+      const error = await failureOf(baseCall(errorFetch(new Response(
+        JSON.stringify({ error: 'CUDA error: shared object initialization failed' }), { status: 500 }))));
+      expect(error).toBeInstanceOf(OllamaProtocolError);
+      expect(error).toMatchObject({ code: 'ollama_transport_error', httpStatus: 500, providerError: 'CUDA error: shared object initialization failed' });
+      expect(error.message).toBe('[ollama_transport_error] o modelo Ollama respondeu 500: CUDA error: shared object initialization failed.');
+    });
+
+    test('A: forma {"error":{"message"}} também é aceita', async () => {
+      const error = await failureOf(baseCall(errorFetch(new Response(JSON.stringify({ error: { message: 'model not found' } }), { status: 404 }))));
+      expect(error).toMatchObject({ httpStatus: 404, providerError: 'model not found' });
+    });
+
+    test('B: corpo não-JSON vira texto cru em uma linha', async () => {
+      const error = await failureOf(baseCall(errorFetch(new Response('runner crashed\n  exit status 2', { status: 502 }))));
+      expect(error).toMatchObject({ code: 'ollama_transport_error', httpStatus: 502, providerError: 'runner crashed exit status 2' });
+    });
+
+    test('C: corpo acima do limite é truncado de forma determinística', async () => {
+      const huge = 'x'.repeat(10_000);
+      const plain = await failureOf(baseCall(errorFetch(new Response(huge, { status: 500 }))));
+      expect(plain.providerError).toBe(`${'x'.repeat(OLLAMA_PROVIDER_ERROR_MAX_CHARS - 1)}…`);
+      // JSON maior que o teto de leitura deixa de ser JSON válido: cai no texto cru, também truncado.
+      const json = await failureOf(baseCall(errorFetch(new Response(JSON.stringify({ error: huge }), { status: 500 }))));
+      expect(json.providerError).toHaveLength(OLLAMA_PROVIDER_ERROR_MAX_CHARS);
+      expect(json.providerError!.startsWith('{"error":"xxx')).toBe(true);
+      expect(OLLAMA_ERROR_BODY_READ_MAX_CHARS).toBeGreaterThan(OLLAMA_PROVIDER_ERROR_MAX_CHARS);
+    });
+
+    test('D: falha ao ler o corpo preserva o status HTTP', async () => {
+      const unreadable = (async () => ({ ok: false, status: 500, body: null, text: async () => { throw new Error('socket hang up'); } })) as unknown as typeof fetch;
+      const error = await failureOf(baseCall(unreadable));
+      expect(error).toMatchObject({ code: 'ollama_transport_error', httpStatus: 500 });
+      expect(error.providerError).toBeUndefined();
+      expect(error.message).toBe('[ollama_transport_error] o modelo Ollama respondeu 500.');
+      const streamFails = new Response(new ReadableStream({ pull() { throw new Error('stream quebrado'); } }), { status: 503 });
+      const broken = await failureOf(baseCall(errorFetch(streamFails)));
+      expect(broken.httpStatus).toBe(503);
+      expect(broken.providerError).toBeUndefined();
+      const empty = await failureOf(baseCall(errorFetch(new Response('', { status: 500 }))));
+      expect(empty.httpStatus).toBe(500);
+      expect(empty.providerError).toBeUndefined();
+    });
+
+    test('E: nunca carrega o conteúdo das messages do request; segredos do corpo são redigidos', async () => {
+      const call = { ...baseCall(errorFetch(new Response(JSON.stringify({ error: 'boom Authorization: Bearer abc.def.ghi' }), { status: 500 }))),
+        messages: [{ role: 'user' as const, content: 'SENTINELA-DO-PROMPT-7f3a' }] };
+      const error = await failureOf(call);
+      const serialized = `${error.message} ${JSON.stringify(error)} ${error.providerError}`;
+      expect(serialized).not.toContain('SENTINELA-DO-PROMPT-7f3a');
+      expect(serialized).not.toContain('abc.def.ghi');
+      expect(error.providerError).toMatch(/^boom .*<redacted>$/);
+    });
+
+    test('F: timeout e exceção de transporte seguem sem status HTTP', async () => {
+      const thrown = await failureOf(baseCall((async () => { throw new Error('sem rota'); }) as unknown as typeof fetch));
+      expect(thrown).toMatchObject({ code: 'ollama_transport_error' });
+      expect(thrown.message).toBe('[ollama_transport_error] sem rota');
+      expect(thrown.httpStatus).toBeUndefined();
+      expect(thrown.providerError).toBeUndefined();
+      const hang = ((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      })) as unknown as typeof fetch;
+      const timedOut = await failureOf(baseCall(hang, 20));
+      expect(timedOut).toMatchObject({ code: 'ollama_timeout' });
+      expect(timedOut.httpStatus).toBeUndefined();
+    });
   });
 
   test('exceção de transporte vira ollama_transport_error', async () => {

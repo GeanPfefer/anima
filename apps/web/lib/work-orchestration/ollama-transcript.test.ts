@@ -80,3 +80,19 @@ test('unredacted/extra fields and broken READ references are refused by the evid
   bad.entries[1].structure = 'xxxx'; bad.entries[1].before = 'secret'; expect(validCoderTranscripts([bad])).toBe(false);
   delete bad.entries[1].before; bad.entries[1].readRefs = [99]; expect(validCoderTranscripts([bad])).toBe(false);
 });
+
+test('HTTP 500 do Ollama: o erro carrega status+detalhe e o transcript v1 fica inalterado (sem chaves novas)', async () => {
+  let transcript: CoderTranscript | undefined;
+  const fetchImpl = jest.fn(async () => new Response(JSON.stringify({ error: 'CUDA error: shared object initialization failed' }), { status: 500 })) as unknown as typeof fetch;
+  const backend = new OllamaCoderBackend({ model: 'fixture', fetchImpl });
+  let error: unknown;
+  try {
+    await backend.edit({ objective: 'fixture', includedScope: ['test.ts'], excludedScope: [], onTranscript: t => { transcript = t; } },
+      { readFile: async () => 'hello', writeFile: async () => true }, new AbortController().signal);
+  } catch (e) { error = e; }
+  expect(error).toMatchObject({ code: 'ollama_transport_error', httpStatus: 500, providerError: 'CUDA error: shared object initialization failed' });
+  expect(transcript!.termination).toBe('ollama_transport_error');
+  expect(validCoderTranscripts([transcript!])).toBe(true);
+  expect(Object.keys(transcript!)).not.toEqual(expect.arrayContaining(['httpStatus']));
+  expect(JSON.stringify(transcript)).not.toContain('CUDA');
+});

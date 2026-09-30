@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { MAX_READS_REQUESTED_PER_ROUND } from '@anima/core';
+import { redactSecrets } from './output-sanitization';
 
 // ============================================================
 // Protocolo limitado de leitura + edição estruturada para backends de modelo
@@ -43,11 +44,74 @@ export type OllamaProtocolErrorCode =
  * código nunca se perde. */
 export class OllamaProtocolError extends Error {
   readonly code: OllamaProtocolErrorCode;
-  constructor(code: OllamaProtocolErrorCode, detail: string) {
+  /** Status HTTP de uma resposta não-2xx do Ollama (ausente nos demais erros). */
+  readonly httpStatus?: number;
+  /** Erro devolvido pelo PRÓPRIO Ollama no corpo da resposta não-2xx: redigido e
+   * limitado a OLLAMA_PROVIDER_ERROR_MAX_CHARS. Nunca contém o request. */
+  readonly providerError?: string;
+  constructor(code: OllamaProtocolErrorCode, detail: string, diagnostics?: { readonly httpStatus?: number; readonly providerError?: string }) {
     super(`[${code}] ${detail}`);
     this.name = 'OllamaProtocolError';
     this.code = code;
+    if (diagnostics?.httpStatus !== undefined) this.httpStatus = diagnostics.httpStatus;
+    if (diagnostics?.providerError !== undefined) this.providerError = diagnostics.providerError;
   }
+}
+
+/** Teto de leitura do corpo de uma resposta não-2xx (o erro do Ollama cabe folgado). */
+export const OLLAMA_ERROR_BODY_READ_MAX_CHARS = 2048;
+/** Teto do erro do provider preservado no OllamaProtocolError. */
+export const OLLAMA_PROVIDER_ERROR_MAX_CHARS = 300;
+
+/** Teto de tempo da leitura do corpo de erro: o timeout da chamada já foi liberado. */
+const OLLAMA_ERROR_BODY_READ_TIMEOUT_MS = 2000;
+
+/** Lê no máximo OLLAMA_ERROR_BODY_READ_MAX_CHARS do corpo, fail-safe: falha ou demora ⇒ null. */
+async function readBoundedErrorBody(response: Response): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), OLLAMA_ERROR_BODY_READ_TIMEOUT_MS); });
+  try {
+    return await Promise.race([readErrorBody(response), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readErrorBody(response: Response): Promise<string | null> {
+  try {
+    const reader = typeof response.body?.getReader === 'function' ? response.body.getReader() : null;
+    if (!reader) {
+      if (typeof response.text !== 'function') return null;
+      return (await response.text()).slice(0, OLLAMA_ERROR_BODY_READ_MAX_CHARS);
+    }
+    const decoder = new TextDecoder();
+    let text = '';
+    while (text.length < OLLAMA_ERROR_BODY_READ_MAX_CHARS) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    await reader.cancel().catch(() => undefined);
+    return text.slice(0, OLLAMA_ERROR_BODY_READ_MAX_CHARS);
+  } catch {
+    return null;
+  }
+}
+
+/** `{"error":"…"}` ou `{"error":{"message":"…"}}` ⇒ o texto do erro; senão o corpo cru.
+ * Uma linha, redigido e truncado; corpo vazio ⇒ undefined. */
+function providerErrorFromBody(raw: string | null): string | undefined {
+  if (raw === null) return undefined;
+  let text = raw;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const error = parsed && typeof parsed === 'object' ? (parsed as { error?: unknown }).error : undefined;
+    if (typeof error === 'string') text = error;
+    else if (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string') text = (error as { message: string }).message;
+  } catch { /* corpo não-JSON: usa o texto cru */ }
+  const line = redactSecrets(text.replace(/\s+/g, ' ').trim());
+  if (!line) return undefined;
+  return line.length <= OLLAMA_PROVIDER_ERROR_MAX_CHARS ? line : `${line.slice(0, OLLAMA_PROVIDER_ERROR_MAX_CHARS - 1)}…`;
 }
 
 /** Estimativa conservadora (super-estima) de tokens a partir de caracteres.
@@ -181,8 +245,16 @@ export async function callOllamaChat(input: OllamaChatInput): Promise<OllamaChat
     clearTimeout(timer);
     if (input.signal) input.signal.removeEventListener('abort', onAbort);
   }
-  if (!response || !response.ok) {
-    throw new OllamaProtocolError('ollama_transport_error', `o modelo Ollama respondeu ${response ? response.status : 'sem conexão'}.`);
+  if (!response) throw new OllamaProtocolError('ollama_transport_error', 'o modelo Ollama respondeu sem conexão.');
+  if (!response.ok) {
+    // Preserva o diagnóstico do próprio Ollama (ex.: crash do runner/CUDA): o corpo de
+    // erro é do servidor local e nunca inclui o request enviado.
+    const providerError = providerErrorFromBody(await readBoundedErrorBody(response));
+    throw new OllamaProtocolError(
+      'ollama_transport_error',
+      `o modelo Ollama respondeu ${response.status}${providerError ? `: ${providerError}` : ''}.`,
+      { httpStatus: response.status, ...(providerError ? { providerError } : {}) },
+    );
   }
   const body = await response.json().catch(() => null) as {
     message?: { content?: unknown };

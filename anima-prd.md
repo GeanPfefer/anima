@@ -1,4 +1,12 @@
 # Anima — Product Requirements Document
+> Ollama Coder Error Observability V1 (2026-09-30): respostas não-2xx do Ollama no caminho do
+> coder preservam `httpStatus` e `providerError` (erro do próprio Ollama, redigido, ≤300 chars)
+> em `OllamaProtocolError`, sem ler nada do request. O transcript host-observed v1 não mudou
+> (validador fechado no core; evoluí-lo é decisão pendente). Motivação: a attempt única do
+> TPC-01 (`107997e2`) falhou com HTTP 500 opaco; a probe diagnóstica mostrou crash CUDA no
+> kernel de flash-attention do `qwen3-coder` após o load completo (não OOM provado). TPC-01
+> segue `failed`, sem successor. Registro
+> `docs/registros/2026-09-30-ollama-coder-error-observability-v1.md`.
 > Mandated Verifier is monotonic across proposal revisions (2026-09-29): uma revisão de proposal
 > pode mudar escopo, efeitos, gates e limites, mas nunca remove `verifier_requirement`
 > obrigatório. `planExecutableProjectWorkRevision` reaplica o mandato sobre o execution_spec
