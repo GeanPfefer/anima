@@ -391,8 +391,10 @@ export class GptCoderBackend implements CoderBackend {
     // falhava com `ollama_invalid_response_schema` ANTES de qualquer edit. Agora o
     // excedente é deferido; a janela grande do modelo remoto comporta a exploração
     // ampla. Um `maxReadRounds` legado (se passado) ainda faz override, clampado no core.
+    // Modo AUTONOMOUS (bounded) de propósito: chamada PAGA nunca roda sem contadores —
+    // SUPERVISED (sem teto de rodadas) é exclusivo do coder local declarado pelo invocador.
     const runtimePolicy = resolveAgenticRuntimePolicy({
-      mode: 'supervised',
+      mode: 'autonomous',
       profile: STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1,
       ...(options.maxReadRounds !== undefined
         ? { overrides: { maxReadRounds: options.maxReadRounds } }

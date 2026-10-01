@@ -65,3 +65,28 @@ export function resolveOllamaCoderRuntimeConfig(
     },
   };
 }
+
+/** Janela operacional histórica do coder LOCAL (num_ctx). */
+export const DEFAULT_LOCAL_CODER_CONTEXT_LENGTH = 8192;
+/** Piso do orçamento de contexto (`resolveContextBudget` nunca usa menos). */
+const MIN_LOCAL_CODER_CONTEXT_LENGTH = 1024;
+
+/**
+ * `ANIMA_LOCAL_CODER_CONTEXT_LENGTH`: teto operacional (num_ctx) do coder Ollama LOCAL.
+ * Ausente/vazio ⇒ 8192 (comportamento histórico). Só inteiro decimal positivo e
+ * finito >= 1024; qualquer outra coisa FALHA FECHADO (o coder não é construído),
+ * como os demais knobs deste módulo — nunca um valor silenciosamente diferente.
+ * Não afeta planner, OpenAI nem nodes remotos; reserva de saída e guardas de
+ * truncamento continuam as do `resolveContextBudget`.
+ */
+export function resolveLocalCoderContextLength(
+  env: Record<string, string | undefined> = process.env,
+): { readonly ok: true; readonly value: number } | { readonly ok: false; readonly error: string } {
+  const raw = env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH?.trim();
+  if (!raw) return { ok: true, value: DEFAULT_LOCAL_CODER_CONTEXT_LENGTH };
+  const value = /^[1-9][0-9]*$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value < MIN_LOCAL_CODER_CONTEXT_LENGTH) {
+    return { ok: false, error: `ANIMA_LOCAL_CODER_CONTEXT_LENGTH deve ser inteiro decimal >= ${MIN_LOCAL_CODER_CONTEXT_LENGTH}.` };
+  }
+  return { ok: true, value };
+}

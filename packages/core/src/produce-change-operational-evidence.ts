@@ -265,7 +265,7 @@ function classifyFailureCode(code: string | null, message: string | null): Failu
     case 'gate_failed': return { kind: 'gate' };
     case 'code_failure': return { kind: 'attributed', cause: 'candidate_or_coder_failure' };
     case 'ollama_read_round_limit': return { kind: 'attributed', cause: 'candidate_or_coder_failure' };
-    case 'no_progress': case 'loop_detected': case 'ollama_no_effective_edits': return { kind: 'attributed', cause: 'no_progress' };
+    case 'no_progress': case 'loop_detected': case 'ollama_no_effective_edits': case 'ollama_no_progress': return { kind: 'attributed', cause: 'no_progress' };
     case 'contract_violation': return { kind: 'attributed', cause: 'candidate_contract_violation' };
     case 'ollama_transport_error': return { kind: 'other_layer', cause: 'transport_failure' };
     case 'provider_unavailable': case 'external_unavailable': return { kind: 'other_layer', cause: 'provider_failure' };

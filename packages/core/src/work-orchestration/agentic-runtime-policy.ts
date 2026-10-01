@@ -22,11 +22,17 @@
 // (que hoje serve Ollama e OpenAI, pois o GptCoder delega ao Ollama) consome esta
 // política; trocar/adicionar backend não reconstrói o laço.
 //
-// Modo SUPERVISIONADO vs AUTÔNOMO: em modo supervisionado pelo usuário evita-se
-// anti-loop artificial que impeça o trabalho (rodadas/leituras mais generosas);
-// em modo autônomo/desacompanhado os loop guards continuam necessários (perfis
-// mais contidos). A segurança ESTRUTURAL e FINANCEIRA (escopo de escrita, gates,
-// autoridade paga, tempo) é idêntica nos dois — ela vive nas fronteiras do agente.
+// Modo SUPERVISIONADO vs AUTÔNOMO (distinção EXPLÍCITA e operante):
+//   • AUTONOMOUS (default fail-closed de quem não declara o modo): contadores
+//     bounded de rodadas de investigação, leituras servidas por sessão e reserva
+//     pós-edit — anti-loop/consumo para execução desacompanhada.
+//   • SUPERVISED (só quando o invocador DECLARA): SEM teto de contagem de
+//     read/search/glob/exec. O modelo continua investigando enquanto fizer
+//     PROGRESSO; a guarda é de ESTAGNAÇÃO (rodadas consecutivas sem informação nova)
+//     e a barreira final é o deadline global de execução do contrato.
+// A segurança ESTRUTURAL e FINANCEIRA (escopo de escrita, gates, Verifier,
+// autoridade paga, deadline, contadores de ações inválidas) é idêntica nos dois —
+// ela vive nas fronteiras do agente, não nos contadores de exploração.
 // ============================================================
 
 export type AgenticRuntimeMode = 'supervised' | 'autonomous';
@@ -41,14 +47,28 @@ export interface AgenticRuntimePolicyV1 {
    * grandes de uma vez), não um teto de exploração.
    */
   readonly readServingBudgetPerRound: number;
-  /** Rodadas de leitura antes de o protocolo exigir edição. Fronteira do laço. */
+  /** Rodadas de leitura antes de o protocolo exigir edição. Fronteira do laço.
+   * `Infinity` em SUPERVISED sem override: não há contador de investigação. */
   readonly maxReadRounds: number;
   /**
    * Teto de leituras SERVIDAS na sessão inteira (soma entre rodadas). Fronteira de
    * sessão que substitui o anti-loop por-rodada: um agente pode ler muito ao longo
-   * de várias rodadas, mas não indefinidamente sem editar.
+   * de várias rodadas, mas não indefinidamente sem editar. `Infinity` em SUPERVISED
+   * sem override.
    */
   readonly maxTotalServedReads: number;
+  /**
+   * Rodadas produtivas reservadas DEPOIS da 1ª edição (EDIT→TEST→DIFF→SUBMIT e
+   * reparo), só no modo exec. `Infinity` em SUPERVISED.
+   */
+  readonly postEditRoundReserve: number;
+  /**
+   * Guarda de PROGRESSO: nº de rodadas produtivas CONSECUTIVAS sem informação nova
+   * (leitura só repetida, busca idêntica, mesmo comando na mesma revisão) que
+   * encerra a sessão. É a guarda anti-loop do SUPERVISED (que não tem contadores);
+   * `Infinity` (desligada) em AUTONOMOUS, que já é bounded pelos contadores.
+   */
+  readonly maxStagnantRounds: number;
 }
 
 /**
@@ -79,6 +99,16 @@ export const LOCAL_AGENTIC_RUNTIME_PROFILE_V1 = {
   maxTotalServedReads: 40,
 } as const;
 
+/** Reserva pós-edit histórica do modo exec (AUTONOMOUS). */
+export const POST_EDIT_EXEC_ROUND_RESERVE = 8;
+
+/**
+ * Rodadas produtivas consecutivas SEM informação nova antes de o SUPERVISED
+ * encerrar por falta de progresso. Pequeno de propósito: só dispara quando o modelo
+ * repete exatamente o que já viu/rodou — nunca enquanto descobre algo novo.
+ */
+export const SUPERVISED_MAX_STAGNANT_ROUNDS = 4;
+
 /**
  * Perfil de backend REMOTO FORTE (OpenAI e afins / janela grande, ex.: 64k+): a
  * exploração ampla que o modelo forte QUER fazer cabe na janela, então o orçamento
@@ -105,9 +135,14 @@ const clampInt = (raw: unknown, bounds: { readonly min: number; readonly max: nu
 /**
  * Resolve uma política EFETIVA e SÃ a partir de um perfil base e de overrides
  * opcionais. FAIL-CLOSED por clamp: cada grandeza é forçada aos limites; entrada
- * malformada cai no valor do perfil. Garante ainda a invariante estrutural
- * `maxTotalServedReads >= readServingBudgetPerRound` (um teto de sessão menor que
- * uma rodada tornaria a 1ª rodada impossível). Determinística e sem efeitos.
+ * malformada cai no valor do perfil LOCAL bounded. Garante ainda a invariante
+ * estrutural `maxTotalServedReads >= readServingBudgetPerRound` (um teto de sessão
+ * menor que uma rodada tornaria a 1ª rodada impossível). Determinística e sem efeitos.
+ *
+ * SUPERVISED: sem override, rodadas/teto de sessão/reserva pós-edit são `Infinity`
+ * (sem contador) e a guarda é de estagnação. Um override EXPLÍCITO válido continua
+ * aplicado (só endurece). `readServingBudgetPerRound` permanece do perfil: é orçamento
+ * de JANELA/latência por rodada (o excedente é deferido), não teto de exploração.
  */
 export function resolveAgenticRuntimePolicy(input: {
   readonly mode: AgenticRuntimeMode;
@@ -116,21 +151,26 @@ export function resolveAgenticRuntimePolicy(input: {
 }): AgenticRuntimePolicyV1 {
   const base = input.profile ?? LOCAL_AGENTIC_RUNTIME_PROFILE_V1;
   const overrides = input.overrides ?? {};
+  const supervised = input.mode === 'supervised';
   const readServingBudgetPerRound = clampInt(
     overrides.readServingBudgetPerRound ?? base.readServingBudgetPerRound,
     AGENTIC_RUNTIME_POLICY_BOUNDS.readServingBudgetPerRound,
     LOCAL_AGENTIC_RUNTIME_PROFILE_V1.readServingBudgetPerRound,
   );
-  const maxReadRounds = clampInt(
-    overrides.maxReadRounds ?? base.maxReadRounds,
-    AGENTIC_RUNTIME_POLICY_BOUNDS.maxReadRounds,
-    LOCAL_AGENTIC_RUNTIME_PROFILE_V1.maxReadRounds,
-  );
-  const maxTotalServedReadsRaw = clampInt(
-    overrides.maxTotalServedReads ?? base.maxTotalServedReads,
-    AGENTIC_RUNTIME_POLICY_BOUNDS.maxTotalServedReads,
-    LOCAL_AGENTIC_RUNTIME_PROFILE_V1.maxTotalServedReads,
-  );
+  const maxReadRounds = supervised && overrides.maxReadRounds === undefined
+    ? Number.POSITIVE_INFINITY
+    : clampInt(
+      overrides.maxReadRounds ?? base.maxReadRounds,
+      AGENTIC_RUNTIME_POLICY_BOUNDS.maxReadRounds,
+      LOCAL_AGENTIC_RUNTIME_PROFILE_V1.maxReadRounds,
+    );
+  const maxTotalServedReadsRaw = supervised && overrides.maxTotalServedReads === undefined
+    ? Number.POSITIVE_INFINITY
+    : clampInt(
+      overrides.maxTotalServedReads ?? base.maxTotalServedReads,
+      AGENTIC_RUNTIME_POLICY_BOUNDS.maxTotalServedReads,
+      LOCAL_AGENTIC_RUNTIME_PROFILE_V1.maxTotalServedReads,
+    );
   return {
     schemaVersion: 1,
     mode: input.mode,
@@ -138,14 +178,16 @@ export function resolveAgenticRuntimePolicy(input: {
     maxReadRounds,
     // Um teto de sessão nunca pode ser menor que o servido numa rodada.
     maxTotalServedReads: Math.max(maxTotalServedReadsRaw, readServingBudgetPerRound),
+    postEditRoundReserve: supervised ? Number.POSITIVE_INFINITY : POST_EDIT_EXEC_ROUND_RESERVE,
+    maxStagnantRounds: supervised ? SUPERVISED_MAX_STAGNANT_ROUNDS : Number.POSITIVE_INFINITY,
   };
 }
 
-/** Default seguro: perfil LOCAL conservador em modo supervisionado. É o que um
- * caller que não conhece a política recebe — comportamento numérico idêntico ao
- * backend local histórico, com a deferência graciosa do V3. */
+/** Default seguro: perfil LOCAL conservador em modo AUTÔNOMO (bounded). É o que um
+ * caller que não declara o modo recebe — comportamento numérico idêntico ao backend
+ * local histórico, com a deferência graciosa do V3. SUPERVISED nunca é implícito. */
 export const DEFAULT_AGENTIC_RUNTIME_POLICY_V1: AgenticRuntimePolicyV1 = resolveAgenticRuntimePolicy({
-  mode: 'supervised',
+  mode: 'autonomous',
   profile: LOCAL_AGENTIC_RUNTIME_PROFILE_V1,
 });
 

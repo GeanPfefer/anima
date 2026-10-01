@@ -42,6 +42,11 @@ export interface CoderEditRequest {
   readonly attemptId?: string;
   readonly approvedProposalVersion?: number;
   readonly maxDurationMs?: number;
+  /** Instante absoluto (epoch ms) do DEADLINE GLOBAL da tentativa, medido desde o
+   * início da attempt (inclui baseline e reparos). Backends com laço agêntico param
+   * de iniciar rodadas ao atingi-lo. Ausente ⇒ derivado de `maxDurationMs` no início
+   * da chamada. */
+  readonly deadlineAtMs?: number;
   readonly onTranscript?: (transcript: import('@anima/core').CoderTranscript) => void;
   readonly objective: string;
   readonly includedScope: readonly string[];
@@ -109,6 +114,11 @@ export interface WorkspaceSearchResult {
   readonly truncated: boolean;
 }
 /** Pedido de listagem por padrão glob executado pelo HOST. */
+/** Opções do HOST para busca/listagem (nunca derivadas da resposta do modelo). */
+export interface WorkspaceLookupHostOptions {
+  /** Timeout do subprocesso, já limitado ao restante do deadline global. */
+  readonly timeoutMs?: number;
+}
 export interface WorkspaceListInput {
   readonly pattern: string;
   readonly maxResults: number;
@@ -145,9 +155,9 @@ export interface CoderWorkspace {
    * simplesmente não oferece a ação `search` ao modelo (retrocompatível). O modelo
    * NUNCA executa shell — o host roda a busca e devolve caminhos + trechos.
    */
-  search?(input: WorkspaceSearchInput, signal: AbortSignal): Promise<WorkspaceSearchResult>;
+  search?(input: WorkspaceSearchInput, signal: AbortSignal, host?: WorkspaceLookupHostOptions): Promise<WorkspaceSearchResult>;
   /** Listagem por padrão glob executada pelo HOST, confinada ao workspace. Opcional. */
-  list?(input: WorkspaceListInput, signal: AbortSignal): Promise<WorkspaceListResult>;
+  list?(input: WorkspaceListInput, signal: AbortSignal, host?: WorkspaceLookupHostOptions): Promise<WorkspaceListResult>;
   /**
    * Execução de comando (dev/test/typecheck/git read-only) pelo HOST, confinada à
    * worktree, SEM shell arbitrário. Opcional: um workspace sem esta capacidade não

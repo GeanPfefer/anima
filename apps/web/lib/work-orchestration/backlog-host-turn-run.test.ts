@@ -73,3 +73,26 @@ describe('runProjectBacklogHostTurn — amarração por workItemId', () => {
     expect(await readSeen()).toEqual(['A', 'B']);
   });
 });
+
+describe('runProjectBacklogHostTurn — modo do laço do coder', () => {
+  beforeEach(() => jest.clearAllMocks());
+  const base = { client: {} as SupabaseClient<Database>, ownerInstanceId: 'owner', maxTurnsPerCycle: 1, maxCycles: 1, signal: new AbortController().signal };
+
+  test('sem declaração não repassa modo (deps resolvem AUTONOMOUS)', async () => {
+    wire(['A']);
+    await run('A');
+    expect((buildProjectBacklogCycleDeps as jest.Mock).mock.calls[0]).toHaveLength(2);
+  });
+
+  test('SUPERVISED explícito para UM item é repassado às deps', async () => {
+    wire(['A']);
+    await runProjectBacklogHostTurn({ ...base, requestedWorkItemId: 'A', coderRuntimeMode: 'supervised' });
+    expect((buildProjectBacklogCycleDeps as jest.Mock).mock.calls[0]![2]).toEqual({ coderRuntimeMode: 'supervised' });
+  });
+
+  test('SUPERVISED sem item pedido é recusado (nunca vale para a fila autônoma)', async () => {
+    wire(['A', 'B']);
+    await expect(runProjectBacklogHostTurn({ ...base, coderRuntimeMode: 'supervised' })).rejects.toThrow('requestedWorkItemId');
+    expect(buildProjectBacklogCycleDeps).not.toHaveBeenCalled();
+  });
+});

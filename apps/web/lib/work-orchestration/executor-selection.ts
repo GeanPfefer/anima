@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
-import type { ChangeAuthorizationFactsV1, CoderModelSelectionEvidenceV1, ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
-import { selectGovernedCoderModel } from '@anima/core';
+import type { AgenticRuntimeMode, ChangeAuthorizationFactsV1, CoderModelSelectionEvidenceV1, ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
+import { resolveAgenticRuntimePolicy, selectGovernedCoderModel } from '@anima/core';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { resolveCoderCapacityPolicy } from './coder-model-policy';
-import { resolveOllamaCoderRuntimeConfig, type OllamaCoderRuntimeConfig } from './ollama-coder-config';
+import { resolveLocalCoderContextLength, resolveOllamaCoderRuntimeConfig, type OllamaCoderRuntimeConfig } from './ollama-coder-config';
 import { GptCoderBackend } from './gpt-coder';
 import type { OpenAIAdmissionControl } from '@/lib/ai/openai-paid-transport';
 import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
@@ -126,6 +126,7 @@ const backendFor = (
   override?: CoderBackend,
   ollamaRuntimeOverride?: OllamaCoderRuntimeConfig,
   openAIAdmission?: OpenAIAdmissionControl,
+  coderRuntimeMode: AgenticRuntimeMode = 'autonomous',
 ): CoderBackend | { readonly error: string } => {
   if (override) return override;
   const kind = contract.coderBackend ?? 'ollama';
@@ -150,6 +151,9 @@ const backendFor = (
     }
     const runtime = ollamaRuntimeOverride ? { ok: true as const, value: ollamaRuntimeOverride } : resolveOllamaCoderRuntimeConfig(model);
     if (!runtime.ok) return { error: runtime.error };
+    // Janela do coder LOCAL configurável (default 8192); nodes remotos mantêm o default.
+    const contextLength = runtime.value.locality === 'local' ? resolveLocalCoderContextLength() : null;
+    if (contextLength && !contextLength.ok) return { error: contextLength.error };
     return new OllamaCoderBackend({
       model,
       url: runtime.value.url,
@@ -157,6 +161,11 @@ const backendFor = (
       locality: runtime.value.locality,
       nodeId: runtime.value.nodeId,
       ...(modelSelection ? { modelSelection } : {}),
+      // Modo do laço agêntico DECLARADO pelo invocador (default AUTONOMOUS, bounded).
+      // SUPERVISED remove os contadores de investigação; deadline, escopo, gates e
+      // contadores de ações inválidas permanecem.
+      agenticRuntimePolicy: resolveAgenticRuntimePolicy({ mode: coderRuntimeMode }),
+      ...(contextLength?.ok ? { operationalContextCap: contextLength.value } : {}),
     });
   }
 
@@ -217,7 +226,12 @@ export interface AnimaValidationPreparationInput {
   readonly rootPath: string;
   readonly validationCriteria: WorkExecutorRequest['validationCriteria'];
   readonly signal: AbortSignal;
+  /** Tempo restante do deadline global da tentativa; o typegen usa min(120 s, este). */
+  readonly timeoutMs?: number;
 }
+
+/** Teto histórico do Next typegen; o deadline global só pode REDUZI-LO. */
+export const ANIMA_VALIDATION_PREPARATION_TIMEOUT_MS = 120_000;
 
 export interface AnimaValidationPreparationDependencies {
   readonly resolveNextCli: (webRoot: string) => string;
@@ -250,6 +264,13 @@ export async function prepareAnimaValidation(
     throw new Error('Preparacao de validacao cancelada antes do Next typegen.');
   }
 
+  const timeoutMs = input.timeoutMs === undefined
+    ? ANIMA_VALIDATION_PREPARATION_TIMEOUT_MS
+    : Math.min(ANIMA_VALIDATION_PREPARATION_TIMEOUT_MS, input.timeoutMs);
+  if (!(timeoutMs > 0)) {
+    throw new Error('Preparacao de validacao nao iniciada: deadline global da tentativa esgotado.');
+  }
+
   const webRoot = join(input.rootPath, 'apps', 'web');
   const nextCli = dependencies.resolveNextCli(webRoot);
 
@@ -258,7 +279,7 @@ export async function prepareAnimaValidation(
     [nextCli, 'typegen', '.'],
     {
       cwd: webRoot,
-      timeoutMs: 120_000,
+      timeoutMs,
       signal: input.signal,
     },
   );
@@ -300,6 +321,11 @@ export function resolveExecutorRoute(
      * executor de worktree (host in-process) o usa. */
     readonly changeAuthorizationObserver?: (facts: ChangeAuthorizationFactsV1) => void;
     readonly openAIAdmission?: OpenAIAdmissionControl;
+    /** Modo do laço agêntico do coder LOCAL (Ollama). Ausente ⇒ `autonomous` (bounded,
+     * fail-closed). `supervised` só quando o invocador declara supervisão humana: sem
+     * teto de rodadas de investigação; guarda de progresso + deadline global. Não
+     * afeta OpenAI (sempre bounded) nem DeepSeek. */
+    readonly coderRuntimeMode?: AgenticRuntimeMode;
   } = {},
 ): ExecutorSelection {
   const err = (code: string, message: string): ExecutorSelection => ({ ok: false, error: { code, message } });
@@ -310,7 +336,7 @@ export function resolveExecutorRoute(
     if (!contract.baseSha || !SHA.test(contract.baseSha)) return err('worktree_base_sha_missing', 'O SHA-base autorizado não foi persistido ou é inválido.');
     const repoRoot = options.repoRoot ?? projectRoot();
     if (!isAnimaProjectRoot(repoRoot)) return err('project_root_invalid', 'A raiz do projeto Anima não é um repositório válido.');
-    const backend = backendFor(contract, repoRoot, options.backendOverride, options.ollamaRuntimeOverride, options.openAIAdmission);
+    const backend = backendFor(contract, repoRoot, options.backendOverride, options.ollamaRuntimeOverride, options.openAIAdmission, options.coderRuntimeMode);
     if ('error' in backend) return err('coder_backend_invalid', backend.error);
     const reference = contract.targetReference;
     const baseSha = contract.baseSha;

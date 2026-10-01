@@ -1,4 +1,4 @@
-import { planAutonomousBacklogTurn } from '@anima/core';
+import { planAutonomousBacklogTurn, type AgenticRuntimeMode } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildProjectBacklogCycleDeps } from './autonomous-backlog-deps';
@@ -33,6 +33,13 @@ export interface RunProjectBacklogHostTurnInput {
   readonly signal: AbortSignal;
   /** Quando veio de um ato explícito, limita ESTA invocação ao item solicitado. */
   readonly requestedWorkItemId?: string;
+  /**
+   * Modo do laço do coder local. Ausente ⇒ `autonomous` (bounded) — é o que o Resident
+   * Host e a rota HTTP recebem. `supervised` (sem teto de rodadas de investigação;
+   * guarda de progresso + deadline) exige declaração EXPLÍCITA de um invocador
+   * acompanhado por humano e, por segurança, um `requestedWorkItemId`.
+   */
+  readonly coderRuntimeMode?: AgenticRuntimeMode;
 }
 
 /**
@@ -41,7 +48,13 @@ export interface RunProjectBacklogHostTurnInput {
  * resultado tipado do host-turn (continuation | wait | stop + moreWorkAvailable).
  */
 export function runProjectBacklogHostTurn(input: RunProjectBacklogHostTurnInput): Promise<BacklogHostTurnResult> {
-  const baseDeps = buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId);
+  // SUPERVISED nunca vale para a fila: só para UM item pedido explicitamente.
+  if (input.coderRuntimeMode === 'supervised' && !input.requestedWorkItemId) {
+    return Promise.reject(new Error('coderRuntimeMode=supervised exige requestedWorkItemId (nunca vale para a fila autônoma).'));
+  }
+  const baseDeps = input.coderRuntimeMode
+    ? buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId, { coderRuntimeMode: input.coderRuntimeMode })
+    : buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId);
   const deps = input.requestedWorkItemId ? {
     ...baseDeps,
     // Amarração ao item pedido, MAS preservando as dependências `completed`: a projeção pura

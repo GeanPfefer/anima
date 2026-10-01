@@ -9,7 +9,7 @@ import {
   type CoderTranscript,
 } from '@anima/core';
 import type { CoderWorkspace, WorkspaceExecResult, WorkspaceListResult, WorkspaceSearchResult } from './coder-backend';
-import { OllamaCoderBackend } from './ollama-coder';
+import { OllamaCoderBackend, normalizeVolatileOutput } from './ollama-coder';
 import { sha256 } from './ollama-protocol';
 
 function memoryWorkspace(initial: Record<string, string> = {}): CoderWorkspace & { files: Map<string, string> } {
@@ -529,7 +529,7 @@ describe('OllamaCoderBackend — comportamento agêntico do Coding Harness V3', 
   test('perfil remoto forte serve muitas leituras numa ÚNICA rodada sem deferir e sem falhar (correção do gargalo pago)', async () => {
     const workspace = memoryWorkspace({ 'docs/a.md': bigDoc });
     const { fetchImpl, sentBodies } = scriptedFetch([manyReads(12), editReq(bigSha)]);
-    const policy = resolveAgenticRuntimePolicy({ mode: 'supervised', profile: STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1 });
+    const policy = resolveAgenticRuntimePolicy({ mode: 'autonomous', profile: STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1 });
     const result = await new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: policy })
       .edit(request, workspace, new AbortController().signal);
     expect(result.touchedResources).toEqual(['docs/a.md']);
@@ -606,7 +606,7 @@ describe('OllamaCoderBackend — SEARCH host-side + READ amplo / WRITE estreito 
     objective: 'Usar SIMBOLO_X corretamente', includedScope: ['src/target.ts'], excludedScope: ['src/secret.ts'],
     workspaceAccessPolicy: policy,
   });
-  const strong = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 8 } });
+  const strong = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 8 } });
 
   test('SEARCH por símbolo FORA do write scope, READ do arquivo encontrado, e EDIT nele é RECUSADO (write fora do escopo)', async () => {
     const ws = searchableWorkspace(wsFiles());
@@ -732,7 +732,7 @@ describe('OllamaCoderBackend — EXEC/TEST/GIT governados + loop iterativo (V3, 
   const fixEdit = editFileAction('src/target.ts', sha256(initial), 'export const target = 1;', 'export const target = 1; // FIXED');
   const policy = supervisedWorkspaceAccessPolicy(['src/target.ts'], ['src/secret.ts']);
   const cmd = resolveCommandExecutionPolicy('supervised');
-  const runtime = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 12 } });
+  const runtime = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 12 } });
   const req = () => ({ objective: 'Corrigir', includedScope: ['src/target.ts'], excludedScope: ['src/secret.ts'], workspaceAccessPolicy: policy, commandPolicy: cmd });
   const backend = (fetchImpl: typeof fetch) => new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: runtime });
 
@@ -921,7 +921,7 @@ describe('OllamaCoderBackend — EXEC/TEST/GIT governados + loop iterativo (V3, 
 
   test('fixture 7143d697: edits no fim do budget não podem concluir implicitamente sem gate focal', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const strictRuntime = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 1 } });
+    const strictRuntime = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 1 } });
     const validationCommands = [{ label: 'gate focal', program: 'npm', args: ['test'] }] as const;
     const { fetchImpl } = scriptedFetch([
       readAction('src/target.ts', 'target'),
@@ -951,7 +951,7 @@ describe('OllamaCoderBackend — EXEC/TEST/GIT governados + loop iterativo (V3, 
 
   test('T1: READ→EDIT→submit prematuro recusado SEM consumir reserva→TEST→DIFF→SUBMIT válido', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const strict = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 1 } });
+    const strict = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 1 } });
     let captured: import('@anima/core').CoderTranscript | undefined;
     const { fetchImpl } = scriptedFetch([
       readAction('src/target.ts', 'target'),
@@ -1012,7 +1012,7 @@ describe('OllamaCoderBackend — EXEC/TEST/GIT governados + loop iterativo (V3, 
 
   test('T7: READ tardio após EDIT (orçamento esgotado) NÃO conclui sem provas', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const strict = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 1 } });
+    const strict = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 1 } });
     const { fetchImpl } = scriptedFetch([fixEdit, readAction('src/target.ts', 'target')]); // repete read após orçamento
     await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: strict })
       .edit({ ...req(), validationCommands: vcmd }, ws, new AbortController().signal))
@@ -1033,7 +1033,7 @@ describe('OllamaCoderBackend — EXEC/TEST/GIT governados + loop iterativo (V3, 
 
   test('T9: esgotamento total de rodadas produtivas sem provas → falha específica', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const strict = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 1 } });
+    const strict = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 1 } });
     const { fetchImpl } = scriptedFetch([fixEdit, execAction('git', ['status'])]); // status (não focal, não diff) repete
     await expect(new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: strict })
       .edit({ ...req(), validationCommands: vcmd }, ws, new AbortController().signal))
@@ -1071,7 +1071,7 @@ describe('OllamaCoderBackend — EXEC/TEST/GIT governados + loop iterativo (V3, 
 
   test('T12: perfil remoto forte garante caminho pós-edit suficiente (budget esgotado → EDIT→TEST→DIFF→SUBMIT)', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const strong = resolveAgenticRuntimePolicy({ mode: 'supervised', profile: STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1 });
+    const strong = resolveAgenticRuntimePolicy({ mode: 'autonomous', profile: STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1 });
     const reads = Array.from({ length: strong.maxReadRounds }, () => readAction('src/target.ts', 'target'));
     const { fetchImpl } = scriptedFetch([
       ...reads,                       // consome TODO o orçamento de leitura
@@ -1088,7 +1088,7 @@ describe('OllamaCoderBackend — observabilidade EXEC/TEST/GIT (V3, Parte A)', (
   const fixEdit = editFileAction('src/target.ts', sha256(initial), 'export const target = 1;', 'export const target = 1; // FIXED');
   const policy = supervisedWorkspaceAccessPolicy(['src/target.ts'], ['src/secret.ts']);
   const cmd = resolveCommandExecutionPolicy('supervised');
-  const runtime = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 12 } });
+  const runtime = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 12 } });
   const req = () => ({ objective: 'Corrigir', includedScope: ['src/target.ts'], excludedScope: ['src/secret.ts'], workspaceAccessPolicy: policy, commandPolicy: cmd });
   const backend = (fetchImpl: typeof fetch) => new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: runtime });
   const obs = (t?: CoderTranscript) => t?.commandObservations ?? [];
@@ -1190,7 +1190,7 @@ describe('OllamaCoderBackend — reserva pós-edit ANCORADA (V3, Parte B)', () =
     const ws = execWorkspace({ 'src/target.ts': initial });
     // maxReadRounds=2: 1 read + 1 search esgotam a exploração; o git diff seguinte é PRÉ-EDIT
     // com orçamento 0 → reorientado (não toca a reserva pós-edit).
-    const runtime2 = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 2 } });
+    const runtime2 = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 2 } });
     const { fetchImpl, sentBodies } = scriptedFetch([
       readAction('src/target.ts', 'target'),   // exploração 1/2
       searchAction('target'),                   // exploração 2/2 (orçamento esgotado)
@@ -1212,7 +1212,7 @@ describe('OllamaCoderBackend — reserva pós-edit ANCORADA (V3, Parte B)', () =
 
   test('B2: EDIT→TEST(vermelho)→EDIT→RETEST(verde)→DIFF→SUBMIT cabe na reserva', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const runtime = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 4 } });
+    const runtime = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 4 } });
     const { fetchImpl } = scriptedFetch([
       editToWip, execAction('npm', ['test']), editToFixed, execAction('npm', ['test']), execAction('git', ['diff']), submitAction(),
     ]);
@@ -1224,7 +1224,7 @@ describe('OllamaCoderBackend — reserva pós-edit ANCORADA (V3, Parte B)', () =
 
   test('B3: submits prematuros (inválidos) pós-edit não drenam a reserva; TEST→DIFF→SUBMIT ainda conclui', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const runtime = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 2 } });
+    const runtime = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 2 } });
     const { fetchImpl } = scriptedFetch([
       fixEdit, submitAction(), submitAction(), submitAction(),   // 3 submits prematuros (bloqueados, não consomem rodada)
       execAction('npm', ['test']), execAction('git', ['diff']), submitAction(),
@@ -1236,7 +1236,7 @@ describe('OllamaCoderBackend — reserva pós-edit ANCORADA (V3, Parte B)', () =
 
   test('B4: laço de ações inválidas pós-edit é BOUNDED e falha específico (não trava)', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const runtime = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 2 } });
+    const runtime = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 2 } });
     // Após a edição, só comandos recusados: reorientação bounded → conclui-ou-falha sem prova.
     const { fetchImpl } = scriptedFetch([
       fixEdit, execAction('curl', ['x']), execAction('curl', ['x']), execAction('curl', ['x']),
@@ -1249,7 +1249,7 @@ describe('OllamaCoderBackend — reserva pós-edit ANCORADA (V3, Parte B)', () =
 
   test('B5: tarefa SEM validationCommands preserva compat (submit disponível pós-edit)', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const runtime = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 3 } });
+    const runtime = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 3 } });
     const { fetchImpl } = scriptedFetch([fixEdit, submitAction()]);
     const result = await new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: runtime })
       .edit({ objective: 'x', includedScope: ['src/target.ts'], excludedScope: ['src/secret.ts'], workspaceAccessPolicy: policy, commandPolicy: cmd }, ws, new AbortController().signal);
@@ -1258,7 +1258,7 @@ describe('OllamaCoderBackend — reserva pós-edit ANCORADA (V3, Parte B)', () =
 
   test('B6: mesma lógica compartilhada (perfil REMOTO FORTE = OpenAI): reserva ancorada após exaurir leitura', async () => {
     const ws = execWorkspace({ 'src/target.ts': initial });
-    const strong = resolveAgenticRuntimePolicy({ mode: 'supervised', profile: STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1 });
+    const strong = resolveAgenticRuntimePolicy({ mode: 'autonomous', profile: STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1 });
     const reads = Array.from({ length: strong.maxReadRounds }, () => readAction('src/target.ts', 'target'));
     const { fetchImpl } = scriptedFetch([
       ...reads,                                 // exaure TODO o orçamento de leitura
@@ -1390,7 +1390,7 @@ describe('OllamaCoderBackend — revisão de diff de arquivos novos (untracked)'
   const route = 'app/api/novo/route.ts';
   const spec = 'app/api/novo/route.test.ts';
   const vcmd = [{ label: 'teste focal', program: 'npm', args: ['test'] }] as const;
-  const runtime = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 12 } });
+  const runtime = resolveAgenticRuntimePolicy({ mode: 'autonomous', overrides: { maxReadRounds: 12 } });
   const policy = supervisedWorkspaceAccessPolicy([route, spec], ['src/secret.ts']);
   const cmd = resolveCommandExecutionPolicy('supervised');
   const req = (onTranscript: (t: import('@anima/core').CoderTranscript) => void) => ({
@@ -1459,5 +1459,389 @@ describe('OllamaCoderBackend — revisão de diff de arquivos novos (untracked)'
     const events = captured?.runtimeEvents ?? [];
     expect(events.find(e => e.kind === 'git_diff')?.result).toBe('empty_diff');
     expect(events.map(e => e.kind)).not.toContain('submit_allowed');
+  });
+});
+
+describe('OllamaCoderBackend — SUPERVISED sem teto de rodadas × AUTONOMOUS bounded', () => {
+  const initial = 'export const target = 1;\n';
+  // Arquivos legíveis distintos: cada busca devolve um resultado NOVO (progresso real).
+  const extraFiles = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`src/dep${i}.ts`, `export const SYMBOL_${i} = ${i};\n`]));
+  const fixEdit = editFileAction('src/target.ts', sha256(initial), 'export const target = 1;', 'export const target = 1; // FIXED');
+  const policy = supervisedWorkspaceAccessPolicy(['src/target.ts'], []);
+  const cmd = resolveCommandExecutionPolicy('supervised');
+  const req = (over: Record<string, unknown> = {}) => ({ objective: 'Corrigir', includedScope: ['src/target.ts'], excludedScope: [], workspaceAccessPolicy: policy, commandPolicy: cmd, ...over });
+  const supervised = resolveAgenticRuntimePolicy({ mode: 'supervised' });
+  const backendWith = (fetchImpl: typeof fetch, agenticRuntimePolicy = supervised) => new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy });
+  const distinctSearches = (n: number) => Array.from({ length: n }, (_, i) => searchAction(`SYMBOL_${i}`));
+
+  test('causa do TPC-01 reproduzida: AUTONOMOUS (default local 3 rodadas) falha com ollama_read_round_limit ao seguir investigando', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial, ...extraFiles });
+    const { fetchImpl } = scriptedFetch([...distinctSearches(10), fixEdit, submitAction()]);
+    // Sem policy explícita ⇒ AUTONOMOUS local (8/3/40): 3 buscas servidas, 4 reorientações, terminal.
+    const backend = new OllamaCoderBackend({ model: 'x', fetchImpl });
+    await expect(backend.edit(req(), ws, new AbortController().signal)).rejects.toMatchObject({ code: 'ollama_read_round_limit' });
+    expect(ws.files.get('src/target.ts')).toBe(initial);
+  });
+
+  test('SUPERVISED: a MESMA investigação longa (10 buscas novas) continua e chega a edit → submit', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial, ...extraFiles });
+    const { fetchImpl, sentBodies } = scriptedFetch([...distinctSearches(10), fixEdit, submitAction()]);
+    const result = await backendWith(fetchImpl).edit(req(), ws, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['src/target.ts']);
+    expect(ws.files.get('src/target.ts')).toContain('FIXED');
+    expect(sentBodies).toHaveLength(12);
+    // O prompt anuncia a regra real (progresso + deadline), nunca "Infinity" nem "0 rodadas".
+    const last = sentBodies[10]!;
+    expect(last).toContain('Modo supervisionado: sem teto de rodadas');
+    expect(last).not.toContain('Infinity');
+    expect(last).not.toContain('0 rodadas de investigação restantes');
+  });
+
+  test('SUPERVISED: leituras além do teto autônomo de 40 leituras servidas continuam enquanto há trecho novo', async () => {
+    const big = Array.from({ length: 200 }, (_, i) => `linha ${i + 1}`).join('\n');
+    const ws = execWorkspace({ 'src/target.ts': initial, 'src/big.ts': big });
+    // 6 rodadas × 8 leituras distintas = 48 servidas (> 40 do perfil autônomo local).
+    const rounds = Array.from({ length: 6 }, (_, r) => JSON.stringify({ action: 'read', reads: Array.from({ length: 8 }, (_, k) => {
+      const start = r * 32 + k * 4 + 1;
+      return { path: 'src/big.ts', lineRange: [start, start + 1], maxLines: 2 };
+    }) }));
+    const { fetchImpl } = scriptedFetch([...rounds, fixEdit, submitAction()]);
+    const result = await backendWith(fetchImpl).edit(req(), ws, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['src/target.ts']);
+  });
+
+  test('SUPERVISED: guarda de PROGRESSO encerra busca idêntica repetida com ollama_no_progress (bounded)', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial, ...extraFiles });
+    const { fetchImpl, sentBodies } = scriptedFetch([searchAction('SYMBOL_1')]); // repete para sempre
+    await expect(backendWith(fetchImpl).edit(req(), ws, new AbortController().signal)).rejects.toMatchObject({ code: 'ollama_no_progress' });
+    // 1 busca nova + maxStagnantRounds repetidas.
+    expect(sentBodies).toHaveLength(1 + supervised.maxStagnantRounds);
+    expect(sentBodies[2]!).toContain('Rodada sem informação nova (1/');
+  });
+
+  test('SUPERVISED: leitura do MESMO trecho repetida também é falta de progresso, não limite de rodadas', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const { fetchImpl } = scriptedFetch([readAction('src/target.ts', 'target')]);
+    await expect(backendWith(fetchImpl).edit(req(), ws, new AbortController().signal)).rejects.toMatchObject({ code: 'ollama_no_progress' });
+  });
+
+  test('SUPERVISED: o mesmo comando na mesma revisão repetido não é progresso', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const { fetchImpl } = scriptedFetch([execAction('npm', ['test'])]);
+    await expect(backendWith(fetchImpl).edit(req(), ws, new AbortController().signal)).rejects.toMatchObject({ code: 'ollama_no_progress' });
+  });
+
+  test('SUPERVISED: ações INVÁLIDAS repetidas continuam bounded (comando recusado) e nunca viram read_round_limit', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const { fetchImpl, sentBodies } = scriptedFetch([execAction('curl', ['http://example.invalid'])]);
+    await expect(backendWith(fetchImpl).edit(req(), ws, new AbortController().signal)).rejects.toMatchObject({ code: 'ollama_no_progress' });
+    expect(sentBodies.length).toBeLessThanOrEqual(5);
+  });
+
+  test('DEADLINE GLOBAL: já vencido ⇒ ollama_timeout sem nenhuma chamada ao modelo', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const { fetchImpl, sentBodies } = scriptedFetch([searchAction('SYMBOL_1')]);
+    await expect(backendWith(fetchImpl).edit(req({ deadlineAtMs: Date.now() - 1 }), ws, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_timeout' });
+    expect(sentBodies).toHaveLength(0);
+  });
+
+  test('DEADLINE GLOBAL é a barreira final de uma investigação supervisionada que progride sem convergir', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial, ...extraFiles });
+    let calls = 0;
+    const deadlineAtMs = Date.now() + 60_000;
+    const base = scriptedFetch(distinctSearches(10)).fetchImpl;
+    const nowSpy = jest.spyOn(Date, 'now');
+    try {
+      const fetchImpl = (async (url: unknown, init: unknown) => {
+        calls += 1;
+        // Após 3 chamadas o relógio passa do deadline: a próxima rodada não começa.
+        if (calls === 3) nowSpy.mockReturnValue(deadlineAtMs + 1);
+        return (base as unknown as (u: unknown, i: unknown) => Promise<unknown>)(url, init);
+      }) as unknown as typeof fetch;
+      await expect(backendWith(fetchImpl).edit(req({ deadlineAtMs }), ws, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'ollama_timeout' });
+      expect(calls).toBe(3);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  test('SUPERVISED preserva validate-before-submit: submit sem teste verde + diff continua bloqueado', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const { fetchImpl } = scriptedFetch([fixEdit, submitAction()]);
+    const validationCommands = [{ label: 'focal', program: 'npm', args: ['test'] }];
+    await expect(backendWith(fetchImpl).edit(req({ validationCommands }), ws, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_invalid_response_schema' });
+  });
+
+  test('AUTONOMOUS mantém a reserva pós-edit bounded e não anuncia o modo supervisionado', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const autonomous = resolveAgenticRuntimePolicy({ mode: 'autonomous' });
+    const { fetchImpl, sentBodies } = scriptedFetch([fixEdit, execAction('git', ['status'])]);
+    const validationCommands = [{ label: 'focal', program: 'npm', args: ['test'] }];
+    await expect(backendWith(fetchImpl, autonomous).edit(req({ validationCommands }), ws, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ollama_submit_gate_unsatisfied' });
+    expect(sentBodies.length).toBeLessThanOrEqual(1 + autonomous.postEditRoundReserve + 2);
+    expect(sentBodies.join('\n')).not.toContain('Modo supervisionado');
+  });
+});
+
+describe('OllamaCoderBackend — DEADLINE GLOBAL como autoridade temporal e identidade de progresso', () => {
+  const initial = 'export const target = 1;\n';
+  const fixEdit = editFileAction('src/target.ts', sha256(initial), 'export const target = 1;', 'export const target = 1; // FIXED');
+  const policy = supervisedWorkspaceAccessPolicy(['src/target.ts'], []);
+  const cmd = resolveCommandExecutionPolicy('supervised');
+  const req = (over: Record<string, unknown> = {}) => ({ objective: 'Corrigir', includedScope: ['src/target.ts'], excludedScope: [], workspaceAccessPolicy: policy, commandPolicy: cmd, ...over });
+  const supervised = resolveAgenticRuntimePolicy({ mode: 'supervised' });
+  const backendWith = (fetchImpl: typeof fetch, agenticRuntimePolicy = supervised) => new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy });
+
+  /** Fetch roteirizado que, na chamada `expireAt` (1-based), termina DEPOIS do deadline. */
+  function expiringFetch(responses: readonly string[], deadlineAtMs: number, expireAt: number, nowSpy: jest.SpyInstance) {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      const content = responses[Math.min(calls - 1, responses.length - 1)] ?? '';
+      if (calls === expireAt) nowSpy.mockReturnValue(deadlineAtMs + 1);
+      return { ok: true, status: 200, json: async () => ({ message: { content }, prompt_eval_count: 100_000, eval_count: 50, done_reason: 'stop' }) };
+    }) as unknown as typeof fetch;
+    return { fetchImpl, calls: () => calls };
+  }
+
+  test('inferência iniciada antes e concluída DEPOIS do deadline não aplica a edição', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const deadlineAtMs = Date.now() + 60_000;
+    const nowSpy = jest.spyOn(Date, 'now');
+    try {
+      const f = expiringFetch([fixEdit], deadlineAtMs, 1, nowSpy);
+      await expect(backendWith(f.fetchImpl).edit(req({ deadlineAtMs }), ws, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'ollama_timeout' });
+      expect(ws.files.get('src/target.ts')).toBe(initial);
+    } finally { nowSpy.mockRestore(); }
+  });
+
+  test('submit devolvido DEPOIS do deadline não conclui normalmente: ollama_timeout terminal', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const deadlineAtMs = Date.now() + 60_000;
+    const nowSpy = jest.spyOn(Date, 'now');
+    try {
+      const f = expiringFetch([fixEdit, submitAction()], deadlineAtMs, 2, nowSpy);
+      await expect(backendWith(f.fetchImpl).edit(req({ deadlineAtMs }), ws, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'ollama_timeout' });
+    } finally { nowSpy.mockRestore(); }
+  });
+
+  test('reparo de schema NÃO começa depois do deadline', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const deadlineAtMs = Date.now() + 60_000;
+    const nowSpy = jest.spyOn(Date, 'now');
+    try {
+      const f = expiringFetch(['isto não é json'], deadlineAtMs, 1, nowSpy);
+      await expect(backendWith(f.fetchImpl).edit(req({ deadlineAtMs }), ws, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'ollama_timeout' });
+      expect(f.calls()).toBe(1);
+    } finally { nowSpy.mockRestore(); }
+  });
+
+  test('timeout da inferência é limitado ao tempo restante (min(timeoutMs, restante))', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    let receivedTimeout = -1;
+    const transport = async (input: { timeoutMs: number }) => { receivedTimeout = input.timeoutMs; return { content: fixEdit }; };
+    const backend = new OllamaCoderBackend({ model: 'x', timeoutMs: 120_000, agenticRuntimePolicy: supervised, protocolTransport: transport as never });
+    // Só a 1ª chamada importa; a edição não-exec encerra.
+    await backend.edit({ objective: 'x', includedScope: ['src/target.ts'], excludedScope: [], deadlineAtMs: Date.now() + 5_000 }, ws, new AbortController().signal);
+    expect(receivedTimeout).toBeGreaterThan(0);
+    expect(receivedTimeout).toBeLessThanOrEqual(5_000);
+  });
+
+  test('EXEC recebe timeout limitado ao restante e revalida o deadline depois', async () => {
+    const base = execWorkspace({ 'src/target.ts': initial });
+    let received = -1;
+    const ws: typeof base = { ...base, exec: async input => { received = input.timeoutMs ?? -1; return base.exec!(input, new AbortController().signal); } };
+    const { fetchImpl } = scriptedFetch([execAction('npm', ['test']), fixEdit, submitAction()]);
+    await backendWith(fetchImpl).edit(req({ deadlineAtMs: Date.now() + 3_000 }), ws, new AbortController().signal);
+    expect(received).toBeGreaterThan(0);
+    expect(received).toBeLessThanOrEqual(3_000);
+  });
+
+  test('timeout DEPOIS de edição aplicada continua ollama_timeout (nunca submit_gate_unsatisfied) e preserva o candidato', async () => {
+    const base = execWorkspace({ 'src/target.ts': initial });
+    const deadlineAtMs = Date.now() + 60_000;
+    const nowSpy = jest.spyOn(Date, 'now');
+    let transcript: CoderTranscript | undefined;
+    try {
+      // O teste focal termina depois do deadline (comando longo).
+      const ws: typeof base = { ...base, exec: async (input, s) => { const r = await base.exec!(input, s); nowSpy.mockReturnValue(deadlineAtMs + 1); return r; } };
+      const { fetchImpl } = scriptedFetch([fixEdit, execAction('npm', ['test'])]);
+      const validationCommands = [{ label: 'focal', program: 'npm', args: ['test'] }];
+      await expect(backendWith(fetchImpl).edit(req({ deadlineAtMs, validationCommands, onTranscript: (t: CoderTranscript) => { transcript = t; } }), ws, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'ollama_timeout' });
+      expect(ws.files.get('src/target.ts')).toContain('FIXED');
+      expect(transcript?.termination).toBe('ollama_timeout');
+    } finally { nowSpy.mockRestore(); }
+  });
+
+  test('mesmo EXEC na mesma revisão com stdout/exitCode DIFERENTE é progresso', async () => {
+    const base = execWorkspace({ 'src/target.ts': initial });
+    let n = 0;
+    const ws: typeof base = { ...base, exec: async () => { n += 1; return { exitCode: n % 2, stdout: `falhas restantes: ${10 - n}`, stderr: '', timedOut: false, durationMs: 5 }; } };
+    const { fetchImpl } = scriptedFetch([...Array.from({ length: 8 }, () => execAction('npm', ['test'])), fixEdit, submitAction()]);
+    const result = await backendWith(fetchImpl).edit(req(), ws, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['src/target.ts']);
+  });
+
+  test('mesmo EXEC com resultado semanticamente idêntico (só a telemetria do runner muda) é repetição', async () => {
+    const base = execWorkspace({ 'src/target.ts': initial });
+    let n = 0;
+    const ws: typeof base = { ...base, exec: async () => { n += 1; return { exitCode: 1, stdout: `FAIL src/a.test.ts (${n}.${n} s)\n  ✕ caso (${n * 7} ms)\n  Expected: 1\n  Received: 2\nTests: 1 failed\nTime:        ${n}.${n}${n} s, estimated ${n} s`, stderr: '', timedOut: false, durationMs: n }; } };
+    const { fetchImpl } = scriptedFetch([execAction('npm', ['test'])]);
+    await expect(backendWith(fetchImpl).edit(req(), ws, new AbortController().signal)).rejects.toMatchObject({ code: 'ollama_no_progress' });
+  });
+
+  test('mesmo EXEC cujo diagnóstico FUNCIONAL muda (Received com unidade) é progresso', async () => {
+    const base = execWorkspace({ 'src/target.ts': initial });
+    let n = 0;
+    const ws: typeof base = { ...base, exec: async () => { n += 1; return { exitCode: 1, stdout: `Expected: 100 ms\nReceived: ${n * 100} ms\nTime:        1.0 s`, stderr: '', timedOut: false, durationMs: 1 }; } };
+    const { fetchImpl } = scriptedFetch([...Array.from({ length: 8 }, () => execAction('npm', ['test'])), fixEdit, submitAction()]);
+    await expect(backendWith(fetchImpl).edit(req(), ws, new AbortController().signal)).resolves.toMatchObject({ touchedResources: ['src/target.ts'] });
+  });
+
+  test('READ de caminhos inexistentes DIFERENTES é progresso (descoberta negativa inédita)', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const missingReads = Array.from({ length: 8 }, (_, i) => JSON.stringify({ action: 'read', reads: [{ path: `src/missing${i}.ts`, lineRange: [1, 5], maxLines: 5 }] }));
+    const { fetchImpl } = scriptedFetch([...missingReads, fixEdit, submitAction()]);
+    const result = await backendWith(fetchImpl).edit(req(), ws, new AbortController().signal);
+    expect(result.touchedResources).toEqual(['src/target.ts']);
+  });
+
+  test('READ negativo IDÊNTICO repetido é estagnação', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const { fetchImpl } = scriptedFetch([JSON.stringify({ action: 'read', reads: [{ path: 'src/missing.ts', lineRange: [1, 5], maxLines: 5 }] })]);
+    await expect(backendWith(fetchImpl).edit(req(), ws, new AbortController().signal)).rejects.toMatchObject({ code: 'ollama_no_progress' });
+  });
+
+  test('buscas DIFERENTES sem resultado são progresso; a mesma busca vazia repetida é estagnação', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const empties = Array.from({ length: 8 }, (_, i) => searchAction(`INEXISTENTE_${i}`));
+    const ok = scriptedFetch([...empties, fixEdit, submitAction()]);
+    await expect(backendWith(ok.fetchImpl).edit(req(), ws, new AbortController().signal)).resolves.toMatchObject({ touchedResources: ['src/target.ts'] });
+    const ws2 = execWorkspace({ 'src/target.ts': initial });
+    const stuck = scriptedFetch([searchAction('INEXISTENTE_0')]);
+    await expect(backendWith(stuck.fetchImpl).edit(req(), ws2, new AbortController().signal)).rejects.toMatchObject({ code: 'ollama_no_progress' });
+  });
+
+  test('recusa de policy (caminho fora do workspace) NÃO é progresso, mesmo com caminhos diferentes', async () => {
+    const ws = execWorkspace({ 'src/target.ts': initial });
+    const refused = Array.from({ length: 8 }, (_, i) => JSON.stringify({ action: 'read', reads: [{ path: `../fora${i}.ts`, lineRange: [1, 5], maxLines: 5 }] }));
+    const { fetchImpl } = scriptedFetch([...refused, fixEdit, submitAction()]);
+    await expect(backendWith(fetchImpl).edit(req(), ws, new AbortController().signal)).rejects.toMatchObject({ code: 'ollama_no_progress' });
+    expect(ws.files.get('src/target.ts')).toBe(initial);
+  });
+});
+
+describe('normalizeVolatileOutput — só telemetria conhecida do runner, nunca dado funcional', () => {
+  test('telemetria volátil do Jest (Time:, duração de suíte e de caso) é normalizada', () => {
+    const a = normalizeVolatileOutput('PASS src/a.test.ts (4.2 s)\n  ✓ soma (5 ms)\nTests: 2 failed\nTime:        4.169 s, estimated 14 s');
+    const b = normalizeVolatileOutput('PASS src/a.test.ts (12.9 s)\n  ✓ soma (250 ms)\nTests: 2 failed\nTime:        9.001 s, estimated 9 s');
+    expect(a).toBe(b);
+  });
+
+  test('Received: 500 ms vs Received: 900 ms continuam DIFERENTES', () => {
+    expect(normalizeVolatileOutput('Expected: 100 ms\nReceived: 500 ms')).not.toBe(normalizeVolatileOutput('Expected: 100 ms\nReceived: 900 ms'));
+  });
+
+  test('timestamps funcionais diferentes continuam DIFERENTES', () => {
+    expect(normalizeVolatileOutput('Received: "2026-10-01T19:00:40.974Z"')).not.toBe(normalizeVolatileOutput('Received: "2026-10-02T01:02:03.000Z"'));
+    expect(normalizeVolatileOutput('expiresAt 12:00:01')).not.toBe(normalizeVolatileOutput('expiresAt 23:59:59'));
+  });
+
+  test('números com unidade em diffs/asserções/nomes de caso não são tocados fora do sufixo de duração', () => {
+    expect(normalizeVolatileOutput('-  timeout: 30 s\n+  timeout: 60 s')).toBe('-  timeout: 30 s\n+  timeout: 60 s');
+    expect(normalizeVolatileOutput('Time: depois do deploy')).toBe('Time: depois do deploy');
+    expect(normalizeVolatileOutput('  ✓ espera 5 ms (12 ms)')).toBe('  ✓ espera 5 ms');
+    expect(normalizeVolatileOutput('Tests: 2 failed')).not.toBe(normalizeVolatileOutput('Tests: 3 failed'));
+  });
+});
+
+describe('OllamaCoderBackend — deadline em escritas e buscas (rodada 3)', () => {
+  const initial = 'export const target = 1;\n';
+  const other = 'export const other = 1;\n';
+  const policy = supervisedWorkspaceAccessPolicy(['src/target.ts', 'src/other.ts'], []);
+  const cmd = resolveCommandExecutionPolicy('supervised');
+  const req = (over: Record<string, unknown> = {}) => ({ objective: 'Corrigir', includedScope: ['src/target.ts', 'src/other.ts'], excludedScope: [], workspaceAccessPolicy: policy, commandPolicy: cmd, ...over });
+  const supervised = resolveAgenticRuntimePolicy({ mode: 'supervised' });
+  const backendWith = (fetchImpl: typeof fetch) => new OllamaCoderBackend({ model: 'x', fetchImpl, agenticRuntimePolicy: supervised });
+  const twoFileEdit = JSON.stringify({ action: 'edit', operations: [
+    { kind: 'replace_exact', path: 'src/target.ts', expected_file_sha256: sha256(initial), before: 'export const target = 1;', after: 'export const target = 2;', expected_occurrences: 1 },
+    { kind: 'replace_exact', path: 'src/other.ts', expected_file_sha256: sha256(other), before: 'export const other = 1;', after: 'export const other = 2;', expected_occurrences: 1 },
+  ] });
+
+  test('deadline vencido ENTRE escritas do lote: a 2ª escrita não começa e a causa é ollama_timeout', async () => {
+    const base = execWorkspace({ 'src/target.ts': initial, 'src/other.ts': other });
+    const deadlineAtMs = Date.now() + 60_000;
+    const nowSpy = jest.spyOn(Date, 'now');
+    const writes: string[] = [];
+    try {
+      const ws: typeof base = { ...base, writeFile: async (path, content) => { writes.push(path); const ok = await base.writeFile(path, content); nowSpy.mockReturnValue(deadlineAtMs + 1); return ok; } };
+      const { fetchImpl } = scriptedFetch([twoFileEdit, submitAction()]);
+      await expect(backendWith(fetchImpl).edit(req({ deadlineAtMs }), ws, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'ollama_timeout' });
+      expect(writes).toEqual(['src/target.ts']);
+      // Escrita parcial anterior ao prazo fica como evidência local, nunca conclusão.
+      expect(ws.files.get('src/target.ts')).toContain('= 2');
+      expect(ws.files.get('src/other.ts')).toBe(other);
+    } finally { nowSpy.mockRestore(); }
+  });
+
+  test('o mesmo vale para o caminho NÃO-exec (edição terminal)', async () => {
+    const files = new Map([['src/target.ts', initial], ['src/other.ts', other]]);
+    const deadlineAtMs = Date.now() + 60_000;
+    const nowSpy = jest.spyOn(Date, 'now');
+    const writes: string[] = [];
+    try {
+      const ws: CoderWorkspace = {
+        readFile: async path => files.get(path) ?? null,
+        writeFile: async (path, content) => { writes.push(path); files.set(path, content); nowSpy.mockReturnValue(deadlineAtMs + 1); return true; },
+      };
+      const { fetchImpl } = scriptedFetch([twoFileEdit]);
+      await expect(backendWith(fetchImpl).edit({ objective: 'x', includedScope: ['src/target.ts', 'src/other.ts'], excludedScope: [], deadlineAtMs }, ws, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'ollama_timeout' });
+      expect(writes).toEqual(['src/target.ts']);
+    } finally { nowSpy.mockRestore(); }
+  });
+
+  test('search/glob recebem timeout host-side <= restante (nunca do modelo)', async () => {
+    const base = execWorkspace({ 'src/target.ts': initial, 'src/other.ts': other });
+    const received: { search?: number; list?: number } = {};
+    const ws: CoderWorkspace = { ...base,
+      search: async (input, s, host) => { received.search = host?.timeoutMs; return base.search!(input, s); },
+      list: async () => { received.list = 1; return { paths: ['src/target.ts'], truncated: false }; },
+    };
+    const wsWithList: CoderWorkspace = { ...ws, list: async (_input, _s, host) => { received.list = host?.timeoutMs; return { paths: ['src/target.ts'], truncated: false }; } };
+    const fix = editFileAction('src/target.ts', sha256(initial), 'export const target = 1;', 'export const target = 3;');
+    // O modelo tenta passar timeoutMs: é ignorado (o host decide).
+    const search = JSON.stringify({ action: 'search', query: 'target', maxResults: 5, timeoutMs: 999_999 });
+    const glob = JSON.stringify({ action: 'glob', pattern: 'src/**', maxResults: 5, timeoutMs: 999_999 });
+    const { fetchImpl } = scriptedFetch([search, glob, fix, submitAction()]);
+    await backendWith(fetchImpl).edit(req({ deadlineAtMs: Date.now() + 3_000 }), wsWithList, new AbortController().signal);
+    expect(received.search).toBeGreaterThan(0);
+    expect(received.search).toBeLessThanOrEqual(3_000);
+    expect(received.list).toBeGreaterThan(0);
+    expect(received.list).toBeLessThanOrEqual(3_000);
+  });
+
+  test('search não inicia após o deadline; resultado que chega depois do prazo não é usado', async () => {
+    const base = execWorkspace({ 'src/target.ts': initial, 'src/other.ts': other });
+    const deadlineAtMs = Date.now() + 60_000;
+    const nowSpy = jest.spyOn(Date, 'now');
+    let searches = 0;
+    try {
+      const ws: CoderWorkspace = { ...base, search: async (input, s) => { searches += 1; const r = await base.search!(input, s); nowSpy.mockReturnValue(deadlineAtMs + 1); return r; } };
+      const { fetchImpl, sentBodies } = scriptedFetch([searchAction('target'), searchAction('other')]);
+      await expect(backendWith(fetchImpl).edit(req({ deadlineAtMs }), ws, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'ollama_timeout' });
+      expect(searches).toBe(1);
+      expect(sentBodies).toHaveLength(1);
+    } finally { nowSpy.mockRestore(); }
   });
 });

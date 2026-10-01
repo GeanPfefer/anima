@@ -112,6 +112,28 @@ describe('ollama-protocol — Commit 1: orçamento e diagnóstico', () => {
     expect(r.meta).toEqual({ promptEvalCount: 123, evalCount: 45, doneReason: 'stop' });
   });
 
+  test('o timeout cobre o CORPO: headers chegam e response.json() trava ⇒ ollama_timeout dentro do prazo', async () => {
+    const stalledBody = (async () => ({ ok: true, status: 200, json: () => new Promise(() => { /* nunca resolve */ }) })) as unknown as typeof fetch;
+    const started = Date.now();
+    await expect(callOllamaChat({ ...baseCall(stalledBody), timeoutMs: 50 })).rejects.toMatchObject({ code: 'ollama_timeout' });
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  test('cancelamento do chamador durante o corpo encerra a leitura (não vira timeout nem sucesso)', async () => {
+    const controller = new AbortController();
+    const stalledBody = (async () => {
+      setTimeout(() => controller.abort(), 10);
+      return { ok: true, status: 200, json: () => new Promise(() => { /* nunca resolve */ }) };
+    }) as unknown as typeof fetch;
+    await expect(callOllamaChat({ ...baseCall(stalledBody), timeoutMs: 60_000, signal: controller.signal }))
+      .rejects.toMatchObject({ code: 'ollama_transport_error' });
+  });
+
+  test('corpo não-JSON dentro do prazo continua sendo conteúdo vazio (comportamento histórico)', async () => {
+    const badJson = (async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('x'); } })) as unknown as typeof fetch;
+    await expect(callOllamaChat(baseCall(badJson))).resolves.toMatchObject({ content: '' });
+  });
+
   test('resposta não-ok do servidor vira ollama_transport_error', async () => {
     const call = baseCall((async () => ({ ok: false, status: 503, json: async () => ({}) })) as unknown as typeof fetch);
     await expect(callOllamaChat(call)).rejects.toMatchObject({ code: 'ollama_transport_error' });

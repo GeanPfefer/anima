@@ -2,6 +2,7 @@
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ScriptedCoderBackend } from './coder-backend';
+import type { OllamaCoderBackend } from './ollama-coder';
 import { isAnimaProjectRoot, needsAnimaWebTypegen, prepareAnimaValidation, projectRoot, readExecutionContract, resolveExecutorRoute, type ExecutionContract, resolveAnimaNextCli } from './executor-selection';
 
 const SHA = 'a'.repeat(40);
@@ -70,6 +71,45 @@ describe('projectRoot — independente do cwd', () => {
     const selection = resolveExecutorRoute(anima);
     expect(selection.ok).toBe(false);
     if (!selection.ok) expect(selection.error.code).toBe('project_root_invalid');
+  });
+});
+
+describe('resolveExecutorRoute — modo do laço do coder local (SUPERVISED × AUTONOMOUS)', () => {
+  const coderOf = (selection: ReturnType<typeof resolveExecutorRoute>): OllamaCoderBackend => {
+    if (!selection.ok) throw new Error(selection.error.message);
+    return (selection.route.adapter as unknown as { options: { backend: OllamaCoderBackend } }).options.backend;
+  };
+
+  test('sem declaração ⇒ AUTONOMOUS bounded (fail-closed; Resident Host e fila)', () => {
+    const policy = coderOf(resolveExecutorRoute(anima, { repoRoot: REPO_ROOT })).agenticRuntimePolicy;
+    expect(policy.mode).toBe('autonomous');
+    expect(policy.maxReadRounds).toBe(3);
+    expect(Number.isFinite(policy.maxTotalServedReads)).toBe(true);
+  });
+
+  test('ANIMA_LOCAL_CODER_CONTEXT_LENGTH ajusta só o num_ctx do coder LOCAL; inválido falha fechado', () => {
+    const saved = process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH;
+    try {
+      delete process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH;
+      expect(coderOf(resolveExecutorRoute(anima, { repoRoot: REPO_ROOT })).contextBudget.numCtx).toBe(8192);
+      process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH = '16384';
+      const budget = coderOf(resolveExecutorRoute(anima, { repoRoot: REPO_ROOT })).contextBudget;
+      expect(budget.numCtx).toBe(16384);
+      expect(budget.outputReserveTokens).toBe(1536);
+      process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH = 'muito';
+      const invalid = resolveExecutorRoute(anima, { repoRoot: REPO_ROOT });
+      expect(invalid.ok).toBe(false);
+      if (!invalid.ok) expect(invalid.error.code).toBe('coder_backend_invalid');
+    } finally {
+      if (saved === undefined) delete process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH; else process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH = saved;
+    }
+  });
+
+  test('SUPERVISED declarado ⇒ coder local sem teto de rodadas, com guarda de progresso', () => {
+    const policy = coderOf(resolveExecutorRoute(anima, { repoRoot: REPO_ROOT, coderRuntimeMode: 'supervised' })).agenticRuntimePolicy;
+    expect(policy.mode).toBe('supervised');
+    expect(policy.maxReadRounds).toBe(Number.POSITIVE_INFINITY);
+    expect(Number.isFinite(policy.maxStagnantRounds)).toBe(true);
   });
 });
 

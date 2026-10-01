@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +18,7 @@ import {
   type WorktreeHandoffV1,
 } from '@anima/core';
 import { GitWorktree, runProcess } from './worktree';
+import { prepareAnimaValidation } from './executor-selection';
 import { ScriptedCoderBackend, withCoderFailureUsage, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { WorktreeExecutorAdapter, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, verifyGateTargetScope, type WorktreeTargetResolver } from './worktree-executor';
@@ -85,6 +86,24 @@ test('transcript survives backend failure through the host observation channel',
     expect(signals.at(-1)?.kind).toBe('error');
     expect(observations).toHaveLength(1);
     expect(observations[0]).toMatchObject({ outcome: 'failed', transcripts: [{ termination: 'ollama_ambiguous_replacement' }] });
+  } finally { await ctx.cleanup(); }
+});
+
+// Deadline GLOBAL da tentativa: o coder recebe um instante absoluto ancorado no INÍCIO da
+// execução (contrato maxDurationMinutes), não um relógio que reinicia a cada chamada/reparo.
+test('o coder recebe deadlineAtMs absoluto do contrato, ancorado no início da tentativa', async () => {
+  const ctx = await makeNpmRepo();
+  let received: number | undefined;
+  const before = Date.now();
+  try {
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      backend: { id: 'fixture', edit: async req => { received = req.deadlineAtMs; throw new Error('fixture stop'); } },
+    });
+    const req = request();
+    await collect(adapter, req, new AbortController().signal);
+    const budgetMs = (req.limits.maxDurationMinutes ?? 30) * 60_000;
+    expect(received).toBeGreaterThanOrEqual(before + budgetMs);
+    expect(received).toBeLessThanOrEqual(Date.now() + budgetMs);
   } finally { await ctx.cleanup(); }
 });
 
@@ -1347,5 +1366,196 @@ describe('isGateFailureEligibleForCoderRepair', () => {
     expect(isGateFailureEligibleForCoderRepair({ exitCode: 1, timedOut: false, cancelled: true })).toBe(false);
     expect(isGateFailureEligibleForCoderRepair({ exitCode: 1, timedOut: false, cancelled: false, diagnostic: 'apps/web/.next/types/routes.d.ts ausente' })).toBe(false);
     expect(isGateFailureEligibleForCoderRepair({ exitCode: 1, timedOut: false, cancelled: false, diagnostic: 'ECONNREFUSED 127.0.0.1' })).toBe(false);
+  });
+});
+
+// DEADLINE GLOBAL da tentativa: baseline, coder, repair e gates compartilham o MESMO
+// relógio. O relógio é deslocado (Date.now) a partir de dentro da tentativa para provar
+// cada fronteira sem esperar minutos reais.
+describe('WorktreeExecutorAdapter — deadline global como autoridade temporal', () => {
+  let ctx: Awaited<ReturnType<typeof makeNpmRepo>>;
+  beforeAll(async () => { ctx = await makeNpmRepo(); });
+  afterAll(async () => { await ctx.cleanup(); });
+
+  const realNow = Date.now.bind(Date);
+  let offset = 0;
+  let nowSpy: jest.SpyInstance;
+  beforeEach(() => { offset = 0; nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => realNow() + offset); });
+  afterEach(() => nowSpy.mockRestore());
+
+  const lastError = (signals: readonly WorkExecutorSignal[]) => {
+    const last = signals.at(-1)!;
+    expect(last.kind).toBe('error');
+    return last.kind === 'error' ? last : null;
+  };
+  const writeAdded = async (workspace: CoderWorkspace, content = 'export const two = 2;\n') => {
+    await workspace.writeFile('src/added.ts', content);
+    return { summary: 'ok', touchedResources: ['src/added.ts'] };
+  };
+
+  test('coder que retorna DEPOIS do deadline não segue para gates: runner_timeout + candidato preservado', async () => {
+    const gates: ObservedGateInput[] = [];
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, onGateObserved: g => { gates.push(g); },
+      backend: { id: 'slow', edit: async (req, workspace) => { const r = await writeAdded(workspace); offset = req.deadlineAtMs! - realNow() + 1; return r; } } });
+    const error = lastError(await collect(adapter, request(), new AbortController().signal));
+    expect(error?.message).toContain('[runner_timeout]');
+    expect(error?.message).toContain('após o coder');
+    expect(error?.retryable).toBe(false);
+    expect(gates).toHaveLength(0);
+    const sha = /commit ([0-9a-f]{40})/.exec(error?.message ?? '')?.[1];
+    expect(sha).toBeDefined();
+    const shown = await git(ctx.repo, ['show', '--name-only', '--format=%s', sha!]);
+    expect(shown.stdout).toContain('src/added.ts');
+    expect(decideRecovery({ code: error!.code, safeMessage: error!.message, retryable: false, attemptsUsed: 1, maxAttempts: 1, repeatedSameFailure: false }).failureKind).toBe('timeout');
+  });
+
+  test('gate final recebe só o tempo RESTANTE: gate lento é cortado e a tentativa termina em runner_timeout', async () => {
+    const slow = await makeNpmRepo();
+    try {
+      // typecheck dorme 20 s; o restante no início dos gates é ~1,5 s.
+      const pkg = JSON.parse(await readFile(join(slow.repo, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
+      pkg.scripts.typecheck = 'node -e "setTimeout(() => {}, 20000)"';
+      await writeFile(join(slow.repo, 'package.json'), JSON.stringify(pkg, null, 2));
+      await git(slow.repo, ['commit', '-am', 'slow typecheck']);
+      const sha = (await git(slow.repo, ['rev-parse', 'HEAD'])).stdout.trim();
+      const gates: ObservedGateInput[] = [];
+      const adapter = new WorktreeExecutorAdapter({
+        targets: { resolve: reference => reference === 'anima' ? { repoRoot: slow.repo, sha } : null },
+        onGateObserved: g => { gates.push(g); },
+        backend: { id: 'fast', edit: async (req, workspace) => { const r = await writeAdded(workspace); offset = req.deadlineAtMs! - realNow() - 1_500; return r; } },
+      });
+      const started = realNow();
+      const error = lastError(await collect(adapter, request({ validationCriteria: [{ label: 'tc', command: 'npm run typecheck' }] }), new AbortController().signal));
+      expect(realNow() - started).toBeLessThan(15_000);
+      expect(gates[0]?.timedOut).toBe(true);
+      expect(error?.message).toContain('[runner_timeout]');
+      expect(error?.message).not.toContain('[gate_failed]');
+    } finally { await slow.cleanup(); }
+  });
+
+  test('REPAIR não começa depois do deadline (gate falhou e o tempo acabou durante ele)', async () => {
+    let edits = 0;
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver, gateRetryLimit: 1,
+      // O gate observado "consome" o resto do prazo.
+      onGateObserved: () => { offset = 10 * 60_000; },
+      backend: { id: 'needs-repair', edit: async (_req, workspace) => { edits += 1; return writeAdded(workspace, 'export const broken = 1;\n'); } } });
+    const error = lastError(await collect(adapter, request({ validationCriteria: [{ label: 'retry', command: 'npm test -- retry' }] }), new AbortController().signal));
+    expect(edits).toBe(1);
+    expect(error?.message).toContain('[runner_timeout]');
+    expect(error?.message).toContain('após os gates');
+  });
+
+  test('timeout do CODER depois de editar mantém [ollama_timeout] e preserva o candidato', async () => {
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      backend: { id: 'coder-timeout', edit: async (_req, workspace) => {
+        await writeAdded(workspace);
+        throw new Error('[ollama_timeout] deadline global da tentativa atingido após executar comando.');
+      } } });
+    const error = lastError(await collect(adapter, request(), new AbortController().signal));
+    expect(error?.message).toContain('[ollama_timeout]');
+    expect(error?.message).toMatch(/Candidato preservado no commit [0-9a-f]{40}/);
+    expect(decideRecovery({ code: error!.code, safeMessage: error!.message, retryable: false, attemptsUsed: 1, maxAttempts: 1, repeatedSameFailure: false }).failureKind).toBe('timeout');
+  });
+
+  test('deadline já vencido antes do coder: zero chamadas ao backend', async () => {
+    let edits = 0;
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      prepareValidation: async () => { offset = 10 * 60_000; },
+      backend: { id: 'never', edit: async () => { edits += 1; return { summary: '', touchedResources: [] }; } } });
+    const error = lastError(await collect(adapter, request(), new AbortController().signal));
+    expect(edits).toBe(0);
+    expect(error?.message).toContain('[runner_timeout]');
+  });
+});
+
+describe('WorktreeExecutorAdapter — deadline: preparação e result (rodada 3)', () => {
+  let ctx: Awaited<ReturnType<typeof makeNpmRepo>>;
+  beforeAll(async () => { ctx = await makeNpmRepo(); });
+  afterAll(async () => { await ctx.cleanup(); });
+
+  const realNow = Date.now.bind(Date);
+  let offset = 0;
+  let nowSpy: jest.SpyInstance;
+  beforeEach(() => { offset = 0; nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => realNow() + offset); });
+  afterEach(() => nowSpy.mockRestore());
+  const writeAdded = async (workspace: CoderWorkspace) => {
+    await workspace.writeFile('src/added.ts', 'export const two = 2;\n');
+    return { summary: 'ok', touchedResources: ['src/added.ts'] };
+  };
+
+  test('prepareValidation recebe o tempo RESTANTE (não 120 s fixos)', async () => {
+    const received: number[] = [];
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      prepareValidation: async input => { received.push(input.timeoutMs); },
+      backend: { id: 'ok', edit: async (_req, workspace) => writeAdded(workspace) } });
+    await collect(adapter, request({ limits: { maxDurationMinutes: 1 } }), new AbortController().signal);
+    expect(received.length).toBeGreaterThanOrEqual(2);
+    for (const value of received) { expect(value).toBeGreaterThan(0); expect(value).toBeLessThanOrEqual(60_000); }
+  });
+
+  test('prepareAnimaValidation usa min(120 s, restante) e não inicia sem tempo', async () => {
+    const runs: number[] = [];
+    const deps = { resolveNextCli: () => 'next', run: (async (_f: string, _a: readonly string[], o: { timeoutMs: number }) => { runs.push(o.timeoutMs); return { command: '', exitCode: 0, stdout: '', stderr: '', durationMs: 1, timedOut: false, cancelled: false }; }) as never };
+    const criteria = [{ label: 'tc', command: 'npm run typecheck --workspace=apps/web' }];
+    await prepareAnimaValidation({ rootPath: ctx.repo, validationCriteria: criteria, signal: new AbortController().signal, timeoutMs: 4_000 }, deps);
+    await prepareAnimaValidation({ rootPath: ctx.repo, validationCriteria: criteria, signal: new AbortController().signal, timeoutMs: 999_999 }, deps);
+    expect(runs).toEqual([4_000, 120_000]);
+    await expect(prepareAnimaValidation({ rootPath: ctx.repo, validationCriteria: criteria, signal: new AbortController().signal, timeoutMs: 0 }, deps)).rejects.toThrow('deadline');
+    expect(runs).toHaveLength(2);
+  });
+
+  test('preparação que atravessa o prazo vira [runner_timeout], nunca erro genérico, e o coder não roda', async () => {
+    let edits = 0;
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      prepareValidation: async () => { offset = 10 * 60_000; throw new Error('typegen morto pelo timeout'); },
+      backend: { id: 'never', edit: async () => { edits += 1; return { summary: '', touchedResources: [] }; } } });
+    const signals = await collect(adapter, request(), new AbortController().signal);
+    const last = signals.at(-1)!;
+    expect(last.kind).toBe('error');
+    if (last.kind === 'error') {
+      expect(last.message).toContain('[runner_timeout]');
+      expect(last.message).not.toContain('Falha ao preparar');
+    }
+    expect(edits).toBe(0);
+  });
+
+  test('preparação NÃO inicia com o prazo já vencido (antes dos gates)', async () => {
+    let preparations = 0;
+    // O prazo vence DEPOIS da checagem pós-coder e antes da preparação dos gates.
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      prepareValidation: async () => { preparations += 1; },
+      onChangeAuthorizationObserved: () => { offset = 10 * 60_000; },
+      backend: { id: 'ok', edit: async (_req, workspace) => writeAdded(workspace) } });
+    const signals = await collect(adapter, request(), new AbortController().signal);
+    expect(preparations).toBe(1); // só a do coder; a dos gates não começa
+    const last = signals.at(-1)!;
+    expect(last.kind).toBe('error');
+    if (last.kind === 'error') expect(last.message).toContain('antes de preparar os gates');
+  });
+
+  test('commit final que termina DEPOIS do deadline: sem result, sem handoff; commit só como evidência', async () => {
+    const gates: ObservedGateInput[] = [];
+    const adapter = new WorktreeExecutorAdapter({ targets: ctx.resolver,
+      onGateObserved: g => { gates.push(g); },
+      backend: { id: 'ok', edit: async (_req, workspace) => writeAdded(workspace) } });
+    // O commit é a próxima operação após o último gate observado: o relógio vence durante ela.
+    const commitSpy = jest.spyOn(GitWorktree.prototype, 'commit');
+    commitSpy.mockImplementation(async function (this: GitWorktree, ...args: Parameters<GitWorktree['commit']>) {
+      commitSpy.mockRestore();
+      const sha = await GitWorktree.prototype.commit.apply(this, args);
+      offset = 10 * 60_000;
+      return sha;
+    });
+    try {
+      const signals = await collect(adapter, request(), new AbortController().signal);
+      expect(gates.length).toBeGreaterThan(0);
+      expect(signals.some(s => s.kind === 'result')).toBe(false);
+      const last = signals.at(-1)!;
+      expect(last.kind).toBe('error');
+      if (last.kind === 'error') {
+        expect(last.message).toContain('[runner_timeout]');
+        expect(last.message).toMatch(/após o commit final\. Candidato preservado no commit [0-9a-f]{40}/);
+      }
+    } finally { commitSpy.mockRestore(); }
   });
 });

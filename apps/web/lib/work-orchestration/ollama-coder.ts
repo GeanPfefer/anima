@@ -88,14 +88,15 @@ export interface OllamaCoderOptions {
   /**
    * Rodadas máximas de leitura antes de exigir edição. LEGADO: quando
    * `agenticRuntimePolicy` está presente, ela tem precedência. Preservado para os
-   * callers históricos e testes que só ajustam as rodadas.
+   * callers históricos e testes que só ajustam as rodadas (modo AUTONOMOUS).
    */
   readonly maxReadRounds?: number;
   /**
    * Política do laço agêntico (Coding Harness V3): orçamento de leituras servidas
-   * por rodada, rodadas máximas e teto de leituras por sessão. Ausente ⇒ um perfil
-   * local conservador (comportamento numérico histórico) é resolvido a partir do
-   * `maxReadRounds` legado. Um backend forte (ex.: OpenAI) injeta o perfil remoto
+   * por rodada, rodadas máximas e teto de leituras por sessão. Ausente ⇒ perfil
+   * local conservador em modo AUTONOMOUS (comportamento numérico histórico),
+   * resolvido a partir do `maxReadRounds` legado. SUPERVISED só por declaração
+   * explícita do invocador (sem contadores de investigação; guarda de progresso). Um backend forte (ex.: OpenAI) injeta o perfil remoto
    * forte, que amplia o orçamento por rodada e as rodadas — a correção do gargalo
    * que reprovava o modelo forte por pedir muitas leituras de uma vez.
    */
@@ -174,6 +175,9 @@ const EXEC_SYSTEM = [
   'ENCERRAR: quando o host anunciar {"action":"submit"} entre as ações permitidas, responda-o para entregar ao host (que roda os gates autoritativos). Os gates finais do host são independentes — seu teste local é observação, não o veredito final.',
 ].join('\n');
 
+/** Teto host-side de uma busca/listagem no workspace (git grep / ls-files). */
+const WORKSPACE_LOOKUP_TIMEOUT_MS = 15_000;
+
 const commandKey = (program: string, args: readonly string[]): string => `${program.toLowerCase()}\0${args.join('\0')}`;
 
 /** Erros de edição RECUPERÁVEIS no modo iterativo (exec): recolocados ao modelo como
@@ -187,14 +191,10 @@ const RECOVERABLE_EDIT_CODES = new Set([
 ]);
 const MAX_EDIT_FEEDBACKS = 4;
 
-/**
- * Reserva de rodadas PRODUTIVAS pós-investigação, exclusiva do modo exec (V3). É o
- * caminho estrutural EDIT → TEST → DIFF → SUBMIT: garante rodadas suficientes DEPOIS
- * do orçamento de leitura para validar e revisar a edição (EDIT→TEST→DIFF são ~3
- * rodadas; um reparo simples ~5). Preserva o número já usado pelo perfil histórico; a
- * correção estrutural do V3 é que ações INVÁLIDAS para o estado (submit prematuro,
- * leitura após orçamento) NÃO consomem esta reserva. */
-const POST_EDIT_EXEC_ROUND_RESERVE = 8;
+// Reserva de rodadas PRODUTIVAS pós-investigação (modo exec): vem da política
+// (`postEditRoundReserve`; 8 em AUTONOMOUS, sem teto em SUPERVISED). É o caminho
+// estrutural EDIT → TEST → DIFF → SUBMIT; ações INVÁLIDAS para o estado (submit
+// prematuro, leitura após orçamento) NÃO consomem esta reserva.
 
 const EXPERIMENTAL_ANCHOR_SYSTEM = [
   'EXPERIMENTO R2 OPT-IN: o host pode anunciar anchors efemeros de trechos que ja foram servidos.',
@@ -217,6 +217,27 @@ const EXPERIMENTAL_ANCHOR_AFTER_SCOPE_GUIDANCE = [
 
 const clip = (value: string, max: number): string => (value.length <= max ? value : `${value.slice(0, max)}…`);
 
+/**
+ * Normaliza SOMENTE telemetria reconhecível de test runner (Jest) que varia entre
+ * execuções idênticas, para a identidade de progresso de um EXEC:
+ *   • linha-resumo `Time:        4.169 s, estimated 14 s`;
+ *   • sufixo de duração de suíte `PASS|FAIL caminho (12.3 s)`;
+ *   • sufixo de duração de caso `✓|✕ nome (5 ms)`.
+ * Nada mais é tocado: números com unidade em `Expected`/`Received`, diffs, asserções
+ * e timestamps em valores funcionais permanecem — preferimos algum falso progresso a
+ * apagar diferença funcional real. A observação mostrada ao modelo e o transcript
+ * ficam intactos (isto só alimenta o fingerprint).
+ */
+export function normalizeVolatileOutput(output: string): string {
+  return output
+    .split('\n')
+    .map(line => line
+      .replace(/^(\s*Time:\s+)\d+(?:\.\d+)?\s*m?s\b.*$/, '$1<duration>')
+      .replace(/^(\s*(?:PASS|FAIL)\s+\S.*?)\s+\(\d+(?:\.\d+)?\s*m?s\)\s*$/, '$1')
+      .replace(/^(\s*[✓✕√×]\s.*?)\s+\(\d+(?:\.\d+)?\s*m?s\)\s*$/, '$1'))
+    .join('\n');
+}
+
 export class OllamaCoderBackend implements CoderBackend {
   readonly id: string;
   readonly observation: NonNullable<CoderBackend['observation']>;
@@ -227,6 +248,8 @@ export class OllamaCoderBackend implements CoderBackend {
   private readonly maxReadRounds: number;
   private readonly readServingBudget: number;
   private readonly maxTotalServedReads: number;
+  private readonly postEditRoundReserve: number;
+  private readonly maxStagnantRounds: number;
   private readonly budget: ContextBudget;
   private readonly providerLabel: string;
 
@@ -244,10 +267,11 @@ export class OllamaCoderBackend implements CoderBackend {
     // Coding Harness V3: as fronteiras do laço vêm de uma política resolvida e
     // clampada no core. Precedência: policy explícita > `maxReadRounds` legado >
     // perfil local conservador. `resolveAgenticRuntimePolicy` garante valores sãos
-    // (nunca um orçamento inválido) e a invariante `total >= por-rodada`.
+    // (nunca um orçamento inválido) e a invariante `total >= por-rodada`. Sem policy
+    // explícita o modo é AUTONOMOUS (bounded): SUPERVISED nunca é implícito.
     this.runtimePolicy = options.agenticRuntimePolicy
       ?? resolveAgenticRuntimePolicy({
-        mode: 'supervised',
+        mode: 'autonomous',
         ...(options.maxReadRounds !== undefined
           ? { overrides: { maxReadRounds: options.maxReadRounds } }
           : {}),
@@ -255,6 +279,8 @@ export class OllamaCoderBackend implements CoderBackend {
     this.maxReadRounds = this.runtimePolicy.maxReadRounds;
     this.readServingBudget = this.runtimePolicy.readServingBudgetPerRound;
     this.maxTotalServedReads = this.runtimePolicy.maxTotalServedReads;
+    this.postEditRoundReserve = this.runtimePolicy.postEditRoundReserve;
+    this.maxStagnantRounds = this.runtimePolicy.maxStagnantRounds;
     this.providerLabel = options.providerLabel ?? `Ollama ${options.model}`;
     this.budget = resolveContextBudget({
       declaredContextLength: options.declaredContextLength ?? null,
@@ -268,6 +294,10 @@ export class OllamaCoderBackend implements CoderBackend {
    * resolvido no construtor. Exposto para observabilidade host-side e prova; permanece
    * bounded — nunca cresce além do teto operacional selecionado. */
   get contextBudget(): ContextBudget { return this.budget; }
+
+  /** Política EFETIVA do laço agêntico (modo SUPERVISED/AUTONOMOUS e fronteiras),
+   * exposta para observabilidade host-side e prova da fiação do modo. */
+  get agenticRuntimePolicy(): AgenticRuntimePolicyV1 { return this.runtimePolicy; }
 
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
     const transcript = new OllamaTranscript(request.hostValidationFeedback);
@@ -404,12 +434,37 @@ export class OllamaCoderBackend implements CoderBackend {
     let submitFeedbacks = 0;
     const MAX_SUBMIT_FEEDBACKS = 4;
     let editFeedbacks = 0;
+    // DEADLINE GLOBAL da tentativa (autoridade temporal). Ancorado pelo executor no
+    // início da attempt (`deadlineAtMs`); sem ele, derivado de `maxDurationMs` agora.
+    // Regras: (1) antes de toda operação potencialmente bloqueante (inferência, reparo
+    // de schema, exec) checa o restante e limita o timeout local a min(op, restante);
+    // (2) DEPOIS de cada uma revalida ANTES de aplicar edição, aceitar submit, servir
+    // observação ou concluir. Vencido ⇒ `ollama_timeout` TERMINAL, mesmo com edições
+    // aplicadas: nunca vira submit_gate_unsatisfied nem conclusão normal. O candidato
+    // fica preservado no transcript (edições aplicadas) e na worktree para o host.
+    const deadlineAt = typeof request.deadlineAtMs === 'number' && Number.isFinite(request.deadlineAtMs)
+      ? request.deadlineAtMs
+      : typeof request.maxDurationMs === 'number' && request.maxDurationMs > 0
+        ? Date.now() + request.maxDurationMs
+        : null;
+    const assertWithinDeadline = (phase: string): void => {
+      if (deadlineAt !== null && Date.now() >= deadlineAt) {
+        throw new OllamaProtocolError('ollama_timeout',
+          `deadline global da tentativa atingido ${phase} (${appliedTouched.size} arquivo(s) editado(s), revisão ${editRevision}).`);
+      }
+    };
+    /** Timeout efetivo de uma operação: min(timeout próprio, tempo restante), >= 1 ms. */
+    const boundedTimeout = (operationTimeoutMs: number): number =>
+      deadlineAt === null ? operationTimeoutMs : Math.max(1, Math.min(operationTimeoutMs, deadlineAt - Date.now()));
     // Entrega o trabalho acumulado para revisão — usado só quando as provas exigidas
-    // estão satisfeitas (ou a tarefa não tem gate executável).
-    const concludeApplied = (note: string): CoderEditResult => ({
-      summary: `Modelo ${this.providerLabel} concluiu ${appliedTouched.size} edição(ões) iterativa(s) (${note}), para revisão.`,
-      touchedResources: [...appliedTouched],
-    });
+    // estão satisfeitas (ou a tarefa não tem gate executável). Revalida o deadline.
+    const concludeApplied = (note: string): CoderEditResult => {
+      assertWithinDeadline('antes de concluir');
+      return {
+        summary: `Modelo ${this.providerLabel} concluiu ${appliedTouched.size} edição(ões) iterativa(s) (${note}), para revisão.`,
+        touchedResources: [...appliedTouched],
+      };
+    };
     // Estado da máquina de submit (V3): as provas são amarradas à editRevision atual.
     const gateStateNow = (): SubmitGateStateV1 => deriveSubmitGateState({
       editRevision, passedValidationRevision, failedValidationRevision, diffReviewedRevision,
@@ -425,9 +480,12 @@ export class OllamaCoderBackend implements CoderBackend {
     // é o limite de rodadas clássico; com edições porém sem provas (havendo gate
     // executável), falha ESPECÍFICA; com provas satisfeitas (ou tarefa sem gate),
     // entrega o acumulado para revisão.
-    const concludeOrFail = (note: string): CoderEditResult => {
+    const concludeOrFail = (
+      note: string,
+      noEditCode: 'ollama_read_round_limit' | 'ollama_no_progress' = 'ollama_read_round_limit',
+    ): CoderEditResult => {
       if (appliedTouched.size === 0) {
-        throw new OllamaProtocolError('ollama_read_round_limit', `protocolo encerrou (${note}) sem edições.`);
+        throw new OllamaProtocolError(noEditCode, `protocolo encerrou (${note}) sem edições.`);
       }
       if (isSubmitAvailable(gateStateNow())) return concludeApplied(note);
       throw new OllamaProtocolError('ollama_submit_gate_unsatisfied',
@@ -440,11 +498,36 @@ export class OllamaCoderBackend implements CoderBackend {
     // leitura/busca após o orçamento, comando recusado, edição recuperável) NÃO
     // consomem `round` — cada uma é bounded pelo próprio contador; um cap DURO de
     // iterações fecha qualquer laço.
-    const postEditReserve = execMode ? POST_EDIT_EXEC_ROUND_RESERVE : 0;
+    const postEditReserve = execMode ? this.postEditRoundReserve : 0;
+    const unboundedInvestigation = !Number.isFinite(this.maxReadRounds);
+    // Código de esgotamento sem edição: em AUTONOMOUS é o limite de rodadas clássico;
+    // em SUPERVISED não existe contador de leitura, então esgotar = falta de progresso
+    // (ações inválidas/repetidas) — `ollama_read_round_limit` nunca ocorre ali.
+    const exhaustionCode = unboundedInvestigation ? 'ollama_no_progress' as const : 'ollama_read_round_limit' as const;
     const MAX_MISDIRECTED_FEEDBACKS = 4;
     let misdirectedFeedbacks = 0;
-    const hardIterationCap = this.maxReadRounds + postEditReserve + MAX_SUBMIT_FEEDBACKS + MAX_EDIT_FEEDBACKS
+    // Iterações NÃO-produtivas (ação inválida/recusada/reapresentada) têm teto próprio
+    // em AMBOS os modos. Em SUPERVISED as rodadas produtivas não têm contador (a guarda
+    // é de progresso + deadline), então este teto é o que fecha laços de ações inválidas.
+    const nonProductiveIterationCap = MAX_SUBMIT_FEEDBACKS + MAX_EDIT_FEEDBACKS
       + MAX_AMBIGUITY_FEEDBACKS + MAX_MISDIRECTED_FEEDBACKS + 8;
+    const hardIterationCap = this.maxReadRounds + postEditReserve + nonProductiveIterationCap;
+    // GUARDA DE PROGRESSO (SUPERVISED): rodadas produtivas consecutivas sem informação
+    // nova (leitura só repetida, busca/listagem com resultado idêntico, mesmo comando
+    // na mesma revisão). Desligada (Infinity) em AUTONOMOUS, já bounded pelos contadores.
+    const stagnationGuardOn = Number.isFinite(this.maxStagnantRounds);
+    const investigationFingerprints = new Set<string>();
+    let stagnantRounds = 0;
+    const noteProgress = (novel: boolean): CoderEditResult | null => {
+      if (!stagnationGuardOn) return null;
+      if (novel) { stagnantRounds = 0; return null; }
+      stagnantRounds += 1;
+      if (stagnantRounds >= this.maxStagnantRounds) {
+        return concludeOrFail(`${stagnantRounds} rodadas consecutivas sem informação nova`, 'ollama_no_progress');
+      }
+      servedBlocks.push(`Rodada sem informação nova (${stagnantRounds}/${this.maxStagnantRounds} consecutivas encerram a sessão): não repita leituras, buscas ou comandos já feitos; investigue outra região ou edite.`);
+      return null;
+    };
     // RESERVA PÓS-EDIT ANCORADA (V3): enquanto `editRevision===0` o teto é `maxReadRounds`
     // (só exploração). A PRIMEIRA edição material marca `postEditBase = round` e libera a
     // reserva ÍNTEGRA (`postEditReserve`) a partir daí. Assim ações de exploração —
@@ -456,14 +539,15 @@ export class OllamaCoderBackend implements CoderBackend {
     // observação, NÃO consome rodada produtiva; após o teto, conclui-ou-falha.
     const misdirect = (note: string): CoderEditResult | null => {
       misdirectedFeedbacks += 1;
-      if (misdirectedFeedbacks > MAX_MISDIRECTED_FEEDBACKS) return concludeOrFail(`ações desviadas em excesso: ${note}`);
+      if (misdirectedFeedbacks > MAX_MISDIRECTED_FEEDBACKS) return concludeOrFail(`ações desviadas em excesso: ${note}`, exhaustionCode);
       servedBlocks.push(`${note} (reorientação ${misdirectedFeedbacks}/${MAX_MISDIRECTED_FEEDBACKS}).`);
       return null;
     };
 
     let round = 0;
     let iterations = 0;
-    while (round <= roundCap() && iterations <= hardIterationCap) {
+    while (round <= roundCap() && iterations <= hardIterationCap && iterations - round <= nonProductiveIterationCap) {
+      assertWithinDeadline('antes de iniciar a rodada');
       iterations += 1;
       // Fase: EXPLORING enquanto sem edição material; PÓS-EDIT depois da 1ª edição.
       const postEdit = postEditBase !== null;
@@ -494,7 +578,11 @@ export class OllamaCoderBackend implements CoderBackend {
               : `SUBMIT DISPONÍVEL: revisão ${editRevision} validada e diff revisado. Responda {"action":"submit"} (qualquer nova edição reinicia a exigência).`;
       const investigateHint = `${searchEnabled ? '/{"action":"search",...}/{"action":"glob",...}' : ''}${execMode ? '/{"action":"exec",...}' : ''}`;
       const finishHint = execMode ? '{"action":"edit",...} e valide antes de submeter' : '{"action":"edit",...}';
-      const budgetLine = postEdit
+      const budgetLine = unboundedInvestigation
+        // SUPERVISED: não há contador de rodadas — anunciar "Infinity" seria ruído. O
+        // modelo é informado da regra real: progresso + deadline.
+        ? `Modo supervisionado: sem teto de rodadas. Continue lendo/buscando${execMode ? '/executando' : ''} enquanto obtiver informação NOVA; repetir o que já viu ou rodou ${this.maxStagnantRounds} vezes seguidas encerra a sessão. Quando tiver o necessário, finalize com ${finishHint}.`
+        : postEdit
         // Reserva pós-edit ANCORADA: a exploração acabou; estas rodadas são para
         // validar/reparar/revisar/submeter e não foram tocadas pela exploração.
         ? `Orçamento pós-edit: ${Math.max(postEditLeft, 0)} rodada(s) reservada(s) para validar (exitCode=0), reparar, git diff e {"action":"submit"}.${refreshRead
@@ -521,7 +609,10 @@ export class OllamaCoderBackend implements CoderBackend {
         budgetLine,
       ].join('\n\n');
 
-      const response = await this.callProtocol(prompt, signal, searchEnabled, execMode, submitAvailable);
+      const response = await this.callProtocol(prompt, signal, searchEnabled, execMode, submitAvailable, deadlineAt);
+      // Inferência iniciada antes do deadline e concluída depois NÃO age: nem edição,
+      // nem submit, nem nova investigação.
+      assertWithinDeadline('após a inferência, antes de agir');
 
       if (response.action === 'edit') {
         const rawOperations = response.operations as unknown[];
@@ -545,6 +636,7 @@ export class OllamaCoderBackend implements CoderBackend {
             changes,
             { writeFile: (path, content) => workspace.writeFile(path, content) },
             signal,
+            () => assertWithinDeadline('antes de escrever (lote interrompido)'),
           );
           return {
             summary: `Modelo ${this.providerLabel} aplicou ${touched.length} edição(ões) pelo experimento R2 de âncora host-mediada, para revisão.`,
@@ -581,6 +673,7 @@ export class OllamaCoderBackend implements CoderBackend {
             changes,
             { writeFile: (path, content) => workspace.writeFile(path, content) },
             signal,
+            () => assertWithinDeadline('antes de escrever (lote interrompido)'),
           ); } catch (error) { transcript.application(steps, 'write_failed'); throw error; }
           transcript.application(steps, 'applied');
           if (execMode) {
@@ -599,6 +692,7 @@ export class OllamaCoderBackend implements CoderBackend {
             servedBlocks.push(`Edição aplicada (${touched.length}): ${touched.join(', ')}. A revisão ${editRevision} precisa de validação focal (exitCode=0) e git diff antes de submit — que só será oferecido então. O sha256 desses arquivos MUDOU: shas lidos antes desta edição estão obsoletos; para editá-los de novo, leia o estado ATUAL (leitura de refresh garantida).`);
             runtimeEvent('edit_applied', 'served', round);
             round += 1;
+            noteProgress(true);
             continue;
           }
           return {
@@ -619,6 +713,8 @@ export class OllamaCoderBackend implements CoderBackend {
             servedBlocks.push(`Edição recusada (${error.code}), nada foi aplicado: ${clip(error.message, 300)} Reapresentação ${editFeedbacks}/${MAX_EDIT_FEEDBACKS}. Corrija DENTRO do escopo de escrita.${staleHint}`);
             continue;
           }
+          // Timeout é causa terminal própria: nunca reclassificado.
+          if (error instanceof OllamaProtocolError && error.code === 'ollama_timeout') throw error;
           // Esgotado o teto: NÃO conclui sucesso implícito sem as provas exigidas.
           if (execMode && appliedTouched.size > 0) return concludeOrFail(`ação posterior recusada: ${error instanceof OllamaProtocolError ? error.code : 'erro'}`);
           throw error;
@@ -645,6 +741,7 @@ export class OllamaCoderBackend implements CoderBackend {
           servedBlocks.push(`Submit recusado (${submitFeedbacks}/${MAX_SUBMIT_FEEDBACKS}): ${missing.join('; ')}. A sessão continua; não declare sucesso ainda.`);
           continue;
         }
+        assertWithinDeadline('antes de aceitar o submit');
         runtimeEvent('submit_allowed', 'allowed', round);
         return {
           summary: `Modelo ${this.providerLabel} concluiu ${appliedTouched.size} edição(ões) iterativa(s) (com exec/validação local), para revisão.`,
@@ -681,7 +778,9 @@ export class OllamaCoderBackend implements CoderBackend {
           servedBlocks.push(`Comando recusado pela política: ${decision.reason}`);
           const r = misdirect('comando recusado pela política'); if (r) return r; continue;
         }
-        const result = await workspace.exec({ program: decision.program, args: decision.args, timeoutMs: decision.timeoutMs }, signal);
+        assertWithinDeadline('antes de executar comando');
+        const result = await workspace.exec({ program: decision.program, args: decision.args, timeoutMs: boundedTimeout(decision.timeoutMs) }, signal);
+        assertWithinDeadline('após executar comando');
         // O transcript host-observed preserva TODAS as saídas completas. Para o
         // próximo prompt, porém, somente a observação EXEC mais recente precisa do
         // corpo integral; resultados antigos ficam como cabeçalhos factuais. Isso
@@ -734,6 +833,15 @@ export class OllamaCoderBackend implements CoderBackend {
           runtimeEvent(isFocalTest ? 'test' : 'exec', outcome, round, detail);
         }
         round += 1;
+        {
+          // Identidade SEMÂNTICA da observação: comando + revisão + exitCode + timedOut +
+          // stdout/stderr normalizados (sem durações/timestamps). Resultado diferente na
+          // mesma revisão é progresso; resultado idêntico é repetição.
+          const fingerprint = `exec\0${key}\0${editRevision}\0${result.exitCode}\0${result.timedOut}\0${sha256(normalizeVolatileOutput(result.stdout))}\0${sha256(normalizeVolatileOutput(result.stderr))}`;
+          const novel = !investigationFingerprints.has(fingerprint);
+          investigationFingerprints.add(fingerprint);
+          const r = noteProgress(novel); if (r) return r;
+        }
         continue;
       }
 
@@ -754,24 +862,39 @@ export class OllamaCoderBackend implements CoderBackend {
           if (execMode) { const r = misdirect('busca/listagem indisponível'); if (r) return r; }
           continue;
         }
+        let investigationResult = '';
         if (response.action === 'search') {
           const req = parseSearchRequest(response.raw);
+          assertWithinDeadline('antes da busca');
+          // Timeout HOST-side (nunca do modelo): min(15 s, restante).
           const result = workspace.search
-            ? await workspace.search({ query: req.query, ...(req.pathGlob ? { pathGlob: req.pathGlob } : {}), maxResults: req.maxResults, isRegex: req.isRegex }, signal)
+            ? await workspace.search({ query: req.query, ...(req.pathGlob ? { pathGlob: req.pathGlob } : {}), maxResults: req.maxResults, isRegex: req.isRegex }, signal, { timeoutMs: boundedTimeout(WORKSPACE_LOOKUP_TIMEOUT_MS) })
             : { matches: [] as const, truncated: false };
+          assertWithinDeadline('após a busca');
           const readable = result.matches.filter(m => isPathReadable(m.path, accessPolicy));
           servedBlocks.push(renderSearch(req.query, readable, result.truncated || readable.length < result.matches.length));
+          investigationResult = servedBlocks[servedBlocks.length - 1]!;
           runtimeEvent('search', 'served', round);
         } else {
           const req = parseGlobRequest(response.raw);
+          assertWithinDeadline('antes da listagem');
           const result = workspace.list
-            ? await workspace.list({ pattern: req.pattern, maxResults: req.maxResults }, signal)
+            ? await workspace.list({ pattern: req.pattern, maxResults: req.maxResults }, signal, { timeoutMs: boundedTimeout(WORKSPACE_LOOKUP_TIMEOUT_MS) })
             : { paths: [] as const, truncated: false };
+          assertWithinDeadline('após a listagem');
           const readable = result.paths.filter(p => isPathReadable(p, accessPolicy));
           servedBlocks.push(renderGlob(req.pattern, readable, result.truncated || readable.length < result.paths.length));
+          investigationResult = servedBlocks[servedBlocks.length - 1]!;
           runtimeEvent('glob', 'served', round);
         }
         round += 1;
+        {
+          // Busca/listagem com resultado IDÊNTICO a uma anterior não traz informação nova.
+          const fingerprint = `${response.action}\0${sha256(investigationResult)}`;
+          const novel = !investigationFingerprints.has(fingerprint);
+          investigationFingerprints.add(fingerprint);
+          const r = noteProgress(novel); if (r) return r;
+        }
         continue;
       }
 
@@ -859,19 +982,37 @@ export class OllamaCoderBackend implements CoderBackend {
         deferred,
       ));
       round += 1;
+      {
+        // Progresso = trecho inédito OU descoberta NEGATIVA inédita (arquivo inexistente
+        // ainda não observado). Recusas de policy/escopo (`rejected`) NÃO contam.
+        let novelNegative = false;
+        for (const negative of missing) {
+          const fingerprint = `read-missing\0${negative}`;
+          if (!investigationFingerprints.has(fingerprint)) { investigationFingerprints.add(fingerprint); novelNegative = true; }
+        }
+        const r = noteProgress(uniqueServed.length > 0 || novelNegative); if (r) return r;
+      }
       continue;
     }
     // Esgotadas as rodadas PRODUTIVAS. Em exec, entrega o acumulado SOMENTE se as
     // provas exigidas estão satisfeitas (ou a tarefa não tem gate executável); caso
     // contrário, falha ESPECÍFICA — nunca sucesso implícito. Sem exec, terminal.
-    if (execMode) return concludeOrFail(postEditBase !== null ? 'reserva pós-edit esgotada' : 'rodadas de investigação esgotadas');
-    throw new OllamaProtocolError('ollama_read_round_limit', 'protocolo encerrou sem edições.');
+    if (execMode) return concludeOrFail(postEditBase !== null ? 'reserva pós-edit esgotada' : 'rodadas de investigação esgotadas', exhaustionCode);
+    throw new OllamaProtocolError(exhaustionCode, 'protocolo encerrou sem edições.');
   }
 
   /** Uma volta do protocolo: chama o modelo, checa truncamento e parseia o
    * envelope. Um ÚNICO reparo é permitido quando o schema vem errado — apenas
    * reforçando o formato, sem reapresentar conteúdo algum. */
-  private async callProtocol(prompt: string, signal: AbortSignal, searchEnabled = false, execEnabled = false, submitAvailable = false) {
+  private async callProtocol(prompt: string, signal: AbortSignal, searchEnabled = false, execEnabled = false, submitAvailable = false, deadlineAt: number | null = null) {
+    // Cada chamada (inclusive o reparo de schema) só começa com tempo restante e tem o
+    // timeout limitado a min(timeoutMs, restante); depois revalida o deadline.
+    const remainingOrThrow = (phase: string): number => {
+      if (deadlineAt === null) return this.timeoutMs;
+      const remaining = deadlineAt - Date.now();
+      if (remaining <= 0) throw new OllamaProtocolError('ollama_timeout', `deadline global da tentativa atingido ${phase}.`);
+      return Math.max(1, Math.min(this.timeoutMs, remaining));
+    };
     const system = [
       SYSTEM,
       ...(searchEnabled ? [SEARCH_SYSTEM] : []),
@@ -889,12 +1030,12 @@ export class OllamaCoderBackend implements CoderBackend {
     ].join('\n');
     const messages = [{ role: 'system' as const, content: system }, { role: 'user' as const, content: prompt }];
     assertPromptWithinBudget(system + prompt, this.budget);
-    const invoke = async (callMessages: readonly CoderProtocolMessage[]): Promise<CoderProtocolTransportResult | OllamaChatResult> => this.options.protocolTransport
+    const invoke = async (callMessages: readonly CoderProtocolMessage[], timeoutMs: number): Promise<CoderProtocolTransportResult | OllamaChatResult> => this.options.protocolTransport
       // A MESMA reserva de geração usada pelo Ollama (`num_predict`) vai ao transport do
       // provider como teto duro de saída — o Ollama já a aplica em callOllamaChat.
-      ? this.options.protocolTransport({ messages: callMessages, signal, timeoutMs: this.timeoutMs, maxOutputTokens: this.budget.numPredict })
-      : callOllamaChat({ url: this.url, model: this.options.model, messages: callMessages, budget: this.budget, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, signal });
-    const first = await invoke(messages);
+      ? this.options.protocolTransport({ messages: callMessages, signal, timeoutMs, maxOutputTokens: this.budget.numPredict })
+      : callOllamaChat({ url: this.url, model: this.options.model, messages: callMessages, budget: this.budget, timeoutMs, fetchImpl: this.fetchImpl, signal });
+    const first = await invoke(messages, remainingOrThrow('antes da inferência'));
     if ('meta' in first) assertNotTruncated(system + prompt, first.meta);
     try {
       return parseProtocolResponse(first.content);
@@ -921,7 +1062,7 @@ export class OllamaCoderBackend implements CoderBackend {
       // o que a Fase 1 evita. Não cresce o orçamento; só mede o que de fato é enviado.
       const repairText = system + prompt + assistantEcho + repairInstruction;
       assertPromptWithinBudget(repairText, this.budget);
-      const repaired = await invoke(repairMessages);
+      const repaired = await invoke(repairMessages, remainingOrThrow('antes do reparo de schema'));
       if ('meta' in repaired) assertNotTruncated(repairText, repaired.meta);
       return parseProtocolResponse(repaired.content);
     }

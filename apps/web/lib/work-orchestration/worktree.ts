@@ -46,6 +46,16 @@ export function safeJoin(root: string, relPath: string): string | null {
   return target;
 }
 
+/** Teto de busca/listagem no workspace; o host pode só REDUZIR (restante do deadline). */
+const LOOKUP_TIMEOUT_MS = 15_000;
+const lookupTimeout = (host?: { readonly timeoutMs?: number }): number =>
+  typeof host?.timeoutMs === 'number' && Number.isFinite(host.timeoutMs) && host.timeoutMs > 0
+    ? Math.max(1, Math.min(LOOKUP_TIMEOUT_MS, host.timeoutMs))
+    : LOOKUP_TIMEOUT_MS;
+
+/** Folga entre matar a árvore e forçar o desfecho caso o `close` não chegue. */
+const KILL_GRACE_MS = 5_000;
+
 /** Executa um processo sem shell, capturando saída com timeout e cancelamento
  * cooperativo. Nunca lança por código de saída — a falha é um dado. */
 export function runProcess(
@@ -67,11 +77,26 @@ export function runProcess(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (forceTimer) clearTimeout(forceTimer);
       options.signal?.removeEventListener('abort', onAbort);
       resolveResult({ command, exitCode, stdout: stdout.slice(0, MAX_CAPTURE), stderr: stderr.slice(0, MAX_CAPTURE), durationMs: Date.now() - started, timedOut, cancelled });
     };
-    const onAbort = (): void => { cancelled = true; child.kill(); };
-    const timer = setTimeout(() => { timedOut = true; child.kill(); }, options.timeoutMs);
+    // Encerramento da ÁRVORE: no Windows com shell, `child.kill()` mata só o cmd.exe e
+    // o neto (node/jest) segura o pipe aberto — o timeout não cortava nada e o
+    // `close` esperava o processo terminar sozinho. `taskkill /T /F` derruba a árvore.
+    // Rede de segurança: se o `close` não vier, resolve mesmo assim após uma folga.
+    let forceTimer: ReturnType<typeof setTimeout> | undefined;
+    const terminate = (): void => {
+      if (process.platform === 'win32' && child.pid !== undefined) {
+        try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill()); }
+        catch { child.kill(); }
+      } else {
+        child.kill();
+      }
+      forceTimer ??= setTimeout(() => { child.stdout.destroy(); child.stderr.destroy(); done(-1); }, KILL_GRACE_MS);
+    };
+    const onAbort = (): void => { cancelled = true; terminate(); };
+    const timer = setTimeout(() => { timedOut = true; terminate(); }, options.timeoutMs);
     if (options.signal?.aborted) onAbort();
     else options.signal?.addEventListener('abort', onAbort, { once: true });
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
@@ -262,13 +287,14 @@ export class GitWorktree {
   async searchText(
     input: { readonly query: string; readonly pathGlob?: string; readonly maxResults: number; readonly isRegex: boolean },
     signal?: AbortSignal,
+    host?: { readonly timeoutMs?: number },
   ): Promise<{ matches: { path: string; line: number; preview: string }[]; truncated: boolean }> {
     const cap = Math.max(1, Math.min(Math.floor(input.maxResults) || 1, 200));
     const args = ['-C', this.root, 'grep', '--no-color', '-n', '-I', input.isRegex ? '-E' : '-F', '-e', input.query];
     if (typeof input.pathGlob === 'string' && input.pathGlob.trim().length > 0) {
       args.push('--', `:(glob)${input.pathGlob.trim()}`);
     }
-    const result = await runProcess('git', args, { cwd: this.root, timeoutMs: 15_000, signal });
+    const result = await runProcess('git', args, { cwd: this.root, timeoutMs: lookupTimeout(host), signal });
     // git grep: exit 0 = houve match; 1 = nenhum; outros = erro → resultado vazio.
     if (result.exitCode !== 0 && result.exitCode !== 1) return { matches: [], truncated: false };
     const matches: { path: string; line: number; preview: string }[] = [];
@@ -314,11 +340,12 @@ export class GitWorktree {
   async listFiles(
     input: { readonly pattern: string; readonly maxResults: number },
     signal?: AbortSignal,
+    host?: { readonly timeoutMs?: number },
   ): Promise<{ paths: string[]; truncated: boolean }> {
     const cap = Math.max(1, Math.min(Math.floor(input.maxResults) || 1, 500));
     const pattern = input.pattern.trim();
     const args = ['-C', this.root, 'ls-files', '--', pattern.length > 0 ? `:(glob)${pattern}` : '.'];
-    const result = await runProcess('git', args, { cwd: this.root, timeoutMs: 15_000, signal });
+    const result = await runProcess('git', args, { cwd: this.root, timeoutMs: lookupTimeout(host), signal });
     if (result.exitCode !== 0) return { paths: [], truncated: false };
     const paths: string[] = [];
     let truncated = false;

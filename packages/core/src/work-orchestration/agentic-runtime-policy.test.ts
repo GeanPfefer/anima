@@ -3,7 +3,9 @@ import {
   DEFAULT_AGENTIC_RUNTIME_POLICY_V1,
   LOCAL_AGENTIC_RUNTIME_PROFILE_V1,
   MAX_READS_REQUESTED_PER_ROUND,
+  POST_EDIT_EXEC_ROUND_RESERVE,
   STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1,
+  SUPERVISED_MAX_STAGNANT_ROUNDS,
   availableRuntimeActions,
   deriveSubmitGateState,
   isRefreshReadAvailable,
@@ -13,12 +15,15 @@ import {
 } from './agentic-runtime-policy';
 
 describe('AgenticRuntimePolicyV1 — fronteiras do laço do Coding Harness V3', () => {
-  test('default seguro preserva o comportamento numérico local histórico (8/3) em modo supervisionado', () => {
+  test('default seguro é AUTONOMOUS e preserva o comportamento numérico local histórico (8/3/40, reserva 8)', () => {
     expect(DEFAULT_AGENTIC_RUNTIME_POLICY_V1).toMatchObject({
       schemaVersion: 1,
-      mode: 'supervised',
+      mode: 'autonomous',
       readServingBudgetPerRound: 8,
       maxReadRounds: 3,
+      maxTotalServedReads: 40,
+      postEditRoundReserve: POST_EDIT_EXEC_ROUND_RESERVE,
+      maxStagnantRounds: Number.POSITIVE_INFINITY,
     });
     // Teto de sessão nunca menor que a rodada.
     expect(DEFAULT_AGENTIC_RUNTIME_POLICY_V1.maxTotalServedReads)
@@ -62,6 +67,42 @@ describe('AgenticRuntimePolicyV1 — fronteiras do laço do Coding Harness V3', 
       overrides: { readServingBudgetPerRound: 20, maxTotalServedReads: 1 },
     });
     expect(resolved.maxTotalServedReads).toBeGreaterThanOrEqual(resolved.readServingBudgetPerRound);
+  });
+});
+
+describe('AgenticRuntimePolicyV1 — SUPERVISED × AUTONOMOUS', () => {
+  test('SUPERVISED sem override: sem contador de rodadas/leituras/reserva pós-edit; guarda de progresso ligada', () => {
+    const supervised = resolveAgenticRuntimePolicy({ mode: 'supervised' });
+    expect(supervised.maxReadRounds).toBe(Number.POSITIVE_INFINITY);
+    expect(supervised.maxTotalServedReads).toBe(Number.POSITIVE_INFINITY);
+    expect(supervised.postEditRoundReserve).toBe(Number.POSITIVE_INFINITY);
+    expect(supervised.maxStagnantRounds).toBe(SUPERVISED_MAX_STAGNANT_ROUNDS);
+    expect(Number.isFinite(supervised.maxStagnantRounds)).toBe(true);
+    // Orçamento por RODADA (janela/latência) continua do perfil: excedente deferido.
+    expect(supervised.readServingBudgetPerRound).toBe(LOCAL_AGENTIC_RUNTIME_PROFILE_V1.readServingBudgetPerRound);
+  });
+
+  test('SUPERVISED ignora os contadores do PERFIL (inclusive o forte), não só o local', () => {
+    const supervised = resolveAgenticRuntimePolicy({ mode: 'supervised', profile: STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1 });
+    expect(supervised.maxReadRounds).toBe(Number.POSITIVE_INFINITY);
+    expect(supervised.readServingBudgetPerRound).toBe(STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1.readServingBudgetPerRound);
+  });
+
+  test('SUPERVISED com override EXPLÍCITO válido continua bounded (override só endurece)', () => {
+    const hardened = resolveAgenticRuntimePolicy({ mode: 'supervised', overrides: { maxReadRounds: 5, maxTotalServedReads: 60 } });
+    expect(hardened.maxReadRounds).toBe(5);
+    expect(hardened.maxTotalServedReads).toBe(60);
+  });
+
+  test('AUTONOMOUS permanece bounded e fail-closed (sem regressão): contadores finitos, guarda de estagnação desligada', () => {
+    for (const profile of [LOCAL_AGENTIC_RUNTIME_PROFILE_V1, STRONG_REMOTE_AGENTIC_RUNTIME_PROFILE_V1]) {
+      const autonomous = resolveAgenticRuntimePolicy({ mode: 'autonomous', profile });
+      expect(autonomous.maxReadRounds).toBe(profile.maxReadRounds);
+      expect(autonomous.maxTotalServedReads).toBe(profile.maxTotalServedReads);
+      expect(autonomous.postEditRoundReserve).toBe(POST_EDIT_EXEC_ROUND_RESERVE);
+      expect(Number.isFinite(autonomous.maxReadRounds)).toBe(true);
+      expect(Number.isFinite(autonomous.maxTotalServedReads)).toBe(true);
+    }
   });
 });
 

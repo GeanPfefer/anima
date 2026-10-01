@@ -1,4 +1,4 @@
-import { COMPUTE_PREFERENCE_EVENT_TYPE, COMPUTE_ROUTER_REQUESTED_DURATION_MS, decideComputeRoute, projectComputePreference, resolveEffectiveComputePreference, type ComputePreferenceV1, deriveLocalFailureSignal, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureHistoryEventV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
+import { COMPUTE_PREFERENCE_EVENT_TYPE, COMPUTE_ROUTER_REQUESTED_DURATION_MS, decideComputeRoute, projectComputePreference, resolveEffectiveComputePreference, type ComputePreferenceV1, deriveLocalFailureSignal, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AgenticRuntimeMode, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureHistoryEventV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
@@ -219,6 +219,11 @@ async function routeCompute(
 export function buildProjectBacklogCycleDeps(
   client: SupabaseClient<Database>,
   ownerInstanceId: string,
+  options: {
+    /** Modo do laço do coder local. Ausente ⇒ `autonomous` (Resident Host/rota HTTP).
+     * `supervised` só por declaração explícita de um invocador acompanhado por humano. */
+    readonly coderRuntimeMode?: AgenticRuntimeMode;
+  } = {},
 ): ProjectBacklogCycleDeps {
   let admittedPressure: ReturnType<typeof readMachinePressure> = 'unknown';
   // Base de um resultado sintético do Supervisor para quando o contrato do item não
@@ -350,6 +355,7 @@ export function buildProjectBacklogCycleDeps(
         coderObserver: outcome => coderObservations.push(outcome),
         changeAuthorizationObserver: facts => { changeAuthorization = facts; },
         ...(contract.coderBackend === 'openai' ? { openAIAdmission: createOpenAICoderAdmission(client) } : {}),
+        ...(options.coderRuntimeMode ? { coderRuntimeMode: options.coderRuntimeMode } : {}),
       });
       if (!selection.ok) return notExecutable(entry, selection.error.code, selection.error.message);
 

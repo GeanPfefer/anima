@@ -74,6 +74,8 @@ export interface WorktreeExecutorOptions {
     readonly rootPath: string;
     readonly validationCriteria: WorkExecutorRequest['validationCriteria'];
     readonly signal: AbortSignal;
+    /** Tempo RESTANTE do deadline global; a preparação nunca o excede. */
+    readonly timeoutMs: number;
   }) => Promise<void>;
   /** Emite um checkpoint mid-flight após a edição e antes do gate. */
   readonly emitCheckpoint?: boolean;
@@ -205,6 +207,14 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
 
   async *execute(request: WorkExecutorRequest, signal: AbortSignal): AsyncIterable<WorkExecutorSignal> {
     let seq = 0;
+    // Deadline GLOBAL da tentativa (contrato `maxDurationMinutes`), ancorado no início
+    // da execução: baseline, coder e reparos internos compartilham o MESMO relógio.
+    const attemptBudgetMs = (request.limits.maxDurationMinutes ?? 30) * 60_000;
+    const attemptDeadlineAtMs = Date.now() + attemptBudgetMs;
+    /** Tempo restante até o deadline global da tentativa (pode ser <= 0). */
+    const remainingMs = (): number => attemptDeadlineAtMs - Date.now();
+    /** Timeout de uma operação limitado ao restante: min(op, restante), >= 1 ms. */
+    const boundedMs = (operationMs: number): number => Math.max(1, Math.min(operationMs, remainingMs()));
     // Política EFETIVA do harness: sempre superset canônico. Um `harnessPolicy` de
     // caller só pode ENDURECER; listas vazias/omissão NÃO desligam as invariantes
     // (Vitest proibido, `entry.coderBackend` proibido). É esta política que viaja ao
@@ -233,6 +243,22 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
     const handoffReference = `worktree:${request.target.reference}:${branch}`;
     let worktree: GitWorktree | null = null;
     let durableCheckpointSha: string | null = null;
+    // Deadline vencido é causa TERMINAL estruturada (`[runner_timeout]`, classe
+    // `timeout`), nunca falha de gate/código. O candidato, se houver, é PRESERVADO como
+    // commit na branch da attempt (evidência; não é result nem handoff).
+    const preserveCandidate = async (): Promise<string | null> => {
+      if (!worktree) return null;
+      const changedSinceStart = await worktree.changedFilesSinceStart(signal).catch(() => [] as readonly string[]);
+      if (changedSinceStart.length === 0) return durableCheckpointSha;
+      return (await worktree.commit(`anima(timeout-evidence): ${clip(request.objective, 72)}`, signal).catch(() => null)) ?? durableCheckpointSha;
+    };
+    const deadlineSignal = async (phase: string, alreadyPreserved?: string | null): Promise<WorkExecutorSignal> => {
+      const preserved = alreadyPreserved ?? await preserveCandidate();
+      return attach(++seq, {
+        kind: 'error', code: 'execution_failed', retryable: false, handoffReference,
+        message: `[runner_timeout] Deadline global da tentativa (${request.limits.maxDurationMinutes ?? 30} min) atingido ${phase}.${preserved ? ` Candidato preservado no commit ${preserved}.` : ''}`,
+      });
+    };
     try {
       try {
         worktree = await GitWorktree.create({ repoRoot: target.repoRoot, sha: target.sha, startSha: target.startSha, branch, signal });
@@ -249,8 +275,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         // amplamente (todo o escopo de LEITURA) sem shell e sem ganhar autoridade de
         // escrita. O confinamento é do git grep/ls-files (só arquivos rastreados sob a
         // raiz) mais o filtro de read-scope no laço; a escrita continua governada.
-        search: (input, searchSignal) => worktree!.searchText(input, searchSignal),
-        list: (input, listSignal) => worktree!.listFiles(input, listSignal),
+        search: (input, searchSignal, host) => worktree!.searchText(input, searchSignal, host),
+        list: (input, listSignal, host) => worktree!.listFiles(input, listSignal, host),
         // EXEC/TEST/GIT governados (V3, 3ª fatia): o comando já vem validado pela
         // command policy (allowlist de programa, git read-only, npm run/test, sem
         // metacaractere de shell); a worktree o roda confinado à raiz, sem shell
@@ -334,21 +360,24 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           if (!await worktree.restoreToCheckpoint(target.sha)) throw new Error('baseline restore failed');
           if (this.options.linkNodeModules) await worktree.linkNodeModules(signal);
           if (this.options.prepareValidation) {
+            if (remainingMs() <= 0) throw new Error('baseline sem tempo restante');
             await this.options.prepareValidation({
               rootPath: worktree.root,
               validationCriteria: baselineCriteria.map(({ criterion }) => criterion),
               signal,
+              timeoutMs: remainingMs(),
             });
           }
-          const baselineTimeoutMs = (request.limits.maxDurationMinutes ?? 30) * 60_000;
           for (const { criterion, index } of baselineCriteria) {
             if (signal.aborted) break;
+            // Baseline é advisory: sem tempo restante, é omitido (o deadline segue valendo).
+            if (remainingMs() <= 0) break;
             const targets = await Promise.all(criterion.targetPaths!.map(async path => {
               const kindAtBase = await worktree!.workspacePathKind(path);
               return { path: norm(path), existedAtBase: kindAtBase === 'file', kindAtBase };
             }));
             const commandScope = verifyGateTargetScope(criterion.command!, criterion.targetPaths!);
-            const baseline = await runGate(criterion.command!, worktree.root, baselineTimeoutMs, signal);
+            const baseline = await runGate(criterion.command!, worktree.root, boundedMs(attemptBudgetMs), signal);
             differentialBaselines.set(index, {
               baseExitCode: baseline.exitCode,
               baseTimedOut: baseline.timedOut,
@@ -377,9 +406,13 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           yield attach(++seq, { kind: 'cancelled', acknowledged: true, handoffReference });
           return;
         }
+        // Baseline (inclusive a preparação) que atravessou o prazo: timeout estruturado.
+        if (remainingMs() <= 0) { yield await deadlineSignal('durante o baseline'); return; }
       }
 
       while (true) {
+        // Coder inicial e REPAIR compartilham o relógio da tentativa.
+        if (remainingMs() <= 0) { yield await deadlineSignal(retryIndex > 0 ? 'antes do repair do coder' : 'antes do coder'); return; }
         // O Harness V3 pode executar os MESMOS comandos de validação durante
         // backend.edit() (edit → test → diff → submit). Portanto o ambiente do
         // coder precisa estar preparado antes da chamada, não apenas depois dela
@@ -389,13 +422,17 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           await worktree.linkNodeModules(signal);
         }
         if (this.options.prepareValidation) {
+          if (remainingMs() <= 0) { yield await deadlineSignal('antes de preparar a validação do coder'); return; }
           try {
             await this.options.prepareValidation({
               rootPath: worktree.root,
               validationCriteria: request.validationCriteria,
               signal,
+              timeoutMs: remainingMs(),
             });
           } catch (error) {
+            // Prazo vencido durante a preparação: timeout estruturado, nunca erro genérico.
+            if (remainingMs() <= 0) { yield await deadlineSignal('durante a preparação da validação'); return; }
             yield attach(++seq, {
               kind: 'error',
               code: 'execution_failed',
@@ -412,6 +449,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         // Relogio de primeira parte do HOST por chamada ao coder. Um retry interno
         // continua sendo uma nova observacao de execucao do backend, embora permaneça
         // dentro do mesmo attemptId/worktree.
+        if (remainingMs() <= 0) { yield await deadlineSignal('antes do coder (após preparar a validação)'); return; }
         const coderStartedAt = Date.now();
         let transcript: import('@anima/core').CoderTranscript | undefined;
         const observeCoder = (threw: boolean): void => {
@@ -435,6 +473,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
               attemptId: request.attemptId,
               approvedProposalVersion: request.approvedProposalVersion,
               maxDurationMs: (request.limits.maxDurationMinutes ?? 30) * 60_000,
+              deadlineAtMs: attemptDeadlineAtMs,
               objective: request.objective,
               onTranscript: value => { transcript = value; },
               includedScope: request.includedScope,
@@ -468,6 +507,22 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           // Uma chamada paga que falhou também é observada com o uso que consumiu.
           ({ providerUsage, providerCallCount } = coderFailureUsage(error));
           observeCoder(true);
+
+          // Timeout do coder (deadline global ou timeout por chamada) é causa terminal
+          // própria: a mensagem preserva `[ollama_timeout]` e o candidato já aplicado é
+          // preservado como evidência em vez de descartado pela restauração.
+          const coderMessage = error instanceof Error ? error.message : String(error);
+          if (!signal.aborted && coderMessage.includes('[ollama_timeout]')) {
+            const preserved = await preserveCandidate();
+            yield attach(++seq, {
+              kind: 'error',
+              code: 'execution_failed',
+              message: `O backend de código falhou: ${clip(coderMessage)}.${preserved ? ` Candidato preservado no commit ${preserved}.` : ''}`,
+              retryable: remainingMs() > 0,
+              handoffReference,
+            });
+            return;
+          }
 
           const restored = durableCheckpointSha
             ? await worktree.restoreToCheckpoint(durableCheckpointSha)
@@ -506,6 +561,9 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           });
           return;
         }
+
+        // Um coder que retornou DEPOIS do deadline não segue para checkpoint/gates.
+        if (remainingMs() <= 0) { yield await deadlineSignal('após o coder, antes dos gates'); return; }
 
         // `changed` preserva o diff auditável contra a base original. Enforcement
         // de escopo/no-op usa somente o delta desta attempt contra seu estado
@@ -678,13 +736,17 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         }
 
         if (this.options.prepareValidation) {
+          if (remainingMs() <= 0) { yield await deadlineSignal('antes de preparar os gates'); return; }
           try {
             await this.options.prepareValidation({
               rootPath: worktree.root,
               validationCriteria: request.validationCriteria,
               signal,
+              timeoutMs: remainingMs(),
             });
           } catch (error) {
+            // Prazo vencido durante a preparação: timeout estruturado, nunca erro genérico.
+            if (remainingMs() <= 0) { yield await deadlineSignal('durante a preparação dos gates'); return; }
             yield attach(++seq, {
               kind: 'error',
               code: 'execution_failed',
@@ -697,9 +759,6 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             return;
           }
         }
-
-        const timeoutMs =
-          (request.limits.maxDurationMinutes ?? 30) * 60_000;
 
         validations = [];
         gateOutcomes = [];
@@ -715,11 +774,12 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           }
 
           if (signal.aborted) break;
+          if (remainingMs() <= 0) { yield await deadlineSignal(`antes do gate "${criterion.label}"`); return; }
 
           const gate = await runGate(
             criterion.command,
             worktree.root,
-            timeoutMs,
+            boundedMs(attemptBudgetMs),
             signal,
           );
 
@@ -790,6 +850,10 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           return;
         }
 
+        // Gate que estourou o restante, ou qualquer conclusão após o deadline: timeout
+        // terminal — nem repair, nem result normal.
+        if (remainingMs() <= 0) { yield await deadlineSignal('após os gates'); return; }
+
         const canRetry =
           failure !== null &&
           isGateFailureEligibleForCoderRepair(failure) &&
@@ -842,6 +906,11 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         signal,
       )) ?? durableCheckpointSha;
 
+      // INVARIANTE: depois do deadline nenhum caminho produz sucesso governado. Um
+      // commit que atravessou o prazo fica só como EVIDÊNCIA local; sem result, sem
+      // handoff, sem result_submitted e, portanto, sem Verifier.
+      if (remainingMs() <= 0) { yield await deadlineSignal('após o commit final', commitSha); return; }
+
       if (failure) {
         yield attach(++seq, {
           kind: 'error',
@@ -858,6 +927,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       // embutida no sinal `result`, persistida pela RPC de término (sinal inteiro
       // em executor_signal) e relida por projectWorktreeHandoff. Opcional e
       // fail-open — sem commit ou sem gate, o resultado ainda vai para revisão.
+      if (remainingMs() <= 0) { yield await deadlineSignal('antes do handoff', commitSha); return; }
       const handoff = commitSha
         ? buildWorktreeHandoff({
             workItemId: request.workItemId,
@@ -876,6 +946,9 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           })
         : null;
       const worktreeHandoff = handoff?.ok ? handoff.value : undefined;
+
+      // Última fronteira antes do result (que vira result_submitted e dispara o Verifier).
+      if (remainingMs() <= 0) { yield await deadlineSignal('antes do result', commitSha); return; }
 
       yield attach(++seq, {
         kind: 'result',

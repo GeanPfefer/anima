@@ -35,6 +35,9 @@ export type OllamaProtocolErrorCode =
   // Esgotamento pós-edit SEM as provas exigidas (validate-before-submit / máquina de
   // estados V3): terminal e específico — nunca sucesso implícito.
   | 'ollama_submit_gate_unsatisfied'
+  // SUPERVISED (sem contadores de investigação): rodadas produtivas consecutivas sem
+  // informação nova. Guarda de PROGRESSO, não teto de contagem.
+  | 'ollama_no_progress'
   | 'ollama_aborted'
   | 'ollama_timeout'
   | 'ollama_transport_error';
@@ -63,7 +66,7 @@ export const OLLAMA_ERROR_BODY_READ_MAX_CHARS = 2048;
 /** Teto do erro do provider preservado no OllamaProtocolError. */
 export const OLLAMA_PROVIDER_ERROR_MAX_CHARS = 300;
 
-/** Teto de tempo da leitura do corpo de erro: o timeout da chamada já foi liberado. */
+/** Teto próprio de tempo da leitura do corpo de erro (além do timeout da chamada). */
 const OLLAMA_ERROR_BODY_READ_TIMEOUT_MS = 2000;
 
 /** Lê no máximo OLLAMA_ERROR_BODY_READ_MAX_CHARS do corpo, fail-safe: falha ou demora ⇒ null. */
@@ -209,7 +212,11 @@ export interface OllamaChatResult {
 
 /** Uma chamada /api/chat com format:json, num_ctx/num_predict do orçamento,
  * timeout explícito e erros de transporte/timeout tipados. Não valida schema:
- * isso é dos parsers dedicados. */
+ * isso é dos parsers dedicados.
+ *
+ * O timeout cobre a chamada INTEIRA — conexão, headers E o consumo do corpo
+ * (`response.json()`). O corpo corre contra o abort: um servidor que manda headers
+ * e depois trava o corpo não segura a chamada além de `timeoutMs`. */
 export async function callOllamaChat(input: OllamaChatInput): Promise<OllamaChatResult> {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
@@ -218,57 +225,79 @@ export async function callOllamaChat(input: OllamaChatInput): Promise<OllamaChat
     else input.signal.addEventListener('abort', onAbort, { once: true });
   }
   const timer = setTimeout(() => controller.abort(), Math.max(1, input.timeoutMs));
-  let response: Response | null;
+  const timedOut = (): boolean => controller.signal.aborted && (!input.signal || !input.signal.aborted);
+  const timeoutError = () => new OllamaProtocolError('ollama_timeout', `o modelo Ollama não respondeu em ${input.timeoutMs} ms.`);
+  // Rejeita quando o controller aborta (timeout OU cancelamento do chamador), para que
+  // nenhuma leitura de corpo sobreviva ao prazo mesmo se o stream ignorar o sinal.
+  let rejectOnAbort: (() => void) | null = null;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectOnAbort = () => reject(new Error('aborted'));
+    if (controller.signal.aborted) rejectOnAbort();
+    else controller.signal.addEventListener('abort', rejectOnAbort, { once: true });
+  });
+  aborted.catch(() => { /* observado só via race */ });
   try {
-    response = await input.fetchImpl(`${input.url}/api/chat`, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: input.model,
-        stream: false,
-        format: 'json',
-        options: {
-          num_ctx: input.budget.numCtx,
-          num_predict: input.budget.numPredict,
-          temperature: input.temperature ?? 0,
-        },
-        messages: input.messages,
-      }),
-    });
-  } catch (error) {
-    if (controller.signal.aborted && (!input.signal || !input.signal.aborted)) {
-      throw new OllamaProtocolError('ollama_timeout', `o modelo Ollama não respondeu em ${input.timeoutMs} ms.`);
+    let response: Response | null;
+    try {
+      response = await input.fetchImpl(`${input.url}/api/chat`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: input.model,
+          stream: false,
+          format: 'json',
+          options: {
+            num_ctx: input.budget.numCtx,
+            num_predict: input.budget.numPredict,
+            temperature: input.temperature ?? 0,
+          },
+          messages: input.messages,
+        }),
+      });
+    } catch (error) {
+      if (timedOut()) throw timeoutError();
+      throw new OllamaProtocolError('ollama_transport_error', error instanceof Error ? error.message : String(error));
     }
-    throw new OllamaProtocolError('ollama_transport_error', error instanceof Error ? error.message : String(error));
+    if (!response) throw new OllamaProtocolError('ollama_transport_error', 'o modelo Ollama respondeu sem conexão.');
+    if (!response.ok) {
+      // Preserva o diagnóstico do próprio Ollama (ex.: crash do runner/CUDA): o corpo de
+      // erro é do servidor local e nunca inclui o request enviado.
+      const providerError = providerErrorFromBody(await readBoundedErrorBody(response));
+      throw new OllamaProtocolError(
+        'ollama_transport_error',
+        `o modelo Ollama respondeu ${response.status}${providerError ? `: ${providerError}` : ''}.`,
+        { httpStatus: response.status, ...(providerError ? { providerError } : {}) },
+      );
+    }
+    let body: {
+      message?: { content?: unknown };
+      prompt_eval_count?: unknown;
+      eval_count?: unknown;
+      done_reason?: unknown;
+    } | null;
+    try {
+      body = await Promise.race([response.json() as Promise<typeof body>, aborted]);
+    } catch (error) {
+      if (timedOut()) throw timeoutError();
+      if (controller.signal.aborted) {
+        throw new OllamaProtocolError('ollama_transport_error', 'leitura da resposta do Ollama cancelada.');
+      }
+      void error;
+      body = null;
+    }
+    const content = typeof body?.message?.content === 'string' ? body.message.content : '';
+    const meta: OllamaCallMeta = {
+      promptEvalCount: typeof body?.prompt_eval_count === 'number' ? body.prompt_eval_count : null,
+      evalCount: typeof body?.eval_count === 'number' ? body.eval_count : null,
+      doneReason: typeof body?.done_reason === 'string' ? body.done_reason : null,
+    };
+    return { content, meta };
   } finally {
     clearTimeout(timer);
     if (input.signal) input.signal.removeEventListener('abort', onAbort);
+    if (rejectOnAbort) controller.signal.removeEventListener('abort', rejectOnAbort);
   }
-  if (!response) throw new OllamaProtocolError('ollama_transport_error', 'o modelo Ollama respondeu sem conexão.');
-  if (!response.ok) {
-    // Preserva o diagnóstico do próprio Ollama (ex.: crash do runner/CUDA): o corpo de
-    // erro é do servidor local e nunca inclui o request enviado.
-    const providerError = providerErrorFromBody(await readBoundedErrorBody(response));
-    throw new OllamaProtocolError(
-      'ollama_transport_error',
-      `o modelo Ollama respondeu ${response.status}${providerError ? `: ${providerError}` : ''}.`,
-      { httpStatus: response.status, ...(providerError ? { providerError } : {}) },
-    );
-  }
-  const body = await response.json().catch(() => null) as {
-    message?: { content?: unknown };
-    prompt_eval_count?: unknown;
-    eval_count?: unknown;
-    done_reason?: unknown;
-  } | null;
-  const content = typeof body?.message?.content === 'string' ? body.message.content : '';
-  const meta: OllamaCallMeta = {
-    promptEvalCount: typeof body?.prompt_eval_count === 'number' ? body.prompt_eval_count : null,
-    evalCount: typeof body?.eval_count === 'number' ? body.eval_count : null,
-    doneReason: typeof body?.done_reason === 'string' ? body.done_reason : null,
-  };
-  return { content, meta };
 }
 
 // ---- Envelope da resposta do protocolo (discriminado por `action`) ----
@@ -1005,10 +1034,14 @@ export async function writeChangeSet(
   changes: readonly AppliedChange[],
   writer: ChangeWriter,
   signal?: AbortSignal,
+  /** Guarda do host chamada ANTES de cada escrita (ex.: deadline global); lança para
+   * interromper o lote — nenhuma escrita nova começa depois dela. */
+  beforeEachWrite?: () => void,
 ): Promise<string[]> {
   const touched: string[] = [];
   for (const change of changes) {
     if (signal?.aborted) throw new OllamaProtocolError('ollama_aborted', 'aplicação abortada antes de concluir o lote.');
+    beforeEachWrite?.();
     let ok: boolean;
     try {
       ok = await writer.writeFile(change.path, change.newContent);

@@ -1,4 +1,4 @@
-import { resolveOllamaCoderRuntimeConfig } from './ollama-coder-config';
+import { DEFAULT_LOCAL_CODER_CONTEXT_LENGTH, resolveLocalCoderContextLength, resolveOllamaCoderRuntimeConfig } from './ollama-coder-config';
 
 describe('resolveOllamaCoderRuntimeConfig — endpoint dedicado do coder', () => {
   test('sem env preserva Ollama local e identidade compatível', () => {
@@ -27,4 +27,20 @@ describe('resolveOllamaCoderRuntimeConfig — endpoint dedicado do coder', () =>
   ])('%s falha fechado', (_label, env) => {
     expect(resolveOllamaCoderRuntimeConfig('qwen3-coder:latest', env)).toMatchObject({ ok: false });
   });
+});
+
+describe('resolveLocalCoderContextLength — ANIMA_LOCAL_CODER_CONTEXT_LENGTH', () => {
+  test('ausente ou vazio ⇒ 8192 (comportamento histórico)', () => {
+    expect(resolveLocalCoderContextLength({})).toEqual({ ok: true, value: 8192 });
+    expect(resolveLocalCoderContextLength({ ANIMA_LOCAL_CODER_CONTEXT_LENGTH: '  ' })).toEqual({ ok: true, value: DEFAULT_LOCAL_CODER_CONTEXT_LENGTH });
+  });
+
+  test('inteiro decimal positivo >= 1024 é aceito', () => {
+    expect(resolveLocalCoderContextLength({ ANIMA_LOCAL_CODER_CONTEXT_LENGTH: '16384' })).toEqual({ ok: true, value: 16384 });
+  });
+
+  test.each(['0', '-8192', '8192.5', '1e4', '0x2000', 'abc', 'Infinity', '512', '99999999999999999999'])(
+    'valor inválido %s falha fechado (nunca outro valor silencioso)', raw => {
+      expect(resolveLocalCoderContextLength({ ANIMA_LOCAL_CODER_CONTEXT_LENGTH: raw }).ok).toBe(false);
+    });
 });

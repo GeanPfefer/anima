@@ -43,7 +43,7 @@ const KNOWN_CODES = new Set([
   'ollama_read_round_limit', 'context_limit', 'context_window_exceeded',
   'resource_pressure', 'insufficient_memory', 'insufficient_vram',
   'ollama_timeout', 'runner_timeout', 'provider_timeout',
-  'no_progress', 'loop_detected', 'ollama_no_effective_edits',
+  'no_progress', 'loop_detected', 'ollama_no_effective_edits', 'ollama_no_progress',
   'provider_unavailable', 'external_unavailable', 'ollama_transport_error',
   'execution_cancelled', 'cancelled',
   'invalid_request', 'contract_violation', 'attempt_payload_conflict',
@@ -78,7 +78,7 @@ const kindFor = (code: string | null): RecoveryFailureKind => {
     case 'resource_pressure': case 'insufficient_memory': case 'insufficient_vram': return 'resource_pressure';
     case 'gate_failed': return 'gate_failure';
     case 'ollama_timeout': case 'runner_timeout': case 'provider_timeout': return 'timeout';
-    case 'no_progress': case 'loop_detected': case 'ollama_no_effective_edits': return 'no_progress';
+    case 'no_progress': case 'loop_detected': case 'ollama_no_effective_edits': case 'ollama_no_progress': return 'no_progress';
     case 'provider_unavailable': case 'external_unavailable': case 'ollama_transport_error': return 'external_unavailable';
     case 'execution_cancelled': case 'cancelled': return 'contract_violation';
     case 'invalid_request': case 'contract_violation': case 'attempt_payload_conflict': return 'contract_violation';
