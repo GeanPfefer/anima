@@ -40,6 +40,8 @@ export interface RunProjectBacklogHostTurnInput {
    * acompanhado por humano e, por segurança, um `requestedWorkItemId`.
    */
   readonly coderRuntimeMode?: AgenticRuntimeMode;
+  /** Preflight opcional do node cloud pronto, antes da attempt (ver `buildProjectBacklogCycleDeps`). */
+  readonly coderNodePreflight?: NonNullable<Parameters<typeof buildProjectBacklogCycleDeps>[2]>['coderNodePreflight'];
 }
 
 /**
@@ -52,8 +54,12 @@ export function runProjectBacklogHostTurn(input: RunProjectBacklogHostTurnInput)
   if (input.coderRuntimeMode === 'supervised' && !input.requestedWorkItemId) {
     return Promise.reject(new Error('coderRuntimeMode=supervised exige requestedWorkItemId (nunca vale para a fila autônoma).'));
   }
-  const baseDeps = input.coderRuntimeMode
-    ? buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId, { coderRuntimeMode: input.coderRuntimeMode })
+  const depsOptions = {
+    ...(input.coderRuntimeMode ? { coderRuntimeMode: input.coderRuntimeMode } : {}),
+    ...(input.coderNodePreflight ? { coderNodePreflight: input.coderNodePreflight } : {}),
+  };
+  const baseDeps = Object.keys(depsOptions).length > 0
+    ? buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId, depsOptions)
     : buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId);
   const deps = input.requestedWorkItemId ? {
     ...baseDeps,

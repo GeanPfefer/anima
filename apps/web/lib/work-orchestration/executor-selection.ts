@@ -5,7 +5,7 @@ import { resolveAgenticRuntimePolicy, selectGovernedCoderModel } from '@anima/co
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { resolveCoderCapacityPolicy } from './coder-model-policy';
-import { resolveLocalCoderContextLength, resolveOllamaCoderRuntimeConfig, type OllamaCoderRuntimeConfig } from './ollama-coder-config';
+import { resolveLocalCoderContextLength, resolveOllamaCoderRuntimeConfig, resolveRemoteCoderContextLength, type OllamaCoderRuntimeConfig } from './ollama-coder-config';
 import { GptCoderBackend } from './gpt-coder';
 import type { OpenAIAdmissionControl } from '@/lib/ai/openai-paid-transport';
 import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
@@ -151,9 +151,10 @@ const backendFor = (
     }
     const runtime = ollamaRuntimeOverride ? { ok: true as const, value: ollamaRuntimeOverride } : resolveOllamaCoderRuntimeConfig(model);
     if (!runtime.ok) return { error: runtime.error };
-    // Janela do coder LOCAL configurável (default 8192); nodes remotos mantêm o default.
-    const contextLength = runtime.value.locality === 'local' ? resolveLocalCoderContextLength() : null;
-    if (contextLength && !contextLength.ok) return { error: contextLength.error };
+    // Janela do coder configurável POR LOCALIDADE (default 8192 em ambas): a Goma usa o knob
+    // LOCAL; um node remoto (túnel loopback, ex.: RunPod) usa o knob REMOTE, independente.
+    const contextLength = runtime.value.locality === 'local' ? resolveLocalCoderContextLength() : resolveRemoteCoderContextLength();
+    if (!contextLength.ok) return { error: contextLength.error };
     return new OllamaCoderBackend({
       model,
       url: runtime.value.url,
@@ -165,7 +166,7 @@ const backendFor = (
       // SUPERVISED remove os contadores de investigação; deadline, escopo, gates e
       // contadores de ações inválidas permanecem.
       agenticRuntimePolicy: resolveAgenticRuntimePolicy({ mode: coderRuntimeMode }),
-      ...(contextLength?.ok ? { operationalContextCap: contextLength.value } : {}),
+      operationalContextCap: contextLength.value,
     });
   }
 

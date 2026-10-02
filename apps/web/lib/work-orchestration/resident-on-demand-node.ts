@@ -68,6 +68,23 @@ export interface ResidentOnDemandNodeConfig {
   readonly priceHint: NodePriceHintV0 | null;
 }
 
+/** Lease histórico do node on-demand (minutos). */
+export const DEFAULT_ON_DEMAND_LEASE_MINUTES = 30;
+/** Teto de sanidade do knob (a authority é o limite contratual real). */
+export const MAX_ON_DEMAND_LEASE_MINUTES = 24 * 60;
+
+/**
+ * Lease EFETIVO de um node: o configurado, nunca maior que o `maxDurationMs` da authority paga
+ * vigente. É o valor canônico único para matching, estimativa/reserva, lease, deadline do turno
+ * e settlement (por tempo real). Sem authority (owned) ⇒ o configurado. PURA.
+ */
+export function effectiveLeaseDurationMs(
+  configuredMs: number,
+  authorization: { readonly maxDurationMs: number } | null,
+): number {
+  return authorization === null ? configuredMs : Math.min(configuredMs, authorization.maxDurationMs);
+}
+
 export function readResidentOnDemandNodeConfig(
   model: string,
   env: Record<string, string | undefined> = process.env,
@@ -86,6 +103,12 @@ export function readResidentOnDemandNodeConfig(
     if (billing !== 'paid') return null;
     if (readRunPodProvisionerConfig(env) === null) return null;
   }
+  // Lease do node (vida de INFRAESTRUTURA, ≠ maxDurationMinutes da attempt). Default histórico
+  // 30 min; inválido ⇒ fail-closed (burst não admitido). O efetivo ainda é limitado pela
+  // authority em `effectiveLeaseDurationMs`.
+  const leaseMinutesRaw = env.ANIMA_ON_DEMAND_LEASE_MINUTES?.trim();
+  const leaseMinutes = leaseMinutesRaw ? (/^[1-9][0-9]*$/.test(leaseMinutesRaw) ? Number(leaseMinutesRaw) : Number.NaN) : DEFAULT_ON_DEMAND_LEASE_MINUTES;
+  if (!Number.isSafeInteger(leaseMinutes) || leaseMinutes > MAX_ON_DEMAND_LEASE_MINUTES) return null;
   const maxConcurrentRaw = Number(env.ANIMA_ON_DEMAND_MAX_CONCURRENT_PAID_NODES);
   const perHour = Number(env.ANIMA_ON_DEMAND_PRICE_PER_HOUR);
   const priceHint: NodePriceHintV0 | null = Number.isFinite(perHour) && perHour > 0
@@ -95,7 +118,7 @@ export function readResidentOnDemandNodeConfig(
     nodeId, providerId: provisioner, model,
     resourceClass: env.ANIMA_ON_DEMAND_NODE_RESOURCE_CLASS?.trim() || provisioner,
     billingMode: billing,
-    maxActiveDurationMs: 30 * 60_000,
+    maxActiveDurationMs: leaseMinutes * 60_000,
     idleTimeoutMs: 60_000,
     maxConcurrentPaidNodes: Number.isInteger(maxConcurrentRaw) && maxConcurrentRaw > 0 ? maxConcurrentRaw : null,
     priceHint,
@@ -218,6 +241,8 @@ export async function prepareResidentOnDemandCoderNode(input: {
         workItemId: input.workItemId, now: clock(),
       })
     : null;
+  // Lease canônico: nunca maior que a authority (todo o resto deriva deste config).
+  config = { ...config, maxActiveDurationMs: effectiveLeaseDurationMs(config.maxActiveDurationMs, authorization) };
   let selectedGpuTypeId: string | undefined;
   let selectedCapabilities: { readonly vramGiB: number; readonly gpuFeatures: readonly string[]; readonly perHour: { readonly currency: string; readonly amount: number } | null } | null = null;
   let capabilityMatched = false;
@@ -595,6 +620,10 @@ export async function prepareResilientCloudCoderSession(
     workItemId: input.workItemId, now: clock(),
   });
   if (authorization === null) return stop('terminal_failure', 'no active paid authority for cloud session');
+  // Lease canônico da sessão (o mesmo que cada tentativa usará): limitado pela authority.
+  const config: ResidentOnDemandNodeConfig = {
+    ...input.config, maxActiveDurationMs: effectiveLeaseDurationMs(input.config.maxActiveDurationMs, authorization),
+  };
   const ceiling = authorization.maxCostEstimate;
   if (ceiling === null) return stop('terminal_failure', 'authority has no aggregate cost ceiling');
 
@@ -612,7 +641,7 @@ export async function prepareResilientCloudCoderSession(
   if (envelope === null) return stop('session_deadline_reached', 'authority validity window already elapsed');
 
   const requirements = deriveQwen3CoderCloudRequirements({
-    model: input.config.model,
+    model: config.model,
     maxHourlyPrice: authorization.capabilityScope?.maxHourlyPrice ?? null,
     maxEstimatedCost: ceiling,
     maxNodes: Math.min(authorization.capabilityScope?.maxNodes ?? 1, input.config.maxConcurrentPaidNodes ?? authorization.capabilityScope?.maxNodes ?? 1),
@@ -644,7 +673,7 @@ export async function prepareResilientCloudCoderSession(
         ? { ok: true, candidates: raw.candidates.filter(c => !excluded.has(`${c.providerId}:${c.gpuTypeId}`)) }
         : raw;
       const plan = await planCloudResourceProvisioning({
-        requirements, authorization, leaseDurationMs: input.config.maxActiveDurationMs, readInventory: async () => filtered,
+        requirements, authorization, leaseDurationMs: config.maxActiveDurationMs, readInventory: async () => filtered,
       });
       if (!plan.ok) return { ok: false, blocker: plan.blocker, detail: plan.detail };
       const c = plan.chosen.candidate;
@@ -660,7 +689,7 @@ export async function prepareResilientCloudCoderSession(
         return raw.ok ? { ok: true, candidates: raw.candidates.filter(c => `${c.providerId}:${c.gpuTypeId}` === candidate.placementId) } : raw;
       };
       const prep = await prepareResidentOnDemandCoderNode({
-        client: input.client, config: input.config, workItemId: input.workItemId,
+        client: input.client, config, workItemId: input.workItemId,
         proposalVersion: input.proposalVersion, leaseId: `${input.cloudSessionId}-a${attemptCounter}`,
         signal, now: input.now, evidenceSink: input.evidenceSink, provisionerFactory: input.provisionerFactory,
         readResourceInventory: only, readLivePaidNodeCount: input.readLivePaidNodeCount,

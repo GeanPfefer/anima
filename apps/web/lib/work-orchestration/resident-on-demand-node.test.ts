@@ -3,7 +3,7 @@ import type { NodeLifecycleEvidenceV1, NodeProvisioner, NodeProvisionRequest } f
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { LocalProcessNodeProvisioner } from './local-process-node-provisioner';
-import { leaseDeadlineSignal, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig, resolveOnDemandProvisioner, type ResidentOnDemandNodeConfig } from './resident-on-demand-node';
+import { DEFAULT_ON_DEMAND_LEASE_MINUTES, effectiveLeaseDurationMs, leaseDeadlineSignal, prepareResidentOnDemandCoderNode, readResidentOnDemandNodeConfig, resolveOnDemandProvisioner, type ResidentOnDemandNodeConfig } from './resident-on-demand-node';
 import { join } from 'node:path';
 
 const RUNPOD_ENV = {
@@ -596,5 +596,48 @@ describe('leaseDeadlineSignal (watchdog best-effort do deadline da lease)', () =
     dispose();
     await new Promise(r => setTimeout(r, 80));
     expect(signal.aborted).toBe(false);
+  });
+});
+
+describe('lease configurável do node on-demand (ANIMA_ON_DEMAND_LEASE_MINUTES)', () => {
+  test('default histórico 30 min quando ausente', () => {
+    expect(DEFAULT_ON_DEMAND_LEASE_MINUTES).toBe(30);
+    expect(readResidentOnDemandNodeConfig('m', RUNPOD_ENV)?.maxActiveDurationMs).toBe(30 * 60_000);
+  });
+  test('90 min configurado é lido', () => {
+    expect(readResidentOnDemandNodeConfig('m', { ...RUNPOD_ENV, ANIMA_ON_DEMAND_LEASE_MINUTES: '90' })?.maxActiveDurationMs).toBe(90 * 60_000);
+  });
+  test.each(['0', '-5', '90.5', 'abc', '1441'])('inválido %s ⇒ fail-closed (burst não admitido)', raw => {
+    expect(readResidentOnDemandNodeConfig('m', { ...RUNPOD_ENV, ANIMA_ON_DEMAND_LEASE_MINUTES: raw })).toBeNull();
+  });
+  test('efetivo nunca maior que a authority; sem authority (owned) usa o configurado', () => {
+    expect(effectiveLeaseDurationMs(120 * 60_000, { maxDurationMs: 90 * 60_000 })).toBe(90 * 60_000);
+    expect(effectiveLeaseDurationMs(30 * 60_000, { maxDurationMs: 90 * 60_000 })).toBe(30 * 60_000);
+    expect(effectiveLeaseDurationMs(45 * 60_000, null)).toBe(45 * 60_000);
+  });
+  test('o lease ENTREGUE ao provisioner é limitado pela authority (configurado 120 > authority 90)', async () => {
+    const now = new Date('2026-10-02T00:00:00.000Z');
+    const authRow = {
+      id: 'auth-90', user_id: 'u', provider_id: 'local-process', node_id: null, resource_class: null, work_item_id: null,
+      max_duration_ms: 90 * 60_000, max_cost_currency: 'USD', max_cost_amount: 10,
+      valid_from: '2026-10-01T23:00:00.000Z', valid_until: '2026-10-03T00:00:00.000Z', revoked_at: null, created_at: '2026-10-01T23:00:00.000Z',
+    };
+    const chain = { eq: () => chain, is: () => chain, lte: () => chain, gt: () => chain, order: () => chain, limit: async () => ({ data: [authRow], error: null }) };
+    const client = { from: () => ({ select: () => chain }), rpc: async () => ({ data: { action: 'reserved', reservation_id: 'r-90' }, error: null }) } as unknown as SupabaseClient<Database>;
+    let captured: NodeProvisionRequest['lease'] | null = null;
+    const provisioner: NodeProvisioner = {
+      providerId: 'local-process',
+      provision: async req => { captured = req.lease; return { ok: false, reason: 'parar após capturar a lease' }; },
+      inspect: async h => ({ nodeId: h.nodeId, reachable: false, healthy: false }),
+      stop: async () => ({ ok: true }),
+    };
+    await prepareResidentOnDemandCoderNode({
+      client, config: { ...config('paid'), maxActiveDurationMs: 120 * 60_000, priceHint: { currency: 'USD', perHour: 0.49 } },
+      workItemId: 'work-90', proposalVersion: 1, leaseId: 'lease-90', signal: new AbortController().signal, now: () => now,
+      evidenceSink: { record: async () => ({ ok: true, action: 'recorded' }) }, provisionerFactory: () => provisioner,
+    });
+    expect(captured).not.toBeNull();
+    expect(captured!.maxActiveDurationMs).toBe(90 * 60_000);
+    expect(captured!.leaseExpiresAt).toBe(new Date(now.getTime() + 90 * 60_000).toISOString());
   });
 });

@@ -9,6 +9,7 @@ import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
 import { readMachinePressure, readResourceAdmission } from './resource-governor';
 import { decideCoderPlacement, localRuntimeFor, readExplicitCoderNodeV0, remoteRuntimeFor } from './coder-placement';
+import type { OllamaCoderRuntimeConfig } from './ollama-coder-config';
 import { leaseDeadlineSignal, onDemandBurstForced, prepareCloudCoderNode, readResidentOnDemandNodeConfig } from './resident-on-demand-node';
 import { readLivePaidNodeCount } from './paid-compute-lease-reconciler-deps';
 import { createOpenAICoderAdmission, openAIProviderResourceClass } from './openai-paid-compute';
@@ -223,6 +224,13 @@ export function buildProjectBacklogCycleDeps(
     /** Modo do laço do coder local. Ausente ⇒ `autonomous` (Resident Host/rota HTTP).
      * `supervised` só por declaração explícita de um invocador acompanhado por humano. */
     readonly coderRuntimeMode?: AgenticRuntimeMode;
+    /**
+     * Preflight opcional do node CLOUD já pronto (endpoint/túnel/modelo), executado DEPOIS da
+     * preparação do node e ANTES de `runSupervisorTurn` (que cria claim/attempt). Falha ⇒ o
+     * node passa pelo `finish` canônico (teardown + settlement) e a volta vira
+     * `coder_node_preflight_failed` SEM attempt. Ausente ⇒ comportamento inalterado.
+     */
+    readonly coderNodePreflight?: (runtime: OllamaCoderRuntimeConfig) => Promise<{ readonly ok: true } | { readonly ok: false; readonly detail: string }>;
   } = {},
 ): ProjectBacklogCycleDeps {
   let admittedPressure: ReturnType<typeof readMachinePressure> = 'unknown';
@@ -345,6 +353,15 @@ export function buildProjectBacklogCycleDeps(
         }
       }
       if (placement?.placement === 'defer') return notExecutable(entry, 'coder_placement_deferred', `Placement do coder adiou a execução: ${placement.reason}.`);
+      if (onDemandSession?.ok && options.coderNodePreflight) {
+        let preflight: { readonly ok: true } | { readonly ok: false; readonly detail: string };
+        try { preflight = await options.coderNodePreflight(onDemandSession.runtime); }
+        catch (error) { preflight = { ok: false, detail: error instanceof Error ? error.message : String(error) }; }
+        if (!preflight.ok) {
+          await onDemandSession.finish(null);
+          return notExecutable(entry, 'coder_node_preflight_failed', `Preflight do node cloud falhou antes da attempt: ${preflight.detail}.`);
+        }
+      }
       if (placement) ollamaRuntimeOverride ??= placement.placement === 'remote' ? remoteRuntimeFor(placement.node, model) : localRuntimeFor(model);
       const gateObservations: ObservedGateInput[] = [];
       const coderObservations: ObservedCoderInput[] = [];

@@ -105,6 +105,31 @@ describe('resolveExecutorRoute — modo do laço do coder local (SUPERVISED × A
     }
   });
 
+  test('ANIMA_REMOTE_CODER_CONTEXT_LENGTH: só o coder REMOTO recebe 32768; o LOCAL segue inalterado', () => {
+    const saved = { remote: process.env.ANIMA_REMOTE_CODER_CONTEXT_LENGTH, local: process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH };
+    const remote = { url: 'http://127.0.0.1:21434', backendId: 'ollama:remote/runpod-x:qwen3-coder:latest', locality: 'remote' as const, nodeId: 'runpod-x' };
+    try {
+      delete process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH;
+      process.env.ANIMA_REMOTE_CODER_CONTEXT_LENGTH = '32768';
+      const remoteBudget = coderOf(resolveExecutorRoute(anima, { repoRoot: REPO_ROOT, ollamaRuntimeOverride: remote })).contextBudget;
+      expect(remoteBudget.numCtx).toBe(32768);
+      expect(remoteBudget.outputReserveTokens).toBe(1536); // reserva de saída preservada
+      expect(remoteBudget.inputBudgetTokens).toBe(32768 - 1536);
+      expect(coderOf(resolveExecutorRoute(anima, { repoRoot: REPO_ROOT })).contextBudget.numCtx).toBe(8192); // local intocado
+      delete process.env.ANIMA_REMOTE_CODER_CONTEXT_LENGTH;
+      expect(coderOf(resolveExecutorRoute(anima, { repoRoot: REPO_ROOT, ollamaRuntimeOverride: remote })).contextBudget.numCtx).toBe(8192); // default histórico
+      process.env.ANIMA_REMOTE_CODER_CONTEXT_LENGTH = 'muito';
+      const invalid = resolveExecutorRoute(anima, { repoRoot: REPO_ROOT, ollamaRuntimeOverride: remote });
+      expect(invalid.ok).toBe(false);
+      if (!invalid.ok) expect(invalid.error.code).toBe('coder_backend_invalid');
+      // knob remoto inválido não afeta o coder LOCAL
+      expect(resolveExecutorRoute(anima, { repoRoot: REPO_ROOT }).ok).toBe(true);
+    } finally {
+      if (saved.remote === undefined) delete process.env.ANIMA_REMOTE_CODER_CONTEXT_LENGTH; else process.env.ANIMA_REMOTE_CODER_CONTEXT_LENGTH = saved.remote;
+      if (saved.local === undefined) delete process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH; else process.env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH = saved.local;
+    }
+  });
+
   test('SUPERVISED declarado ⇒ coder local sem teto de rodadas, com guarda de progresso', () => {
     const policy = coderOf(resolveExecutorRoute(anima, { repoRoot: REPO_ROOT, coderRuntimeMode: 'supervised' })).agenticRuntimePolicy;
     expect(policy.mode).toBe('supervised');

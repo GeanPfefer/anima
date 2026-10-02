@@ -1,4 +1,4 @@
-import { DEFAULT_LOCAL_CODER_CONTEXT_LENGTH, resolveLocalCoderContextLength, resolveOllamaCoderRuntimeConfig } from './ollama-coder-config';
+import { DEFAULT_LOCAL_CODER_CONTEXT_LENGTH, DEFAULT_REMOTE_CODER_CONTEXT_LENGTH, resolveLocalCoderContextLength, resolveOllamaCoderRuntimeConfig, resolveRemoteCoderContextLength } from './ollama-coder-config';
 
 describe('resolveOllamaCoderRuntimeConfig — endpoint dedicado do coder', () => {
   test('sem env preserva Ollama local e identidade compatível', () => {
@@ -43,4 +43,21 @@ describe('resolveLocalCoderContextLength — ANIMA_LOCAL_CODER_CONTEXT_LENGTH', 
     'valor inválido %s falha fechado (nunca outro valor silencioso)', raw => {
       expect(resolveLocalCoderContextLength({ ANIMA_LOCAL_CODER_CONTEXT_LENGTH: raw }).ok).toBe(false);
     });
+});
+
+describe('resolveRemoteCoderContextLength — ANIMA_REMOTE_CODER_CONTEXT_LENGTH', () => {
+  test('ausente ⇒ 8192 (histórico); independente do knob LOCAL', () => {
+    expect(resolveRemoteCoderContextLength({})).toEqual({ ok: true, value: DEFAULT_REMOTE_CODER_CONTEXT_LENGTH });
+    expect(DEFAULT_REMOTE_CODER_CONTEXT_LENGTH).toBe(8192);
+    expect(resolveRemoteCoderContextLength({ ANIMA_LOCAL_CODER_CONTEXT_LENGTH: '16384' })).toEqual({ ok: true, value: 8192 });
+    expect(resolveLocalCoderContextLength({ ANIMA_REMOTE_CODER_CONTEXT_LENGTH: '32768' })).toEqual({ ok: true, value: 8192 });
+  });
+  test('32768 configurado é aceito', () => {
+    expect(resolveRemoteCoderContextLength({ ANIMA_REMOTE_CODER_CONTEXT_LENGTH: '32768' })).toEqual({ ok: true, value: 32768 });
+  });
+  test.each(['0', '-1', '32768.5', 'abc', '512', '1e5'])('inválido %s falha fechado', raw => {
+    const r = resolveRemoteCoderContextLength({ ANIMA_REMOTE_CODER_CONTEXT_LENGTH: raw });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('ANIMA_REMOTE_CODER_CONTEXT_LENGTH');
+  });
 });

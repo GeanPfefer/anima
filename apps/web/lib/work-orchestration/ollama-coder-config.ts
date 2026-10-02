@@ -82,11 +82,34 @@ const MIN_LOCAL_CODER_CONTEXT_LENGTH = 1024;
 export function resolveLocalCoderContextLength(
   env: Record<string, string | undefined> = process.env,
 ): { readonly ok: true; readonly value: number } | { readonly ok: false; readonly error: string } {
-  const raw = env.ANIMA_LOCAL_CODER_CONTEXT_LENGTH?.trim();
-  if (!raw) return { ok: true, value: DEFAULT_LOCAL_CODER_CONTEXT_LENGTH };
+  return resolveCoderContextLength('ANIMA_LOCAL_CODER_CONTEXT_LENGTH', env);
+}
+
+/** Janela operacional histórica do coder REMOTO (num_ctx) — a mesma de antes do knob. */
+export const DEFAULT_REMOTE_CODER_CONTEXT_LENGTH = 8192;
+
+/**
+ * `ANIMA_REMOTE_CODER_CONTEXT_LENGTH`: teto operacional (num_ctx) do coder Ollama com
+ * `locality: remote` (node dedicado por túnel loopback, ex.: RunPod). Independente do knob
+ * LOCAL: a capacidade de um node remoto não é a da Goma. Ausente/vazio ⇒ 8192 (histórico);
+ * mesma validação fail-closed (inteiro decimal >= 1024). Não afeta planner nem OpenAI;
+ * reserva de saída e guardas de truncamento continuam as do `resolveContextBudget`.
+ */
+export function resolveRemoteCoderContextLength(
+  env: Record<string, string | undefined> = process.env,
+): { readonly ok: true; readonly value: number } | { readonly ok: false; readonly error: string } {
+  return resolveCoderContextLength('ANIMA_REMOTE_CODER_CONTEXT_LENGTH', env);
+}
+
+function resolveCoderContextLength(
+  name: 'ANIMA_LOCAL_CODER_CONTEXT_LENGTH' | 'ANIMA_REMOTE_CODER_CONTEXT_LENGTH',
+  env: Record<string, string | undefined>,
+): { readonly ok: true; readonly value: number } | { readonly ok: false; readonly error: string } {
+  const raw = env[name]?.trim();
+  if (!raw) return { ok: true, value: name === 'ANIMA_LOCAL_CODER_CONTEXT_LENGTH' ? DEFAULT_LOCAL_CODER_CONTEXT_LENGTH : DEFAULT_REMOTE_CODER_CONTEXT_LENGTH };
   const value = /^[1-9][0-9]*$/.test(raw) ? Number(raw) : Number.NaN;
   if (!Number.isSafeInteger(value) || value < MIN_LOCAL_CODER_CONTEXT_LENGTH) {
-    return { ok: false, error: `ANIMA_LOCAL_CODER_CONTEXT_LENGTH deve ser inteiro decimal >= ${MIN_LOCAL_CODER_CONTEXT_LENGTH}.` };
+    return { ok: false, error: `${name} deve ser inteiro decimal >= ${MIN_LOCAL_CODER_CONTEXT_LENGTH}.` };
   }
   return { ok: true, value };
 }
