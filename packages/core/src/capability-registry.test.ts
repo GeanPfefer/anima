@@ -122,11 +122,11 @@ describe('Evolution Reconciliation V2 — honestidade epistemológica do registr
     }
   });
 
-  test('SearXNG e agent-browser são reuso INTEGRADO; os demais POCs são só candidatos futuros', () => {
+  test('SearXNG e agent-browser são reuso INTEGRADO; candidatos permanecem futuros', () => {
     expect(get('research.web.search').reuse).toMatchObject({ tool: 'SearXNG', strategy: 'wrap', status: 'integrated' });
     expect(get('research.web.open').reuse).toMatchObject({ tool: 'agent-browser', strategy: 'wrap', status: 'integrated' });
     const candidates = ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.reuse?.status === 'candidate');
-    expect(candidates.map((c) => c.reuse?.tool).sort()).toEqual(['Claude Code / Codex CLI', 'ai-memory', 'ai-usagebar', 'ghpending']);
+    expect(candidates.map((c) => c.reuse?.tool).sort()).toEqual(['Claude Code', 'Claude Code / Codex CLI', 'Codex CLI', 'ai-memory', 'ai-usagebar', 'ghpending']);
     for (const c of candidates) {
       expect(isFutureMaturity(c.maturity)).toBe(true);
       // Evidência externa nunca vira prova de funcionamento do Anima.
@@ -169,5 +169,42 @@ describe('Evolution Reconciliation V2 — honestidade epistemológica do registr
     expect(ids.has('governance.harness-recovery')).toBe(true);
     expect(recent.every((r) => r.entry.at >= EVOLUTION_BASELINE.date)).toBe(true);
     expect(ids.has('interaction.chat')).toBe(false);
+  });
+});
+
+describe('Akita Baseline — direção não concede maturidade', () => {
+  const get = (id: string) => ANIMA_CAPABILITY_REGISTRY_V0.find((c) => c.id === id)!;
+  test('objetivo preserva sequência planejada e dependências sem ciclos', () => {
+    const baseline = get('agency.akita-baseline-v1');
+    expect(baseline.target?.steps?.map((step) => step.capabilityId)).toEqual([
+      'agency.codex-cli', 'agency.claude-code', 'memory.cross-harness', 'agency.continuous-self-development',
+    ]);
+    expect(baseline.dependsOn).toEqual(['agency.codex-cli', 'agency.claude-code', 'memory.cross-harness']);
+    expect(validateCapabilityRegistry(ANIMA_CAPABILITY_REGISTRY_V0)).toEqual([]);
+  });
+  test('WRAP e CURRENT FOCUS não promovem candidatos', () => {
+    for (const id of ['agency.codex-cli', 'agency.claude-code', 'memory.cross-harness', 'agency.external-harness']) {
+      const capability = get(id);
+      expect(capability.reuse?.strategy).toBe('wrap');
+      expect(capability.reuse?.status).toBe('candidate');
+      expect(capability.maturity).toBe('projected');
+      expect(capability.proofRefs ?? []).toEqual([]);
+      expect(capability.direction?.refs.length).toBeGreaterThan(0);
+    }
+    expect(get('agency.codex-cli').direction?.status).toBe('current_focus');
+    expect(get('agency.claude-code').direction?.status).toBe('next');
+    expect(get('memory.cross-harness').direction?.status).toBe('next');
+  });
+  test('pesquisa preserva provas sem bloquear baseline', () => {
+    for (const id of ['agency.ollama-agentic-runtime', 'agency.deepseek-harness']) {
+      expect(get(id).direction?.status).toBe('experimental');
+      expect(get(id).maturity).toBe('proven');
+      expect(get(id).proofRefs?.length).toBeGreaterThan(0);
+      expect(get('agency.akita-baseline-v1').dependsOn).not.toContain(id);
+    }
+    expect(get('compute.cloud-self-hosted').direction?.status).toBe('parked');
+    expect(get('compute.cloud-self-hosted').maturity).toBe('implemented');
+    expect(get('agency.produce-change').maturity).toBe('proven');
+    expect(get('governance.authority').maturity).toBe('proven');
   });
 });

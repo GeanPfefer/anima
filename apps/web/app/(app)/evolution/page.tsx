@@ -13,7 +13,7 @@ import {
 import EvolutionClient, { type EvolutionCapabilityAssessmentState, type EvolutionObjective } from './_components/EvolutionClient';
 
 // Objetivo padrão em foco: o norte do arco de agência.
-const FEATURED_TARGET_ID = 'agency.continuous-self-development';
+const FEATURED_TARGET_ID = 'agency.akita-baseline-v1';
 
 export default async function EvolutionPage() {
   const supabase = await createClient();

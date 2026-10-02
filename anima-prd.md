@@ -1,4 +1,11 @@
 # Anima — Product Requirements Document
+> Evolution UX V2 / Akita Baseline (2026-10-02), implementada em branch isolada
+> `codex/evolution-ux-v2`, ainda não integrada: /evolution destaca REUSE BEFORE BUILD,
+> objetivo Codex CLI → Claude Code → ai-memory → self-dev avançado, estratégias
+> existentes e direção separada de maturidade. Registry 63 → 68; nenhuma capacidade
+> anterior promovida ou rebaixada. Codex/Claude permanecem candidatos nesta baseline;
+> prova/integração do WIP paralelo exigem reconciliação humana. Sem backend, banco
+> ou enforcement alterados. Plano 009 e registro 2026-10-02-evolution-ux-v2-akita-baseline.
 > Ollama Coder Error Observability V1 (2026-09-30): respostas não-2xx do Ollama no caminho do
 > coder preservam `httpStatus` e `providerError` (erro do próprio Ollama, redigido, ≤300 chars)
 > em `OllamaProtocolError`, sem ler nada do request. O transcript host-observed v1 não mudou

@@ -183,9 +183,23 @@ export interface CapabilityHistoryEntry {
 
 // ─── Capacidade ──────────────────────────────────────────────────────────────
 
+// Direção é decisão de planejamento, nunca entrada para o Proof Engine.
+export type CapabilityDirectionStatus = 'current_focus' | 'next' | 'experimental' | 'parked' | 'projected';
+export const CAPABILITY_DIRECTION_LABEL: Record<CapabilityDirectionStatus, string> = {
+  current_focus: 'CURRENT FOCUS', next: 'NEXT', experimental: 'EXPERIMENTAL',
+  parked: 'PARKED', projected: 'PROJECTED',
+};
+export interface CapabilityDirection {
+  status: CapabilityDirectionStatus;
+  rationale: string;
+  refs: CapabilityProofRef[]; // decisão arquitetural, não prova de funcionamento
+}
+
 export interface CapabilityTarget {
   description: string;
   milestone?: string;
+  /** Sequência de planejamento; não substitui dependsOn nem comprova conclusão. */
+  steps?: { capabilityId: string; description: string }[];
 }
 
 export interface Capability {
@@ -224,6 +238,10 @@ export interface Capability {
   /** Origem externa (reuso). Ausente = capacidade interna. */
   reuse?: CapabilityReuse;
 
+  direction?: CapabilityDirection;
+  /** Responsabilidade declarada; não alegação de originalidade. */
+  responsibility?: 'reused_baseline' | 'control_plane';
+
   /** Mudanças auditadas desta capacidade (ordem cronológica). */
   history?: CapabilityHistoryEntry[];
 }
@@ -244,6 +262,8 @@ export type CapabilityRegistryIssueCode =
   // Evolution V2 — regras epistemológicas:
   | 'strong_maturity_without_proof' // proven/operational/autonomous sem proofRefs
   | 'external_candidate_realized' //  candidata externa marcada como já existente no Anima
+  | 'invalid_direction'
+  | 'invalid_target_step'
   | 'invalid_history' //              data inválida ou maturity_changed incompleto/sem refs
   | 'history_maturity_mismatch'; //   último `to` (introduced/maturity_changed) ≠ maturidade atual
 
@@ -318,6 +338,15 @@ export function validateCapabilityRegistry(
       issues.push({ code: 'invalid_maturity', capabilityId: cap.id, message: `maturidade inválida: ${cap.maturity}` });
     }
 
+    if (cap.direction && (!Object.prototype.hasOwnProperty.call(CAPABILITY_DIRECTION_LABEL, cap.direction.status)
+      || !cap.direction.rationale.trim() || cap.direction.refs.length === 0)) {
+      issues.push({ code: 'invalid_direction', capabilityId: cap.id, message: `${cap.id}: direção sem estado, justificativa ou referência` });
+    }
+    for (const step of cap.target?.steps ?? []) {
+      if (!ids.has(step.capabilityId) || !step.description.trim()) {
+        issues.push({ code: 'invalid_target_step', capabilityId: cap.id, message: `${cap.id}: etapa inválida ${step.capabilityId}` });
+      }
+    }
     const seenDeps = new Set<string>();
     for (const dep of cap.dependsOn) {
       if (dep === cap.id) {
@@ -621,4 +650,15 @@ export function listRecentEvolution(capabilities: readonly Capability[], since: 
     }
   }
   return out.sort((a, b) => (a.entry.at === b.entry.at ? a.capabilityId.localeCompare(b.capabilityId) : a.entry.at < b.entry.at ? 1 : -1));
+}
+
+/** Sinais advisory: não bloqueiam proposta, não concedem autoridade. */
+export function capabilityDirectionSignals(capability: Capability): string[] {
+  const signals: string[] = [];
+  if (capability.reuse?.strategy === 'undecided' || (!capability.reuse && capability.direction?.status === 'current_focus' && capability.responsibility === 'reused_baseline')) signals.push('reuse decision missing');
+  if (capability.reuse?.status === 'candidate') signals.push('external candidate exists');
+  if (capability.reuse?.strategy === 'build') signals.push('BUILD escolhido');
+  if (capability.reuse?.status === 'candidate' || (capability.proofRefs?.length ?? 0) === 0) signals.push('evidence needed');
+  if (capability.direction?.status === 'current_focus') signals.push('current path');
+  return signals;
 }

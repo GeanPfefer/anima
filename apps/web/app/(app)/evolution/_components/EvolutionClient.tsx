@@ -40,7 +40,7 @@ import type {
   CapabilityProofEvaluation,
   CapabilityProofStatus,
 } from '@anima/core';
-import { explainCapabilityAssessment } from '@anima/core';
+import { CAPABILITY_DIRECTION_LABEL, capabilityDirectionSignals, explainCapabilityAssessment } from '@anima/core';
 import styles from './EvolutionClient.module.css';
 
 // ─── Vocabulário de produto / apresentação (valores puros; tipos vêm do core) ───
@@ -81,7 +81,7 @@ const HISTORY_CHANGE_LABEL: Record<RecentEvolutionEntry['entry']['change'], stri
   relation_added: 'Nova relação',
 };
 
-type Lens = 'all' | 'recent' | 'external';
+type Lens = 'all' | 'recent' | 'external' | 'direction' | 'baseline' | 'control';
 
 // Rótulo curto de origem para o chip (a linha de maturidade tem pouco espaço).
 function originSuffix(cap: Capability): string {
@@ -418,7 +418,9 @@ export default function EvolutionClient({
     () => new Set(nodes.filter((n) => n.capability.reuse).map((n) => n.capability.id)),
     [nodes],
   );
-  const lensIds = lens === 'recent' ? recentIds : lens === 'external' ? externalIds : null;
+  const directionIds = new Set(nodes.filter((n) => n.capability.direction).map((n) => n.capability.id));
+  const responsibilityIds = new Set(nodes.filter((n) => n.capability.responsibility === (lens === 'baseline' ? 'reused_baseline' : 'control_plane')).map((n) => n.capability.id));
+  const lensIds = lens === 'recent' ? recentIds : lens === 'external' ? externalIds : lens === 'direction' ? directionIds : lens === 'baseline' || lens === 'control' ? responsibilityIds : null;
   const inLens = (id: string): boolean => lensIds === null || lensIds.has(id);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -552,6 +554,7 @@ export default function EvolutionClient({
           <span className={styles.marker}>Evolution V2</span>
         </div>
 
+        <DevelopmentPath nodes={nodes} onSelect={selectCapability} />
         <div className={styles.controls}>
           <div className={styles.filterRow} role="group" aria-label="Focar por domínio">
             <button
@@ -604,6 +607,12 @@ export default function EvolutionClient({
             >
               Reuso externo <span className={styles.filterCount}>{externalIds.size}</span>
             </button>
+            {(['direction', 'baseline', 'control'] as const).map((value) => (
+              <button key={value} type="button" className={`${styles.filterChip} ${lens === value ? styles.filterActive : ''}`}
+                aria-pressed={lens === value} onClick={() => { setLens(value); setSelectedId(null); }}>
+                {value === 'direction' ? 'Direção atual' : value === 'baseline' ? 'Baseline reutilizado' : 'Anima control plane'}
+              </button>
+            ))}
           </div>
 
           <label className={styles.objectivePicker}>
@@ -743,6 +752,8 @@ export default function EvolutionClient({
                     data-capid={cap.id}
                     data-state={state}
                     data-future={future ? 'true' : 'false'}
+                    data-direction={cap.direction?.status ?? 'unspecified'}
+                    data-responsibility={cap.responsibility ?? 'unspecified'}
                     data-origin={cap.reuse ? cap.reuse.status : 'internal'}
                     data-recent={recentIds.has(cap.id) ? 'true' : 'false'}
                     className={cls}
@@ -822,6 +833,8 @@ export default function EvolutionClient({
               onSelect={selectCapability}
               onClose={() => setSelectedId(null)}
             />
+          ) : lens === 'direction' || lens === 'baseline' || lens === 'control' ? (
+            <DirectionOverview nodes={nodes.filter((node) => inLens(node.capability.id))} lens={lens} onSelect={selectCapability} />
           ) : lens === 'recent' ? (
             <RecentEvolutionSummary
               entries={recentEvolution}
@@ -1064,6 +1077,7 @@ function CapabilityDetail({
         </button>
       </div>
       <h2 className={styles.detailName}>{cap.name}</h2>
+      <DirectionDetail cap={cap} />
       <div className={styles.maturityBadge} style={{ borderColor: color, color }}>
         <span>{MATURITY_GLYPH[cap.maturity]}</span> {MATURITY_LABEL[cap.maturity]}
         <span className={styles.maturityMeaning}>— {MATURITY_MEANING[cap.maturity]}</span>
@@ -1173,7 +1187,7 @@ function CapabilityDetail({
       <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>Origem</h3>
         {!cap.reuse ? (
-          <p className={styles.detailText}>Interna — construída e governada pelo Anima.</p>
+          <p className={styles.detailText}>Implementação interna registrada; estratégia de reuso não declarada.</p>
         ) : cap.reuse.status === 'integrated' ? (
           <p className={styles.detailText}>
             Reuso integrado · <strong>{REUSE_STRATEGY_LABEL[cap.reuse.strategy]}</strong> sobre <strong>{cap.reuse.tool}</strong>. A ferramenta
@@ -1281,6 +1295,10 @@ function ObjectiveSummary({
       <span className={styles.detailKicker}>Objetivo em foco</span>
       <h2 className={styles.detailName}>{cap?.name ?? objective.name}</h2>
       {cap?.target && <p className={styles.detailDesc}>{cap.target.description}</p>}
+      {cap && <DirectionDetail cap={cap} />}
+      {cap?.target?.steps && <ol className={styles.pathList} aria-label="Sequência planejada do objetivo">
+        {cap.target.steps.map((step) => <li key={step.capabilityId}><button type="button" className={styles.pathStep} onClick={() => onSelect(step.capabilityId)}>{nameById.get(step.capabilityId) ?? step.capabilityId} · {step.description}</button></li>)}
+      </ol>}
 
       <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>O que falta para o Anima chegar aqui</h3>
@@ -1412,7 +1430,7 @@ function ReuseSummary({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; onSel
         <span style={{ color: MATURITY_COLOR[c.maturity] }} title={MATURITY_LABEL[c.maturity]}>
           {MATURITY_GLYPH[c.maturity]}
         </span>{' '}
-        {c.name} · {REUSE_STRATEGY_LABEL[c.reuse!.strategy]} {c.reuse!.tool}
+        {c.name} · {REUSE_STRATEGY_LABEL[c.reuse!.strategy]} {c.reuse!.tool} · {MATURITY_LABEL[c.maturity]}{c.direction ? ` · ${CAPABILITY_DIRECTION_LABEL[c.direction.status]}` : ''}
       </button>
     </li>
   );
@@ -1438,4 +1456,48 @@ function ReuseSummary({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; onSel
       </section>
     </div>
   );
+}
+
+function DirectionDetail({ cap }: { cap: Capability }) {
+  const signals = capabilityDirectionSignals(cap);
+  return <section className={styles.detailSection} aria-label="Direção e estratégia">
+    <h3 className={styles.detailLabel}>Direção atual · estratégia</h3>
+    <p className={styles.detailText}>Maturidade: {MATURITY_LABEL[cap.maturity]} · Estratégia: {cap.reuse ? REUSE_STRATEGY_LABEL[cap.reuse.strategy] : 'Não declarada'}</p>
+    {cap.responsibility && <p className={styles.detailText}>{cap.responsibility === 'reused_baseline' ? 'Baseline reutilizado' : 'Anima control plane'} · separação de responsabilidade</p>}
+    {cap.direction ? <>
+      <p className={styles.detailText}><strong>{CAPABILITY_DIRECTION_LABEL[cap.direction.status]}</strong> · {cap.direction.rationale}</p>
+      <p className={styles.detailHint}>Decisão arquitetural ≠ integração ≠ prova ≠ maturidade.</p>
+      <ul className={styles.proofList}>{cap.direction.refs.map((ref) => <li key={ref.ref}>Decisão: {ref.ref}{ref.note ? ` · ${ref.note}` : ''}</li>)}</ul>
+    </> : <p className={styles.detailHint}>Direção não declarada.</p>}
+    {signals.length > 0 && <p className={styles.detailHint}>Observabilidade: {signals.join(' · ')}. Sem bloqueio de trabalho.</p>}
+  </section>;
+}
+
+function DevelopmentPath({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; onSelect: (id: string) => void }) {
+  const objective = nodes.find((node) => node.capability.id === 'agency.akita-baseline-v1')?.capability;
+  if (!objective?.target?.steps) return null;
+  const byId = new Map(nodes.map((node) => [node.capability.id, node.capability]));
+  return <section className={styles.developmentPath} aria-label="Current development path">
+    <div className={styles.pathIntro}><strong>{objective.name}</strong><span>REUSE BEFORE BUILD</span>
+      <p>{objective.direction?.rationale}</p></div>
+    <ol className={styles.baselineSteps}>{objective.target.steps.map((step) => {
+      const capability = byId.get(step.capabilityId);
+      if (!capability) return null;
+      return <li key={step.capabilityId}><button type="button" onClick={() => onSelect(step.capabilityId)}>
+        <strong>{capability.name}</strong><span>{step.description}</span>
+        <small>{capability.direction ? CAPABILITY_DIRECTION_LABEL[capability.direction.status] : 'Direção não declarada'} · {MATURITY_LABEL[capability.maturity]}{capability.reuse ? ` · ${REUSE_STRATEGY_LABEL[capability.reuse.strategy]} · ${capability.reuse.status === 'candidate' ? 'candidata' : 'integrada'}` : ''}</small>
+      </button></li>;
+    })}</ol>
+  </section>;
+}
+
+function DirectionOverview({ nodes, lens, onSelect }: { nodes: CapabilityGraphNode[]; lens: 'direction' | 'baseline' | 'control'; onSelect: (id: string) => void }) {
+  return <div className={styles.detail}>
+    <h2 className={styles.detailName}>{lens === 'direction' ? 'Direção de desenvolvimento' : lens === 'baseline' ? 'Baseline reutilizado' : 'Anima control plane'}</h2>
+    <p className={styles.detailHint}>Responsabilidade e planejamento declarados. Preservam maturidade e provas; não alegam originalidade.</p>
+    <ul className={styles.reuseList}>{nodes.map(({ capability: cap }) => <li key={cap.id}>
+      <button type="button" className={styles.pathStep} onClick={() => onSelect(cap.id)}>{cap.name} · {cap.direction ? CAPABILITY_DIRECTION_LABEL[cap.direction.status] : 'Direção não declarada'} · {MATURITY_LABEL[cap.maturity]}</button>
+      {cap.reuse && <p className={styles.detailHint}>{REUSE_STRATEGY_LABEL[cap.reuse.strategy]} · {cap.reuse.tool} · {cap.reuse.status === 'candidate' ? 'candidata externa' : 'integração existente'}</p>}
+    </li>)}</ul>
+  </div>;
 }

@@ -237,3 +237,27 @@ describe('listRecentEvolution', () => {
     expect(recent.map((r) => `${r.capabilityId}:${r.entry.note}`)).toEqual(['b:nova', 'a:meio']);
   });
 });
+
+describe('Direction safety advisory', () => {
+  const { capabilityDirectionSignals } = jest.requireActual<typeof import('./capability-map')>('./capability-map');
+  const capability: import('./capability-map').Capability = {
+    id: 'example', name: 'Example', description: 'Example', domain: 'agency', maturity: 'projected', dependsOn: [],
+    responsibility: 'reused_baseline', direction: { status: 'current_focus', rationale: 'Escolha humana', refs: [{ kind: 'doc', ref: 'plan.md' }] },
+  };
+  test('estratégia ausente não é inferida como BUILD', () => {
+    expect(capabilityDirectionSignals(capability)).toEqual(['reuse decision missing', 'evidence needed', 'current path']);
+  });
+  test.each(['adopt', 'wrap', 'fork', 'build', 'undecided'] as const)('estratégia %s não altera maturidade', (strategy) => {
+    const candidate = { ...capability, reuse: { strategy, tool: 'External', status: 'candidate' as const } };
+    const signals = capabilityDirectionSignals(candidate);
+    expect(signals).toContain('external candidate exists');
+    expect(signals).toContain('evidence needed');
+    expect(signals.includes('BUILD escolhido')).toBe(strategy === 'build');
+    expect(signals.includes('reuse decision missing')).toBe(strategy === 'undecided');
+    expect(candidate.maturity).toBe('projected');
+  });
+  test('validação exige referência de decisão e alvo existente', () => {
+    const invalid = { ...capability, direction: { ...capability.direction!, refs: [] }, target: { description: 'Goal', steps: [{ capabilityId: 'missing', description: 'Step' }] } };
+    expect(validateCapabilityRegistry([invalid]).map((issue) => issue.code)).toEqual(['invalid_direction', 'invalid_target_step']);
+  });
+});

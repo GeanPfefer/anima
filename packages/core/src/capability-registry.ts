@@ -30,6 +30,9 @@ export const EVOLUTION_BASELINE = {
 
 const RECONCILIATION_V2_RECORD = 'docs/registros/2026-09-27c-evolution-reconciliation-v2.md';
 
+const DIRECTION_RECORD = 'docs/planos/009-evolution-ux-v2-akita-baseline.md';
+const directionRefs = [{ kind: 'doc' as const, ref: DIRECTION_RECORD, note: 'Decisão humana de direção; não prova operacional.' }];
+
 export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   // ─── COMPREENSÃO ──────────────────────────────────────────────────────────
   {
@@ -105,6 +108,8 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
 
   {
     id: 'understanding.github-attention',
+    direction: { status: 'parked', rationale: 'Candidato registrado; fora do caminho crítico dos executores.', refs: directionRefs },
+    responsibility: 'reused_baseline',
     name: 'Atenção multi-repo (GitHub)',
     description: 'Derivar o que espera atenção nos repositórios (PRs/issues abertos, draft, alertas, repo parado).',
     domain: 'understanding',
@@ -275,11 +280,13 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'memory.cross-harness',
+    direction: { status: 'next', rationale: 'Após os dois executores: Claude ↔ Codex via ai-memory.', refs: directionRefs },
+    responsibility: 'reused_baseline',
     name: 'Continuidade entre harnesses',
     description: 'Ledger e resume de sessão entre Claude Code e Codex correlacionados a attempt/lineage do Anima.',
     domain: 'memory',
     maturity: 'projected',
-    dependsOn: ['agency.external-harness', 'memory.continuity'],
+    dependsOn: ['agency.codex-cli', 'agency.claude-code', 'memory.continuity'],
     reuse: {
       strategy: 'wrap',
       tool: 'ai-memory',
@@ -435,6 +442,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'agency.supervised-self-development',
+    responsibility: 'control_plane',
     name: 'Self-development supervisionado',
     description: 'Cadeia completa backlog → attempt → worktree → coder → gates → review → aceite humano.',
     domain: 'agency',
@@ -545,6 +553,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'agency.continuous-self-development',
+    direction: { status: 'projected', rationale: 'Retomar o self-development avançado depois do Akita Baseline V1.', refs: directionRefs },
     name: 'Self-development contínuo',
     description: 'O Anima detecta, formula, valida e incorpora melhorias próprias dentro da authority, sem loop humano constante.',
     domain: 'agency',
@@ -569,6 +578,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
 
   {
     id: 'agency.recovery-evidence',
+    responsibility: 'control_plane',
     name: 'Evidência entre recoveries',
     description:
       'Levar ao sucessor a evidência host-observada de ancestors da lineage (mesmo gate FAIL → edição → PASS), com identidade canônica de gate.',
@@ -627,13 +637,15 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'agency.external-harness',
+    direction: { status: 'current_focus', rationale: 'Reutilizar coding agents maduros antes de construir o loop próprio.', refs: directionRefs },
+    responsibility: 'reused_baseline',
     name: 'Harness externo (Claude Code / Codex)',
     description: 'Usar um harness de código externo como CoderBackend enraizado, sob os mesmos gates, escopo e Verifier.',
     domain: 'agency',
     maturity: 'projected',
     dependsOn: ['agency.produce-change', 'governance.authority'],
     reuse: {
-      strategy: 'undecided',
+      strategy: 'wrap',
       tool: 'Claude Code / Codex CLI',
       status: 'candidate',
       externalEvidence:
@@ -641,7 +653,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     },
     meaning:
       'O seam CoderBackend (ADR-001) permite trocar o executor. Um harness por assinatura é outra classe de compute, não um provider de API.',
-    advancement: 'Decisões humanas pendentes: login dedicado em home isolado, e se quota de assinatura é authority ou preferência.',
+    advancement: 'Provar ANIMA → executor → mudança → gate em integração governada; WRAP é direção aprovada, não maturidade.',
     history: [
       {
         at: '2026-09-27',
@@ -653,9 +665,64 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     ],
   },
 
+  {
+    id: 'agency.codex-cli', name: 'Codex CLI executor', domain: 'agency', maturity: 'projected',
+    description: 'Primeiro incremento: ANIMA → Codex → mudança → gate.',
+    parentId: 'agency.external-harness',
+    dependsOn: ['agency.external-harness'],
+    responsibility: 'reused_baseline',
+    direction: { status: 'current_focus', rationale: 'Primeiro incremento: ANIMA → Codex → mudança → gate.', refs: directionRefs },
+    reuse: { strategy: 'wrap', tool: 'Codex CLI', status: 'candidate',
+      externalEvidence: 'Candidato já registrado na Evolution Reconciliation V2; POC externo de continuidade não prova executor integrado.' },
+    advancement: 'Integração e prova viva governada pendentes nesta baseline; não promover por escolha arquitetural.',
+  },
+  {
+    id: 'agency.claude-code', name: 'Claude Code executor', domain: 'agency', maturity: 'projected',
+    description: 'Segundo incremento: ANIMA → Claude → mudança → gate.',
+    parentId: 'agency.external-harness',
+    dependsOn: ['agency.external-harness'],
+    responsibility: 'reused_baseline',
+    direction: { status: 'next', rationale: 'Segundo incremento: ANIMA → Claude → mudança → gate.', refs: directionRefs },
+    reuse: { strategy: 'wrap', tool: 'Claude Code', status: 'candidate',
+      externalEvidence: 'Candidato já registrado na Evolution Reconciliation V2; POC externo de continuidade não prova executor integrado.' },
+    advancement: 'Integração e prova viva governada pendentes nesta baseline; não promover por escolha arquitetural.',
+  },
+  {
+    id: 'agency.akita-baseline-v1', name: 'AKITA BASELINE V1', domain: 'agency', maturity: 'projected',
+    description: 'REUSE BEFORE BUILD: executores maduros, depois memória entre harnesses.',
+    dependsOn: ['agency.codex-cli', 'agency.claude-code', 'memory.cross-harness'],
+    direction: { status: 'current_focus', rationale: 'Antes, o caminho incluía evoluir o coding-agent loop próprio. Agora, reutilizar Codex e Claude; Ollama/DSH permanecem pesquisa e não bloqueiam este milestone.', refs: directionRefs },
+    target: { description: 'Baseline funcional reutilizado antes de retomar self-development autônomo avançado.', milestone: DIRECTION_RECORD,
+      steps: [
+        { capabilityId: 'agency.codex-cli', description: 'ANIMA → Codex → mudança → gate' },
+        { capabilityId: 'agency.claude-code', description: 'ANIMA → Claude → mudança → gate' },
+        { capabilityId: 'memory.cross-harness', description: 'Claude ↔ Codex via ai-memory, após os executores' },
+        { capabilityId: 'agency.continuous-self-development', description: 'Só depois: retomar self-development autônomo avançado' },
+      ] },
+    advancement: 'Provar cada integração e sua composição; objetivo escolhido não equivale a baseline concluído.',
+  },
+  {
+    id: 'agency.ollama-agentic-runtime', name: 'Runtime agêntico próprio (Ollama)', domain: 'agency', maturity: 'proven',
+    description: 'Loop de coding próprio preservado como pesquisa experimental.',
+    dependsOn: ['compute.local-execution', 'agency.produce-change'],
+    direction: { status: 'experimental', rationale: 'Não bloqueia Akita Baseline V1; provas anteriores preservadas.', refs: directionRefs },
+    proofRefs: [{ kind: 'record', ref: 'docs/registros/2026-08-21-loop-local-coder-verifier-fim-a-fim.md' }],
+    advancement: 'Pesquisa experimental; reproduzir confiabilidade sem substituir o foco nos executores maduros.',
+  },
+  {
+    id: 'agency.deepseek-harness', name: 'DeepSeek Harness experimental', domain: 'agency', maturity: 'proven',
+    description: 'Integração DSH com provas controladas já registradas, fora do caminho crítico atual.',
+    dependsOn: ['agency.produce-change', 'governance.authority'],
+    direction: { status: 'experimental', rationale: 'Pesquisa preservada; não bloqueia o baseline reutilizado.', refs: directionRefs },
+    reuse: { strategy: 'wrap', tool: 'DeepSeek Harness', status: 'integrated' },
+    proofRefs: [{ kind: 'record', ref: 'docs/registros/2026-08-18-deepseek-harness-retry-interno-e-verifier-terminal.md' }],
+    advancement: 'Prova controlada não equivale a operação confiável; direção experimental não rebaixa essa prova.',
+  },
+
   // ─── GOVERNANÇA ─────────────────────────────────────────────────────────────
   {
     id: 'governance.authority',
+    responsibility: 'control_plane',
     name: 'Authority (mandato)',
     description: 'Derivar um envelope de trabalho a partir de intenção e limites e impedir o que estiver fora dele.',
     domain: 'governance',
@@ -684,6 +751,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'governance.attempt',
+    responsibility: 'control_plane',
     name: 'Attempt e lineage',
     description: 'Tentativas persistentes com claim exclusivo e rastreio de sucessores (decomposição, replan, correção) preservando a história.',
     domain: 'governance',
@@ -699,6 +767,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'governance.review',
+    responsibility: 'control_plane',
     name: 'Review',
     description: 'Parar antes do efeito externo e pedir revisão humana (review request fail-closed).',
     domain: 'governance',
@@ -713,6 +782,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'governance.verifier',
+    responsibility: 'control_plane',
     name: 'Verifier',
     description: 'Parecer append-only, puro e advisory que confere o resultado contra o contrato aprovado.',
     domain: 'governance',
@@ -727,6 +797,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'governance.budgets',
+    responsibility: 'control_plane',
     name: 'Budgets e limites',
     description: 'Orçamento local e externo com bloqueio temporal, re-admissão e fail-closed.',
     domain: 'governance',
@@ -741,6 +812,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'governance.recovery-authority',
+    responsibility: 'control_plane',
     name: 'Human Recovery Authority',
     description: 'Autorizar +1 tentativa após saldo esgotado, append-only e anti-loop.',
     domain: 'governance',
@@ -752,6 +824,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'governance.harness-recovery',
+    responsibility: 'control_plane',
     name: 'Recovery governada de defeito de harness',
     description:
       'Quando a falha é do harness (não do trabalho), derivar exatamente um sucessor honesto, com o SHA do fix conferido pelo host, sem aprovar, preferir nem pagar.',
@@ -788,6 +861,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'governance.differential-evidence',
+    responsibility: 'control_plane',
     name: 'Evidência diferencial e readiness (shadow)',
     description:
       'Rodar o gate no base e no resultado (FAIL→PASS), avaliar policy/readiness e calibrar contra a revisão humana — só como telemetria.',
@@ -915,6 +989,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'compute.selection',
+    responsibility: 'control_plane',
     name: 'Seleção de compute',
     description: 'Rotear entre Ollama × OpenAI (e casar recursos de cloud) por política e economia.',
     domain: 'compute',
@@ -971,6 +1046,8 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'compute.subscription-availability',
+    direction: { status: 'projected', rationale: 'Observabilidade de assinatura candidata, ainda não integrada.', refs: directionRefs },
+    responsibility: 'reused_baseline',
     name: 'Disponibilidade de quota de assinatura',
     description: 'Observar janelas de quota das assinaturas Claude/Codex como sinal do Router, nunca como autoridade.',
     domain: 'compute',
@@ -1011,6 +1088,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'compute.cloud-self-hosted',
+    direction: { status: 'parked', rationale: 'Experimentos RunPod preservados; não bloqueiam o milestone atual.', refs: directionRefs },
     name: 'Cloud self-hosted + resiliência de sessão',
     description: 'Subir e usar um nó de inferência próprio na nuvem (RunPod cold-start + túnel) e reprovisionar/teardown de forma governada.',
     domain: 'compute',
@@ -1027,6 +1105,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'compute.paid-settlement',
+    responsibility: 'control_plane',
     name: 'Settlement de custo pago',
     description: 'Liquidar o custo REAL de compute pago (actual-cost) no ledger, append-only.',
     domain: 'compute',
@@ -1154,6 +1233,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'research.web.search',
+    responsibility: 'reused_baseline',
     name: 'Busca web',
     description: 'Buscar na web por um metabuscador self-hosted e normalizar resultados, degradação e engines silenciosas.',
     domain: 'research',
@@ -1225,6 +1305,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'research.web.open',
+    responsibility: 'reused_baseline',
     name: 'Abrir página web',
     description: 'Abrir uma URL validada numa sessão de browser efêmera, com policy default-deny de ações reais, close garantido e limpeza.',
     domain: 'research',
@@ -1257,6 +1338,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'research.web.extract',
+    responsibility: 'reused_baseline',
     name: 'Extrair conteúdo web',
     description: 'Extrair texto legível da página aberta como `untrusted_external_content`, com contentHash para proveniência.',
     domain: 'research',
@@ -1288,6 +1370,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'research.web.navigate',
+    responsibility: 'reused_baseline',
     name: 'Navegar na web (mínimo)',
     description: 'Seguir para outra URL validada — na V1, numa NOVA sessão efêmera; sem clique nem sessão contínua.',
     domain: 'research',

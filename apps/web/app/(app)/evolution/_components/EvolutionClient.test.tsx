@@ -512,7 +512,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
       expect(el?.getAttribute('aria-label')).not.toMatch(/Operacional/);
     }
     const candidates = container.querySelectorAll('[data-origin="candidate"]');
-    expect(candidates.length).toBe(4);
+    expect(candidates.length).toBe(6);
     candidates.forEach((el) => expect(el.getAttribute('data-future')).toBe('true'));
     expect(screen.getByRole('button', { name: 'Continuidade entre harnesses — Projetada (a conquistar) · candidata externa (ai-memory)' })).toBeInTheDocument();
   });
@@ -537,7 +537,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     expect(stateOf(container, 'memory.cross-harness')).toBe('strong');
     expect(stateOf(container, 'governance.review')).toBe('dim');
     expect(screen.getByRole('heading', { name: /Reuso já integrado/ })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Candidatas externas (4)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Candidatas externas (6)' })).toBeInTheDocument();
     expect(screen.getByText(/POC externo que funcionou ≠ capacidade do Anima/)).toBeInTheDocument();
   });
 
@@ -545,7 +545,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     render(<EvolutionClient {...buildProps()} />);
     fireEvent.click(screen.getByRole('button', { name: /^Executar testes e comandos governados — / }));
     expect(screen.getByRole('heading', { name: 'Origem' })).toBeInTheDocument();
-    expect(screen.getByText(/Interna — construída e governada pelo Anima/)).toBeInTheDocument();
+    expect(screen.getByText(/Implementação interna registrada; estratégia de reuso não declarada/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'História' })).toBeInTheDocument();
     expect(screen.getAllByText('Maturidade').length).toBeGreaterThan(0);
     expect(screen.getByText(/ATTEMPT 515c4d83/)).toBeInTheDocument();
@@ -722,4 +722,43 @@ describe('EvolutionClient — Autonomy Readiness V0 (maturidade ≠ readiness �
     fireEvent.click(screen.getByRole('button', { name: 'Chat — Operacional' }));
     expect(screen.queryByTestId('autonomy-readiness')).not.toBeInTheDocument();
   });
+});
+
+describe('Evolution UX V2 — Akita e reuso', () => {
+  test('baseline é objetivo selecionável e sequência clicável derivada do registry', () => {
+    render(<EvolutionClient {...buildProps()} featuredTargetId="agency.akita-baseline-v1" />);
+    expect(screen.getByRole('combobox', { name: 'Escolher objetivo futuro' })).toHaveValue('agency.akita-baseline-v1');
+    expect(screen.getByRole('list', { name: 'Sequência planejada do objetivo' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Codex CLI executor ANIMA/ }));
+    expect(screen.getByRole('heading', { name: 'Codex CLI executor' })).toBeInTheDocument();
+    expect(screen.getByText(/Maturidade: Projetada · Estratégia: WRAP/)).toBeInTheDocument();
+    expect(screen.getByText(/external candidate exists/)).toBeInTheDocument();
+    expect(screen.getByText(/Decisão arquitetural ≠ integração ≠ prova ≠ maturidade/)).toBeInTheDocument();
+  });
+  test('lentes separam responsabilidade e direção sem recolorir maturidade', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Baseline reutilizado' }));
+    expect(stateOf(container, 'agency.codex-cli')).toBe('strong');
+    expect(stateOf(container, 'governance.authority')).toBe('dim');
+    fireEvent.click(screen.getByRole('button', { name: 'Anima control plane' }));
+    expect(stateOf(container, 'governance.authority')).toBe('strong');
+    expect(stateOf(container, 'agency.codex-cli')).toBe('dim');
+    fireEvent.click(screen.getByRole('button', { name: 'Direção atual' }));
+    const experimental = container.querySelector('[data-capid="agency.deepseek-harness"]');
+    expect(experimental).toHaveAttribute('data-direction', 'experimental');
+    expect(experimental).toHaveAttribute('data-future', 'false');
+    expect(experimental).toHaveAttribute('aria-label', expect.stringContaining('Comprovada'));
+    expect(container.querySelector('[data-capid="agency.codex-cli"]')).toHaveAttribute('data-future', 'true');
+  });
+});
+
+test.each(['adopt', 'wrap', 'fork', 'build', 'undecided'] as const)('painel expõe estratégia %s do domínio sem inferir maturidade', (strategy) => {
+  const props = buildProps();
+  props.nodes = props.nodes.map((node) => node.capability.id === 'agency.codex-cli' ? { ...node, capability: { ...node.capability, reuse: { ...node.capability.reuse!, strategy } } } : node);
+  const { container } = render(<EvolutionClient {...props} />);
+  fireEvent.click(container.querySelector('[data-capid="agency.codex-cli"]')!);
+  const panel = screen.getByRole('region', { name: 'Direção e estratégia' });
+  expect(within(panel).getByText(new RegExp(`Maturidade: Projetada · Estratégia: ${strategy === 'undecided' ? 'A DECIDIR' : strategy.toUpperCase()}`))).toBeInTheDocument();
+  if (strategy === 'build') expect(within(panel).getByText(/BUILD escolhido/)).toBeInTheDocument();
+  if (strategy === 'undecided') expect(within(panel).getByText(/reuse decision missing/)).toBeInTheDocument();
 });
