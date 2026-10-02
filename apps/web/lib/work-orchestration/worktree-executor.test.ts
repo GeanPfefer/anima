@@ -13,6 +13,7 @@ import {
   type ObservedCoderInput,
   type ObservedGateInput,
   type WorkCapability,
+  buildCoderTaskSpec,
   type WorkExecutorRequest,
   type WorkExecutorSignal,
   type WorktreeHandoffV1,
@@ -124,7 +125,13 @@ test('uso de provider de uma chamada que FALHOU chega à observação host-side'
   } finally { await ctx.cleanup(); }
 });
 
-const request = (overrides: Partial<WorkExecutorRequest> = {}): WorkExecutorRequest => ({
+const fixtureTaskSpec = (base: Omit<WorkExecutorRequest, 'taskSpec'>) => buildCoderTaskSpec({
+  workItemId: base.workItemId, approvedProposalVersion: base.approvedProposalVersion,
+  proposal: { summary: base.objective, objective: base.objective, includedScope: base.includedScope, excludedScope: base.excludedScope, expectedEffects: [], risks: [] },
+  spec: { validationCriteria: base.validationCriteria }, verifierRequirement: 'advisory', contextReferences: base.contextReferences,
+});
+const request = (overrides: Partial<WorkExecutorRequest> = {}): WorkExecutorRequest => {
+  const base: Omit<WorkExecutorRequest, 'taskSpec'> = {
   attemptId: `att-${Date.now()}-${counter++}`,
   workItemId: 'item-1',
   approvedProposalVersion: 1,
@@ -138,7 +145,9 @@ const request = (overrides: Partial<WorkExecutorRequest> = {}): WorkExecutorRequ
   limits: { maxDurationMinutes: 1 },
   contextReferences: [],
   ...overrides,
-});
+  };
+  return { ...base, taskSpec: overrides.taskSpec ?? fixtureTaskSpec(base) };
+};
 
 describe('verifyGateTargetScope — fronteira independente comando↔targets', () => {
   test('verifica filtro de teste por arquivo exato, inclusive sob workspace', () => {

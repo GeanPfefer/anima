@@ -14,6 +14,7 @@ import {
   type NodeLifecycleEvidenceV1,
   type NodeLifecycleState,
   type NodeProvisionRequest,
+  buildCoderTaskSpec,
   type WorkExecutorRequest,
   type WorkExecutorSignal,
 } from '@anima/core';
@@ -56,14 +57,22 @@ async function makeNpmRepo(): Promise<{ repo: string; sha: string; resolver: Wor
 }
 
 let counter = 0;
-const request = (overrides: Partial<WorkExecutorRequest> = {}): WorkExecutorRequest => ({
+const fixtureTaskSpec = (base: Omit<WorkExecutorRequest, 'taskSpec'>) => buildCoderTaskSpec({
+  workItemId: base.workItemId, approvedProposalVersion: base.approvedProposalVersion,
+  proposal: { summary: base.objective, objective: base.objective, includedScope: base.includedScope, excludedScope: base.excludedScope, expectedEffects: [], risks: [] },
+  spec: { validationCriteria: base.validationCriteria }, verifierRequirement: 'advisory', contextReferences: base.contextReferences,
+});
+const request = (overrides: Partial<WorkExecutorRequest> = {}): WorkExecutorRequest => {
+  const base: Omit<WorkExecutorRequest, 'taskSpec'> = {
   attemptId: `att-${Date.now()}-${counter++}`,
   workItemId: 'item-1', approvedProposalVersion: 1, capability: 'programming',
   objective: 'Adicionar uma função pura', includedScope: ['src/added.ts'], excludedScope: ['src/other.ts'],
   target: { kind: 'project', reference: 'anima' }, permissions: ['workspace_read', 'workspace_write_isolated'],
   validationCriteria: [{ label: 'testes', command: 'npm test' }], limits: { maxDurationMinutes: 1 }, contextReferences: [],
   ...overrides,
-});
+  };
+  return { ...base, taskSpec: overrides.taskSpec ?? fixtureTaskSpec(base) };
+};
 
 const provisionRequest = (nodeId: string, lease: NodeLeaseV0): NodeProvisionRequest =>
   ({ nodeId, providerId: 'local-process', model: MODEL, resourceClass: 'local-cpu', lease });

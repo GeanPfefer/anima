@@ -1,4 +1,4 @@
-import type { WorkExecutorRequest } from '@anima/core';
+import { buildCoderTaskSpec, type WorkExecutorRequest } from '@anima/core';
 import { classifyPersistedAttempt, LocalRunnerAdapter, type LocalRunnerProcess } from './local-runner';
 
 const request: WorkExecutorRequest = {
@@ -6,6 +6,11 @@ const request: WorkExecutorRequest = {
   includedScope: ['a.py'], excludedScope: ['deploy'], target: { kind: 'project', reference: 'anima' },
   permissions: ['workspace_read', 'workspace_write_isolated'], validationCriteria: [{ label: 'testes', command: 'python -m unittest' }],
   limits: { maxAttempts: 1, maxDurationMinutes: 5 }, contextReferences: [],
+  taskSpec: buildCoderTaskSpec({
+    workItemId: 'work-1', approvedProposalVersion: 2,
+    proposal: { summary: 'Corrija a função.', objective: 'Corrija a função.', includedScope: ['a.py'], excludedScope: ['deploy'], expectedEffects: [], risks: [] },
+    spec: { validationCriteria: [{ label: 'testes', command: 'python -m unittest' }] }, verifierRequirement: 'advisory', contextReferences: [],
+  }),
 };
 const collect = async (adapter: LocalRunnerAdapter, value: WorkExecutorRequest = request) => {
   const found = []; for await (const signal of adapter.execute(value, new AbortController().signal)) found.push(signal); return found;

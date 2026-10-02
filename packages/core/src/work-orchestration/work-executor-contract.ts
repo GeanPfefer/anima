@@ -1,4 +1,5 @@
 import type { AutonomousExecutionLimits, AutonomousExecutionTarget, AutonomousValidationCriterion } from './eligibility';
+import { coderTaskSpecMismatch, type CoderTaskSpecV1 } from './coder-task-spec';
 import { containsSensitiveData, type ExecutionAttemptCorrelation } from './execution-attempt';
 import type { ExecutionEventCorrelation } from './execution-event-correlation';
 import type { HumanDecisionOption, HumanInterruptionReason } from './human-interruption';
@@ -16,6 +17,11 @@ export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
   readonly validationCriteria: readonly AutonomousValidationCriterion[];
   readonly limits: AutonomousExecutionLimits;
   readonly contextReferences: readonly WorkContextReference[];
+  /** Projeção semântica DERIVADA (não persistida) da versão aprovada para o coder:
+   * resumo, efeitos esperados, riscos, semântica completa dos critérios, requisito do
+   * Verifier. Informativa — coerente com os campos de autoridade acima (validado por
+   * `coderTaskSpecMismatch`) e nunca amplia escopo, permissões nem comandos. */
+  readonly taskSpec: CoderTaskSpecV1;
   /** Evidência host-observed, seletiva e bounded, herdada de ancestors da lineage.
    * Nunca contém transcript livre/raciocínio do provider e nunca amplia autoridade. */
   readonly recoveryEvidence?: RecoveryEvidenceContextV1;
@@ -145,7 +151,7 @@ export function validateWorkExecutorRequest(request: WorkExecutorRequest): strin
   if (!nonBlank(request.target.reference) || request.validationCriteria.length === 0 || request.validationCriteria.some(value => !nonBlank(value.label))) return 'Alvo e critérios de validação são obrigatórios.';
   const { maxAttempts, maxDurationMinutes, maxResourceUnits } = request.limits;
   if (!positive(maxAttempts) || !positive(maxDurationMinutes) || !positive(maxResourceUnits) || (maxAttempts === undefined && maxDurationMinutes === undefined && maxResourceUnits === undefined)) return 'Ao menos um limite positivo é obrigatório.';
-  return null;
+  return coderTaskSpecMismatch(request.taskSpec, request);
 }
 
 /**

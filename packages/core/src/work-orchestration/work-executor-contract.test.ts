@@ -1,9 +1,14 @@
-import { FakeWorkExecutor, buildWorktreeHandoff, validateWorkCheckpoint, validateWorkExecutorTranscript, type WorkCheckpointV1, type WorkExecutorRequest, type WorkExecutorSignal } from '.';
+import { FakeWorkExecutor, buildCoderTaskSpec, buildWorktreeHandoff, validateWorkCheckpoint, validateWorkExecutorTranscript, type WorkCheckpointV1, type WorkExecutorRequest, type WorkExecutorSignal } from '.';
 
 const request: WorkExecutorRequest = {
   attemptId: 'attempt-1', workItemId: 'work-1', approvedProposalVersion: 3, capability: 'programming', objective: 'Implementar contrato',
   includedScope: ['packages/core'], excludedScope: ['apps'], target: { kind: 'project', reference: 'anima' }, permissions: ['read', 'test'],
   validationCriteria: [{ label: 'core verde', command: 'npm test' }], limits: { maxAttempts: 2 }, contextReferences: [{ kind: 'message', id: 'm1' }],
+  taskSpec: buildCoderTaskSpec({
+    workItemId: 'work-1', approvedProposalVersion: 3,
+    proposal: { summary: 'Implementar contrato', objective: 'Implementar contrato', includedScope: ['packages/core'], excludedScope: ['apps'], expectedEffects: [], risks: [] },
+    spec: { validationCriteria: [{ label: 'core verde', command: 'npm test' }] }, verifierRequirement: 'advisory', contextReferences: [{ kind: 'message', id: 'm1' }],
+  }),
 };
 const collect = async (fake: FakeWorkExecutor, value = request, signal = new AbortController().signal): Promise<WorkExecutorSignal[]> => {
   const result: WorkExecutorSignal[] = [];

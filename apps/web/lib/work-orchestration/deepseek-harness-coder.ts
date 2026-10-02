@@ -8,7 +8,7 @@ import {
   type HarnessPreStepDecision,
   type HarnessTurnEnd,
 } from '@anima/core';
-import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
+import { coderBackendId, renderCoderTaskSection, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 
 // ============================================================
 // Backend de código candidato: DeepSeek Harness (@deepseek-ai/dsh) por trás da
@@ -76,6 +76,12 @@ export interface HarnessRunTurnInput {
    * estrutural pós-output do host ainda roda).
    */
   readonly harnessPolicyInstructions?: string;
+  /**
+   * Seção semântica canônica (`renderCoderTaskSection`) — a MESMA que Ollama/OpenAI
+   * recebem: especificação aprovada + comandos de validação autorizados pelo host,
+   * informativos. O Harness NÃO decide gate: o host executa e julga.
+   */
+  readonly taskSpecSection?: string;
   readonly includedScope: readonly string[];
   readonly excludedScope: readonly string[];
   readonly carriedContext?: CoderEditRequest['carriedContext'];
@@ -167,12 +173,14 @@ export class DeepSeekHarnessCoderBackend implements CoderBackend {
     }
 
     const stepBudget = this.stepBudget;
+    const taskSpecSection = renderCoderTaskSection(request);
     const result = await this.runtime.runTurn({
       rootPath,
       objective: request.objective,
       ...(request.harnessPolicy
         ? { harnessPolicyInstructions: renderCoderHarnessPolicyInstructions(request.harnessPolicy) }
         : {}),
+      ...(taskSpecSection ? { taskSpecSection } : {}),
       includedScope: request.includedScope,
       excludedScope: request.excludedScope,
       ...(request.carriedContext ? { carriedContext: request.carriedContext } : {}),

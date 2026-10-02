@@ -15,7 +15,7 @@ import {
   type WorkspaceAccessPolicyV1,
 } from '@anima/core';
 import { OllamaTranscript } from './ollama-transcript';
-import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace, type WorkspaceExecResult, type WorkspaceSearchHit } from './coder-backend';
+import { coderBackendId, renderCoderTaskSection, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace, type WorkspaceExecResult, type WorkspaceSearchHit } from './coder-backend';
 import { renderRecoveryEvidence } from './recovery-evidence-render';
 import { gateIdentityFromExecution } from './gate-identity';
 import {
@@ -377,11 +377,15 @@ export class OllamaCoderBackend implements CoderBackend {
     const readScopeLine = readScopeIsBroad
       ? 'Escopo de LEITURA: todo o workspace autorizado (você pode buscar/listar/ler arquivos fora do escopo de escrita — deps, tipos, testes, configs — mas NÃO editá-los).'
       : `Escopo de LEITURA (só estes caminhos): ${scope.join(', ')}`;
+    const taskSection = renderCoderTaskSection(request);
     const header = [
       `Tarefa: ${request.objective}`,
       // Política canônica do harness ANTES da inferência (fonte única compartilhada;
       // o mesmo texto chega ao OpenAI, que delega a este protocolo).
       ...(request.harnessPolicy ? [renderCoderHarnessPolicyInstructions(request.harnessPolicy)] : []),
+      // Especificação APROVADA do Work Item (aceites, critérios, riscos, Verifier):
+      // seção canônica compartilhada — o mesmo texto chega ao OpenAI e ao DeepSeek Harness.
+      ...(taskSection ? [taskSection] : []),
       `Escopo de ESCRITA (só estes caminhos podem ser editados): ${scope.join(', ')}`,
       readScopeLine,
       `Fora do escopo (não toque): ${request.excludedScope.join('; ')}`,

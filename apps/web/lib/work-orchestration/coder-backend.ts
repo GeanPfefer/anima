@@ -1,4 +1,4 @@
-import type { CoderHarnessPolicyV1, CommandExecutionPolicyV1, ObservedGateInput, WorkExecutorRequest, WorkspaceAccessPolicyV1 } from '@anima/core';
+import { renderCoderTaskSpec, type CoderHarnessPolicyV1, type CoderTaskSpecV1, type CommandExecutionPolicyV1, type ObservedGateInput, type WorkExecutorRequest, type WorkspaceAccessPolicyV1 } from '@anima/core';
 
 // ============================================================
 // Interface selecionável de inteligência que ESCREVE o código (ADR-001).
@@ -51,6 +51,15 @@ export interface CoderEditRequest {
   readonly objective: string;
   readonly includedScope: readonly string[];
   readonly excludedScope: readonly string[];
+  /**
+   * Projeção semântica COMPARTILHADA da versão aprovada (`CoderTaskSpecV1`): resumo,
+   * efeitos esperados, riscos, semântica completa dos critérios e requisito do
+   * Verifier. Todos os backends a renderizam pela MESMA função
+   * (`renderCoderTaskSection`). Informativa: escopo de escrita, command policy e
+   * gates continuam vindo dos campos de autoridade deste request e do host.
+   * Ausente ⇒ chamada direta sem Work Item (testes/probes): nenhuma seção é inventada.
+   */
+  readonly taskSpec?: CoderTaskSpecV1;
   /** Contexto informativo de uma tentativa anterior; nunca amplia escopo. */
   readonly carriedContext?: WorkExecutorRequest['carriedContext'];
   /** Continuidade seletiva entre successors/recoveries da mesma lineage. */
@@ -95,6 +104,18 @@ export interface CoderEditRequest {
    * and never expands scope or permissions.
    */
   readonly hostValidationFeedback?: HostValidationFeedback;
+}
+
+/**
+ * Seção semântica canônica do coder, idêntica para Ollama, OpenAI (que delega ao
+ * Ollama) e DeepSeek Harness: a especificação aprovada + os comandos de validação já
+ * autorizados pelo host (informativos). `null` quando o request não traz `taskSpec`.
+ */
+export function renderCoderTaskSection(request: Pick<CoderEditRequest, 'taskSpec' | 'validationCommands'>): string | null {
+  if (!request.taskSpec) return null;
+  return renderCoderTaskSpec(request.taskSpec, (request.validationCommands ?? []).map(command => ({
+    label: command.label, program: command.program, args: command.args,
+  })));
 }
 
 /** Pedido de busca textual/símbolo executado pelo HOST (nunca shell do modelo). */

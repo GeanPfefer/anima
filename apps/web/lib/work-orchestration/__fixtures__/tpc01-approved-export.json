@@ -1,0 +1,137 @@
+{
+  "_provenance": {
+    "source": ".tmp/tpc01-model-ab/request.json (export real do TPC-01 usado nos replays de 2026-10-02)",
+    "sourceSha256": "cdfd83a21f752ebfc362e86a0a069a2d5a6956f4817589ef2e66ddb25ce338fd",
+    "note": "Recorte dos campos canônicos que alimentam a projeção do coder: proposta aprovada, intent.execution_spec e spec parseado. Demais campos do Work Item omitidos."
+  },
+  "item": {
+    "id": "4c0a8498-541c-4d50-ae3e-fcd1a3b778ab",
+    "proposalVersion": 1,
+    "capability": "programming",
+    "proposal": {
+      "schemaVersion": 1,
+      "data": {
+        "summary": "Adicionar validação para múltiplos <id> e --reason em comandos de governança work da CLI",
+        "objective": "Recusar <id> extra e --reason ignorado nos comandos de governança work da CLI",
+        "includedScope": [
+          "apps/web/cli/args.ts",
+          "apps/web/cli/args.test.ts"
+        ],
+        "excludedScope": [
+          "apps/web/cli/app.ts",
+          "apps/web/cli/anima.ts",
+          "apps/web/cli/render.ts",
+          "apps/web/cli/identity.ts",
+          "packages/core",
+          "supabase",
+          "Trusted System Writer",
+          "Produce-Change Evidence Projection",
+          "texto de help/usage",
+          "novos flags ou subcomandos",
+          "refactors laterais"
+        ],
+        "expectedEffects": [
+          "Mais de um `<id>` posicional em `work approve|accept|retry|show|evidence|correct|request-changes|withdraw` é uso inválido (parseArgs retorna ok:false).",
+          "`--reason` passado a `work approve|accept|retry|show|evidence|correct` é uso inválido (parseArgs retorna ok:false), em vez de descartado em silêncio.",
+          "As formas válidas existentes continuam funcionando com o mesmo resultado: um único `<id>`, `--json`, `request-changes` e `withdraw` exigindo `--reason` não vazio e trimado, `correct --require-gate`.",
+          "Os testes focais de `apps/web/cli/args.test.ts` passam."
+        ],
+        "risks": [
+          "Alterações no parser podem afetar outros comandos que dependem de parseArgs."
+        ]
+      }
+    },
+    "intent": {
+      "execution_spec": {
+        "model": "qwen3-coder:latest",
+        "limits": {
+          "max_attempts": 1,
+          "max_duration_minutes": 30
+        },
+        "target": {
+          "kind": "project",
+          "reference": "anima"
+        },
+        "base_sha": "f94bc5a2dc8076be40471d5f7810d81518cb8bfa",
+        "executor": "worktree",
+        "permissions": [
+          "workspace_read",
+          "workspace_write_isolated"
+        ],
+        "coder_backend": "ollama",
+        "schema_version": 1,
+        "harness_recovery": {
+          "authorization": {
+            "kind": "harness_defect_fixed_v1",
+            "reason": "Attempt 0043c7f9 falhou por ollama_context_budget_exceeded (num_ctx 8192, RAM da Goma). Preparado em a79fc0c: contexto do coder remoto, lease configurável e preflight do node. Uma attempt supervised em compute RunPod >=48 GB.",
+            "requestId": "3c9d8e7f-6a5b-4c3d-9e2f-1a0b9c8d7e6f",
+            "fixCommits": [
+              "a79fc0cf49e4c0a1a998a0e60ad83ab55511bf39"
+            ],
+            "failureClass": "harness",
+            "schemaVersion": 1,
+            "evidenceReference": "docs/registros/2026-10-02-tpc01-runpod-coder-remoto.md",
+            "additionalAttempts": 1
+          },
+          "predecessor_id": "1f03dcca-1e3c-4183-81f8-e329bdfc09cd",
+          "failure_event_id": "5eb36bfa-db24-450a-b56f-cf8bbe0c76f7",
+          "source_attempt_id": "0043c7f9-9601-4fdc-8b61-324f4e39ba0c"
+        },
+        "validation_criteria": [
+          {
+            "label": "validate-parseArgs",
+            "proof": "gate",
+            "covers": [
+              "Mais de um `<id>` posicional em `work approve|accept|retry|show|evidence|correct|request-changes|withdraw` é uso inválido (parseArgs retorna ok:false).",
+              "`--reason` passado a `work approve|accept|retry|show|evidence|correct` é uso inválido (parseArgs retorna ok:false), em vez de descartado em silêncio.",
+              "As formas válidas existentes continuam funcionando com o mesmo resultado: um único `<id>`, `--json`, `request-changes` e `withdraw` exigindo `--reason` não vazio e trimado, `correct --require-gate`.",
+              "Os testes focais de `apps/web/cli/args.test.ts` passam."
+            ],
+            "command": "npm test --workspace=apps/web -- cli/args.test.ts",
+            "claim_kind": "substantive",
+            "target_paths": [
+              "apps/web/cli/args.ts",
+              "apps/web/cli/args.test.ts"
+            ]
+          }
+        ],
+        "coder_backend_source": "runtime_default",
+        "verifier_requirement": "required_fail_closed"
+      }
+    }
+  },
+  "spec": {
+    "schemaVersion": 1,
+    "target": {
+      "kind": "project",
+      "reference": "anima"
+    },
+    "permissions": [
+      "workspace_read",
+      "workspace_write_isolated"
+    ],
+    "validationCriteria": [
+      {
+        "label": "validate-parseArgs",
+        "command": "npm test --workspace=apps/web -- cli/args.test.ts",
+        "covers": [
+          "Mais de um `<id>` posicional em `work approve|accept|retry|show|evidence|correct|request-changes|withdraw` é uso inválido (parseArgs retorna ok:false).",
+          "`--reason` passado a `work approve|accept|retry|show|evidence|correct` é uso inválido (parseArgs retorna ok:false), em vez de descartado em silêncio.",
+          "As formas válidas existentes continuam funcionando com o mesmo resultado: um único `<id>`, `--json`, `request-changes` e `withdraw` exigindo `--reason` não vazio e trimado, `correct --require-gate`.",
+          "Os testes focais de `apps/web/cli/args.test.ts` passam."
+        ],
+        "proof": "gate",
+        "claimKind": "substantive",
+        "targetPaths": [
+          "apps/web/cli/args.ts",
+          "apps/web/cli/args.test.ts"
+        ]
+      }
+    ],
+    "limits": {
+      "maxAttempts": 1,
+      "maxDurationMinutes": 30
+    },
+    "dependsOnWorkItemIds": []
+  }
+}

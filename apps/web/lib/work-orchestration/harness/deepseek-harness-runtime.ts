@@ -107,6 +107,9 @@ export function composeHarnessTask(input: HarnessRunTurnInput): string {
     input.objective.trim(),
     // Política canônica do harness ANTES da inferência (mesma fonte que Ollama/OpenAI).
     ...(input.harnessPolicyInstructions ? ['', input.harnessPolicyInstructions.trim()] : []),
+    // Especificação aprovada + validações autorizadas (seção canônica compartilhada,
+    // informativa: o host executa e julga os gates).
+    ...(input.taskSpecSection ? ['', input.taskSpecSection.trim()] : []),
     '',
     `Working directory is the repository root. Only edit files within this allowed scope:`,
     ...input.includedScope.map(path => `  - ${path}`),

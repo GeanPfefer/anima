@@ -1,5 +1,6 @@
 import {
   buildWorktreeHandoff,
+  coderTaskSpecMismatch,
   type ChangeAuthorizationFactsV1,
   validateWorkCheckpoint,
   describeCoderHarnessViolations,
@@ -230,6 +231,13 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
     const commands = request.validationCriteria.flatMap(item => item.command ? [item.command] : []);
     if (!opaque(request.target.reference) || !target || missing.length > 0 || request.validationCriteria.length === 0) {
       yield attach(++seq, { kind: 'error', code: 'invalid_request', message: !target ? 'Alvo de worktree não autorizado.' : missing.length ? 'Permissões locais insuficientes.' : 'A tentativa precisa de ao menos um critério de validação.', retryable: false, handoffReference: 'checkpoint:invalid-worktree-request' });
+      return;
+    }
+    // Fidelidade: a projeção semântica precisa coincidir com os campos de autoridade
+    // (correlação, objetivo, escopo, critérios). Divergência é pedido inválido.
+    const taskSpecDefect = coderTaskSpecMismatch(request.taskSpec, request);
+    if (taskSpecDefect) {
+      yield attach(++seq, { kind: 'error', code: 'invalid_request', message: taskSpecDefect, retryable: false, handoffReference: 'checkpoint:invalid-worktree-request' });
       return;
     }
     // Allowlist verificada na ENTRADA: um comando não permitido é pedido
@@ -475,6 +483,9 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
               maxDurationMs: (request.limits.maxDurationMinutes ?? 30) * 60_000,
               deadlineAtMs: attemptDeadlineAtMs,
               objective: request.objective,
+              // Especificação aprovada (aceites/critérios/riscos/Verifier) — semântica
+              // compartilhada por todos os backends; coerência já validada na entrada.
+              taskSpec: request.taskSpec,
               onTranscript: value => { transcript = value; },
               includedScope: request.includedScope,
               excludedScope: request.excludedScope,

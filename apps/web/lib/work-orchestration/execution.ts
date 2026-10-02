@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path';
 import {
+  buildCoderTaskSpecFromWorkItem,
   validateWorkExecutorTranscript,
   type AutonomousExecutionSpecV1,
   type WorkContextReference,
@@ -144,6 +145,9 @@ export const buildExecutorRequest = ({ item, spec, attemptId, contextReferences,
   validationCriteria: spec.validationCriteria,
   limits: spec.limits,
   contextReferences,
+  // Projeção semântica da versão APROVADA para o coder (derivada, não persistida):
+  // aceites, riscos, semântica dos critérios e requisito do Verifier.
+  taskSpec: buildCoderTaskSpecFromWorkItem(item, spec, contextReferences),
   ...(carriedContext ? { carriedContext } : {}),
   ...(recoveryEvidence ? { recoveryEvidence } : {}),
 });

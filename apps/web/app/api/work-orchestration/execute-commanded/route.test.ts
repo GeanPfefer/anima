@@ -33,7 +33,7 @@ const spec = {
 };
 const item = {
   id: WID, proposalVersion: 1, capability: 'programming',
-  proposal: { data: { objective: 'x', includedScope: ['a.ts'], excludedScope: ['b.ts'] } },
+  proposal: { data: { summary: 'x', objective: 'x', includedScope: ['a.ts'], excludedScope: ['b.ts'], expectedEffects: ['e'], risks: [] } },
 };
 
 beforeEach(() => {
