@@ -103,6 +103,20 @@ describe('planejador executável do projeto', () => {
     }
   });
 
+  test('backend codex-cli persiste o modelo do Codex (ou default), nunca o modelo Ollama', async () => {
+    process.env.ANIMA_CODER_PROVIDER = 'codex-cli';
+    process.env.ANIMA_WORKTREE_CODER_MODEL = 'qwen3-coder:latest';
+    try {
+      const result = await planExecutableProjectWork('adicione o teste', base, new OpenAIProjectWorkPlanner({ admission: grant }));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.command.intent).toMatchObject({ execution_spec: { coder_backend: 'codex-cli', model: 'default', coder_backend_source: 'runtime_default' } });
+    } finally {
+      delete process.env.ANIMA_CODER_PROVIDER;
+      delete process.env.ANIMA_WORKTREE_CODER_MODEL;
+    }
+  });
+
   test('persiste target_paths distintos por gate no execution_spec canônico', async () => {
     const planner = { id: 'fixture', proposeArguments: async () => ({ ok: true as const, rawArguments: JSON.stringify({
       summary: 'Dois gates', objective: 'Validar superfícies distintas',

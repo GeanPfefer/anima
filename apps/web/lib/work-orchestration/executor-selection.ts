@@ -9,6 +9,7 @@ import { resolveLocalCoderContextLength, resolveOllamaCoderRuntimeConfig, resolv
 import { GptCoderBackend } from './gpt-coder';
 import type { OpenAIAdmissionControl } from '@/lib/ai/openai-paid-transport';
 import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
+import { CodexCliCoderBackend, resolveCodexCliConfig } from './codex-cli-coder';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from './execution';
 import { WorktreeExecutorAdapter } from './worktree-executor';
 import { runProcess } from './worktree';
@@ -187,6 +188,14 @@ const backendFor = (
       repoRoot,
       model: contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
     });
+  }
+
+  if (kind === 'codex-cli') {
+    // Akita Baseline V1: o Codex CLI roda o PRÓPRIO harness na worktree; o host segue
+    // dono do git observado, escopo, gates e handoff. Config do operador por env.
+    const config = resolveCodexCliConfig(contract.model);
+    if (!config.ok) return { error: config.error };
+    return new CodexCliCoderBackend({ config: config.value });
   }
 
   // O backend determin?stico (`scripted`) s? entra por inje??o em teste.

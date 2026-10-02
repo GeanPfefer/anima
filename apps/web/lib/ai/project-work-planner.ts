@@ -1,6 +1,7 @@
 import { readVerifierRequirement, VERIFIER_REQUIREMENT_KEY, type CreateWorkProposalCommand, type RequestProposalRevisionCommand, type WorkItem } from '@anima/core';
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
+import { CODEX_CLI_DEFAULT_MODEL } from '@/lib/work-orchestration/codex-cli-coder';
 import { resolveOpenAICoderModel } from '@/lib/work-orchestration/gpt-coder';
 import { parseProposal, scopeTestCommandToWorkspace, targetPathsAreExactFilesOrAbsent, type PlannerProposalResult, type ProjectWorkPlanner } from './project-work-planner-shared';
 import { OpenAIProjectWorkPlanner } from './project-work-planner-openai';
@@ -151,7 +152,9 @@ export async function planExecutableProjectWork(
           // incoerente (e, com o Router desligado, chamaria a OpenAI com `qwen…`).
           model: coderBackend === 'openai'
             ? resolveOpenAICoderModel()
-            : process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
+            : coderBackend === 'codex-cli'
+              ? process.env.ANIMA_CODEX_CLI_MODEL?.trim() || CODEX_CLI_DEFAULT_MODEL
+              : process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
           base_sha: baseSha,
           permissions: ['workspace_read', 'workspace_write_isolated'],
           // Autoridade do host: escopa um `npm test -- <arquivo>` ao workspace do

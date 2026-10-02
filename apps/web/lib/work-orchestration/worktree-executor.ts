@@ -520,10 +520,10 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           observeCoder(true);
 
           // Timeout do coder (deadline global ou timeout por chamada) é causa terminal
-          // própria: a mensagem preserva `[ollama_timeout]` e o candidato já aplicado é
+          // própria: a mensagem preserva `[ollama_timeout]`/`[runner_timeout]` e o candidato já aplicado é
           // preservado como evidência em vez de descartado pela restauração.
           const coderMessage = error instanceof Error ? error.message : String(error);
-          if (!signal.aborted && coderMessage.includes('[ollama_timeout]')) {
+          if (!signal.aborted && (coderMessage.includes('[ollama_timeout]') || coderMessage.includes('[runner_timeout]'))) {
             const preserved = await preserveCandidate();
             yield attach(++seq, {
               kind: 'error',
