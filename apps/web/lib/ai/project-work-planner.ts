@@ -2,6 +2,7 @@ import { readVerifierRequirement, VERIFIER_REQUIREMENT_KEY, type CreateWorkPropo
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
 import { CODEX_CLI_DEFAULT_MODEL } from '@/lib/work-orchestration/codex-cli-coder';
+import { CLAUDE_CODE_DEFAULT_MODEL } from '@/lib/work-orchestration/claude-code-coder';
 import { resolveOpenAICoderModel } from '@/lib/work-orchestration/gpt-coder';
 import { parseProposal, scopeTestCommandToWorkspace, targetPathsAreExactFilesOrAbsent, type PlannerProposalResult, type ProjectWorkPlanner } from './project-work-planner-shared';
 import { OpenAIProjectWorkPlanner } from './project-work-planner-openai';
@@ -154,7 +155,9 @@ export async function planExecutableProjectWork(
             ? resolveOpenAICoderModel()
             : coderBackend === 'codex-cli'
               ? process.env.ANIMA_CODEX_CLI_MODEL?.trim() || CODEX_CLI_DEFAULT_MODEL
-              : process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
+              : coderBackend === 'claude-code'
+                ? process.env.ANIMA_CLAUDE_CODE_MODEL?.trim() || CLAUDE_CODE_DEFAULT_MODEL
+                : process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest',
           base_sha: baseSha,
           permissions: ['workspace_read', 'workspace_write_isolated'],
           // Autoridade do host: escopa um `npm test -- <arquivo>` ao workspace do

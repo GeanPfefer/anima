@@ -12,6 +12,7 @@ describe('resolveConfiguredCoderBackend — config de deploy do backend de códi
     expect(resolveConfiguredCoderBackend({ ANIMA_WORKTREE_CODER_BACKEND: 'ollama' })).toBe('ollama');
     expect(resolveConfiguredCoderBackend({ ANIMA_CODER_PROVIDER: 'openai' })).toBe('openai');
     expect(resolveConfiguredCoderBackend({ ANIMA_CODER_PROVIDER: 'codex-cli' })).toBe('codex-cli');
+    expect(resolveConfiguredCoderBackend({ ANIMA_CODER_PROVIDER: 'claude-code' })).toBe('claude-code');
   });
 
   test('trim de espaços em volta do valor', () => {
@@ -25,6 +26,6 @@ describe('resolveConfiguredCoderBackend — config de deploy do backend de códi
   });
 
   test('o conjunto permitido espelha os backends do fluxo real (backendFor)', () => {
-    expect([...WORKTREE_CODER_BACKENDS].sort()).toEqual(['codex-cli', 'deepseek-harness', 'ollama', 'openai']);
+    expect([...WORKTREE_CODER_BACKENDS].sort()).toEqual(['claude-code', 'codex-cli', 'deepseek-harness', 'ollama', 'openai']);
   });
 });

@@ -242,12 +242,12 @@ export interface CoderBackend {
  * backends reais (Ollama, OpenAI) a usam para o próprio `id`, e o Resource Governor
  * a usa para PREVER, a partir do contrato, qual coder um item vai rodar (advisory
  * pré-execução). Assim a evidência (`backendId` observado) e a previsão nunca divergem. */
-export type CoderProvider = 'ollama' | 'openai' | 'deepseek-harness' | 'codex-cli';
+export type CoderProvider = 'ollama' | 'openai' | 'deepseek-harness' | 'codex-cli' | 'claude-code';
 export const coderBackendId = (provider: CoderProvider, model: string): string => `${provider}:${model}`;
 
 /** Backends de código permitidos no fluxo real de worktree (fonte única de runtime
  * para validar a config de deploy). Espelha `backendFor`. */
-export const WORKTREE_CODER_BACKENDS: readonly CoderProvider[] = ['ollama', 'openai', 'deepseek-harness', 'codex-cli'];
+export const WORKTREE_CODER_BACKENDS: readonly CoderProvider[] = ['ollama', 'openai', 'deepseek-harness', 'codex-cli', 'claude-code'];
 
 /**
  * Resolve o backend de código do worktree a partir da configuração de DEPLOY

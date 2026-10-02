@@ -39,3 +39,28 @@ Status: **incremento 1 implementado, sem uso real** (2026-10-02). Base: `dev` `6
 Resume do Codex, ClaudeCodeCoderBackend, settlement de assinatura, UI, mudanças no Verifier,
 retry interno de gate para `codex-cli` (0) e **qualquer execução real** — a primeira prova real
 com assinatura é decisão humana separada.
+
+## Incremento 2 — Claude Code como segundo executor nativo
+
+Status: **implementado na branch `claude/claude-code-coder-backend`, sem uso real** (2026-10-02).
+
+- Código: `apps/web/lib/work-orchestration/claude-code-coder.ts`; seleção `coder_backend: 'claude-code'`
+  (default segue `ollama`; retry interno de gate 0). A mecânica comum aos dois executores (instrução,
+  allowlist de ambiente, turno com deadline/cancelamento, diagnóstico sanitizado) vive em
+  `native-cli-coder.ts`; cada adaptador mantém as próprias flags e config.
+- Lançamento sem shell, cwd = worktree (o Claude Code não tem flag de cwd), flags verificadas no
+  `claude --help` 2.1.286: `-p --output-format json --no-session-persistence --restricted
+  --tools Read,Edit,Write,Glob,Grep,Bash --allowedTools Bash(npm test:*),Bash(npm run typecheck:*),
+  Bash(git status:*),Bash(git diff:*) --permission-mode acceptEdits --permission-prompts none [--model M] <instrução>`.
+- Só o envelope final JSON é lido (`is_error`/`subtype`/`num_turns`/modelos): exit 0 com erro declarado
+  falha fechado. Tool calls não são interpretadas.
+- Ambiente: base comum + `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_GIT_BASH_PATH`; `DISABLE_AUTOUPDATER=1`.
+  Fora: `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, variáveis
+  `CLAUDE_CODE_*`/`CLAUDECODE` de uma sessão hospedeira, Supabase, RunPod e segredos do ANIMA.
+- Config do operador: `ANIMA_CLAUDE_CODE_PATH` (default `claude`; `.cmd/.bat/.ps1` recusados),
+  `ANIMA_CLAUDE_CODE_MODEL` (ausente ⇒ `default`).
+- **Limitação Windows:** sem sandbox de SO no Windows nativo (diferente de Linux/WSL). A contenção é
+  `--restricted` + permissões nativas + worktree descartável + git/escopo/gates do host. Não há sandbox próprio.
+- **Pré-requisito da prova viva:** o executável standalone precisa estar autenticado na assinatura
+  (`claude auth status` ⇒ `loggedIn: true`), por ato humano (`claude auth login`). Em 2026-10-02 ele
+  reportava `loggedIn: false` nesta máquina.

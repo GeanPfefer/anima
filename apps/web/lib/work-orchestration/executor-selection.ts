@@ -10,6 +10,7 @@ import { GptCoderBackend } from './gpt-coder';
 import type { OpenAIAdmissionControl } from '@/lib/ai/openai-paid-transport';
 import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
 import { CodexCliCoderBackend, resolveCodexCliConfig } from './codex-cli-coder';
+import { ClaudeCodeCoderBackend, resolveClaudeCodeConfig } from './claude-code-coder';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from './execution';
 import { WorktreeExecutorAdapter } from './worktree-executor';
 import { runProcess } from './worktree';
@@ -196,6 +197,14 @@ const backendFor = (
     const config = resolveCodexCliConfig(contract.model);
     if (!config.ok) return { error: config.error };
     return new CodexCliCoderBackend({ config: config.value });
+  }
+
+  if (kind === 'claude-code') {
+    // Akita Baseline V1, 2º executor nativo: o Claude Code roda o PRÓPRIO harness na
+    // worktree; o host segue dono do git observado, escopo, gates e handoff.
+    const config = resolveClaudeCodeConfig(contract.model);
+    if (!config.ok) return { error: config.error };
+    return new ClaudeCodeCoderBackend({ config: config.value });
   }
 
   // O backend determin?stico (`scripted`) s? entra por inje??o em teste.
