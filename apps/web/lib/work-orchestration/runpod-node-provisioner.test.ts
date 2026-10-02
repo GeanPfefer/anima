@@ -385,6 +385,47 @@ describe('RunPodNodeProvisioner', () => {
     expect(calls.some(c => c.url === 'http://127.0.0.1:21434/api/chat')).toBe(true);
   });
 
+  // Prova viva 2026-10-02 (4 Pods >=48 GB): o pull terminou e o modelo apareceu em /api/tags, mas o
+  // 1º /api/chat CARREGA o modelo na VRAM (dezenas de segundos) e o health o abortava no teto de
+  // liveness (5 s) — todo Pod saudável virava health_failed. O chat tem teto próprio.
+  const slowChatHttp = (chatDelayMs: number): HttpClient => ({
+    async send(req) {
+      if (req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+      if (req.url === 'http://127.0.0.1:21434/api/tags') return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
+      if (req.url === 'http://127.0.0.1:21434/api/chat') {
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => resolve(json(200, { message: { content: 'OK' } })), chatDelayMs);
+          req.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); }, { once: true });
+        });
+      }
+      return json(404, {});
+    },
+  });
+
+  test('inspect: chat com cold load ACIMA do teto de liveness passa (teto próprio do chat)', async () => {
+    const report = await new RunPodNodeProvisioner(config(), slowChatHttp(120), { ...opts, healthTimeoutMs: 20, healthChatTimeoutMs: 2_000 }).inspect(handle, signal());
+    expect(report).toMatchObject({ reachable: true, healthy: true });
+  });
+
+  test('inspect: chat que estoura o PRÓPRIO teto reprova com detalhe distinto', async () => {
+    const report = await new RunPodNodeProvisioner(config(), slowChatHttp(500), { ...opts, healthTimeoutMs: 20, healthChatTimeoutMs: 40 }).inspect(handle, signal());
+    expect(report).toMatchObject({ reachable: true, healthy: false, detail: 'health chat unreachable or timed out' });
+  });
+
+  test('teto do chat: default 180 s; env ANIMA_RUNPOD_HEALTH_CHAT_TIMEOUT_MS; liveness segue 5 s', () => {
+    const saved = process.env.ANIMA_RUNPOD_HEALTH_CHAT_TIMEOUT_MS;
+    try {
+      delete process.env.ANIMA_RUNPOD_HEALTH_CHAT_TIMEOUT_MS;
+      const p = new RunPodNodeProvisioner(config(), fakeHttp(() => json(404, {})).client, {}) as unknown as { healthChatTimeoutMs: number; healthTimeoutMs: number };
+      expect(p.healthChatTimeoutMs).toBe(180_000);
+      expect(p.healthTimeoutMs).toBe(5_000);
+      process.env.ANIMA_RUNPOD_HEALTH_CHAT_TIMEOUT_MS = '240000';
+      expect((new RunPodNodeProvisioner(config(), fakeHttp(() => json(404, {})).client, {}) as unknown as { healthChatTimeoutMs: number }).healthChatTimeoutMs).toBe(240_000);
+    } finally {
+      if (saved === undefined) delete process.env.ANIMA_RUNPOD_HEALTH_CHAT_TIMEOUT_MS; else process.env.ANIMA_RUNPOD_HEALTH_CHAT_TIMEOUT_MS = saved;
+    }
+  });
+
   test('inspect: provider RUNNING mas endpoint externo cai → healthy=false', async () => {
     const { client } = fakeHttp((req) => {
       if (req.url.endsWith('/pods/pod-1')) return json(200, runningPod());

@@ -192,6 +192,10 @@ export interface RunPodProvisionerOptions {
   /** Deadline explícito para o Pod RUNNING publicar o endpoint (ver constante acima). */
   readonly endpointPublicationDeadlineMs?: number;
   readonly healthTimeoutMs?: number;
+  /** Teto do probe `/api/chat` do health. Separado do `healthTimeoutMs` (liveness de `/api/tags`):
+   * o 1º chat de um Pod novo CARREGA o modelo (~19 GB) do disco na VRAM, o que leva dezenas de
+   * segundos — com o teto de liveness (5 s) todo Pod saudável era reprovado logo após o pull. */
+  readonly healthChatTimeoutMs?: number;
   /** Teto para o túnel SSH aceitar conexão (o `sshd` só sobe no meio do bootstrap; a 1ª tentativa
    * quase sempre falha em cold-start). Retry bounded até este teto. */
   readonly tunnelReadyTimeoutMs?: number;
@@ -318,6 +322,7 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
   private readonly pollIntervalMs: number;
   private readonly endpointPublicationDeadlineMs: number;
   private readonly healthTimeoutMs: number;
+  private readonly healthChatTimeoutMs: number;
   private readonly tunnelReadyTimeoutMs: number;
   private readonly modelReadyTimeoutMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -336,6 +341,7 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
     this.endpointPublicationDeadlineMs = options.endpointPublicationDeadlineMs ?? options.maxProvisionMs
       ?? runpodEndpointPublicationDeadlineMs();
     this.healthTimeoutMs = options.healthTimeoutMs ?? 5_000;
+    this.healthChatTimeoutMs = options.healthChatTimeoutMs ?? positiveInt(process.env.ANIMA_RUNPOD_HEALTH_CHAT_TIMEOUT_MS, 180_000);
     this.tunnelReadyTimeoutMs = options.tunnelReadyTimeoutMs ?? positiveInt(process.env.ANIMA_RUNPOD_TUNNEL_READY_TIMEOUT_MS, 180_000);
     this.modelReadyTimeoutMs = options.modelReadyTimeoutMs ?? positiveInt(process.env.ANIMA_RUNPOD_MODEL_READY_TIMEOUT_MS, 900_000);
     this.sleep = options.sleep ?? ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
@@ -693,38 +699,39 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
   }
 
   private async externalHealth(endpoint: string, signal: AbortSignal): Promise<{ ok: boolean; detail?: string }> {
-    // Timeout próprio de health, cooperativo com o signal externo.
-    const controller = new AbortController();
-    const onAbort = () => controller.abort();
-    signal.addEventListener('abort', onAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(), this.healthTimeoutMs);
+    const base = endpoint.replace(/\/+$/, '');
+    const expected = this.config.podEnv.ANIMA_OLLAMA_MODEL ?? 'qwen3-coder:latest';
+    // Cada probe com timeout PRÓPRIO, cooperativo com o signal externo: liveness (`/api/tags`)
+    // curto; o `/api/chat` pode carregar o modelo na VRAM (cold load) e tem teto maior.
+    const bounded = async <T>(timeoutMs: number, run: (s: AbortSignal) => Promise<T>): Promise<T> => {
+      const controller = new AbortController();
+      const onAbort = () => controller.abort();
+      signal.addEventListener('abort', onAbort, { once: true });
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try { return await run(controller.signal); }
+      finally { clearTimeout(timer); signal.removeEventListener('abort', onAbort); }
+    };
+    let stage: 'tags' | 'chat' = 'tags';
     try {
-      const tags = await this.http.send({
-        method: 'GET',
-        url: `${endpoint.replace(/\/+$/, '')}/api/tags`,
-        signal: controller.signal,
-      });
+      const tags = await bounded(this.healthTimeoutMs, s => this.http.send({ method: 'GET', url: `${base}/api/tags`, signal: s }));
       if (tags.status < 200 || tags.status >= 300) return { ok: false, detail: `tags ${tags.status}` };
       const parsed = asObject(parseJson(tags.body));
       const models = Array.isArray(parsed?.models) ? parsed.models : [];
-      const expected = this.config.podEnv.ANIMA_OLLAMA_MODEL ?? 'qwen3-coder:latest';
       const present = models.some(value => {
         const model = asObject(value);
         return model?.name === expected || model?.model === expected;
       });
       if (!present) return { ok: false, detail: 'model missing' };
-      const chat = await this.http.send({
-        method: 'POST', url: `${endpoint.replace(/\/+$/, '')}/api/chat`,
+      stage = 'chat';
+      const chat = await bounded(this.healthChatTimeoutMs, s => this.http.send({
+        method: 'POST', url: `${base}/api/chat`,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: expected, messages: [{ role: 'user', content: 'Reply only OK.' }], stream: false, options: { num_predict: 8 } }),
-        signal: controller.signal,
-      });
+        signal: s,
+      }));
       return chat.status >= 200 && chat.status < 300 ? { ok: true } : { ok: false, detail: `chat ${chat.status}` };
     } catch {
-      return { ok: false, detail: 'health unreachable' };
-    } finally {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
+      return { ok: false, detail: stage === 'chat' ? 'health chat unreachable or timed out' : 'health unreachable' };
     }
   }
 }
