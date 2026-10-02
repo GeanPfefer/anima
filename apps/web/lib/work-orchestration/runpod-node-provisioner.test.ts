@@ -412,6 +412,39 @@ describe('RunPodNodeProvisioner', () => {
     expect(report).toMatchObject({ reachable: true, healthy: false, detail: 'health chat unreachable or timed out' });
   });
 
+  test('o probe de chat declara o próprio teto ao TRANSPORTE (senão o default de 30 s corta o cold load)', async () => {
+    const seen: { url: string; timeoutMs: number | undefined }[] = [];
+    const client: HttpClient = {
+      async send(req) {
+        seen.push({ url: req.url, timeoutMs: req.timeoutMs });
+        if (req.url.endsWith('/pods/pod-1')) return json(200, runningPod());
+        if (req.url.endsWith('/api/tags')) return json(200, { models: [{ name: 'qwen3-coder:latest' }] });
+        return json(200, { message: { content: 'OK' } });
+      },
+    };
+    const report = await new RunPodNodeProvisioner(config(), client, { ...opts, healthChatTimeoutMs: 123_000 }).inspect(handle, signal());
+    expect(report.healthy).toBe(true);
+    expect(seen.find(r => r.url.endsWith('/api/chat'))?.timeoutMs).toBe(123_000);
+    expect(seen.find(r => r.url.endsWith('/api/tags'))?.timeoutMs).toBeUndefined(); // liveness segue no default
+  });
+
+  test('fetchHttpClient honra timeoutMs por requisição acima do default de 30 s', async () => {
+    const realFetch = globalThis.fetch;
+    const savedEnv = process.env.ANIMA_RUNPOD_HTTP_TIMEOUT_MS;
+    process.env.ANIMA_RUNPOD_HTTP_TIMEOUT_MS = '30';
+    globalThis.fetch = ((_url: unknown, init: { signal: AbortSignal }) => new Promise((resolve, reject) => {
+      const t = setTimeout(() => resolve({ status: 200, text: async () => 'ok' }), 120);
+      init.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('aborted')); }, { once: true });
+    })) as unknown as typeof fetch;
+    try {
+      await expect(fetchHttpClient.send({ method: 'GET', url: 'http://x/slow', signal: signal() })).rejects.toThrow('aborted');
+      await expect(fetchHttpClient.send({ method: 'GET', url: 'http://x/slow', signal: signal(), timeoutMs: 2_000 })).resolves.toEqual({ status: 200, body: 'ok' });
+    } finally {
+      globalThis.fetch = realFetch;
+      if (savedEnv === undefined) delete process.env.ANIMA_RUNPOD_HTTP_TIMEOUT_MS; else process.env.ANIMA_RUNPOD_HTTP_TIMEOUT_MS = savedEnv;
+    }
+  });
+
   test('teto do chat: default 180 s; env ANIMA_RUNPOD_HEALTH_CHAT_TIMEOUT_MS; liveness segue 5 s', () => {
     const saved = process.env.ANIMA_RUNPOD_HEALTH_CHAT_TIMEOUT_MS;
     try {

@@ -70,6 +70,9 @@ export interface HttpRequestInput {
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: string;
   readonly signal: AbortSignal;
+  /** Teto desta requisição no transporte; ausente ⇒ `runpodHttpTimeoutMs()` (30 s). Só para
+   * chamadas que legitimamente demoram mais (ex.: 1º `/api/chat` carregando o modelo na VRAM). */
+  readonly timeoutMs?: number;
 }
 /** Transporte injetável. `send` NUNCA lança por status HTTP (só por rede/abort). */
 export interface HttpClient {
@@ -90,12 +93,13 @@ export const runpodHttpTimeoutMs = (env: Record<string, string | undefined> = pr
  * que o adapter traduz para `provider_unreachable` — nunca vaza stack/segredo. O timeout por
  * requisição compõe com o `signal` do chamador: aborta no PRIMEIRO dos dois (deadline ou cancel). */
 export const fetchHttpClient: HttpClient = {
-  async send({ method, url, headers, body, signal }) {
+  async send({ method, url, headers, body, signal, timeoutMs }) {
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     if (signal.aborted) controller.abort();
     else signal.addEventListener('abort', onAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(), runpodHttpTimeoutMs());
+    const requestTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : runpodHttpTimeoutMs();
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       const response = await fetch(url, { method, headers: headers as HeadersInit, body, signal: controller.signal });
       return { status: response.status, body: await response.text() };
@@ -728,6 +732,9 @@ export class RunPodNodeProvisioner implements NodeProvisioner {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: expected, messages: [{ role: 'user', content: 'Reply only OK.' }], stream: false, options: { num_predict: 8 } }),
         signal: s,
+        // O transporte também precisa do teto do chat: por default ele corta TODA requisição em
+        // 30 s (prova viva 2026-10-02, 2ª sessão: health_lost exatamente 30 s após o modelo pronto).
+        timeoutMs: this.healthChatTimeoutMs,
       }));
       return chat.status >= 200 && chat.status < 300 ? { ok: true } : { ok: false, detail: `chat ${chat.status}` };
     } catch {
