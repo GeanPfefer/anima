@@ -1219,7 +1219,9 @@ function CapabilityDetail({
       <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>Provas</h3>
         {(cap.proofRefs?.length ?? 0) === 0 ? (
-          <p className={styles.detailEmpty}>Sem prova declarada — coerente com um estado ainda não comprovado.</p>
+          <p className={styles.detailEmpty}>{cap.history?.some((entry) => entry.change === 'proof_added')
+            ? 'Evidência registrada abaixo; sem prova de maturidade creditada pelo motor.'
+            : 'Sem prova declarada — coerente com um estado ainda não comprovado.'}</p>
         ) : (
           <ul className={styles.proofList}>
             {cap.proofRefs!.map((proof, i) => (
@@ -1233,6 +1235,13 @@ function CapabilityDetail({
         )}
       </section>
 
+      {(cap.history ?? []).some((entry) => entry.change === 'proof_added') && (
+        <section className={styles.detailSection} aria-label="Evidência registrada de escopo limitado">
+          <h3 className={styles.detailLabel}>Evidência registrada · escopo limitado</h3>
+          <p className={styles.detailHint}>Registro de prova não concede maturidade ou autoridade; seu escopo e limitações permanecem explícitos.</p>
+          <HistoryList entries={cap.history!.filter((entry) => entry.change === 'proof_added')} />
+        </section>
+      )}
       <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>História</h3>
         {(cap.history?.length ?? 0) === 0 ? (

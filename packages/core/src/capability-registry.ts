@@ -31,6 +31,7 @@ export const EVOLUTION_BASELINE = {
 const RECONCILIATION_V2_RECORD = 'docs/registros/2026-09-27c-evolution-reconciliation-v2.md';
 
 const DIRECTION_RECORD = 'docs/planos/009-evolution-ux-v2-akita-baseline.md';
+const CODEX_LIVE_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-codex-live-proof.md';
 const directionRefs = [{ kind: 'doc' as const, ref: DIRECTION_RECORD, note: 'Decisão humana de direção; não prova operacional.' }];
 
 export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
@@ -672,9 +673,15 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     dependsOn: ['agency.external-harness'],
     responsibility: 'reused_baseline',
     direction: { status: 'current_focus', rationale: 'Primeiro incremento: ANIMA → Codex → mudança → gate.', refs: directionRefs },
-    reuse: { strategy: 'wrap', tool: 'Codex CLI', status: 'candidate',
+    reuse: { strategy: 'wrap', tool: 'Codex CLI', status: 'integrated',
       externalEvidence: 'Candidato já registrado na Evolution Reconciliation V2; POC externo de continuidade não prova executor integrado.' },
-    advancement: 'Integração e prova viva governada pendentes nesta baseline; não promover por escolha arquitetural.',
+    meaning: 'Adapter integrado em 9404bd4; primeira prova técnica viva PASS, não governada. Sem regra específica no Proof Engine, maturidade declarada anterior preservada (projected); integração e prova técnica não demonstram governança.',
+    advancement: 'Prova governada ainda não demonstrada: faltam work item, attempt, authority, Verifier e review governada. Não operacional/autônomo; definir critério específico antes de qualquer promoção.',
+    history: [{ at: '2026-10-02', change: 'proof_added',
+      note: 'Live technical proof passed · primeira prova viva técnica PASS; governed proof not yet demonstrated. TPC-01: dois arquivos, E1/E2/E3 e gate focal verdes, sem contract violation; sem work item/attempt/authority/Verifier/review governada.',
+      refs: [{ kind: 'commit', ref: '9404bd4039738c4fbfabd414db4d11ffd83383db', note: 'Integração do adapter; não é commit do resultado da prova.' },
+        { kind: 'record', ref: CODEX_LIVE_RECORD, note: 'Relatório humano de prova técnica não governada; não promove maturidade.' }],
+    }],
   },
   {
     id: 'agency.claude-code', name: 'Claude Code executor', domain: 'agency', maturity: 'projected',
@@ -694,7 +701,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     direction: { status: 'current_focus', rationale: 'Antes, o caminho incluía evoluir o coding-agent loop próprio. Agora, reutilizar Codex e Claude; Ollama/DSH permanecem pesquisa e não bloqueiam este milestone.', refs: directionRefs },
     target: { description: 'Baseline funcional reutilizado antes de retomar self-development autônomo avançado.', milestone: DIRECTION_RECORD,
       steps: [
-        { capabilityId: 'agency.codex-cli', description: 'ANIMA → Codex → mudança → gate' },
+        { capabilityId: 'agency.codex-cli', description: 'ANIMA → Codex → mudança → gate · adapter integrado · primeira prova técnica viva PASS (não governada)' },
         { capabilityId: 'agency.claude-code', description: 'ANIMA → Claude → mudança → gate' },
         { capabilityId: 'memory.cross-harness', description: 'Claude ↔ Codex via ai-memory, após os executores' },
         { capabilityId: 'agency.continuous-self-development', description: 'Só depois: retomar self-development autônomo avançado' },

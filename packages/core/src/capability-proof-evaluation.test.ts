@@ -593,3 +593,12 @@ describe('V0.1 — reprodução observada ≠ satisfação operacional', () => {
     expect(accepting).toEqual(['agency.edit-file', 'agency.run-tests']);
   });
 });
+
+test('Codex sem regra mantém declared projected; prova técnica em history não vira execução governada', () => {
+  const evaluation = evaluateCapabilityProofsFromHistory({ events: [], capabilities: ANIMA_CAPABILITY_REGISTRY_V0 }).find((entry) => entry.capabilityId === 'agency.codex-cli')!;
+  expect(evaluation.status).toBe('not_evaluated');
+  expect(evaluation.declaredMaturity).toBe('projected');
+  expect(evaluation.derivedMaturity).toBeNull();
+  expect(evaluation.assessment).toBeNull();
+  expect(evaluation.evidence).toEqual([]);
+});

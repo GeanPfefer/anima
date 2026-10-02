@@ -66,3 +66,20 @@ qualquer promoção: esta worktree não observa nem presume a integração em WI
 PRD é o único arquivo de estado vivo com potencial de conflito documental;
 preservar ambas as atualizações na integração. Nenhum backend de coding ou
 arquivo de work-orchestration faz parte deste delta.
+
+## Reconciliação 2026-10-02 — primeira prova técnica viva Codex
+
+Rebase sobre 9404bd4 sem conflitos; backend integrado intacto. Estado atual
+substitui a fotografia de candidatos da implementação inicial: Codex integrado
+com primeira prova técnica viva PASS **não governada**, CURRENT FOCUS/WRAP.
+Claude e cross-harness continuam NEXT; self-dev avançado continua posterior.
+Maturidade Codex preservada como projected, avaliação not_evaluated por ausência
+de regra específica. Evidência limitada usa history.proof_added (sem to/from de
+maturidade); o painel a expõe sem convertê-la em observação canônica. Nenhum
+novo modelo, campo, rule ou gate de governança foi criado para esta reconciliação.
+
+Registro e proveniência: [prova técnica relatada e sessão](../registros/2026-10-02-akita-baseline-v1-codex-live-proof.md).
+Nenhum conflito de PRD no rebase; somente bloco Evolution atualizado. O WIP
+histórico do checkout principal não consta desta base e permanece pendente.
+Próxima etapa humana: integrar esta branch/documentação e, em unidade separada,
+autorizar uma prova governada do Codex com critérios explícitos de maturidade.

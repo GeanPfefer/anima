@@ -512,7 +512,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
       expect(el?.getAttribute('aria-label')).not.toMatch(/Operacional/);
     }
     const candidates = container.querySelectorAll('[data-origin="candidate"]');
-    expect(candidates.length).toBe(6);
+    expect(candidates.length).toBe(5);
     candidates.forEach((el) => expect(el.getAttribute('data-future')).toBe('true'));
     expect(screen.getByRole('button', { name: 'Continuidade entre harnesses — Projetada (a conquistar) · candidata externa (ai-memory)' })).toBeInTheDocument();
   });
@@ -537,7 +537,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     expect(stateOf(container, 'memory.cross-harness')).toBe('strong');
     expect(stateOf(container, 'governance.review')).toBe('dim');
     expect(screen.getByRole('heading', { name: /Reuso já integrado/ })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Candidatas externas (6)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Candidatas externas (5)' })).toBeInTheDocument();
     expect(screen.getByText(/POC externo que funcionou ≠ capacidade do Anima/)).toBeInTheDocument();
   });
 
@@ -732,7 +732,10 @@ describe('Evolution UX V2 — Akita e reuso', () => {
     fireEvent.click(screen.getByRole('button', { name: /Codex CLI executor ANIMA/ }));
     expect(screen.getByRole('heading', { name: 'Codex CLI executor' })).toBeInTheDocument();
     expect(screen.getByText(/Maturidade: Projetada · Estratégia: WRAP/)).toBeInTheDocument();
-    expect(screen.getByText(/external candidate exists/)).toBeInTheDocument();
+    expect(screen.getAllByText(/primeira prova viva técnica PASS/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/governed proof not yet demonstrated/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Reuso integrado/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/external candidate exists/)).not.toBeInTheDocument();
     expect(screen.getByText(/Decisão arquitetural ≠ integração ≠ prova ≠ maturidade/)).toBeInTheDocument();
   });
   test('lentes separam responsabilidade e direção sem recolorir maturidade', () => {
@@ -761,4 +764,19 @@ test.each(['adopt', 'wrap', 'fork', 'build', 'undecided'] as const)('painel exp�
   expect(within(panel).getByText(new RegExp(`Maturidade: Projetada · Estratégia: ${strategy === 'undecided' ? 'A DECIDIR' : strategy.toUpperCase()}`))).toBeInTheDocument();
   if (strategy === 'build') expect(within(panel).getByText(/BUILD escolhido/)).toBeInTheDocument();
   if (strategy === 'undecided') expect(within(panel).getByText(/reuse decision missing/)).toBeInTheDocument();
+});
+
+test('baseline exibe PASS técnico com integração enquanto Claude e memória permanecem NEXT', () => {
+  const { container } = render(<EvolutionClient {...buildProps()} />);
+  const path = screen.getByRole('region', { name: 'Current development path' });
+  expect(within(path).getByRole('button', { name: /Codex CLI executor.*adapter integrado.*prova técnica viva PASS.*não governada/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Claude Code executor.*NEXT.*candidata/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Continuidade entre harnesses.*após os executores.*NEXT/ })).toBeInTheDocument();
+  const codex = container.querySelector('[data-capid="agency.codex-cli"]');
+  expect(codex).toHaveAttribute('data-origin', 'integrated');
+  expect(codex).toHaveAttribute('data-future', 'true');
+  fireEvent.click(codex!);
+  expect(screen.getByRole('region', { name: 'Evidência registrada de escopo limitado' })).toBeInTheDocument();
+  expect(screen.getByText(/sem prova de maturidade creditada pelo motor/)).toBeInTheDocument();
+  expect(screen.getByText(/Prova governada ainda não demonstrada/)).toBeInTheDocument();
 });

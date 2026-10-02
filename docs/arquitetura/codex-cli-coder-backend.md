@@ -1,6 +1,9 @@
 # Akita Baseline V1 — Codex CLI como CoderBackend
 
-Status: **incremento 1 implementado, sem uso real** (2026-10-02). Base: `dev` `6eb2dee`.
+Status: **incremento 1 integrado em `9404bd4`; primeira prova viva técnica PASS,
+não governada** (2026-10-02). Base da implementação: `dev` `6eb2dee`.
+Registro do relato humano: [prova técnica Codex](../registros/2026-10-02-akita-baseline-v1-codex-live-proof.md).
+Sem work item/attempt/authority/Verifier/review governada; maturidade não promovida.
 
 ## Decisão de direção
 
@@ -37,8 +40,8 @@ Status: **incremento 1 implementado, sem uso real** (2026-10-02). Base: `dev` `6
 ## Fora deste incremento
 
 Resume do Codex, ClaudeCodeCoderBackend, settlement de assinatura, UI, mudanças no Verifier,
-retry interno de gate para `codex-cli` (0) e **qualquer execução real** — a primeira prova real
-com assinatura é decisão humana separada.
+retry interno de gate para `codex-cli` (0) e **execução governada real** — a primeira prova governada
+com assinatura permanece decisão humana separada. A prova técnica relatada não a substitui.
 
 ## Incremento 2 — Claude Code como segundo executor nativo
 

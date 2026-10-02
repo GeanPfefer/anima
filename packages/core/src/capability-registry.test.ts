@@ -126,7 +126,7 @@ describe('Evolution Reconciliation V2 — honestidade epistemológica do registr
     expect(get('research.web.search').reuse).toMatchObject({ tool: 'SearXNG', strategy: 'wrap', status: 'integrated' });
     expect(get('research.web.open').reuse).toMatchObject({ tool: 'agent-browser', strategy: 'wrap', status: 'integrated' });
     const candidates = ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.reuse?.status === 'candidate');
-    expect(candidates.map((c) => c.reuse?.tool).sort()).toEqual(['Claude Code', 'Claude Code / Codex CLI', 'Codex CLI', 'ai-memory', 'ai-usagebar', 'ghpending']);
+    expect(candidates.map((c) => c.reuse?.tool).sort()).toEqual(['Claude Code', 'Claude Code / Codex CLI', 'ai-memory', 'ai-usagebar', 'ghpending']);
     for (const c of candidates) {
       expect(isFutureMaturity(c.maturity)).toBe(true);
       // Evidência externa nunca vira prova de funcionamento do Anima.
@@ -183,7 +183,7 @@ describe('Akita Baseline — direção não concede maturidade', () => {
     expect(validateCapabilityRegistry(ANIMA_CAPABILITY_REGISTRY_V0)).toEqual([]);
   });
   test('WRAP e CURRENT FOCUS não promovem candidatos', () => {
-    for (const id of ['agency.codex-cli', 'agency.claude-code', 'memory.cross-harness', 'agency.external-harness']) {
+    for (const id of ['agency.claude-code', 'memory.cross-harness', 'agency.external-harness']) {
       const capability = get(id);
       expect(capability.reuse?.strategy).toBe('wrap');
       expect(capability.reuse?.status).toBe('candidate');
@@ -207,4 +207,15 @@ describe('Akita Baseline — direção não concede maturidade', () => {
     expect(get('agency.produce-change').maturity).toBe('proven');
     expect(get('governance.authority').maturity).toBe('proven');
   });
+});
+
+test('Codex integrado com prova técnica não governada preserva maturidade e não concede provas canônicas', () => {
+  const codex = ANIMA_CAPABILITY_REGISTRY_V0.find((c) => c.id === 'agency.codex-cli')!;
+  expect(codex.reuse).toMatchObject({ strategy: 'wrap', status: 'integrated' });
+  expect(codex.direction?.status).toBe('current_focus');
+  expect(codex.maturity).toBe('projected');
+  expect(codex.proofRefs ?? []).toEqual([]);
+  expect(codex.history?.[0]).toMatchObject({ change: 'proof_added', at: '2026-10-02' });
+  expect(codex.history?.[0]?.note).toContain('governed proof not yet demonstrated');
+  expect(codex.history?.[0]?.refs).toContainEqual(expect.objectContaining({ kind: 'record', ref: 'docs/registros/2026-10-02-akita-baseline-v1-codex-live-proof.md' }));
 });
