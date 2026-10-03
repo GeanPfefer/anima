@@ -132,7 +132,6 @@ export interface CodexCliCoderOptions {
 
 export class CodexCliCoderBackend implements CoderBackend {
   readonly id: string;
-  readonly observation: NonNullable<CoderBackend['observation']>;
   private readonly config: CodexCliConfig;
   private readonly run: CodexCliProcessRunner | undefined;
   private readonly environmentSource: Record<string, string | undefined>;
@@ -142,8 +141,11 @@ export class CodexCliCoderBackend implements CoderBackend {
   constructor(options: CodexCliCoderOptions) {
     this.config = options.config;
     this.id = coderBackendId('codex-cli', options.config.model);
-    // Inferência é do provider do Codex (remota); worktree e efeitos continuam locais.
-    this.observation = { placement: 'remote', nodeId: null, model: options.config.model };
+    // SEM `observation` (identidade de placement): `placement:'remote'` exige um `nodeId` estável que o host
+    // atesta (Ollama: nó configurado; OpenAI: 'openai-api'), e o host NÃO atesta o nó de inferência de um CLI
+    // nativo; `local` seria falso. `{remote, nodeId:null}` era recusado por buildHostObservedCoderEvidence e a
+    // evidência do coder sumia em silêncio (lane mandatado ficava em evidence_incomplete). Ausência é legado válido;
+    // backend/modelo seguem no `backendId` (`provider:model`).
     this.run = options.run;
     this.environmentSource = options.environmentSource ?? process.env;
     this.aiMemory = options.aiMemory;
