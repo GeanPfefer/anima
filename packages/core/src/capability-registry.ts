@@ -34,6 +34,7 @@ const DIRECTION_RECORD = 'docs/planos/009-evolution-ux-v2-akita-baseline.md';
 const CODEX_LIVE_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-codex-live-proof.md';
 const CLAUDE_LIVE_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-claude-live-proof.md';
 const FINAL_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-final-reconciliation.md';
+const AI_MEMORY_LIVE_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-ai-memory-live-proof.md';
 const directionRefs = [{ kind: 'doc' as const, ref: DIRECTION_RECORD, note: 'Decisão humana de direção; não prova operacional.' }];
 
 export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
@@ -283,7 +284,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'memory.cross-harness',
-    direction: { status: 'next', rationale: 'Após os dois executores: Claude ↔ Codex via ai-memory.', refs: directionRefs },
+    direction: { status: 'current_focus', rationale: 'WRAP integrado · live cross-harness proof PASS (não governada).', refs: directionRefs },
     responsibility: 'reused_baseline',
     name: 'Continuidade entre harnesses',
     description: 'Ledger e resume de sessão entre Claude Code e Codex correlacionados a attempt/lineage do Anima.',
@@ -293,12 +294,12 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     reuse: {
       strategy: 'wrap',
       tool: 'ai-memory',
-      status: 'candidate',
+      status: 'integrated',
       externalEvidence:
-        'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado com ids em repo descartável. Riscos: o ledger guarda prompts e arquivos em texto claro; autowire global.',
+        'ai-memory 2.4.1 integrado em 2e153ed; Claude → Codex → Claude: live cross-harness proof PASS, não governada. Ledger externo não copiado.',
     },
-    meaning: '≠ memory.continuity (checkpoint interno do Anima). Não fundir: esta é continuidade técnica de harnesses externos.',
-    advancement: 'Só tem valor junto com o harness externo; entram juntos na mesma porta de runtime.',
+    meaning: 'WRAP integrado; live cross-harness proof PASS, não governada. Continuidade técnica externa distinta do checkpoint interno. Sem regra específica no Proof Engine: projected preservada.',
+    advancement: 'Definir critérios e demonstrar correlação governada a work item/attempt/authority/Verifier/review antes de promover maturidade.',
     history: [
       {
         at: '2026-09-27',
@@ -307,6 +308,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         note: 'Candidata externa (Reuse Architecture V1).',
         refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
       },
+      { at: '2026-10-02', change: 'proof_added', note: 'Live cross-harness proof PASS: Claude → ai-memory → Codex → ai-memory → Claude; prova técnica não governada, sem promoção.', refs: [{ kind: 'record', ref: AI_MEMORY_LIVE_RECORD }, { kind: 'commit', ref: '2e153ed05dac21a4ef67f001fa9c4543be1ff195' }] },
     ],
   },
 
@@ -556,7 +558,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'agency.continuous-self-development',
-    direction: { status: 'projected', rationale: 'Retomar o self-development avançado depois do Akita Baseline V1.', refs: directionRefs },
+    direction: { status: 'next', rationale: 'Akita Baseline V1 COMPLETE; próximo: self-development avançado, sob critérios próprios de governança.', refs: directionRefs },
     name: 'Self-development contínuo',
     description: 'O Anima detecta, formula, valida e incorpora melhorias próprias dentro da authority, sem loop humano constante.',
     domain: 'agency',
@@ -652,10 +654,10 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       tool: 'Claude Code / Codex CLI',
       status: 'integrated',
       externalEvidence:
-        'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado em repo descartável. Os dois adapters estão integrados em dev; provas técnicas TPC-01 PASS, sem governança demonstrada.',
+        'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado em repo descartável. Os dois adapters e ai-memory WRAP estão integrados em dev; provas técnicas TPC-01 e cross-harness PASS, sem governança demonstrada.',
     },
     meaning:
-      'Codex CLI e Claude Code integrados, com baseline técnico dos executores atingido. Provas governadas e composição com ai-memory ainda não demonstradas. O seam CoderBackend (ADR-001) permite trocar o executor. Um harness por assinatura é outra classe de compute, não um provider de API.',
+      'Codex CLI e Claude Code integrados, com baseline técnico dos executores atingido. Composição com ai-memory: live cross-harness proof PASS, não governada. Provas governadas ainda não demonstradas. O seam CoderBackend (ADR-001) permite trocar o executor. Um harness por assinatura é outra classe de compute, não um provider de API.',
     advancement: 'Provar ANIMA → executor → mudança → gate em integração governada; WRAP é direção aprovada, não maturidade.',
     history: [
       {
@@ -710,15 +712,16 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     id: 'agency.akita-baseline-v1', name: 'AKITA BASELINE V1', domain: 'agency', maturity: 'projected',
     description: 'REUSE BEFORE BUILD: executores maduros, depois memória entre harnesses.',
     dependsOn: ['agency.codex-cli', 'agency.claude-code', 'memory.cross-harness'],
-    direction: { status: 'current_focus', rationale: 'Antes, o caminho incluía evoluir o coding-agent loop próprio. Agora, reutilizar Codex e Claude; Ollama/DSH permanecem pesquisa e não bloqueiam este milestone.', refs: directionRefs },
-    target: { description: 'Baseline funcional reutilizado antes de retomar self-development autônomo avançado.', milestone: DIRECTION_RECORD,
+    direction: { status: 'current_focus', rationale: 'Akita Baseline V1 COMPLETE · live cross-harness proof PASS (não governada). Próximo: self-development avançado; pesquisa preservada.', refs: directionRefs },
+    target: { achievement: 'complete', description: 'Akita Baseline V1 COMPLETE: baseline técnico reutilizado; conquista do objetivo não promove maturidade.', milestone: DIRECTION_RECORD,
       steps: [
         { capabilityId: 'agency.codex-cli', description: 'ANIMA → Codex → mudança → gate · adapter integrado · baseline técnico do executor atingido · live technical proof PASS (não governada)' },
         { capabilityId: 'agency.claude-code', description: 'ANIMA → Claude → mudança → gate · adapter integrado · baseline técnico do executor atingido · live technical proof PASS (não governada)' },
-        { capabilityId: 'memory.cross-harness', description: 'Claude ↔ Codex via ai-memory, após os executores' },
+        { capabilityId: 'memory.cross-harness', description: 'Claude ↔ Codex via ai-memory · WRAP integrado · live cross-harness proof PASS (não governada)' },
         { capabilityId: 'agency.continuous-self-development', description: 'Só depois: retomar self-development autônomo avançado' },
       ] },
-    advancement: 'Provar cada integração e sua composição; objetivo escolhido não equivale a baseline concluído.',
+    advancement: 'Baseline técnico COMPLETE; próxima direção: self-development avançado. Definir critérios de maturidade e provar governança separadamente.',
+    history: [{ at: '2026-10-02', change: 'proof_added', note: 'Akita Baseline V1 COMPLETE; direction/achievement != maturity. Prova técnica não governada.', refs: [{ kind: 'record', ref: AI_MEMORY_LIVE_RECORD }] }],
   },
   {
     id: 'agency.ollama-agentic-runtime', name: 'Runtime agêntico próprio (Ollama)', domain: 'agency', maturity: 'proven',

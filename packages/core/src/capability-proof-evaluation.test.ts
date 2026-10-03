@@ -608,3 +608,11 @@ test('Claude técnico sem regra permanece não avaliado pelo Proof Engine', () =
   expect(evaluation.status).toBe('not_evaluated');
   expect(evaluation.derivedMaturity).toBeNull();
 });
+
+ test('baseline completo e continuidade técnica não concedem maturidade derivada', () => {
+ const evaluations = evaluateCapabilityProofsFromHistory({ events: [], capabilities: ANIMA_CAPABILITY_REGISTRY_V0 });
+ for (const id of ['memory.cross-harness', 'agency.akita-baseline-v1', 'agency.continuous-self-development']) {
+ const evaluation = evaluations.find(entry => entry.capabilityId === id)!;
+ expect(evaluation.status).toBe('not_evaluated');
+ }
+ });

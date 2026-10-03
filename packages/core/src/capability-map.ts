@@ -196,6 +196,8 @@ export interface CapabilityDirection {
 }
 
 export interface CapabilityTarget {
+  /** Conquista do objetivo; independente da maturidade da capacidade. */
+  achievement?: 'complete';
   description: string;
   milestone?: string;
   /** Sequência de planejamento; não substitui dependsOn nem comprova conclusão. */

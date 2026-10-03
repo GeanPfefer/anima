@@ -72,7 +72,8 @@ reportava `loggedIn: false` no preflight anterior; o relato humano posterior con
 
 ## Incremento 3 — ai-memory WRAP V1 (opt-in)
 
-Status: **implementado na branch `claude/ai-memory-wrap-v1`, sem uso real** (2026-10-02). Reuse = WRAP do
+Status: **integrado em `2e153ed`; live cross-harness proof PASS, técnica NÃO GOVERNADA** (2026-10-02).
+Registro: [fechamento do baseline](../registros/2026-10-02-akita-baseline-v1-ai-memory-live-proof.md). Reuse = WRAP do
 `ai-memory run` **2.4.1** (sem fork, sem memória própria). O ai-memory cuida só da continuidade cross-harness
 (ledger, delta não visto, resume nativo); Work Item, task spec, gates, evidência e Verifier seguem no ANIMA.
 

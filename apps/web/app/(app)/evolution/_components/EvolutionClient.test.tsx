@@ -512,9 +512,9 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
       expect(el?.getAttribute('aria-label')).not.toMatch(/Operacional/);
     }
     const candidates = container.querySelectorAll('[data-origin="candidate"]');
-    expect(candidates.length).toBe(3);
+    expect(candidates.length).toBe(2);
     candidates.forEach((el) => expect(el.getAttribute('data-future')).toBe('true'));
-    expect(screen.getByRole('button', { name: 'Continuidade entre harnesses — Projetada (a conquistar) · candidata externa (ai-memory)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continuidade entre harnesses — Projetada (a conquistar) · reuso integrado WRAP (ai-memory)' })).toBeInTheDocument();
   });
 
   test('lente Evolução recente destaca só o que foi registrado desde a baseline e lista no painel', () => {
@@ -537,7 +537,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     expect(stateOf(container, 'memory.cross-harness')).toBe('strong');
     expect(stateOf(container, 'governance.review')).toBe('dim');
     expect(screen.getByRole('heading', { name: /Reuso já integrado/ })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Candidatas externas (3)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Candidatas externas (2)' })).toBeInTheDocument();
     expect(screen.getByText(/POC externo que funcionou ≠ capacidade do Anima/)).toBeInTheDocument();
   });
 
@@ -766,12 +766,14 @@ test.each(['adopt', 'wrap', 'fork', 'build', 'undecided'] as const)('painel exp�
   if (strategy === 'undecided') expect(within(panel).getByText(/reuse decision missing/)).toBeInTheDocument();
 });
 
-test('baseline exibe ambos os executores com PASS técnico e memória NEXT', () => {
+test('baseline COMPLETE exibe PASS técnico e cross-harness sem promover maturidade', () => {
   const { container } = render(<EvolutionClient {...buildProps()} />);
   const path = screen.getByRole('region', { name: 'Current development path' });
   expect(within(path).getByRole('button', { name: /Codex CLI executor.*adapter integrado.*live technical proof PASS.*não governada/ })).toBeInTheDocument();
   expect(within(path).getByRole('button', { name: /Claude Code executor.*PASS.*CURRENT FOCUS.*integrada/ })).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Continuidade entre harnesses.*após os executores.*NEXT/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Continuidade entre harnesses.*live cross-harness proof PASS.*CURRENT FOCUS.*integrada/ })).toBeInTheDocument();
+  expect(within(path).getByText('AKITA BASELINE V1 · COMPLETE')).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Self-development contínuo.*NEXT/ })).toBeInTheDocument();
   const codex = container.querySelector('[data-capid="agency.codex-cli"]');
   expect(codex).toHaveAttribute('data-origin', 'integrated');
   expect(codex).toHaveAttribute('data-future', 'true');

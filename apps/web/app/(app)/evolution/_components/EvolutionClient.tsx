@@ -1256,7 +1256,7 @@ function CapabilityDetail({
       {cap.target && (
         <section className={styles.detailSection}>
           <h3 className={styles.detailLabel}>Alvo futuro</h3>
-          <p className={styles.detailText}>{cap.target.description}</p>
+          <p className={styles.detailText}>{cap.target.achievement === 'complete' && <strong>COMPLETE · </strong>}{cap.target.description}</p>
           {cap.target.milestone && <code className={styles.proofRef}>{cap.target.milestone}</code>}
         </section>
       )}
@@ -1487,7 +1487,7 @@ function DevelopmentPath({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; on
   if (!objective?.target?.steps) return null;
   const byId = new Map(nodes.map((node) => [node.capability.id, node.capability]));
   return <section className={styles.developmentPath} aria-label="Current development path">
-    <div className={styles.pathIntro}><strong>{objective.name}</strong><span>REUSE BEFORE BUILD</span>
+    <div className={styles.pathIntro}><strong>{objective.name}{objective.target.achievement === 'complete' ? ' · COMPLETE' : ''}</strong><span>REUSE BEFORE BUILD</span>
       <p>{objective.direction?.rationale}</p></div>
     <ol className={styles.baselineSteps}>{objective.target.steps.map((step) => {
       const capability = byId.get(step.capabilityId);
