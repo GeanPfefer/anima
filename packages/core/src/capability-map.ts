@@ -277,6 +277,15 @@ export type CapabilityRegistryIssueCode =
   | 'invalid_history' //              data inválida ou maturity_changed incompleto/sem refs
   | 'history_maturity_mismatch'; //   último `to` (introduced/maturity_changed) ≠ maturidade atual
 
+/** Conquista editorial explícita; não deriva maturidade, readiness ou authority. */
+export function capabilityAchievement(capability: Capability): string | null {
+  if (capability.target?.achievement === 'complete') return 'COMPLETE / Conquistada';
+  if (capability.deliveryEvidence?.technical.status !== 'pass') return null;
+  return capability.deliveryEvidence.governed.status === 'pass'
+    ? 'Conquistada / em uso'
+    : 'Baseline técnico conquistado';
+}
+
 export interface CapabilityRegistryIssue {
   code: CapabilityRegistryIssueCode;
   capabilityId: string;

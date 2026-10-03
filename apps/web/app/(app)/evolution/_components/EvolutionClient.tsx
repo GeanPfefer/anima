@@ -40,7 +40,7 @@ import type {
   CapabilityProofEvaluation,
   CapabilityProofStatus,
 } from '@anima/core';
-import { CAPABILITY_DIRECTION_LABEL, capabilityDirectionSignals, explainCapabilityAssessment } from '@anima/core';
+import { CAPABILITY_DIRECTION_LABEL, capabilityDirectionSignals, capabilityAchievement, explainCapabilityAssessment } from '@anima/core';
 import styles from './EvolutionClient.module.css';
 
 // ─── Vocabulário de produto / apresentação (valores puros; tipos vêm do core) ───
@@ -136,7 +136,7 @@ const MATURITY_GLYPH: Record<CapabilityMaturity, string> = {
 };
 
 const MATURITY_MEANING: Record<CapabilityMaturity, string> = {
-  projected: 'existe apenas na visão futura',
+  projected: 'maturidade ainda sem comprovação derivada',
   specified: 'contrato/design definido, sem código',
   implemented: 'o código existe',
   proven: 'há prova concreta de que funcionou',
@@ -190,7 +190,7 @@ const REGIONS: { key: string; title: string; maturities: CapabilityMaturity[]; f
   { key: 'operational', title: 'FUNDAÇÕES OPERACIONAIS', maturities: ['operational', 'autonomous'], future: false },
   { key: 'current', title: 'CAPACIDADES ATUAIS', maturities: ['proven', 'implemented', 'degraded'], future: false },
   { key: 'specified', title: 'PRÓXIMAS EVOLUÇÕES', maturities: ['specified'], future: true },
-  { key: 'projected', title: 'VISÃO FUTURA', maturities: ['projected'], future: true },
+  { key: 'projected', title: 'MATURIDADE PROJETADA', maturities: ['projected'], future: true },
 ];
 
 interface Placed {
@@ -747,7 +747,7 @@ export default function EvolutionClient({
                     key={cap.id}
                     role="button"
                     tabIndex={0}
-                    aria-label={`${cap.name} — ${MATURITY_LABEL[cap.maturity]}${future ? ' (a conquistar)' : ''}${originAria(cap)}`}
+                    aria-label={`${cap.name} — ${MATURITY_LABEL[cap.maturity]}${capabilityAchievement(cap) ? ` · ${capabilityAchievement(cap)}` : future ? ' (a conquistar)' : ''}${originAria(cap)}`}
                     aria-pressed={state === 'selected'}
                     data-capid={cap.id}
                     data-state={state}
@@ -793,7 +793,7 @@ export default function EvolutionClient({
                     ))}
                     <text x={30} y={CHIP_H - 10} className={styles.chipMaturity} style={{ fill: color }}>
                       {MATURITY_LABEL[cap.maturity]}
-                      {candidate ? '' : future ? ' · a conquistar' : ''}
+                      {capabilityAchievement(cap) ? ' · conquistada' : candidate ? '' : future ? ' · a conquistar' : ''}
                       {originSuffix(cap)}
                     </text>
                   </g>
@@ -1077,7 +1077,15 @@ function CapabilityDetail({
         </button>
       </div>
       <h2 className={styles.detailName}>{cap.name}</h2>
-      <DirectionDetail cap={cap} />
+      <p className={styles.detailText}>Maturity: {MATURITY_LABEL[cap.maturity]}</p>
+      {capabilityAchievement(cap) && <p className={styles.detailText}><strong>Achievement: {capabilityAchievement(cap)}</strong></p>}
+      {cap.deliveryEvidence && <p className={styles.detailText}>
+        Backend: {cap.reuse?.status === 'integrated' ? 'integrado' : 'candidato'} · Technical: PASS · Governed: {cap.deliveryEvidence.governed.status === 'pass' ? 'PASS' : 'ainda não demonstrado'}
+        {cap.deliveryEvidence.verifier && ' · Verifier: verified'}{cap.deliveryEvidence.humanReview && ' · Human: ACCEPTED'}{cap.deliveryEvidence.candidate && ` · Candidate: ${cap.deliveryEvidence.candidate.status}`}
+      </p>}
+      <details className={styles.detailSection} open={!capabilityAchievement(cap)}><summary>Direção e estratégia</summary><DirectionDetail cap={cap} /></details>
+      <details className={styles.detailSection} open={!capabilityAchievement(cap)}><summary>Maturity / epistemologia</summary>
+      <p className={styles.detailHint}>Maturidade descreve o que o Proof Engine consegue derivar. Conquista registra o baseline atingido; uma não substitui a outra.</p>
       <div className={styles.maturityBadge} style={{ borderColor: color, color }}>
         <span>{MATURITY_GLYPH[cap.maturity]}</span> {MATURITY_LABEL[cap.maturity]}
         <span className={styles.maturityMeaning}>— {MATURITY_MEANING[cap.maturity]}</span>
@@ -1168,6 +1176,7 @@ function CapabilityDetail({
         )}
       </section>
 
+      </details>
       {autonomyReadiness && (
         <section className={styles.detailSection}>
           <h3 className={styles.detailLabel}>Prontidão para autonomia</h3>
@@ -1206,6 +1215,7 @@ function CapabilityDetail({
         )}
       </section>
 
+      <details className={styles.detailSection} open={!capabilityAchievement(cap)}><summary>Dependências</summary>
       <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>Depende de</h3>
         <ChipList ids={node.dependsOn} nameById={nameById} onSelect={onSelect} empty="Fundação — não depende de nenhuma outra capacidade." />
@@ -1216,9 +1226,10 @@ function CapabilityDetail({
         <ChipList ids={node.unlocks} nameById={nameById} onSelect={onSelect} empty="Ainda não desbloqueia outra capacidade registrada." />
       </section>
 
+      </details>
       {cap.deliveryEvidence && <section className={styles.detailSection} aria-label="Proof delivery dimensions">
-        <h3 className={styles.detailLabel}>Proof / review / integration</h3>
-        <p className={styles.detailHint}>direction != maturity · technical proof != governed proof · governed proof != autonomous · accepted != integrated</p>
+        <details><summary>Proof / review / integration</summary>
+        <p className={styles.detailHint}>direction != maturity · technical proof != governed proof · governed proof != autonomous · Aceite não implica integração automaticamente.</p>
         <ul className={styles.proofList}>
           {[cap.deliveryEvidence.technical, cap.deliveryEvidence.governed].map((proof) => <li key={proof.label} className={styles.proofItem}>
             <strong className={styles.deliveryBadge} data-dimension="proof" data-status={proof.status}>{proof.label} · {proof.status === 'pass' ? 'PASS' : 'NOT YET DEMONSTRATED'}</strong>
@@ -1228,6 +1239,8 @@ function CapabilityDetail({
           {cap.deliveryEvidence.humanReview && <li className={styles.proofItem}><strong className={styles.deliveryBadge} data-dimension="review">Human Review · ACCEPTED</strong><span>5⇒Despertar · 30⇒Expansão · preservação dos casos</span></li>}
           {cap.deliveryEvidence.candidate && <li className={styles.proofItem}><strong className={styles.deliveryBadge} data-dimension="integration">Candidate Integration/Publication · {cap.deliveryEvidence.candidate.status}</strong><code className={styles.proofRef}>{cap.deliveryEvidence.candidate.commit}</code><span>Fotografia após fetch · origin/dev {cap.deliveryEvidence.candidate.checkedAgainst.slice(0, 7)}</span></li>}
         </ul>
+        {cap.deliveryEvidence.candidate?.status === 'integrated' && <p className={styles.detailText}>Neste caso, a integração foi confirmada em origin/dev {cap.deliveryEvidence.candidate.checkedAgainst.slice(0, 7)}.</p>}
+        </details>
       </section>}
       <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>Provas</h3>
@@ -1268,7 +1281,7 @@ function CapabilityDetail({
 
       {cap.target && (
         <section className={styles.detailSection}>
-          <h3 className={styles.detailLabel}>Alvo futuro</h3>
+          <h3 className={styles.detailLabel}>{cap.target.achievement === 'complete' ? 'Objetivo conquistado' : 'Alvo futuro'}</h3>
           <p className={styles.detailText}>{cap.target.achievement === 'complete' && <strong>COMPLETE · </strong>}{cap.target.description}</p>
           {cap.target.milestone && <code className={styles.proofRef}>{cap.target.milestone}</code>}
         </section>
@@ -1317,13 +1330,13 @@ function ObjectiveSummary({
       <span className={styles.detailKicker}>Objetivo em foco</span>
       <h2 className={styles.detailName}>{cap?.name ?? objective.name}</h2>
       {cap?.target && <p className={styles.detailDesc}>{cap.target.description}</p>}
-      {cap && <DirectionDetail cap={cap} />}
+      {cap && <><p className={styles.detailText}>Maturity: {MATURITY_LABEL[cap.maturity]}</p>{capabilityAchievement(cap) && <p className={styles.detailText}><strong>Achievement: {capabilityAchievement(cap)}</strong></p>}<DirectionDetail cap={cap} /></>}
       {cap?.target?.steps && <ol className={styles.pathList} aria-label="Sequência planejada do objetivo">
         {cap.target.steps.map((step) => <li key={step.capabilityId}><button type="button" className={styles.pathStep} onClick={() => onSelect(step.capabilityId)}>{nameById.get(step.capabilityId) ?? step.capabilityId} · {step.description}</button></li>)}
       </ol>}
 
       <section className={styles.detailSection}>
-        <h3 className={styles.detailLabel}>O que falta para o Anima chegar aqui</h3>
+        <h3 className={styles.detailLabel}>{cap?.target?.achievement === 'complete' ? 'Maturidade das dependências · objetivo já conquistado' : 'O que falta para o Anima chegar aqui'}</h3>
         <p className={styles.detailText}>
           {progress.found ? (
             <>
@@ -1338,7 +1351,7 @@ function ObjectiveSummary({
       </section>
 
       <section className={styles.detailSection}>
-        <h3 className={styles.detailLabel}>Um caminho relevante do presente até aqui</h3>
+        <h3 className={styles.detailLabel}>{cap?.target?.achievement === 'complete' ? 'Relações do objetivo conquistado' : 'Um caminho relevante do presente até aqui'}</h3>
         <p className={styles.detailHint}>
           Um entre vários — o objetivo depende de múltiplas capacidades, não de uma única sequência.
         </p>
@@ -1501,7 +1514,7 @@ function DevelopmentPath({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; on
   const byId = new Map(nodes.map((node) => [node.capability.id, node.capability]));
   return <section className={styles.developmentPath} aria-label="Current development path">
     <div className={styles.pathIntro}><strong>{objective.name}{objective.target.achievement === 'complete' ? ' · COMPLETE' : ''}</strong><span>REUSE BEFORE BUILD</span>
-      <p>{objective.direction?.rationale}</p>
+
       <p>✓ Codex executor · ✓ Claude executor · ✓ cross-harness continuity</p>
       <p>COMPLETE não significa autonomia completa, prova governada Claude, recovery cross-agent ou integração autônoma.</p>
       <details><summary>Próximos marcos</summary>
@@ -1509,14 +1522,17 @@ function DevelopmentPath({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; on
         <p>LATER · recovery cross-agent governado; autonomous integration/publication; self-development mais amplo.</p>
         <p>PARKED / EXPERIMENTAL · Qwen/Ollama/DSH, RunPod coder próprio, parser/tool-loop próprio fora do caminho crítico.</p>
       </details></div>
-    <ol className={styles.baselineSteps}>{objective.target.steps.map((step) => {
+    <h3 className={styles.detailLabel}>BASELINE CONQUISTADO</h3>
+    <ol className={styles.baselineSteps}>{objective.target.steps.filter((step) => { const cap = byId.get(step.capabilityId); return cap && capabilityAchievement(cap); }).map((step) => {
       const capability = byId.get(step.capabilityId);
       if (!capability) return null;
       return <li key={step.capabilityId}><button type="button" onClick={() => onSelect(step.capabilityId)}>
         <strong>{capability.name}</strong><span>{step.description}</span>
-        <small>{capability.direction ? CAPABILITY_DIRECTION_LABEL[capability.direction.status] : 'Direção não declarada'} · {MATURITY_LABEL[capability.maturity]}{capability.reuse ? ` · ${REUSE_STRATEGY_LABEL[capability.reuse.strategy]} · ${capability.reuse.status === 'candidate' ? 'candidata' : 'integrada'}` : ''}</small>
+        <small>Achievement: {capabilityAchievement(capability)} · Maturity: {MATURITY_LABEL[capability.maturity]}{capability.reuse ? ` · ${REUSE_STRATEGY_LABEL[capability.reuse.strategy]} · ${capability.reuse.status === 'candidate' ? 'candidata' : 'integrada'}` : ''}</small>
       </button></li>;
     })}</ol>
+    <p className={styles.detailText}><strong>CURRENT FOCUS</strong> · <button className={styles.pathStep} type="button" onClick={() => onSelect('agency.continuous-self-development')}>Self-development contínuo · usando native coding agents sob governança</button></p>
+    <p className={styles.detailHint}>NEXT · governed Claude Code proof; governed cross-agent/recovery quando necessário.</p>
   </section>;
 }
 

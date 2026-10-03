@@ -708,7 +708,7 @@
 .pathIntro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--text-primary); }
 .pathIntro span { color: var(--accent-hover); }
 .pathIntro p { flex-basis: 100%; color: var(--text-secondary); line-height: 1.4; margin: 0; }
-.baselineSteps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0; margin: 8px 0 0; list-style-position: inside; }
+.baselineSteps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 0; margin: 8px 0 0; list-style-position: inside; }
 .baselineSteps li { min-width: 0; color: var(--text-secondary); }
 .baselineSteps button { text-align: left; width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--bg-base); color: var(--text-primary); }
 .baselineSteps button:hover, .baselineSteps button:focus-visible { border-color: var(--accent); }

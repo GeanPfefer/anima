@@ -688,7 +688,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     reuse: { strategy: 'wrap', tool: 'Codex CLI', status: 'integrated',
       externalEvidence: 'Candidato já registrado na Evolution Reconciliation V2; POC externo de continuidade não prova executor integrado.' },
     meaning: 'Adapter integrado em 9404bd4; primeira prova técnica viva PASS, não governada. AKT-03: execução governada PASS e aceite humano, candidato confirmado em origin/dev 83f7fd2 após novo fetch. Sem regra específica no Proof Engine, maturidade declarada anterior preservada (projected); integração e prova técnica não demonstram governança.',
-    advancement: 'Prova governada AKT-03 PASS; Verifier machine-proven = scope + gate. Human review confirmou 5=>Despertar, 30=>Expansão e preservação dos casos. Accepted != integrated. Não operacional/autônomo; definir critério específico antes de qualquer promoção.',
+    advancement: 'Prova governada AKT-03 PASS; Verifier machine-proven = scope + gate. Human review confirmou 5=>Despertar, 30=>Expansão e preservação dos casos. Aceite não implica integração automaticamente. Neste caso, integração confirmada em origin/dev 83f7fd2. Não operacional/autônomo; definir critério específico antes de qualquer promoção.',
     history: [{ at: '2026-10-02', change: 'proof_added',
       note: 'Live technical proof passed · primeira prova viva técnica PASS; governed proof not yet demonstrated. TPC-01: dois arquivos, E1/E2/E3 e gate focal verdes, sem contract violation; sem work item/attempt/authority/Verifier/review governada.',
       refs: [{ kind: 'commit', ref: '9404bd4039738c4fbfabd414db4d11ffd83383db', note: 'Integração do adapter; não é commit do resultado da prova.' },

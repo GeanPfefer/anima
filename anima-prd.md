@@ -1,4 +1,8 @@
 # Anima — Product Requirements Document
+> Evolution clareza final (2026-10-03): maturity epistemológica e achievement separados.
+> Baselines conquistados não aparecem como a conquistar; projected/not_evaluated preservados.
+> Resumo inicial, detalhes recolhíveis; aceite não implica integração automaticamente,
+> mas AKT-03 permanece confirmado em origin/dev 83f7fd2. Plano 009, registro evolution-clareza-final.
 > Evolution pós-Akita (2026-10-03), branch codex/evolution-ux-v2 sobre origin/dev 83f7fd2.
 > Akita Baseline V1 COMPLETE = Codex executor + Claude executor + cross-harness continuity.
 > Foco: self-development governado usando native coding agents. Codex AKT-03: governed PASS,

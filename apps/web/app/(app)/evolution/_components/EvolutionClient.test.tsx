@@ -514,7 +514,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     const candidates = container.querySelectorAll('[data-origin="candidate"]');
     expect(candidates.length).toBe(2);
     candidates.forEach((el) => expect(el.getAttribute('data-future')).toBe('true'));
-    expect(screen.getByRole('button', { name: 'Continuidade entre harnesses — Projetada (a conquistar) · reuso integrado WRAP (ai-memory)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continuidade entre harnesses — Projetada · Baseline técnico conquistado · reuso integrado WRAP (ai-memory)' })).toBeInTheDocument();
   });
 
   test('lente Evolução recente destaca só o que foi registrado desde a baseline e lista no painel', () => {
@@ -762,6 +762,7 @@ test.each(['adopt', 'wrap', 'fork', 'build', 'undecided'] as const)('painel exp�
   props.nodes = props.nodes.map((node) => node.capability.id === 'agency.codex-cli' ? { ...node, capability: { ...node.capability, reuse: { ...node.capability.reuse!, strategy } } } : node);
   const { container } = render(<EvolutionClient {...props} />);
   fireEvent.click(container.querySelector('[data-capid="agency.codex-cli"]')!);
+  fireEvent.click(screen.getByText('Direção e estratégia'));
   const panel = screen.getByRole('region', { name: 'Direção e estratégia' });
   expect(within(panel).getByText(new RegExp(`Maturidade: Projetada · Estratégia: ${strategy === 'undecided' ? 'A DECIDIR' : strategy.toUpperCase()}`))).toBeInTheDocument();
   if (strategy === 'build') expect(within(panel).getByText(/BUILD escolhido/)).toBeInTheDocument();
@@ -772,10 +773,10 @@ test('baseline COMPLETE exibe PASS técnico e cross-harness sem promover maturid
   const { container } = render(<EvolutionClient {...buildProps()} />);
   const path = screen.getByRole('region', { name: 'Current development path' });
   expect(within(path).getByRole('button', { name: /Codex CLI executor.*adapter integrado.*live technical proof PASS.*não governada/ })).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Claude Code executor.*PASS.*NEXT.*integrada/ })).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Continuidade entre harnesses.*live cross-harness proof PASS.*NEXT.*integrada/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Claude Code executor.*PASS.*Baseline técnico conquistado.*integrada/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Continuidade entre harnesses.*live cross-harness proof PASS.*Baseline técnico conquistado.*integrada/ })).toBeInTheDocument();
   expect(within(path).getByText('AKITA BASELINE V1 · COMPLETE')).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Self-development contínuo.*CURRENT FOCUS/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Self-development contínuo.*native coding agents/ })).toBeInTheDocument();
   const codex = container.querySelector('[data-capid="agency.codex-cli"]');
   expect(codex).toHaveAttribute('data-origin', 'integrated');
   expect(codex).toHaveAttribute('data-future', 'true');
@@ -787,4 +788,24 @@ test('baseline COMPLETE exibe PASS técnico e cross-harness sem promover maturid
   expect(screen.getByRole('region', { name: 'Evidência registrada de escopo limitado' })).toBeInTheDocument();
   expect(screen.getByText(/sem prova de maturidade creditada pelo motor/)).toBeInTheDocument();
   expect(screen.getByText(/Prova governada ainda não demonstrada/)).toBeInTheDocument();
+});
+
+
+test('conquistas permanecem separadas da maturidade e detalhes começam recolhidos', () => {
+  const { container } = render(<EvolutionClient {...buildProps()} />);
+  for (const id of ['agency.akita-baseline-v1', 'agency.codex-cli', 'agency.claude-code', 'memory.cross-harness']) {
+    const node = container.querySelector(`[data-capid="${id}"]`)!;
+    expect(node.getAttribute('aria-label')).toContain('Projetada');
+    expect(node.getAttribute('aria-label')).not.toContain('a conquistar');
+  }
+  fireEvent.click(container.querySelector('[data-capid="agency.codex-cli"]')!);
+  expect(screen.getByText('Achievement: Conquistada / em uso')).toBeVisible();
+  for (const label of ['Maturity / epistemologia', 'Dependências', 'Proof / review / integration']) {
+    const summary = screen.getByText(label);
+    expect(summary.parentElement).not.toHaveAttribute('open');
+    fireEvent.click(summary);
+  }
+  expect(screen.getByText(/Neste caso, a integração foi confirmada em origin\/dev 83f7fd2/)).toBeInTheDocument();
+  expect(screen.queryByText(/accepted != integrated/)).not.toBeInTheDocument();
+  expect(screen.getByText('Governed execution AKT-03 · PASS')).toBeInTheDocument();
 });

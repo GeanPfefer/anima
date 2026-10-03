@@ -122,3 +122,15 @@ sem alimentar o Proof Engine. Codex AKT-03 PASS, verified, ACCEPTED, completed,
 candidato integrated confirmado contra dev; Claude e ai-memory não ganham prova governada.
 História AKT-01/02 preservada como diagnóstico, nunca sucessos governados.
 Gates, proveniência e limites no [registro](../registros/2026-10-03-evolution-pos-akita-governed-codex.md).
+
+
+## Clareza final — 2026-10-03
+
+Retomada confirmou HEAD/remoto Evolution 8fa94f7 e origin/dev 83f7fd2.
+Conquista editorial explícita (target COMPLETE ou technical PASS) é projetada
+separadamente de maturity. Não deriva conquista da integração sozinha; não altera
+Proof Engine, maturity, readiness ou authority. Topo distingue baseline conquistado,
+foco atual e próximos marcos. Painel tem resumo inicial e disclosures de prova,
+epistemologia, dependências e história. Aceite não implica integração automaticamente;
+AKT-03 tem integração confirmada em origin/dev 83f7fd2. História/provas preservadas.
+Gates e retomada: [registro final](../registros/2026-10-03-evolution-clareza-final.md).

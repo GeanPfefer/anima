@@ -1,5 +1,6 @@
 import {
   buildCapabilityGraph,
+  capabilityAchievement,
   dependencyClosure,
   findDependencyCycles,
   isFutureMaturity,
@@ -260,4 +261,18 @@ describe('Direction safety advisory', () => {
     const invalid = { ...capability, direction: { ...capability.direction!, refs: [] }, target: { description: 'Goal', steps: [{ capabilityId: 'missing', description: 'Step' }] } };
     expect(validateCapabilityRegistry([invalid]).map((issue) => issue.code)).toEqual(['invalid_direction', 'invalid_target_step']);
   });
+});
+
+
+test('conquista explícita não promove maturity nem nasce da integração sozinha', () => {
+  const baseline = cap({id: 'baseline', maturity: 'projected', target: {achievement: 'complete', description: 'baseline'}});
+  expect(capabilityAchievement(baseline)).toBe('COMPLETE / Conquistada');
+  expect(baseline.maturity).toBe('projected');
+  const executor = cap({id: 'executor', maturity: 'projected', reuse: {strategy: 'wrap', tool: 'CLI', status: 'integrated'}});
+  expect(capabilityAchievement(executor)).toBeNull();
+  executor.deliveryEvidence = {technical: {status: 'pass', label: 'Technical', refs: []}, governed: {status: 'not_demonstrated', label: 'Governed', refs: []}};
+  expect(capabilityAchievement(executor)).toBe('Baseline técnico conquistado');
+  executor.deliveryEvidence.governed.status = 'pass';
+  expect(capabilityAchievement(executor)).toBe('Conquistada / em uso');
+  expect(executor.maturity).toBe('projected');
 });
