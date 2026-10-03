@@ -3,12 +3,17 @@ import {
   buildIntegrationEffectReceipt,
   classifyIntegrationTarget,
   INTEGRATION_EFFECT_MODE,
+  INTEGRATION_EFFECT_MODE_FF_ONLY,
   INTEGRATION_EFFECT_TARGET_REF,
+  isAllowedIntegrationMode,
+  parseWorktreeHandoff,
   planIntegrationEffect,
   sameIntegrationEffect,
   type IntegrationEffectAuthorizationV1,
+  type IntegrationEffectMode,
   type IntegrationEffectPlanDefect,
   type IntegrationEffectReceiptV1,
+  type IntegrationTargetObservation,
   type WorkEvent,
   type WorkItem,
   type WorkOperationResult,
@@ -27,6 +32,13 @@ import { runProcess, type CommandResult } from './worktree';
 //   preparar merge SEM tocar o alvo (`merge-tree --write-tree`) → criar o merge commit
 //   (`commit-tree -p esperado -p resultado`) → avançar o alvo por COMPARE-AND-SWAP
 //   (`update-ref <alvo> <novo> <esperado>`) → inspecionar de novo → persistir o receipt.
+//
+// Modo `ff_only` (V1): mesmo protocolo, mas SEM merge commit — o alvo avança por CAS
+// (`update-ref dev <resultado> <esperado>`) para o commit EXATO do resultado, desde que o SHA
+// esperado seja ancestral dele. Sem force e sem fallback para `merge_no_ff`: se o ff não é
+// possível, a execução é negada (nova autorização humana, com outro modo, se for o caso).
+// A proteção `target_checked_out` vale para os dois modos (Modo W — ff dentro do checkout em
+// uso — é fase posterior).
 //
 // Nunca persiste `integration_completed` antes do efeito observado. Nunca rebaseia,
 // recalcula a base, troca a fonte nem atualiza a autorização: alvo que andou ⇒
@@ -147,7 +159,7 @@ export class GitIntegrationEffectProvider {
 
 export type IntegrationEffectOutcome =
   | { readonly status: 'integrated'; readonly disposition: 'effected' | 'reconciled' | 'already_persisted'; readonly receipt: IntegrationEffectReceiptV1; readonly cleanup: 'none' | 'done' | 'failed' }
-  | { readonly status: 'denied'; readonly reason: IntegrationEffectPlanDefect | 'repository_mismatch' | 'result_not_descendant_of_base' | 'unexpected_merge_parents' }
+  | { readonly status: 'denied'; readonly reason: IntegrationEffectPlanDefect | 'repository_mismatch' | 'result_not_descendant_of_base' | 'unexpected_merge_parents' | 'ff_not_possible' }
   | { readonly status: 'human_required'; readonly reason: 'authorization_stale' | 'ambiguous_target' | 'merge_conflict' | 'result_commit_missing' | 'target_checked_out' }
   | { readonly status: 'retryable'; readonly reason: string }
   | { readonly status: 'reconciliation_required'; readonly reason: string; readonly receipt?: IntegrationEffectReceiptV1 }
@@ -199,28 +211,38 @@ export async function executeAuthorizedIntegration(
       if (persistedMismatch || persisted.operationKey !== auth.operationKey || persisted.authorizationId !== auth.authorizationId) {
         return { status: 'integrity_violation', reason: 'receipt_conflict' };
       }
-      const proven = (await provider.commitExists(persisted.mergeCommitSha))
-        && sameParents(await provider.parents(persisted.mergeCommitSha), persisted.mergeParents)
-        && (await provider.isAncestor(persisted.mergeCommitSha, current));
+      const proven = auth.mode === INTEGRATION_EFFECT_MODE_FF_ONLY
+        // ff_only: nenhum commit novo; o Git comprova que o resultado ainda está no histórico do alvo.
+        ? persisted.mergeCommitSha === null && persisted.mergeParents.length === 0
+          && (await provider.commitExists(persisted.resultingTargetSha))
+          && (await provider.isAncestor(persisted.resultingTargetSha, current))
+        : persisted.mergeCommitSha !== null
+          && (await provider.commitExists(persisted.mergeCommitSha))
+          && sameParents(await provider.parents(persisted.mergeCommitSha), persisted.mergeParents)
+          && (await provider.isAncestor(persisted.mergeCommitSha, current));
       return proven
         ? { status: 'integrated', disposition: 'already_persisted', receipt: persisted, cleanup: 'none' }
         : { status: 'integrity_violation', reason: 'receipt_not_proven_by_git' };
     }
 
-    const observation = {
-      targetSha: current,
-      targetParents: await provider.parents(current),
-      resultCommitInTarget: await provider.isAncestor(auth.resultCommitSha, current),
-    };
+    const ff = auth.mode === INTEGRATION_EFFECT_MODE_FF_ONLY;
+    const observe = async (sha: string): Promise<IntegrationTargetObservation> => ({
+      targetSha: sha,
+      targetParents: await provider.parents(sha),
+      resultCommitInTarget: await provider.isAncestor(auth.resultCommitSha, sha),
+      ...(ff ? { expectedTargetInTargetHistory: await provider.isAncestor(auth.expectedTargetSha, sha) } : {}),
+    });
+    const observation = await observe(current);
     const classification = classifyIntegrationTarget(auth, observation);
     if (classification === 'stale') return { status: 'human_required', reason: 'authorization_stale' };
     if (classification === 'ambiguous') return { status: 'human_required', reason: 'ambiguous_target' };
     if (classification === 'already_effected') {
       // Efeito EXATO já no Git sem receipt (crash entre Git e Postgres): persistir, NÃO repetir.
-      return persistObserved(auth, { mergeCommitSha: current, mergeParents: observation.targetParents, resultingTargetSha: current }, 'reconciled', deps);
+      return persistObserved(auth, observedEffect(auth, current, observation.targetParents), 'reconciled', deps);
     }
 
     if (await provider.targetCheckedOut()) return { status: 'human_required', reason: 'target_checked_out' };
+    if (ff) return executeFastForward(auth, deps, observe);
     const prepared = await provider.prepareMerge(auth.expectedTargetSha, auth.resultCommitSha);
     if ('conflict' in prepared) return { status: 'human_required', reason: 'merge_conflict' };
     const merge = await provider.commitMerge(
@@ -235,13 +257,10 @@ export async function executeAuthorizedIntegration(
     const after = await provider.readTarget();
     if (!advanced && after !== merge) {
       // Perdeu o CAS: outro executor (ou humano) moveu o alvo. Reclassifica sobre o fato.
-      const reobserved = classifyIntegrationTarget(auth, {
-        targetSha: after,
-        targetParents: await provider.parents(after),
-        resultCommitInTarget: await provider.isAncestor(auth.resultCommitSha, after),
-      });
+      const afterObservation = await observe(after);
+      const reobserved = classifyIntegrationTarget(auth, afterObservation);
       if (reobserved === 'already_effected') {
-        return persistObserved(auth, { mergeCommitSha: after, mergeParents: await provider.parents(after), resultingTargetSha: after }, 'reconciled', deps);
+        return persistObserved(auth, observedEffect(auth, after, afterObservation.targetParents), 'reconciled', deps);
       }
       if (reobserved === 'ready') return { status: 'retryable', reason: 'target_update_failed' };
       return { status: 'human_required', reason: reobserved === 'ambiguous' ? 'ambiguous_target' : 'authorization_stale' };
@@ -257,12 +276,44 @@ export async function executeAuthorizedIntegration(
   }
 }
 
+/** Fatos observados que o receipt do modo descreve (ff_only: nenhum commit criado). */
+function observedEffect(auth: IntegrationEffectAuthorizationV1, targetSha: string, targetParents: readonly string[]) {
+  return auth.mode === INTEGRATION_EFFECT_MODE_FF_ONLY
+    ? { mergeCommitSha: null, mergeParents: [] as readonly string[], resultingTargetSha: targetSha }
+    : { mergeCommitSha: targetSha, mergeParents: targetParents, resultingTargetSha: targetSha };
+}
+
+/**
+ * `ff_only`: precondição (SHA esperado ancestral do resultado) → CAS `update-ref dev <resultado> <esperado>`
+ * → releitura independente → receipt. Sem force, sem merge, sem fallback.
+ */
+async function executeFastForward(
+  auth: IntegrationEffectAuthorizationV1,
+  deps: ExecuteIntegrationDeps,
+  observe: (sha: string) => Promise<IntegrationTargetObservation>,
+): Promise<IntegrationEffectOutcome> {
+  const provider = deps.provider;
+  if (!(await provider.isAncestor(auth.expectedTargetSha, auth.resultCommitSha))) return { status: 'denied', reason: 'ff_not_possible' };
+  const advanced = await provider.casAdvance(auth.resultCommitSha, auth.expectedTargetSha, `anima integration ${auth.operationKey}`);
+  const after = await provider.readTarget();
+  if (!advanced && after !== auth.resultCommitSha) {
+    // Perdeu o CAS: reclassifica sobre o fato observado.
+    const afterObservation = await observe(after);
+    const reobserved = classifyIntegrationTarget(auth, afterObservation);
+    if (reobserved === 'already_effected') return persistObserved(auth, observedEffect(auth, after, afterObservation.targetParents), 'reconciled', deps);
+    if (reobserved === 'ready') return { status: 'retryable', reason: 'target_update_failed' };
+    return { status: 'human_required', reason: reobserved === 'ambiguous' ? 'ambiguous_target' : 'authorization_stale' };
+  }
+  if (after !== auth.resultCommitSha) return { status: 'reconciliation_required', reason: 'effect_not_observed' };
+  return persistObserved(auth, observedEffect(auth, after, []), 'effected', deps);
+}
+
 const sameParents = (observed: readonly string[], expected: readonly string[]): boolean =>
   observed.length === expected.length && observed.every((sha, i) => sha === expected[i]);
 
 async function persistObserved(
   auth: IntegrationEffectAuthorizationV1,
-  observed: { readonly mergeCommitSha: string; readonly mergeParents: readonly string[]; readonly resultingTargetSha: string },
+  observed: { readonly mergeCommitSha: string | null; readonly mergeParents: readonly string[]; readonly resultingTargetSha: string },
   disposition: 'effected' | 'reconciled',
   deps: ExecuteIntegrationDeps,
 ): Promise<IntegrationEffectOutcome> {
@@ -296,7 +347,7 @@ export type AuthorizeIntegrationEffectOutcome =
  * do resultado é derivado pela própria RPC a partir do handoff persistido.
  */
 export async function authorizeIntegrationEffect(
-  input: { readonly workItemId: string; readonly authorizationId: string },
+  input: { readonly workItemId: string; readonly authorizationId: string; readonly mode?: IntegrationEffectMode },
   deps: {
     readonly getItem: ExecuteIntegrationDeps['getItem'];
     readonly listEvents: ExecuteIntegrationDeps['listEvents'];
@@ -315,9 +366,23 @@ export async function authorizeIntegrationEffect(
     accepted = typeof data?.accepted_result_event_id === 'string' ? data.accepted_result_event_id : null;
   }
   if (!accepted) return { ok: false, reason: 'acceptance_missing' };
+  // O modo é EXPLÍCITO na autorização; ausente ⇒ `merge_no_ff` (comportamento V0 preservado). `ff_only` nunca é inferido.
+  const mode = input.mode ?? INTEGRATION_EFFECT_MODE;
+  if (!isAllowedIntegrationMode(mode)) return { ok: false, reason: 'mode_not_allowed' };
   if (!(await deps.provider.repositoryMatches(deps.config))) return { ok: false, reason: 'repository_mismatch' };
   let expectedTargetSha: string;
   try { expectedTargetSha = await deps.provider.readTarget(); } catch { return { ok: false, reason: 'target_unreadable' }; }
+  if (mode === INTEGRATION_EFFECT_MODE_FF_ONLY) {
+    // Falha cedo e legível para o humano: só autoriza ff se o SHA atual do alvo já é ancestral do resultado.
+    const result = events.value.find((event) => event.id === accepted && event.type === 'result_submitted');
+    const signal = (result?.payload as { data?: { executor_signal?: { worktreeHandoff?: Json } } } | null)?.data?.executor_signal;
+    const handoff = parseWorktreeHandoff(signal?.worktreeHandoff);
+    if (!handoff) return { ok: false, reason: 'handoff_not_found' };
+    try {
+      if (!(await deps.provider.commitExists(handoff.commitSha))) return { ok: false, reason: 'result_commit_missing' };
+      if (!(await deps.provider.isAncestor(expectedTargetSha, handoff.commitSha))) return { ok: false, reason: 'ff_not_possible' };
+    } catch { return { ok: false, reason: 'ancestry_unknown' }; }
+  }
 
   const { data, error } = await deps.rpc({
     work_item_id: input.workItemId,
@@ -327,7 +392,7 @@ export async function authorizeIntegrationEffect(
     repository_id: deps.config.repositoryId,
     target_ref: INTEGRATION_EFFECT_TARGET_REF,
     expected_target_sha: expectedTargetSha,
-    mode: INTEGRATION_EFFECT_MODE,
+    mode,
   });
   if (error) return { ok: false, reason: error.message };
   const value = data as { action?: unknown; operation_key?: unknown } | null;

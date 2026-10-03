@@ -15,13 +15,24 @@ import { parseWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff
 // evento próprio que CONGELA o efeito exato: resultado aceito, commit do resultado
 // (derivado do handoff persistido), repositório, alvo, SHA-alvo esperado e modo.
 //
-// V0: alvo SOMENTE `refs/heads/dev`; modo SOMENTE `merge_no_ff`. `main`, `origin/main`
-// e qualquer outro alvo são negados. `work_items.state` continua `completed`:
-// `integrated` é projeção do receipt. Módulo PURO — o Git mora no executor web.
+// Alvo SOMENTE `refs/heads/dev`. Modos: `merge_no_ff` (V0, merge commit de dois pais) e
+// `ff_only` (V1: avança dev para o commit EXATO do resultado, sem commit novo). O modo é
+// escolhido na autorização humana e congelado na chave de operação; nunca há fallback de um
+// modo para o outro. `main`, `origin/main` e qualquer outro alvo são negados.
+// `work_items.state` continua `completed`: `integrated` é projeção do receipt.
+// Módulo PURO — o Git mora no executor web.
 // ============================================================
 
 export const INTEGRATION_EFFECT_TARGET_REF = 'refs/heads/dev' as const;
+/** Modo V0 (histórico). NÃO é default silencioso do `ff_only`: o modo é sempre explícito na autorização. */
 export const INTEGRATION_EFFECT_MODE = 'merge_no_ff' as const;
+export const INTEGRATION_EFFECT_MODE_FF_ONLY = 'ff_only' as const;
+export type IntegrationEffectMode = typeof INTEGRATION_EFFECT_MODE | typeof INTEGRATION_EFFECT_MODE_FF_ONLY;
+
+/** Comparação EXATA: `fast_forward`, `ff`, vazio e qualquer outro valor são negados. */
+export function isAllowedIntegrationMode(mode: unknown): mode is IntegrationEffectMode {
+  return mode === INTEGRATION_EFFECT_MODE || mode === INTEGRATION_EFFECT_MODE_FF_ONLY;
+}
 const AUTHORIZED = 'integration_effect_authorized';
 const COMPLETED = 'integration_completed';
 const SHA = /^[a-f0-9]{40}$/;
@@ -61,8 +72,10 @@ export interface IntegrationEffectReceiptV1 {
   readonly mode: string;
   readonly previousTargetSha: string;
   readonly resultingTargetSha: string;
-  readonly mergeCommitSha: string;
-  readonly mergeParents: readonly [string, string];
+  /** `merge_no_ff`: SHA do merge commit criado. `ff_only`: `null` — NENHUM commit foi criado. */
+  readonly mergeCommitSha: string | null;
+  /** `merge_no_ff`: `[alvo esperado, resultado]`. `ff_only`: `[]` (sem merge). */
+  readonly mergeParents: readonly string[];
   readonly observed: true;
   /** `effected`: esta execução fez o efeito; `reconciled`: efeito exato comprovado por inspeção. */
   readonly disposition: 'effected' | 'reconciled';
@@ -133,13 +146,12 @@ export function projectIntegrationCompleted(
   return null;
 }
 
-/** O receipt reproduz INTEGRALMENTE a autorização e descreve o merge exato esperado? */
+/** O receipt reproduz INTEGRALMENTE a autorização e descreve o efeito exato esperado PARA O MODO? */
 export function integrationReceiptMatchesAuthorization(
   authorization: IntegrationEffectAuthorizationV1,
   receipt: IntegrationEffectReceiptV1,
 ): boolean {
-  const parents = receipt.mergeParents;
-  return receipt.kind === 'integration_effect'
+  const common = receipt.kind === 'integration_effect'
     && receipt.operationKey === authorization.operationKey
     && receipt.authorizationId === authorization.authorizationId
     && receipt.workItemId === authorization.workItemId
@@ -152,12 +164,21 @@ export function integrationReceiptMatchesAuthorization(
     && isAllowedIntegrationTargetRef(receipt.targetRef)
     && receipt.mode === authorization.mode
     && receipt.previousTargetSha === authorization.expectedTargetSha
-    && SHA.test(receipt.mergeCommitSha)
-    && receipt.resultingTargetSha === receipt.mergeCommitSha
-    && Array.isArray(parents) && parents.length === 2
-    && parents[0] === authorization.expectedTargetSha && parents[1] === authorization.resultCommitSha
     && receipt.observed === true
     && (receipt.disposition === 'effected' || receipt.disposition === 'reconciled');
+  if (!common) return false;
+  const parents = receipt.mergeParents;
+  if (authorization.mode === INTEGRATION_EFFECT_MODE_FF_ONLY) {
+    // ff_only: o alvo passou a ser EXATAMENTE o commit do resultado; nenhum commit/merge foi criado.
+    return receipt.mergeCommitSha === null
+      && receipt.resultingTargetSha === authorization.resultCommitSha
+      && Array.isArray(parents) && parents.length === 0;
+  }
+  if (authorization.mode !== INTEGRATION_EFFECT_MODE) return false;
+  return receipt.mergeCommitSha !== null && SHA.test(receipt.mergeCommitSha)
+    && receipt.resultingTargetSha === receipt.mergeCommitSha
+    && Array.isArray(parents) && parents.length === 2
+    && parents[0] === authorization.expectedTargetSha && parents[1] === authorization.resultCommitSha;
 }
 
 export type IntegrationProjectionStatus = 'integrated' | 'not_integrated' | 'invalid_receipt';
@@ -224,7 +245,7 @@ export function planIntegrationEffect(input: {
   if (item.state !== 'completed') return deny('item_not_completed');
   if (auth.proposalVersion !== item.proposalVersion) return deny('proposal_version_changed');
   if (!isAllowedIntegrationTargetRef(auth.targetRef)) return deny('target_not_allowed');
-  if (auth.mode !== INTEGRATION_EFFECT_MODE) return deny('mode_not_allowed');
+  if (!isAllowedIntegrationMode(auth.mode)) return deny('mode_not_allowed');
   if (auth.repositoryId !== input.trustedRepositoryId) return deny('repository_mismatch');
 
   let acceptance: WorkEvent | null = null;
@@ -255,6 +276,8 @@ export interface IntegrationTargetObservation {
   readonly targetParents: readonly string[];
   /** O commit do resultado é ancestral do (ou igual ao) alvo? */
   readonly resultCommitInTarget: boolean;
+  /** `ff_only`: o SHA-alvo esperado (autorizado) é ancestral do alvo observado? Ausente ⇒ falso. */
+  readonly expectedTargetInTargetHistory?: boolean;
 }
 
 export type IntegrationTargetClassification =
@@ -272,6 +295,11 @@ export function classifyIntegrationTarget(
   observation: IntegrationTargetObservation,
 ): IntegrationTargetClassification {
   if (observation.targetSha === authorization.expectedTargetSha) return 'ready';
+  if (authorization.mode === INTEGRATION_EFFECT_MODE_FF_ONLY) {
+    // ff_only já efetuado = o alvo É o commit do resultado E descende do SHA-alvo autorizado.
+    if (observation.targetSha === authorization.resultCommitSha && observation.expectedTargetInTargetHistory === true) return 'already_effected';
+    return observation.resultCommitInTarget ? 'ambiguous' : 'stale';
+  }
   const [first, second, ...rest] = observation.targetParents;
   if (rest.length === 0 && first === authorization.expectedTargetSha && second === authorization.resultCommitSha) {
     return 'already_effected';
@@ -282,12 +310,26 @@ export function classifyIntegrationTarget(
 
 export function buildIntegrationEffectReceipt(
   authorization: IntegrationEffectAuthorizationV1,
-  observed: { readonly mergeCommitSha: string; readonly mergeParents: readonly string[]; readonly resultingTargetSha: string },
+  observed: { readonly mergeCommitSha: string | null; readonly mergeParents: readonly string[]; readonly resultingTargetSha: string },
   disposition: IntegrationEffectReceiptV1['disposition'],
 ): IntegrationEffectReceiptV1 | null {
-  const [first, second, ...rest] = observed.mergeParents;
-  if (!SHA.test(observed.mergeCommitSha) || observed.resultingTargetSha !== observed.mergeCommitSha
-    || rest.length > 0 || first !== authorization.expectedTargetSha || second !== authorization.resultCommitSha) {
+  let mergeCommitSha: string | null;
+  let mergeParents: readonly string[];
+  if (authorization.mode === INTEGRATION_EFFECT_MODE_FF_ONLY) {
+    // Nenhum commit novo: o alvo observado É o commit do resultado.
+    if (observed.mergeCommitSha !== null || observed.mergeParents.length !== 0
+      || observed.resultingTargetSha !== authorization.resultCommitSha) return null;
+    mergeCommitSha = null;
+    mergeParents = [];
+  } else if (authorization.mode === INTEGRATION_EFFECT_MODE) {
+    const [first, second, ...rest] = observed.mergeParents;
+    if (observed.mergeCommitSha === null || !SHA.test(observed.mergeCommitSha) || observed.resultingTargetSha !== observed.mergeCommitSha
+      || rest.length > 0 || first !== authorization.expectedTargetSha || second !== authorization.resultCommitSha) {
+      return null;
+    }
+    mergeCommitSha = observed.mergeCommitSha;
+    mergeParents = [first, second];
+  } else {
     return null;
   }
   return {
@@ -304,8 +346,8 @@ export function buildIntegrationEffectReceipt(
     mode: authorization.mode,
     previousTargetSha: authorization.expectedTargetSha,
     resultingTargetSha: observed.resultingTargetSha,
-    mergeCommitSha: observed.mergeCommitSha,
-    mergeParents: [first, second],
+    mergeCommitSha,
+    mergeParents,
     observed: true,
     disposition,
   };
@@ -320,6 +362,6 @@ const EFFECT_FIELDS = [
 /** Comparação campo a campo (o receipt relido do jsonb não preserva a ordem das chaves). */
 export function sameIntegrationEffect(left: IntegrationEffectReceiptV1, right: IntegrationEffectReceiptV1): boolean {
   return EFFECT_FIELDS.every((field) => left[field] === right[field])
-    && left.mergeParents.length === 2 && right.mergeParents.length === 2
-    && left.mergeParents[0] === right.mergeParents[0] && left.mergeParents[1] === right.mergeParents[1];
+    && left.mergeParents.length === right.mergeParents.length
+    && left.mergeParents.every((sha, i) => sha === right.mergeParents[i]);
 }

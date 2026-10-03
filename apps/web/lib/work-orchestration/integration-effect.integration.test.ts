@@ -89,10 +89,13 @@ function event(id: string, type: string, author: string, data: Record<string, un
 }
 
 /** Espelho em memória de `authorize_integration_effect` (commit derivado do handoff). */
-function authorize(f: Fixture, expectedTargetSha = git(f.repo, 'rev-parse', 'refs/heads/dev'), authorizationId = 'auth-1'): void {
+function authorize(
+  f: Fixture, expectedTargetSha = git(f.repo, 'rev-parse', 'refs/heads/dev'), authorizationId = 'auth-1',
+  extra: { readonly mode?: string; readonly targetRef?: string } = {},
+): void {
   const parts = {
     authorizationId, acceptedResultEventId: 'ev-result', repositoryId: f.config.repositoryId,
-    targetRef: 'refs/heads/dev', expectedTargetSha, resultCommitSha: f.commit, mode: 'merge_no_ff',
+    targetRef: extra.targetRef ?? 'refs/heads/dev', expectedTargetSha, resultCommitSha: f.commit, mode: extra.mode ?? 'merge_no_ff',
   };
   f.events.push(event(`ev-auth-${authorizationId}`, 'integration_effect_authorized', 'user', {
     authorization_id: authorizationId, operation_key: integrationOperationKey(parts), work_item_id: 'work-1', approved_proposal_version: 1,
@@ -353,5 +356,187 @@ describe('Trusted System Writer V0 — receipt de integração só pelo writer d
     expect(git(f.repo, 'rev-parse', 'refs/heads/main')).not.toBe(merge);
     // Replay idempotente comprovado pelo Git.
     await expect(run(f, { persist: writer.integrationReceipt })).resolves.toMatchObject({ status: 'integrated', disposition: 'already_persisted' });
+  }, 60_000);
+});
+
+// ─── Modo ff_only (V1): update-ref CAS direto para o commit EXATO do resultado ─────────────────
+const authorizeFf = (f: Fixture, expected?: string, id = 'auth-1'): void => authorize(f, expected, id, { mode: 'ff_only' });
+const parentsOf = (f: Fixture, sha: string): string[] => git(f.repo, 'rev-list', '--parents', '-n', '1', sha).split(' ').slice(1);
+const completedReceipt = (f: Fixture): IntegrationEffectReceiptV1 =>
+  (receipts(f)[0]!.payload as unknown as { data: { receipt: IntegrationEffectReceiptV1 } }).data.receipt;
+
+describe('executeAuthorizedIntegration — ff_only (repositório Git real, temporário)', () => {
+  test('ff_only válido: dev avança para o commit EXATO do resultado, sem merge commit; receipt = efeito observado', async () => {
+    const f = make();
+    const main = mainSha(f);
+    authorizeFf(f);
+    const outcome = await run(f);
+    expect(outcome).toMatchObject({ status: 'integrated', disposition: 'effected' });
+    expect(devSha(f)).toBe(f.commit); // o SHA integrado é o SHA verificado/aceito
+    expect(parentsOf(f, devSha(f))).toEqual([f.dev]); // nenhum commit novo: o pai é o alvo anterior
+    expect(git(f.repo, 'rev-list', '--count', `${f.dev}..${devSha(f)}`)).toBe('1');
+    expect(receipts(f)).toHaveLength(1);
+    expect(completedReceipt(f)).toMatchObject({
+      mode: 'ff_only', previousTargetSha: f.dev, resultingTargetSha: f.commit, resultCommitSha: f.commit,
+      mergeCommitSha: null, mergeParents: [], targetRef: 'refs/heads/dev', observed: true, disposition: 'effected',
+    });
+    expect(mainSha(f)).toBe(main); // main intocada
+  }, 60_000);
+
+  test('resultado NÃO descendente do alvo esperado ⇒ recusado (sem fallback para merge); dev intacto; sem receipt', async () => {
+    const f = make({ devDiverges: 'clean' }); // dev andou em outro ramo: expected não é ancestral do resultado
+    authorizeFf(f);
+    const before = devSha(f);
+    await expect(run(f)).resolves.toEqual({ status: 'denied', reason: 'ff_not_possible' });
+    expect(devSha(f)).toBe(before);
+    expect(receipts(f)).toHaveLength(0);
+  }, 60_000);
+
+  test('alvo avançou depois da autorização ⇒ human_required/authorization_stale; nada muda', async () => {
+    const f = make();
+    authorizeFf(f);
+    git(f.repo, 'update-ref', 'refs/heads/dev', commitOn(f, 'x.txt'));
+    const moved = devSha(f);
+    await expect(run(f)).resolves.toEqual({ status: 'human_required', reason: 'authorization_stale' });
+    expect(devSha(f)).toBe(moved);
+    expect(receipts(f)).toHaveLength(0);
+  }, 60_000);
+
+  test('CAS perdido para outro avanço de dev ⇒ reclassifica (stale), sem receipt e sem sobrescrever', async () => {
+    const f = make();
+    authorizeFf(f);
+    const provider = new GitIntegrationEffectProvider(f.repo);
+    let moved = '';
+    const realCas = provider.casAdvance.bind(provider);
+    provider.casAdvance = async (next, expected, reason) => {
+      moved = commitOn(f, 'race.txt');
+      git(f.repo, 'update-ref', 'refs/heads/dev', moved); // outro executor move dev entre a leitura e o CAS
+      return realCas(next, expected, reason);
+    };
+    await expect(run(f, { provider })).resolves.toEqual({ status: 'human_required', reason: 'authorization_stale' });
+    expect(devSha(f)).toBe(moved); // o CAS recusou: nada foi sobrescrito
+    expect(receipts(f)).toHaveLength(0);
+  }, 60_000);
+
+  test('already_effected: dev já É o commit do resultado (crash entre Git e Postgres) ⇒ reconcilia sem repetir o efeito', async () => {
+    const f = make();
+    authorizeFf(f);
+    git(f.repo, 'update-ref', 'refs/heads/dev', f.commit, f.dev); // efeito Git exato já feito, sem receipt
+    const outcome = await run(f);
+    expect(outcome).toMatchObject({ status: 'integrated', disposition: 'reconciled' });
+    expect(devSha(f)).toBe(f.commit);
+    expect(completedReceipt(f)).toMatchObject({ mode: 'ff_only', mergeCommitSha: null, mergeParents: [], resultingTargetSha: f.commit, disposition: 'reconciled' });
+  }, 60_000);
+
+  test('efeito Git feito + DB falha ⇒ reconciliation_required; replay reconcilia SEM repetir', async () => {
+    const f = make();
+    authorizeFf(f);
+    expect((await run(f, { failPersist: true })).status).toBe('reconciliation_required');
+    expect(devSha(f)).toBe(f.commit);
+    expect(receipts(f)).toHaveLength(0);
+    await expect(run(f)).resolves.toMatchObject({ status: 'integrated', disposition: 'reconciled' });
+    expect(devSha(f)).toBe(f.commit);
+    expect(receipts(f)).toHaveLength(1);
+  }, 60_000);
+
+  test('chamada duplicada ⇒ um efeito e um receipt; replay comprovado pelo Git', async () => {
+    const f = make();
+    authorizeFf(f);
+    await run(f);
+    await expect(run(f)).resolves.toMatchObject({ status: 'integrated', disposition: 'already_persisted' });
+    expect(devSha(f)).toBe(f.commit);
+    expect(receipts(f)).toHaveLength(1);
+  }, 60_000);
+
+  test('concorrência ⇒ um executor avança dev; um único receipt', async () => {
+    const f = make();
+    authorizeFf(f);
+    const outcomes = await Promise.all([run(f), run(f)]);
+    expect(outcomes.some((o) => o.status === 'integrated')).toBe(true);
+    expect(outcomes.every((o) => o.status === 'integrated' || o.status === 'retryable')).toBe(true);
+    expect(devSha(f)).toBe(f.commit);
+    expect(receipts(f)).toHaveLength(1);
+  }, 60_000);
+
+  test('receipt persistido + dev voltou atrás ⇒ integrity_violation (o Git não comprova mais)', async () => {
+    const f = make();
+    authorizeFf(f);
+    await run(f);
+    git(f.repo, 'update-ref', 'refs/heads/dev', f.dev);
+    await expect(run(f)).resolves.toEqual({ status: 'integrity_violation', reason: 'receipt_not_proven_by_git' });
+  }, 60_000);
+
+  test('alvo em checkout numa worktree ⇒ human_required (proteção preservada também no ff_only)', async () => {
+    const f = make();
+    authorizeFf(f);
+    git(f.repo, 'checkout', '-q', 'dev');
+    const before = devSha(f);
+    await expect(run(f)).resolves.toEqual({ status: 'human_required', reason: 'target_checked_out' });
+    expect(devSha(f)).toBe(before);
+  }, 60_000);
+
+  test('alvo main/outro na autorização ⇒ negado, zero efeito', async () => {
+    const f = make();
+    const main = mainSha(f);
+    const before = devSha(f);
+    authorize(f, undefined, 'auth-1', { mode: 'ff_only', targetRef: 'refs/heads/main' });
+    await expect(run(f)).resolves.toEqual({ status: 'denied', reason: 'target_not_allowed' });
+    expect(mainSha(f)).toBe(main);
+    expect(devSha(f)).toBe(before);
+  }, 60_000);
+
+  test('modo desconhecido na autorização ⇒ negado, zero efeito', async () => {
+    const f = make();
+    authorize(f, undefined, 'auth-1', { mode: 'fast_forward' });
+    const before = devSha(f);
+    await expect(run(f)).resolves.toEqual({ status: 'denied', reason: 'mode_not_allowed' });
+    expect(devSha(f)).toBe(before);
+  }, 60_000);
+
+  test('merge_no_ff continua sendo o efeito da autorização merge_no_ff (não vira ff silenciosamente)', async () => {
+    const f = make(); // dev == base: ff seria possível, mas a autorização pede merge
+    authorize(f);
+    const outcome = await run(f);
+    expect(outcome).toMatchObject({ status: 'integrated', disposition: 'effected' });
+    expect(devSha(f)).not.toBe(f.commit);
+    expect(parentsOf(f, devSha(f))).toEqual([f.dev, f.commit]);
+    expect(completedReceipt(f)).toMatchObject({ mode: 'merge_no_ff', mergeParents: [f.dev, f.commit] });
+  }, 60_000);
+});
+
+describe('authorizeIntegrationEffect — modo explícito', () => {
+  const rpcOk = () => jest.fn(async (args: Record<string, unknown>) => ({ data: { action: 'recorded', operation_key: `k:${String(args.mode)}` } as unknown as Json, error: null }));
+  const authorizeWith = (f: Fixture, rpc: ReturnType<typeof rpcOk>, mode?: Parameters<typeof authorizeIntegrationEffect>[0]['mode']) =>
+    authorizeIntegrationEffect({ workItemId: 'work-1', authorizationId: 'auth-1', ...(mode ? { mode } : {}) }, {
+      getItem: async () => ({ ok: true, value: f.item }), listEvents: async () => ({ ok: true, value: f.events }),
+      config: f.config, provider: new GitIntegrationEffectProvider(f.repo), rpc,
+    });
+
+  test('ff_only possível ⇒ a RPC recebe mode=ff_only e o SHA-alvo atual', async () => {
+    const f = make();
+    const rpc = rpcOk();
+    await expect(authorizeWith(f, rpc, 'ff_only')).resolves.toMatchObject({ ok: true, expectedTargetSha: f.dev });
+    expect(rpc).toHaveBeenCalledWith(expect.objectContaining({ mode: 'ff_only', target_ref: 'refs/heads/dev', expected_target_sha: f.dev }));
+  }, 60_000);
+
+  test('ff_only impossível (dev não é ancestral do resultado) ⇒ recusa cedo, sem chamar a RPC', async () => {
+    const f = make({ devDiverges: 'clean' });
+    const rpc = rpcOk();
+    await expect(authorizeWith(f, rpc, 'ff_only')).resolves.toEqual({ ok: false, reason: 'ff_not_possible' });
+    expect(rpc).not.toHaveBeenCalled();
+  }, 60_000);
+
+  test('sem modo explícito ⇒ merge_no_ff (V0 preservado; ff_only nunca é default silencioso)', async () => {
+    const f = make();
+    const rpc = rpcOk();
+    await authorizeWith(f, rpc);
+    expect(rpc).toHaveBeenCalledWith(expect.objectContaining({ mode: 'merge_no_ff' }));
+  }, 60_000);
+
+  test('modo desconhecido ⇒ recusado antes da RPC', async () => {
+    const f = make();
+    const rpc = rpcOk();
+    await expect(authorizeWith(f, rpc, 'ff' as never)).resolves.toEqual({ ok: false, reason: 'mode_not_allowed' });
+    expect(rpc).not.toHaveBeenCalled();
   }, 60_000);
 });

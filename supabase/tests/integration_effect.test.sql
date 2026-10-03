@@ -1,7 +1,7 @@
--- Completed → Integrated V0 — autorização humana do efeito e receipt persistido.
+-- Completed → Integrated V0/V1 — autorização humana do efeito e receipt persistido (merge_no_ff e ff_only).
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(23);
+SELECT plan(32);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('9b000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','ie@test.invalid','',now(),'{}','{}',now(),now());
@@ -128,6 +128,17 @@ CREATE FUNCTION pg_temp.receipt(p_over jsonb DEFAULT '{}'::jsonb) RETURNS jsonb 
     'resultingTargetSha',repeat('d',40),'mergeCommitSha',repeat('d',40),'mergeParents',jsonb_build_array(repeat('c',40),repeat('b',40)),
     'observed',true,'disposition','effected') || p_over;
 $$;
+-- Receipt ff_only do item B: nenhum commit criado (mergeCommitSha nulo, mergeParents vazio, alvo = commit do resultado).
+CREATE FUNCTION pg_temp.receipt_ff(p_over jsonb DEFAULT '{}'::jsonb) RETURNS jsonb LANGUAGE sql AS $$
+  SELECT jsonb_build_object('kind','integration_effect',
+    'operationKey',(SELECT payload->'data'->>'operation_key' FROM public.work_events WHERE event_type='integration_effect_authorized' AND payload->'data'->>'authorization_id'='auth-ff'),
+    'authorizationId','auth-ff','workItemId',pg_temp.id('B'),'proposalVersion',1,'attemptId',pg_temp.id('attB'),
+    'acceptedResultEventId',pg_temp.id('resB'),'resultCommitSha',repeat('b',40),'repositoryId','https://github.com/example/anima',
+    'targetRef','refs/heads/dev','mode','ff_only','previousTargetSha',repeat('c',40),
+    'resultingTargetSha',repeat('b',40),'mergeCommitSha',NULL::text,'mergeParents','[]'::jsonb,
+    'observed',true,'disposition','effected') || p_over;
+$$;
+GRANT EXECUTE ON FUNCTION pg_temp.receipt_ff(jsonb) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.id(text) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.receipt(jsonb) TO authenticated;
 
@@ -207,6 +218,41 @@ SELECT is((pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_te
   'replayed','10. replay idempotente por identidade do efeito');
 SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('mergeCommitSha',repeat('f',40),'resultingTargetSha',repeat('f',40))))$$,
   '55000','integration receipt conflict','23. mesmo item com efeito divergente ⇒ conflito');
+
+-- ─── V1: modo ff_only (item B, com o mesmo desenho do item A) ───────────────
+-- Modo desconhecido segue negado (não há default nem aliases).
+SELECT throws_ok($$SELECT public.authorize_integration_effect(pg_temp.id('A'),1,pg_temp.id('res'),'auth-x','https://github.com/example/anima','refs/heads/dev',repeat('c',40),'ff')$$,
+  '22023','integration mode not allowed','V1. modo desconhecido (ff) negado');
+
+INSERT INTO ids SELECT 'B',(public.create_work_proposal('9b000000-0000-0000-0000-0000000000a1','low','programming',
+  '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"ie-b"},"permissions":["workspace_read","workspace_write_isolated"],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}',
+  '{"schema_version":1,"data":{"summary":"x","objective":"o","included_scope":["a.ts"],"excluded_scope":["z"],"expected_effects":["e"],"risks":[]}}')).id::text;
+INSERT INTO ids VALUES('attB','9b000000-0000-0000-0000-00000000b0b0');
+SELECT public.resolve_approval(pg_temp.id('B'),1,'approve','{}');
+SELECT public.start_commanded_work_attempt(pg_temp.id('B'),1,pg_temp.id('attB'),'worktree-v1');
+SELECT public.record_commanded_work_terminal(pg_temp.id('B'),1,pg_temp.id('attB'),jsonb_build_object('kind','result','workItemId',pg_temp.id('B'),
+  'attemptId',pg_temp.id('attB'),'approvedProposalVersion',1,'origin','executor','sequence',1,'summary','feito','resultReferences','[]'::jsonb,
+  'validations','[]'::jsonb,'limitations','[]'::jsonb,'handoffReference','worktree:ie-b:anima-work/y',
+  'worktreeHandoff',jsonb_build_object('commitSha',repeat('b',40),'attemptId',pg_temp.id('attB'),'workItemId',pg_temp.id('B'),'approvedProposalVersion',1)));
+INSERT INTO ids SELECT 'resB', id::text FROM public.work_events WHERE work_item_id=pg_temp.id('B') AND event_type='result_submitted';
+SELECT public.review_work_result_versioned(pg_temp.id('B'),1,pg_temp.id('resB'),'accept','{}');
+
+SELECT is((public.authorize_integration_effect(pg_temp.id('B'),1,pg_temp.id('resB'),'auth-ff','https://github.com/example/anima','refs/heads/dev',repeat('c',40),'ff_only'))->>'action',
+  'recorded','V1. autorização ff_only gravada (modo congelado na autorização)');
+SELECT is((public.authorize_integration_effect(pg_temp.id('B'),1,pg_temp.id('resB'),'auth-ff','https://github.com/example/anima','refs/heads/dev',repeat('c',40),'ff_only'))->>'action',
+  'replayed','V1. autorização ff_only idempotente');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('mergeCommitSha',repeat('d',40))))$$,
+  '55000','integration receipt mismatch','V1. receipt ff_only com merge commit inventado ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('mergeParents',jsonb_build_array(repeat('c',40),repeat('b',40)))))$$,
+  '55000','integration receipt mismatch','V1. receipt ff_only com pais de merge ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('resultingTargetSha',repeat('d',40))))$$,
+  '55000','integration receipt mismatch','V1. receipt ff_only com alvo resultante ≠ commit do resultado ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('mode','merge_no_ff')))$$,
+  '55000','integration receipt mismatch','V1. receipt com modo ≠ modo autorizado ⇒ recusado');
+SELECT is((pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff()))->>'action',
+  'recorded','V1. receipt ff_only exato persistido');
+SELECT is((pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('disposition','reconciled'))))->>'action',
+  'replayed','V1. replay ff_only idempotente por identidade do efeito');
 
 SELECT * FROM finish();
 RESET ROLE;

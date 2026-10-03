@@ -4,6 +4,8 @@ import {
   buildWorktreeHandoff,
   classifyIntegrationTarget,
   integrationOperationKey,
+  integrationReceiptMatchesAuthorization,
+  isAllowedIntegrationMode,
   isAllowedIntegrationTargetRef,
   planIntegrationEffect,
   projectIntegrationCompleted,
@@ -213,5 +215,99 @@ describe('Trusted System Writer V0 — projeção endurecida (defesa em profundi
     expect(result.ok && result.plan.persistedMismatch).toBe(true);
     const clean = plan([...chain(), completed('system')]);
     expect(clean.ok && clean.plan.persistedMismatch).toBe(false);
+  });
+});
+
+describe('modo ff_only (V1)', () => {
+  const ffChain = (over: Record<string, unknown> = {}, extra: WorkEvent[] = []) => chain({ mode: 'ff_only', ...over }, extra);
+  const ffAuth = projectIntegrationEffectAuthorization(ffChain(), 'auth-1') as IntegrationEffectAuthorizationV1;
+  const mergeAuth = projectIntegrationEffectAuthorization(chain(), 'auth-1') as IntegrationEffectAuthorizationV1;
+  const ffObserved = { mergeCommitSha: null, mergeParents: [] as string[], resultingTargetSha: COMMIT };
+  const ffReceipt = () => buildIntegrationEffectReceipt(ffAuth, ffObserved, 'effected')!;
+
+  test('allowlist de modos: só merge_no_ff e ff_only (comparação exata)', () => {
+    expect(isAllowedIntegrationMode('merge_no_ff')).toBe(true);
+    expect(isAllowedIntegrationMode('ff_only')).toBe(true);
+    for (const mode of ['fast_forward', 'ff', 'FF_ONLY', 'merge', '', undefined, null]) expect(isAllowedIntegrationMode(mode)).toBe(false);
+  });
+
+  test('plano aceita ff_only; modo desconhecido ⇒ mode_not_allowed; alvo main segue negado', () => {
+    expect(plan(ffChain()).ok).toBe(true);
+    expect(plan(chain({ mode: 'ff' }))).toEqual({ ok: false, defect: 'mode_not_allowed' });
+    expect(plan(ffChain({ target_ref: 'refs/heads/main' }))).toEqual({ ok: false, defect: 'target_not_allowed' });
+    expect(plan(ffChain({ target_ref: 'origin/main' }))).toEqual({ ok: false, defect: 'target_not_allowed' });
+  });
+
+  test('o modo faz parte da chave de operação (ff_only ≠ merge_no_ff para a mesma autorização)', () => {
+    expect(ffAuth.operationKey).not.toBe(mergeAuth.operationKey);
+    expect(ffAuth.operationKey.endsWith(':ff_only')).toBe(true);
+    expect(plan(ffChain({ operation_key: mergeAuth.operationKey }))).toEqual({ ok: false, defect: 'operation_key_mismatch' });
+  });
+
+  test('classificação: alvo no SHA esperado ⇒ ready', () => {
+    expect(classifyIntegrationTarget(ffAuth, { targetSha: DEV, targetParents: [], resultCommitInTarget: false })).toBe('ready');
+  });
+  test('classificação: alvo avançou (sem o resultado) ⇒ stale', () => {
+    expect(classifyIntegrationTarget(ffAuth, { targetSha: 'e'.repeat(40), targetParents: [DEV], resultCommitInTarget: false, expectedTargetInTargetHistory: true })).toBe('stale');
+  });
+  test('classificação: alvo = commit do resultado descendente do esperado ⇒ already_effected', () => {
+    expect(classifyIntegrationTarget(ffAuth, { targetSha: COMMIT, targetParents: [DEV], resultCommitInTarget: true, expectedTargetInTargetHistory: true })).toBe('already_effected');
+  });
+  test('classificação: alvo = commit do resultado SEM comprovar descendência do esperado ⇒ ambiguous (não conclui)', () => {
+    expect(classifyIntegrationTarget(ffAuth, { targetSha: COMMIT, targetParents: [BASE], resultCommitInTarget: true })).toBe('ambiguous');
+    expect(classifyIntegrationTarget(ffAuth, { targetSha: COMMIT, targetParents: [BASE], resultCommitInTarget: true, expectedTargetInTargetHistory: false })).toBe('ambiguous');
+  });
+  test('classificação: alvo contém o resultado mas está além dele (ou é merge) ⇒ ambiguous', () => {
+    expect(classifyIntegrationTarget(ffAuth, { targetSha: 'f'.repeat(40), targetParents: [DEV, COMMIT], resultCommitInTarget: true, expectedTargetInTargetHistory: true })).toBe('ambiguous');
+  });
+  test('merge_no_ff intocado: o merge exato continua already_effected e o ff NÃO é aceito como efeito dele', () => {
+    expect(classifyIntegrationTarget(mergeAuth, { targetSha: 'f'.repeat(40), targetParents: [DEV, COMMIT], resultCommitInTarget: true })).toBe('already_effected');
+    expect(classifyIntegrationTarget(mergeAuth, { targetSha: COMMIT, targetParents: [DEV], resultCommitInTarget: true, expectedTargetInTargetHistory: true })).toBe('ambiguous');
+  });
+
+  test('receipt ff_only válido: mode, previous/resulting/result e NENHUM merge commit', () => {
+    expect(ffReceipt()).toMatchObject({
+      mode: 'ff_only', previousTargetSha: DEV, resultingTargetSha: COMMIT, resultCommitSha: COMMIT,
+      mergeCommitSha: null, mergeParents: [], observed: true, disposition: 'effected', targetRef: 'refs/heads/dev',
+    });
+  });
+
+  test.each([
+    ['merge commit inventado', { mergeCommitSha: '1'.repeat(40), mergeParents: [] as string[], resultingTargetSha: COMMIT }],
+    ['pais de merge', { mergeCommitSha: null, mergeParents: [DEV, COMMIT], resultingTargetSha: COMMIT }],
+    ['alvo resultante ≠ commit do resultado', { mergeCommitSha: null, mergeParents: [] as string[], resultingTargetSha: DEV }],
+  ])('receipt ff_only inconsistente (%s) ⇒ sem receipt', (_name, observed) => {
+    expect(buildIntegrationEffectReceipt(ffAuth, observed, 'effected')).toBeNull();
+  });
+
+  test('receipt ff_only não é aceito para autorização merge_no_ff (e vice-versa)', () => {
+    expect(buildIntegrationEffectReceipt(mergeAuth, ffObserved, 'effected')).toBeNull();
+    expect(buildIntegrationEffectReceipt(ffAuth, { mergeCommitSha: '1'.repeat(40), mergeParents: [DEV, COMMIT], resultingTargetSha: '1'.repeat(40) }, 'effected')).toBeNull();
+    expect(integrationReceiptMatchesAuthorization(mergeAuth, ffReceipt())).toBe(false);
+  });
+
+  test('projeção: receipt ff_only de sistema reproduzindo a autorização ⇒ integrated', () => {
+    const done = ev('ev-integrated', 'integration_completed', { authorization_id: 'auth-1', receipt: ffReceipt() }, 'system');
+    expect(projectIntegrationStatus([...ffChain(), done])).toBe('integrated');
+  });
+
+  test.each([
+    ['merge commit inventado', { mergeCommitSha: '1'.repeat(40) }],
+    ['pais de merge', { mergeParents: [DEV, COMMIT] }],
+    ['alvo resultante ≠ commit do resultado', { resultingTargetSha: DEV }],
+    ['modo divergente da autorização', { mode: 'merge_no_ff' }],
+    ['SHA anterior diferente do esperado', { previousTargetSha: 'e'.repeat(40) }],
+    ['alvo main', { targetRef: 'refs/heads/main' }],
+  ])('projeção: receipt ff_only inconsistente (%s) ⇒ invalid_receipt', (_name, patch) => {
+    const done = ev('ev-integrated', 'integration_completed', { authorization_id: 'auth-1', receipt: { ...ffReceipt(), ...patch } }, 'system');
+    expect(projectIntegrationStatus([...ffChain(), done])).toBe('invalid_receipt');
+  });
+
+  test('identidade de efeito ff_only: independe da disposição; difere se o alvo resultante difere', () => {
+    const a = ffReceipt();
+    const b = buildIntegrationEffectReceipt(ffAuth, ffObserved, 'reconciled')!;
+    expect(sameIntegrationEffect(a, b)).toBe(true);
+    expect(sameIntegrationEffect(a, { ...b, resultingTargetSha: DEV })).toBe(false);
+    expect(sameIntegrationEffect(a, { ...b, mergeParents: [DEV] })).toBe(false);
   });
 });
