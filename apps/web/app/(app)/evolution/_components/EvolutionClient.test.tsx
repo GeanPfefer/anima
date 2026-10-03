@@ -525,9 +525,50 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     expect(stateOf(container, 'interaction.chat')).toBe('dim');
     const panel = screen.getByText(/Desde Evolution UX V1/).closest('div') as HTMLElement;
     expect(within(panel).getByText(/Baseline 7f276d8/)).toBeInTheDocument();
+    const group = panel.querySelector('details[data-history-date="2026-09-27"]')!;
+    fireEvent.click(group.querySelector('summary')!);
     // clicar numa entrada seleciona a capacidade
     fireEvent.click(within(panel).getAllByRole('button', { name: 'Executar testes e comandos governados' })[0]!);
     expect(stateOf(container, 'agency.run-tests')).toBe('selected');
+  });
+
+  test('história agrupada preserva todos os 44 eventos, notas, refs e ordem canônica', () => {
+    const props = buildProps();
+    const { container } = render(<EvolutionClient {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: /Evolução recente/ }));
+    const groups = Array.from(container.querySelectorAll('details[data-history-date]'));
+    expect(groups.length).toBe(new Set(props.recentEvolution.map(item => item.entry.at)).size);
+    expect(groups.every(group => !group.hasAttribute('open'))).toBe(true);
+    const events = Array.from(container.querySelectorAll('[data-history-capability]'));
+    expect(events).toHaveLength(44);
+    expect(events.map(event => event.getAttribute('data-history-capability')))
+      .toEqual(props.recentEvolution.map(item => item.capabilityId));
+    events.forEach((event, index) => {
+      const entry = props.recentEvolution[index]!.entry;
+      expect(event.textContent).toContain(entry.note);
+      for (const ref of entry.refs) expect(event.textContent).toContain(ref.ref);
+      expect(event.textContent).toContain('Estado naquele momento');
+    });
+    const latest = groups[0]!;
+    fireEvent.click(latest.querySelector('summary')!);
+    expect(latest).toHaveAttribute('open');
+    const evidence = latest.querySelector('details')!;
+    fireEvent.click(evidence.querySelector('summary')!);
+    expect(evidence).toHaveAttribute('open');
+    expect(within(latest as HTMLElement).getByText(/AKT-01: FAIL pré-inferência/)).toBeVisible();
+    fireEvent.click(latest.querySelector('summary')!);
+    expect(latest).not.toHaveAttribute('open');
+  });
+
+  test('marcos têm destaque editorial; prova antiga conserva estado histórico sem promoção', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Evolução recente/ }));
+    expect(container.querySelectorAll('[data-history-kind="milestone"]')).toHaveLength(2);
+    const oldCodex = container.querySelector('[data-history-date="2026-10-02"] [data-history-capability="agency.codex-cli"]')!;
+    expect(oldCodex).toHaveAttribute('data-history-kind', 'proof');
+    expect(oldCodex.textContent).toContain('governed proof not yet demonstrated');
+    expect(oldCodex.textContent).toContain('Estado naquele momento');
+    expect(screen.getByLabelText('Tipos de evento')).toHaveTextContent('◆ Marco↑ Maturidade● Prova+ Capacidade↔ Relação');
   });
 
   test('lente Reuso externo separa temos × integrado × candidatas', () => {

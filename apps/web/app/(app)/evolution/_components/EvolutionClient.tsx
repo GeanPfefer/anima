@@ -42,6 +42,7 @@ import type {
 } from '@anima/core';
 import { CAPABILITY_DIRECTION_LABEL, capabilityDirectionSignals, capabilityAchievement, explainCapabilityAssessment } from '@anima/core';
 import styles from './EvolutionClient.module.css';
+import { groupRecentEvolution, recentDateLabel, recentEventPresentation } from './recent-evolution-presentation';
 
 // ─── Vocabulário de produto / apresentação (valores puros; tipos vêm do core) ───
 
@@ -1419,6 +1420,7 @@ function RecentEvolutionSummary({
   nameById: Map<string, string>;
   onSelect: (id: string) => void;
 }) {
+  const groups = groupRecentEvolution(entries);
   return (
     <div className={styles.detail}>
       <span className={styles.detailKicker}>Evolução recente</span>
@@ -1426,25 +1428,56 @@ function RecentEvolutionSummary({
       <p className={styles.detailHint}>
         Baseline {baseline.commit} ({baseline.date}). Só mudanças registradas no modelo com refs reais — nada é inferido por data de arquivo.
       </p>
+      <p className={styles.detailHint}>
+        História registrada · {entries.length} eventos. Estado naquele momento; maturidade e conquista são dimensões distintas.
+      </p>
+      <div className={styles.recentLegend} aria-label="Tipos de evento">
+        <span>◆ Marco</span><span>↑ Maturidade</span><span>● Prova</span><span>+ Capacidade</span><span>↔ Relação</span>
+      </div>
       {entries.length === 0 ? (
         <p className={styles.detailEmpty}>Nenhuma mudança registrada desde a baseline.</p>
       ) : (
-        <ol className={styles.historyList}>
-          {entries.map(({ capabilityId, entry }, i) => (
-            <li key={`${capabilityId}-${i}`} className={styles.historyItem}>
-              <span className={styles.historyHead}>
-                <time className={styles.historyDate}>{entry.at}</time>
-                <span className={styles.proofKind}>{HISTORY_CHANGE_LABEL[entry.change]}</span>
-                {entry.change === 'maturity_changed' && entry.from && entry.to && (
-                  <span className={styles.historyMaturity}>
-                    {MATURITY_LABEL[entry.from]} → {MATURITY_LABEL[entry.to]}
-                  </span>
-                )}
-              </span>
-              <button type="button" className={styles.pathStep} onClick={() => onSelect(capabilityId)}>
-                {nameById.get(capabilityId) ?? capabilityId}
-              </button>
-              <span className={styles.detailText}>{entry.note}</span>
+        <ol className={styles.recentGroups} aria-label="História por data">
+          {groups.map(group => (
+            <li key={group.date}>
+              <details className={styles.recentGroup} data-history-date={group.date}>
+                <summary className={styles.recentGroupHeading}>
+                  <time dateTime={group.date}>{recentDateLabel(group.date)}</time>
+                  <strong>{group.title}</strong>
+                  <span>{group.entries.length} {group.entries.length === 1 ? 'evento' : 'eventos'}</span>
+                </summary>
+                <ol className={styles.recentEvents}>
+                  {group.entries.map((item, i) => {
+                    const { capabilityId, entry } = item;
+                    const presentation = recentEventPresentation(item);
+                    return <li key={`${capabilityId}-${i}`} className={styles.recentEvent}
+                      data-history-kind={presentation.kind} data-history-capability={capabilityId}>
+                      <span className={styles.recentEventGlyph} aria-hidden="true">{presentation.glyph}</span>
+                      <div className={styles.recentEventContent}>
+                        <span className={styles.recentEventKind}>{presentation.label}</span>
+                        {presentation.title && <strong className={styles.recentMilestoneTitle}>{presentation.title}</strong>}
+                        <button type="button" className={styles.pathStep} onClick={() => onSelect(capabilityId)}>
+                          {nameById.get(capabilityId) ?? capabilityId}
+                        </button>
+                        {entry.change === 'maturity_changed' && entry.from && entry.to && (
+                          <span className={styles.historyMaturity}>
+                            {MATURITY_LABEL[entry.from]} → {MATURITY_LABEL[entry.to]}
+                          </span>
+                        )}
+                        <details className={styles.recentEventDetails}>
+                          <summary>Estado naquele momento · relato e refs</summary>
+                          <p className={styles.detailText}>{entry.note}</p>
+                          <span className={styles.historyRefs}>
+                            {entry.refs.map((ref, k) => <code key={k} className={styles.proofRef} title={ref.note}>
+                              {PROOF_KIND_LABEL[ref.kind]} {ref.ref}
+                            </code>)}
+                          </span>
+                        </details>
+                      </div>
+                    </li>;
+                  })}
+                </ol>
+              </details>
             </li>
           ))}
         </ol>

@@ -1,4 +1,9 @@
 # Anima — Product Requirements Document
+> Evolution história legível (2026-10-03): Evolução recente agrupada em oito datas
+> com 44 eventos preservados. Marcos AKT-03/Akita COMPLETE destacados por refs exatos;
+> quatro tipos canônicos distintos, relato e refs recolhíveis com “Estado naquele momento”.
+> Sem alteração factual, maturidade, achievement, backend, governança ou scopeVerification.
+> Plano 009; registro docs/registros/2026-10-03-evolution-historia-legivel.md.
 > Evolution clareza final (2026-10-03): maturity epistemológica e achievement separados.
 > Baselines conquistados não aparecem como a conquistar; projected/not_evaluated preservados.
 > Resumo inicial, detalhes recolhíveis; aceite não implica integração automaticamente,

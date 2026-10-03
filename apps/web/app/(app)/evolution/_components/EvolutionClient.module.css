@@ -703,6 +703,36 @@
   gap: 4px;
 }
 
+/* Recent history: compact chapters, independently expandable evidence. */
+.recentLegend { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--text-secondary); font-size: 11px; margin: 12px 0; }
+.recentGroups { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.recentGroup { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.recentGroupHeading { cursor: pointer; padding: 12px; color: var(--text-primary); line-height: 1.45; }
+.recentGroupHeading time { font-size: 11px; letter-spacing: .05em; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.recentGroupHeading strong { display: block; margin: 4px 0; font-size: 13px; }
+.recentGroupHeading > span { font-size: 11px; color: var(--text-muted); }
+.recentGroupHeading:focus-visible, .recentEventDetails > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.recentGroup[open] > summary { border-bottom: 1px solid var(--border); }
+.recentEvents { list-style: none; padding: 4px 12px; }
+.recentEvent { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.recentEvent:last-child { border-bottom: 0; }
+.recentEventGlyph { color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+.recentEventContent { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+.recentEventKind { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.recentEvent[data-history-kind="milestone"] .recentEventGlyph,
+.recentEvent[data-history-kind="milestone"] .recentEventKind { color: var(--accent-hover); font-weight: 700; }
+.recentEvent[data-history-kind="milestone"] { border-left: 3px solid var(--accent); padding-left: 8px; }
+.recentEvent[data-history-kind="maturity"] .recentEventGlyph { color: var(--text-primary); font-size: 19px; font-weight: 700; }
+.recentEvent[data-history-kind="proof"] .recentEventGlyph { color: var(--text-secondary); }
+.recentEvent[data-history-kind="relation"] .recentEventGlyph { font-size: 18px; }
+.recentMilestoneTitle { font-size: 13px; color: var(--text-primary); line-height: 1.5; }
+.recentEventDetails { width: 100%; }
+.recentEventDetails > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); line-height: 1.5; padding: 3px 0; }
+.recentEventDetails p { margin: 8px 0; }
+.recentEventDetails .historyRefs { overflow-wrap: anywhere; }
+.recentEventDetails .proofRef { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.recentEventContent > button { text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+
 /* Direção separada do mapa de maturidade; sequência é planejamento. */
 .developmentPath { border: 1px solid var(--border-focus); border-radius: 12px; padding: 10px; background: var(--bg-surface); }
 .pathIntro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--text-primary); }

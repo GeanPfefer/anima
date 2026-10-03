@@ -134,3 +134,28 @@ foco atual e próximos marcos. Painel tem resumo inicial e disclosures de prova,
 epistemologia, dependências e história. Aceite não implica integração automaticamente;
 AKT-03 tem integração confirmada em origin/dev 83f7fd2. História/provas preservadas.
 Gates e retomada: [registro final](../registros/2026-10-03-evolution-clareza-final.md).
+
+## História recente legível — 2026-10-03
+
+HEAD publicado confirmado por fetch exclusivo da branch: fb002d2dedabfec2d0fbf327b52412057f1da5f1.
+Mandato: apresentação de Evolução recente apenas, preservando todas as 44 entradas.
+
+O painel apresenta oito grupos por data declarada do fato (mais recente primeiro),
+recolhidos inicialmente. Os grupos destacam Codex governado/AKT-03 e Akita COMPLETE;
+os demais resumem os tipos presentes, sem inventar marcos ou relações por data.
+A ordem de empates do core permanece intacta. Dentro do grupo, cada evento permite
+selecionar a capacidade e expandir separadamente o relato original e todos os refs.
+
+Os quatro tipos canônicos têm texto e símbolos próprios: + Capacidade, ↑ Maturidade,
+● Prova, ↔ Relação. ◆ Marco é destaque editorial exclusivamente de dois registros
+existentes identificados por capability ID, data, proof_added e ref exatos; não é
+tipo novo no contrato nem mudança de maturidade/achievement. Cabeçalhos e borda
+reforçam esses dois marcos. Não dividir AKT-01/02/03 em eventos novos.
+
+Todo relato histórico tem disclosure “Estado naquele momento · relato e refs”.
+Assim, governed proof not yet demonstrated em 02 OUT permanece verdadeiro como
+registro daquele momento, sem reescrever a história a partir do estado atual.
+Registry, Proof Engine, gates, backend, governança e scopeVerification intactos.
+
+Gates e retomada: [registro](../registros/2026-10-03-evolution-historia-legivel.md).
+Push autorizado somente para origin/codex/evolution-ux-v2, sem merge em dev/main.
