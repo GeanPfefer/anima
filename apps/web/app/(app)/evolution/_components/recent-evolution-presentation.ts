@@ -1,8 +1,9 @@
 import type { RecentEvolutionEntry } from '@anima/core';
 
-// Editorial UI only: these two highlights identify existing records exactly.
+// Editorial UI only: these highlights identify existing records exactly.
 // No inference from note text, today's maturity, or file timestamps.
 const MILESTONES = [
+  { capabilityId: 'agency.claude-code', at: '2026-10-03', ref: 'docs/registros/2026-10-03-evolution-pos-akt04.md', title: 'Claude Code governado · AKT-04' },
   { capabilityId: 'agency.codex-cli', at: '2026-10-03',
     ref: 'docs/registros/2026-10-03-evolution-pos-akita-governed-codex.md', title: 'Codex governado · AKT-03' },
   { capabilityId: 'agency.akita-baseline-v1', at: '2026-10-02',

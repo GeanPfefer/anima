@@ -1549,9 +1549,9 @@ function DevelopmentPath({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; on
     <div className={styles.pathIntro}><strong>{objective.name}{objective.target.achievement === 'complete' ? ' · COMPLETE' : ''}</strong><span>REUSE BEFORE BUILD</span>
 
       <p>✓ Codex executor · ✓ Claude executor · ✓ cross-harness continuity</p>
-      <p>COMPLETE não significa autonomia completa, prova governada Claude, recovery cross-agent ou integração autônoma.</p>
+      <p>COMPLETE não significa autonomia completa, integração Git governada após aceite, recovery cross-agent ou integração autônoma.</p>
       <details><summary>Próximos marcos</summary>
-        <p>NEXT · governed Claude Code proof; escolha/handoff Codex ↔ Claude dentro da governança; ai-memory correlacionado a work item/attempt/lineage quando necessário.</p>
+        <p>NEXT · accepted result → integração Git governada (AKT-03/04 tiveram integração manual); governed cross-agent continuity/recovery; self-development contínuo com tarefas reais. ff_only/F0-F3: proposta em auditoria.</p>
         <p>LATER · recovery cross-agent governado; autonomous integration/publication; self-development mais amplo.</p>
         <p>PARKED / EXPERIMENTAL · Qwen/Ollama/DSH, RunPod coder próprio, parser/tool-loop próprio fora do caminho crítico.</p>
       </details></div>
@@ -1564,8 +1564,8 @@ function DevelopmentPath({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; on
         <small>Achievement: {capabilityAchievement(capability)} · Maturity: {MATURITY_LABEL[capability.maturity]}{capability.reuse ? ` · ${REUSE_STRATEGY_LABEL[capability.reuse.strategy]} · ${capability.reuse.status === 'candidate' ? 'candidata' : 'integrada'}` : ''}</small>
       </button></li>;
     })}</ol>
-    <p className={styles.detailText}><strong>CURRENT FOCUS</strong> · <button className={styles.pathStep} type="button" onClick={() => onSelect('agency.continuous-self-development')}>Self-development contínuo · usando native coding agents sob governança</button></p>
-    <p className={styles.detailHint}>NEXT · governed Claude Code proof; governed cross-agent/recovery quando necessário.</p>
+    <p className={styles.detailText}><strong>CURRENT FOCUS</strong> · <button className={styles.pathStep} type="button" onClick={() => onSelect('agency.continuous-self-development')}>Self-development contínuo · usar Codex e Claude como executores governados reais</button></p>
+    <p className={styles.detailHint}>NEXT · accepted result → integração Git governada; governed cross-agent continuity/recovery; self-development contínuo com tarefas reais.</p>
   </section>;
 }
 

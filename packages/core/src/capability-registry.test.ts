@@ -192,7 +192,7 @@ describe('Akita Baseline — direção não concede maturidade', () => {
       expect(capability.direction?.refs.length).toBeGreaterThan(0);
     }
     expect(get('agency.codex-cli').direction?.status).toBe('current_focus');
-    expect(get('agency.claude-code').direction?.status).toBe('next');
+    expect(get('agency.claude-code').direction?.status).toBe('current_focus');
     expect(get('memory.cross-harness').direction?.status).toBe('next');
     expect(get('agency.akita-baseline-v1').target?.achievement).toBe('complete');
     expect(get('agency.akita-baseline-v1').maturity).toBe('projected');
@@ -226,7 +226,7 @@ test('Codex integrado com prova técnica não governada preserva maturidade e n�
 test('Claude integrado com PASS técnico mantém projected e evidência sem crédito canônico', () => {
   const claude = ANIMA_CAPABILITY_REGISTRY_V0.find((c) => c.id === 'agency.claude-code')!;
   expect(claude.reuse).toMatchObject({ strategy: 'wrap', status: 'integrated' });
-  expect(claude.direction?.status).toBe('next');
+  expect(claude.direction?.status).toBe('current_focus');
   expect(claude.maturity).toBe('projected');
   expect(claude.proofRefs ?? []).toEqual([]);
   expect(claude.history?.[0]?.note).toContain('governed proof not yet demonstrated');
@@ -244,8 +244,16 @@ test('AKT-03 separa prova governada, review e integração sem promover os execu
     expect(get(id).maturity).toBe('projected');
     expect(get(id).reuse?.status).toBe('integrated');
   }
-  for (const id of ['agency.claude-code', 'memory.cross-harness']) {
+  for (const id of ['memory.cross-harness']) {
     expect(get(id).deliveryEvidence?.governed.status).toBe('not_demonstrated');
     expect(get(id).deliveryEvidence?.humanReview).toBeUndefined();
   }
+});
+
+test('AKT-04 preserva maturidade e separa execução governada da integração manual', () => {
+ const c = ANIMA_CAPABILITY_REGISTRY_V0.find(c => c.id === 'agency.claude-code')!;
+ expect(c.maturity).toBe('projected');
+ expect(c.deliveryEvidence).toMatchObject({ governed: { status: 'pass', label: 'Governed execution AKT-04' }, verifier: 'verified', humanReview: 'accepted', candidate: { status: 'integrated', commit: 'c536efff3d4d214c289afa1c352464cfbc66f2c5' } });
+ expect(c.history?.at(-1)?.note).toContain('Exatamente uma attempt');
+ expect(c.advancement).toContain('integração Git governada');
 });

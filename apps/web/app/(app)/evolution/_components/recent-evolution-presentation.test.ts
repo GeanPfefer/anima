@@ -6,10 +6,10 @@ test('agrupamento não altera dados, empates, cronologia ou quantidade', () => {
   const before = JSON.stringify(entries);
   const groups = groupRecentEvolution(entries);
   expect(groups.flatMap(group => group.entries)).toEqual(entries);
-  expect(entries).toHaveLength(44);
+  expect(entries).toHaveLength(45);
   expect(JSON.stringify(entries)).toBe(before);
   expect(groups.map(group => group.date)).toEqual([...new Set(entries.map(item => item.entry.at))]);
-  expect(groups[0]!.title).toBe('Codex governado · AKT-03');
+  expect(groups[0]!.title).toBe('Claude Code governado · AKT-04 · Codex governado · AKT-03');
   expect(groups[1]!.title).toBe('Akita Baseline V1 COMPLETE');
   expect(recentDateLabel('2026-10-03')).toBe('03 OUT 2026');
   expect(groupRecentEvolution([])).toEqual([]);

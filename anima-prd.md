@@ -1,8 +1,8 @@
 # Anima — Product Requirements Document
 > Evolution história legível (2026-10-03): Evolução recente agrupada em oito datas
-> com 44 eventos preservados. Marcos AKT-03/Akita COMPLETE destacados por refs exatos;
+> com 45 eventos (44 preservados + AKT-04). Marcos AKT-03/AKT-04/Akita COMPLETE destacados por refs exatos;
 > quatro tipos canônicos distintos, relato e refs recolhíveis com “Estado naquele momento”.
-> Sem alteração factual, maturidade, achievement, backend, governança ou scopeVerification.
+> Reconciliação factual AKT-04; maturidade Projetada preservada, sem alteração de backend/governança.
 > Plano 009; registro docs/registros/2026-10-03-evolution-historia-legivel.md.
 > Evolution clareza final (2026-10-03): maturity epistemológica e achievement separados.
 > Baselines conquistados não aparecem como a conquistar; projected/not_evaluated preservados.
@@ -10,10 +10,13 @@
 > mas AKT-03 permanece confirmado em origin/dev 83f7fd2. Plano 009, registro evolution-clareza-final.
 > Evolution pós-Akita (2026-10-03), branch codex/evolution-ux-v2 sobre origin/dev 83f7fd2.
 > Akita Baseline V1 COMPLETE = Codex executor + Claude executor + cross-harness continuity.
-> Foco: self-development governado usando native coding agents. Codex AKT-03: governed PASS,
+> Foco: usar Codex e Claude como executores governados reais do self-development do ANIMA.
+> Lacuna: accepted result → integração Git governada; AKT-03/04 integrados manualmente.
+> ff_only/F0-F3 são direção/proposta em auditoria, sem implementação. Codex AKT-03: governed PASS,
 > Verifier verified (machine-proven scope + gate), HUMAN ACCEPTED, completed; candidato
 > 83f7fd2 integrated após fetch (HEAD de origin/dev 83f7fd2).
-> Claude: technical PASS, governed NOT YET DEMONSTRATED. ai-memory: cross-harness PASS,
+> Claude: technical PASS anterior, governed AKT-04 PASS, Verifier verified, HUMAN ACCEPTED, completed;
+> candidato c536eff Git-integrated manualmente em origin/dev (fetch confirmado em 03 OUT). ai-memory: cross-harness PASS,
 > governed cross-attempt continuity NOT YET DEMONSTRATED. WRAP integrado nos três.
 > Technical/governed/review/integration separados; projected e not_evaluated preservados.
 > Plano 009; registro docs/registros/2026-10-03-evolution-pos-akita-governed-codex.md.

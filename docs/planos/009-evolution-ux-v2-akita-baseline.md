@@ -159,3 +159,15 @@ Registry, Proof Engine, gates, backend, governança e scopeVerification intactos
 
 Gates e retomada: [registro](../registros/2026-10-03-evolution-historia-legivel.md).
 Push autorizado somente para origin/codex/evolution-ux-v2, sem merge em dev/main.
+
+## Reconciliação final pós AKT-04 — 2026-10-03
+
+Merge seguro de origin/dev c536eff (apenas xp.test.ts), preservando Evolution UX e WIPs externos.
+Claude technical PASS anterior; primeira prova GOVERNADA AKT-04 PASS, uma attempt,
+Verifier verified, mandated release, HUMAN ACCEPTED, completed e integração Git manual confirmada.
+Codex/Claude governados reais são o foco do self-development. Próxima lacuna operacional:
+accepted result → integração Git governada; continuidade/recovery governados e tarefas reais.
+ff_only/F0-F3 permanecem proposta em auditoria. Maturidade Projetada; achievement conquistado/em uso.
+História aditiva com AKT-03 e AKT-04 em 03 OUT e contexto temporal preservado.
+Gates, limites e retomada: [registro](../registros/2026-10-03-evolution-pos-akt04.md).
+Push autorizado exclusivamente para origin/codex/evolution-ux-v2; sem merge em dev.

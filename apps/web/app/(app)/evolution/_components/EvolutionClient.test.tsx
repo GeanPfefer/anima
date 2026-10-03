@@ -532,7 +532,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     expect(stateOf(container, 'agency.run-tests')).toBe('selected');
   });
 
-  test('história agrupada preserva todos os 44 eventos, notas, refs e ordem canônica', () => {
+  test('história agrupada preserva todos os 45 eventos, notas, refs e ordem canônica', () => {
     const props = buildProps();
     const { container } = render(<EvolutionClient {...props} />);
     fireEvent.click(screen.getByRole('button', { name: /Evolução recente/ }));
@@ -540,7 +540,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     expect(groups.length).toBe(new Set(props.recentEvolution.map(item => item.entry.at)).size);
     expect(groups.every(group => !group.hasAttribute('open'))).toBe(true);
     const events = Array.from(container.querySelectorAll('[data-history-capability]'));
-    expect(events).toHaveLength(44);
+    expect(events).toHaveLength(45);
     expect(events.map(event => event.getAttribute('data-history-capability')))
       .toEqual(props.recentEvolution.map(item => item.capabilityId));
     events.forEach((event, index) => {
@@ -552,7 +552,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     const latest = groups[0]!;
     fireEvent.click(latest.querySelector('summary')!);
     expect(latest).toHaveAttribute('open');
-    const evidence = latest.querySelector('details')!;
+    const evidence = latest.querySelector('[data-history-capability="agency.codex-cli"] details')!;
     fireEvent.click(evidence.querySelector('summary')!);
     expect(evidence).toHaveAttribute('open');
     expect(within(latest as HTMLElement).getByText(/AKT-01: FAIL pré-inferência/)).toBeVisible();
@@ -563,7 +563,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
   test('marcos têm destaque editorial; prova antiga conserva estado histórico sem promoção', () => {
     const { container } = render(<EvolutionClient {...buildProps()} />);
     fireEvent.click(screen.getByRole('button', { name: /Evolução recente/ }));
-    expect(container.querySelectorAll('[data-history-kind="milestone"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-history-kind="milestone"]')).toHaveLength(3);
     const oldCodex = container.querySelector('[data-history-date="2026-10-02"] [data-history-capability="agency.codex-cli"]')!;
     expect(oldCodex).toHaveAttribute('data-history-kind', 'proof');
     expect(oldCodex.textContent).toContain('governed proof not yet demonstrated');
@@ -814,10 +814,10 @@ test('baseline COMPLETE exibe PASS técnico e cross-harness sem promover maturid
   const { container } = render(<EvolutionClient {...buildProps()} />);
   const path = screen.getByRole('region', { name: 'Current development path' });
   expect(within(path).getByRole('button', { name: /Codex CLI executor.*adapter integrado.*live technical proof PASS.*não governada/ })).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Claude Code executor.*PASS.*Baseline técnico conquistado.*integrada/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Claude Code executor.*PASS.*Conquistada.*integrada/ })).toBeInTheDocument();
   expect(within(path).getByRole('button', { name: /Continuidade entre harnesses.*live cross-harness proof PASS.*Baseline técnico conquistado.*integrada/ })).toBeInTheDocument();
   expect(within(path).getByText('AKITA BASELINE V1 · COMPLETE')).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Self-development contínuo.*native coding agents/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Self-development contínuo.*Codex e Claude/ })).toBeInTheDocument();
   const codex = container.querySelector('[data-capid="agency.codex-cli"]');
   expect(codex).toHaveAttribute('data-origin', 'integrated');
   expect(codex).toHaveAttribute('data-future', 'true');
@@ -828,7 +828,7 @@ test('baseline COMPLETE exibe PASS técnico e cross-harness sem promover maturid
   expect(screen.getByText(/Adapter integrado em cd73276/)).toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Evidência registrada de escopo limitado' })).toBeInTheDocument();
   expect(screen.getByText(/sem prova de maturidade creditada pelo motor/)).toBeInTheDocument();
-  expect(screen.getByText(/Prova governada ainda não demonstrada/)).toBeInTheDocument();
+  expect(screen.getByText('Governed execution AKT-04 · PASS')).toBeInTheDocument();
 });
 
 
