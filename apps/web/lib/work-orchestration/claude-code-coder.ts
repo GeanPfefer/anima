@@ -157,7 +157,6 @@ export interface ClaudeCodeCoderOptions {
 
 export class ClaudeCodeCoderBackend implements CoderBackend {
   readonly id: string;
-  readonly observation: NonNullable<CoderBackend['observation']>;
   private readonly config: ClaudeCodeConfig;
   private readonly run: NativeCliProcessRunner | undefined;
   private readonly environmentSource: Record<string, string | undefined>;
@@ -167,8 +166,11 @@ export class ClaudeCodeCoderBackend implements CoderBackend {
   constructor(options: ClaudeCodeCoderOptions) {
     this.config = options.config;
     this.id = coderBackendId('claude-code', options.config.model);
-    // Inferência é do provider do Claude Code (remota); worktree e efeitos continuam locais.
-    this.observation = { placement: 'remote', nodeId: null, model: options.config.model };
+    // SEM `observation` (identidade de placement): `placement:'remote'` exige um `nodeId` estável que o host
+    // atesta (Ollama: nó configurado; OpenAI: 'openai-api'), e o host NÃO atesta o nó de inferência de um CLI
+    // nativo; `local` seria falso. `{remote, nodeId:null}` era recusado por buildHostObservedCoderEvidence e a
+    // evidência do coder sumia em silêncio (lane mandatado ficava em evidence_incomplete). Ausência é legado válido;
+    // backend/modelo seguem no `backendId` (`provider:model`).
     this.run = options.run;
     this.environmentSource = options.environmentSource ?? process.env;
     this.aiMemory = options.aiMemory;

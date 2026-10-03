@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   buildCoderTaskSpec,
+  buildHostObservedCoderEvidence,
   decideRecovery,
   validateWorkExecutorTranscript,
   type ObservedCoderInput,
@@ -119,7 +120,12 @@ describe('CodexCliCoderBackend → WorktreeExecutorAdapter (executável falso)',
     expect(result.worktreeHandoff?.status).toBe('succeeded');
     // Gate rodou no HOST e o coder foi observado com a identidade do backend.
     expect(gates).toEqual([expect.objectContaining({ label: 'testes', exitCode: 0 })]);
-    expect(coder).toEqual([expect.objectContaining({ backendId: 'codex-cli:default', outcome: 'succeeded', placement: 'remote' })]);
+    expect(coder).toEqual([expect.objectContaining({ backendId: 'codex-cli:default', outcome: 'succeeded' })]);
+    // Sem identidade de placement (o host não atesta o nó de inferência de um CLI nativo): `{remote, nodeId:null}`
+    // era recusado por buildHostObservedCoderEvidence e a evidência do coder se perdia.
+    expect(coder[0]).not.toHaveProperty('placement');
+    expect(coder[0]).not.toHaveProperty('nodeId');
+    expect(buildHostObservedCoderEvidence({ workItemId: 'w' as never, attemptId: 'a', approvedProposalVersion: 1 as never, observedAt: new Date().toISOString(), ...coder[0]! }).ok).toBe(true);
 
     // O "Codex" rodou na worktree isolada, nunca no checkout principal, e recebeu a task spec.
     const seen = JSON.parse(await readFile(record, 'utf8')) as { cwd: string; args: string[] };
