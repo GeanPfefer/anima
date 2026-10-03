@@ -602,3 +602,9 @@ test('Codex sem regra mantém declared projected; prova técnica em history não
   expect(evaluation.assessment).toBeNull();
   expect(evaluation.evidence).toEqual([]);
 });
+
+test('Claude técnico sem regra permanece não avaliado pelo Proof Engine', () => {
+  const evaluation = evaluateCapabilityProofsFromHistory({ events: [], capabilities: ANIMA_CAPABILITY_REGISTRY_V0 }).find((entry) => entry.capabilityId === 'agency.claude-code')!;
+  expect(evaluation.status).toBe('not_evaluated');
+  expect(evaluation.derivedMaturity).toBeNull();
+});

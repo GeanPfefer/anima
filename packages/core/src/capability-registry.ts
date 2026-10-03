@@ -32,6 +32,8 @@ const RECONCILIATION_V2_RECORD = 'docs/registros/2026-09-27c-evolution-reconcili
 
 const DIRECTION_RECORD = 'docs/planos/009-evolution-ux-v2-akita-baseline.md';
 const CODEX_LIVE_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-codex-live-proof.md';
+const CLAUDE_LIVE_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-claude-live-proof.md';
+const FINAL_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-final-reconciliation.md';
 const directionRefs = [{ kind: 'doc' as const, ref: DIRECTION_RECORD, note: 'Decisão humana de direção; não prova operacional.' }];
 
 export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
@@ -648,12 +650,12 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     reuse: {
       strategy: 'wrap',
       tool: 'Claude Code / Codex CLI',
-      status: 'candidate',
+      status: 'integrated',
       externalEvidence:
-        'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado em repo descartável. Bloqueios: auth dedicada do CLI e decisão sobre a classe de autoridade da quota de assinatura.',
+        'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado em repo descartável. Os dois adapters estão integrados em dev; provas técnicas TPC-01 PASS, sem governança demonstrada.',
     },
     meaning:
-      'O seam CoderBackend (ADR-001) permite trocar o executor. Um harness por assinatura é outra classe de compute, não um provider de API.',
+      'Codex CLI e Claude Code integrados, com baseline técnico dos executores atingido. Provas governadas e composição com ai-memory ainda não demonstradas. O seam CoderBackend (ADR-001) permite trocar o executor. Um harness por assinatura é outra classe de compute, não um provider de API.',
     advancement: 'Provar ANIMA → executor → mudança → gate em integração governada; WRAP é direção aprovada, não maturidade.',
     history: [
       {
@@ -662,6 +664,10 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         to: 'projected',
         note: 'Candidata externa registrada a partir da Reuse Architecture V1. POC externo ≠ capacidade do Anima.',
         refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+      { at: '2026-10-02', change: 'proof_added',
+        note: 'Ambos os adapters integrados; primeiras provas técnicas TPC-01 PASS, não governadas. Sem promoção de maturidade ou prova de composição com ai-memory.',
+        refs: [{ kind: 'record', ref: CODEX_LIVE_RECORD }, { kind: 'record', ref: CLAUDE_LIVE_RECORD }, { kind: 'record', ref: FINAL_RECORD }],
       },
     ],
   },
@@ -672,7 +678,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     parentId: 'agency.external-harness',
     dependsOn: ['agency.external-harness'],
     responsibility: 'reused_baseline',
-    direction: { status: 'current_focus', rationale: 'Primeiro incremento: ANIMA → Codex → mudança → gate.', refs: directionRefs },
+    direction: { status: 'current_focus', rationale: 'Baseline técnico do executor atingido: integração e live technical proof PASS; governed proof ainda não demonstrada.', refs: [...directionRefs, { kind: 'record', ref: FINAL_RECORD }] },
     reuse: { strategy: 'wrap', tool: 'Codex CLI', status: 'integrated',
       externalEvidence: 'Candidato já registrado na Evolution Reconciliation V2; POC externo de continuidade não prova executor integrado.' },
     meaning: 'Adapter integrado em 9404bd4; primeira prova técnica viva PASS, não governada. Sem regra específica no Proof Engine, maturidade declarada anterior preservada (projected); integração e prova técnica não demonstram governança.',
@@ -689,10 +695,16 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     parentId: 'agency.external-harness',
     dependsOn: ['agency.external-harness'],
     responsibility: 'reused_baseline',
-    direction: { status: 'next', rationale: 'Segundo incremento: ANIMA → Claude → mudança → gate.', refs: directionRefs },
-    reuse: { strategy: 'wrap', tool: 'Claude Code', status: 'candidate',
+    direction: { status: 'current_focus', rationale: 'Baseline técnico do executor atingido: integração e live technical proof PASS; governed proof ainda não demonstrada.', refs: directionRefs },
+    reuse: { strategy: 'wrap', tool: 'Claude Code', status: 'integrated',
       externalEvidence: 'Candidato já registrado na Evolution Reconciliation V2; POC externo de continuidade não prova executor integrado.' },
-    advancement: 'Integração e prova viva governada pendentes nesta baseline; não promover por escolha arquitetural.',
+    meaning: 'Adapter integrado em cd73276; primeira prova técnica viva PASS, não governada. Sem regra específica no Proof Engine, maturidade declarada anterior preservada (projected); integração e prova técnica não demonstram governança.',
+    advancement: 'Prova governada ainda não demonstrada: faltam work item, attempt, authority, Verifier e review governada. Não operacional/autônomo; definir critério específico antes de qualquer promoção.',
+    history: [{ at: '2026-10-02', change: 'proof_added',
+      note: 'Live technical proof passed · primeira prova viva técnica PASS; governed proof not yet demonstrated. Mesmo TPC-01, base, prompt/spec e gate do Codex: dois arquivos, E1/E2/E3 verdes, sem contract violation; sem work item/attempt/authority/Verifier/review governada.',
+      refs: [{ kind: 'commit', ref: 'cd73276b1e18eda70f5a65338d744cca9634addc', note: 'Integração do adapter; não é commit do resultado da prova.' },
+        { kind: 'record', ref: CLAUDE_LIVE_RECORD, note: 'Relatório humano de prova técnica não governada; não promove maturidade.' }],
+    }],
   },
   {
     id: 'agency.akita-baseline-v1', name: 'AKITA BASELINE V1', domain: 'agency', maturity: 'projected',
@@ -701,8 +713,8 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     direction: { status: 'current_focus', rationale: 'Antes, o caminho incluía evoluir o coding-agent loop próprio. Agora, reutilizar Codex e Claude; Ollama/DSH permanecem pesquisa e não bloqueiam este milestone.', refs: directionRefs },
     target: { description: 'Baseline funcional reutilizado antes de retomar self-development autônomo avançado.', milestone: DIRECTION_RECORD,
       steps: [
-        { capabilityId: 'agency.codex-cli', description: 'ANIMA → Codex → mudança → gate · adapter integrado · primeira prova técnica viva PASS (não governada)' },
-        { capabilityId: 'agency.claude-code', description: 'ANIMA → Claude → mudança → gate' },
+        { capabilityId: 'agency.codex-cli', description: 'ANIMA → Codex → mudança → gate · adapter integrado · baseline técnico do executor atingido · live technical proof PASS (não governada)' },
+        { capabilityId: 'agency.claude-code', description: 'ANIMA → Claude → mudança → gate · adapter integrado · baseline técnico do executor atingido · live technical proof PASS (não governada)' },
         { capabilityId: 'memory.cross-harness', description: 'Claude ↔ Codex via ai-memory, após os executores' },
         { capabilityId: 'agency.continuous-self-development', description: 'Só depois: retomar self-development autônomo avançado' },
       ] },

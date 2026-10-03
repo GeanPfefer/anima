@@ -45,7 +45,7 @@ com assinatura permanece decisão humana separada. A prova técnica relatada nã
 
 ## Incremento 2 — Claude Code como segundo executor nativo
 
-Status: **implementado na branch `claude/claude-code-coder-backend`, sem uso real** (2026-10-02).
+Status: **integrado em `cd73276`; primeira prova técnica viva PASS, NÃO GOVERNADA** (2026-10-02).
 
 - Código: `apps/web/lib/work-orchestration/claude-code-coder.ts`; seleção `coder_backend: 'claude-code'`
   (default segue `ollama`; retry interno de gate 0). A mecânica comum aos dois executores (instrução,
@@ -66,7 +66,9 @@ Status: **implementado na branch `claude/claude-code-coder-backend`, sem uso rea
   `--restricted` + permissões nativas + worktree descartável + git/escopo/gates do host. Não há sandbox próprio.
 - **Pré-requisito da prova viva:** o executável standalone precisa estar autenticado na assinatura
   (`claude auth status` ⇒ `loggedIn: true`), por ato humano (`claude auth login`). Em 2026-10-02 ele
-  reportava `loggedIn: false` nesta máquina.
+reportava `loggedIn: false` no preflight anterior; o relato humano posterior confirma prova real
+  por assinatura. Ver [registro Claude](../registros/2026-10-02-akita-baseline-v1-claude-live-proof.md).
+  A prova técnica não demonstra execução governada.
 
 ## Incremento 3 — ai-memory WRAP V1 (opt-in)
 

@@ -512,7 +512,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
       expect(el?.getAttribute('aria-label')).not.toMatch(/Operacional/);
     }
     const candidates = container.querySelectorAll('[data-origin="candidate"]');
-    expect(candidates.length).toBe(5);
+    expect(candidates.length).toBe(3);
     candidates.forEach((el) => expect(el.getAttribute('data-future')).toBe('true'));
     expect(screen.getByRole('button', { name: 'Continuidade entre harnesses — Projetada (a conquistar) · candidata externa (ai-memory)' })).toBeInTheDocument();
   });
@@ -537,7 +537,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     expect(stateOf(container, 'memory.cross-harness')).toBe('strong');
     expect(stateOf(container, 'governance.review')).toBe('dim');
     expect(screen.getByRole('heading', { name: /Reuso já integrado/ })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Candidatas externas (5)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Candidatas externas (3)' })).toBeInTheDocument();
     expect(screen.getByText(/POC externo que funcionou ≠ capacidade do Anima/)).toBeInTheDocument();
   });
 
@@ -766,16 +766,20 @@ test.each(['adopt', 'wrap', 'fork', 'build', 'undecided'] as const)('painel exp�
   if (strategy === 'undecided') expect(within(panel).getByText(/reuse decision missing/)).toBeInTheDocument();
 });
 
-test('baseline exibe PASS técnico com integração enquanto Claude e memória permanecem NEXT', () => {
+test('baseline exibe ambos os executores com PASS técnico e memória NEXT', () => {
   const { container } = render(<EvolutionClient {...buildProps()} />);
   const path = screen.getByRole('region', { name: 'Current development path' });
-  expect(within(path).getByRole('button', { name: /Codex CLI executor.*adapter integrado.*prova técnica viva PASS.*não governada/ })).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Claude Code executor.*NEXT.*candidata/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Codex CLI executor.*adapter integrado.*live technical proof PASS.*não governada/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Claude Code executor.*PASS.*CURRENT FOCUS.*integrada/ })).toBeInTheDocument();
   expect(within(path).getByRole('button', { name: /Continuidade entre harnesses.*após os executores.*NEXT/ })).toBeInTheDocument();
   const codex = container.querySelector('[data-capid="agency.codex-cli"]');
   expect(codex).toHaveAttribute('data-origin', 'integrated');
   expect(codex).toHaveAttribute('data-future', 'true');
-  fireEvent.click(codex!);
+  const claude = container.querySelector('[data-capid="agency.claude-code"]');
+  expect(claude).toHaveAttribute('data-origin', 'integrated');
+  expect(claude).toHaveAttribute('data-future', 'true');
+  fireEvent.click(claude!);
+  expect(screen.getByText(/Adapter integrado em cd73276/)).toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Evidência registrada de escopo limitado' })).toBeInTheDocument();
   expect(screen.getByText(/sem prova de maturidade creditada pelo motor/)).toBeInTheDocument();
   expect(screen.getByText(/Prova governada ainda não demonstrada/)).toBeInTheDocument();

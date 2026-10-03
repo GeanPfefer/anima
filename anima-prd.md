@@ -1,13 +1,14 @@
 # Anima — Product Requirements Document
 > Evolution UX V2 / Akita Baseline reconciliada em 2026-10-02 na branch isolada
-> `codex/evolution-ux-v2` sobre `9404bd4`, ainda sem merge em dev. Codex CLI:
-> CURRENT FOCUS / WRAP / integrated, primeira prova técnica viva TPC-01 PASS
-> relatada pelo humano (não governada; sem work item/attempt/authority/Verifier/review).
-> Maturidade anterior projected preservada: sem regra específica no Proof Engine,
-> avaliação not_evaluated; nenhuma alegação operational/autonomous. Claude e
-> ai-memory continuam NEXT/candidate. Sem alteração do backend nesta frente.
-> Plano 009; registro 2026-10-02-akita-baseline-v1-codex-live-proof. WIP histórico
-> externo de PRD não copiado nem presumido; pendente para integração humana.
+> `codex/evolution-ux-v2` sobre `cd73276`, ainda sem merge em dev. Codex CLI e
+> Claude Code: CURRENT FOCUS / WRAP / integrated; baseline técnico de ambos os
+> executores atingido, live technical proof TPC-01 PASS, base `f94bc5a`.
+> Provas relatadas pelo humano, NÃO GOVERNADAS (sem work item/attempt/authority/Verifier/review).
+> Maturidades projected preservadas: sem regras específicas no Proof Engine,
+> avaliação not_evaluated; nenhuma alegação operational/autonomous.
+> ai-memory continua NEXT/candidate; self-development avançado depois do baseline.
+> Plano 009; registros Codex/Claude live-proof e final-reconciliation de 2026-10-02.
+> Backends preservados. WIP histórico externo de PRD não absorvido; integração humana pendente.
 > Ollama Coder Error Observability V1 (2026-09-30): respostas não-2xx do Ollama no caminho do
 > coder preservam `httpStatus` e `providerError` (erro do próprio Ollama, redigido, ≤300 chars)
 > em `OllamaProtocolError`, sem ler nada do request. O transcript host-observed v1 não mudou

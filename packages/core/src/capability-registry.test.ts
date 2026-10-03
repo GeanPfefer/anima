@@ -126,7 +126,7 @@ describe('Evolution Reconciliation V2 — honestidade epistemológica do registr
     expect(get('research.web.search').reuse).toMatchObject({ tool: 'SearXNG', strategy: 'wrap', status: 'integrated' });
     expect(get('research.web.open').reuse).toMatchObject({ tool: 'agent-browser', strategy: 'wrap', status: 'integrated' });
     const candidates = ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.reuse?.status === 'candidate');
-    expect(candidates.map((c) => c.reuse?.tool).sort()).toEqual(['Claude Code', 'Claude Code / Codex CLI', 'ai-memory', 'ai-usagebar', 'ghpending']);
+    expect(candidates.map((c) => c.reuse?.tool).sort()).toEqual(['ai-memory', 'ai-usagebar', 'ghpending']);
     for (const c of candidates) {
       expect(isFutureMaturity(c.maturity)).toBe(true);
       // Evidência externa nunca vira prova de funcionamento do Anima.
@@ -183,7 +183,7 @@ describe('Akita Baseline — direção não concede maturidade', () => {
     expect(validateCapabilityRegistry(ANIMA_CAPABILITY_REGISTRY_V0)).toEqual([]);
   });
   test('WRAP e CURRENT FOCUS não promovem candidatos', () => {
-    for (const id of ['agency.claude-code', 'memory.cross-harness', 'agency.external-harness']) {
+    for (const id of ['memory.cross-harness']) {
       const capability = get(id);
       expect(capability.reuse?.strategy).toBe('wrap');
       expect(capability.reuse?.status).toBe('candidate');
@@ -192,7 +192,7 @@ describe('Akita Baseline — direção não concede maturidade', () => {
       expect(capability.direction?.refs.length).toBeGreaterThan(0);
     }
     expect(get('agency.codex-cli').direction?.status).toBe('current_focus');
-    expect(get('agency.claude-code').direction?.status).toBe('next');
+    expect(get('agency.claude-code').direction?.status).toBe('current_focus');
     expect(get('memory.cross-harness').direction?.status).toBe('next');
   });
   test('pesquisa preserva provas sem bloquear baseline', () => {
@@ -218,4 +218,14 @@ test('Codex integrado com prova técnica não governada preserva maturidade e n�
   expect(codex.history?.[0]).toMatchObject({ change: 'proof_added', at: '2026-10-02' });
   expect(codex.history?.[0]?.note).toContain('governed proof not yet demonstrated');
   expect(codex.history?.[0]?.refs).toContainEqual(expect.objectContaining({ kind: 'record', ref: 'docs/registros/2026-10-02-akita-baseline-v1-codex-live-proof.md' }));
+});
+
+test('Claude integrado com PASS técnico mantém projected e evidência sem crédito canônico', () => {
+  const claude = ANIMA_CAPABILITY_REGISTRY_V0.find((c) => c.id === 'agency.claude-code')!;
+  expect(claude.reuse).toMatchObject({ strategy: 'wrap', status: 'integrated' });
+  expect(claude.direction?.status).toBe('current_focus');
+  expect(claude.maturity).toBe('projected');
+  expect(claude.proofRefs ?? []).toEqual([]);
+  expect(claude.history?.[0]?.note).toContain('governed proof not yet demonstrated');
+  expect(claude.history?.[0]?.refs).toContainEqual(expect.objectContaining({ kind: 'record', ref: 'docs/registros/2026-10-02-akita-baseline-v1-claude-live-proof.md' }));
 });

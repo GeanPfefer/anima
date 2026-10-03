@@ -83,3 +83,17 @@ Nenhum conflito de PRD no rebase; somente bloco Evolution atualizado. O WIP
 histórico do checkout principal não consta desta base e permanece pendente.
 Próxima etapa humana: integrar esta branch/documentação e, em unidade separada,
 autorizar uma prova governada do Codex com critérios explícitos de maturidade.
+
+## Reconciliação final — 2026-10-02, base cd73276
+
+Os dois executores estão integrados e suas primeiras provas técnicas TPC-01 PASS
+foram relatadas pelo humano (mesma base f94bc5a, prompt/spec e gate). Ambos WRAP /
+CURRENT FOCUS, baseline técnico do executor atingido; governed proof ainda não
+demonstrada. Maturidades projected preservadas, sem regra específica no Proof
+Engine. ai-memory NEXT; self-development avançado após o baseline. Pesquisa e
+provas históricas preservadas. O objetivo composto Akita ainda não está concluído.
+
+Rebase com um conflito documental resolvido preservando os contratos dos dois
+backends. Nenhuma implementação de backend alterada; WIP externo não absorvido.
+Registros: Codex live-proof (preservado), Claude live-proof e final-reconciliation
+em docs/registros, data 2026-10-02. Gates e retomada no registro final. Sem merge/push.
