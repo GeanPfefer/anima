@@ -111,6 +111,120 @@ export const sanitizeNativeCliDiagnostic = (result: Pick<CommandResult, 'stdout'
     { maxChars: DIAGNOSTIC_MAX_CHARS, maxLines: DIAGNOSTIC_MAX_LINES, dropFooters: false, redactPaths: true },
   );
 
+// ------------------------------------------------------------
+// AI-MEMORY WRAP V1 (opt-in, default DESLIGADO). Reuse do `ai-memory run` (2.4.1) SÓ para
+// continuidade cross-harness (Claude ↔ Codex) NA MESMA worktree: o ai-memory vira o processo
+// pai do harness nativo, injeta o resume/seleção de sessão nativa e entrega o delta não visto
+// via hooks. O ANIMA não importa o ledger: no máximo registra REFERÊNCIAS em `notes`.
+// O servidor (`ai-memory serve`) é pré-condição operacional externa; inacessível ⇒ fail-closed.
+// ------------------------------------------------------------
+
+/** Escopo fixo do ANIMA no ai-memory (evita a estratégia `basename` partir a memória). */
+export const AI_MEMORY_WORKSPACE = 'anima';
+export const AI_MEMORY_PROJECT = 'anima';
+
+export type AiMemoryHarness = 'claude' | 'codex';
+
+export interface AiMemoryWrapConfig {
+  /** Executável nativo do `ai-memory` (não wrapper de shell). */
+  readonly executable: string;
+  /** URL HTTP loopback do `ai-memory serve` (sem credencial). */
+  readonly serverUrl: string;
+  /** Data dir do ai-memory (`AI_MEMORY_DATA_DIR`). */
+  readonly dataDir: string;
+  /** `new` ⇒ `--new <name>` (cria; nome existente = 409); `continue` ⇒ `--workstream <name>`. */
+  readonly workstream: { readonly mode: 'new' | 'continue'; readonly name: string };
+  /** Settings JSON com os hooks do ai-memory para o Claude Code (`--settings`); obrigatório no wrap do Claude. */
+  readonly claudeSettingsFile?: string;
+}
+
+export type AiMemoryWrapConfigResult =
+  | { readonly ok: true; readonly value: AiMemoryWrapConfig | null }
+  | { readonly ok: false; readonly error: string };
+
+const WORKSTREAM_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const LOOPBACK_HTTP = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d{1,5}\/?$/i;
+
+/**
+ * Config opt-in por env de DEPLOY/operador. `ANIMA_AI_MEMORY_PATH` ausente ⇒ wrap DESLIGADO
+ * (`value: null`) e os backends se comportam exatamente como sem ai-memory. Presente ⇒ todos
+ * os demais campos obrigatórios são validados e qualquer lacuna falha fechado (nunca liga
+ * pela metade): `ANIMA_AI_MEMORY_SERVER_URL` (HTTP loopback), `ANIMA_AI_MEMORY_DATA_DIR`,
+ * `ANIMA_AI_MEMORY_WORKSTREAM` (nome), `ANIMA_AI_MEMORY_WORKSTREAM_MODE` (`new`|`continue`),
+ * `ANIMA_AI_MEMORY_CLAUDE_SETTINGS` (opcional aqui; o backend Claude o exige).
+ */
+export function resolveAiMemoryWrapConfig(env: Record<string, string | undefined> = process.env): AiMemoryWrapConfigResult {
+  const executable = env.ANIMA_AI_MEMORY_PATH?.trim();
+  if (!executable) return { ok: true, value: null };
+  if (isShellWrapperPath(executable)) return { ok: false, error: 'ANIMA_AI_MEMORY_PATH aponta para um wrapper de shell (.cmd/.bat/.ps1); configure o executável nativo do ai-memory.' };
+  const serverUrl = env.ANIMA_AI_MEMORY_SERVER_URL?.trim() ?? '';
+  if (!LOOPBACK_HTTP.test(serverUrl)) return { ok: false, error: 'ANIMA_AI_MEMORY_SERVER_URL precisa ser uma URL HTTP loopback (http://127.0.0.1:<porta>).' };
+  const dataDir = env.ANIMA_AI_MEMORY_DATA_DIR?.trim();
+  if (!dataDir) return { ok: false, error: 'ANIMA_AI_MEMORY_DATA_DIR é obrigatório quando o ai-memory está habilitado.' };
+  const name = env.ANIMA_AI_MEMORY_WORKSTREAM?.trim() ?? '';
+  if (!WORKSTREAM_NAME.test(name)) return { ok: false, error: 'ANIMA_AI_MEMORY_WORKSTREAM ausente ou inválido (letras, dígitos, . _ -; até 64).' };
+  const mode = env.ANIMA_AI_MEMORY_WORKSTREAM_MODE?.trim();
+  if (mode !== 'new' && mode !== 'continue') return { ok: false, error: 'ANIMA_AI_MEMORY_WORKSTREAM_MODE precisa ser "new" ou "continue".' };
+  const claudeSettingsFile = env.ANIMA_AI_MEMORY_CLAUDE_SETTINGS?.trim();
+  return { ok: true, value: { executable, serverUrl: serverUrl.replace(/\/$/, ''), dataDir, workstream: { mode, name }, ...(claudeSettingsFile ? { claudeSettingsFile } : {}) } };
+}
+
+/**
+ * `ai-memory run` com as flags do wrapper ANTES do harness e os args nativos encaminhados
+ * byte a byte depois dele. `--no-autowire`: nunca toca config global dos harnesses.
+ */
+export function buildAiMemoryRunArgs(
+  config: AiMemoryWrapConfig,
+  harness: AiMemoryHarness,
+  nativeExecutable: string,
+  nativeArgs: readonly string[],
+): readonly string[] {
+  return [
+    'run',
+    '--no-autowire',
+    '--workspace', AI_MEMORY_WORKSPACE,
+    '--project', AI_MEMORY_PROJECT,
+    config.workstream.mode === 'new' ? '--new' : '--workstream', config.workstream.name,
+    '--executable', nativeExecutable,
+    harness,
+    ...nativeArgs,
+  ];
+}
+
+/** Sonda de disponibilidade do servidor (injetável em teste). */
+export type AiMemoryServerProbe = (serverUrl: string, signal: AbortSignal) => Promise<boolean>;
+
+const AI_MEMORY_PROBE_TIMEOUT_MS = 3_000;
+
+/** `GET /healthz` do `ai-memory serve` (2.4.1), com teto curto; qualquer falha ⇒ indisponível. */
+export const probeAiMemoryServer: AiMemoryServerProbe = async (serverUrl, signal) => {
+  try {
+    const response = await fetch(`${serverUrl}/healthz`, { signal: AbortSignal.any([signal, AbortSignal.timeout(AI_MEMORY_PROBE_TIMEOUT_MS)]) });
+    return response.ok;
+  } catch { return false; }
+};
+
+const ANSI = /\x1b\[[0-9;]*m/g;
+const SAFE_REF = /^[A-Za-z0-9._:+-]{1,80}$/;
+
+/**
+ * Referências (nunca conteúdo) do turno wrapped: workstream configurado, modo e harness, mais
+ * a versão e a contagem de eventos que o próprio `ai-memory run` já imprime no stderr. Sem
+ * scraping de ledger; tokens fora do padrão seguro são descartados.
+ */
+export function aiMemoryTurnNotes(config: AiMemoryWrapConfig, harness: AiMemoryHarness, stderr: string): readonly string[] {
+  const text = stderr.replace(ANSI, '');
+  const version = /ai-memory starting version="([^"]+)"/.exec(text)?.[1];
+  const saved = new RegExp(`workstream '${config.workstream.name.replace(/[.]/g, '\\.')}' saved (\\d+) new event`).exec(text)?.[1];
+  return [
+    `ai-memory:workstream:${config.workstream.name}`,
+    `ai-memory:mode:${config.workstream.mode}`,
+    `ai-memory:harness:${harness}`,
+    ...(version && SAFE_REF.test(version) ? [`ai-memory:version:${version}`] : []),
+    ...(saved ? [`ai-memory:saved-events:${saved}`] : []),
+  ];
+}
+
 export interface NativeCliTurnInput {
   /** Nome humano nas mensagens (ex.: "Codex CLI"). */
   readonly label: string;
@@ -121,12 +235,20 @@ export interface NativeCliTurnInput {
   readonly request: CoderEditRequest;
   readonly rootPath: string | undefined;
   readonly signal: AbortSignal;
+  /** Wrap opt-in pelo `ai-memory run`; ausente ⇒ lançamento direto, como sempre. */
+  readonly aiMemory?: {
+    readonly config: AiMemoryWrapConfig;
+    readonly harness: AiMemoryHarness;
+    readonly probe?: AiMemoryServerProbe;
+  };
 }
 
 export interface NativeCliTurnOutput {
   readonly result: CommandResult;
   readonly rootPath: string;
   readonly seconds: number;
+  /** Referências do ai-memory quando wrapped; vazio sem wrap. */
+  readonly aiMemoryNotes: readonly string[];
 }
 
 /**
@@ -153,11 +275,31 @@ export async function runNativeCliTurn(input: NativeCliTurnInput): Promise<Nativ
     throw new Error(`Instrução do ${label} excede ${NATIVE_CLI_PROMPT_MAX_CHARS} caracteres (${prompt.length}); não iniciado.`);
   }
 
-  const result = await (input.run ?? runProcess)(input.executable, input.buildArgs(rootPath, prompt), {
+  const nativeArgs = input.buildArgs(rootPath, prompt);
+  const wrap = input.aiMemory;
+  if (wrap && !(await (wrap.probe ?? probeAiMemoryServer)(wrap.config.serverUrl, signal))) {
+    // Pré-condição externa: sem servidor não há continuidade gerenciada; nunca cai em lançamento direto.
+    throw new Error(`${label} não iniciado: servidor ai-memory inacessível (fail-closed).`);
+  }
+  if (signal.aborted) throw new Error(`${label} não iniciado: tentativa cancelada.`);
+  // O probe é um await: o restante é RECALCULADO do mesmo deadline absoluto antes do spawn.
+  // Vencido durante o probe ⇒ mesmo `[runner_timeout]` de antes, sem lançar ai-memory/harness.
+  const launchTimeoutMs = wrap ? deadlineAtMs - Date.now() : timeoutMs;
+  if (!(launchTimeoutMs > 0)) throw new Error(`[runner_timeout] ${label} não iniciado: deadline global da tentativa esgotado.`);
+  // Wrapped: o ai-memory é o processo PAI (mesmo cwd, mesmo env filtrado + só o necessário
+  // para achar o servidor/data dir); o harness nativo vira `--executable`. O encerramento por
+  // deadline/cancelamento derruba a ÁRVORE (taskkill /T no Windows), incluindo o harness.
+  const executable = wrap ? wrap.config.executable : input.executable;
+  const args = wrap ? buildAiMemoryRunArgs(wrap.config, wrap.harness, input.executable, nativeArgs) : nativeArgs;
+  const env = wrap
+    ? { ...input.env, AI_MEMORY_SERVER_URL: wrap.config.serverUrl, AI_MEMORY_DATA_DIR: wrap.config.dataDir }
+    : input.env;
+
+  const result = await (input.run ?? runProcess)(executable, args, {
     cwd: rootPath,
-    timeoutMs,
+    timeoutMs: launchTimeoutMs,
     signal,
-    env: input.env as NodeJS.ProcessEnv,
+    env: env as NodeJS.ProcessEnv,
   });
 
   const seconds = Math.round(result.durationMs / 1000);
@@ -165,7 +307,7 @@ export async function runNativeCliTurn(input: NativeCliTurnInput): Promise<Nativ
   if (result.timedOut) throw new Error(`[runner_timeout] ${label} encerrado pelo deadline global após ${seconds}s.`);
   if (result.exitCode !== 0) {
     const diagnostic = sanitizeNativeCliDiagnostic(result, rootPath);
-    throw new Error(`${label} terminou com exit ${result.exitCode}${diagnostic ? `: ${diagnostic}` : ''}`);
+    throw new Error(`${label}${wrap ? ' (via ai-memory)' : ''} terminou com exit ${result.exitCode}${diagnostic ? `: ${diagnostic}` : ''}`);
   }
-  return { result, rootPath, seconds };
+  return { result, rootPath, seconds, aiMemoryNotes: wrap ? aiMemoryTurnNotes(wrap.config, wrap.harness, result.stderr) : [] };
 }

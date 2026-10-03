@@ -6,6 +6,8 @@ import {
   buildNativeCliPrompt,
   isShellWrapperPath,
   runNativeCliTurn,
+  type AiMemoryServerProbe,
+  type AiMemoryWrapConfig,
   type NativeCliProcessRunner,
 } from './native-cli-coder';
 
@@ -83,8 +85,22 @@ export function resolveCodexCliConfig(
  * Argumentos de `codex exec` (sem shell, sem interpolação). Determinísticos:
  * sandbox `workspace-write`, aprovação `never` (sem prompt interativo nem escalada),
  * raiz explícita, modelo/perfil só quando fornecidos, instrução como último argumento.
+ *
+ * `aiMemoryWrapped`: o `ai-memory run` reescreve `exec <args>` para `exec resume <id> <args>`
+ * ao voltar ao Codex, e `codex exec resume` (0.159) NÃO aceita `--sandbox` nem `--cd`. Nesse
+ * modo o sandbox vai por `-c sandbox_mode=workspace-write` (aceito por exec E exec resume) e a
+ * raiz é o cwd do processo (a worktree). Sem wrap, os args são exatamente os de antes.
  */
-export function buildCodexExecArgs(config: CodexCliConfig, rootPath: string, prompt: string): readonly string[] {
+export function buildCodexExecArgs(config: CodexCliConfig, rootPath: string, prompt: string, aiMemoryWrapped = false): readonly string[] {
+  if (aiMemoryWrapped) {
+    return [
+      'exec',
+      '-c', 'sandbox_mode=workspace-write',
+      '-c', 'approval_policy=never',
+      ...(config.model !== CODEX_CLI_DEFAULT_MODEL ? ['--model', config.model] : []),
+      prompt,
+    ];
+  }
   return [
     'exec',
     '--sandbox', 'workspace-write',
@@ -108,6 +124,10 @@ export interface CodexCliCoderOptions {
   readonly run?: CodexCliProcessRunner;
   /** Fonte do ambiente filtrado; default `process.env`. */
   readonly environmentSource?: Record<string, string | undefined>;
+  /** Wrap opt-in pelo `ai-memory run` (continuidade cross-harness); ausente ⇒ lançamento direto. */
+  readonly aiMemory?: AiMemoryWrapConfig;
+  /** Sonda do servidor ai-memory (teste). */
+  readonly aiMemoryProbe?: AiMemoryServerProbe;
 }
 
 export class CodexCliCoderBackend implements CoderBackend {
@@ -116,6 +136,8 @@ export class CodexCliCoderBackend implements CoderBackend {
   private readonly config: CodexCliConfig;
   private readonly run: CodexCliProcessRunner | undefined;
   private readonly environmentSource: Record<string, string | undefined>;
+  private readonly aiMemory: AiMemoryWrapConfig | undefined;
+  private readonly aiMemoryProbe: AiMemoryServerProbe | undefined;
 
   constructor(options: CodexCliCoderOptions) {
     this.config = options.config;
@@ -124,25 +146,31 @@ export class CodexCliCoderBackend implements CoderBackend {
     this.observation = { placement: 'remote', nodeId: null, model: options.config.model };
     this.run = options.run;
     this.environmentSource = options.environmentSource ?? process.env;
+    this.aiMemory = options.aiMemory;
+    this.aiMemoryProbe = options.aiMemoryProbe;
   }
 
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
-    const { seconds } = await runNativeCliTurn({
+    const wrap = this.aiMemory;
+    // `exec resume` não aceita `--profile`: com wrap, perfil explícito falha fechado (nunca é descartado em silêncio).
+    if (wrap && this.config.profile) throw new Error('Codex CLI com ai-memory não suporta ANIMA_CODEX_CLI_PROFILE (codex exec resume não aceita --profile).');
+    const { seconds, aiMemoryNotes } = await runNativeCliTurn({
       label: 'Codex CLI',
       executable: this.config.executable,
-      buildArgs: (rootPath, prompt) => buildCodexExecArgs(this.config, rootPath, prompt),
+      buildArgs: (rootPath, prompt) => buildCodexExecArgs(this.config, rootPath, prompt, Boolean(wrap)),
       env: buildCodexCliEnvironment(this.environmentSource),
       ...(this.run ? { run: this.run } : {}),
       request,
       rootPath: workspace.rootPath,
       signal,
+      ...(wrap ? { aiMemory: { config: wrap, harness: 'codex' as const, ...(this.aiMemoryProbe ? { probe: this.aiMemoryProbe } : {}) } } : {}),
     });
     return {
       // Flui para o sinal `result` persistido: sem caminho absoluto, sem saída do modelo.
       summary: `Codex CLI (${this.id}) encerrou o turno com exit 0 em ${seconds}s; a validação é dos gates do host.`,
       // O host observa o escopo real via git; o adaptador não atesta arquivos.
       touchedResources: [],
-      notes: ['turn-outcome:exited-0', `duration-s:${seconds}`],
+      notes: ['turn-outcome:exited-0', `duration-s:${seconds}`, ...aiMemoryNotes],
     };
   }
 }

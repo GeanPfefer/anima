@@ -11,6 +11,7 @@ import type { OpenAIAdmissionControl } from '@/lib/ai/openai-paid-transport';
 import { createNodeDeepSeekHarnessBackend } from './harness/node-harness-runtime';
 import { CodexCliCoderBackend, resolveCodexCliConfig } from './codex-cli-coder';
 import { ClaudeCodeCoderBackend, resolveClaudeCodeConfig } from './claude-code-coder';
+import { resolveAiMemoryWrapConfig } from './native-cli-coder';
 import { localRunnerRouteFromEnvironment, type ConfiguredWorkRoute } from './execution';
 import { WorktreeExecutorAdapter } from './worktree-executor';
 import { runProcess } from './worktree';
@@ -196,7 +197,10 @@ const backendFor = (
     // dono do git observado, escopo, gates e handoff. Config do operador por env.
     const config = resolveCodexCliConfig(contract.model);
     if (!config.ok) return { error: config.error };
-    return new CodexCliCoderBackend({ config: config.value });
+    // ai-memory (opt-in, default desligado): continuidade cross-harness na mesma worktree.
+    const aiMemory = resolveAiMemoryWrapConfig();
+    if (!aiMemory.ok) return { error: aiMemory.error };
+    return new CodexCliCoderBackend({ config: config.value, ...(aiMemory.value ? { aiMemory: aiMemory.value } : {}) });
   }
 
   if (kind === 'claude-code') {
@@ -204,7 +208,9 @@ const backendFor = (
     // worktree; o host segue dono do git observado, escopo, gates e handoff.
     const config = resolveClaudeCodeConfig(contract.model);
     if (!config.ok) return { error: config.error };
-    return new ClaudeCodeCoderBackend({ config: config.value });
+    const aiMemory = resolveAiMemoryWrapConfig();
+    if (!aiMemory.ok) return { error: aiMemory.error };
+    return new ClaudeCodeCoderBackend({ config: config.value, ...(aiMemory.value ? { aiMemory: aiMemory.value } : {}) });
   }
 
   // O backend determin?stico (`scripted`) s? entra por inje??o em teste.

@@ -64,3 +64,26 @@ Status: **implementado na branch `claude/claude-code-coder-backend`, sem uso rea
 - **Pré-requisito da prova viva:** o executável standalone precisa estar autenticado na assinatura
   (`claude auth status` ⇒ `loggedIn: true`), por ato humano (`claude auth login`). Em 2026-10-02 ele
   reportava `loggedIn: false` nesta máquina.
+
+## Incremento 3 — ai-memory WRAP V1 (opt-in)
+
+Status: **implementado na branch `claude/ai-memory-wrap-v1`, sem uso real** (2026-10-02). Reuse = WRAP do
+`ai-memory run` **2.4.1** (sem fork, sem memória própria). O ai-memory cuida só da continuidade cross-harness
+(ledger, delta não visto, resume nativo); Work Item, task spec, gates, evidência e Verifier seguem no ANIMA.
+
+- Fronteira única: `runNativeCliTurn` em `native-cli-coder.ts`. Default **desligado**; sem config os dois
+  backends lançam exatamente como antes.
+- Config (env do operador): `ANIMA_AI_MEMORY_PATH` (liga), `ANIMA_AI_MEMORY_SERVER_URL` (HTTP loopback),
+  `ANIMA_AI_MEMORY_DATA_DIR`, `ANIMA_AI_MEMORY_WORKSTREAM`, `ANIMA_AI_MEMORY_WORKSTREAM_MODE` (`new` ⇒ `--new`,
+  `continue` ⇒ `--workstream`), `ANIMA_AI_MEMORY_CLAUDE_SETTINGS` (settings de hooks; exigido pelo Claude).
+  Campo faltando ou inválido ⇒ fail-closed.
+- Lançamento wrapped: `ai-memory run --no-autowire --workspace anima --project anima --new|--workstream <nome>
+  --executable <claude.exe|codex.exe> claude|codex <args nativos>`. Env = allowlist do backend +
+  `AI_MEMORY_SERVER_URL`/`AI_MEMORY_DATA_DIR`. Servidor (`ai-memory serve`) é pré-condição externa:
+  `GET /healthz` falhando ⇒ não lança.
+- Claude wrapped: sem `--no-session-persistence` (o ai-memory trata como efêmero) e com `--settings <hooks>`
+  (`--restricted` ignora settings user/project). Codex wrapped: `-c sandbox_mode=workspace-write` no lugar de
+  `--sandbox`/`--cd` (o `codex exec resume` não os aceita); perfil explícito ⇒ fail-closed.
+- Evidência: só referências em `notes` (`ai-memory:workstream|mode|harness|version|saved-events`); nunca prompts,
+  respostas, tool calls, arquivos ou pacotes de delta.
+- Escopo V1: Claude → Codex → Claude na **mesma worktree**. Continuidade entre worktrees (A→B→C) é fase 2.

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import {
   NATIVE_CLI_DEFAULT_MODEL,
@@ -5,6 +6,8 @@ import {
   buildNativeCliPrompt,
   isShellWrapperPath,
   runNativeCliTurn,
+  type AiMemoryServerProbe,
+  type AiMemoryWrapConfig,
   type NativeCliProcessRunner,
 } from './native-cli-coder';
 
@@ -97,13 +100,20 @@ export function resolveClaudeCodeConfig(
  * worktree (o Claude Code não tem flag de cwd). As opções variádicas (`--tools`,
  * `--allowedTools`) vêm ANTES de opções de valor único, para nunca engolirem a
  * instrução, que é o último argumento.
+ *
+ * `aiMemoryHooksSettings` (wrap pelo `ai-memory run`): sai `--no-session-persistence` (o
+ * ai-memory trata a flag como invocação efêmera e NÃO dá continuidade) e entra `--settings
+ * <arquivo>` com os hooks do ai-memory — `--restricted` ignora settings de user/project/local,
+ * mas `--settings` continua valendo. Nada é instalado na config global. Sem wrap, os args são
+ * exatamente os de antes.
  */
-export function buildClaudeCodeArgs(config: ClaudeCodeConfig, prompt: string): readonly string[] {
+export function buildClaudeCodeArgs(config: ClaudeCodeConfig, prompt: string, aiMemoryHooksSettings?: string): readonly string[] {
   return [
     '-p',
     '--output-format', 'json',
-    '--no-session-persistence',
+    ...(aiMemoryHooksSettings === undefined ? ['--no-session-persistence'] : []),
     '--restricted',
+    ...(aiMemoryHooksSettings === undefined ? [] : ['--settings', aiMemoryHooksSettings]),
     '--tools', CLAUDE_CODE_TOOLS,
     '--allowedTools', CLAUDE_CODE_ALLOWED_TOOLS.join(','),
     '--permission-mode', 'acceptEdits',
@@ -139,6 +149,10 @@ export interface ClaudeCodeCoderOptions {
   readonly run?: NativeCliProcessRunner;
   /** Fonte do ambiente filtrado; default `process.env`. */
   readonly environmentSource?: Record<string, string | undefined>;
+  /** Wrap opt-in pelo `ai-memory run` (continuidade cross-harness); ausente ⇒ lançamento direto. */
+  readonly aiMemory?: AiMemoryWrapConfig;
+  /** Sonda do servidor ai-memory (teste). */
+  readonly aiMemoryProbe?: AiMemoryServerProbe;
 }
 
 export class ClaudeCodeCoderBackend implements CoderBackend {
@@ -147,6 +161,8 @@ export class ClaudeCodeCoderBackend implements CoderBackend {
   private readonly config: ClaudeCodeConfig;
   private readonly run: NativeCliProcessRunner | undefined;
   private readonly environmentSource: Record<string, string | undefined>;
+  private readonly aiMemory: AiMemoryWrapConfig | undefined;
+  private readonly aiMemoryProbe: AiMemoryServerProbe | undefined;
 
   constructor(options: ClaudeCodeCoderOptions) {
     this.config = options.config;
@@ -155,18 +171,27 @@ export class ClaudeCodeCoderBackend implements CoderBackend {
     this.observation = { placement: 'remote', nodeId: null, model: options.config.model };
     this.run = options.run;
     this.environmentSource = options.environmentSource ?? process.env;
+    this.aiMemory = options.aiMemory;
+    this.aiMemoryProbe = options.aiMemoryProbe;
   }
 
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
-    const { result, seconds } = await runNativeCliTurn({
+    const wrap = this.aiMemory;
+    // Sem o settings de hooks, o Claude sob --restricted não captura nem recebe o delta: wrap
+    // incompleto falha fechado em vez de rodar "wrapped" sem continuidade.
+    if (wrap && !(wrap.claudeSettingsFile && existsSync(wrap.claudeSettingsFile))) {
+      throw new Error('Claude Code com ai-memory exige ANIMA_AI_MEMORY_CLAUDE_SETTINGS apontando para o settings de hooks existente.');
+    }
+    const { result, seconds, aiMemoryNotes } = await runNativeCliTurn({
       label: 'Claude Code',
       executable: this.config.executable,
-      buildArgs: (_rootPath, prompt) => buildClaudeCodeArgs(this.config, prompt),
+      buildArgs: (_rootPath, prompt) => buildClaudeCodeArgs(this.config, prompt, wrap?.claudeSettingsFile),
       env: buildClaudeCodeEnvironment(this.environmentSource),
       ...(this.run ? { run: this.run } : {}),
       request,
       rootPath: workspace.rootPath,
       signal,
+      ...(wrap ? { aiMemory: { config: wrap, harness: 'claude' as const, ...(this.aiMemoryProbe ? { probe: this.aiMemoryProbe } : {}) } } : {}),
     });
 
     const envelope = parseEnvelope(result.stdout);
@@ -192,6 +217,7 @@ export class ClaudeCodeCoderBackend implements CoderBackend {
         envelope ? `result-subtype:${subtype ?? 'ausente'}` : 'result-envelope:unparsed',
         ...(turns !== null ? [`num-turns:${turns}`] : []),
         ...models.map(name => `model:${name}`),
+        ...aiMemoryNotes,
       ],
     };
   }
