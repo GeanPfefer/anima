@@ -1216,6 +1216,19 @@ function CapabilityDetail({
         <ChipList ids={node.unlocks} nameById={nameById} onSelect={onSelect} empty="Ainda não desbloqueia outra capacidade registrada." />
       </section>
 
+      {cap.deliveryEvidence && <section className={styles.detailSection} aria-label="Proof delivery dimensions">
+        <h3 className={styles.detailLabel}>Proof / review / integration</h3>
+        <p className={styles.detailHint}>direction != maturity · technical proof != governed proof · governed proof != autonomous · accepted != integrated</p>
+        <ul className={styles.proofList}>
+          {[cap.deliveryEvidence.technical, cap.deliveryEvidence.governed].map((proof) => <li key={proof.label} className={styles.proofItem}>
+            <strong className={styles.deliveryBadge} data-dimension="proof" data-status={proof.status}>{proof.label} · {proof.status === 'pass' ? 'PASS' : 'NOT YET DEMONSTRATED'}</strong>
+            {proof.refs.map((ref) => <code key={ref.ref} className={styles.proofRef}>{PROOF_KIND_LABEL[ref.kind]} · {ref.ref}</code>)}
+          </li>)}
+          {cap.deliveryEvidence.verifier && <li className={styles.proofItem}><strong className={styles.deliveryBadge} data-dimension="proof">Verifier · verified</strong><span>Machine-proven = scope + gate</span></li>}
+          {cap.deliveryEvidence.humanReview && <li className={styles.proofItem}><strong className={styles.deliveryBadge} data-dimension="review">Human Review · ACCEPTED</strong><span>5⇒Despertar · 30⇒Expansão · preservação dos casos</span></li>}
+          {cap.deliveryEvidence.candidate && <li className={styles.proofItem}><strong className={styles.deliveryBadge} data-dimension="integration">Candidate Integration/Publication · {cap.deliveryEvidence.candidate.status}</strong><code className={styles.proofRef}>{cap.deliveryEvidence.candidate.commit}</code><span>Fotografia após fetch · origin/dev {cap.deliveryEvidence.candidate.checkedAgainst.slice(0, 7)}</span></li>}
+        </ul>
+      </section>}
       <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>Provas</h3>
         {(cap.proofRefs?.length ?? 0) === 0 ? (
@@ -1239,19 +1252,19 @@ function CapabilityDetail({
         <section className={styles.detailSection} aria-label="Evidência registrada de escopo limitado">
           <h3 className={styles.detailLabel}>Evidência registrada · escopo limitado</h3>
           <p className={styles.detailHint}>Registro de prova não concede maturidade ou autoridade; seu escopo e limitações permanecem explícitos.</p>
-          <HistoryList entries={cap.history!.filter((entry) => entry.change === 'proof_added')} />
+          <details><summary>Evidence / history</summary><HistoryList entries={cap.history!.filter((entry) => entry.change === 'proof_added')} /></details>
         </section>
       )}
-      <section className={styles.detailSection}>
+      {!(cap.history ?? []).every((entry) => entry.change === 'proof_added') && <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>História</h3>
         {(cap.history?.length ?? 0) === 0 ? (
           <p className={styles.detailEmpty}>
             Sem mudança registrada desde a reconciliação. História derivada (commits, attempts, decisões) fica para a Evolution History V3.
           </p>
         ) : (
-          <HistoryList entries={cap.history!} />
+          <HistoryList entries={cap.history!.filter((entry) => entry.change !== 'proof_added')} />
         )}
-      </section>
+      </section>}
 
       {cap.target && (
         <section className={styles.detailSection}>
@@ -1488,7 +1501,14 @@ function DevelopmentPath({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; on
   const byId = new Map(nodes.map((node) => [node.capability.id, node.capability]));
   return <section className={styles.developmentPath} aria-label="Current development path">
     <div className={styles.pathIntro}><strong>{objective.name}{objective.target.achievement === 'complete' ? ' · COMPLETE' : ''}</strong><span>REUSE BEFORE BUILD</span>
-      <p>{objective.direction?.rationale}</p></div>
+      <p>{objective.direction?.rationale}</p>
+      <p>✓ Codex executor · ✓ Claude executor · ✓ cross-harness continuity</p>
+      <p>COMPLETE não significa autonomia completa, prova governada Claude, recovery cross-agent ou integração autônoma.</p>
+      <details><summary>Próximos marcos</summary>
+        <p>NEXT · governed Claude Code proof; escolha/handoff Codex ↔ Claude dentro da governança; ai-memory correlacionado a work item/attempt/lineage quando necessário.</p>
+        <p>LATER · recovery cross-agent governado; autonomous integration/publication; self-development mais amplo.</p>
+        <p>PARKED / EXPERIMENTAL · Qwen/Ollama/DSH, RunPod coder próprio, parser/tool-loop próprio fora do caminho crítico.</p>
+      </details></div>
     <ol className={styles.baselineSteps}>{objective.target.steps.map((step) => {
       const capability = byId.get(step.capabilityId);
       if (!capability) return null;

@@ -107,3 +107,18 @@ Achievement separado de maturity; projected e not_evaluated preservados.
 Ollama/DSH/Qwen experimentais e RunPod parked. Sem mudança nos backends,
 sem prova governada, sem merge/push/deploy. Gates e retomada no
 [registro de fechamento](../registros/2026-10-02-akita-baseline-v1-ai-memory-live-proof.md).
+
+
+## Pós-Akita — 2026-10-03
+
+Reconciliado sem conflito com origin/dev f518d0d e depois 83f7fd2 (avanço concorrente confirmado por fetch), preservando o fix CLI nativo.
+Baseline COMPLETE preservado. Foco atual: usar native coding agents no self-development
+ governado. NEXT: Claude governado, escolha/handoff Codex/Claude na governança e
+correlação ai-memory quando necessária. LATER: recovery cross-agent governado,
+integração/publicação autônoma e self-development mais amplo.
+
+Modelo aditivo deliveryEvidence separa technical/governed/verifier/humanReview/candidate
+sem alimentar o Proof Engine. Codex AKT-03 PASS, verified, ACCEPTED, completed,
+candidato integrated confirmado contra dev; Claude e ai-memory não ganham prova governada.
+História AKT-01/02 preservada como diagnóstico, nunca sucessos governados.
+Gates, proveniência e limites no [registro](../registros/2026-10-03-evolution-pos-akita-governed-codex.md).

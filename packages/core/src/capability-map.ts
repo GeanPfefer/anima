@@ -205,6 +205,14 @@ export interface CapabilityTarget {
 }
 
 export interface Capability {
+  /** Fotografia editorial de provas, separada do motor de maturidade e de authority. */
+  deliveryEvidence?: {
+    technical: { status: 'pass'; label: string; refs: CapabilityProofRef[] };
+    governed: { status: 'pass' | 'not_demonstrated'; label: string; refs: CapabilityProofRef[] };
+    verifier?: 'verified';
+    humanReview?: 'accepted';
+    candidate?: { status: 'local_only' | 'integrated'; commit: string; checkedAgainst: string };
+  };
   id: string;
   name: string;
   /** Uma linha: o que a capacidade é. */

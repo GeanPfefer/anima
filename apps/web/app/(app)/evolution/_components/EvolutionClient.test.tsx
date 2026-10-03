@@ -733,7 +733,9 @@ describe('Evolution UX V2 — Akita e reuso', () => {
     expect(screen.getByRole('heading', { name: 'Codex CLI executor' })).toBeInTheDocument();
     expect(screen.getByText(/Maturidade: Projetada · Estratégia: WRAP/)).toBeInTheDocument();
     expect(screen.getAllByText(/primeira prova viva técnica PASS/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/governed proof not yet demonstrated/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Governed execution AKT-03 · PASS')).toBeInTheDocument();
+    expect(screen.getByText('Human Review · ACCEPTED')).toBeInTheDocument();
+    expect(screen.getByText('Candidate Integration/Publication · integrated')).toBeInTheDocument();
     expect(screen.getAllByText(/Reuso integrado/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/external candidate exists/)).not.toBeInTheDocument();
     expect(screen.getByText(/Decisão arquitetural ≠ integração ≠ prova ≠ maturidade/)).toBeInTheDocument();
@@ -770,10 +772,10 @@ test('baseline COMPLETE exibe PASS técnico e cross-harness sem promover maturid
   const { container } = render(<EvolutionClient {...buildProps()} />);
   const path = screen.getByRole('region', { name: 'Current development path' });
   expect(within(path).getByRole('button', { name: /Codex CLI executor.*adapter integrado.*live technical proof PASS.*não governada/ })).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Claude Code executor.*PASS.*CURRENT FOCUS.*integrada/ })).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Continuidade entre harnesses.*live cross-harness proof PASS.*CURRENT FOCUS.*integrada/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Claude Code executor.*PASS.*NEXT.*integrada/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Continuidade entre harnesses.*live cross-harness proof PASS.*NEXT.*integrada/ })).toBeInTheDocument();
   expect(within(path).getByText('AKITA BASELINE V1 · COMPLETE')).toBeInTheDocument();
-  expect(within(path).getByRole('button', { name: /Self-development contínuo.*NEXT/ })).toBeInTheDocument();
+  expect(within(path).getByRole('button', { name: /Self-development contínuo.*CURRENT FOCUS/ })).toBeInTheDocument();
   const codex = container.querySelector('[data-capid="agency.codex-cli"]');
   expect(codex).toHaveAttribute('data-origin', 'integrated');
   expect(codex).toHaveAttribute('data-future', 'true');

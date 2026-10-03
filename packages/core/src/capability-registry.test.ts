@@ -192,11 +192,11 @@ describe('Akita Baseline — direção não concede maturidade', () => {
       expect(capability.direction?.refs.length).toBeGreaterThan(0);
     }
     expect(get('agency.codex-cli').direction?.status).toBe('current_focus');
-    expect(get('agency.claude-code').direction?.status).toBe('current_focus');
-    expect(get('memory.cross-harness').direction?.status).toBe('current_focus');
+    expect(get('agency.claude-code').direction?.status).toBe('next');
+    expect(get('memory.cross-harness').direction?.status).toBe('next');
     expect(get('agency.akita-baseline-v1').target?.achievement).toBe('complete');
     expect(get('agency.akita-baseline-v1').maturity).toBe('projected');
-    expect(get('agency.continuous-self-development').direction?.status).toBe('next');
+    expect(get('agency.continuous-self-development').direction?.status).toBe('current_focus');
   });
   test('pesquisa preserva provas sem bloquear baseline', () => {
     for (const id of ['agency.ollama-agentic-runtime', 'agency.deepseek-harness']) {
@@ -226,9 +226,26 @@ test('Codex integrado com prova técnica não governada preserva maturidade e n�
 test('Claude integrado com PASS técnico mantém projected e evidência sem crédito canônico', () => {
   const claude = ANIMA_CAPABILITY_REGISTRY_V0.find((c) => c.id === 'agency.claude-code')!;
   expect(claude.reuse).toMatchObject({ strategy: 'wrap', status: 'integrated' });
-  expect(claude.direction?.status).toBe('current_focus');
+  expect(claude.direction?.status).toBe('next');
   expect(claude.maturity).toBe('projected');
   expect(claude.proofRefs ?? []).toEqual([]);
   expect(claude.history?.[0]?.note).toContain('governed proof not yet demonstrated');
   expect(claude.history?.[0]?.refs).toContainEqual(expect.objectContaining({ kind: 'record', ref: 'docs/registros/2026-10-02-akita-baseline-v1-claude-live-proof.md' }));
+});
+
+
+test('AKT-03 separa prova governada, review e integração sem promover os executores', () => {
+  const get = (id: string) => ANIMA_CAPABILITY_REGISTRY_V0.find((cap) => cap.id === id)!;
+  expect(get('agency.codex-cli').deliveryEvidence).toMatchObject({
+    technical: { status: 'pass' }, governed: { status: 'pass' }, verifier: 'verified',
+    humanReview: 'accepted', candidate: { status: 'integrated' },
+  });
+  for (const id of ['agency.codex-cli', 'agency.claude-code', 'memory.cross-harness']) {
+    expect(get(id).maturity).toBe('projected');
+    expect(get(id).reuse?.status).toBe('integrated');
+  }
+  for (const id of ['agency.claude-code', 'memory.cross-harness']) {
+    expect(get(id).deliveryEvidence?.governed.status).toBe('not_demonstrated');
+    expect(get(id).deliveryEvidence?.humanReview).toBeUndefined();
+  }
 });

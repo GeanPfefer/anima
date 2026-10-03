@@ -35,6 +35,8 @@ const CODEX_LIVE_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-codex-liv
 const CLAUDE_LIVE_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-claude-live-proof.md';
 const FINAL_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-final-reconciliation.md';
 const AI_MEMORY_LIVE_RECORD = 'docs/registros/2026-10-02-akita-baseline-v1-ai-memory-live-proof.md';
+const GOVERNED_RECORD = 'docs/registros/2026-10-03-evolution-pos-akita-governed-codex.md';
+const governedRefs = [{ kind: 'record' as const, ref: GOVERNED_RECORD }, { kind: 'work_item' as const, ref: 'b00e6a38-18e3-4770-a2e5-553827d28b54' }, { kind: 'attempt' as const, ref: '51eb070d-9880-493d-a7d4-b2fab28bd60b' }];
 const directionRefs = [{ kind: 'doc' as const, ref: DIRECTION_RECORD, note: 'Decisão humana de direção; não prova operacional.' }];
 
 export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
@@ -284,12 +286,13 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'memory.cross-harness',
-    direction: { status: 'current_focus', rationale: 'WRAP integrado · live cross-harness proof PASS (não governada).', refs: directionRefs },
+    direction: { status: 'next', rationale: 'Cross-harness técnico PASS; próximo: correlação governada a work item/attempt/lineage quando necessária.', refs: directionRefs },
     responsibility: 'reused_baseline',
     name: 'Continuidade entre harnesses',
-    description: 'Ledger e resume de sessão entre Claude Code e Codex correlacionados a attempt/lineage do Anima.',
+    description: 'Continuidade técnica entre Claude Code e Codex; correlação governada a attempt/lineage ainda não demonstrada.',
     domain: 'memory',
     maturity: 'projected',
+    deliveryEvidence: { technical: { status: 'pass', label: 'Cross-harness live proof', refs: [{ kind: 'record', ref: AI_MEMORY_LIVE_RECORD }] }, governed: { status: 'not_demonstrated', label: 'Governed cross-attempt continuity', refs: [] }, },
     dependsOn: ['agency.codex-cli', 'agency.claude-code', 'memory.continuity'],
     reuse: {
       strategy: 'wrap',
@@ -298,7 +301,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       externalEvidence:
         'ai-memory 2.4.1 integrado em 2e153ed; Claude → Codex → Claude: live cross-harness proof PASS, não governada. Ledger externo não copiado.',
     },
-    meaning: 'WRAP integrado; live cross-harness proof PASS, não governada. Continuidade técnica externa distinta do checkpoint interno. Sem regra específica no Proof Engine: projected preservada.',
+    meaning: 'WRAP integrado; live cross-harness proof PASS, não governada. Mesmo workstream, sessões nativas distintas, delta incremental e sem contexto manual. Continuidade técnica externa distinta do checkpoint interno. Sem regra específica no Proof Engine: projected preservada.',
     advancement: 'Definir critérios e demonstrar correlação governada a work item/attempt/authority/Verifier/review antes de promover maturidade.',
     history: [
       {
@@ -558,7 +561,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   },
   {
     id: 'agency.continuous-self-development',
-    direction: { status: 'next', rationale: 'Akita Baseline V1 COMPLETE; próximo: self-development avançado, sob critérios próprios de governança.', refs: directionRefs },
+    direction: { status: 'current_focus', rationale: 'Usar o Akita Baseline no self-development governado do ANIMA com native coding agents.', refs: directionRefs },
     name: 'Self-development contínuo',
     description: 'O Anima detecta, formula, valida e incorpora melhorias próprias dentro da authority, sem loop humano constante.',
     domain: 'agency',
@@ -657,7 +660,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado em repo descartável. Os dois adapters e ai-memory WRAP estão integrados em dev; provas técnicas TPC-01 e cross-harness PASS, sem governança demonstrada.',
     },
     meaning:
-      'Codex CLI e Claude Code integrados, com baseline técnico dos executores atingido. Composição com ai-memory: live cross-harness proof PASS, não governada. Provas governadas ainda não demonstradas. O seam CoderBackend (ADR-001) permite trocar o executor. Um harness por assinatura é outra classe de compute, não um provider de API.',
+      'Codex CLI e Claude Code integrados, com baseline técnico dos executores atingido. Composição com ai-memory: live cross-harness proof PASS, não governada. Codex AKT-03 governado PASS e HUMAN ACCEPTED; Claude governado ainda não demonstrado. O seam CoderBackend (ADR-001) permite trocar o executor. Um harness por assinatura é outra classe de compute, não um provider de API.',
     advancement: 'Provar ANIMA → executor → mudança → gate em integração governada; WRAP é direção aprovada, não maturidade.',
     history: [
       {
@@ -678,26 +681,28 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     id: 'agency.codex-cli', name: 'Codex CLI executor', domain: 'agency', maturity: 'projected',
     description: 'Primeiro incremento: ANIMA → Codex → mudança → gate.',
     parentId: 'agency.external-harness',
+    deliveryEvidence: { technical: { status: 'pass', label: 'Technical live proof', refs: [{ kind: 'record', ref: CODEX_LIVE_RECORD }] }, governed: { status: 'pass', label: 'Governed execution AKT-03', refs: governedRefs }, verifier: 'verified', humanReview: 'accepted', candidate: { status: 'integrated', commit: '83f7fd24c0c3d8a9ab4f9a3dd89b26d9b9c2edfd', checkedAgainst: '83f7fd24c0c3d8a9ab4f9a3dd89b26d9b9c2edfd' }, },
     dependsOn: ['agency.external-harness'],
     responsibility: 'reused_baseline',
-    direction: { status: 'current_focus', rationale: 'Baseline técnico do executor atingido: integração e live technical proof PASS; governed proof ainda não demonstrada.', refs: [...directionRefs, { kind: 'record', ref: FINAL_RECORD }] },
+    direction: { status: 'current_focus', rationale: 'Technical PASS · governed AKT-03 PASS · Verifier verified · human ACCEPTED · candidate integrated.', refs: [...directionRefs, { kind: 'record', ref: FINAL_RECORD }] },
     reuse: { strategy: 'wrap', tool: 'Codex CLI', status: 'integrated',
       externalEvidence: 'Candidato já registrado na Evolution Reconciliation V2; POC externo de continuidade não prova executor integrado.' },
-    meaning: 'Adapter integrado em 9404bd4; primeira prova técnica viva PASS, não governada. Sem regra específica no Proof Engine, maturidade declarada anterior preservada (projected); integração e prova técnica não demonstram governança.',
-    advancement: 'Prova governada ainda não demonstrada: faltam work item, attempt, authority, Verifier e review governada. Não operacional/autônomo; definir critério específico antes de qualquer promoção.',
+    meaning: 'Adapter integrado em 9404bd4; primeira prova técnica viva PASS, não governada. AKT-03: execução governada PASS e aceite humano, candidato confirmado em origin/dev 83f7fd2 após novo fetch. Sem regra específica no Proof Engine, maturidade declarada anterior preservada (projected); integração e prova técnica não demonstram governança.',
+    advancement: 'Prova governada AKT-03 PASS; Verifier machine-proven = scope + gate. Human review confirmou 5=>Despertar, 30=>Expansão e preservação dos casos. Accepted != integrated. Não operacional/autônomo; definir critério específico antes de qualquer promoção.',
     history: [{ at: '2026-10-02', change: 'proof_added',
       note: 'Live technical proof passed · primeira prova viva técnica PASS; governed proof not yet demonstrated. TPC-01: dois arquivos, E1/E2/E3 e gate focal verdes, sem contract violation; sem work item/attempt/authority/Verifier/review governada.',
       refs: [{ kind: 'commit', ref: '9404bd4039738c4fbfabd414db4d11ffd83383db', note: 'Integração do adapter; não é commit do resultado da prova.' },
         { kind: 'record', ref: CODEX_LIVE_RECORD, note: 'Relatório humano de prova técnica não governada; não promove maturidade.' }],
-    }],
+    }, { at: '2026-10-03', change: 'proof_added', note: 'AKT-01: FAIL pré-inferência (path operacional; Codex não executou) → correção operacional → AKT-02: executor/gate/scope PASS, Verifier verified, control-plane BLOCKED por coder evidence ausente; cancelado humanamente para liberar target → fix f518d0d → AKT-03: GOVERNED PASS · HUMAN ACCEPTED · completed · integrated.', refs: [...governedRefs, { kind: 'commit', ref: 'f518d0d6bad60ebe8f301bfcfeca21b2ee42b2cb' }, { kind: 'commit', ref: '83f7fd24c0c3d8a9ab4f9a3dd89b26d9b9c2edfd' }] }],
   },
   {
     id: 'agency.claude-code', name: 'Claude Code executor', domain: 'agency', maturity: 'projected',
     description: 'Segundo incremento: ANIMA → Claude → mudança → gate.',
     parentId: 'agency.external-harness',
+    deliveryEvidence: { technical: { status: 'pass', label: 'Technical live proof', refs: [{ kind: 'record', ref: CLAUDE_LIVE_RECORD }] }, governed: { status: 'not_demonstrated', label: 'Governed execution', refs: [] }, },
     dependsOn: ['agency.external-harness'],
     responsibility: 'reused_baseline',
-    direction: { status: 'current_focus', rationale: 'Baseline técnico do executor atingido: integração e live technical proof PASS; governed proof ainda não demonstrada.', refs: directionRefs },
+    direction: { status: 'next', rationale: 'Baseline técnico do executor atingido: integração e live technical proof PASS; governed proof ainda não demonstrada.', refs: directionRefs },
     reuse: { strategy: 'wrap', tool: 'Claude Code', status: 'integrated',
       externalEvidence: 'Candidato já registrado na Evolution Reconciliation V2; POC externo de continuidade não prova executor integrado.' },
     meaning: 'Adapter integrado em cd73276; primeira prova técnica viva PASS, não governada. Sem regra específica no Proof Engine, maturidade declarada anterior preservada (projected); integração e prova técnica não demonstram governança.',
@@ -712,15 +717,15 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     id: 'agency.akita-baseline-v1', name: 'AKITA BASELINE V1', domain: 'agency', maturity: 'projected',
     description: 'REUSE BEFORE BUILD: executores maduros, depois memória entre harnesses.',
     dependsOn: ['agency.codex-cli', 'agency.claude-code', 'memory.cross-harness'],
-    direction: { status: 'current_focus', rationale: 'Akita Baseline V1 COMPLETE · live cross-harness proof PASS (não governada). Próximo: self-development avançado; pesquisa preservada.', refs: directionRefs },
+    direction: { status: 'current_focus', rationale: 'CURRENT / ACHIEVED: Akita Baseline V1 COMPLETE. CURRENT FOCUS: self-development governado usando native coding agents.', refs: directionRefs },
     target: { achievement: 'complete', description: 'Akita Baseline V1 COMPLETE: baseline técnico reutilizado; conquista do objetivo não promove maturidade.', milestone: DIRECTION_RECORD,
       steps: [
         { capabilityId: 'agency.codex-cli', description: 'ANIMA → Codex → mudança → gate · adapter integrado · baseline técnico do executor atingido · live technical proof PASS (não governada)' },
         { capabilityId: 'agency.claude-code', description: 'ANIMA → Claude → mudança → gate · adapter integrado · baseline técnico do executor atingido · live technical proof PASS (não governada)' },
         { capabilityId: 'memory.cross-harness', description: 'Claude ↔ Codex via ai-memory · WRAP integrado · live cross-harness proof PASS (não governada)' },
-        { capabilityId: 'agency.continuous-self-development', description: 'Só depois: retomar self-development autônomo avançado' },
+        { capabilityId: 'agency.continuous-self-development', description: 'CURRENT FOCUS: self-development governado usando native coding agents' },
       ] },
-    advancement: 'Baseline técnico COMPLETE; próxima direção: self-development avançado. Definir critérios de maturidade e provar governança separadamente.',
+    advancement: 'COMPLETE = Codex executor + Claude executor + cross-harness continuity. Não significa self-development autônomo completo, governed Claude proof, recovery cross-agent governado ou autonomous integration.',
     history: [{ at: '2026-10-02', change: 'proof_added', note: 'Akita Baseline V1 COMPLETE; direction/achievement != maturity. Prova técnica não governada.', refs: [{ kind: 'record', ref: AI_MEMORY_LIVE_RECORD }] }],
   },
   {

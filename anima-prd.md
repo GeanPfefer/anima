@@ -1,13 +1,14 @@
 # Anima — Product Requirements Document
-> Evolution UX V2 / Akita Baseline V1 COMPLETE (prova 2026-10-02; fechamento 2026-10-03).
-> Branch isolada codex/evolution-ux-v2 reconciliada sobre origin/dev 2e153ed, sem merge em dev.
-> Codex CLI e Claude Code: WRAP / integrated / live technical proof PASS.
-> ai-memory 2.4.1: WRAP / integrated / live cross-harness proof PASS (Claude → Codex → Claude).
-> Prova relatada pelo humano, técnica NÃO GOVERNADA; advanced self-development NEXT.
-> Direction/achievement != maturity: capacidades projected preservadas; sem regras específicas,
-> avaliação not_evaluated. Nenhuma nova authority ou alegação operational/autonomous.
-> Ollama/DSH/Qwen experimentais e RunPod coder parked neste caminho. Plano 009;
-> registro docs/registros/2026-10-02-akita-baseline-v1-ai-memory-live-proof.md. Integração humana pendente.
+> Evolution pós-Akita (2026-10-03), branch codex/evolution-ux-v2 sobre origin/dev 83f7fd2.
+> Akita Baseline V1 COMPLETE = Codex executor + Claude executor + cross-harness continuity.
+> Foco: self-development governado usando native coding agents. Codex AKT-03: governed PASS,
+> Verifier verified (machine-proven scope + gate), HUMAN ACCEPTED, completed; candidato
+> 83f7fd2 integrated após fetch (HEAD de origin/dev 83f7fd2).
+> Claude: technical PASS, governed NOT YET DEMONSTRATED. ai-memory: cross-harness PASS,
+> governed cross-attempt continuity NOT YET DEMONSTRATED. WRAP integrado nos três.
+> Technical/governed/review/integration separados; projected e not_evaluated preservados.
+> Plano 009; registro docs/registros/2026-10-03-evolution-pos-akita-governed-codex.md.
+> Sem mudança própria de backend/governança/Supabase; integração pré-existente preservada.
 > Ollama Coder Error Observability V1 (2026-09-30): respostas não-2xx do Ollama no caminho do
 > coder preservam `httpStatus` e `providerError` (erro do próprio Ollama, redigido, ≤300 chars)
 > em `OllamaProtocolError`, sem ler nada do request. O transcript host-observed v1 não mudou
