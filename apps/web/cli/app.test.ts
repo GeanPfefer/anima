@@ -8,7 +8,8 @@ import type {
 } from '@anima/core';
 import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
 import type { AuthorizeResumeResult } from '@/lib/work-orchestration/authorize-resume';
-import { runBudgetStatus, runStatus, runWorkApprove, runWorkAuthorizeResume, runWorkCorrect, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
+import { runBudgetStatus, runStatus, runWorkApprove, runWorkAuthorizeResume, runWorkCorrect, runWorkExecutors, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
+import { renderHuman } from './render';
 import { EXIT } from './exit-codes';
 
 const ok = <T>(value: T): WorkOperationResult<T> => ({ ok: true, value });
@@ -309,5 +310,67 @@ describe('work resolve-pending (Pending Verification Human Recovery V0)', () => 
     expect(resolvePendingVerification).not.toHaveBeenCalled();
     expect(result.exitCode).toBe(EXIT.REJECTED);
     expect(result.payload).toMatchObject({ ok: false, code: 'not_pending_verification:not_in_progress' });
+  });
+});
+
+describe('work executors (discovery read-only)', () => {
+  const SECRET = 'sk-secret-should-never-appear';
+  const claudeItem = {
+    ...reviewItem, state: 'approved', proposalVersion: 1,
+    intent: { execution_spec: { executor: 'worktree', coder_backend: 'claude-code', model: 'sonnet-x' } },
+  } as unknown as WorkItem;
+  const observations = [
+    { provider: 'ollama', availability: 'unavailable', reasonUnavailable: 'ollama_unreachable' },
+    { provider: 'claude-code', availability: 'ready', reasonUnavailable: null },
+    { provider: 'codex-cli', availability: 'ready', reasonUnavailable: null },
+  ] as const;
+  const at = () => new Date('2026-10-03T12:00:00.000Z');
+
+  test('item com contrato claude-code: payload estável, recomendação contract_declared, exit 0', async () => {
+    const probe = jest.fn(async () => observations);
+    const result = await runWorkExecutors(fakePort({ getItem: async () => ok(claudeItem) }), probe, 'i', at);
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(result.payload).toMatchObject({
+      ok: true, kind: 'work-executors', workItemId: 'i', state: 'approved', proposalVersion: 1,
+      contractBackend: 'claude-code', observedAt: '2026-10-03T12:00:00.000Z',
+      recommendation: { provider: 'claude-code', backendId: 'claude-code:sonnet-x', rule: 'contract_declared', fallback: { provider: 'codex-cli' } },
+      noRecommendation: null,
+    });
+    const candidates = (result.payload as unknown as { candidates: { provider: string }[] }).candidates;
+    expect(candidates.map(c => c.provider)).toEqual(['ollama', 'openai', 'deepseek-harness', 'codex-cli', 'claude-code']);
+  });
+
+  test('renderização humana e --json derivam do mesmo payload, sem segredos', async () => {
+    const result = await runWorkExecutors(fakePort({ getItem: async () => ok(claudeItem) }), async () => observations, 'i', at);
+    const text = renderHuman(result.payload);
+    expect(text).toContain('Recomendado: claude-code:sonnet-x (regra contract_declared)');
+    expect(text).toContain('ollama_unreachable');
+    const json = JSON.stringify(result.payload);
+    expect(JSON.parse(json).kind).toBe('work-executors');
+    expect(json + text).not.toContain(SECRET);
+  });
+
+  test('sem candidato pronto: exit 0, recommendation null e motivos', async () => {
+    const result = await runWorkExecutors(fakePort({ getItem: async () => ok(claudeItem) }), async () => [], 'i', at);
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(result.payload).toMatchObject({ ok: true, recommendation: null, noRecommendation: { reason: 'no_ready_candidate' } });
+  });
+
+  test('item inexistente segue o erro operacional e não sonda', async () => {
+    const probe = jest.fn(async () => observations);
+    const result = await runWorkExecutors(fakePort({ getItem: async () => notFound() }), probe, 'zzz', at);
+    expect(result.exitCode).toBe(EXIT.ERROR);
+    expect(result.payload).toMatchObject({ ok: false, code: 'work_item_not_found' });
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  test('é read-only: só lê o item', async () => {
+    const reviewResult = jest.fn(); const resolveApproval = jest.fn(); const withdrawApprovedWork = jest.fn(); const listEvents = jest.fn();
+    await runWorkExecutors(fakePort({ getItem: async () => ok(claudeItem), reviewResult, resolveApproval, withdrawApprovedWork, listEvents }), async () => observations, 'i', at);
+    expect(reviewResult).not.toHaveBeenCalled();
+    expect(resolveApproval).not.toHaveBeenCalled();
+    expect(withdrawApprovedWork).not.toHaveBeenCalled();
+    expect(listEvents).not.toHaveBeenCalled();
   });
 });

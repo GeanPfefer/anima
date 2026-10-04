@@ -118,6 +118,29 @@ export function renderHuman(payload: CliPayload): string {
       return lines.join('\n');
     }
 
+    case 'work-executors': {
+      const lines: string[] = [];
+      lines.push(`${payload.workItemId} ${DOT} ${payload.state} ${DOT} proposta v${payload.proposalVersion} ${DOT} executores observados em ${payload.observedAt}`);
+      lines.push(`Backend do contrato: ${payload.contractBackend ?? '(não declarado)'}`);
+      for (const c of payload.candidates) {
+        const mark = c.availability === 'ready' ? YES : c.availability === 'unavailable' ? NO : '?';
+        const reasons = [...new Set([c.reasonUnavailable, c.reasonIneligible].filter((r): r is string => r !== null))];
+        lines.push(`${mark} ${c.provider.padEnd(17)} ${c.availability.padEnd(11)} ${c.eligibility.padEnd(10)} ${c.costClass.padEnd(12)} ${c.backendId}${reasons.length > 0 ? `  [${reasons.join(', ')}]` : ''}`);
+      }
+      if (payload.recommendation) {
+        const r = payload.recommendation;
+        lines.push(`Recomendado: ${r.backendId} (regra ${r.rule})`);
+        lines.push(`Justificativa: ${r.reason}`);
+        lines.push(`Fallback: ${r.fallback ? r.fallback.backendId : 'nenhum'}`);
+      } else {
+        lines.push('Sem recomendação: no_ready_candidate');
+        for (const c of payload.noRecommendation?.candidates ?? []) lines.push(`  ${c.provider}: ${c.reason}`);
+        lines.push('A recomendação reflete apenas readiness, elegibilidade e custo; não afirma adequação do modelo à tarefa.');
+      }
+      lines.push('Somente leitura: nada foi persistido, escolhido ou iniciado.');
+      return lines.join('\n');
+    }
+
     case 'work-evidence': {
       const lines: string[] = [];
       lines.push(`${payload.id} ${DOT} ${payload.state}${payload.attemptId ? ` ${DOT} tentativa ${payload.attemptId}` : ''}`);

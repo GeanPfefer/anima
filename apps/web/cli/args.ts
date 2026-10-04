@@ -14,6 +14,7 @@ export type ParsedCommand =
   | { readonly kind: 'work-list'; readonly json: boolean }
   | { readonly kind: 'work-show'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-evidence'; readonly id: string; readonly json: boolean }
+  | { readonly kind: 'work-executors'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-request-changes'; readonly id: string; readonly reason: string; readonly json: boolean }
   | { readonly kind: 'work-correct'; readonly id: string; readonly requiredGates: readonly string[]; readonly json: boolean }
   | { readonly kind: 'work-replan'; readonly id: string; readonly diagnosisPath: string | null; readonly json: boolean }
@@ -174,6 +175,10 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       if (!id) return { ok: false, error: 'Uso: anima work evidence <id>' };
       return { ok: true, command: { kind: 'work-evidence', id, json } };
     }
+    if (sub === 'executors') {
+      if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: 'Uso: anima work executors <id> [--json]' };
+      return { ok: true, command: { kind: 'work-executors', id, json } };
+    }
     if (sub === 'request-changes') {
       if (!id) return { ok: false, error: 'Uso: anima work request-changes <id> --reason "..."' };
       if (reason === null || reason.trim().length === 0) return { ok: false, error: 'request-changes exige --reason "<pedido>" não vazio.' };
@@ -257,6 +262,7 @@ Uso:
   anima work list                             Lista os trabalhos não terminais (retomáveis)
   anima work show <id>                        Estado, versão, tentativa, Verifier e cobertura
   anima work evidence <id>                    Critérios de aceite, provas e lacunas (Verifier)
+  anima work executors <id>                   Executores de coding: prontos, elegíveis e recomendação (read-only; não escolhe nem inicia)
   anima work request-changes <id> --reason "" Registra REQUEST_CHANGES pelo fluxo canônico
   anima work correct <id> [--require-gate C]   Materializa o sucessor de correção (proposed); gates extras exigidos pela revisão
   anima work replan <id> [--diagnosis arquivo] Replaneja unidade mínima; sem diagnóstico, replay persistido

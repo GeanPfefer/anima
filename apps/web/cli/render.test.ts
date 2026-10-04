@@ -1,5 +1,6 @@
 import { renderHuman } from './render';
 import type { CliPayload } from './app';
+import { projectExecutorCandidates, recommendExecutor } from '@/lib/work-orchestration/executor-discovery';
 
 describe('render humano da CLI', () => {
   test('status lista estado e conexão', () => {
@@ -41,6 +42,31 @@ describe('render humano da CLI', () => {
   test('review resume o novo estado', () => {
     const payload: CliPayload = { ok: true, kind: 'review', workItemId: 'i', decision: 'request_changes', state: 'changes_requested', reviewedResultEventId: 'r', message: 'Correções solicitadas. Novo estado: changes_requested.' };
     expect(renderHuman(payload)).toContain('changes_requested');
+  });
+
+  test('work-executors mostra candidatos, recomendação, honestidade e somente leitura', () => {
+    const candidates = projectExecutorCandidates({
+      contract: { coderBackend: 'claude-code', model: null },
+      observations: [{ provider: 'claude-code', availability: 'ready', reasonUnavailable: null }, { provider: 'codex-cli', availability: 'unavailable', reasonUnavailable: 'codex_not_logged_in' }],
+    });
+    const outcome = recommendExecutor(candidates, { coderBackend: 'claude-code', model: null });
+    const payload: CliPayload = { ok: true, kind: 'work-executors', workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: 'claude-code', observedAt: '2026-10-03T00:00:00.000Z', candidates, ...outcome };
+    const out = renderHuman(payload);
+    expect(out).toContain('Backend do contrato: claude-code');
+    expect(out).toContain('Recomendado: claude-code:default (regra contract_declared)');
+    expect(out).toContain('codex_not_logged_in');
+    expect(out).toContain('parked_not_operational');
+    expect(out).toContain('não afirma adequação do modelo');
+    expect(out).toContain('Somente leitura');
+  });
+
+  test('work-executors sem recomendação lista os motivos', () => {
+    const contract = { coderBackend: null, model: null };
+    const candidates = projectExecutorCandidates({ contract, observations: [] });
+    const out = renderHuman({ ok: true, kind: 'work-executors', workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: null, observedAt: 't', candidates, ...recommendExecutor(candidates, contract) });
+    expect(out).toContain('Sem recomendação: no_ready_candidate');
+    expect(out).toContain('ollama: readiness_not_probed');
+    expect(out).toContain('(não declarado)');
   });
 
   test('erro é prefixado com o código', () => {

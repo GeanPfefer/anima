@@ -104,6 +104,14 @@ describe('parser de argumentos da CLI', () => {
     expect(parseArgs(['work', 'frobnicate'])).toMatchObject({ ok: false });
   });
 
+  test('work executors exige exatamente um id e recusa --reason e extras', () => {
+    expect(parseArgs(['work', 'executors', 'abc'])).toEqual({ ok: true, command: { kind: 'work-executors', id: 'abc', json: false } });
+    expect(parseArgs(['work', 'executors', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'work-executors', id: 'abc', json: true } });
+    expect(parseArgs(['work', 'executors'])).toMatchObject({ ok: false });
+    expect(parseArgs(['work', 'executors', 'a', 'b'])).toMatchObject({ ok: false });
+    expect(parseArgs(['work', 'executors', 'a', '--reason', 'x'])).toMatchObject({ ok: false });
+  });
+
   test('comando de topo desconhecido → uso inválido', () => {
     expect(parseArgs(['bogus'])).toEqual({ ok: false, error: 'Comando desconhecido: bogus' });
   });

@@ -14,7 +14,8 @@ import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/
 import { runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
 import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recovery';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
-import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
+import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkExecutors, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
+import { createNodeExecutorReadinessDeps, probeAllExecutors } from '@/lib/work-orchestration/executor-readiness';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
 import { checkRecoveryConfig, renderRecoveryConfigReport } from '@/lib/recovery-config/check';
@@ -60,6 +61,7 @@ async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config
     case 'work-list': return runWorkList(service);
     case 'work-show': return runWorkShow(service, command.id);
     case 'work-evidence': return runWorkEvidence(service, command.id);
+    case 'work-executors': return runWorkExecutors(service, () => probeAllExecutors(createNodeExecutorReadinessDeps()), command.id);
     case 'work-request-changes': {
       const decision: ResultReviewDecision = { type: 'request_changes', requestedChanges: command.reason };
       return runWorkReview(service, command.id, decision);

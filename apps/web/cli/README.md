@@ -47,6 +47,7 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work list` | Lista os trabalhos não terminais (retomáveis) |
 | `anima work show <id>` | Estado, versão, tentativa, Verifier (ao vivo × registrado) e cobertura de aceite |
 | `anima work evidence <id>` | Critérios de aceite, gates, validações e lacunas (Verifier) |
+| `anima work executors <id> [--json]` | READ-ONLY. Lista os 5 executores de coding (ollama, openai, deepseek-harness, codex-cli, claude-code) com disponibilidade (`ready`/`unavailable`/`unknown`), elegibilidade, motivo estável, modelo e classe de custo, e a recomendação determinística (`contract_declared` ou `local_first`, com `fallback`). Sonda `--version`/`auth status` dos CLIs nativos e `GET /api/tags` do Ollama; nunca chama a API da OpenAI e nunca expõe segredo, e-mail ou organização. A recomendação reflete só readiness, elegibilidade e custo — NÃO afirma adequação do modelo à tarefa. Não persiste, não grava evento, não escolhe executor nem inicia attempt; sai com 0 mesmo sem recomendação |
 | `anima work request-changes <id> --reason "..."` | Registra REQUEST_CHANGES pelo fluxo canônico (`reviewResult`) |
 | `anima work correct <id>` | Materializa o sucessor de correção governado (`proposed`) via `correctReviewedWorkItem` — NÃO aprova |
 | `anima work approve <id>` | Aprova uma PROPOSTA (`proposed → approved`) via `resolveApproval` |

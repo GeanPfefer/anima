@@ -22,6 +22,8 @@ import type { WorkOrchestrationErrorCode, WorkOperationResult } from '@anima/cor
 import { parseAutonomyFlag } from '@/lib/resident-host/ports';
 import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
 import { EXIT, type ExitCode } from './exit-codes';
+import { readExecutionContract } from '@/lib/work-orchestration/executor-selection';
+import { projectExecutorCandidates, recommendExecutor, type ExecutorCandidate, type ExecutorObservation, type ExecutorRecommendation, type NoExecutorRecommendation } from '@/lib/work-orchestration/executor-discovery';
 import type { ReplanResult } from '@/lib/work-orchestration/replan-orchestration';
 import type { AuthorizeResumeResult } from '@/lib/work-orchestration/authorize-resume';
 
@@ -124,6 +126,20 @@ export interface WorkEvidencePayload {
   readonly gaps: readonly { readonly code: string; readonly detail: string; readonly subject: string | null }[];
   readonly violations: readonly { readonly code: string; readonly detail: string; readonly subject: string | null }[];
   readonly findings: readonly { readonly code: string; readonly severity: string; readonly provenance: string; readonly subject: string | null; readonly detail: string }[];
+}
+export interface WorkExecutorsPayload {
+  readonly ok: true;
+  readonly kind: 'work-executors';
+  readonly workItemId: string;
+  readonly state: string;
+  readonly proposalVersion: number;
+  /** Backend declarado no contrato aprovado (`execution_spec.coder_backend`), ou null. */
+  readonly contractBackend: string | null;
+  readonly observedAt: string;
+  readonly candidates: readonly ExecutorCandidate[];
+  readonly recommendation: ExecutorRecommendation | null;
+  /** Presente quando não há recomendação: `no_ready_candidate` + motivo por candidato. */
+  readonly noRecommendation: NoExecutorRecommendation | null;
 }
 export interface StatusPayload {
   readonly ok: true;
@@ -267,7 +283,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
+  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -733,6 +749,34 @@ export async function runWorkAuthorizeCompute(
       providerId: required.providerId, nodeId: required.nodeId, resourceClass: required.resourceClass, model: required.model,
       maxCostUsd: limits.maxCostUsd, maxDurationMs, validFrom, validUntil,
       message: 'Authority paga concedida. O Resident Host a consome na próxima volta; nada foi executado agora.',
+    },
+  };
+}
+
+/**
+ * Discovery READ-ONLY dos executores de coding de um work item: lê o item, deriva o
+ * contrato, sonda a readiness (injetada) e projeta candidatos + recomendação pelas
+ * regras compartilhadas em `lib/work-orchestration`. Nunca persiste, grava evento,
+ * escolhe executor nem inicia attempt; termina com exit 0 mesmo sem recomendação.
+ */
+export async function runWorkExecutors(
+  service: WorkOrchestrationPort,
+  probe: () => Promise<readonly ExecutorObservation[]>,
+  id: string,
+  now: () => Date = () => new Date(),
+): Promise<CommandResult> {
+  const item = await service.getItem(id);
+  if (!item.ok) return errorResult(item.error.message, item.error.code, exitCodeForError(item.error.code));
+  const contract = readExecutionContract(item.value.intent);
+  const observations = await probe();
+  const candidates = projectExecutorCandidates({ contract, observations });
+  const outcome = recommendExecutor(candidates, contract);
+  return {
+    exitCode: EXIT.OK,
+    payload: {
+      ok: true, kind: 'work-executors', workItemId: item.value.id, state: item.value.state, proposalVersion: item.value.proposalVersion,
+      contractBackend: contract.coderBackend, observedAt: now().toISOString(), candidates,
+      recommendation: outcome.recommendation, noRecommendation: outcome.noRecommendation,
     },
   };
 }
