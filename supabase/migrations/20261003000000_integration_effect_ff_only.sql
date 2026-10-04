@@ -135,6 +135,7 @@ BEGIN
   END IF;
 
   -- Campos comuns: o receipt reproduz EXATAMENTE a autorização (inclusive o modo congelado nela).
+  -- disposition: presente, não nula e ∈ {effected, reconciled} (ausente/JSON null ⇒ coalesce '' ⇒ recusada).
   IF receipt->>'kind' IS DISTINCT FROM 'integration_effect'
      OR receipt->>'operationKey' IS DISTINCT FROM v_a->>'operation_key'
      OR receipt->>'authorizationId' IS DISTINCT FROM authorization_id
@@ -148,7 +149,7 @@ BEGIN
      OR receipt->>'mode' IS DISTINCT FROM v_a->>'mode'
      OR receipt->>'previousTargetSha' IS DISTINCT FROM v_a->>'expected_target_sha'
      OR receipt->'observed' IS DISTINCT FROM 'true'::jsonb
-     OR receipt->>'disposition' NOT IN ('effected','reconciled') THEN
+     OR coalesce(receipt->>'disposition','') NOT IN ('effected','reconciled') THEN
     RAISE EXCEPTION 'integration receipt mismatch' USING ERRCODE='55000';
   END IF;
 
@@ -159,8 +160,8 @@ BEGIN
       AND receipt->>'resultingTargetSha' IS NOT DISTINCT FROM receipt->>'mergeCommitSha'
       AND receipt->'mergeParents' IS NOT DISTINCT FROM jsonb_build_array(v_a->>'expected_target_sha',v_a->>'result_commit_sha');
   ELSIF v_a->>'mode'='ff_only' THEN
-    -- nenhum commit criado: sem merge, sem pais; o alvo passou a ser EXATAMENTE o commit do resultado.
-    v_mode_ok := (receipt->'mergeCommitSha' IS NULL OR receipt->'mergeCommitSha'='null'::jsonb)
+    -- nenhum commit criado: a chave mergeCommitSha EXISTE como JSON null (omitida ⇒ recusada, como no core); sem pais; o alvo passou a ser EXATAMENTE o commit do resultado.
+    v_mode_ok := (receipt ? 'mergeCommitSha' AND jsonb_typeof(receipt->'mergeCommitSha')='null')
       AND receipt->'mergeParents' IS NOT DISTINCT FROM '[]'::jsonb
       AND receipt->>'resultingTargetSha' IS NOT DISTINCT FROM v_a->>'result_commit_sha';
   ELSE

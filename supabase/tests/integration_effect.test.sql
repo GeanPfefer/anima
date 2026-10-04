@@ -1,7 +1,7 @@
 -- Completed → Integrated V0/V1 — autorização humana do efeito e receipt persistido (merge_no_ff e ff_only).
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(32);
+SELECT plan(40);
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
 ('9b000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','ie@test.invalid','',now(),'{}','{}',now(),now());
@@ -210,6 +210,14 @@ SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1
 SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('previousTargetSha',repeat('e',40))))$$,
   '55000','integration receipt mismatch','receipt com SHA anterior ≠ esperado ⇒ recusado');
 
+-- Hardening pós-auditoria: disposition presente, não nula e ∈ {effected, reconciled} nos dois modos.
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt() - 'disposition')$$,
+  '55000','integration receipt mismatch','H1. merge_no_ff: disposition ausente ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('disposition',NULL::text)))$$,
+  '55000','integration receipt mismatch','H2. merge_no_ff: disposition JSON null ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt(jsonb_build_object('disposition','bogus')))$$,
+  '55000','integration receipt mismatch','H3. merge_no_ff: disposition desconhecido ⇒ recusado');
+
 -- Receipt exato ⇒ integration_completed (author=system); item continua completed.
 SELECT is((pg_temp.record_integration_completed(pg_temp.id('A'),1,'auth-1',pg_temp.receipt()))->>'action','recorded','15. receipt exato persistido');
 SELECT is((SELECT author::text FROM public.work_events WHERE event_type='integration_completed' AND work_item_id=pg_temp.id('A')),'system','receipt é do sistema');
@@ -249,6 +257,17 @@ SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1
   '55000','integration receipt mismatch','V1. receipt ff_only com alvo resultante ≠ commit do resultado ⇒ recusado');
 SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('mode','merge_no_ff')))$$,
   '55000','integration receipt mismatch','V1. receipt com modo ≠ modo autorizado ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff() - 'mergeCommitSha')$$,
+  '55000','integration receipt mismatch','H4. ff_only: chave mergeCommitSha omitida ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('mergeCommitSha',repeat('b',40))))$$,
+  '55000','integration receipt mismatch','H5. ff_only: mergeCommitSha string ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff() - 'disposition')$$,
+  '55000','integration receipt mismatch','H6. ff_only: disposition ausente ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('disposition',NULL::text)))$$,
+  '55000','integration receipt mismatch','H7. ff_only: disposition JSON null ⇒ recusado');
+SELECT throws_ok($$SELECT pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('disposition','bogus')))$$,
+  '55000','integration receipt mismatch','H8. ff_only: disposition desconhecido ⇒ recusado');
+
 SELECT is((pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff()))->>'action',
   'recorded','V1. receipt ff_only exato persistido');
 SELECT is((pg_temp.record_integration_completed(pg_temp.id('B'),1,'auth-ff',pg_temp.receipt_ff(jsonb_build_object('disposition','reconciled'))))->>'action',
