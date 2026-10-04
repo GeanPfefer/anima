@@ -129,3 +129,27 @@ automação e self-dev. O modo humano é derivado do mesmo payload.
 | `1` | Erro operacional (identidade, rede, persistência, item ausente) |
 | `2` | Uso inválido (comando/flag desconhecido, argumento obrigatório ausente) |
 | `3` | Ação recusada por regra/governança (ex.: `request-changes` num estado que não permite) |
+
+
+### Retrabalho estruturado em `work correct`
+
+```bash
+anima work correct <id> --rework apps/web/lib/exemplo.ts
+anima work correct <id> --rework apps/web/lib/exemplo.ts --rework apps/web/lib/exemplo.test.ts --require-gate "npm run typecheck --workspace=apps/web"
+```
+
+`--rework <path>` é repetível e exclusivo de `work correct`. Cada valor precisa
+ser um arquivo explicitamente incluído no escopo aprovado e não excluído. A
+validação normaliza espaços externos, barras e `./` inicial; recusa lista vazia,
+paths absolutos, `..`, segmentos vazios ou `.`, glob e paths fora do escopo.
+A comparação usa a chave de caminho da derivação (barras e caixa normalizadas),
+sem basename ou correspondência parcial. Duplicatas são removidas e a ordem
+resultante vem do escopo aprovado.
+
+Com a flag, o texto persistido em `requested_changes` continua obrigatório como
+feedback do objetivo, mas não concede autoridade sobre arquivos. O escopo efetivo
+é o restante ainda não tocado unido aos paths estruturados. O successor mantém
+lineage, checkpoint e gates, e registra `correction_scope.rework_source: 'structured'`.
+Sem a flag, permanece o comportamento legado de derivar retrabalho explícito do
+texto, sem acrescentar essa chave. A operação apenas materializa um successor
+`proposed`; aprovação, execução e aceite seguem a governança existente.

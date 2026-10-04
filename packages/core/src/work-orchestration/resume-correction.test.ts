@@ -3,6 +3,7 @@ import { validateCorrectionSuccessor } from './recovery-successor';
 import type { WorkItem } from './types';
 import {
   deriveResumeCorrectionSuccessor,
+  validateStructuredReworkPaths,
   type DecompositionCheckpoint,
   type ResumeCorrectionInput,
 } from './decomposition';
@@ -360,4 +361,46 @@ describe('deriveResumeCorrectionSuccessor — gates adicionais exigidos pela rev
   test('sem gates adicionais o candidato é idêntico ao anterior (compatibilidade)', () => {
     expect(ok(deriveResumeCorrectionSuccessor(input({ additionalValidations: [] })))).toEqual(ok(deriveResumeCorrectionSuccessor(input())));
   });
+});
+
+
+describe('validateStructuredReworkPaths — autoridade explícita fail-closed', () => {
+  test('lista vazia recusa', () => {
+    expect(validateStructuredReworkPaths([], [IMPL, TEST], [])).toEqual({ ok: false, refusals: ['rework_paths_empty'] });
+  });
+  test.each(['', '   ', '/abs.ts', 'C:relative.ts', 'C:\\abs.ts', '../file.ts', 'a/../file.ts',
+    'a..ts', 'a//b.ts', 'a/./b.ts', 'a/', '././a.ts', '*', '?', '[a]', ']a', '{a}', 'a}'])('recusa malformed: %s', path => {
+    expect(validateStructuredReworkPaths([path], [path], [])).toEqual({ ok: false, refusals: ['rework_paths_malformed'] });
+  });
+  test.each(['chat-surface.ts', 'apps/web/lib/ai', `${IMPL}.extra`, 'fora.ts'])('não aceita basename, substring ou path alheio: %s', path => {
+    expect(validateStructuredReworkPaths([path], [IMPL, TEST], [])).toEqual({ ok: false, refusals: ['rework_paths_not_in_scope'] });
+  });
+  test('exclusão prevalece sobre inclusão pela mesma chave', () => {
+    expect(validateStructuredReworkPaths([IMPL], [IMPL, TEST], [IMPL.toUpperCase()])).toEqual({ ok: false, refusals: ['rework_paths_excluded'] });
+  });
+  test('canonicaliza, deduplica e emite grafia/ordem aprovadas', () => {
+    const paths = [TEST, `  ./${IMPL} `.replace(/\//g, '\\'), IMPL.toUpperCase(), TEST];
+    expect(validateStructuredReworkPaths(paths, [IMPL, TEST], [])).toEqual({ ok: true, reworkFiles: [IMPL, TEST] });
+    expect(validateStructuredReworkPaths([...paths].reverse(), [IMPL, TEST], [])).toEqual({ ok: true, reworkFiles: [IMPL, TEST] });
+  });
+  test('acumula recusas estáveis sem emitir autoridade parcial', () => {
+    expect(validateStructuredReworkPaths(['*', 'fora.ts', IMPL, '*'], [IMPL, TEST], [IMPL])).toEqual({
+      ok: false, refusals: ['rework_paths_malformed', 'rework_paths_not_in_scope', 'rework_paths_excluded'],
+    });
+  });
+});
+
+test('auditoria estruturada é a única diferença do spec para os mesmos fatos de correção', () => {
+  const legacy = ok(deriveResumeCorrectionSuccessor(input({ reworkFiles: [IMPL] })));
+  const structured = ok(deriveResumeCorrectionSuccessor(input({ reworkFiles: [IMPL], reworkSource: 'structured' })));
+  const legacySpec = legacy.intent['execution_spec'] as Record<string, unknown>;
+  const structuredSpec = structured.intent['execution_spec'] as Record<string, unknown>;
+  expect(structured).toEqual({ ...legacy, intent: { ...legacy.intent, execution_spec: {
+    ...legacySpec, correction_scope: { ...(legacySpec['correction_scope'] as Record<string, unknown>), rework_source: 'structured' },
+  } } });
+  expect(legacySpec['correction_scope']).not.toHaveProperty('rework_source');
+  expect(structuredSpec['resume_from_checkpoint']).toEqual(legacySpec['resume_from_checkpoint']);
+  expect(structuredSpec['validation_criteria']).toEqual(legacySpec['validation_criteria']);
+  expect(structured.recoverySequence).toBe(legacy.recoverySequence);
+  expect(structured.idempotencyKey).toBe(legacy.idempotencyKey);
 });

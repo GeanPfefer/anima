@@ -140,3 +140,69 @@ describe('planCorrectionFromReview — correção governada por retomada', () =>
     });
   });
 });
+
+
+describe('planCorrectionFromReview — retrabalho estruturado', () => {
+  test('undefined mantém exatamente o plano legado e não acrescenta auditoria', () => {
+    const legacy = planCorrectionFromReview(facts());
+    expect(planCorrectionFromReview(facts({ reworkPaths: undefined }))).toEqual(legacy);
+    const spec = okPlan(legacy).candidate.intent['execution_spec'] as Record<string, unknown>;
+    expect(spec['correction_scope']).toEqual({ rework_scope: [], remaining_scope: [TEST], effective_scope: [TEST] });
+  });
+  test('um arquivo: restante ∪ rework; texto não concede autoridade adicional', () => {
+    const scope = [IMPL, TEST, 'apps/web/lib/ai/other.ts'];
+    const scopedOriginal = { ...original, proposal: { ...original.proposal, data: { ...original.proposal.data, includedScope: scope } } };
+    const plan = okPlan(planCorrectionFromReview(facts({ original: scopedOriginal, reworkPaths: [TEST], events: [
+      gitEvidenceEvent({ changedFiles: [IMPL, TEST] }), resultEvent(), reviewEvent({ requestedChanges: `Corrija ${IMPL}.` }),
+    ] })));
+    expect(plan.candidate.proposal.data.includedScope).toEqual(scope.slice(1));
+    expect(plan.candidate.proposal.data.excludedScope).toContain(IMPL);
+    expect(plan.candidate.proposal.data.objective).toContain(`Corrija ${IMPL}`);
+    expect((plan.candidate.intent['execution_spec'] as Record<string, unknown>)['correction_scope']).toEqual({
+      rework_scope: [TEST], remaining_scope: [scope[2]], effective_scope: scope.slice(1), rework_source: 'structured',
+    });
+  });
+  test.each([
+    { paths: [], refusal: 'rework_paths_empty' },
+    { paths: ['../outside.ts'], refusal: 'rework_paths_malformed' },
+    { paths: ['outside.ts'], refusal: 'rework_paths_not_in_scope' },
+  ])('recusa estruturada sem candidato: $refusal', ({ paths, refusal }) => {
+    expect(planCorrectionFromReview(facts({ reworkPaths: paths }))).toEqual({ ok: false, reason: 'derivation_refused', refusals: [refusal] });
+  });
+  test('recusa path simultaneamente incluído e excluído', () => {
+    const conflicting = { ...original, proposal: { ...original.proposal, data: { ...original.proposal.data, excludedScope: [IMPL] } } };
+    expect(planCorrectionFromReview(facts({ original: conflicting, reworkPaths: [IMPL] }))).toEqual({
+      ok: false, reason: 'derivation_refused', refusals: ['rework_paths_excluded'],
+    });
+  });
+  test('texto humano continua obrigatório no modo estruturado', () => {
+    expect(planCorrectionFromReview(facts({ reworkPaths: [IMPL], events: [gitEvidenceEvent(), resultEvent(), reviewEvent({ requestedChanges: ' ' })] })))
+      .toEqual({ ok: false, reason: 'review_request_missing' });
+  });
+  test('regressão SDC-03: 12 arquivos tocados; feedback sem path/verbo; somente 2 reabertos', () => {
+    const scope = Array.from({ length: 12 }, (_, index) => `apps/web/lib/sdc/file-${index}.ts`);
+    const scopedOriginal = { ...original, proposal: { ...original.proposal, data: { ...original.proposal.data, includedScope: scope } } };
+    const feedback = 'A evidência apresentada é insuficiente para o aceite.';
+    const reviewFacts = facts({ original: scopedOriginal, events: [
+      gitEvidenceEvent({ changedFiles: scope }), resultEvent(), reviewEvent({ requestedChanges: feedback }),
+    ], existingRecoverySequences: [1], additionalValidations: [{ label: 'build', command: 'npm run build --workspace=apps/web' }] });
+    expect(planCorrectionFromReview(reviewFacts)).toEqual({ ok: false, reason: 'derivation_refused', refusals: ['remaining_scope_empty'] });
+    const selected = [scope[2]!, scope[9]!];
+    const plan = okPlan(planCorrectionFromReview({ ...reviewFacts, reworkPaths: [selected[1]!, selected[0]!, selected[1]!] }));
+    expect(planCorrectionFromReview({ ...reviewFacts, reworkPaths: selected })).toEqual(plan);
+    expect(plan.candidate.proposal.data.includedScope).toEqual(selected);
+    expect(plan.candidate.proposal.data.excludedScope).toEqual(['supabase/', ...scope.filter(path => !selected.includes(path))]);
+    expect(plan.candidate.proposal.data.objective).toContain(feedback);
+    const spec = plan.candidate.intent['execution_spec'] as Record<string, unknown>;
+    expect(spec['correction_scope']).toEqual({ rework_scope: selected, remaining_scope: [], effective_scope: selected, rework_source: 'structured' });
+    expect(spec['resume_from_checkpoint']).toEqual({ base_sha: BASE_SHA, branch: `anima-work/${ATTEMPT}`, commit_sha: COMMIT_SHA });
+    expect(spec['validation_criteria']).toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: 'npm test --workspace=apps/web -- chat-surface.test.ts' }),
+      expect.objectContaining({ command: 'npm run build --workspace=apps/web' }),
+    ]));
+    expect(plan.recoverySequence).toBe(2);
+    expect(plan.candidate.recoverySequence).toBe(2);
+    expect(plan.candidate.idempotencyKey).toBe(plan.idempotencyKey);
+    expect(validateCorrectionSuccessor(scopedOriginal, plan.candidate)).toMatchObject({ valid: true });
+  });
+});

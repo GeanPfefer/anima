@@ -249,6 +249,7 @@ interface SuccessorProofRequirements {
     readonly reworkScope: readonly string[];
     readonly remainingScope: readonly string[];
     readonly effectiveScope: readonly string[];
+    readonly reworkSource?: 'structured';
   };
 }
 
@@ -292,6 +293,7 @@ function buildSuccessorIntent(
         rework_scope: [...proof.correctionScope.reworkScope],
         remaining_scope: [...proof.correctionScope.remainingScope],
         effective_scope: [...proof.correctionScope.effectiveScope],
+        ...(proof.correctionScope.reworkSource ? { rework_source: proof.correctionScope.reworkSource } : {}),
       };
     }
     const rawCriteria = executionSpec['validation_criteria'];
@@ -379,6 +381,7 @@ export interface ResumeCorrectionInput {
   /** Subconjunto explicitamente autorizado pelo pedido humano para REWORK. Pode
    * reabrir arquivos tocados, mas nunca paths fora do escopo original. */
   readonly reworkFiles: readonly string[];
+  readonly reworkSource?: 'structured';
   readonly recoverySequence: number;
   readonly idempotencyKey: string;
   /** Gates ADICIONAIS exigidos pelo humano na revisão (ex.: o build real do framework).
@@ -388,6 +391,10 @@ export interface ResumeCorrectionInput {
 }
 
 export type ResumeCorrectionRefusal =
+  | 'rework_paths_empty'
+  | 'rework_paths_malformed'
+  | 'rework_paths_not_in_scope'
+  | 'rework_paths_excluded'
   | 'original_not_changes_requested'
   | 'requested_changes_empty'
   | 'checkpoint_incomplete'
@@ -397,6 +404,41 @@ export type ResumeCorrectionRefusal =
   | 'remaining_scope_empty'
   | 'additional_validation_invalid'
   | 'lineage_input_invalid';
+
+/** Valida autoridade estruturada por igualdade exata da chave usada pela derivação.
+ * Emite somente entradas originais, na ordem aprovada; nunca interpreta texto. */
+export function validateStructuredReworkPaths(
+  paths: readonly string[],
+  includedScope: readonly string[],
+  excludedScope: readonly string[],
+): { readonly ok: true; readonly reworkFiles: readonly string[] }
+  | { readonly ok: false; readonly refusals: readonly ResumeCorrectionRefusal[] } {
+  if (paths.length === 0) return { ok: false, refusals: ['rework_paths_empty'] };
+  const refusals: ResumeCorrectionRefusal[] = [];
+  const selected = new Set<string>();
+  const included = new Set(includedScope.map(pathKey));
+  const excluded = new Set(excludedScope.map(pathKey));
+  for (const raw of paths) {
+    const path = raw.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+    if (!path || path.includes('..') || /^(?:\/|[a-z]:)/i.test(path) || /[\*?\[\]{}]/.test(path)
+        || path.split('/').some(segment => !segment || segment === '.' || segment === '..')) {
+      refusals.push('rework_paths_malformed');
+      continue;
+    }
+    const key = pathKey(path);
+    if (!included.has(key)) refusals.push('rework_paths_not_in_scope');
+    if (excluded.has(key)) refusals.push('rework_paths_excluded');
+    selected.add(key);
+  }
+  if (refusals.length) return { ok: false, refusals: dedupe(refusals) };
+  const emitted = new Set<string>();
+  return { ok: true, reworkFiles: includedScope.filter(entry => {
+    const key = pathKey(entry);
+    if (!selected.has(key) || emitted.has(key)) return false;
+    emitted.add(key);
+    return true;
+  }) };
+}
 
 export type ResumeCorrectionResult =
   | { readonly ok: true; readonly candidate: RecoverySuccessorCandidate }
@@ -503,7 +545,7 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
   const intent = buildSuccessorIntent(withAdditionalGates(original.intent, addedGates), checkpoint, {
     functional: hasGate ? functionalCriterion : null,
     scopeCriteria,
-    correctionScope: { reworkScope, remainingScope, effectiveScope },
+    correctionScope: { reworkScope, remainingScope, effectiveScope, ...(input.reworkSource ? { reworkSource: input.reworkSource } : {}) },
   });
   if (!intent) return { ok: false, refusals: ['spec_unreadable'] };
 

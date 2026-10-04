@@ -1,5 +1,6 @@
 import {
   deriveResumeCorrectionSuccessor,
+  validateStructuredReworkPaths,
   projectHostObservedEvidence,
   type RecoverySuccessorCandidate,
   type RecoverySuccessorGap,
@@ -44,6 +45,7 @@ export type ReviewCorrectionBlock =
   | 'persistence_failed';
 
 export interface ReviewCorrectionFacts {
+  readonly reworkPaths?: readonly string[];
   readonly original: WorkItem;
   readonly events: readonly WorkEvent[];
   /** Sequências de lineage já existentes para o original (append-only). */
@@ -150,12 +152,17 @@ export function planCorrectionFromReview(facts: ReviewCorrectionFacts): ReviewCo
     + (recoverySequence === 1 ? '' : `:${recoverySequence}`);
   const idempotencyKey = uuidFromSeed(keySeed);
 
+  const structured = facts.reworkPaths === undefined ? undefined
+    : validateStructuredReworkPaths(facts.reworkPaths, original.proposal.data.includedScope, original.proposal.data.excludedScope);
+  if (structured && !structured.ok) return { ok: false, reason: 'derivation_refused', refusals: structured.refusals };
+
   const derivation = deriveResumeCorrectionSuccessor({
     original,
     requestedChanges,
     checkpoint: { baseSha: gitEvidence.baseSha, branch: worktreeBranchFor(reviewedAttemptId), commitSha: gitEvidence.observedCommitSha },
     preservedFiles: gitEvidence.observedChangedFiles,
-    reworkFiles: deriveExplicitReworkScope(requestedChanges, original.proposal.data.includedScope),
+    reworkFiles: structured?.ok ? structured.reworkFiles : deriveExplicitReworkScope(requestedChanges, original.proposal.data.includedScope),
+    ...(structured ? { reworkSource: 'structured' as const } : {}),
     recoverySequence,
     idempotencyKey,
     ...(facts.additionalValidations?.length ? { additionalValidations: facts.additionalValidations } : {}),
@@ -176,7 +183,7 @@ export type ReviewCorrectionResult =
 export async function correctReviewedWorkItem(
   client: SupabaseClient<Database>,
   workItemId: string,
-  options: { readonly requiredGates?: readonly string[] } = {},
+  options: { readonly requiredGates?: readonly string[]; readonly reworkPaths?: readonly string[] } = {},
 ): Promise<ReviewCorrectionResult> {
   const additionalValidations = (options.requiredGates ?? []).map(requiredReviewGate);
   if (additionalValidations.some(gate => gate === null)) {
@@ -208,6 +215,7 @@ export async function correctReviewedWorkItem(
   }
 
   const planned = planCorrectionFromReview({
+    ...(options.reworkPaths !== undefined ? { reworkPaths: options.reworkPaths } : {}),
     original: itemResult.value,
     events: eventsResult.value,
     existingRecoverySequences,

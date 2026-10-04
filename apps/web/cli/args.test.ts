@@ -116,3 +116,30 @@ describe('parser de argumentos da CLI', () => {
     expect(parseArgs(['bogus'])).toEqual({ ok: false, error: 'Comando desconhecido: bogus' });
   });
 });
+
+
+test('work correct --rework único e repetido preserva lista e flags', () => {
+  expect(parseArgs(['work', 'correct', 'abc', '--rework', 'a.ts'])).toEqual({
+    ok: true, command: { kind: 'work-correct', id: 'abc', requiredGates: [], json: false, reworkPaths: ['a.ts'] },
+  });
+  const argv = ['work', 'correct', 'abc', '--rework', 'a.ts', '--require-gate', 'npm run build', '--rework', 'b.ts', '--json'];
+  expect(parseArgs(argv)).toEqual({ ok: true, command: {
+    kind: 'work-correct', id: 'abc', requiredGates: ['npm run build'], json: true, reworkPaths: ['a.ts', 'b.ts'],
+  } });
+  expect(parseArgs(argv)).toEqual(parseArgs(argv));
+});
+
+test.each([
+  ['work', 'correct', 'abc', '--rework'],
+  ['work', 'correct', 'abc', '--rework', ''],
+  ['work', 'correct', 'abc', '--rework', '   '],
+  ['work', 'correct', 'abc', '--rework', '--json'],
+  ['work', 'correct', 'abc', '--rework', 'a.ts', '--rework'],
+  ['work', 'show', 'abc', '--rework', 'a.ts'],
+  ['work', 'retry', 'abc', '--rework', 'a.ts'],
+  ['work', 'replan', 'abc', '--rework', 'a.ts'],
+  ['status', '--rework', 'a.ts'],
+  ['--rework', 'a.ts'],
+])('--rework inválido ou fora de work correct: %j', (...argv) => {
+  expect(parseArgs(argv)).toMatchObject({ ok: false });
+});

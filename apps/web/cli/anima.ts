@@ -67,7 +67,7 @@ async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config
       return runWorkReview(service, command.id, decision);
     }
     case 'work-correct':
-      return runWorkCorrect((workItemId) => correctReviewedWorkItem(client, workItemId, { requiredGates: command.requiredGates }), command.id);
+      return runWorkCorrect((workItemId) => correctReviewedWorkItem(client, workItemId, { requiredGates: command.requiredGates, ...(command.reworkPaths !== undefined ? { reworkPaths: command.reworkPaths } : {}) }), command.id);
     case 'work-replan': {
       let diagnosis: unknown;
       if (command.diagnosisPath !== null) {
