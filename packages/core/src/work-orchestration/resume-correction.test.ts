@@ -2,6 +2,7 @@ import { readAutonomousExecutionSpec } from './eligibility';
 import { validateCorrectionSuccessor } from './recovery-successor';
 import type { WorkItem } from './types';
 import {
+  deriveRootAuthorityScope,
   deriveResumeCorrectionSuccessor,
   validateStructuredReworkPaths,
   type DecompositionCheckpoint,
@@ -403,4 +404,53 @@ test('auditoria estruturada é a única diferença do spec para os mesmos fatos 
   expect(structuredSpec['validation_criteria']).toEqual(legacySpec['validation_criteria']);
   expect(structured.recoverySequence).toBe(legacy.recoverySequence);
   expect(structured.idempotencyKey).toBe(legacy.idempotencyKey);
+});
+
+
+describe('SDC-05 — autoridade da raiz e reabertura preservada', () => {
+  const database = 'packages/types/src/database.ts';
+  const rootExcluded = 'packages/core/src/work-orchestration/replan.ts';
+  const includedScope = [database, ...Array.from({ length: 11 }, (_, i) => `src/file${i}.ts`)];
+  const excludedScope = [rootExcluded, ...Array.from({ length: 7 }, (_, i) => `excluded/file${i}.ts`)];
+  const rootAuthority = { includedScope, excludedScope };
+  const root = { ...original, proposal: { ...original.proposal, data: { ...original.proposal.data, ...rootAuthority } } };
+  const first = ok(deriveResumeCorrectionSuccessor(input({ original: root, preservedFiles: includedScope.slice(0, 8) })));
+  const current = { ...root, intent: first.intent, proposal: first.proposal };
+
+  test('SDC-03 real: duas corrections derivadas, exclusões e auditoria preservadas', () => {
+    const validation = validateStructuredReworkPaths([database], current.proposal.data.includedScope, current.proposal.data.excludedScope, rootAuthority);
+    if (!validation.ok) throw new Error('reabertura recusada');
+    expect(validation.reopenedFiles).toEqual([database]);
+    const second = ok(deriveResumeCorrectionSuccessor(input({ original: current,
+      preservedFiles: includedScope.slice(8, 9), reworkFiles: validation.reworkFiles,
+      reopenedFiles: validation.reopenedFiles, reworkSource: 'structured' })));
+    expect(second.proposal.data.includedScope).toEqual([...includedScope.slice(9), database]);
+    expect(second.proposal.data.excludedScope).not.toContain(database);
+    expect(second.proposal.data.excludedScope).toEqual(expect.arrayContaining([...excludedScope, ...includedScope.slice(1, 9)]));
+    const spec = second.intent['execution_spec'] as Record<string, unknown>;
+    expect(spec['correction_scope']).toMatchObject({ rework_scope: [database], reopened_scope: [database], rework_source: 'structured' });
+    expect(spec['resume_from_checkpoint']).toBeDefined();
+    expect(validateCorrectionSuccessor(current, second, { rootAuthority })).toMatchObject({ valid: true });
+    expect(validateCorrectionSuccessor(current, second)).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+    expect(validateCorrectionSuccessor(current, second, { rootAuthority: { includedScope: [], excludedScope } })).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+  });
+
+  test.each(['never.ts', rootExcluded, '/absolute.ts', '../outside.ts', 'src/*.ts', 'src//file.ts', 'src/./file.ts', '', 'database.ts', 'types/src/database.ts'])('recusa %s', path => {
+    expect(validateStructuredReworkPaths([path], current.proposal.data.includedScope, current.proposal.data.excludedScope, rootAuthority).ok).toBe(false);
+  });
+  test('sem autoridade preserva recusa atual; root-excluded vence inclusão conflitante', () => {
+    expect(validateStructuredReworkPaths([database], current.proposal.data.includedScope, current.proposal.data.excludedScope).ok).toBe(false);
+    expect(validateStructuredReworkPaths([database], [database], [], { includedScope: [database], excludedScope: [database] }).ok).toBe(false);
+    expect(deriveRootAuthorityScope({ includedScope: ['Src/A.ts', 'src/b.ts'], excludedScope: ['SRC\\B.TS'] })).toEqual(['Src/A.ts']);
+  });
+  test('canonicaliza pela chave, emite ordem e grafia da raiz', () => {
+    expect(validateStructuredReworkPaths([' ./PACKAGES\\TYPES\\SRC\\DATABASE.TS ', database], [], [database], rootAuthority))
+      .toEqual({ ok: true, reworkFiles: [database], reopenedFiles: [database] });
+  });
+  test('não adiciona chave aos specs legado ou estruturado sem reabertura', () => {
+    for (const reworkSource of [undefined, 'structured' as const]) {
+      const candidate = ok(deriveResumeCorrectionSuccessor(input({ reworkFiles: [TEST], reworkSource })));
+      expect((candidate.intent['execution_spec'] as Record<string, unknown>)['correction_scope']).not.toHaveProperty('reopened_scope');
+    }
+  });
 });

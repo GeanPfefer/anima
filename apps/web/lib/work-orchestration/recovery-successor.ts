@@ -1,6 +1,7 @@
 import {
   validateCorrectionSuccessor,
   validateRecoverySuccessor,
+  type RootAuthorityScope,
   type RecoverySuccessorCandidate,
   type RecoverySuccessorGap,
   type WorkItem,
@@ -54,8 +55,9 @@ export async function proposeRecoverySuccessor(
  * de falha — `validateCorrectionSuccessor` exige `changes_requested`). */
 export async function proposeCorrectionSuccessor(
   client: SupabaseClient<Database>, original: WorkItem, candidate: RecoverySuccessorCandidate,
+  options?: { readonly rootAuthority?: RootAuthorityScope },
 ): Promise<ProposeRecoverySuccessorResult> {
-  const validation = validateCorrectionSuccessor(original, candidate);
+  const validation = validateCorrectionSuccessor(original, candidate, options);
   if (!validation.valid) return { ok: false, code: 'candidate_invalid', gaps: validation.gaps };
   const result = await client.rpc('propose_recovery_successor', {
     p_original_work_item_id: original.id,

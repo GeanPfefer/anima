@@ -2,6 +2,7 @@ import {
   deriveResumeCorrectionSuccessor,
   validateStructuredReworkPaths,
   projectHostObservedEvidence,
+  type RootAuthorityScope,
   type RecoverySuccessorCandidate,
   type RecoverySuccessorGap,
   type ResumeCorrectionRefusal,
@@ -45,6 +46,7 @@ export type ReviewCorrectionBlock =
   | 'persistence_failed';
 
 export interface ReviewCorrectionFacts {
+  readonly rootAuthority?: RootAuthorityScope;
   readonly reworkPaths?: readonly string[];
   readonly original: WorkItem;
   readonly events: readonly WorkEvent[];
@@ -153,7 +155,7 @@ export function planCorrectionFromReview(facts: ReviewCorrectionFacts): ReviewCo
   const idempotencyKey = uuidFromSeed(keySeed);
 
   const structured = facts.reworkPaths === undefined ? undefined
-    : validateStructuredReworkPaths(facts.reworkPaths, original.proposal.data.includedScope, original.proposal.data.excludedScope);
+    : validateStructuredReworkPaths(facts.reworkPaths, original.proposal.data.includedScope, original.proposal.data.excludedScope, facts.rootAuthority);
   if (structured && !structured.ok) return { ok: false, reason: 'derivation_refused', refusals: structured.refusals };
 
   const derivation = deriveResumeCorrectionSuccessor({
@@ -162,6 +164,7 @@ export function planCorrectionFromReview(facts: ReviewCorrectionFacts): ReviewCo
     checkpoint: { baseSha: gitEvidence.baseSha, branch: worktreeBranchFor(reviewedAttemptId), commitSha: gitEvidence.observedCommitSha },
     preservedFiles: gitEvidence.observedChangedFiles,
     reworkFiles: structured?.ok ? structured.reworkFiles : deriveExplicitReworkScope(requestedChanges, original.proposal.data.includedScope),
+    ...(structured?.ok && structured.reopenedFiles?.length ? { reopenedFiles: structured.reopenedFiles } : {}),
     ...(structured ? { reworkSource: 'structured' as const } : {}),
     recoverySequence,
     idempotencyKey,
@@ -169,6 +172,41 @@ export function planCorrectionFromReview(facts: ReviewCorrectionFacts): ReviewCo
   });
   if (!derivation.ok) return { ok: false, reason: 'derivation_refused', refusals: derivation.refusals };
   return { ok: true, candidate: derivation.candidate, recoverySequence, idempotencyKey };
+}
+
+/** Leitura injetável: erros devem rejeitar a promise; null significa ausência de linha/item. */
+export interface CorrectionRootAuthorityPort {
+  readonly readPredecessor: (successorWorkItemId: string) => Promise<string | null>;
+  readonly readItem: (workItemId: string) => Promise<WorkItem | null>;
+}
+
+/** Só percorre corrections, no máximo 16 hops; toda incerteza fecha a reabertura. */
+export async function resolveCorrectionRootAuthority(
+  current: WorkItem, port: CorrectionRootAuthorityPort,
+): Promise<RootAuthorityScope | null> {
+  const visited = new Set<string>();
+  let item = current;
+  let depth = 0;
+  try {
+    for (;;) {
+      const id = item.id.toLowerCase();
+      if (visited.has(id)) return null;
+      visited.add(id);
+      const predecessor = await port.readPredecessor(item.id);
+      if (predecessor === null) return {
+        includedScope: item.proposal.data.includedScope,
+        excludedScope: item.proposal.data.excludedScope,
+      };
+      if (++depth > 16) return null;
+      const spec = asObject(item.intent['execution_spec'] as Json | undefined);
+      if (!asObject(spec?.['correction_scope'])) return null;
+      const parent = await port.readItem(predecessor);
+      if (!parent || parent.id.toLowerCase() !== predecessor.toLowerCase()) return null;
+      item = parent;
+    }
+  } catch {
+    return null;
+  }
 }
 
 export type ReviewCorrectionResult =
@@ -214,7 +252,27 @@ export async function correctReviewedWorkItem(
       .reduce<number | undefined>((max, row) => max === undefined || row.recovery_sequence > max ? row.recovery_sequence : max, undefined);
   }
 
+  const pathKey = (value: string): string => value.trim().toLowerCase().replace(/\\/g, '/');
+  const currentScope = new Set(itemResult.value.proposal.data.includedScope.map(pathKey));
+  let rootAuthority: RootAuthorityScope | undefined;
+  if (options.reworkPaths?.some(path => !currentScope.has(pathKey(path.trim().replace(/\\/g, '/').replace(/^\.\//, ''))))) {
+    rootAuthority = await resolveCorrectionRootAuthority(itemResult.value, {
+      readPredecessor: async id => {
+        const result = await client.from('work_recovery_lineage').select('original_work_item_id')
+          .eq('successor_work_item_id', id).maybeSingle();
+        if (result.error) throw new Error(result.error.message);
+        return result.data?.original_work_item_id ?? null;
+      },
+      readItem: async id => {
+        const result = await service.getItem(id);
+        if (!result.ok) throw new Error('item_unavailable');
+        return result.value;
+      },
+    }) ?? undefined;
+  }
+
   const planned = planCorrectionFromReview({
+    ...(rootAuthority ? { rootAuthority } : {}),
     ...(options.reworkPaths !== undefined ? { reworkPaths: options.reworkPaths } : {}),
     original: itemResult.value,
     events: eventsResult.value,
@@ -224,7 +282,7 @@ export async function correctReviewedWorkItem(
   });
   if (!planned.ok) return { ok: false, reason: planned.reason, refusals: planned.refusals };
 
-  const persisted = await proposeCorrectionSuccessor(client, itemResult.value, planned.candidate);
+  const persisted = await proposeCorrectionSuccessor(client, itemResult.value, planned.candidate, { rootAuthority });
   if (!persisted.ok) {
     if (persisted.code === 'candidate_invalid') return { ok: false, reason: 'candidate_invalid', gaps: persisted.gaps };
     return { ok: false, reason: 'persistence_failed', message: persisted.message };

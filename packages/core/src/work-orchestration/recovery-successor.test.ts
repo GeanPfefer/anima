@@ -1,6 +1,6 @@
 import type { WorkItem, WorkIntent, WorkProposal } from './types';
 import type { WorkRecoveryAssessment } from './recovery-successor-types';
-import { validateRecoverySuccessor, type RecoverySuccessorCandidate } from './recovery-successor';
+import { validateCorrectionSuccessor, validateRecoverySuccessor, type RecoverySuccessorCandidate } from './recovery-successor';
 
 const original: WorkItem = {
   id: '0cedae21-433d-4842-8fbd-9045c5128bcf', userId: 'u', sourceMessageId: 'm', state: 'failed',
@@ -50,3 +50,23 @@ test('não materializa quando a estratégia não é decomposição ou a autorida
   if (!result.valid) expect(result.gaps).toContain('financial_authority_introduced');
 });
 
+
+
+test('validação independente de reopened_scope não confia na derivação', () => {
+  const current = { ...original, state: 'changes_requested' as const };
+  const reopened = 'packages/types/src/database.ts';
+  const rootAuthority = { includedScope: [...original.proposal.data.includedScope, reopened], excludedScope: ['cloud'] };
+  const forged = candidate({ proposal: { ...proposal, data: { ...proposal.data, includedScope: [reopened] } },
+    intent: { ...intent, execution_spec: { ...(intent.execution_spec as object), correction_scope: {
+      rework_scope: [reopened], remaining_scope: [], effective_scope: [reopened], reopened_scope: [reopened], rework_source: 'structured',
+    } } } });
+  expect(validateCorrectionSuccessor(current, forged, { rootAuthority }).valid).toBe(true);
+  for (const options of [undefined, { rootAuthority: { ...rootAuthority, excludedScope: [reopened] } },
+    { rootAuthority: { includedScope: original.proposal.data.includedScope, excludedScope: [] } }]) {
+    expect(validateCorrectionSuccessor(current, forged, options)).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+  }
+  const excludedCandidate = { ...forged, proposal: { ...forged.proposal, data: { ...forged.proposal.data, excludedScope: [reopened] } } };
+  expect(validateCorrectionSuccessor(current, excludedCandidate, { rootAuthority })).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+  const outsideCandidate = { ...forged, proposal: { ...forged.proposal, data: { ...forged.proposal.data, includedScope: [reopened, 'never.ts'] } } };
+  expect(validateCorrectionSuccessor(current, outsideCandidate, { rootAuthority })).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+});

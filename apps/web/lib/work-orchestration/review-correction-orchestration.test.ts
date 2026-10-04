@@ -1,5 +1,5 @@
 import { validateCorrectionSuccessor, type WorkEvent, type WorkItem } from '@anima/core';
-import { deriveExplicitReworkScope, planCorrectionFromReview, type ReviewCorrectionFacts } from './review-correction-orchestration';
+import { deriveExplicitReworkScope, planCorrectionFromReview, resolveCorrectionRootAuthority, type ReviewCorrectionFacts } from './review-correction-orchestration';
 
 const ATTEMPT = '0aaf828c-fa1d-4c76-8503-64df7a5041c9';
 const BASE_SHA = 'a'.repeat(40);
@@ -205,4 +205,57 @@ describe('planCorrectionFromReview — retrabalho estruturado', () => {
     expect(plan.candidate.idempotencyKey).toBe(plan.idempotencyKey);
     expect(validateCorrectionSuccessor(scopedOriginal, plan.candidate)).toMatchObject({ valid: true });
   });
+});
+
+
+describe('resolveCorrectionRootAuthority — porta sem banco', () => {
+  const correction = (id: string): WorkItem => ({ ...original, id, intent: {
+    ...original.intent, execution_spec: { ...(original.intent['execution_spec'] as Record<string, never>), correction_scope: {} },
+  } });
+  const root = { ...original, id: 'root' };
+  test.each([1, 2, 16])('resolve %i hops', async hops => {
+    const items = [root, ...Array.from({ length: hops }, (_, i) => correction(`c${i}`))];
+    const port = {
+      readPredecessor: async (id: string) => { const i = items.findIndex(item => item.id === id); return i > 0 ? items[i - 1]!.id : null; },
+      readItem: async (id: string) => items.find(item => item.id === id) ?? null,
+    };
+    await expect(resolveCorrectionRootAuthority(items[hops]!, port)).resolves.toEqual({ includedScope: [IMPL, TEST], excludedScope: ['supabase/'] });
+  });
+  test('raiz usa o próprio escopo', async () => {
+    const readItem = jest.fn();
+    await expect(resolveCorrectionRootAuthority(root, { readPredecessor: async () => null, readItem })).resolves.toEqual({ includedScope: [IMPL, TEST], excludedScope: ['supabase/'] });
+    expect(readItem).not.toHaveBeenCalled();
+  });
+  test('ciclo, profundidade, hop não-correction, item ausente e erros fecham', async () => {
+    await expect(resolveCorrectionRootAuthority(correction('c'), { readPredecessor: async () => 'c', readItem: async () => correction('c') })).resolves.toBeNull();
+    await expect(resolveCorrectionRootAuthority(correction('0'), { readPredecessor: async id => String(Number(id) + 1), readItem: async id => correction(id) })).resolves.toBeNull();
+    await expect(resolveCorrectionRootAuthority(original, { readPredecessor: async () => 'root', readItem: async () => root })).resolves.toBeNull();
+    await expect(resolveCorrectionRootAuthority(correction('c'), { readPredecessor: async () => 'root', readItem: async () => null })).resolves.toBeNull();
+    await expect(resolveCorrectionRootAuthority(correction('c'), { readPredecessor: async () => { throw new Error('read'); }, readItem: async () => root })).resolves.toBeNull();
+    await expect(resolveCorrectionRootAuthority(correction('c'), { readPredecessor: async () => 'root', readItem: async () => { throw new Error('read'); } })).resolves.toBeNull();
+  });
+  test('plano estruturado reabre com raiz; legado ignora raiz', () => {
+    const current = { ...original, proposal: { ...original.proposal, data: { ...original.proposal.data, includedScope: [TEST], excludedScope: ['supabase/', IMPL] } } };
+    const scopedFacts = facts({ original: current, events: [gitEvidenceEvent({ changedFiles: [TEST] }), resultEvent(), reviewEvent()] });
+    const rootAuthority = original.proposal.data;
+    const plan = okPlan(planCorrectionFromReview({ ...scopedFacts, rootAuthority, reworkPaths: [IMPL] }));
+    expect(plan.candidate.proposal.data.includedScope).toEqual([IMPL]);
+    expect(validateCorrectionSuccessor(current, plan.candidate, { rootAuthority }).valid).toBe(true);
+    expect(planCorrectionFromReview({ ...scopedFacts, rootAuthority })).toEqual(planCorrectionFromReview(scopedFacts));
+    expect(planCorrectionFromReview({ ...scopedFacts, reworkPaths: [IMPL] }).ok).toBe(false);
+  });
+});
+
+
+test('autoridade opcional conserva o plano estruturado normal byte a byte', () => {
+  expect(planCorrectionFromReview(facts({ reworkPaths: [TEST], rootAuthority: original.proposal.data })))
+    .toEqual(planCorrectionFromReview(facts({ reworkPaths: [TEST] })));
+});
+
+test('hop intermediario sem correction_scope fecha a raiz', async () => {
+  const current: WorkItem = { ...original, id: 'current', intent: { execution_spec: { correction_scope: {} } } };
+  await expect(resolveCorrectionRootAuthority(current, {
+    readPredecessor: async id => id === 'current' ? original.id : 'root',
+    readItem: async () => original,
+  })).resolves.toBeNull();
 });

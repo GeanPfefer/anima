@@ -1,5 +1,5 @@
 import type { RecoverySuccessorCandidate, WorkItem, WorkRecoveryAssessment } from '@anima/core';
-import { proposeRecoverySuccessor } from './recovery-successor';
+import { proposeCorrectionSuccessor, proposeRecoverySuccessor } from './recovery-successor';
 
 const original: WorkItem = {
   id: '0cedae21-433d-4842-8fbd-9045c5128bcf', userId: 'u', sourceMessageId: 'm', state: 'failed', impactLevel: 'structural', capability: 'programming',
@@ -44,3 +44,21 @@ test('erro e envelope inválido da RPC falham fechado', async () => {
   await expect(proposeRecoverySuccessor({ rpc: invalid } as never, original, assessment, candidate)).resolves.toMatchObject({ ok: false, code: 'response_invalid' });
 });
 
+
+
+test('correction repassa autoridade da raiz e mantém RPC/auditoria', async () => {
+  const current = { ...original, state: 'changes_requested' as const };
+  const reopened = 'packages/types/src/database.ts';
+  const rootAuthority = { includedScope: ['a', 'b', 'c', reopened], excludedScope: ['x'] };
+  const correction = { ...candidate,
+    proposal: { ...candidate.proposal, data: { ...candidate.proposal.data, includedScope: [reopened] } },
+    intent: { ...candidate.intent, execution_spec: { ...(candidate.intent.execution_spec as object), correction_scope: {
+      rework_scope: [reopened], remaining_scope: [], effective_scope: [reopened], reopened_scope: [reopened], rework_source: 'structured',
+    } } },
+  };
+  const rpc = jest.fn().mockResolvedValue({ data: { successorWorkItemId: 's', lineageId: 'l', recoverySequence: 1, replayed: false }, error: null });
+  await expect(proposeCorrectionSuccessor({ rpc } as never, current, correction)).resolves.toMatchObject({ ok: false, code: 'candidate_invalid', gaps: expect.arrayContaining(['correction_scope_invalid']) });
+  expect(rpc).not.toHaveBeenCalled();
+  await expect(proposeCorrectionSuccessor({ rpc } as never, current, correction, { rootAuthority })).resolves.toMatchObject({ ok: true });
+  expect(rpc).toHaveBeenCalledWith('propose_recovery_successor', expect.objectContaining({ p_intent: correction.intent, p_recovery_sequence: 1 }));
+});

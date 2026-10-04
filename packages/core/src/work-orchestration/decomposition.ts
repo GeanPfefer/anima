@@ -249,6 +249,7 @@ interface SuccessorProofRequirements {
     readonly reworkScope: readonly string[];
     readonly remainingScope: readonly string[];
     readonly effectiveScope: readonly string[];
+    readonly reopenedScope?: readonly string[];
     readonly reworkSource?: 'structured';
   };
 }
@@ -293,6 +294,7 @@ function buildSuccessorIntent(
         rework_scope: [...proof.correctionScope.reworkScope],
         remaining_scope: [...proof.correctionScope.remainingScope],
         effective_scope: [...proof.correctionScope.effectiveScope],
+        ...(proof.correctionScope.reopenedScope?.length ? { reopened_scope: [...proof.correctionScope.reopenedScope] } : {}),
         ...(proof.correctionScope.reworkSource ? { rework_source: proof.correctionScope.reworkSource } : {}),
       };
     }
@@ -381,6 +383,7 @@ export interface ResumeCorrectionInput {
   /** Subconjunto explicitamente autorizado pelo pedido humano para REWORK. Pode
    * reabrir arquivos tocados, mas nunca paths fora do escopo original. */
   readonly reworkFiles: readonly string[];
+  readonly reopenedFiles?: readonly string[];
   readonly reworkSource?: 'structured';
   readonly recoverySequence: number;
   readonly idempotencyKey: string;
@@ -405,19 +408,34 @@ export type ResumeCorrectionRefusal =
   | 'additional_validation_invalid'
   | 'lineage_input_invalid';
 
+export interface RootAuthorityScope {
+  readonly includedScope: readonly string[];
+  readonly excludedScope: readonly string[];
+}
+
+/** Autoridade original, por igualdade exata de pathKey, na ordem e grafia da raiz. */
+export function deriveRootAuthorityScope(root: RootAuthorityScope): readonly string[] {
+  const excluded = new Set(root.excludedScope.map(pathKey));
+  return root.includedScope.filter(path => !excluded.has(pathKey(path)));
+}
+
 /** Valida autoridade estruturada por igualdade exata da chave usada pela derivação.
  * Emite somente entradas originais, na ordem aprovada; nunca interpreta texto. */
 export function validateStructuredReworkPaths(
   paths: readonly string[],
   includedScope: readonly string[],
   excludedScope: readonly string[],
-): { readonly ok: true; readonly reworkFiles: readonly string[] }
+  rootAuthority?: RootAuthorityScope,
+): { readonly ok: true; readonly reworkFiles: readonly string[]; readonly reopenedFiles?: readonly string[] }
   | { readonly ok: false; readonly refusals: readonly ResumeCorrectionRefusal[] } {
   if (paths.length === 0) return { ok: false, refusals: ['rework_paths_empty'] };
   const refusals: ResumeCorrectionRefusal[] = [];
   const selected = new Set<string>();
   const included = new Set(includedScope.map(pathKey));
   const excluded = new Set(excludedScope.map(pathKey));
+  const authority = rootAuthority ? deriveRootAuthorityScope(rootAuthority) : [];
+  const authorized = new Set(authority.map(pathKey));
+  const rootExcluded = new Set(rootAuthority?.excludedScope.map(pathKey) ?? []);
   for (const raw of paths) {
     const path = raw.trim().replace(/\\/g, '/').replace(/^\.\//, '');
     if (!path || path.includes('..') || /^(?:\/|[a-z]:)/i.test(path) || /[\*?\[\]{}]/.test(path)
@@ -426,18 +444,21 @@ export function validateStructuredReworkPaths(
       continue;
     }
     const key = pathKey(path);
-    if (!included.has(key)) refusals.push('rework_paths_not_in_scope');
-    if (excluded.has(key)) refusals.push('rework_paths_excluded');
+    if (rootAuthority ? !authorized.has(key) : !included.has(key)) refusals.push('rework_paths_not_in_scope');
+    if (rootAuthority ? rootExcluded.has(key) || (excluded.has(key) && !authorized.has(key)) : excluded.has(key)) refusals.push('rework_paths_excluded');
     selected.add(key);
   }
   if (refusals.length) return { ok: false, refusals: dedupe(refusals) };
   const emitted = new Set<string>();
-  return { ok: true, reworkFiles: includedScope.filter(entry => {
+  const reopenedFiles = authority.filter((entry, index) => selected.has(pathKey(entry))
+    && !included.has(pathKey(entry)) && authority.findIndex(other => pathKey(other) === pathKey(entry)) === index);
+  const reworkFiles = [...includedScope, ...reopenedFiles].filter(entry => {
     const key = pathKey(entry);
     if (!selected.has(key) || emitted.has(key)) return false;
     emitted.add(key);
     return true;
-  }) };
+  });
+  return { ok: true, reworkFiles, ...(rootAuthority ? { reopenedFiles } : {}) };
 }
 
 export type ResumeCorrectionResult =
@@ -471,7 +492,12 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
   // Escopo reduzido DETERMINÍSTICO: as entradas do escopo original que o
   // checkpoint NÃO tocou (o "restante" da revisão). A implementação preservada
   // (tocada) é casada por caminho tolerante e sai do escopo (byte-idêntico).
-  const originalScope = original.proposal.data.includedScope;
+  const currentScope = original.proposal.data.includedScope;
+  const currentKeys = new Set(currentScope.map(pathKey));
+  const reopenedFiles = (input.reopenedFiles ?? []).filter((entry, index, entries) =>
+    !currentKeys.has(pathKey(entry)) && entries.findIndex(other => pathKey(other) === pathKey(entry)) === index);
+  const reopened = new Set(reopenedFiles.map(pathKey));
+  const originalScope = [...currentScope, ...reopenedFiles];
   const preserved = new Set(preservedFiles.map(pathKey));
   const rework = new Set(reworkFiles.map(pathKey));
   const everyPreservedInScope = preservedFiles.length > 0
@@ -532,7 +558,7 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
       ),
       includedScope: [...effectiveScope],
       // A implementação preservada passa a ser EXCLUÍDA de forma explícita e honesta.
-      excludedScope: [...new Set([...original.proposal.data.excludedScope, ...preservedScope])],
+      excludedScope: [...new Set([...original.proposal.data.excludedScope.filter(entry => !reopened.has(pathKey(entry))), ...preservedScope])],
       // Aceite com PROVAS heterogêneas: funcional (gate, quando há) + escopo (invariante).
       expectedEffects: [...(hasGate ? [functionalCriterion] : []), ...scopeCriteria],
       risks: [
@@ -545,7 +571,7 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
   const intent = buildSuccessorIntent(withAdditionalGates(original.intent, addedGates), checkpoint, {
     functional: hasGate ? functionalCriterion : null,
     scopeCriteria,
-    correctionScope: { reworkScope, remainingScope, effectiveScope, ...(input.reworkSource ? { reworkSource: input.reworkSource } : {}) },
+    correctionScope: { reworkScope, remainingScope, effectiveScope, ...(reopenedFiles.length ? { reopenedScope: reopenedFiles } : {}), ...(input.reworkSource ? { reworkSource: input.reworkSource } : {}) },
   });
   if (!intent) return { ok: false, refusals: ['spec_unreadable'] };
 

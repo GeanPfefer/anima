@@ -1,3 +1,4 @@
+import { deriveRootAuthorityScope, type RootAuthorityScope } from './decomposition';
 import { evaluateTechnicalApprovalReadiness, readAutonomousExecutionSpec } from './eligibility';
 import type { WorkCapability, WorkImpactLevel, WorkIntent, WorkItem, WorkProposal } from './types';
 import type { WorkRecoveryAssessment } from './recovery-successor-types';
@@ -50,6 +51,8 @@ function validateSuccessorEnvelope(
   original: WorkItem,
   candidate: RecoverySuccessorCandidate,
   scopeRule: 'strict_subset' | 'nonempty_subset',
+  scopeOverride?: readonly string[],
+  normalizeScope = normalized,
 ): RecoverySuccessorGap[] {
   const gaps: RecoverySuccessorGap[] = [];
   if (!candidate.recoveryReason.trim() || !Number.isInteger(candidate.recoverySequence)
@@ -76,8 +79,8 @@ function validateSuccessorEnvelope(
     if (candidateSpec.dependsOnWorkItemIds.includes(original.id)) gaps.push('depends_on_failed_original');
   }
 
-  const originalScope = normalized(original.proposal.data.includedScope);
-  const candidateScope = normalized(candidate.proposal.data.includedScope);
+  const originalScope = normalizeScope(scopeOverride ?? original.proposal.data.includedScope);
+  const candidateScope = normalizeScope(candidate.proposal.data.includedScope);
   const subset = candidateScope.size > 0 && [...candidateScope].every(entry => originalScope.has(entry));
   const allowedScope = subset && (scopeRule === 'nonempty_subset' || candidateScope.size < originalScope.size);
   if (!allowedScope) gaps.push('scope_not_strictly_smaller');
@@ -113,13 +116,13 @@ export function validateRecoverySuccessor(
 export function validateCorrectionSuccessor(
   original: WorkItem,
   candidate: RecoverySuccessorCandidate,
+  options?: { readonly rootAuthority?: RootAuthorityScope },
 ): RecoverySuccessorValidation {
   const gaps: RecoverySuccessorGap[] = [];
   if (original.state !== 'changes_requested') gaps.push('original_not_changes_requested');
   // Correction pode reabrir explicitamente todo o escopo original; ainda exige
   // subconjunto não vazio e todas as demais garantias do envelope. Recovery
   // comum permanece estritamente menor.
-  gaps.push(...validateSuccessorEnvelope(original, candidate, 'nonempty_subset'));
   const rawSpec = candidate.intent['execution_spec'];
   const rawCorrection = typeof rawSpec === 'object' && rawSpec !== null && !Array.isArray(rawSpec)
     ? (rawSpec as Record<string, unknown>)['correction_scope'] : null;
@@ -130,11 +133,24 @@ export function validateCorrectionSuccessor(
   const rework = strings(correction?.['rework_scope']);
   const remaining = strings(correction?.['remaining_scope']);
   const effective = strings(correction?.['effective_scope']);
-  const originalScope = normalized(original.proposal.data.includedScope);
-  const candidateScope = normalized(candidate.proposal.data.includedScope);
-  const reworkSet = rework ? normalized(rework) : null;
-  const remainingSet = remaining ? normalized(remaining) : null;
-  const effectiveSet = effective ? normalized(effective) : null;
+  const reopened = strings(correction?.['reopened_scope']);
+  const hasReopened = reopened !== null && reopened.length > 0;
+  const key = (value: string): string => value.trim().toLowerCase().replace(/\\/g, '/');
+  const rootScope = new Set(options?.rootAuthority ? deriveRootAuthorityScope(options.rootAuthority).map(key) : []);
+  const reopeningValid = !hasReopened || (!!options?.rootAuthority
+    && reopened.every(value => rootScope.has(key(value)))
+    && reopened.every(value => rework?.some(entry => key(entry) === key(value)))
+    && reopened.every(value => !candidate.proposal.data.excludedScope.some(entry => key(entry) === key(value)))
+    && correction?.['rework_source'] === 'structured');
+  if (!reopeningValid || (correction?.['reopened_scope'] !== undefined && reopened === null)) gaps.push('correction_scope_invalid');
+  const universe = hasReopened && reopeningValid ? [...original.proposal.data.includedScope, ...reopened] : original.proposal.data.includedScope;
+  const scopeNormalize = hasReopened ? (values: readonly string[]) => new Set(values.map(key)) : normalized;
+  gaps.push(...validateSuccessorEnvelope(original, candidate, 'nonempty_subset', universe, scopeNormalize));
+  const originalScope = scopeNormalize(universe);
+  const candidateScope = scopeNormalize(candidate.proposal.data.includedScope);
+  const reworkSet = rework ? scopeNormalize(rework) : null;
+  const remainingSet = remaining ? scopeNormalize(remaining) : null;
+  const effectiveSet = effective ? scopeNormalize(effective) : null;
   const sameSet = (left: Set<string>, right: Set<string>): boolean =>
     left.size === right.size && [...left].every(value => right.has(value));
   const union = reworkSet && remainingSet ? new Set([...reworkSet, ...remainingSet]) : null;
