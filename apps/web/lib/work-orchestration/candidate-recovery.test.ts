@@ -93,6 +93,22 @@ describe('recoverFromFailedCandidate', () => {
     expect(calls).toHaveLength(0);
   });
 
+  test('caso real SDC-02: failure_not_retryable com tentativas esgotadas chega à RPC', async () => {
+    readiness.mockResolvedValue({ ...exhausted, status: 'BLOCKED', reason: 'failure_not_retryable', attemptsUsed: 1, maxAttempts: 1, remainingAttempts: 0 });
+    const { c, calls } = client({ rpc: { data: rpcOk, error: null } });
+    expect(await recoverFromFailedCandidate(c, 'w1', request(), git())).toMatchObject({ ok: true });
+    expect(calls).toHaveLength(1);
+  });
+
+  test('tentativas NÃO esgotadas ou falha ausente ⇒ recusa antes da RPC', async () => {
+    const { c, calls } = client();
+    readiness.mockResolvedValue({ ...exhausted, reason: 'failure_not_retryable', attemptsUsed: 1, maxAttempts: 2, remainingAttempts: 1 });
+    expect(await recoverFromFailedCandidate(c, 'w1', request(), git())).toMatchObject({ ok: false, code: 'budget_not_exhausted_or_not_failed' });
+    readiness.mockResolvedValue({ ...exhausted, failureEventId: null });
+    expect(await recoverFromFailedCandidate(c, 'w1', request(), git())).toMatchObject({ ok: false, code: 'budget_not_exhausted_or_not_failed' });
+    expect(calls).toHaveLength(0);
+  });
+
   test('leitura de prontidão falha ⇒ erro não-rejeição', async () => {
     readiness.mockResolvedValue({ ...exhausted, reason: 'read_failed' });
     expect(await recoverFromFailedCandidate(client().c, 'w1', request(), git())).toMatchObject({ ok: false, code: 'read_failed', rejected: false });

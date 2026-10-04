@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(36);
+SELECT plan(45);
 
 -- Três usuários: dono (allowlist), outro usuário (allowlist) e um fora da allowlist.
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
@@ -62,8 +62,17 @@ SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000f9',1,false,'openai'
 SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000fa',1,true,'claude-code','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,
   '{"candidate_recovery":{"predecessor_id":"97000000-0000-0000-0000-0000000000f1"}}');                                                                                                                              -- recovery em cadeia
 
+-- Gate npm.cmd (evidência real do host) e conteúdo legítimo/proibido no envelope.
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e1',1,false,'codex-cli','succeeded','npm.cmd run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,'{}');
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e2',1,false,'codex-cli','succeeded','npm.cmd run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,'{}');
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e3',1,false,'codex-cli','succeeded','pnpm.cmd run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,'{}');
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e4',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,'{"paid":false,"notes":["paid-compute-readiness.ts"]}');
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e5',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,'{"paid_compute":true}');
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e6',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,'{"financial_authorization":"x"}');
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e7',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,'{"auto_provision":true}');
+
 CREATE TEMP TABLE failure AS SELECT work_item_id, id FROM public.work_events WHERE event_type='execution_failed'
-  AND work_item_id::text LIKE '97000000-0000-0000-0000-0000000000f%';
+  AND work_item_id::text LIKE '97000000-0000-0000-0000-0000000000%';
 GRANT SELECT ON failure TO authenticated;
 
 CREATE FUNCTION pg_temp.auth(p_request text) RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$ SELECT jsonb_build_object(
@@ -162,6 +171,39 @@ SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-000
   pg_temp.fid('97000000-0000-0000-0000-0000000000fa'),pg_temp.auth('97000000-0000-0000-0000-0000000000c7'))$$,
   '55000','execution_envelope_unsupported','recovery em cadeia (spec já com candidate_recovery) é recusada');
 
+-- B: apenas o executável inicial `npm.cmd` ≡ `npm`; o resto do comando, label e exitCode são exatos.
+SELECT is((public.authorize_candidate_recovery('97000000-0000-0000-0000-0000000000e1',3,
+  pg_temp.fid('97000000-0000-0000-0000-0000000000e1'),pg_temp.auth('97000000-0000-0000-0000-0000000000f1')))->>'replayed','false','npm na autorização aceita evidência npm.cmd');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-0000000000e2',3,
+  pg_temp.fid('97000000-0000-0000-0000-0000000000e2'),pg_temp.auth('97000000-0000-0000-0000-0000000000f2')||
+  '{"gate":{"label":"typecheck","command":"npm run typecheck --workspace=apps/mobile","exitCode":2}}')$$,
+  '55000','gate_evidence_mismatch','argumento diferente é recusado');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-0000000000e2',3,
+  pg_temp.fid('97000000-0000-0000-0000-0000000000e2'),pg_temp.auth('97000000-0000-0000-0000-0000000000f3')||
+  '{"gate":{"label":"lint","command":"npm run typecheck --workspace=apps/web","exitCode":2}}')$$,
+  '55000','gate_evidence_mismatch','label divergente é recusado');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-0000000000e2',3,
+  pg_temp.fid('97000000-0000-0000-0000-0000000000e2'),pg_temp.auth('97000000-0000-0000-0000-0000000000f4')||
+  '{"gate":{"label":"typecheck","command":"npm run typecheck --workspace=apps/web","exitCode":3}}')$$,
+  '55000','gate_evidence_mismatch','exitCode divergente é recusado');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-0000000000e3',3,
+  pg_temp.fid('97000000-0000-0000-0000-0000000000e3'),pg_temp.auth('97000000-0000-0000-0000-0000000000f5')||
+  '{"gate":{"label":"typecheck","command":"pnpm run typecheck --workspace=apps/web","exitCode":2}}')$$,
+  '55000','gate_evidence_mismatch','pnpm.cmd não é equivalente a pnpm');
+
+-- C: `paid` legítimo é aceito; só os marcadores semânticos são recusados.
+SELECT is((public.authorize_candidate_recovery('97000000-0000-0000-0000-0000000000e4',3,
+  pg_temp.fid('97000000-0000-0000-0000-0000000000e4'),pg_temp.auth('97000000-0000-0000-0000-0000000000f6')))->>'replayed','false','"paid": false e paths paid-compute-* são aceitos');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-0000000000e5',3,
+  pg_temp.fid('97000000-0000-0000-0000-0000000000e5'),pg_temp.auth('97000000-0000-0000-0000-0000000000f7'))$$,
+  '55000','execution_envelope_unsupported','paid_compute é recusado');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-0000000000e6',3,
+  pg_temp.fid('97000000-0000-0000-0000-0000000000e6'),pg_temp.auth('97000000-0000-0000-0000-0000000000f8'))$$,
+  '55000','execution_envelope_unsupported','financial_authorization é recusado');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-0000000000e7',3,
+  pg_temp.fid('97000000-0000-0000-0000-0000000000e7'),pg_temp.auth('97000000-0000-0000-0000-0000000000f9'))$$,
+  '55000','execution_envelope_unsupported','auto_provision é recusado');
+
 -- O sucessor proposed não é um failed corrente.
 SELECT throws_ok(format($q$SELECT public.authorize_candidate_recovery(%L,1,%L,pg_temp.auth('97000000-0000-0000-0000-0000000000c8'))$q$,
   (SELECT v->>'successorWorkItemId' FROM r1),pg_temp.fid('97000000-0000-0000-0000-0000000000f1')),
@@ -185,7 +227,7 @@ SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-000
   pg_temp.fid('97000000-0000-0000-0000-0000000000f2'),pg_temp.auth('97000000-0000-0000-0000-0000000000d2'))$$,
   '42501','authentication_or_allowlist_required','usuário fora da allowlist é recusado');
 SELECT set_config('request.jwt.claim.sub','97000000-0000-0000-0000-000000000001',true);
-SELECT is((SELECT count(*) FROM public.work_candidate_recoveries),1::bigint,'RLS: o dono lê a própria recovery');
+SELECT is((SELECT count(*) FROM public.work_candidate_recoveries),3::bigint,'RLS: o dono lê as próprias recoveries');
 SELECT ok(has_function_privilege('authenticated','public.authorize_candidate_recovery(uuid,integer,uuid,jsonb)','EXECUTE')
   AND NOT has_function_privilege('anon','public.authorize_candidate_recovery(uuid,integer,uuid,jsonb)','EXECUTE'),
   'EXECUTE só para authenticated (nunca anon)');

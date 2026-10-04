@@ -182,7 +182,8 @@ BEGIN
   IF gev.id IS NULL
     OR jsonb_typeof(gev.payload #> '{data,evidence,gates}') IS DISTINCT FROM 'array'
     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(gev.payload #> '{data,evidence,gates}') g
-      WHERE g->>'label' = p_authorization #>> '{gate,label}' AND g->>'command' = p_authorization #>> '{gate,command}'
+      WHERE g->>'label' = p_authorization #>> '{gate,label}' AND regexp_replace(g->>'command', '^npm\.cmd(?= |$)', 'npm')
+          = regexp_replace(p_authorization #>> '{gate,command}', '^npm\.cmd(?= |$)', 'npm')
         AND g->'outcome' = '"failed"'::jsonb AND g->'timedOut' = 'false'::jsonb AND g->'cancelled' = 'false'::jsonb
         AND g->'exitCode' = p_authorization #> '{gate,exitCode}')
     THEN RAISE EXCEPTION 'gate_evidence_mismatch' USING ERRCODE = '55000'; END IF;
@@ -213,7 +214,7 @@ BEGIN
     OR spec->>'coder_backend' IS NULL OR spec->>'coder_backend' NOT IN ('codex-cli','claude-code')
     OR spec->'permissions' IS DISTINCT FROM '["workspace_read","workspace_write_isolated"]'::jsonb
     OR jsonb_typeof(spec->'validation_criteria') IS DISTINCT FROM 'array'
-    OR spec::text ~* '(financial_authorization|paid_compute|auto.?provision|paid)'
+    OR spec::text ~* '(financial_authorization|paid_compute|auto.?provision)'
     THEN RAISE EXCEPTION 'execution_envelope_unsupported' USING ERRCODE = '55000'; END IF;
 
   checkpoint := jsonb_build_object('base_sha', hev.payload #>> '{data,evidence,baseSha}',

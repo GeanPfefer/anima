@@ -77,7 +77,9 @@ export async function recoverFromFailedCandidate(
   const readiness = await readWorkRetryReadiness(client, workItemId);
   if (readiness.reason === 'read_failed') return fail('read_failed', 'Não foi possível ler o estado de retry do item.', false);
   // Com tentativas restantes o caminho canônico é `work retry`, não uma recuperação.
-  if (readiness.reason !== 'attempt_budget_exhausted' || !readiness.failureEventId || readiness.proposalVersion === null) {
+  // O esgotamento sai dos FATOS da prontidão, não do `reason` (SDC-02: failure_not_retryable com 1/1).
+  const budgetExhausted = readiness.maxAttempts > 0 && readiness.attemptsUsed >= readiness.maxAttempts && readiness.remainingAttempts === 0;
+  if (readiness.status !== 'BLOCKED' || !budgetExhausted || !readiness.failureEventId || !readiness.sourceAttemptId || readiness.proposalVersion === null) {
     return fail('budget_not_exhausted_or_not_failed', `A recuperação de candidato exige item failed com tentativas esgotadas (estado de retry: ${readiness.reason}).`);
   }
 
