@@ -29,7 +29,8 @@ export type ParsedCommand =
   | { readonly kind: 'work-prepare-autonomous'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-authorize-compute'; readonly id: string; readonly maxCostUsd: number; readonly maxMinutes: number; readonly validHours: number; readonly json: boolean }
   | { readonly kind: 'work-set-compute'; readonly id: string; readonly preference: ComputePreferenceV1; readonly json: boolean }
-  | { readonly kind: 'work-recover-harness'; readonly id: string; readonly fixCommits: readonly string[]; readonly evidenceReference: string; readonly reason: string; readonly json: boolean };
+  | { readonly kind: 'work-recover-harness'; readonly id: string; readonly fixCommits: readonly string[]; readonly evidenceReference: string; readonly reason: string; readonly json: boolean }
+  | { readonly kind: 'work-recover-candidate'; readonly id: string; readonly diagnosisPath: string; readonly json: boolean };
 
 export type ParseResult =
   | { readonly ok: true; readonly command: ParsedCommand }
@@ -106,8 +107,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   if (unknownFlag !== null) return { ok: false, error: `Flag desconhecida: ${unknownFlag}` };
 
   const [group, sub, ...rest] = positionals;
-  if (diagnosisPath !== null && (group !== 'work' || sub !== 'replan' || !diagnosisPath.trim())) {
-    return { ok: false, error: '--diagnosis exige um arquivo e work replan.' };
+  if (diagnosisPath !== null && (group !== 'work' || (sub !== 'replan' && sub !== 'recover-candidate') || !diagnosisPath.trim())) {
+    return { ok: false, error: '--diagnosis exige um arquivo e work replan/recover-candidate.' };
   }
   if (planPath !== null && (group !== 'work' || sub !== 'authorize-resume' || !planPath.trim())) {
     return { ok: false, error: '--plan exige um arquivo e work authorize-resume.' };
@@ -158,6 +159,12 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     if (sub === 'replan') {
       if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:'Uso: anima work replan <id> [--diagnosis arquivo.json]' };
       return {ok:true, command:{kind:'work-replan',id,diagnosisPath,json}};
+    }
+    if (sub === 'recover-candidate') {
+      if (!id || rest.length !== 1 || reason !== null || !diagnosisPath?.trim()) {
+        return { ok: false, error: 'Uso: anima work recover-candidate <id> --diagnosis arquivo.json' };
+      }
+      return { ok: true, command: { kind: 'work-recover-candidate', id, diagnosisPath: diagnosisPath.trim(), json } };
     }
     if (sub === 'authorize-resume') {
       if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:'Uso: anima work authorize-resume <id> [--plan arquivo.json]' };
@@ -282,6 +289,8 @@ Uso:
                                                Preferência de compute da unidade (NÃO autoriza gasto)
   anima work recover-harness <id> --fix C --evidence docs/registros/R.md --reason "..."
                                                Recuperação após defeito de HARNESS corrigido: 1 sucessor proposed (sem aprovar/pagar)
+  anima work recover-candidate <id> --diagnosis f
+                                               Recuperação de CANDIDATO com defeito real: 1 sucessor proposed retomando o checkpoint (sem aprovar/executar)
   anima work set-compute <id> --strategy router_default
                                                Volta a unidade ao Router padrão (local-first)
   anima help                                  Esta ajuda
@@ -289,7 +298,7 @@ Uso:
 Flags:
   --json           Saída estável em JSON (para automação/self-dev)
   --reason "..."   Texto do pedido de correção (request-changes)
-  --diagnosis f    Arquivo JSON do diagnóstico (work replan)
+  --diagnosis f    Arquivo JSON do diagnóstico (work replan | recover-candidate)
   --plan f         Arquivo JSON da autorização humana de retomada (work authorize-resume)
   --max-usd N      Teto de custo da authority paga (work authorize-compute)
   --max-minutes M  Duração máxima de compute (≥ o que o Router pede por volta)

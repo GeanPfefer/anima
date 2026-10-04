@@ -256,6 +256,11 @@ export interface WorkRecoverHarnessPayload {
   readonly successorWorkItemId: string; readonly lineageId: string; readonly recoveryId: string;
   readonly sourceAttemptId: string; readonly fixCommits: readonly string[]; readonly replayed: boolean; readonly message: string;
 }
+export interface WorkRecoverCandidatePayload {
+  readonly ok: true; readonly kind: 'work-recover-candidate'; readonly workItemId: string;
+  readonly successorWorkItemId: string; readonly lineageId: string; readonly recoveryId: string;
+  readonly sourceAttemptId: string; readonly checkpointCommitSha: string; readonly replayed: boolean; readonly message: string;
+}
 export interface WorkSetComputePayload {
   readonly ok: true; readonly kind: 'work-set-compute'; readonly workItemId: string;
   readonly proposalVersion: number; readonly preference: ComputePreferenceV1; readonly replayed: boolean;
@@ -283,7 +288,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
-  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
+  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkRecoverCandidatePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -610,6 +615,30 @@ export async function runWorkRecoverHarness(
       lineageId: result.lineageId, recoveryId: result.recoveryId, sourceAttemptId: result.sourceAttemptId,
       fixCommits: result.authorization.fixCommits, replayed: result.replayed,
       message: `Sucessor de recuperação ${result.replayed ? 'já existente (replay)' : 'criado'} em proposed. Aprovação, preferência de compute e authority continuam atos separados.`,
+    },
+  };
+}
+
+/**
+ * Ato HUMANO de recuperação de CANDIDATO com defeito real: um sucessor `proposed` na mesma
+ * lineage que retoma o checkpoint do candidato (1 attempt própria). Não é retry e não inicia
+ * attempt: aprovação, classificação, compute e execução continuam atos humanos separados.
+ */
+export async function runWorkRecoverCandidate(
+  recover: () => Promise<
+    | { ok: true; recoveryId: string; successorWorkItemId: string; lineageId: string; sourceAttemptId: string; checkpointCommitSha: string; replayed: boolean }
+    | { ok: false; code: string; message: string; rejected: boolean }>,
+  id: string,
+): Promise<CommandResult> {
+  const result = await recover();
+  if (!result.ok) return errorResult(result.message, result.code, result.rejected ? EXIT.REJECTED : EXIT.ERROR);
+  return {
+    exitCode: EXIT.OK,
+    payload: {
+      ok: true, kind: 'work-recover-candidate', workItemId: id, successorWorkItemId: result.successorWorkItemId,
+      lineageId: result.lineageId, recoveryId: result.recoveryId, sourceAttemptId: result.sourceAttemptId,
+      checkpointCommitSha: result.checkpointCommitSha, replayed: result.replayed,
+      message: `Sucessor de recuperação do candidato ${result.replayed ? 'já existente (replay)' : 'criado'} em proposed. Aprovação, classificação, compute e execução continuam atos humanos separados.`,
     },
   };
 }

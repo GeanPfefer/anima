@@ -88,3 +88,4 @@ export * from './coder-transcript';
 
 export * from './human-resume';
 export * from './harness-recovery';
+export * from './candidate-recovery';

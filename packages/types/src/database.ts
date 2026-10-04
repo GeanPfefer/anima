@@ -2203,6 +2203,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      authorize_candidate_recovery: {
+        Args: {
+          p_authorization: Json
+          p_expected_proposal_version: number
+          p_failure_event_id: string
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
       authorize_harness_fix_recovery: {
         Args: {
           p_authorization: Json
