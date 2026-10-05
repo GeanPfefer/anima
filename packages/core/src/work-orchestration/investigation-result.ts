@@ -125,7 +125,7 @@ export function applyInvestigationEvidenceRejections(result: InvestigationResult
       requestedLines: { ...e.lines }, findingDowngraded: f.status !== 'undetermined' && findings[fi]!.status === 'undetermined' });
   }));
   const treated: InvestigationResultV1 = { ...result, findings,
-    outcome: !findings.some(f => f.status !== 'undetermined') ? 'inconclusive' : downgraded && result.outcome === 'conclusive' ? 'partial' : result.outcome,
+    outcome: downgraded > 0 && !findings.some(f => f.status !== 'undetermined') ? 'inconclusive' : downgraded > 0 && result.outcome === 'conclusive' ? 'partial' : result.outcome,
     gaps: [...result.gaps, `Host: ${diagnostics.length} evidence reference(s) failed line-range validation and were not accepted; ${downgraded} finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.`] };
   return parseInvestigationResult(treated) ? { result: treated, diagnostics } : null;
 }

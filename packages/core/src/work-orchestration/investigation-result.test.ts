@@ -80,6 +80,25 @@ describe('host line-range rejections', () => {
     expect(applyInvestigationEvidenceRejections(input, [])).toEqual({ result: input, diagnostics: [] });
     expect(applyInvestigationEvidenceRejections(input, [])!.result).toBe(input);
   });
+  test.each(['conclusive', 'partial', 'inconclusive'] as const)('preserves %s when rejecting a ref from an already undetermined finding', outcome => {
+    const input = { ...result([finding('undetermined', 1), finding('undetermined', 0)]), outcome, gaps: ['Model gap'] };
+    const treated = applyInvestigationEvidenceRejections(input, [reject(0)])!;
+    expect(treated.result.outcome).toBe(outcome);
+    expect(treated.result.findings[0]).toEqual({ statement: 'Original statement', status: 'undetermined', evidence: [] });
+    expect(treated.result.findings[1]).toBe(input.findings[1]);
+    expect(treated.diagnostics[0]!.findingDowngraded).toBe(false);
+    expect(treated.result.gaps).toEqual(['Model gap', 'Host: 1 evidence reference(s) failed line-range validation and were not accepted; 0 finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.']);
+    expect(input.findings[0]!.evidence).toEqual([ref]);
+  });
+  test('partial becomes inconclusive when rejection downgrades its last supported finding', () => {
+    const input = { ...result([finding('inferred', 1), finding('undetermined', 0)]), outcome: 'partial' as const, gaps: ['Model gap'] };
+    const treated = applyInvestigationEvidenceRejections(input, [reject(0)])!;
+    expect(treated.result.outcome).toBe('inconclusive');
+    expect(treated.result.findings[0]).toEqual({ statement: 'Original statement', status: 'undetermined', evidence: [] });
+    expect(treated.result.findings[1]).toBe(input.findings[1]);
+    expect(treated.diagnostics[0]!.findingDowngraded).toBe(true);
+    expect(treated.result.gaps[0]).toBe('Model gap');
+  });
   test('CASE5 all refs rejected makes outcome inconclusive and preserves model gaps', () => {
     const input = { ...result([finding('established', 1), finding('inferred', 1), finding('undetermined', 0)]), gaps: ['Model gap'] };
     const treated = applyInvestigationEvidenceRejections(input, [reject(1), reject(0)])!;
