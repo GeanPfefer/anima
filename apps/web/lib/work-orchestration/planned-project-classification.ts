@@ -1,10 +1,11 @@
+import { isInvestigationPreparationEnvelope } from './investigation-preparation';
 import { isInvestigationCommit, readCanonicalProvenanceFromIntent, readEffectClass, validateEffectClassCoherence } from '@anima/core';
 import { Constants, type Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type ItemRow=Pick<Database['public']['Tables']['work_items']['Row'],'state'|'proposal_version'|'impact_level'|'capability'|'intent'>;
 type SupportedPlanner='openai_project_tools_v1'|'local_ollama_project_tools_v1';
-type ClassificationSource=SupportedPlanner|'canonical_backlog_v1';
+type ClassificationSource=SupportedPlanner|'canonical_backlog_v1'|'cli_propose_investigation_v1';
 
 type PreparationResult=
   |{readonly ok:true;readonly replayed:boolean}
@@ -25,6 +26,7 @@ const supportedPlanner=(value:unknown):value is SupportedPlanner=>value==='opena
 async function sourceForClassification(
   client:SupabaseClient<Database>,workItemId:string,intent:{planner?:unknown;execution_spec?:unknown},
 ):Promise<ClassificationSource|null>{
+  if ('investigation_provenance' in intent) return isInvestigationPreparationEnvelope(intent) ? 'cli_propose_investigation_v1' : null;
   if(supportedPlanner(intent.planner))return intent.planner;
   // Uma revisão humana pode substituir a metadata do planner sem alterar a origem
   // canônica estável do trabalho. A proveniência canônica é validada pelo contrato

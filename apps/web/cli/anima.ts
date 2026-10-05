@@ -1,3 +1,7 @@
+import { createInvestigationPreparationDeps, type InvestigationPreparationDeps } from '@/lib/work-orchestration/investigation-preparation';
+import { runWorkProposeInvestigation } from './app';
+import type { WorkOrchestrationService } from '@anima/core';
+import type { IdentityResult } from './identity';
 import { createSupabaseWorkReferenceLookup, resolveWorkReference } from '@/lib/work-orchestration/work-reference';
 import { resolveCommandWorkReference } from './app';
 import { randomUUID } from 'node:crypto';
@@ -46,18 +50,24 @@ function jsonFlag(command: ParsedCommand): boolean {
   return command.kind !== 'help' && command.json;
 }
 
-async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config-check' | 'toolchain-check' }>): Promise<CommandResult> {
+export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config-check' | 'toolchain-check' }>, injection: {
+  readonly resolveIdentity?: () => Promise<IdentityResult>;
+  readonly service?: WorkOrchestrationService;
+  readonly investigationDeps?: InvestigationPreparationDeps;
+} = {}): Promise<CommandResult> {
   if (command.kind === 'help') return { exitCode: EXIT.OK, payload: { ok: true, kind: 'help', usage: USAGE } };
 
-  const identity = await resolveCliIdentity();
+  const identity = await (injection.resolveIdentity ?? resolveCliIdentity)();
   if (!identity.ok) return { exitCode: EXIT.ERROR, payload: { ok: false, kind: 'error', error: identity.error, code: 'authentication_required' } };
   const { client, userId } = identity.identity;
   const resolved = await resolveCommandWorkReference(command, input => resolveWorkReference(createSupabaseWorkReferenceLookup(client), input));
   if (!resolved.ok) return resolved.result;
   command = resolved.command;
-  const service = createWorkOrchestrationService(client);
+  const service = injection.service ?? createWorkOrchestrationService(client);
 
   switch (command.kind) {
+    case 'work-propose-investigation':
+      return runWorkProposeInvestigation(command, injection.investigationDeps ?? createInvestigationPreparationDeps(client, userId, service));
     case 'status': return runStatus(service, userId, process.env);
     case 'budget-status':
       return runBudgetStatus(async (workItemId) => {
@@ -208,7 +218,8 @@ async function main(): Promise<void> {
   finish(result.exitCode);
 }
 
-main().catch((error: unknown) => {
+// Importing dispatch for tests must not authenticate, print or finish the process.
+if (process.argv[1]?.replace(/\\/g, '/').endsWith('/cli/anima.ts')) main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`erro fatal: ${message}\n`);
   finish(EXIT.ERROR);

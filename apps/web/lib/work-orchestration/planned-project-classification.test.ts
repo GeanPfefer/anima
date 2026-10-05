@@ -230,3 +230,31 @@ test('não confia em resume_from_checkpoint sem lineage persistida',async()=>{
   await expect(ensurePlannedProjectClassification({from,rpc} as never,'orphan',3)).resolves.toMatchObject({ok:false,code:'classification_policy_not_applicable'});
   expect(rpc).not.toHaveBeenCalled();
 });
+import { buildInvestigationProposal } from './investigation-preparation';
+describe('origem first-class da preparação de investigação',()=>{
+ const command=buildInvestigationProposal({question:'O que existe?',baseSha:'a'.repeat(40)},'INV-04','2026-10-05T12:00:00.000Z');
+ const valid={state:'approved',proposal_version:1,impact_level:'low',capability:command.capability,intent:command.intent};
+ const clientFor=(data:unknown)=>({from:jest.fn(()=>({select:jest.fn(()=>({eq:jest.fn(()=>({maybeSingle:jest.fn().mockResolvedValue({data,error:null})}))}))})),rpc:jest.fn(async()=>({data:null,error:null}))});
+ test('aceita somente depois de approve/versionamento e emite policy de investigação',async()=>{
+  const client=clientFor(valid); expect(await ensurePlannedProjectClassification(client as never,'item',1)).toMatchObject({ok:true});
+  expect(client.rpc.mock.calls[1]).toEqual(['record_work_intelligence_classification',expect.objectContaining({p_classification:expect.objectContaining({provenance:expect.objectContaining({classifierId:'cli_propose_investigation_v1-bridge',policyVersion:'human-approved-project-investigation-v1'})})})]);
+ });
+ const spec=command.intent.execution_spec as Record<string,unknown>;
+ test.each([
+  {effect_class:undefined,executor:'worktree',permissions:['workspace_read','workspace_write_isolated']},
+  {permissions:['workspace_read','workspace_write_isolated']},{executor:'worktree'},
+  {coder_backend:'ollama'},{model:'custom'},{model:undefined},{verifier_requirement:'required_fail_closed'},
+  {base_sha:'b'.repeat(40)},{resume_from_checkpoint:{}},{candidate_recovery:{}},
+  {limits:{max_attempts:2,max_duration_minutes:30}},{validation_criteria:[]}
+ ])('recusa A–E e variantes %j antes de RPC',async patch=>{
+  const client=clientFor({...valid,capability:'programming',intent:{...command.intent,execution_spec:{...spec,...patch}}});
+  expect(await ensurePlannedProjectClassification(client as never,'item',1)).toMatchObject({ok:false}); expect(client.rpc).not.toHaveBeenCalled();
+ });
+ test.each([null,{}, {kind:'investigation_preparation'}, {...command.intent.investigation_provenance as object,reference:'INV-1'}])('recusa F: provenance malformada %j',async provenance=>{
+  const client=clientFor({...valid,intent:{...command.intent,investigation_provenance:provenance}});
+  expect(await ensurePlannedProjectClassification(client as never,'item',1)).toMatchObject({ok:false});expect(client.rpc).not.toHaveBeenCalled();
+ });
+ test.each([{state:'proposed'},{proposal_version:2},{impact_level:'financial'}, {intent:{}}, {intent:{execution_spec:item.intent.execution_spec}}])('mantém guardas e recusa intent arbitrário/programming sem planner %j',async patch=>{
+  const client=clientFor({...valid,...patch});expect(await ensurePlannedProjectClassification(client as never,'item',1)).toMatchObject({ok:false});expect(client.rpc).not.toHaveBeenCalled();
+ });
+});

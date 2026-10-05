@@ -22,6 +22,8 @@ const workHeading = (id: string, reference: string | null, title: string | null,
 
 export function renderHuman(payload: CliPayload): string {
   switch (payload.kind) {
+    case 'work-propose-investigation':
+      return `${payload.reference} \u2014 ${payload.title}\nEstado: ${payload.state}\nCapability: ${payload.capability}\nAprova\u00e7\u00e3o humana e prepara\u00e7\u00e3o aut\u00f4noma s\u00e3o atos posteriores.`;
     case 'help':
       return payload.usage;
 

@@ -1,3 +1,4 @@
+import { prepareInvestigation, type InvestigationInput, type InvestigationPreparationDeps, type InvestigationPreparationResult } from '@/lib/work-orchestration/investigation-preparation';
 import type { ParsedCommand } from './args';
 import { readWorkHumanReference, type WorkReferenceResult, type WorkReferenceAmbiguousCandidate } from '@/lib/work-orchestration/work-reference';
 import {
@@ -297,9 +298,18 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
+  | (Extract<InvestigationPreparationResult, {ok:true}> & {readonly kind:'work-propose-investigation'})
   | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkRecoverCandidatePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
+
+export async function runWorkProposeInvestigation(input: InvestigationInput, deps: InvestigationPreparationDeps): Promise<CommandResult> {
+  const result = await prepareInvestigation(input, deps);
+  if (result.ok) return {exitCode:EXIT.OK,payload:{...result,kind:'work-propose-investigation'}};
+  const rejected = ['question_invalid', 'base_sha_invalid', 'base_sha_not_found', 'capability_invalid',
+    'investigation_reference_collision', 'investigation_references_exhausted'].includes(result.code);
+  return {exitCode:rejected ? EXIT.REJECTED : EXIT.ERROR,payload:{ok:false,kind:'error',code:result.code,error:result.message}};
+}
 
 export async function runWorkReplan(capability: () => Promise<ReplanResult>): Promise<CommandResult> {
   const r = await capability();

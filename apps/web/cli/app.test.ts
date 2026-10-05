@@ -467,3 +467,31 @@ test.each([
   });
   expect(resolve).toHaveBeenCalledTimes(1);
 });
+import { runWorkProposeInvestigation } from './app';
+import { dispatch } from './anima';
+import { buildInvestigationProposal, type InvestigationPreparationDeps } from '@/lib/work-orchestration/investigation-preparation';
+import type { WorkOrchestrationService } from '@anima/core';
+describe('propose-investigation runner e dispatch real',()=>{
+ const input={question:'Qual o contrato?',baseSha:'a'.repeat(40)};
+ const depsFor=():InvestigationPreparationDeps=>({readReferences:jest.fn(async()=>['INV-01','INV-02','INV-03']),commitExists:jest.fn(async()=>true),persistSourceMessage:jest.fn(async()=>'origin'),service:{createProposal:jest.fn(async command=>ok({...proposedItem,...command,id:'internal-investigation',state:'proposed' as const}))},now:()=>new Date('2026-10-05T12:00:00.000Z')});
+ test('runner cria proposed, saída humana INV-NN sem UUID, JSON preserva diagnóstico',async()=>{
+  const deps=depsFor(), result=await runWorkProposeInvestigation(input,deps);
+  expect(result.exitCode).toBe(EXIT.OK);expect(result.payload).toMatchObject({kind:'work-propose-investigation',state:'proposed',reference:'INV-04',capability:'research',workItemId:'internal-investigation'});
+  expect(renderHuman(result.payload)).toContain('INV-04 — Qual o contrato?'); expect(renderHuman(result.payload)).not.toContain('internal-investigation');
+  expect(JSON.parse(JSON.stringify(result.payload))).toHaveProperty('workItemId','internal-investigation');
+  expect(deps.service.createProposal).toHaveBeenCalledTimes(1);expect(deps.persistSourceMessage).toHaveBeenCalledTimes(1);
+ });
+ test('dispatch importável leva command.kind real à run function sem main ou authority',async()=>{
+  const parsed=parseArgs(['work','propose-investigation','--question',input.question,'--base-sha',input.baseSha,'--json']);
+  if(!parsed.ok || parsed.command.kind!=='work-propose-investigation') throw new Error('parser failed');
+  const deps=depsFor(), service={...fakePort(),...deps.service} as WorkOrchestrationService;
+  const resolveIdentity=jest.fn(async()=>({ok:true as const,identity:{userId:'u',client:{} as never}}));
+  const result=await dispatch(parsed.command,{resolveIdentity,service,investigationDeps:deps});
+  expect(result.payload).toMatchObject({kind:'work-propose-investigation',reference:'INV-04',state:'proposed'});
+  expect(resolveIdentity).toHaveBeenCalledTimes(1);expect(deps.service.createProposal).toHaveBeenCalledTimes(1);
+ });
+ test('validação recusada não grava origem ou proposal',async()=>{
+  const deps=depsFor();expect((await runWorkProposeInvestigation({...input,question:''},deps)).exitCode).toBe(EXIT.REJECTED);
+  expect(deps.persistSourceMessage).not.toHaveBeenCalled();expect(deps.service.createProposal).not.toHaveBeenCalled();
+ });
+});
