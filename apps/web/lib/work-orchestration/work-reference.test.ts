@@ -41,17 +41,17 @@ test('adapter filtra jsonb e ordena sem rede; erro de leitura não vira ausênci
   await expect(createSupabaseWorkReferenceLookup(client).findByCanonicalSourceId('SDC-01')).rejects.toThrow('read failed');
 });
 
-const investigationIntent = { investigation_question:'Qual ? o contrato?', investigation_provenance:{kind:'investigation_preparation',origin:'cli_propose_investigation_v1',baseSha:'a'.repeat(40),preparedAt:'2026-10-05T12:00:00.000Z',reference:'INV-04'} };
-test('resolve INV-NN e mostra t?tulo; can?nicas INV-01..03 e SDC continuam resolvendo',async()=>{
+const investigationIntent = { investigation_question:'Qual é o contrato?', investigation_provenance:{kind:'investigation_preparation',origin:'cli_propose_investigation_v1',baseSha:'a'.repeat(40),preparedAt:'2026-10-05T12:00:00.000Z',reference:'INV-04'} };
+test('resolve INV-NN e mostra título; canônicas INV-01..03 e SDC continuam resolvendo',async()=>{
  const investigation={...candidate,intent:investigationIntent};
- expect(readWorkHumanReference(investigationIntent)).toEqual({reference:'INV-04',title:'Qual ? o contrato?'});
+ expect(readWorkHumanReference(investigationIntent)).toEqual({reference:'INV-04',title:'Qual é o contrato?'});
  expect(await resolveWorkReference({findByCanonicalSourceId:async()=>[investigation]},'INV-04')).toEqual({ok:true,workItemId:id});
  for(const reference of ['INV-01','INV-02','INV-03','SDC-14']) {
   const canonical={...candidate,intent:{canonical_provenance:{...intent.canonical_provenance,sourceId:reference}}};
   expect(await resolveWorkReference({findByCanonicalSourceId:async()=>[canonical]},reference)).toEqual({ok:true,workItemId:id});
  }
 });
-test('colis?o entre refer?ncia can?nica e investiga??o ? amb?gua',async()=>{
+test('colisão entre referência canônica e investigação é ambígua',async()=>{
  const canonical={...candidate,intent:{canonical_provenance:{...intent.canonical_provenance,sourceId:'INV-04'}}};
  expect(await resolveWorkReference({findByCanonicalSourceId:async()=>[canonical,{...candidate,workItemId:'other',intent:investigationIntent}]},'INV-04')).toMatchObject({ok:false,code:'work_reference_ambiguous'});
  expect(await resolveWorkReference({findByCanonicalSourceId:async()=>[{...candidate,intent:{investigation_provenance:{...investigationIntent.investigation_provenance,baseSha:'bad'}}}]},'INV-04')).toMatchObject({ok:false,code:'work_reference_not_found'});

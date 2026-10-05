@@ -6,6 +6,8 @@ import { createSupabaseWorkReferenceLookup, resolveWorkReference } from '@/lib/w
 import { resolveCommandWorkReference } from './app';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { replanFailedWorkItem } from '@/lib/work-orchestration/replan-orchestration';
 import { authorizeResume } from '@/lib/work-orchestration/authorize-resume';
 import { runWorkReplan, runWorkAuthorizeResume } from './app';
@@ -219,7 +221,11 @@ async function main(): Promise<void> {
 }
 
 // Importing dispatch for tests must not authenticate, print or finish the process.
-if (process.argv[1]?.replace(/\\/g, '/').endsWith('/cli/anima.ts')) main().catch((error: unknown) => {
+export function isMainModule(moduleUrl: string, entryPath: string | undefined): boolean {
+  return entryPath !== undefined && moduleUrl === pathToFileURL(resolve(entryPath)).href;
+}
+
+if (isMainModule(import.meta.url, process.argv[1])) main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`erro fatal: ${message}\n`);
   finish(EXIT.ERROR);
