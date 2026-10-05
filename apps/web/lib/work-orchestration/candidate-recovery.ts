@@ -28,6 +28,7 @@ export interface CandidateRecoveryGitPort {
   readonly resolveBranch: (branch: string) => Promise<string | null>;
   /** `ancestor` é ancestral (ou igual) de `descendant`? */
   readonly isAncestor: (ancestor: string, descendant: string) => Promise<boolean>;
+  readonly changedFilesBetween: (start: string, end: string) => Promise<readonly string[] | null>;
   readonly fileExists: (relativePath: string) => boolean;
 }
 
@@ -51,19 +52,24 @@ export function gitCandidatePort(root: string = projectRoot()): CandidateRecover
     resolveCommit: async ref => (SHA.test(ref) ? revParse(ref) : null),
     resolveBranch: async branch => (/^anima-work\/[0-9a-f-]{36}$/.test(branch) ? revParse(`refs/heads/${branch}`) : null),
     isAncestor: async (ancestor, descendant) => (await git(['merge-base', '--is-ancestor', ancestor, descendant]))?.exitCode === 0,
+    changedFilesBetween: async (start, end) => {
+      if (!SHA.test(start) || !SHA.test(end)) return null;
+      const r = await git(['diff', '--name-only', '-z', start + '..' + end]);
+      return r?.exitCode === 0 ? r.stdout.split('\0').filter(Boolean) : null;
+    },
     fileExists: path => /^docs\/registros\/[A-Za-z0-9_-]+\.md$/.test(path) && existsSync(join(root, path)),
   };
 }
 
 /** `base_sha` observado pelo host para a attempt de origem (evidência já persistida). */
-async function readObservedBaseSha(client: SupabaseClient<Database>, workItemId: string, attemptId: string): Promise<string | null> {
+async function readObservedEvidence(client: SupabaseClient<Database>, workItemId: string, attemptId: string): Promise<Record<string, unknown> | null> {
   const { data, error } = await client.from('work_events').select('payload')
     .eq('work_item_id', workItemId).eq('event_type', 'host_observed_evidence_recorded').eq('author', 'system')
     .order('seq', { ascending: false }).limit(20);
   if (error || !Array.isArray(data)) return null;
   for (const row of data as { payload: unknown }[]) {
     const evidence = ((row.payload as { data?: { evidence?: Record<string, unknown> } } | null)?.data?.evidence) ?? null;
-    if (evidence && evidence.attemptId === attemptId && typeof evidence.baseSha === 'string' && SHA.test(evidence.baseSha)) return evidence.baseSha;
+    if (evidence && evidence.attemptId === attemptId && typeof evidence.baseSha === 'string' && SHA.test(evidence.baseSha)) return evidence;
   }
   return null;
 }
@@ -98,9 +104,33 @@ export async function recoverFromFailedCandidate(
   if (commit !== authorization.candidateCommitSha) return fail('candidate_commit_unknown', `Commit candidato não encontrado: ${authorization.candidateCommitSha.slice(0, 7)}.`);
   const branchCommit = await git.resolveBranch(`anima-work/${authorization.sourceAttemptId}`);
   if (branchCommit !== commit) return fail('candidate_branch_mismatch', 'O branch da attempt não resolve para o commit candidato.');
-  const baseSha = await readObservedBaseSha(client, workItemId, authorization.sourceAttemptId);
+  const evidence = await readObservedEvidence(client, workItemId, authorization.sourceAttemptId);
+  const baseSha = evidence?.baseSha as string | undefined;
   if (!baseSha) return fail('base_sha_unknown', 'Evidência host do base_sha da attempt não encontrada.');
   if (baseSha === commit || !(await git.isAncestor(baseSha, commit))) return fail('candidate_not_descendant_of_base', 'O commit candidato não descende do base_sha observado.');
+  const item = await client.from('work_items').select('intent').eq('id', workItemId).single();
+  if (item.error || !item.data) return fail('read_failed', 'Não foi possível ler o checkpoint do item.', false);
+  const intent = item.data.intent as { execution_spec?: Record<string, unknown> } | null;
+  const spec = intent?.execution_spec;
+  if (spec && Object.prototype.hasOwnProperty.call(spec, 'resume_from_checkpoint')) {
+    const resume = spec.resume_from_checkpoint;
+    const checkpointSha = typeof resume === 'object' && resume !== null && !Array.isArray(resume)
+      ? (resume as Record<string, unknown>).commit_sha : null;
+    if (typeof checkpointSha !== 'string' || !SHA.test(checkpointSha) || checkpointSha === commit
+      || (await git.resolveCommit(checkpointSha)) !== checkpointSha || !(await git.isAncestor(checkpointSha, commit))) {
+      return fail('checkpoint_not_ancestor', 'Checkpoint inválido ou não ancestral distinto do candidato.');
+    }
+    const delta = evidence?.observedChangedFilesSinceStart;
+    if (!Array.isArray(delta) || !delta.every((file): file is string => typeof file === 'string')) {
+      return fail('checkpoint_delta_evidence_missing', 'Delta host do checkpoint ausente ou inválido para a attempt.');
+    }
+    const observed = await git.changedFilesBetween(checkpointSha, commit);
+    const expected = new Set(delta);
+    const actual = observed === null ? null : new Set(observed);
+    if (!actual || actual.size !== expected.size || [...actual].some(file => !expected.has(file))) {
+      return fail('checkpoint_delta_mismatch', 'Delta Git do checkpoint diverge da evidência persistida.');
+    }
+  }
   if (!git.fileExists(authorization.evidenceReference)) return fail('evidence_missing', `Registro de evidência inexistente: ${authorization.evidenceReference}.`);
 
   const { data, error } = await client.rpc('authorize_candidate_recovery', {

@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(45);
+SELECT plan(62);
 
 -- Três usuários: dono (allowlist), outro usuário (allowlist) e um fora da allowlist.
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
@@ -72,8 +72,88 @@ SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e5',1,false,'codex-c
 SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e6',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,'{"financial_authorization":"x"}');
 SELECT pg_temp.cand_item('97000000-0000-0000-0000-0000000000e7',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts"]',true,'{"auto_provision":true}');
 
+-- Checkpoint-relative fixtures: cumulative evidence includes a preserved outside-scope file.
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-000000000101',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "cccccccccccccccccccccccccccccccccccccccc"}}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','["apps/web/lib/x.ts"]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-000000000101' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-000000000102',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "cccccccccccccccccccccccccccccccccccccccc"}}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','["apps/web/lib/x.ts", "apps/web/outro.ts"]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-000000000102' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-000000000103',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "cccccccccccccccccccccccccccccccccccccccc"}}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','[]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-000000000103' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-000000000104',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "invalid"}}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','["apps/web/lib/x.ts"]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-000000000104' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-000000000105',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','["apps/web/lib/x.ts"]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-000000000105' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-000000000106',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "cccccccccccccccccccccccccccccccccccccccc"}}');
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-000000000107',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "cccccccccccccccccccccccccccccccccccccccc"}}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','{}'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-000000000107' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-000000000108',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "cccccccccccccccccccccccccccccccccccccccc"}}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','[42]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-000000000108' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-000000000109',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "cccccccccccccccccccccccccccccccccccccccc"}}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','["apps/web/lib/z.ts"]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-000000000109' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-00000000010a',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": {"commit_sha": "cccccccccccccccccccccccccccccccccccccccc"}}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','["apps/web/lib/x.ts"]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-00000000010a' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-00000000010b',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','["apps/web/lib/x.ts"]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-00000000010b' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+SELECT pg_temp.cand_item('97000000-0000-0000-0000-00000000010c',1,false,'codex-cli','succeeded','npm run typecheck --workspace=apps/web',repeat('a',40),'["apps/web/lib/x.ts","apps/web/outro.ts"]',true,'{"resume_from_checkpoint": []}');
+INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+SELECT work_item_id,event_type,author,proposal_version,
+  jsonb_set(payload,'{data,evidence}',(payload#>'{data,evidence}') ||
+    jsonb_build_object('observedChangedFilesSinceStart','["apps/web/lib/x.ts"]'::jsonb))
+FROM public.work_events WHERE work_item_id='97000000-0000-0000-0000-00000000010c' AND event_type='host_observed_evidence_recorded'
+ORDER BY seq DESC LIMIT 1;
+
 CREATE TEMP TABLE failure AS SELECT work_item_id, id FROM public.work_events WHERE event_type='execution_failed'
-  AND work_item_id::text LIKE '97000000-0000-0000-0000-0000000000%';
+  AND work_item_id::text LIKE '97000000-0000-0000-0000-000000000%';
 GRANT SELECT ON failure TO authenticated;
 
 CREATE FUNCTION pg_temp.auth(p_request text, p_item text DEFAULT '97000000-0000-0000-0000-0000000000f1') RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$ SELECT jsonb_build_object(
@@ -232,6 +312,40 @@ SELECT is((SELECT count(*) FROM public.work_candidate_recoveries),3::bigint,'RLS
 SELECT ok(has_function_privilege('authenticated','public.authorize_candidate_recovery(uuid,integer,uuid,jsonb)','EXECUTE')
   AND NOT has_function_privilege('anon','public.authorize_candidate_recovery(uuid,integer,uuid,jsonb)','EXECUTE'),
   'EXECUTE só para authenticated (nunca anon)');
+
+-- A/C: narrow delta authorizes despite preserved cumulative files; B/G remain fail-closed.
+-- E: SQL checks malformed/equal checkpoint; real Git ancestry is exclusively a host proof.
+-- F: [] is evidence of an empty set, never missing; the host rejects it if Git differs.
+CREATE TEMP TABLE checkpoint_01 AS SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-000000000101',3,pg_temp.fid('97000000-0000-0000-0000-000000000101'),pg_temp.auth('97000000-0000-0000-0000-000000000201','97000000-0000-0000-0000-000000000101')) AS v;
+SELECT is((SELECT v->>'replayed' FROM checkpoint_01),'false','checkpoint case 01 authorizes');
+SELECT is((SELECT intent#>'{execution_spec,candidate_recovery,scope_basis}'
+FROM public.work_items WHERE id=(SELECT (v->>'successorWorkItemId')::uuid FROM checkpoint_01)),
+'{"kind": "checkpoint", "start_sha": "cccccccccccccccccccccccccccccccccccccccc", "files": ["apps/web/lib/x.ts"]}'::jsonb,'checkpoint scope_basis records validated set');
+SELECT is((SELECT payload#>'{data,evidence,observedChangedFiles}' FROM public.work_events
+WHERE work_item_id='97000000-0000-0000-0000-000000000101' AND event_type='host_observed_evidence_recorded' ORDER BY seq DESC LIMIT 1),
+'["apps/web/lib/x.ts","apps/web/outro.ts"]'::jsonb,'cumulative evidence remains intact');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-000000000102',3,pg_temp.fid('97000000-0000-0000-0000-000000000102'),pg_temp.auth('97000000-0000-0000-0000-000000000202','97000000-0000-0000-0000-000000000102'))$$,'55000','scope_evidence_mismatch','checkpoint case 02 fails closed');
+CREATE TEMP TABLE checkpoint_03 AS SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-000000000103',3,pg_temp.fid('97000000-0000-0000-0000-000000000103'),pg_temp.auth('97000000-0000-0000-0000-000000000203','97000000-0000-0000-0000-000000000103')) AS v;
+SELECT is((SELECT v->>'replayed' FROM checkpoint_03),'false','checkpoint case 03 authorizes');
+SELECT is((SELECT intent#>'{execution_spec,candidate_recovery,scope_basis}'
+FROM public.work_items WHERE id=(SELECT (v->>'successorWorkItemId')::uuid FROM checkpoint_03)),
+'{"kind": "checkpoint", "start_sha": "cccccccccccccccccccccccccccccccccccccccc", "files": []}'::jsonb,'checkpoint scope_basis records validated set');
+SELECT is((SELECT payload#>'{data,evidence,observedChangedFiles}' FROM public.work_events
+WHERE work_item_id='97000000-0000-0000-0000-000000000103' AND event_type='host_observed_evidence_recorded' ORDER BY seq DESC LIMIT 1),
+'["apps/web/lib/x.ts","apps/web/outro.ts"]'::jsonb,'cumulative evidence remains intact');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-000000000104',3,pg_temp.fid('97000000-0000-0000-0000-000000000104'),pg_temp.auth('97000000-0000-0000-0000-000000000204','97000000-0000-0000-0000-000000000104'))$$,'55000','checkpoint_not_ancestor','checkpoint case 04 fails closed');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-000000000105',3,pg_temp.fid('97000000-0000-0000-0000-000000000105'),pg_temp.auth('97000000-0000-0000-0000-000000000205','97000000-0000-0000-0000-000000000105'))$$,'55000','checkpoint_not_ancestor','checkpoint case 05 fails closed');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-000000000106',3,pg_temp.fid('97000000-0000-0000-0000-000000000106'),pg_temp.auth('97000000-0000-0000-0000-000000000206','97000000-0000-0000-0000-000000000106'))$$,'55000','checkpoint_delta_evidence_missing','checkpoint case 06 fails closed');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-000000000107',3,pg_temp.fid('97000000-0000-0000-0000-000000000107'),pg_temp.auth('97000000-0000-0000-0000-000000000207','97000000-0000-0000-0000-000000000107'))$$,'55000','checkpoint_delta_evidence_missing','checkpoint case 07 fails closed');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-000000000108',3,pg_temp.fid('97000000-0000-0000-0000-000000000108'),pg_temp.auth('97000000-0000-0000-0000-000000000208','97000000-0000-0000-0000-000000000108'))$$,'55000','checkpoint_delta_evidence_missing','checkpoint case 08 fails closed');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-000000000109',3,pg_temp.fid('97000000-0000-0000-0000-000000000109'),pg_temp.auth('97000000-0000-0000-0000-000000000209','97000000-0000-0000-0000-000000000109'))$$,'55000','checkpoint_delta_evidence_inconsistent','checkpoint case 09 fails closed');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-00000000010a',3,pg_temp.fid('97000000-0000-0000-0000-00000000010a'),pg_temp.auth('97000000-0000-0000-0000-00000000020a','97000000-0000-0000-0000-00000000010a') || '{"location":{"path":"apps/web/outro.ts","line":12}}'::jsonb)$$,'55000','scope_evidence_mismatch','checkpoint case 0a fails closed');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-00000000010b',3,pg_temp.fid('97000000-0000-0000-0000-00000000010b'),pg_temp.auth('97000000-0000-0000-0000-00000000020b','97000000-0000-0000-0000-00000000010b'))$$,'55000','scope_evidence_mismatch','checkpoint case 0b fails closed');
+SELECT throws_ok($$SELECT public.authorize_candidate_recovery('97000000-0000-0000-0000-00000000010c',3,pg_temp.fid('97000000-0000-0000-0000-00000000010c'),pg_temp.auth('97000000-0000-0000-0000-00000000020c','97000000-0000-0000-0000-00000000010c'))$$,'55000','checkpoint_not_ancestor','checkpoint case 0c fails closed');
+SELECT is((SELECT intent#>'{execution_spec,candidate_recovery,scope_basis}' FROM public.work_items
+WHERE id=(SELECT (v->>'successorWorkItemId')::uuid FROM r1)),
+jsonb_build_object('kind','base','start_sha',repeat('b',40),'files',
+jsonb_build_array('apps/web/lib/x.ts','apps/web/lib/y.ts')),'D: legacy base scope_basis is audited');
 
 SELECT * FROM finish();
 ROLLBACK;

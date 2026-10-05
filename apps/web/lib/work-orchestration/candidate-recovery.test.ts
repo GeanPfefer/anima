@@ -14,6 +14,8 @@ const readiness = readWorkRetryReadiness as jest.Mock;
 const ATTEMPT = '96000000-0000-4000-8000-0000000000a1';
 const COMMIT = 'a'.repeat(40);
 const BASE = 'b'.repeat(40);
+const CHECKPOINT = 'c'.repeat(40);
+const FILE = 'apps/web/lib/x.ts';
 const exhausted = { status: 'BLOCKED', reason: 'attempt_budget_exhausted', failureEventId: '3ec5fee2-0d11-4c0d-9d86-ecbb0a944a21', proposalVersion: 3, sourceAttemptId: ATTEMPT, attemptsUsed: 1, maxAttempts: 1, remainingAttempts: 0 };
 const rpcOk = { recoveryId: 'r1', successorWorkItemId: 's1', lineageId: 'l1', sourceAttemptId: ATTEMPT, checkpointCommitSha: COMMIT, replayed: false };
 
@@ -21,16 +23,22 @@ const git = (overrides: Partial<CandidateRecoveryGitPort> = {}): CandidateRecove
   resolveCommit: async ref => (ref === COMMIT ? COMMIT : null),
   resolveBranch: async branch => (branch === `anima-work/${ATTEMPT}` ? COMMIT : null),
   isAncestor: async (ancestor, descendant) => ancestor === BASE && descendant === COMMIT,
+  changedFilesBetween: async () => [FILE],
   fileExists: () => true,
   ...overrides,
 });
 
-const client = (opts: { rpc?: { data: unknown; error: unknown }; base?: string | null } = {}) => {
+const client = (opts: { rpc?: { data: unknown; error: unknown }; base?: string | null; spec?: Record<string, unknown>; delta?: unknown; evidenceAttempt?: string; olderDelta?: unknown } = {}) => {
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
   const base = opts.base === undefined ? BASE : opts.base;
-  const rows = base ? [{ payload: { data: { evidence: { attemptId: ATTEMPT, baseSha: base } } } }] : [];
+  const rows = base ? [{ payload: { data: { evidence: { attemptId: opts.evidenceAttempt ?? ATTEMPT, baseSha: base, observedCommitSha: COMMIT,
+    observedChangedFiles: [FILE, 'apps/web/outro.ts'], observedChangedFilesSinceStart: opts.delta } } } }] : [];
   const chain: Record<string, unknown> = {};
   for (const m of ['select', 'eq', 'order']) chain[m] = () => chain;
+  chain.single = async () => ({ data: { intent: { execution_spec: opts.spec ?? {} } }, error: null });
+  if (opts.olderDelta !== undefined) rows.push({ payload: { data: { evidence: {
+    attemptId: ATTEMPT, baseSha: base!, observedChangedFilesSinceStart: opts.olderDelta,
+  } } } });
   chain.limit = async () => ({ data: rows, error: null });
   const c = {
     from: () => chain,
@@ -66,6 +74,87 @@ describe('recoverFromFailedCandidate', () => {
       p_work_item_id: 'w1', p_expected_proposal_version: 3, p_failure_event_id: exhausted.failureEventId,
       p_authorization: expect.objectContaining({ kind: 'production_candidate_incorrect_v1', candidateCommitSha: COMMIT, sourceAttemptId: ATTEMPT, additionalAttempts: 1 }),
     } });
+  });
+
+  const checkpointGit = (overrides: Partial<CandidateRecoveryGitPort> = {}) => git({
+    resolveCommit: async ref => ref === COMMIT || ref === CHECKPOINT ? ref : null,
+    isAncestor: async (ancestor, descendant) => [BASE, CHECKPOINT].includes(ancestor) && descendant === COMMIT,
+    ...overrides,
+  });
+  const checkpointSpec = { resume_from_checkpoint: { commit_sha: CHECKPOINT } };
+
+  test('A/C: narrow correction compares checkpoint delta independently', async () => {
+    const diff = jest.fn(async () => [FILE]);
+    const { c, calls } = client({ spec: checkpointSpec, delta: [FILE, FILE] });
+    expect(await recoverFromFailedCandidate(c, 'w1', request(), checkpointGit({ changedFilesBetween: diff }))).toMatchObject({ ok: true });
+    expect(diff).toHaveBeenCalledWith(CHECKPOINT, COMMIT);
+    expect(calls).toHaveLength(1);
+  });
+
+  test.each(['B: outside-scope delta', 'G: outside-scope location'])('%s preserves authoritative RPC rejection', async label => {
+    const outside = 'apps/web/outro.ts';
+    const delta = label.startsWith('B') ? [FILE, outside] : [FILE];
+    const { c, calls } = client({ spec: checkpointSpec, delta,
+      rpc: { data: null, error: { code: '55000', message: 'scope_evidence_mismatch' } } });
+    const diagnosis = label.startsWith('G') ? { ...request(), location: { path: outside, line: 12 } } : request();
+    expect(await recoverFromFailedCandidate(c, 'w1', diagnosis, checkpointGit({ changedFilesBetween: async () => delta })))
+      .toMatchObject({ ok: false, code: '55000', message: 'scope_evidence_mismatch', rejected: true });
+    expect(calls).toHaveLength(1);
+  });
+
+  test('D: without checkpoint skips diff and preserves base scope RPC rejection', async () => {
+    const diff = jest.fn(async () => { throw new Error('must not observe delta'); });
+    const { c } = client({ rpc: { data: null, error: { code: '55000', message: 'scope_evidence_mismatch' } } });
+    expect(await recoverFromFailedCandidate(c, 'w1', request(), git({ changedFilesBetween: diff })))
+      .toMatchObject({ ok: false, message: 'scope_evidence_mismatch' });
+    expect(diff).not.toHaveBeenCalled();
+  });
+
+  test.each([null, [], { commit_sha: 'invalid' }, { commit_sha: COMMIT }, { commit_sha: 'd'.repeat(40) }].map(resume => [resume]))
+    ('E: invalid/equal/unknown checkpoint %j rejects before RPC', async resume => {
+      const { c, calls } = client({ spec: { resume_from_checkpoint: resume }, delta: [FILE] });
+      expect(await recoverFromFailedCandidate(c, 'w1', request(), checkpointGit()))
+        .toMatchObject({ ok: false, code: 'checkpoint_not_ancestor' });
+      expect(calls).toHaveLength(0);
+    });
+
+  test('E: existing non-ancestor checkpoint rejects', async () => {
+    const { c, calls } = client({ spec: checkpointSpec, delta: [FILE] });
+    expect(await recoverFromFailedCandidate(c, 'w1', request(), checkpointGit({
+      isAncestor: async ancestor => ancestor === BASE,
+    }))).toMatchObject({ ok: false, code: 'checkpoint_not_ancestor' });
+    expect(calls).toHaveLength(0);
+  });
+
+  test.each([undefined, null, {}, 'x', [42]].map(delta => [delta]))('F: missing/invalid delta %j', async delta => {
+    const { c, calls } = client({ spec: checkpointSpec, delta, olderDelta: [FILE] });
+    expect(await recoverFromFailedCandidate(c, 'w1', request(), checkpointGit()))
+      .toMatchObject({ ok: false, code: 'checkpoint_delta_evidence_missing' });
+    expect(calls).toHaveLength(0);
+  });
+
+  test.each([[], ['apps/web/lib/y.ts'], [FILE, 'apps/web/outro.ts']].map(delta => [delta]))
+    ('F: unequal sets %j fail closed', async delta => {
+      const { c, calls } = client({ spec: checkpointSpec, delta });
+      expect(await recoverFromFailedCandidate(c, 'w1', request(), checkpointGit()))
+        .toMatchObject({ ok: false, code: 'checkpoint_delta_mismatch' });
+      expect(calls).toHaveLength(0);
+    });
+
+  test('F: explicit empty set requires empty diff; Git failure rejects', async () => {
+    const a = client({ spec: checkpointSpec, delta: [] });
+    expect(await recoverFromFailedCandidate(a.c, 'w1', request(), checkpointGit({ changedFilesBetween: async () => [] })))
+      .toMatchObject({ ok: true });
+    const b = client({ spec: checkpointSpec, delta: [] });
+    expect(await recoverFromFailedCandidate(b.c, 'w1', request(), checkpointGit({ changedFilesBetween: async () => null })))
+      .toMatchObject({ ok: false, code: 'checkpoint_delta_mismatch' });
+    expect(b.calls).toHaveLength(0);
+  });
+
+  test('F: another attempt cannot supply evidence', async () => {
+    const { c, calls } = client({ spec: checkpointSpec, delta: [FILE], evidenceAttempt: 'other' });
+    expect(await recoverFromFailedCandidate(c, 'w1', request(), checkpointGit())).toMatchObject({ ok: false, code: 'base_sha_unknown' });
+    expect(calls).toHaveLength(0);
   });
 
   test('requestId é determinístico por evento de falha (replay seguro)', async () => {
