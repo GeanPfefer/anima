@@ -547,7 +547,9 @@ describe('entrypoint nativo da CLI', () => {
       });
       expect(child.error).toBeUndefined();
       expect(child.status).toBe(EXIT.OK);
-      expect(child.stderr).toBe('');
+      // Node 24 may report the optional env file missing in a clean worktree.
+      const residualStderr = child.stderr.replace(/^\.env\.local not found\. Continuing without it\.(?:\r?\n|$)/gm, '');
+      expect(residualStderr).toBe('');
       expect(child.stdout).toBe(`${renderHuman({ ok: true, kind: 'help', usage: USAGE })}\n`);
     }
   });
