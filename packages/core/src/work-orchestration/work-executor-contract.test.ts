@@ -1,4 +1,5 @@
 import { FakeWorkExecutor, buildCoderTaskSpec, buildWorktreeHandoff, validateWorkCheckpoint, validateWorkExecutorTranscript, type WorkCheckpointV1, type WorkExecutorRequest, type WorkExecutorSignal } from '.';
+import { renderInvestigationSummary, type InvestigationExecutionV1 } from './investigation-result';
 
 const request: WorkExecutorRequest = {
   attemptId: 'attempt-1', workItemId: 'work-1', approvedProposalVersion: 3, capability: 'programming', objective: 'Implementar contrato',
@@ -15,6 +16,19 @@ const collect = async (fake: FakeWorkExecutor, value = request, signal = new Abo
   for await (const entry of fake.execute(value, signal)) result.push(entry);
   return result;
 };
+
+describe('investigation terminal contract', () => {
+  const investigation: InvestigationExecutionV1 = { schemaVersion: 1, outcome: 'inconclusive', findings: [], gaps: ['Missing history.'], hostVerification: { baseSha: 'a'.repeat(40), snapshotHead: 'a'.repeat(40), snapshotClean: true, snapshotDetached: true, prohibitedRefsBefore: [] } };
+  const terminal = (): WorkExecutorSignal => ({ kind: 'result', attemptId: request.attemptId, workItemId: request.workItemId, approvedProposalVersion: request.approvedProposalVersion, origin: 'executor', sequence: 1, summary: renderInvestigationSummary(investigation), investigation, validations: [], limitations: [], resultReferences: [], handoffReference: 'investigation:result' });
+  test('structured inconclusive terminal is accepted', () => expect(validateWorkExecutorTranscript([terminal()])).toBeNull());
+  test('narrative cannot replace or contradict the result', () => expect(validateWorkExecutorTranscript([{ ...terminal(), summary: 'Conclusive success' } as WorkExecutorSignal])).not.toBeNull());
+  test('absolute handoff references rejected', () => {
+    for (const handoffReference of ['C:\\private\\result', '/tmp/result', '\\server\\result']) expect(validateWorkExecutorTranscript([{ ...terminal(), handoffReference } as WorkExecutorSignal])).not.toBeNull();
+  });
+  test('investigation and programming handoff cannot coexist', () => {
+    expect(validateWorkExecutorTranscript([{ ...terminal(), worktreeHandoff: {} } as WorkExecutorSignal])).not.toBeNull();
+  });
+});
 
 describe('INT-01 — contrato WorkExecutorAdapter', () => {
   test('executor falso exercita progresso e resultado com correlação completa', async () => {

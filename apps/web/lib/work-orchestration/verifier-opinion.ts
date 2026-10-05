@@ -1,4 +1,6 @@
-import { computeVerifierOpinion, guardCanonicalResidentWrite, type VerifierOpinionV1, type WorkEvent, type WorkItem } from '@anima/core';
+import { computeInvestigationVerifierOpinion, computeVerifierOpinion, guardCanonicalResidentWrite, parseInvestigationExecution, readEffectClass, readVerifierRequirement, renderInvestigationSummary, type VerifierOpinionV1, type WorkEvent, type WorkItem, type InvestigationResultV1 } from '@anima/core';
+import { hasNewProhibitedInvestigationRefs, readProhibitedInvestigationRefs, resolveInvestigationEvidence, type InvestigationTarget } from './investigation-executor';
+import { projectRoot, readExecutionContract } from './executor-selection';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -33,13 +35,53 @@ export type VerifierOpinionOutcome =
 export async function computeAndPersistVerifierOpinion(
   input: { readonly item: WorkItem; readonly events: readonly WorkEvent[] },
   sink: VerifierOpinionSink,
+  investigationDependencies: InvestigationVerifierDependencies = {},
 ): Promise<VerifierOpinionOutcome> {
-  const opinion = computeVerifierOpinion(input.item, input.events);
+  const latestResult = [...input.events].reverse().find(event => event.type === 'result_submitted');
+  const data = record(record(latestResult?.payload)?.data);
+  const signal = record(data?.executor_signal);
+  // Isolated SDC-10 branch. Malformed investigations never fall back to programming.
+  const opinion = signal && Object.prototype.hasOwnProperty.call(signal, 'investigation')
+    ? await investigationOpinion(input.item, latestResult!, data!, signal, investigationDependencies).catch(() => null)
+    : computeVerifierOpinion(input.item, input.events);
   if (!opinion) return { ok: false, stage: 'skipped', reason: 'no durable result to verify' };
   const persisted = await sink.record(opinion).catch((error: unknown) =>
     ({ ok: false as const, message: error instanceof Error ? error.message : String(error) }));
   if (!persisted.ok) return { ok: false, stage: 'persist', reason: persisted.message };
   return { ok: true, action: persisted.action, opinion };
+}
+
+const record = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+export interface InvestigationVerifierDependencies {
+  readonly resolveTarget?: (reference: string) => InvestigationTarget | null;
+  readonly resolveEvidence?: (repo: string, result: InvestigationResultV1) => Promise<boolean>;
+  readonly readRefs?: (repo: string, attemptId: string) => Promise<readonly string[]>;
+}
+async function investigationOpinion(item: WorkItem, event: WorkEvent, data: Record<string, unknown>, signal: Record<string, unknown>, deps: InvestigationVerifierDependencies): Promise<VerifierOpinionV1 | null> {
+  const effect = readEffectClass(item.intent);
+  const contract = readExecutionContract(item.intent);
+  if (!effect.ok || effect.value !== 'read_only' || readVerifierRequirement(item.intent) !== 'advisory'
+    || contract.executor !== 'investigation-v1' || !contract.baseSha || !contract.targetReference
+    || event.workItemId !== item.id || event.proposalVersion !== item.proposalVersion
+    || data.work_item_id !== item.id || data.approved_proposal_version !== item.proposalVersion
+    || typeof data.attempt_id !== 'string' || data.attempt_id.trim().length === 0
+    || signal.kind !== 'result' || signal.origin !== 'executor' || signal.worktreeHandoff !== undefined
+    || signal.workItemId !== item.id || signal.attemptId !== data.attempt_id || signal.approvedProposalVersion !== item.proposalVersion) return null;
+  const investigation = parseInvestigationExecution(signal.investigation);
+  if (investigation && (signal.summary !== renderInvestigationSummary(investigation)
+    || typeof signal.handoffReference !== 'string' || !signal.handoffReference.trim()
+    || /^[a-z]:[\\/]|^[\\/]/i.test(signal.handoffReference))) return null;
+  const target = deps.resolveTarget ? deps.resolveTarget(contract.targetReference)
+    : contract.targetKind === 'project' && contract.targetReference === 'anima' ? { repoRoot: projectRoot(), baseSha: contract.baseSha } : null;
+  let referencesResolve = false, prohibitedRefsAbsent = false;
+  if (investigation && target && investigation.hostVerification.baseSha === contract.baseSha && target.baseSha === contract.baseSha
+    && !investigation.hostVerification.prohibitedRefsBefore.some(ref => ref.includes(data.attempt_id as string))) {
+    referencesResolve = await (deps.resolveEvidence ?? resolveInvestigationEvidence)(target.repoRoot, investigation).catch(() => false);
+    const refs = await (deps.readRefs ?? readProhibitedInvestigationRefs)(target.repoRoot, data.attempt_id).catch(() => null);
+    prohibitedRefsAbsent = refs !== null && !hasNewProhibitedInvestigationRefs(investigation.hostVerification.prohibitedRefsBefore, refs);
+  }
+  return computeInvestigationVerifierOpinion({ workItemId: item.id, attemptId: data.attempt_id, approvedProposalVersion: item.proposalVersion,
+    resultEventId: event.id, investigation: signal.investigation, referencesResolve, prohibitedRefsAbsent });
 }
 
 /**

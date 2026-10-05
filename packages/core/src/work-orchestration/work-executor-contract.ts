@@ -6,8 +6,12 @@ import type { HumanDecisionOption, HumanInterruptionReason } from './human-inter
 import type { WorkCapability, WorkContextReference, WorkResultValidation } from './types';
 import { parseWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff';
 import type { Json } from '@anima/types';
+import { parseEffectClass, type WorkEffectClass } from './effect-class';
+import { parseInvestigationExecution, renderInvestigationSummary, type InvestigationExecutionV1 } from './investigation-result';
 
 export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
+  /** SDC-10 projection; absence preserves the existing mutating execution lane. */
+  readonly effectClass?: WorkEffectClass;
   readonly capability: WorkCapability;
   readonly objective: string;
   readonly includedScope: readonly string[];
@@ -111,7 +115,7 @@ export type WorkExecutorSignal =
   | (CorrelatedSignal & { readonly kind: 'progress'; readonly message: string })
   | (CorrelatedSignal & { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 })
   | (CorrelatedSignal & { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] })
-  | (CorrelatedSignal & { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1 })
+  | (CorrelatedSignal & { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1; readonly investigation?: InvestigationExecutionV1 })
   | (CorrelatedSignal & { readonly kind: 'error'; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string })
   | (CorrelatedSignal & { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string });
 
@@ -120,7 +124,7 @@ export type WorkExecutorSignalInput =
   | { readonly kind: 'progress'; readonly message: string }
   | { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 }
   | { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] }
-  | { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1 }
+  | { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1; readonly investigation?: InvestigationExecutionV1 }
   | { readonly kind: 'error'; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string }
   | { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string };
 
@@ -146,6 +150,9 @@ const areCheckpointValidations = (value: unknown): value is readonly WorkResultV
     && checkpointValidationOutcomes.has((entry as WorkResultValidation).outcome));
 
 export function validateWorkExecutorRequest(request: WorkExecutorRequest): string | null {
+  // The internal mutating value is represented by absence on the persisted spec.
+  if (request.effectClass !== 'mutating' && !parseEffectClass(request.effectClass).ok) return 'Classe de efeito inválida.';
+  if (request.effectClass === 'read_only' && (request.permissions.length !== 1 || request.permissions[0] !== 'workspace_read')) return 'Permissões de investigação inválidas.';
   if (!nonBlank(request.attemptId) || !nonBlank(request.workItemId) || !Number.isInteger(request.approvedProposalVersion) || request.approvedProposalVersion < 1) return 'Correlação da tentativa inválida.';
   if (!nonBlank(request.objective) || request.includedScope.length === 0 || request.excludedScope.length === 0 || request.includedScope.some(value => !nonBlank(value)) || request.excludedScope.some(value => !nonBlank(value))) return 'Objetivo e escopo delimitado são obrigatórios.';
   if (!nonBlank(request.target.reference) || request.validationCriteria.length === 0 || request.validationCriteria.some(value => !nonBlank(value.label))) return 'Alvo e critérios de validação são obrigatórios.';
@@ -211,6 +218,12 @@ export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSig
     // INT-05: quando o resultado carrega o worktreeHandoff opcional, ele deve ser
     // estruturalmente válido (re-parseável, fail-closed) e correlacionado com a
     // tentativa. Ausência é aceita — outros executores não emitem o campo.
+    if (signal.kind === 'result' && signal.investigation !== undefined) {
+      if (signal.worktreeHandoff !== undefined) return 'Investigação não pode carregar worktreeHandoff.';
+      const investigation = parseInvestigationExecution(signal.investigation);
+      if (!investigation || signal.summary !== renderInvestigationSummary(investigation)) return 'Resultado de investigação inválido.';
+      if (!nonBlank(signal.handoffReference) || /^[a-z]:[\\/]|^[\\/]/i.test(signal.handoffReference) || containsSensitiveData(signal.handoffReference)) return 'Referência de investigação inválida.';
+    }
     if (signal.kind === 'result' && signal.worktreeHandoff !== undefined) {
       const parsed = parseWorktreeHandoff(signal.worktreeHandoff as unknown as Json);
       if (!parsed) return 'O worktreeHandoff do resultado é inválido.';
