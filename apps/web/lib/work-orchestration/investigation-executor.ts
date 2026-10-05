@@ -127,7 +127,7 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
         '--output-schema', schemaPath, '-o', outputPath,
         ...(config.value.model !== CODEX_CLI_DEFAULT_MODEL ? ['--model', config.value.model] : []),
         ...(config.value.profile ? ['--profile', config.value.profile] : []), prompt,
-      ], { cwd: snapshot, timeoutMs: remaining(), signal, env: buildCodexCliEnvironment(this.options.environmentSource) }).catch(() => null);
+      ], { cwd: snapshot, timeoutMs: remaining(), signal, env: buildCodexCliEnvironment(this.options.environmentSource) as NodeJS.ProcessEnv }).catch(() => null);
       // Integrity checks deliberately ignore an aborted CLI signal: the host must still
       // observe effect violations before considering cancellation or output validity.
       checkingIntegrity = true;

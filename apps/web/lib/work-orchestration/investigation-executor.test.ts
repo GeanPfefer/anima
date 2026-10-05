@@ -51,7 +51,7 @@ describe('investigation adapter request boundary', () => {
     const prompt = buildInvestigationPrompt(request(), 'a'.repeat(40));
     expect(prompt).toContain('Question: Explain the contract.'); expect(prompt).toContain('not a guaranteed confidentiality boundary');
     expect(prompt).toContain('Do not EDIT'); expect(prompt).toContain('file@commit:lines');
-    expect(buildCodexCliEnvironment({ PATH: 'path', CODEX_HOME: 'auth', OPENAI_API_KEY: 'secret', SUPABASE_SERVICE_ROLE_KEY: 'secret' })).toEqual({ PATH: 'path', CODEX_HOME: 'auth' });
+    expect(buildCodexCliEnvironment({ PATH: 'path', CODEX_HOME: 'auth', OPENAI_API_KEY: 'secret', SUPABASE_SERVICE_ROLE_KEY: 'secret' })).toEqual({ PATH: 'path', CODEX_HOME: 'auth', NO_COLOR: '1' });
   });
   test('only newly introduced forbidden names invalidate the snapshot; ordinary concurrent refs are outside this check', () => {
     expect(hasNewProhibitedInvestigationRefs(['refs/heads/anima-work/previous'], ['refs/heads/anima-work/previous'])).toBe(false);
