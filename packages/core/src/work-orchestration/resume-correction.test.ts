@@ -3,6 +3,7 @@ import { validateCorrectionSuccessor } from './recovery-successor';
 import type { WorkItem } from './types';
 import {
   deriveRootAuthorityScope,
+  classifyCumulativeCorrectionFiles,
   deriveResumeCorrectionSuccessor,
   validateStructuredReworkPaths,
   type DecompositionCheckpoint,
@@ -451,6 +452,59 @@ describe('SDC-05 — autoridade da raiz e reabertura preservada', () => {
     for (const reworkSource of [undefined, 'structured' as const]) {
       const candidate = ok(deriveResumeCorrectionSuccessor(input({ reworkFiles: [TEST], reworkSource })));
       expect((candidate.intent['execution_spec'] as Record<string, unknown>)['correction_scope']).not.toHaveProperty('reopened_scope');
+    }
+  });
+});
+
+
+describe('preservação cumulativa multinível', () => {
+  const inherited = 'packages/types/src/database.ts';
+  const rootAuthority = { includedScope: [IMPL, TEST, inherited, 'root-excluded.ts'], excludedScope: ['root-excluded.ts'] };
+  const hop: WorkItem = { ...original, proposal: { ...original.proposal, data: {
+    ...original.proposal.data, excludedScope: [...original.proposal.data.excludedScope, inherited],
+  } }, intent: { execution_spec: { ...(original.intent['execution_spec'] as object), correction_scope: {} } } };
+  const classify = (overrides: Partial<Parameters<typeof classifyCumulativeCorrectionFiles>[0]> = {}) => classifyCumulativeCorrectionFiles({
+    observedChangedFiles: [IMPL, inherited, 'unexpected.ts', 'root-excluded.ts'],
+    includedScope: [IMPL, TEST], excludedScope: [inherited, 'root-excluded.ts'], reopenedFiles: [],
+    rootAuthority, isCorrectionHop: true, ...overrides,
+  });
+  test('classifica toda a evidência em ordem e grafia de origem por pathKey', () => {
+    expect(classify()).toEqual({ preserved: [IMPL], inherited: [inherited], unexplained: ['unexpected.ts', 'root-excluded.ts'] });
+    expect(classify({ observedChangedFiles: [inherited.toUpperCase().replace(/\//g, '\\'), TEST], reopenedFiles: [inherited] })).toEqual({
+      preserved: [inherited.toUpperCase().replace(/\//g, '\\'), TEST], inherited: [], unexplained: [],
+    });
+  });
+  test.each([{ rootAuthority: null }, { isCorrectionHop: false }, { excludedScope: [] }])('sem prova suficiente não herda: %j', overrides => {
+    expect(classify(overrides).inherited).toEqual([]);
+    expect(classify(overrides).unexplained).toContain(inherited);
+  });
+  const candidate = () => ok(deriveResumeCorrectionSuccessor(input({ original: hop, inheritedPreservedFiles: [inherited] })));
+  test('herdado permanece exclu?do sem duplicação e sem autoridade efetiva', () => {
+    const result = candidate();
+    expect(result.proposal.data.includedScope).toEqual([TEST]);
+    expect(result.proposal.data.excludedScope.filter(file => file === inherited)).toEqual([inherited]);
+    expect((result.intent['execution_spec'] as Record<string, unknown>)['correction_scope']).toMatchObject({ inherited_preserved_scope: [inherited] });
+    expect((ok(deriveResumeCorrectionSuccessor(input())).intent['execution_spec'] as Record<string, Record<string, unknown>>)['correction_scope']).not.toHaveProperty('inherited_preserved_scope');
+    expect(validateCorrectionSuccessor(hop, result, { rootAuthority, observedChangedFiles: [IMPL, inherited] })).toMatchObject({ valid: true });
+    expect(validateCorrectionSuccessor(hop, result, { rootAuthority })).toMatchObject({ valid: true });
+    expect(validateCorrectionSuccessor(hop, result)).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+  });
+  test('revalida independentemente predecessor, raiz, excluded e evidência cumulativa', () => {
+    const result = candidate();
+    for (const predecessor of [original, { ...hop, proposal: { ...hop.proposal, data: { ...hop.proposal.data, includedScope: [IMPL, TEST, inherited] } } },
+      { ...hop, proposal: { ...hop.proposal, data: { ...hop.proposal.data, excludedScope: [] } } }]) {
+      expect(validateCorrectionSuccessor(predecessor, result, { rootAuthority })).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+    }
+    expect(validateCorrectionSuccessor(hop, result, { rootAuthority: { ...rootAuthority, excludedScope: [inherited] } })).toMatchObject({ valid: false });
+    expect(validateCorrectionSuccessor(hop, result, { rootAuthority, observedChangedFiles: [IMPL, inherited, 'unexpected.ts'] })).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+    for (const field of ['rework_scope', 'remaining_scope', 'effective_scope', 'inherited_preserved_scope']) {
+      const forged = JSON.parse(JSON.stringify(result)) as typeof result;
+      const scope = (forged.intent['execution_spec'] as Record<string, Record<string, unknown>>)['correction_scope']!;
+      scope[field] = field === 'inherited_preserved_scope' ? [IMPL] : [inherited];
+      expect(validateCorrectionSuccessor(hop, forged, { rootAuthority })).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+    }
+    for (const data of [{ ...result.proposal.data, includedScope: [TEST, inherited] }, { ...result.proposal.data, excludedScope: [] }]) {
+      expect(validateCorrectionSuccessor(hop, { ...result, proposal: { ...result.proposal, data } }, { rootAuthority })).toMatchObject({ valid: false });
     }
   });
 });

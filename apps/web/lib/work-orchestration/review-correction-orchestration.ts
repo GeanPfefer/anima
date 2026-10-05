@@ -1,5 +1,6 @@
 import {
   deriveResumeCorrectionSuccessor,
+  classifyCumulativeCorrectionFiles,
   validateStructuredReworkPaths,
   projectHostObservedEvidence,
   type RootAuthorityScope,
@@ -158,11 +159,22 @@ export function planCorrectionFromReview(facts: ReviewCorrectionFacts): ReviewCo
     : validateStructuredReworkPaths(facts.reworkPaths, original.proposal.data.includedScope, original.proposal.data.excludedScope, facts.rootAuthority);
   if (structured && !structured.ok) return { ok: false, reason: 'derivation_refused', refusals: structured.refusals };
 
+  const correctionScope = asObject(asObject(original.intent['execution_spec'] as Json | undefined)?.['correction_scope']);
+  const classified = classifyCumulativeCorrectionFiles({
+    observedChangedFiles: gitEvidence.observedChangedFiles,
+    includedScope: original.proposal.data.includedScope,
+    excludedScope: original.proposal.data.excludedScope,
+    reopenedFiles: structured?.ok ? structured.reopenedFiles ?? [] : [],
+    rootAuthority: facts.rootAuthority,
+    isCorrectionHop: correctionScope !== null,
+  });
+  if (classified.unexplained.length) return { ok: false, reason: 'derivation_refused', refusals: ['preserved_files_out_of_scope'] };
   const derivation = deriveResumeCorrectionSuccessor({
     original,
     requestedChanges,
     checkpoint: { baseSha: gitEvidence.baseSha, branch: worktreeBranchFor(reviewedAttemptId), commitSha: gitEvidence.observedCommitSha },
-    preservedFiles: gitEvidence.observedChangedFiles,
+    preservedFiles: classified.preserved,
+    inheritedPreservedFiles: classified.inherited,
     reworkFiles: structured?.ok ? structured.reworkFiles : deriveExplicitReworkScope(requestedChanges, original.proposal.data.includedScope),
     ...(structured?.ok && structured.reopenedFiles?.length ? { reopenedFiles: structured.reopenedFiles } : {}),
     ...(structured ? { reworkSource: 'structured' as const } : {}),
@@ -255,7 +267,8 @@ export async function correctReviewedWorkItem(
   const pathKey = (value: string): string => value.trim().toLowerCase().replace(/\\/g, '/');
   const currentScope = new Set(itemResult.value.proposal.data.includedScope.map(pathKey));
   let rootAuthority: RootAuthorityScope | undefined;
-  if (options.reworkPaths?.some(path => !currentScope.has(pathKey(path.trim().replace(/\\/g, '/').replace(/^\.\//, ''))))) {
+  const observedChangedFiles = projectHostObservedEvidence(eventsResult.value)?.observedChangedFiles;
+  if (observedChangedFiles?.some(path => !currentScope.has(pathKey(path))) || options.reworkPaths?.some(path => !currentScope.has(pathKey(path.trim().replace(/\\/g, '/').replace(/^\.\//, ''))))) {
     rootAuthority = await resolveCorrectionRootAuthority(itemResult.value, {
       readPredecessor: async id => {
         const result = await client.from('work_recovery_lineage').select('original_work_item_id')
@@ -282,7 +295,7 @@ export async function correctReviewedWorkItem(
   });
   if (!planned.ok) return { ok: false, reason: planned.reason, refusals: planned.refusals };
 
-  const persisted = await proposeCorrectionSuccessor(client, itemResult.value, planned.candidate, { rootAuthority });
+  const persisted = await proposeCorrectionSuccessor(client, itemResult.value, planned.candidate, { rootAuthority, observedChangedFiles });
   if (!persisted.ok) {
     if (persisted.code === 'candidate_invalid') return { ok: false, reason: 'candidate_invalid', gaps: persisted.gaps };
     return { ok: false, reason: 'persistence_failed', message: persisted.message };

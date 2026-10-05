@@ -250,6 +250,7 @@ interface SuccessorProofRequirements {
     readonly remainingScope: readonly string[];
     readonly effectiveScope: readonly string[];
     readonly reopenedScope?: readonly string[];
+    readonly inheritedPreservedScope?: readonly string[];
     readonly reworkSource?: 'structured';
   };
 }
@@ -294,6 +295,7 @@ function buildSuccessorIntent(
         rework_scope: [...proof.correctionScope.reworkScope],
         remaining_scope: [...proof.correctionScope.remainingScope],
         effective_scope: [...proof.correctionScope.effectiveScope],
+        ...(proof.correctionScope.inheritedPreservedScope?.length ? { inherited_preserved_scope: [...proof.correctionScope.inheritedPreservedScope] } : {}),
         ...(proof.correctionScope.reopenedScope?.length ? { reopened_scope: [...proof.correctionScope.reopenedScope] } : {}),
         ...(proof.correctionScope.reworkSource ? { rework_source: proof.correctionScope.reworkSource } : {}),
       };
@@ -380,6 +382,7 @@ export interface ResumeCorrectionInput {
   readonly checkpoint: DecompositionCheckpoint;
   /** Arquivos que o checkpoint tocou (a implementação preservada) — a excluir. */
   readonly preservedFiles: readonly string[];
+  readonly inheritedPreservedFiles?: readonly string[];
   /** Subconjunto explicitamente autorizado pelo pedido humano para REWORK. Pode
    * reabrir arquivos tocados, mas nunca paths fora do escopo original. */
   readonly reworkFiles: readonly string[];
@@ -417,6 +420,28 @@ export interface RootAuthorityScope {
 export function deriveRootAuthorityScope(root: RootAuthorityScope): readonly string[] {
   const excluded = new Set(root.excludedScope.map(pathKey));
   return root.includedScope.filter(path => !excluded.has(pathKey(path)));
+}
+
+/** Classifica toda a evidência cumulativa sem conceder autoridade de edição. */
+export function classifyCumulativeCorrectionFiles(input: {
+  readonly observedChangedFiles: readonly string[];
+  readonly includedScope: readonly string[];
+  readonly excludedScope: readonly string[];
+  readonly reopenedFiles: readonly string[];
+  readonly rootAuthority?: RootAuthorityScope | null;
+  readonly isCorrectionHop: boolean;
+}): { preserved: string[]; inherited: string[]; unexplained: string[] } {
+  const universe = new Set([...input.includedScope, ...input.reopenedFiles].map(pathKey));
+  const excluded = new Set(input.excludedScope.map(pathKey));
+  const authority = new Set(input.rootAuthority ? deriveRootAuthorityScope(input.rootAuthority).map(pathKey) : []);
+  const result = { preserved: [] as string[], inherited: [] as string[], unexplained: [] as string[] };
+  for (const file of input.observedChangedFiles) {
+    const key = pathKey(file);
+    if (universe.has(key)) result.preserved.push(file);
+    else if (input.isCorrectionHop && input.rootAuthority && excluded.has(key) && authority.has(key)) result.inherited.push(file);
+    else result.unexplained.push(file);
+  }
+  return result;
 }
 
 /** Valida autoridade estruturada por igualdade exata da chave usada pela derivação.
@@ -498,9 +523,15 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
     !currentKeys.has(pathKey(entry)) && entries.findIndex(other => pathKey(other) === pathKey(entry)) === index);
   const reopened = new Set(reopenedFiles.map(pathKey));
   const originalScope = [...currentScope, ...reopenedFiles];
-  const preserved = new Set(preservedFiles.map(pathKey));
+  const inheritedFiles = input.inheritedPreservedFiles ?? [];
+  const inherited = new Set(inheritedFiles.map(pathKey));
+  const preserved = new Set(preservedFiles.map(pathKey).filter(key => !inherited.has(key)));
+  if (inheritedFiles.some(file => originalScope.some(entry => pathKey(entry) === pathKey(file))
+      || !original.proposal.data.excludedScope.some(entry => pathKey(entry) === pathKey(file)))) {
+    refusals.push('preserved_files_out_of_scope');
+  }
   const rework = new Set(reworkFiles.map(pathKey));
-  const everyPreservedInScope = preservedFiles.length > 0
+  const everyPreservedInScope = (preservedFiles.length > 0 || inheritedFiles.length > 0)
     && [...preserved].every(file => originalScope.some(entry => pathKey(entry) === file));
   if (!everyPreservedInScope) refusals.push('preserved_files_out_of_scope');
   const everyReworkInScope = [...rework].every(file => originalScope.some(entry => pathKey(entry) === file));
@@ -571,7 +602,7 @@ export function deriveResumeCorrectionSuccessor(input: ResumeCorrectionInput): R
   const intent = buildSuccessorIntent(withAdditionalGates(original.intent, addedGates), checkpoint, {
     functional: hasGate ? functionalCriterion : null,
     scopeCriteria,
-    correctionScope: { reworkScope, remainingScope, effectiveScope, ...(reopenedFiles.length ? { reopenedScope: reopenedFiles } : {}), ...(input.reworkSource ? { reworkSource: input.reworkSource } : {}) },
+    correctionScope: { reworkScope, remainingScope, effectiveScope, ...(inheritedFiles.length ? { inheritedPreservedScope: inheritedFiles } : {}), ...(reopenedFiles.length ? { reopenedScope: reopenedFiles } : {}), ...(input.reworkSource ? { reworkSource: input.reworkSource } : {}) },
   });
   if (!intent) return { ok: false, refusals: ['spec_unreadable'] };
 

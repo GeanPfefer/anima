@@ -62,3 +62,26 @@ test('correction repassa autoridade da raiz e mantém RPC/auditoria', async () =
   await expect(proposeCorrectionSuccessor({ rpc } as never, current, correction, { rootAuthority })).resolves.toMatchObject({ ok: true });
   expect(rpc).toHaveBeenCalledWith('propose_recovery_successor', expect.objectContaining({ p_intent: correction.intent, p_recovery_sequence: 1 }));
 });
+
+
+test('correction revalida inherited e repassa evidencia cumulativa antes da RPC', async () => {
+  const rootAuthority = { includedScope: ['a', 'b', 'c', 'inherited'], excludedScope: ['x'] };
+  const current: WorkItem = { ...original, state: 'changes_requested',
+    proposal: { ...original.proposal, data: { ...original.proposal.data, excludedScope: ['x', 'inherited'] } },
+    intent: { execution_spec: { ...(original.intent.execution_spec as object), correction_scope: {} } },
+  };
+  const correction: RecoverySuccessorCandidate = { ...candidate,
+    proposal: { ...candidate.proposal, data: { ...candidate.proposal.data, excludedScope: ['x', 'b', 'c', 'inherited'] } },
+    intent: { execution_spec: { ...(candidate.intent.execution_spec as object), correction_scope: {
+      rework_scope: ['a'], remaining_scope: [], effective_scope: ['a'], inherited_preserved_scope: ['inherited'],
+    } } },
+  };
+  const rpc = jest.fn().mockResolvedValue({ data: { successorWorkItemId: 's', lineageId: 'l', recoverySequence: 1, replayed: false }, error: null });
+  await expect(proposeCorrectionSuccessor({ rpc } as never, current, correction, { rootAuthority, observedChangedFiles: ['a', 'inherited', 'unexpected'] }))
+    .resolves.toMatchObject({ ok: false, code: 'candidate_invalid', gaps: expect.arrayContaining(['correction_scope_invalid']) });
+  await expect(proposeCorrectionSuccessor({ rpc } as never, current, correction, { observedChangedFiles: ['a', 'inherited'] }))
+    .resolves.toMatchObject({ ok: false, code: 'candidate_invalid' });
+  expect(rpc).not.toHaveBeenCalled();
+  await expect(proposeCorrectionSuccessor({ rpc } as never, current, correction, { rootAuthority, observedChangedFiles: ['a', 'inherited'] })).resolves.toMatchObject({ ok: true });
+  expect(rpc).toHaveBeenCalledTimes(1);
+});

@@ -116,7 +116,7 @@ export function validateRecoverySuccessor(
 export function validateCorrectionSuccessor(
   original: WorkItem,
   candidate: RecoverySuccessorCandidate,
-  options?: { readonly rootAuthority?: RootAuthorityScope },
+  options?: { readonly rootAuthority?: RootAuthorityScope; readonly observedChangedFiles?: readonly string[] },
 ): RecoverySuccessorValidation {
   const gaps: RecoverySuccessorGap[] = [];
   if (original.state !== 'changes_requested') gaps.push('original_not_changes_requested');
@@ -144,6 +144,25 @@ export function validateCorrectionSuccessor(
     && correction?.['rework_source'] === 'structured');
   if (!reopeningValid || (correction?.['reopened_scope'] !== undefined && reopened === null)) gaps.push('correction_scope_invalid');
   const universe = hasReopened && reopeningValid ? [...original.proposal.data.includedScope, ...reopened] : original.proposal.data.includedScope;
+  const inherited = strings(correction?.['inherited_preserved_scope']);
+  const hasInherited = correction?.['inherited_preserved_scope'] !== undefined;
+  const originalRawSpec = original.intent['execution_spec'];
+  const originalCorrection = typeof originalRawSpec === 'object' && originalRawSpec !== null && !Array.isArray(originalRawSpec)
+    ? (originalRawSpec as Record<string, unknown>)['correction_scope'] : null;
+  const contains = (values: readonly string[], value: string): boolean => values.some(entry => key(entry) === key(value));
+  if (hasInherited && (!inherited || !options?.rootAuthority
+      || typeof originalCorrection !== 'object' || originalCorrection === null || Array.isArray(originalCorrection)
+      || inherited.some(value => !rootScope.has(key(value))
+        || !contains(original.proposal.data.excludedScope, value)
+        || contains(original.proposal.data.includedScope, value)
+        || contains(candidate.proposal.data.includedScope, value)
+        || contains([...(effective ?? []), ...(rework ?? []), ...(remaining ?? []), ...(reopened ?? [])], value)
+        || !contains(candidate.proposal.data.excludedScope, value)))) {
+    gaps.push('correction_scope_invalid');
+  }
+  if (options?.observedChangedFiles?.some(value => !contains(universe, value) && !contains(inherited ?? [], value))) {
+    gaps.push('correction_scope_invalid');
+  }
   const scopeNormalize = hasReopened ? (values: readonly string[]) => new Set(values.map(key)) : normalized;
   gaps.push(...validateSuccessorEnvelope(original, candidate, 'nonempty_subset', universe, scopeNormalize));
   const originalScope = scopeNormalize(universe);

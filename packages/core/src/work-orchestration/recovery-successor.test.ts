@@ -70,3 +70,19 @@ test('validação independente de reopened_scope não confia na derivação', ()
   const outsideCandidate = { ...forged, proposal: { ...forged.proposal, data: { ...forged.proposal.data, includedScope: [reopened, 'never.ts'] } } };
   expect(validateCorrectionSuccessor(current, outsideCandidate, { rootAuthority })).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
 });
+
+
+test('observedChangedFiles fecha arquivos inesperados mesmo sem inherited no spec', () => {
+  const current = { ...original, state: 'changes_requested' as const };
+  const correction = candidate({ intent: { execution_spec: { ...(intent.execution_spec as object), correction_scope: {
+    rework_scope: [...proposal.data.includedScope], remaining_scope: [], effective_scope: [...proposal.data.includedScope],
+  } } } });
+  expect(validateCorrectionSuccessor(current, correction).valid).toBe(true);
+  expect(validateCorrectionSuccessor(current, correction, { observedChangedFiles: original.proposal.data.includedScope }).valid).toBe(true);
+  expect(validateCorrectionSuccessor(current, correction, { observedChangedFiles: [...original.proposal.data.includedScope, 'never.ts'] }))
+    .toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+  const malformed = candidate({ ...correction, intent: { execution_spec: { ...(correction.intent.execution_spec as object), correction_scope: {
+    rework_scope: [...proposal.data.includedScope], remaining_scope: [], effective_scope: [...proposal.data.includedScope], inherited_preserved_scope: 'never.ts',
+  } } } });
+  expect(validateCorrectionSuccessor(current, malformed)).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+});

@@ -1,4 +1,4 @@
-import { validateCorrectionSuccessor, type WorkEvent, type WorkItem } from '@anima/core';
+import { deriveResumeCorrectionSuccessor, validateCorrectionSuccessor, type WorkEvent, type WorkItem } from '@anima/core';
 import { deriveExplicitReworkScope, planCorrectionFromReview, resolveCorrectionRootAuthority, type ReviewCorrectionFacts } from './review-correction-orchestration';
 
 const ATTEMPT = '0aaf828c-fa1d-4c76-8503-64df7a5041c9';
@@ -258,4 +258,50 @@ test('hop intermediario sem correction_scope fecha a raiz', async () => {
     readPredecessor: async id => id === 'current' ? original.id : 'root',
     readItem: async () => original,
   })).resolves.toBeNull();
+});
+
+
+describe('SDC-03 - correction multinível com diff cumulativo', () => {
+  const database = 'packages/types/src/database.ts';
+  const preserved = [database, ...Array.from({ length: 7 }, (_, index) => `apps/web/lib/preserved-${index}.ts`)];
+  const editable = ['supabase/migrations/sdc03.sql', 'supabase/tests/sdc03.test.sql', 'apps/web/lib/sdc03.ts', 'apps/web/lib/sdc03.test.ts'];
+  const includedScope = [...preserved, ...editable];
+  const excludedScope = Array.from({ length: 8 }, (_, index) => `root-excluded-${index}`);
+  const root: WorkItem = { ...original, proposal: { ...original.proposal, data: { ...original.proposal.data, includedScope, excludedScope } } };
+  const first = deriveResumeCorrectionSuccessor({ original: root, requestedChanges: 'Completar testes e servi?o',
+    checkpoint: { baseSha: BASE_SHA, commitSha: COMMIT_SHA, branch: `anima-work/${ATTEMPT}` },
+    preservedFiles: preserved, reworkFiles: [], recoverySequence: 1, idempotencyKey: 'c4000000-0000-4000-8000-000000000001',
+  });
+  if (!first.ok) throw new Error(first.refusals.join(','));
+  const hop: WorkItem = { ...root, intent: first.candidate.intent, proposal: first.candidate.proposal };
+  const rootAuthority = { includedScope, excludedScope };
+  const events = (changedFiles = includedScope) => [gitEvidenceEvent({ changedFiles }), resultEvent(), reviewEvent()];
+  test('retoma do commit observado, reabre database e mantém sete herdados exclu?dos', () => {
+    expect(hop.proposal.data.includedScope).toEqual(editable);
+    const plan = okPlan(planCorrectionFromReview(facts({ original: hop, events: events(), rootAuthority, reworkPaths: [editable[1]!, database] })));
+    expect(plan.candidate.proposal.data.includedScope).toEqual([editable[1]!, database]);
+    const spec = plan.candidate.intent['execution_spec'] as Record<string, unknown>;
+    expect(spec['correction_scope']).toEqual({ rework_scope: [editable[1]!, database], remaining_scope: [],
+      effective_scope: [editable[1]!, database], reopened_scope: [database], rework_source: 'structured', inherited_preserved_scope: preserved.slice(1) });
+    expect(spec['resume_from_checkpoint']).toEqual({ base_sha: BASE_SHA, branch: `anima-work/${ATTEMPT}`, commit_sha: COMMIT_SHA });
+    expect(plan.candidate.proposal.data.excludedScope).toEqual([...excludedScope, ...preserved.slice(1), editable[0], editable[2], editable[3]]);
+    expect(validateCorrectionSuccessor(hop, plan.candidate, { rootAuthority, observedChangedFiles: includedScope })).toMatchObject({ valid: true });
+    expect(validateCorrectionSuccessor(hop, plan.candidate)).toMatchObject({ valid: false, gaps: expect.arrayContaining(['correction_scope_invalid']) });
+  });
+  test('modo legado classifica os mesmos herdados sem reabertura', () => {
+    const plan = okPlan(planCorrectionFromReview(facts({ original: hop, rootAuthority, events: [gitEvidenceEvent({ changedFiles: includedScope }), resultEvent(), reviewEvent({ requestedChanges: `Corrija ${editable[1]!}` })] })));
+    expect(plan.candidate.proposal.data.includedScope).toEqual([editable[1]!]);
+    expect(validateCorrectionSuccessor(hop, plan.candidate, { rootAuthority, observedChangedFiles: includedScope })).toMatchObject({ valid: true });
+  });
+  test.each(['unexpected.ts', excludedScope[0]!])('não esconde arquivo cumulativo sem autoridade: %s', file => {
+    expect(planCorrectionFromReview(facts({ original: hop, rootAuthority, events: events([...includedScope, file]), reworkPaths: [editable[1]!] })))
+      .toMatchObject({ ok: false, reason: 'derivation_refused', refusals: ['preserved_files_out_of_scope'] });
+  });
+  test('sem root authority, sem correction_scope ou sem exclusão comprovada recusa', () => {
+    for (const overrides of [{ rootAuthority: undefined }, { original: { ...hop, intent: original.intent } },
+      { original: { ...hop, proposal: { ...hop.proposal, data: { ...hop.proposal.data, excludedScope } } } }]) {
+      expect(planCorrectionFromReview(facts({ original: hop, rootAuthority, events: events(), reworkPaths: [editable[1]!], ...overrides })))
+        .toMatchObject({ ok: false, reason: 'derivation_refused', refusals: ['preserved_files_out_of_scope'] });
+    }
+  });
 });
