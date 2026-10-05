@@ -1334,6 +1334,70 @@ export type Database = {
           },
         ]
       }
+      work_candidate_recoveries: {
+        Row: {
+          authority: Json
+          candidate_commit_sha: string
+          created_at: string
+          failure_event_id: string
+          id: string
+          lineage_id: string
+          predecessor_id: string
+          request_id: string
+          source_attempt_id: string
+          successor_id: string
+          user_id: string
+        }
+        Insert: {
+          authority: Json
+          candidate_commit_sha: string
+          created_at?: string
+          failure_event_id: string
+          id?: string
+          lineage_id: string
+          predecessor_id: string
+          request_id: string
+          source_attempt_id: string
+          successor_id: string
+          user_id: string
+        }
+        Update: {
+          authority?: Json
+          candidate_commit_sha?: string
+          created_at?: string
+          failure_event_id?: string
+          id?: string
+          lineage_id?: string
+          predecessor_id?: string
+          request_id?: string
+          source_attempt_id?: string
+          successor_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_candidate_recoveries_predecessor_id_fkey"
+            columns: ["predecessor_id"]
+            isOneToOne: true
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_candidate_recoveries_successor_id_fkey"
+            columns: ["successor_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_candidate_recoveries_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_claims: {
         Row: {
           acquired_at: string
@@ -2202,6 +2266,15 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      authorize_candidate_recovery: {
+        Args: {
+          p_authorization: Json
+          p_expected_proposal_version: number
+          p_failure_event_id: string
+          p_work_item_id: string
+        }
+        Returns: Json
       }
       authorize_harness_fix_recovery: {
         Args: {

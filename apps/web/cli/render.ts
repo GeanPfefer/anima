@@ -212,6 +212,14 @@ export function renderHuman(payload: CliPayload): string {
         `Fix: ${payload.fixCommits.map(sha => sha.slice(0, 7)).join(', ')}`,
         `Próximo passo: anima work show ${payload.successorWorkItemId}`,
       ].join('\n');
+    case 'work-recover-candidate':
+      return [
+        `${payload.workItemId} ${DOT} ${payload.message}`,
+        `Sucessor: ${payload.successorWorkItemId}`,
+        `Lineage: ${payload.lineageId} ${DOT} attempt de origem ${payload.sourceAttemptId}`,
+        `Checkpoint: ${payload.checkpointCommitSha.slice(0, 7)}${payload.replayed ? ' (replay)' : ''}`,
+        `Próximo passo: anima work show ${payload.successorWorkItemId}`,
+      ].join('\n');
     case 'work-authorize-compute':
       return [
         `${payload.workItemId} ${DOT} ${payload.message}`,

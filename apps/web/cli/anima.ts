@@ -13,6 +13,8 @@ import { resolveCliIdentity } from './identity';
 import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/lib/work-orchestration/paid-compute-authorization-store';
 import { runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
 import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recovery';
+import { recoverFromFailedCandidate } from '@/lib/work-orchestration/candidate-recovery';
+import { runWorkRecoverCandidate } from './app';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
 import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkExecutors, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { createNodeExecutorReadinessDeps, probeAllExecutors } from '@/lib/work-orchestration/executor-readiness';
@@ -75,6 +77,12 @@ async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config
         catch { return {exitCode:EXIT.USAGE,payload:{ok:false,kind:'error',code:'diagnosis_file_invalid',error:'Não foi possível ler o JSON do diagnóstico.'}}; }
       }
       return runWorkReplan(() => replanFailedWorkItem(client,command.id,diagnosis));
+    }
+    case 'work-recover-candidate': {
+      let diagnosis: unknown;
+      try { diagnosis = JSON.parse(await readFile(command.diagnosisPath, 'utf8')); }
+      catch { return { exitCode: EXIT.USAGE, payload: { ok: false, kind: 'error', code: 'diagnosis_file_invalid', error: 'Não foi possível ler o JSON do diagnóstico.' } }; }
+      return runWorkRecoverCandidate(() => recoverFromFailedCandidate(client, command.id, diagnosis), command.id);
     }
     case 'work-authorize-resume': {
       let authorization: unknown;
