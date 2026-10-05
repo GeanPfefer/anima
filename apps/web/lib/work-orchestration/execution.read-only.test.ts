@@ -1,3 +1,4 @@
+// SDC-11: este teste cobre a projeção de effectClass no request.
 import type { AutonomousExecutionSpecV1, WorkItem, WorkContextReference } from '@anima/core';
 import { buildExecutorRequest } from './execution';
 
