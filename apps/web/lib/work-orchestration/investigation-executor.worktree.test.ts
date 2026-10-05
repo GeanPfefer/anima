@@ -2,8 +2,8 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildCoderTaskSpec, validateWorkExecutorTranscript, type WorkExecutorRequest, type WorkExecutorSignal } from '@anima/core';
-import { InvestigationExecutorAdapter, readProhibitedInvestigationRefs, resolveInvestigationEvidence } from './investigation-executor';
+import { buildCoderTaskSpec, parseInvestigationResult, renderInvestigationSummary, validateWorkExecutorTranscript, type WorkExecutorRequest, type WorkExecutorSignal } from '@anima/core';
+import { inspectInvestigationEvidence, InvestigationExecutorAdapter, readProhibitedInvestigationRefs, resolveInvestigationEvidence } from './investigation-executor';
 import { runProcess } from './worktree';
 import type { CodexCliProcessRunner } from './codex-cli-coder';
 
@@ -68,10 +68,66 @@ describe('investigation host with real git', () => {
   test.each([
     { kind: 'commit', commit: 'f'.repeat(40) },
     { kind: 'file_at_commit', path: 'missing.txt', lines: null },
-    { kind: 'file_at_commit', path: 'file.txt', lines: { start: 1, end: 3 } },
+    { kind: 'file_at_commit', path: 'file.txt', lines: { start: 3, end: 2 } },
+    { kind: 'file_at_commit', path: '../file.txt', lines: null },
     { kind: 'file_at_commit', path: '.', lines: null },
   ])('unresolvable/invalid evidence %p is retryable', async evidence => {
     const output = { schemaVersion: 1, outcome: 'conclusive', gaps: [], findings: [{ statement: 'Finding', status: 'established', evidence: [{ commit: sha, ...evidence }] }] };
+    expect((await execute(undefined, output))[0]).toMatchObject({ kind: 'error', retryable: true });
+  });
+  const outputWith = (evidence: readonly unknown[]) => ({ schemaVersion: 1, outcome: 'conclusive', gaps: [], findings: [{ statement: 'Original finding', status: 'established', evidence }] });
+  test('two-line EOF overflow is treated, never clamped; strict resolver still rejects', async () => {
+    const output = outputWith([{ kind: 'file_at_commit', commit: sha, path: 'file.txt', lines: { start: 1, end: 3 } }]);
+    const parsed = parseInvestigationResult(output)!;
+    expect(await resolveInvestigationEvidence(repo, parsed)).toBe(false);
+    const signal = (await execute(undefined, output))[0]!;
+    expect(signal).toMatchObject({ kind: 'result', resultReferences: [], investigation: { outcome: 'inconclusive', findings: [{ statement: 'Original finding', status: 'undetermined', evidence: [] }], hostVerification: { evidenceDiagnostics: [{ requestedLines: { start: 1, end: 3 }, actualLineCount: 2, reason: 'line_end_out_of_range', findingDowngraded: true }] } } });
+    expect(validateWorkExecutorTranscript([signal])).toBeNull();
+  });
+  test.each([[87, 17, 89], [97, 61, 98], [133, 113, 134]])('EOF fixture %i lines removes requested %i?%i and preserves valid findings', async (count, start, end) => {
+    await writeFile(join(repo, 'range.txt'), Array.from({ length: count }, (_, i) => `line ${i + 1}`).join('\n') + '\n');
+    await git(repo, ['add', '.']); await git(repo, ['commit', '-m', 'range fixture']); sha = await git(repo, ['rev-parse', 'HEAD']);
+    const invalid = { kind: 'file_at_commit', commit: sha, path: 'range.txt', lines: { start, end } };
+    const valid = { kind: 'file_at_commit', commit: sha, path: 'range.txt', lines: { start: 1, end: count } };
+    const output = { ...outputWith([invalid]), findings: [...outputWith([invalid]).findings, ...outputWith([valid]).findings] };
+    const signal = (await execute(undefined, output))[0]!;
+    expect(signal).toMatchObject({ kind: 'result', resultReferences: [`range.txt@${sha}:1-${count}`], investigation: { outcome: 'partial', findings: [{ status: 'undetermined', evidence: [] }, { status: 'established', evidence: [valid] }], hostVerification: { evidenceDiagnostics: [{ findingIndex: 0, evidenceIndex: 0, commit: sha, path: 'range.txt', requestedLines: { start, end }, actualLineCount: count, reason: 'line_end_out_of_range', findingDowngraded: true }] } } });
+    if (signal.kind !== 'result' || !signal.investigation) throw new Error('expected investigation result');
+    expect(signal.summary).toBe(renderInvestigationSummary(signal.investigation));
+    expect(validateWorkExecutorTranscript([signal])).toBeNull();
+    expect(await resolveInvestigationEvidence(repo, signal.investigation)).toBe(true);
+  });
+  test.each([{ start: 1, end: 2 }, null])('valid range or omitted lines %p remains unchanged without diagnostics', async lines => {
+    const evidence = { kind: 'file_at_commit', commit: sha, path: 'file.txt', lines };
+    const output = outputWith([evidence]);
+    const signal = (await execute(undefined, output))[0]!;
+    expect(signal).toMatchObject({ kind: 'result', investigation: parseInvestigationResult(output) });
+    if (signal.kind !== 'result') throw new Error('expected result');
+    expect(signal.investigation?.hostVerification).not.toHaveProperty('evidenceDiagnostics');
+  });
+  test('start beyond EOF takes precedence; empty blobs have zero lines', async () => {
+    const output = outputWith([{ kind: 'file_at_commit', commit: sha, path: 'file.txt', lines: { start: 3, end: 4 } }]);
+    expect((await execute(undefined, output))[0]).toMatchObject({ kind: 'result', investigation: { hostVerification: { evidenceDiagnostics: [{ reason: 'line_start_out_of_range', actualLineCount: 2 }] } } });
+    await writeFile(join(repo, 'empty.txt'), ''); await git(repo, ['add', '.']); await git(repo, ['commit', '-m', 'empty']); sha = await git(repo, ['rev-parse', 'HEAD']);
+    expect(await inspectInvestigationEvidence(repo, parseInvestigationResult(outputWith([{ kind: 'file_at_commit', commit: sha, path: 'empty.txt', lines: { start: 1, end: 1 } }]))!)).toEqual({ ok: true, rejections: [{ findingIndex: 0, evidenceIndex: 0, reason: 'line_start_out_of_range', actualLineCount: 0 }] });
+  });
+  test('two valid refs keep established status after a third is rejected', async () => {
+    const valid = { kind: 'file_at_commit', commit: sha, path: 'file.txt', lines: { start: 1, end: 2 } };
+    const output = outputWith([valid, { kind: 'commit', commit: sha }, { ...valid, lines: { start: 1, end: 3 } }]);
+    expect((await execute(undefined, output))[0]).toMatchObject({ kind: 'result', investigation: { outcome: 'conclusive', findings: [{ status: 'established', evidence: [valid, { kind: 'commit', commit: sha }] }], hostVerification: { evidenceDiagnostics: [{ evidenceIndex: 2, findingDowngraded: false }] } } });
+  });
+  test('all refs rejected yields honest inconclusive rather than execution failure', async () => {
+    const output = outputWith([{ kind: 'file_at_commit', commit: sha, path: 'file.txt', lines: { start: 1, end: 3 } }, { kind: 'file_at_commit', commit: sha, path: 'file.txt', lines: { start: 3, end: 4 } }]);
+    const signal = (await execute(undefined, output))[0]!;
+    expect(signal).toMatchObject({ kind: 'result', investigation: { outcome: 'inconclusive', findings: [{ status: 'undetermined', evidence: [] }] } });
+    if (signal.kind !== 'result') throw new Error('expected result');
+    expect(signal.investigation?.hostVerification.evidenceDiagnostics).toHaveLength(2);
+    expect(signal.investigation?.gaps).toHaveLength(1);
+  });
+  test.each(['large.txt', 'contains-nul.txt', '.gitignore/child'])('hard blob failure %s remains fail-closed even after an EOF rejection', async path => {
+    await writeFile(join(repo, 'large.txt'), 'x'.repeat(150_001)); await writeFile(join(repo, 'contains-nul.txt'), 'a\0b');
+    await git(repo, ['add', '.']); await git(repo, ['commit', '-m', 'hard blobs']); sha = await git(repo, ['rev-parse', 'HEAD']);
+    const output = outputWith([{ kind: 'file_at_commit', commit: sha, path: 'file.txt', lines: { start: 1, end: 3 } }, { kind: 'file_at_commit', commit: sha, path, lines: { start: 1, end: 1 } }]);
     expect((await execute(undefined, output))[0]).toMatchObject({ kind: 'error', retryable: true });
   });
   test('resolves evidence at a commit and valid line range independent of live contents', async () => {

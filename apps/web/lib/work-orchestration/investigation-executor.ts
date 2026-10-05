@@ -2,9 +2,9 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  INVESTIGATION_OUTPUT_SCHEMA, isInvestigationCommit, normalizeInvestigationTransport, parseInvestigationExecution, renderInvestigationEvidence, renderInvestigationSummary,
+  applyInvestigationEvidenceRejections, INVESTIGATION_OUTPUT_SCHEMA, isInvestigationCommit, parseInvestigationResult, normalizeInvestigationTransport, parseInvestigationExecution, renderInvestigationEvidence, renderInvestigationSummary,
   validateEffectClassCoherence, validateWorkExecutorRequest,
-  type InvestigationExecutionV1, type InvestigationResultV1, type WorkExecutorAdapter,
+  type InvestigationEvidenceRejectionV1, type InvestigationExecutionV1, type InvestigationResultV1, type WorkExecutorAdapter,
   type WorkExecutorRequest, type WorkExecutorSignal, type WorkExecutorSignalInput,
 } from '@anima/core';
 import { buildCodexCliEnvironment, resolveCodexCliConfig, CODEX_CLI_DEFAULT_MODEL, CODEX_CLI_PROMPT_MAX_CHARS, type CodexCliProcessRunner } from './codex-cli-coder';
@@ -36,26 +36,33 @@ export const hasNewProhibitedInvestigationRefs = (before: readonly string[], aft
 
 /** Resolve git objects, not files on the live checkout. Blob mode excludes trees,
  * symlinks and submodules. Byte size cross-check fails closed on runProcess truncation. */
-export async function resolveInvestigationEvidence(repo: string, result: InvestigationResultV1): Promise<boolean> {
-  for (const finding of result.findings) for (const evidence of finding.evidence) {
+export async function inspectInvestigationEvidence(repo: string, result: InvestigationResultV1): Promise<{ ok: false } | { ok: true; rejections: readonly InvestigationEvidenceRejectionV1[] }> {
+  if (!parseInvestigationResult(result)) return { ok: false };
+  const rejections: InvestigationEvidenceRejectionV1[] = [];
+  for (const [findingIndex, finding] of result.findings.entries()) for (const [evidenceIndex, evidence] of finding.evidence.entries()) {
     const commit = await git(repo, ['cat-file', '-t', evidence.commit]);
-    if (!successful(commit) || commit.stdout.trim() !== 'commit') return false;
+    if (!successful(commit) || commit.stdout.trim() !== 'commit') return { ok: false };
     if (evidence.kind === 'commit') continue;
     const entry = await git(repo, ['ls-tree', evidence.commit, '--', evidence.path]);
-    if (!successful(entry) || !/^100(?:644|755) blob [a-f0-9]{40}\t/.test(entry.stdout)) return false;
+    if (!successful(entry) || !/^100(?:644|755) blob [a-f0-9]{40}\t/.test(entry.stdout)) return { ok: false };
     const objectName = `${evidence.commit}:${evidence.path}`;
     const type = await git(repo, ['cat-file', '-t', objectName]);
-    if (!successful(type) || type.stdout.trim() !== 'blob') return false;
+    if (!successful(type) || type.stdout.trim() !== 'blob') return { ok: false };
     if (evidence.lines) {
       const size = await git(repo, ['cat-file', '-s', objectName]);
-      if (!successful(size) || !/^\d+\s*$/.test(size.stdout) || Number(size.stdout) > 150_000) return false;
+      if (!successful(size) || !/^\d+\s*$/.test(size.stdout) || Number(size.stdout) > 150_000) return { ok: false };
       const content = await git(repo, ['cat-file', 'blob', objectName]);
-      if (!successful(content) || Buffer.byteLength(content.stdout, 'utf8') !== Number(size.stdout) || content.stdout.includes('\0')) return false;
+      if (!successful(content) || Buffer.byteLength(content.stdout, 'utf8') !== Number(size.stdout) || content.stdout.includes('\0')) return { ok: false };
       const count = content.stdout.length === 0 ? 0 : content.stdout.split('\n').length - (content.stdout.endsWith('\n') ? 1 : 0);
-      if (evidence.lines.end > count) return false;
+      if (evidence.lines.end > count) rejections.push({ findingIndex, evidenceIndex, actualLineCount: count, reason: evidence.lines.start > count ? 'line_start_out_of_range' : 'line_end_out_of_range' });
     }
   }
-  return true;
+  return { ok: true, rejections };
+}
+
+export async function resolveInvestigationEvidence(repo: string, result: InvestigationResultV1): Promise<boolean> {
+  const inspection = await inspectInvestigationEvidence(repo, result);
+  return inspection.ok && inspection.rejections.length === 0;
 }
 
 export function buildInvestigationPrompt(request: WorkExecutorRequest, baseSha: string): string {
@@ -67,6 +74,7 @@ export function buildInvestigationPrompt(request: WorkExecutorRequest, baseSha: 
     `Excluded sources: ${JSON.stringify(request.excludedScope)}`,
     'Source scope is an instruction subject to human audit, not a guaranteed confidentiality boundary. Read-only isolates effects; it does not guarantee confinement of reads.',
     'Return only the strict InvestigationResultV1 JSON schema supplied with --output-schema. Cite file_at_commit evidence as file@commit:lines (relative file path, full 40-hex commit, optional start/end); commit evidence identifies a full commit.',
+    'Omit lines (use null) unless the exact range was confirmed by reading the file. Never estimate the end of a file or cite a line beyond the last line (EOF). Prefer a few small ranges.',
     'established/inferred require evidence. undetermined may have none. partial/inconclusive require explicit gaps. Do not expose secrets or absolute local paths. Findings are subject to human review; resolving a citation does not prove its statement.',
   ].join('\n');
 }
@@ -147,10 +155,13 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
         const size = await stat(outputPath);
         if (!size.isFile() || size.size > 100_000) throw new Error('output_invalid');
         const result = normalizeInvestigationTransport(JSON.parse(await readFile(outputPath, 'utf8')) as unknown);
-        if (!result || !await resolveInvestigationEvidence(target.repoRoot, result)) {
+        const inspection = result ? await inspectInvestigationEvidence(target.repoRoot, result) : { ok: false as const };
+        const treated = result && inspection.ok ? applyInvestigationEvidenceRejections(result, inspection.rejections) : null;
+        if (!treated) {
           outcome = error(true, 'Investigation structure or evidence does not resolve.');
         } else {
-          const investigation: InvestigationExecutionV1 = { ...result, hostVerification: { baseSha: target.baseSha, snapshotClean: true, snapshotHead: target.baseSha, snapshotDetached: true, prohibitedRefsBefore: before } };
+          const result = treated.result;
+          const investigation: InvestigationExecutionV1 = { ...result, hostVerification: { ...(treated.diagnostics.length ? { evidenceDiagnostics: treated.diagnostics } : {}), baseSha: target.baseSha, snapshotClean: true, snapshotHead: target.baseSha, snapshotDetached: true, prohibitedRefsBefore: before } };
           if (!parseInvestigationExecution(investigation)) throw new Error('host_observation_invalid');
           const resultReferences = [...new Set(result.findings.flatMap(f => f.evidence.map(renderInvestigationEvidence)))];
           outcome = { kind: 'result', summary: renderInvestigationSummary(result), investigation, resultReferences, validations: [],

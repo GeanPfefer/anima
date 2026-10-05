@@ -1,4 +1,4 @@
-import { computeInvestigationVerifierOpinion, INVESTIGATION_OUTPUT_SCHEMA, normalizeInvestigationTransport, parseInvestigationExecution, parseInvestigationResult, renderInvestigationSummary } from './investigation-result';
+import { applyInvestigationEvidenceRejections, type InvestigationResultV1, computeInvestigationVerifierOpinion, INVESTIGATION_OUTPUT_SCHEMA, normalizeInvestigationTransport, parseInvestigationExecution, parseInvestigationResult, renderInvestigationSummary } from './investigation-result';
 
 const commit = 'a'.repeat(40);
 const valid = () => ({ schemaVersion: 1, outcome: 'conclusive', gaps: [], findings: [{ statement: 'Contract exists.', status: 'established', evidence: [{ kind: 'file_at_commit', commit, path: 'src/file.ts', lines: { start: 1, end: 2 } }] }] });
@@ -50,5 +50,65 @@ describe('InvestigationResultV1', () => {
     expect(opinion.findings.map(f => f.provenance)).toEqual(['attested', 'attested', 'independent', 'independent', 'independent']);
     expect(computeInvestigationVerifierOpinion({ ...input, referencesResolve: false }).verdict).toBe('inconclusive');
     expect(computeInvestigationVerifierOpinion({ ...input, prohibitedRefsAbsent: false }).verdict).toBe('inconclusive');
+  });
+});
+
+describe('host line-range rejections', () => {
+  const ref = { kind: 'file_at_commit' as const, commit, path: 'src/file.ts', lines: { start: 1, end: 3 } };
+  const finding = (status: 'established' | 'inferred' | 'undetermined', count: number) => ({ statement: 'Original statement', status, evidence: Array.from({ length: count }, () => ref) });
+  const result = (findings: InvestigationResultV1['findings']): InvestigationResultV1 => ({ schemaVersion: 1, outcome: 'conclusive', gaps: [], findings });
+  const reject = (findingIndex: number, evidenceIndex = 0) => ({ findingIndex, evidenceIndex, actualLineCount: 2, reason: 'line_end_out_of_range' as const });
+  test('CASE1 retains status and remaining refs, using original indices', () => {
+    const input = result([finding('established', 3)]);
+    const treated = applyInvestigationEvidenceRejections(input, [reject(0, 1)])!;
+    expect(treated.result.findings[0]).toEqual({ ...input.findings[0], evidence: [ref, ref] });
+    expect(treated.result.outcome).toBe('conclusive');
+    expect(treated.diagnostics[0]).toMatchObject({ findingIndex: 0, evidenceIndex: 1, requestedLines: { start: 1, end: 3 }, actualLineCount: 2, findingDowngraded: false });
+    expect(input.findings[0]!.evidence).toHaveLength(3);
+  });
+  test('CASE2/CASE4 downgrade only unsupported findings and conclusive becomes partial', () => {
+    const input = result([finding('established', 1), finding('inferred', 1)]);
+    const treated = applyInvestigationEvidenceRejections(input, [reject(0)])!;
+    expect(treated.result.outcome).toBe('partial');
+    expect(treated.result.findings[0]).toEqual({ statement: 'Original statement', status: 'undetermined', evidence: [] });
+    expect(treated.result.findings[1]).toBe(input.findings[1]);
+    expect(treated.diagnostics[0]!.findingDowngraded).toBe(true);
+    expect(treated.result.gaps).toEqual(['Host: 1 evidence reference(s) failed line-range validation and were not accepted; 1 finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.']);
+  });
+  test('CASE3/no rejection returns identical result without a host gap', () => {
+    const input = result([finding('undetermined', 0)]);
+    expect(applyInvestigationEvidenceRejections(input, [])).toEqual({ result: input, diagnostics: [] });
+    expect(applyInvestigationEvidenceRejections(input, [])!.result).toBe(input);
+  });
+  test('CASE5 all refs rejected makes outcome inconclusive and preserves model gaps', () => {
+    const input = { ...result([finding('established', 1), finding('inferred', 1), finding('undetermined', 0)]), gaps: ['Model gap'] };
+    const treated = applyInvestigationEvidenceRejections(input, [reject(1), reject(0)])!;
+    expect(treated.result.outcome).toBe('inconclusive');
+    expect(treated.result.findings.every(f => f.status === 'undetermined' && f.evidence.length === 0)).toBe(true);
+    expect(treated.result.findings[2]).toBe(input.findings[2]);
+    expect(treated.result.gaps).toHaveLength(2);
+    expect(treated.result.gaps[0]).toBe('Model gap');
+    expect(treated.diagnostics.map(d => d.findingIndex)).toEqual([0, 1]);
+    expect(parseInvestigationResult(treated.result)).not.toBeNull();
+  });
+  test('gap and diagnostic bounds fail closed rather than truncate', () => {
+    expect(applyInvestigationEvidenceRejections({ ...result([finding('established', 1)]), gaps: Array(40).fill('Gap') }, [reject(0)])).toBeNull();
+    const input = result([finding('established', 20), finding('inferred', 20), finding('established', 1)]);
+    const rejections = input.findings.flatMap((f, fi) => f.evidence.map((_, ei) => reject(fi, ei)));
+    expect(applyInvestigationEvidenceRejections(input, rejections)).toBeNull();
+  });
+  test('optional diagnostics are host-only and parsed with closed keys', () => {
+    const treated = applyInvestigationEvidenceRejections(result([finding('established', 1)]), [reject(0)])!;
+    const hostVerification = { baseSha: commit, snapshotHead: commit, snapshotClean: true, snapshotDetached: true, prohibitedRefsBefore: [] };
+    const execution = { ...treated.result, hostVerification: { ...hostVerification, evidenceDiagnostics: treated.diagnostics } };
+    expect(parseInvestigationExecution(execution)).toEqual(execution);
+    expect(parseInvestigationExecution({ ...treated.result, hostVerification })).not.toBeNull();
+    expect(parseInvestigationExecution({ ...treated.result, evidenceDiagnostics: treated.diagnostics })).toBeNull();
+    for (const diagnostic of [{ ...treated.diagnostics[0], extra: true }, { ...treated.diagnostics[0], commit: 'bad' }, { ...treated.diagnostics[0], reason: 'unknown' }, { ...treated.diagnostics[0], requestedLines: { start: 1, end: 3, extra: true } }, { ...treated.diagnostics[0], actualLineCount: -1 }, { ...treated.diagnostics[0], findingIndex: 1.5 }]) {
+      expect(parseInvestigationExecution({ ...execution, hostVerification: { ...hostVerification, evidenceDiagnostics: [diagnostic] } })).toBeNull();
+    }
+    expect(parseInvestigationExecution({ ...execution, hostVerification: { ...hostVerification, evidenceDiagnostics: Array(41).fill(treated.diagnostics[0]) } })).toBeNull();
+    expect(normalizeInvestigationTransport({ ...valid(), evidenceDiagnostics: treated.diagnostics })).toBeNull();
+    expect(normalizeInvestigationTransport(execution)).toBeNull();
   });
 });

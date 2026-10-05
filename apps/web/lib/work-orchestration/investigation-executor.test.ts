@@ -1,7 +1,7 @@
 /** @jest-environment node */
 import { buildCoderTaskSpec, type WorkExecutorRequest, type WorkExecutorSignal } from '@anima/core';
 import { buildInvestigationPrompt, hasNewProhibitedInvestigationRefs, InvestigationExecutorAdapter } from './investigation-executor';
-import { buildCodexCliEnvironment } from './codex-cli-coder';
+import { CODEX_CLI_PROMPT_MAX_CHARS, buildCodexCliEnvironment } from './codex-cli-coder';
 
 const request = (): WorkExecutorRequest => ({
   workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 1, capability: 'research', effectClass: 'read_only',
@@ -52,6 +52,14 @@ describe('investigation adapter request boundary', () => {
     expect(prompt).toContain('Question: Explain the contract.'); expect(prompt).toContain('not a guaranteed confidentiality boundary');
     expect(prompt).toContain('Do not EDIT'); expect(prompt).toContain('file@commit:lines');
     expect(buildCodexCliEnvironment({ PATH: 'path', CODEX_HOME: 'auth', OPENAI_API_KEY: 'secret', SUPABASE_SERVICE_ROLE_KEY: 'secret' })).toEqual({ PATH: 'path', CODEX_HOME: 'auth', NO_COLOR: '1' });
+  });
+  test('prompt requires confirmed ranges and forbids citations beyond EOF', () => {
+    const prompt = buildInvestigationPrompt(request(), 'a'.repeat(40));
+    expect(prompt).toContain('Omit lines (use null)');
+    expect(prompt).toContain('confirmed by reading the file');
+    expect(prompt).toContain('Never estimate the end of a file');
+    expect(prompt).toContain('beyond the last line (EOF)');
+    expect(prompt.length).toBeLessThan(CODEX_CLI_PROMPT_MAX_CHARS);
   });
   test('only newly introduced forbidden names invalidate the snapshot; ordinary concurrent refs are outside this check', () => {
     expect(hasNewProhibitedInvestigationRefs(['refs/heads/anima-work/previous'], ['refs/heads/anima-work/previous'])).toBe(false);

@@ -4,6 +4,18 @@ import type { VerifierOpinionV1, VerifierOpinionFinding } from './verifier-opini
 export type InvestigationEvidenceV1 =
   | { readonly kind: 'commit'; readonly commit: string }
   | { readonly kind: 'file_at_commit'; readonly commit: string; readonly path: string; readonly lines?: { readonly start: number; readonly end: number } };
+export interface InvestigationEvidenceDiagnosticV1 {
+  readonly findingIndex: number;
+  readonly evidenceIndex: number;
+  readonly kind: 'file_at_commit';
+  readonly commit: string;
+  readonly path: string;
+  readonly requestedLines: { readonly start: number; readonly end: number };
+  readonly actualLineCount: number;
+  readonly reason: 'line_start_out_of_range' | 'line_end_out_of_range';
+  readonly findingDowngraded: boolean;
+}
+export type InvestigationEvidenceRejectionV1 = Pick<InvestigationEvidenceDiagnosticV1, 'findingIndex' | 'evidenceIndex' | 'reason' | 'actualLineCount'>;
 export interface InvestigationResultV1 {
   readonly schemaVersion: 1;
   readonly findings: readonly { readonly statement: string; readonly status: 'established' | 'inferred' | 'undetermined'; readonly evidence: readonly InvestigationEvidenceV1[] }[];
@@ -13,6 +25,7 @@ export interface InvestigationResultV1 {
 /** Adapter observations survive disposal, but are attestations, not independent git events. */
 export interface InvestigationExecutionV1 extends InvestigationResultV1 {
   readonly hostVerification: {
+    readonly evidenceDiagnostics?: readonly InvestigationEvidenceDiagnosticV1[];
     readonly baseSha: string;
     readonly snapshotClean: true;
     readonly snapshotHead: string;
@@ -60,11 +73,61 @@ export function parseInvestigationResult(value: unknown): InvestigationResultV1 
 export function parseInvestigationExecution(value: unknown): InvestigationExecutionV1 | null {
   const result = parseInvestigationResult(value);
   const h = object(object(value)?.hostVerification);
-  if (!result || !h || !keys(h, ['baseSha', 'snapshotClean', 'snapshotHead', 'snapshotDetached', 'prohibitedRefsBefore'])
+  if (!result || !h || !keys(h, ['baseSha', 'snapshotClean', 'snapshotHead', 'snapshotDetached', 'prohibitedRefsBefore', 'evidenceDiagnostics'])
     || !isInvestigationCommit(h.baseSha) || h.snapshotHead !== h.baseSha || h.snapshotClean !== true || h.snapshotDetached !== true
     || !Array.isArray(h.prohibitedRefsBefore) || h.prohibitedRefsBefore.length > 2000
     || !h.prohibitedRefsBefore.every(r => text(r, 400) && r.startsWith('refs/heads/anima-work/'))) return null;
-  return { ...result, hostVerification: { baseSha: h.baseSha, snapshotClean: true, snapshotHead: h.baseSha, snapshotDetached: true, prohibitedRefsBefore: h.prohibitedRefsBefore as string[] } };
+  const diagnostics: InvestigationEvidenceDiagnosticV1[] = [];
+  if (h.evidenceDiagnostics !== undefined) {
+    if (!Array.isArray(h.evidenceDiagnostics) || h.evidenceDiagnostics.length > 40) return null;
+    for (const raw of h.evidenceDiagnostics) {
+      const d = object(raw), lines = object(d?.requestedLines);
+      if (!d || !keys(d, ['findingIndex', 'evidenceIndex', 'kind', 'commit', 'path', 'requestedLines', 'actualLineCount', 'reason', 'findingDowngraded'])
+        || !lines || !keys(lines, ['start', 'end']) || d.kind !== 'file_at_commit' || !isInvestigationCommit(d.commit) || !isInvestigationPath(d.path)
+        || ![d.findingIndex, d.evidenceIndex, d.actualLineCount].every(v => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0)
+        || typeof lines.start !== 'number' || typeof lines.end !== 'number' || !Number.isSafeInteger(lines.start) || !Number.isSafeInteger(lines.end)
+        || lines.start < 1 || lines.end < lines.start || typeof d.findingDowngraded !== 'boolean'
+        || (d.reason !== 'line_start_out_of_range' && d.reason !== 'line_end_out_of_range')) return null;
+      diagnostics.push({ findingIndex: d.findingIndex as number, evidenceIndex: d.evidenceIndex as number, kind: 'file_at_commit', commit: d.commit, path: d.path,
+        requestedLines: { start: lines.start, end: lines.end }, actualLineCount: d.actualLineCount as number, reason: d.reason, findingDowngraded: d.findingDowngraded });
+    }
+  }
+  return { ...result, hostVerification: { ...(h.evidenceDiagnostics !== undefined ? { evidenceDiagnostics: diagnostics } : {}), baseSha: h.baseSha, snapshotClean: true, snapshotHead: h.baseSha, snapshotDetached: true, prohibitedRefsBefore: h.prohibitedRefsBefore as string[] } };
+}
+
+/** Reject only host-inspected EOF ranges; original indices are preserved in diagnostics. */
+export function applyInvestigationEvidenceRejections(result: InvestigationResultV1, rejections: readonly InvestigationEvidenceRejectionV1[]): { result: InvestigationResultV1; diagnostics: readonly InvestigationEvidenceDiagnosticV1[] } | null {
+  if (rejections.length === 0) return { result, diagnostics: [] };
+  if (rejections.length > 40 || result.gaps.length >= 40 || !parseInvestigationResult(result)) return null;
+  const rejected = new Map<string, InvestigationEvidenceRejectionV1>();
+  for (const r of rejections) {
+    if (![r.findingIndex, r.evidenceIndex, r.actualLineCount].every(v => Number.isSafeInteger(v) && v >= 0)) return null;
+    const e = result.findings[r.findingIndex]?.evidence[r.evidenceIndex];
+    const key = `${r.findingIndex}:${r.evidenceIndex}`;
+    if (!e || e.kind !== 'file_at_commit' || !e.lines || rejected.has(key)
+      || r.reason !== (e.lines.start > r.actualLineCount ? 'line_start_out_of_range' : e.lines.end > r.actualLineCount ? 'line_end_out_of_range' : null)) return null;
+    rejected.set(key, r);
+  }
+  let downgraded = 0;
+  const findings = result.findings.map((f, fi) => {
+    const evidence = f.evidence.filter((_, ei) => !rejected.has(`${fi}:${ei}`));
+    if (evidence.length === f.evidence.length) return f;
+    if (evidence.length === 0 && f.status !== 'undetermined') {
+      downgraded++;
+      return { ...f, status: 'undetermined' as const, evidence };
+    }
+    return { ...f, evidence };
+  });
+  const diagnostics: InvestigationEvidenceDiagnosticV1[] = [];
+  result.findings.forEach((f, fi) => f.evidence.forEach((e, ei) => {
+    const r = rejected.get(`${fi}:${ei}`);
+    if (r && e.kind === 'file_at_commit' && e.lines) diagnostics.push({ findingIndex: fi, evidenceIndex: ei, reason: r.reason, actualLineCount: r.actualLineCount, kind: e.kind, commit: e.commit, path: e.path,
+      requestedLines: { ...e.lines }, findingDowngraded: f.status !== 'undetermined' && findings[fi]!.status === 'undetermined' });
+  }));
+  const treated: InvestigationResultV1 = { ...result, findings,
+    outcome: !findings.some(f => f.status !== 'undetermined') ? 'inconclusive' : downgraded && result.outcome === 'conclusive' ? 'partial' : result.outcome,
+    gaps: [...result.gaps, `Host: ${diagnostics.length} evidence reference(s) failed line-range validation and were not accepted; ${downgraded} finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.`] };
+  return parseInvestigationResult(treated) ? { result: treated, diagnostics } : null;
 }
 
 /** Validate the strict CLI transport separately from the normalized persisted form. */
