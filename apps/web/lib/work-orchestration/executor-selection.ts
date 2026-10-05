@@ -1,7 +1,9 @@
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import type { AgenticRuntimeMode, ChangeAuthorizationFactsV1, CoderModelSelectionEvidenceV1, ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
-import { resolveAgenticRuntimePolicy, selectGovernedCoderModel } from '@anima/core';
+import { isInvestigationCommit, readEffectClass, validateEffectClassCoherence, resolveAgenticRuntimePolicy, selectGovernedCoderModel } from '@anima/core';
+import { Constants } from '@anima/types';
+import { InvestigationExecutorAdapter } from './investigation-executor';
 import type { CoderBackend } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
 import { resolveCoderCapacityPolicy } from './coder-model-policy';
@@ -22,14 +24,17 @@ import { runProcess } from './worktree';
 // item e devolve exatamente um `WorkExecutorAdapter` (via ConfiguredWorkRoute).
 // O Supervisor continua recebendo só rotas; não conhece worktree, Ollama, etc.
 //
-// Regras: `project:anima` exige o executor de worktree; o caminho legado (runner
-// Python) continua disponível para os demais; configuração inválida falha de
+// Regras: `read_only` exige investigação; `project:anima` mutante exige worktree;
+// o caminho legado (runner Python) continua disponível para os demais; configuração inválida falha de
 // forma EXPLÍCITA e nenhuma seleção cai silenciosamente num executor diferente.
 // ============================================================
 
 const SHA = /^[a-f0-9]{40}$/;
+export const INVESTIGATION_EXECUTOR_ID = 'investigation-v1';
 
 export interface ExecutionContract {
+  readonly effectClass?: 'read_only' | 'mutating' | 'invalid';
+  readonly permissions?: readonly string[];
   readonly executor: string | null;
   readonly coderBackend: string | null;
   readonly model: string | null;
@@ -94,10 +99,17 @@ export function readExecutionContract(intent: unknown): ExecutionContract {
   const resume = objectOf(spec['resume_from_checkpoint']);
   const resumeCommit = str(resume['commit_sha']);
   const coderBackendSource = str(spec['coder_backend_source']);
+  const effect = readEffectClass(objectOf(intent));
+  const permissions = spec['permissions'];
   return {
+    // Preserve the shape of legacy fixtures; absence still means mutating.
+    ...(!effect.ok ? { effectClass: 'invalid' as const } : effect.value === 'read_only' ? { effectClass: effect.value } : {}),
+    ...(permissions !== undefined ? { permissions: Array.isArray(permissions) && permissions.every(p => typeof p === 'string') ? permissions as string[] : [] } : {}),
     executor: str(spec['executor']),
     coderBackend: str(spec['coder_backend']),
-    model: str(spec['model']),
+    model: effect.ok && effect.value === 'read_only' && spec['model'] !== undefined
+      ? typeof spec['model'] === 'string' ? spec['model'] : ''
+      : str(spec['model']),
     baseSha: str(spec['base_sha']),
     targetKind: str(target['kind']),
     targetReference: str(target['reference']),
@@ -355,6 +367,28 @@ export function resolveExecutorRoute(
 ): ExecutorSelection {
   const err = (code: string, message: string): ExecutorSelection => ({ ok: false, error: { code, message } });
   const isAnima = contract.targetKind === 'project' && contract.targetReference === 'anima';
+
+  const coherence = validateEffectClassCoherence(contract.effectClass, contract.permissions ?? [], contract.executor ?? '');
+  if (coherence) return err(coherence, 'Classe de efeito, permissões e executor incompatíveis.');
+  if (contract.effectClass === 'read_only') {
+    if (!isAnima) return err('investigation_target_invalid', 'Investigação exige o alvo project:anima.');
+    if (contract.coderBackend !== 'codex-cli') return err('read_only_profile_unsupported', 'Investigação exige exatamente codex-cli, sem fallback.');
+    if (contract.model !== null && contract.model !== 'default') return err('investigation_model_invalid', 'Investigação exige modelo ausente ou default.');
+    if (!isInvestigationCommit(contract.baseSha)) return err('investigation_base_sha_invalid', 'O snapshot autorizado exige SHA-base de 40 hex.');
+    const repoRoot = options.repoRoot ?? projectRoot();
+    if (!isAnimaProjectRoot(repoRoot)) return err('project_root_invalid', 'A raiz do projeto Anima não é um repositório válido.');
+    const config = resolveCodexCliConfig(null);
+    if (!config.ok) return err('coder_backend_invalid', config.error);
+    const baseSha = contract.baseSha;
+    const adapter = new InvestigationExecutorAdapter({
+      targets: { resolve: reference => reference === 'anima' ? { repoRoot, baseSha } : null },
+    });
+    return { ok: true, route: { adapter, candidate: {
+      schemaVersion: 1, routeId: `${INVESTIGATION_EXECUTOR_ID}:configured`, executorId: INVESTIGATION_EXECUTOR_ID,
+      providerRef: 'codex-cli', modelRef: 'codex-cli:default', effort: 'strong',
+      capabilities: Constants.public.Enums.work_capability, availability: 'available', latency: 'normal', priority: 100,
+    } } };
+  }
 
   if (contract.executor === 'worktree') {
     if (contract.targetKind !== 'project' || !contract.targetReference) return err('worktree_target_invalid', 'O executor de worktree exige um alvo de projeto com referência.');

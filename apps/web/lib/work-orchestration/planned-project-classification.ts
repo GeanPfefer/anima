@@ -1,5 +1,5 @@
-import { readCanonicalProvenanceFromIntent } from '@anima/core';
-import type { Database } from '@anima/types';
+import { isInvestigationCommit, readCanonicalProvenanceFromIntent, readEffectClass, validateEffectClassCoherence } from '@anima/core';
+import { Constants, type Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type ItemRow=Pick<Database['public']['Tables']['work_items']['Row'],'state'|'proposal_version'|'impact_level'|'capability'|'intent'>;
@@ -62,14 +62,22 @@ export async function ensurePlannedProjectClassification(client:SupabaseClient<D
   const read=await client.from('work_items').select('state,proposal_version,impact_level,capability,intent').eq('id',workItemId).maybeSingle();
   if(read.error||!read.data)return failure('work_item_not_found',read.error?.message??'O trabalho não foi encontrado para esta conta.',read.error?.code);
   const item=read.data as ItemRow;
-  const intent=item.intent as {planner?:unknown;execution_spec?:{target?:{kind?:unknown;reference?:unknown};permissions?:unknown;validation_criteria?:unknown;limits?:{max_attempts?:unknown;max_duration_minutes?:unknown}}};
+  const intent=item.intent as {planner?:unknown;execution_spec?:{executor?:unknown;coder_backend?:unknown;model?:unknown;base_sha?:unknown;verifier_requirement?:unknown;target?:{kind?:unknown;reference?:unknown};permissions?:unknown;validation_criteria?:unknown;limits?:{max_attempts?:unknown;max_duration_minutes?:unknown}}};
   const spec=intent.execution_spec;
   const classificationSource=await sourceForClassification(client,workItemId,intent);
   const supportedImpact=item.impact_level==='low'||item.impact_level==='structural';
-  const planned=item.state==='approved'&&item.proposal_version===expectedProposalVersion&&supportedImpact&&item.capability==='programming'
+  const effect=readEffectClass(item.intent);
+  const permissions=Array.isArray(spec?.permissions)&&spec.permissions.every(p=>typeof p==='string')?spec.permissions as string[]:[];
+  const coherent=effect.ok&&validateEffectClassCoherence(effect.value,permissions,typeof spec?.executor==='string'?spec.executor:'')===null;
+  const readOnly=effect.ok&&effect.value==='read_only';
+  const readOnlyEnvelope=readOnly&&coherent&&Constants.public.Enums.work_capability.includes(item.capability)
+    &&spec?.coder_backend==='codex-cli'&&(spec.model===undefined||spec.model==='default')
+    &&isInvestigationCommit(spec.base_sha)&&spec.verifier_requirement==='advisory';
+  const programmingEnvelope=!readOnly&&coherent&&item.capability==='programming'
+    &&Array.isArray(spec?.permissions)&&spec.permissions.length===2&&spec.permissions[0]==='workspace_read'&&spec.permissions[1]==='workspace_write_isolated';
+  const planned=item.state==='approved'&&item.proposal_version===expectedProposalVersion&&supportedImpact&&(readOnlyEnvelope||programmingEnvelope)
     &&classificationSource!==null
     &&spec?.target?.kind==='project'&&spec.target.reference==='anima'
-    &&Array.isArray(spec.permissions)&&spec.permissions.length===2&&spec.permissions[0]==='workspace_read'&&spec.permissions[1]==='workspace_write_isolated'
     // Budget: o planner fresco emite 3 tentativas, mas um successor de replan (Plano 007)
     // TRANSFERE o saldo não consumido (1–2). Aceitar o intervalo [1,3] preserva a política
     // sem forçar o candidato a resetar o budget só para classificar (o Plano 007 proíbe isso).
@@ -79,7 +87,7 @@ export async function ensurePlannedProjectClassification(client:SupabaseClient<D
   if(current.error)return failure('classification_read_failed',current.error.message,current.error.code);
   if((current.data as {classification?:unknown}|null)?.classification)return {ok:true as const,replayed:true};
   const structural=item.impact_level==='structural';
-  const write=await client.rpc('record_work_intelligence_classification',{p_work_item_id:workItemId,p_expected_proposal_version:expectedProposalVersion,p_expected_classification_revision:0,p_classification:{schemaVersion:1,complexity:'bounded',risk:structural?'moderate':'low',reversibility:structural?'conditionally_reversible':'reversible',planClarity:'clear',urgency:'normal',provenance:{kind:'system_assessed',classifiedAt:now().toISOString(),classifierId:classificationSource+'-bridge',policyVersion:'human-approved-project-planner-v1'}}});
+  const write=await client.rpc('record_work_intelligence_classification',{p_work_item_id:workItemId,p_expected_proposal_version:expectedProposalVersion,p_expected_classification_revision:0,p_classification:{schemaVersion:1,complexity:'bounded',risk:structural?'moderate':'low',reversibility:structural?'conditionally_reversible':'reversible',planClarity:'clear',urgency:'normal',provenance:{kind:'system_assessed',classifiedAt:now().toISOString(),classifierId:classificationSource+'-bridge',policyVersion:readOnly?'human-approved-project-investigation-v1':'human-approved-project-planner-v1'}}});
   if(!write.error)return {ok:true as const,replayed:false};
   // Se outra chamada venceu a corrida ou a resposta da escrita foi ambígua, a
   // fonte de verdade decide: um fato corrente válido transforma o retry em replay.

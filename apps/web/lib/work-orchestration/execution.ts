@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path';
 import {
   buildCoderTaskSpecFromWorkItem,
+  readEffectClass,
   validateWorkExecutorTranscript,
   type AutonomousExecutionSpecV1,
   type WorkContextReference,
@@ -132,25 +133,29 @@ export interface ExecutorRequestInput {
  * Entrada delimitada do executor (INT-01). O escopo vem da proposta aprovada e
  * os limites do `execution_spec` já validado — nunca de sessão ou memória.
  */
-export const buildExecutorRequest = ({ item, spec, attemptId, contextReferences, carriedContext, recoveryEvidence }: ExecutorRequestInput): WorkExecutorRequest => ({
-  attemptId,
-  workItemId: item.id,
-  approvedProposalVersion: item.proposalVersion,
-  capability: item.capability,
-  objective: item.proposal.data.objective,
-  includedScope: item.proposal.data.includedScope,
-  excludedScope: item.proposal.data.excludedScope,
-  target: spec.target,
-  permissions: spec.permissions,
-  validationCriteria: spec.validationCriteria,
-  limits: spec.limits,
-  contextReferences,
-  // Projeção semântica da versão APROVADA para o coder (derivada, não persistida):
-  // aceites, riscos, semântica dos critérios e requisito do Verifier.
-  taskSpec: buildCoderTaskSpecFromWorkItem(item, spec, contextReferences),
-  ...(carriedContext ? { carriedContext } : {}),
-  ...(recoveryEvidence ? { recoveryEvidence } : {}),
-});
+export const buildExecutorRequest = ({ item, spec, attemptId, contextReferences, carriedContext, recoveryEvidence }: ExecutorRequestInput): WorkExecutorRequest => {
+  const effect = readEffectClass(item.intent);
+  return {
+    attemptId,
+    workItemId: item.id,
+    approvedProposalVersion: item.proposalVersion,
+    capability: item.capability,
+    ...(effect.ok && effect.value === 'read_only' ? { effectClass: 'read_only' as const } : {}),
+    objective: item.proposal.data.objective,
+    includedScope: item.proposal.data.includedScope,
+    excludedScope: item.proposal.data.excludedScope,
+    target: spec.target,
+    permissions: spec.permissions,
+    validationCriteria: spec.validationCriteria,
+    limits: spec.limits,
+    contextReferences,
+    // Projeção semântica da versão APROVADA para o coder (derivada, não persistida):
+    // aceites, riscos, semântica dos critérios e requisito do Verifier.
+    taskSpec: buildCoderTaskSpecFromWorkItem(item, spec, contextReferences),
+    ...(carriedContext ? { carriedContext } : {}),
+    ...(recoveryEvidence ? { recoveryEvidence } : {}),
+  };
+};
 
 export type ExecutorRun =
   | { readonly ok: true; readonly terminal: WorkExecutorSignal }

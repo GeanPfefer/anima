@@ -1,6 +1,70 @@
 import { ensurePlannedProjectClassification } from './planned-project-classification';
+import { Constants } from '@anima/types';
 
 const item={state:'approved',proposal_version:3,impact_level:'low',capability:'programming',intent:{planner:'openai_project_tools_v1',execution_spec:{target:{kind:'project',reference:'anima'},permissions:['workspace_read','workspace_write_isolated'],validation_criteria:[{label:'test',command:'npm test'}],limits:{max_attempts:3,max_duration_minutes:30}}}};
+
+describe('envelope read_only independente de capability', () => {
+  const readSpec = { ...item.intent.execution_spec, effect_class: 'read_only', executor: 'investigation-v1',
+    coder_backend: 'codex-cli', base_sha: 'a'.repeat(40), verifier_requirement: 'advisory',
+    permissions: ['workspace_read'], validation_criteria: [{ label: 'Referências resolvem no snapshot' }] };
+  const readItem = { ...item, intent: { ...item.intent, execution_spec: readSpec } };
+  const clientFor = (data: unknown, classified = false) => ({
+    from: jest.fn(() => ({ select: jest.fn(() => ({ eq: jest.fn(() => ({ maybeSingle: jest.fn().mockResolvedValue({ data, error: null }) })) })) })),
+    rpc: jest.fn().mockImplementation((name: string) => Promise.resolve({ data: name === 'current_work_intelligence_classification'
+      ? classified ? { classification: { schemaVersion: 1 } } : null : {}, error: null })),
+  });
+  test.each(Constants.public.Enums.work_capability)('classifica %s sem comando e com policy própria', async capability => {
+    const client = clientFor({ ...readItem, capability });
+    await expect(ensurePlannedProjectClassification(client as never, 'read-item', 3)).resolves.toEqual({ ok: true, replayed: false });
+    expect(client.rpc.mock.calls[1][1].p_classification).toMatchObject({ complexity: 'bounded', risk: 'low', reversibility: 'reversible',
+      planClarity: 'clear', urgency: 'normal', provenance: { policyVersion: 'human-approved-project-investigation-v1' } });
+    expect(client.rpc.mock.calls.map(c => c[0])).toEqual(['current_work_intelligence_classification', 'record_work_intelligence_classification']);
+  });
+  test.each([1, 2, 3])('aceita max_attempts=%s', async max_attempts => {
+    const client = clientFor({ ...readItem, intent: { ...readItem.intent, execution_spec: { ...readSpec, limits: { max_attempts, max_duration_minutes: 30 } } } });
+    await expect(ensurePlannedProjectClassification(client as never, 'read-item', 3)).resolves.toMatchObject({ ok: true });
+  });
+  test.each([
+    { effect_class: 'typo' }, { effect_class: 'mutating' }, { effect_class: undefined },
+    { executor: 'worktree' }, { permissions: ['workspace_read', 'workspace_write_isolated'] },
+    { permissions: [] }, { permissions: ['workspace_read', 3] }, { permissions: ['workspace_read', 'workspace_read'] },
+    { target: { kind: 'workspace', reference: 'anima' } }, { target: { kind: 'project', reference: 'other' } },
+    { validation_criteria: [] }, { limits: { max_attempts: 0, max_duration_minutes: 30 } },
+    { limits: { max_attempts: 4, max_duration_minutes: 30 } }, { limits: { max_attempts: 1, max_duration_minutes: 31 } },
+    { coder_backend: 'claude-code' }, { model: 'custom' }, { base_sha: 'bad' }, { verifier_requirement: 'required_fail_closed' },
+  ])('recusa contrato incoerente %j antes de RPC', async patch => {
+    const client = clientFor({ ...readItem, intent: { ...readItem.intent, execution_spec: { ...readSpec, ...patch } } });
+    await expect(ensurePlannedProjectClassification(client as never, 'read-item', 3)).resolves.toMatchObject({ ok: false, code: 'classification_policy_not_applicable' });
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+  test.each([
+    { state: 'in_progress' }, { proposal_version: 2 }, { impact_level: 'financial' },
+    { capability: 'unknown' }, { intent: { planner: 'unknown', execution_spec: readSpec } },
+  ])('mantém guardas de estado, versão, impacto, capability e origem %j', async patch => {
+    const client = clientFor({ ...readItem, ...patch });
+    await expect(ensurePlannedProjectClassification(client as never, 'read-item', 3)).resolves.toMatchObject({ ok: false, code: 'classification_policy_not_applicable' });
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+  test('conserva os cinco eixos estruturais e o replay existente', async () => {
+    const client = clientFor({ ...readItem, impact_level: 'structural' });
+    await ensurePlannedProjectClassification(client as never, 'read-item', 3);
+    expect(client.rpc.mock.calls[1][1].p_classification).toMatchObject({ complexity: 'bounded', risk: 'moderate',
+      reversibility: 'conditionally_reversible', planClarity: 'clear', urgency: 'normal' });
+    const replay = clientFor(readItem, true);
+    await expect(ensurePlannedProjectClassification(replay as never, 'read-item', 3)).resolves.toEqual({ ok: true, replayed: true });
+    expect(replay.rpc).toHaveBeenCalledTimes(1);
+  });
+  test('envelope programming conserva policy e exige as duas permissões exatas', async () => {
+    const client = clientFor(item);
+    await ensurePlannedProjectClassification(client as never, 'programming', 3);
+    expect(client.rpc.mock.calls[1][1].p_classification.provenance.policyVersion).toBe('human-approved-project-planner-v1');
+    for (const patch of [{ permissions: ['workspace_read'] }, { executor: 'investigation-v1' }, { effect_class: 'typo' }]) {
+      const invalid = clientFor({ ...item, intent: { ...item.intent, execution_spec: { ...item.intent.execution_spec, ...patch } } });
+      await expect(ensurePlannedProjectClassification(invalid as never, 'programming', 3)).resolves.toMatchObject({ ok: false });
+      expect(invalid.rpc).not.toHaveBeenCalled();
+    }
+  });
+});
 
 test('registra somente a classificação ausente sem iniciar claim ou attempt',async()=>{
   const maybeSingle=jest.fn().mockResolvedValue({data:item,error:null});

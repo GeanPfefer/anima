@@ -60,7 +60,7 @@ export interface ExecutorRecommendationOutcome {
 }
 
 /** Só o que a projeção lê do contrato aprovado. */
-export type ExecutorDiscoveryContract = Pick<ExecutionContract, 'coderBackend' | 'model'>;
+export type ExecutorDiscoveryContract = Pick<ExecutionContract, 'coderBackend' | 'model' | 'effectClass'>;
 
 const DISPLAY_NAME: Readonly<Record<CoderProvider, string>> = {
   ollama: 'Ollama (local)',
@@ -104,6 +104,11 @@ export function projectExecutorCandidates(input: {
     const observed = observations.find(observation => observation.provider === provider);
     const model = contract.coderBackend === provider && contract.model?.trim() ? contract.model.trim() : DEFAULT_MODEL[provider];
     const base = { provider, backendId: coderBackendId(provider, model), displayName: DISPLAY_NAME[provider], model, costClass: COST_CLASS[provider] };
+    if (contract.effectClass === 'invalid' || (contract.effectClass === 'read_only' && provider !== 'codex-cli')) {
+      return { ...base, availability: observed?.availability ?? 'unknown', eligibility: 'ineligible',
+        reasonUnavailable: observed?.availability === 'ready' ? null : observed?.reasonUnavailable ?? NOT_PROBED_REASON,
+        reasonIneligible: contract.effectClass === 'invalid' ? 'effect_class_invalid' : 'read_only_profile_unsupported' };
+    }
     if (provider === 'deepseek-harness') {
       // Estacionado: nunca finge readiness, qualquer que seja a observação.
       return { ...base, availability: 'unavailable', eligibility: 'ineligible', reasonUnavailable: PARKED_REASON, reasonIneligible: PARKED_REASON };

@@ -6,6 +6,37 @@ const obs = (provider: CoderProvider, availability: ExecutorAvailability, reason
 const allReady: readonly ExecutorObservation[] = WORKTREE_CODER_BACKENDS.map(provider => obs(provider, 'ready'));
 const contractOf = (coderBackend: string | null, model: string | null = null) => ({ coderBackend, model });
 
+describe('descoberta read_only', () => {
+  const contract = { coderBackend: 'codex-cli', model: 'default', effectClass: 'read_only' as const };
+  test('somente Codex é elegível, inclusive quando todos foram observados ready', () => {
+    const candidates = projectExecutorCandidates({ contract, observations: allReady });
+    expect(candidates.filter(c => c.eligibility === 'eligible').map(c => c.provider)).toEqual(['codex-cli']);
+    for (const candidate of candidates.filter(c => c.provider !== 'codex-cli')) {
+      expect(candidate.reasonIneligible).toBe('read_only_profile_unsupported');
+    }
+    expect(recommendExecutor(candidates, contract)).toMatchObject({ recommendation: {
+      provider: 'codex-cli', backendId: 'codex-cli:default', rule: 'contract_declared', fallback: null,
+      reason: expect.stringContaining('Backend declarado no contrato aprovado'),
+    }, noRecommendation: null });
+    expect(projectExecutorCandidates({ contract, observations: [...allReady].reverse() })).toEqual(candidates);
+  });
+  test.each(['unknown', 'unavailable'] as const)('Codex %s não causa fallback para providers ready', availability => {
+    const candidates = projectExecutorCandidates({ contract, observations: [...allReady.filter(o => o.provider !== 'codex-cli'), obs('codex-cli', availability, 'not_ready')] });
+    expect(recommendExecutor(candidates, contract)).toMatchObject({ recommendation: null, noRecommendation: { reason: 'no_ready_candidate' } });
+  });
+  test('classe inválida torna todos inelegíveis', () => {
+    const invalid = { ...contract, effectClass: 'invalid' as const };
+    const candidates = projectExecutorCandidates({ contract: invalid, observations: allReady });
+    expect(candidates.every(c => c.reasonIneligible === 'effect_class_invalid')).toBe(true);
+    expect(recommendExecutor(candidates, invalid).recommendation).toBeNull();
+  });
+  test('classe mutating explícita conserva a projeção legada', () => {
+    const legacy = contractOf('ollama');
+    expect(projectExecutorCandidates({ contract: { ...legacy, effectClass: 'mutating' }, observations: allReady }))
+      .toEqual(projectExecutorCandidates({ contract: legacy, observations: allReady }));
+  });
+});
+
 describe('projectExecutorCandidates', () => {
   test('lista os cinco providers do registry em ordem estável, mesmo sem observações', () => {
     const candidates = projectExecutorCandidates({ contract: contractOf(null), observations: [] });
