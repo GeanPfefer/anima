@@ -18,6 +18,8 @@
 // V2 (Evolution Reconciliation): domínio `research`; origem (interna × reuso
 // integrado × candidata externa); lentes "Evolução recente" e "Reuso externo",
 // ambas projetando só o que o registry declara (history/reuse) — nada inferido.
+// SDC-09: lente "Fronteira e humano" projeta `frontier` (limites e dependência
+// humana declarados), sem alterar maturidade.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
@@ -81,7 +83,7 @@ const HISTORY_CHANGE_LABEL: Record<RecentEvolutionEntry['entry']['change'], stri
   relation_added: 'Nova relação',
 };
 
-type Lens = 'all' | 'recent' | 'external';
+type Lens = 'all' | 'recent' | 'external' | 'frontier';
 
 // Rótulo curto de origem para o chip (a linha de maturidade tem pouco espaço).
 function originSuffix(cap: Capability): string {
@@ -418,7 +420,12 @@ export default function EvolutionClient({
     () => new Set(nodes.filter((n) => n.capability.reuse).map((n) => n.capability.id)),
     [nodes],
   );
-  const lensIds = lens === 'recent' ? recentIds : lens === 'external' ? externalIds : null;
+  const frontierIds = useMemo(
+    () => new Set(nodes.filter((n) => (n.capability.frontier?.length ?? 0) > 0).map((n) => n.capability.id)),
+    [nodes],
+  );
+  const lensIds =
+    lens === 'recent' ? recentIds : lens === 'external' ? externalIds : lens === 'frontier' ? frontierIds : null;
   const inLens = (id: string): boolean => lensIds === null || lensIds.has(id);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -603,6 +610,15 @@ export default function EvolutionClient({
               onClick={() => setLens((prev) => (prev === 'external' ? 'all' : 'external'))}
             >
               Reuso externo <span className={styles.filterCount}>{externalIds.size}</span>
+            </button>
+            <button
+              type="button"
+              className={`${styles.filterChip} ${lens === 'frontier' ? styles.filterActive : ''}`}
+              aria-pressed={lens === 'frontier'}
+              title="Limites conhecidos e o que ainda depende de ato humano"
+              onClick={() => setLens((prev) => (prev === 'frontier' ? 'all' : 'frontier'))}
+            >
+              Fronteira e humano <span className={styles.filterCount}>{frontierIds.size}</span>
             </button>
           </div>
 
@@ -831,6 +847,8 @@ export default function EvolutionClient({
             />
           ) : lens === 'external' ? (
             <ReuseSummary nodes={nodes} onSelect={selectCapability} />
+          ) : lens === 'frontier' ? (
+            <FrontierSummary nodes={nodes} onSelect={selectCapability} />
           ) : (
             <ObjectiveSummary
               objective={currentObjective}
@@ -1238,6 +1256,19 @@ function CapabilityDetail({
         </section>
       )}
 
+      {(cap.frontier?.length ?? 0) > 0 && (
+        <section className={styles.detailSection}>
+          <h3 className={styles.detailLabel}>Fronteira e dependência humana</h3>
+          <ul className={styles.frontierList}>
+            {cap.frontier!.map((item, i) => (
+              <li key={i} className={styles.detailText}>
+                {item}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className={styles.detailSection}>
         <h3 className={styles.detailLabel}>Próximo estágio</h3>
         <p className={styles.detailText}>
@@ -1395,6 +1426,40 @@ function RecentEvolutionSummary({
             </li>
           ))}
         </ol>
+      )}
+    </div>
+  );
+}
+
+function FrontierSummary({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; onSelect: (id: string) => void }) {
+  const withFrontier = nodes.filter((n) => (n.capability.frontier?.length ?? 0) > 0);
+  return (
+    <div className={styles.detail}>
+      <span className={styles.detailKicker}>Fronteira</span>
+      <h2 className={styles.detailName}>Onde o Anima ainda precisa de humano</h2>
+      <p className={styles.detailHint}>
+        Limites declarados no modelo. Não são capacidades operacionais: um gate verde ou um candidate aceito não os fecham.
+      </p>
+      {withFrontier.length === 0 ? (
+        <p className={styles.detailEmpty}>Nenhum limite declarado no modelo.</p>
+      ) : (
+        withFrontier.map((n) => (
+          <section key={n.capability.id} className={styles.detailSection}>
+            <button type="button" className={styles.pathStep} onClick={() => onSelect(n.capability.id)}>
+              <span style={{ color: MATURITY_COLOR[n.capability.maturity] }} title={MATURITY_LABEL[n.capability.maturity]}>
+                {MATURITY_GLYPH[n.capability.maturity]}
+              </span>{' '}
+              {n.capability.name}
+            </button>
+            <ul className={styles.frontierList}>
+              {n.capability.frontier!.map((item, i) => (
+                <li key={i} className={styles.detailText}>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
       )}
     </div>
   );

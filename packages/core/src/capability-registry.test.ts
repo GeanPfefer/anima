@@ -3,6 +3,7 @@ import {
   CAPABILITY_MATURITIES,
   isFutureMaturity,
   isRealizedMaturity,
+  listFrontier,
   listRecentEvolution,
   longestDependencyPath,
   summarizeTargetProgress,
@@ -126,7 +127,7 @@ describe('Evolution Reconciliation V2 — honestidade epistemológica do registr
     expect(get('research.web.search').reuse).toMatchObject({ tool: 'SearXNG', strategy: 'wrap', status: 'integrated' });
     expect(get('research.web.open').reuse).toMatchObject({ tool: 'agent-browser', strategy: 'wrap', status: 'integrated' });
     const candidates = ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.reuse?.status === 'candidate');
-    expect(candidates.map((c) => c.reuse?.tool).sort()).toEqual(['Claude Code / Codex CLI', 'ai-memory', 'ai-usagebar', 'ghpending']);
+    expect(candidates.map((c) => c.reuse?.tool).sort()).toEqual(['ai-usagebar', 'ghpending']);
     for (const c of candidates) {
       expect(isFutureMaturity(c.maturity)).toBe(true);
       // Evidência externa nunca vira prova de funcionamento do Anima.
@@ -171,3 +172,78 @@ describe('Evolution Reconciliation V2 — honestidade epistemológica do registr
     expect(ids.has('interaction.chat')).toBe(false);
   });
 });
+
+describe('Evolution Reconciliation SDC-09 — ciclo SDC-01→SDC-08', () => {
+  const byId = new Map(ANIMA_CAPABILITY_REGISTRY_V0.map((c) => [c.id, c]));
+  const get = (id: string) => {
+    const c = byId.get(id);
+    if (!c) throw new Error(`capacidade ausente: ${id}`);
+    return c;
+  };
+  const commitRefs = (id: string) => (get(id).proofRefs ?? []).filter((p) => p.kind === 'commit').map((p) => p.ref);
+
+  test('capacidades recentes aparecem em `implemented`, não mais, ancoradas em commits reais', () => {
+    const expected: Record<string, string[]> = {
+      'agency.external-harness': ['9404bd4', 'cd73276', 'f518d0d', '6eb2dee'],
+      'agency.executor-discovery': ['6f7577f'],
+      'memory.cross-harness': ['2e153ed'],
+      'governance.candidate-recovery': ['4bc07fa', 'd4db97f'],
+      'governance.governed-integration': ['f6117f7', '52a745e'],
+    };
+    for (const [id, commits] of Object.entries(expected)) {
+      expect(get(id).maturity).toBe('implemented');
+      for (const commit of commits) expect(commitRefs(id)).toContain(commit);
+    }
+  });
+
+  test('uso real reportado pelo operador não promove nada: o harness e a recuperação não são comprovados', () => {
+    for (const id of ['agency.external-harness', 'governance.candidate-recovery', 'governance.governed-integration', 'memory.cross-harness']) {
+      expect(['proven', 'operational', 'autonomous']).not.toContain(get(id).maturity);
+    }
+    expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.maturity === 'autonomous')).toEqual([]);
+  });
+
+  test('harness externo e ai-memory deixaram de ser candidatos externos (reuso integrado)', () => {
+    expect(get('agency.external-harness').reuse).toMatchObject({ strategy: 'wrap', status: 'integrated' });
+    expect(get('memory.cross-harness').reuse).toMatchObject({ tool: 'ai-memory', status: 'integrated' });
+    expect(get('agency.external-harness').history?.at(-1)).toMatchObject({ change: 'maturity_changed', from: 'projected', to: 'implemented' });
+  });
+
+  test('o operador bootstrap segue como fronteira projetada, e o self-dev contínuo depende dele', () => {
+    const operator = get('agency.self-dev-operator');
+    expect(operator.maturity).toBe('projected');
+    expect(operator.frontier?.join(' ')).toMatch(/Claude Desktop/);
+    expect(get('agency.continuous-self-development').dependsOn).toContain('agency.self-dev-operator');
+    expect(graph().byId.get('governance.candidate-recovery')?.unlocks).toContain('agency.self-dev-operator');
+  });
+
+  test('limites conhecidos ficam visíveis como fronteira nas capacidades certas', () => {
+    const frontier = listFrontier(ANIMA_CAPABILITY_REGISTRY_V0);
+    const ids = frontier.map((f) => f.capabilityId);
+    for (const id of ['governance.candidate-recovery', 'governance.governed-integration', 'agency.verify-change', 'agency.self-dev-operator']) {
+      expect(ids).toContain(id);
+    }
+    const recovery = (get('governance.candidate-recovery').frontier ?? []).join(' ');
+    expect(recovery).toMatch(/corrections/);
+    expect(recovery).toMatch(/encade/);
+    expect(recovery).toMatch(/Gates sequenciais/);
+    expect((get('governance.governed-integration').frontier ?? []).join(' ')).toMatch(/integration_completed/);
+  });
+
+  test('correção por retomada ganhou prova de commit, mas segue comprovada (não operacional)', () => {
+    const recovery = get('agency.recovery-correction');
+    expect(recovery.maturity).toBe('proven');
+    for (const commit of ['a15698f', '5aad729', '243b740']) expect(commitRefs('agency.recovery-correction')).toContain(commit);
+  });
+
+  test('a Evolução recente inclui o ciclo SDC-01→SDC-08', () => {
+    const ids = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date).map((r) => r.capabilityId));
+    for (const id of ['agency.external-harness', 'governance.candidate-recovery', 'governance.governed-integration', 'interaction.action-cards']) {
+      expect(ids.has(id)).toBe(true);
+    }
+  });
+});
+
+function graph() {
+  return getAnimaCapabilityGraph();
+}

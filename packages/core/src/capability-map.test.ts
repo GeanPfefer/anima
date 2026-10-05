@@ -4,6 +4,7 @@ import {
   findDependencyCycles,
   isFutureMaturity,
   isRealizedMaturity,
+  listFrontier,
   longestDependencyPath,
   maturityRank,
   nextMaturity,
@@ -216,6 +217,25 @@ describe('regras epistemológicas (Evolution V2)', () => {
     expect(codes([cap({ id: 'a', maturity: 'proven', proofRefs: proof, history })])).toEqual([]);
     const introduced = [{ at: '2026-09-27', change: 'introduced' as const, to: 'projected' as const, note: 'x', refs: proof }];
     expect(codes([cap({ id: 'a', maturity: 'specified', history: introduced })])).toEqual(['history_maturity_mismatch']);
+  });
+});
+
+describe('listFrontier', () => {
+  test('lista só capacidades com limites declarados, ignorando itens vazios, na ordem do registro', () => {
+    const caps = [
+      cap({ id: 'a', frontier: ['depende de ato humano', '  '] }),
+      cap({ id: 'b' }),
+      cap({ id: 'c', frontier: [''] }),
+      cap({ id: 'd', frontier: ['x', 'y'] }),
+    ];
+    expect(listFrontier(caps)).toEqual([
+      { capabilityId: 'a', items: ['depende de ato humano'] },
+      { capabilityId: 'd', items: ['x', 'y'] },
+    ]);
+  });
+
+  test('fronteira não é maturidade nem prova: não altera a validação do registro', () => {
+    expect(validateCapabilityRegistry([cap({ id: 'a', maturity: 'implemented', frontier: ['x'] })])).toEqual([]);
   });
 });
 

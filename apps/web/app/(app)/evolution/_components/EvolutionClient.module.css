@@ -664,6 +664,15 @@
   gap: 10px;
 }
 
+.frontierList {
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
 .historyItem {
   display: flex;
   flex-direction: column;

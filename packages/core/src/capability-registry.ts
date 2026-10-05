@@ -18,6 +18,12 @@
 // O nome `..._V0` é do CONTRATO e foi mantido para não quebrar consumidores.
 // Toda mudança feita nesta reconciliação está em `history` com refs reais; ver
 // docs/registros/2026-09-27c-evolution-reconciliation-v2.md.
+//
+// SDC-09 (2026-10-05): reconciliado com o ciclo SDC-01→SDC-08 (executores
+// nativos, correção por checkpoint, recuperação de candidato, integração
+// governada, referências humanas). Só o que o git/código prova subiu (até
+// `implemented`); uso real reportado pelo operador NÃO promove nada. Limites
+// abertos e dependência humana ficam em `frontier`.
 
 import { buildCapabilityGraph, type Capability, type CapabilityGraph } from './capability-map';
 
@@ -278,17 +284,24 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     name: 'Continuidade entre harnesses',
     description: 'Ledger e resume de sessão entre Claude Code e Codex correlacionados a attempt/lineage do Anima.',
     domain: 'memory',
-    maturity: 'projected',
+    maturity: 'implemented',
     dependsOn: ['agency.external-harness', 'memory.continuity'],
     reuse: {
       strategy: 'wrap',
       tool: 'ai-memory',
-      status: 'candidate',
+      status: 'integrated',
       externalEvidence:
         'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado com ids em repo descartável. Riscos: o ledger guarda prompts e arquivos em texto claro; autowire global.',
     },
-    meaning: '≠ memory.continuity (checkpoint interno do Anima). Não fundir: esta é continuidade técnica de harnesses externos.',
-    advancement: 'Só tem valor junto com o harness externo; entram juntos na mesma porta de runtime.',
+    meaning: '≠ memory.continuity (checkpoint interno do Anima). Não fundir: esta é continuidade técnica de harnesses externos. Na integração atual o ai-memory é OPCIONAL nos backends nativos.',
+    advancement:
+      'Existe em código e testes (wrap opcional nos backends Codex/Claude). Sem prova de uso real verificável aqui; comprovar exige uma attempt real com ledger correlacionado a attempt/lineage.',
+    proofRefs: [
+      { kind: 'commit', ref: '2e153ed', note: 'wrap do ai-memory nos backends Claude Code e Codex CLI (opcional)' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/native-cli-coder.ai-memory.test.ts' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/executor-selection.ai-memory.test.ts' },
+    ],
+    frontier: ['Opcional e sem prova viva verificável; o ledger guarda prompts e arquivos em texto claro (risco declarado).'],
     history: [
       {
         at: '2026-09-27',
@@ -296,6 +309,14 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         to: 'projected',
         note: 'Candidata externa (Reuse Architecture V1).',
         refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+      {
+        at: '2026-10-02',
+        change: 'maturity_changed',
+        from: 'projected',
+        to: 'implemented',
+        note: 'ai-memory embrulhado, de forma opcional, nos backends nativos. Implementado ≠ comprovado.',
+        refs: [{ kind: 'commit', ref: '2e153ed' }],
       },
     ],
   },
@@ -395,6 +416,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'commit', ref: '824c714', note: 'requisitos de prova heterogêneos pós-review' },
       { kind: 'record', ref: 'docs/registros', note: 'seq4→seq5: verified foi falso positivo, corrigido por request_changes' },
     ],
+    frontier: ['Gates sequenciais revelam defeitos um de cada vez: um defeito real pode ficar mascarado até o gate seguinte (segundo o operador, causa do defeito do SDC-02).'],
   },
   {
     id: 'agency.recovery-correction',
@@ -411,6 +433,13 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'commit', ref: '1c6c656', note: 'Human Recovery Authority' },
       { kind: 'work_item', ref: 'bd4092af', note: 'seq3 da lineage de correção de a703e92f, aceito (2026-09-25)' },
       { kind: 'work_item', ref: 'f6c326b1', note: 'fim da lineage 2c7afe1d→f19ac716→7610b066→843669bd→f6c326b1, aceito (2026-09-27)' },
+      { kind: 'commit', ref: 'a15698f', note: 'work correct --rework <path> (rework estruturado)' },
+      { kind: 'commit', ref: '5aad729', note: 'reabertura de escopo preservado por root authority, por ato humano auditado' },
+      { kind: 'commit', ref: '243b740', note: 'preservação multinível inherited-preserved' },
+    ],
+    frontier: [
+      'Gates sequenciais revelam defeitos um de cada vez: um defeito fica mascarado até o gate seguinte.',
+      'A correção por retomada de checkpoint e o rework estruturado dependem de ato humano.',
     ],
     history: [
       {
@@ -429,6 +458,89 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         refs: [
           { kind: 'work_item', ref: 'f6c326b1' },
           { kind: 'commit', ref: '117fb46', note: 'resultado integrado localmente em dev' },
+        ],
+      },
+      {
+        at: '2026-10-04',
+        change: 'proof_added',
+        note:
+          'Correção por retomada de checkpoint (`work correct`) com rework estruturado, reabertura de escopo preservado e preservação multinível, todos em código e testes. Maturidade mantida: nova mecânica ≠ correção rotineira.',
+        refs: [
+          { kind: 'commit', ref: 'a15698f' },
+          { kind: 'commit', ref: '5aad729' },
+          { kind: 'commit', ref: '243b740' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'governance.candidate-recovery',
+    name: 'Recuperação governada de candidato',
+    description:
+      'Por ato humano, recuperar um work item cujo CANDIDATO tem defeito real (`work recover-candidate`), preservando a lineage; função + migration + pgTAP.',
+    domain: 'governance',
+    maturity: 'implemented',
+    dependsOn: ['governance.recovery-authority', 'governance.attempt', 'agency.recovery-correction'],
+    meaning:
+      'Distinto de governance.harness-recovery (defeito do harness): aqui o defeito está no candidato produzido. O Anima não decide recuperar nem aprova sozinho — registra o ato humano e deriva o sucessor.',
+    advancement:
+      'Existe em código, migration e pgTAP. O primeiro uso real (SDC-02) é reportado pelo operador e não é verificável pelo repositório, então não vira comprovada aqui. Exige as lacunas abaixo fechadas e prova registrada.',
+    proofRefs: [
+      { kind: 'commit', ref: '4bc07fa', note: 'work recover-candidate + migration 20261004000000_candidate_recovery' },
+      { kind: 'commit', ref: 'd4db97f', note: 'typegen e pgTAP alinhados' },
+      { kind: 'test', ref: 'supabase/tests/candidate_recovery.test.sql' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/candidate-recovery.test.ts' },
+    ],
+    frontier: [
+      '`candidate_recovery.corrections` não é propagada automaticamente ao prompt nativo do Codex/Claude: o operador revisou a proposta à mão.',
+      'Não é encadeável: um segundo recover-candidate sobre o mesmo item é recusado.',
+      'Gates sequenciais mascaram defeitos até o gate seguinte.',
+      'Migration e deploy continuam atos humanos.',
+    ],
+    history: [
+      {
+        at: '2026-10-04',
+        change: 'introduced',
+        to: 'implemented',
+        note: 'Caminho governado mínimo, por ato humano, para recuperar candidato com defeito real. Implementado ≠ comprovado.',
+        refs: [
+          { kind: 'commit', ref: '4bc07fa' },
+          { kind: 'commit', ref: 'd4db97f' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'governance.governed-integration',
+    name: 'Integração governada de resultado aceito',
+    description:
+      'Efeito de integração em dev de um resultado aceito (modo ff_only por CAS de ref, sem merge commit), com receipt validado em SQL.',
+    domain: 'governance',
+    maturity: 'implemented',
+    dependsOn: ['governance.review', 'agency.supervised-self-development'],
+    meaning:
+      'A integração é um efeito externo de impacto: o núcleo existe sob contrato e teste, mas no ciclo de self-development atual quem integra em dev é o humano.',
+    advancement:
+      'Existe em código, migration e testes. No fluxo SDC a integração do candidate aceito foi manual (ff-only ou merge de dois pais) e o `integration_completed` governado esteve ausente; falta o fluxo usar este efeito.',
+    proofRefs: [
+      { kind: 'commit', ref: 'f6117f7', note: 'modo ff_only no efeito de integração governada' },
+      { kind: 'commit', ref: '52a745e', note: 'endurecimento SQL do receipt após auditoria' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/integration-effect.integration.test.ts' },
+      { kind: 'test', ref: 'supabase/tests/integration_effect.test.sql' },
+    ],
+    frontier: [
+      'A integração do candidate aceito em dev é manual (merge ff-only ou de dois pais) e o push para origin/dev também.',
+      'O `integration_completed` governado está ausente nesse fluxo.',
+    ],
+    history: [
+      {
+        at: '2026-10-03',
+        change: 'introduced',
+        to: 'implemented',
+        note: 'Efeito de integração governada com modo ff_only; ainda não é o caminho usado no ciclo SDC.',
+        refs: [
+          { kind: 'commit', ref: 'f6117f7' },
+          { kind: 'commit', ref: '52a745e' },
         ],
       },
     ],
@@ -549,7 +661,13 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     description: 'O Anima detecta, formula, valida e incorpora melhorias próprias dentro da authority, sem loop humano constante.',
     domain: 'agency',
     maturity: 'projected',
-    dependsOn: ['agency.validate-improvement', 'agency.recovery-correction', 'governance.progressive-autonomy', 'memory.architectural-memory'],
+    dependsOn: [
+      'agency.validate-improvement',
+      'agency.recovery-correction',
+      'governance.progressive-autonomy',
+      'memory.architectural-memory',
+      'agency.self-dev-operator',
+    ],
     target: {
       description: 'Norte do arco de agência: evolução própria contínua e segura sob mandato.',
       milestone: 'docs/marcos/005-autonomia-progressiva-e-identidade-una.md',
@@ -567,6 +685,39 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     ],
   },
 
+  {
+    id: 'agency.self-dev-operator',
+    name: 'Operador próprio do ciclo de self-development',
+    description:
+      'O Anima conduz sozinho, sob mandato, o ciclo operacional de self-development (iniciar, recuperar, integrar, publicar), sem um operador externo.',
+    domain: 'agency',
+    maturity: 'projected',
+    dependsOn: [
+      'governance.candidate-recovery',
+      'governance.governed-integration',
+      'agency.external-harness',
+      'agency.executor-discovery',
+      'agency.recovery-correction',
+    ],
+    target: { description: 'Fechar a dependência do operador externo no ciclo de self-development.' },
+    meaning:
+      'Hoje o Claude Desktop atua como operador bootstrap do ciclo: as peças governadas existem, mas quem as aciona e encadeia é um humano/assistente externo.',
+    advancement:
+      'Falta o Anima escolher executor, recuperar, integrar e publicar sob mandato. Integração, push, migration e deploy ainda são atos humanos.',
+    frontier: [
+      'O Claude Desktop é o operador bootstrap do ciclo de self-development.',
+      'Integração em dev, push para origin/dev, migration e deploy continuam atos humanos.',
+    ],
+    history: [
+      {
+        at: '2026-10-05',
+        change: 'introduced',
+        to: 'projected',
+        note: 'Fronteira declarada na reconciliação SDC-09; nenhuma parte é autônoma. Um gate verde ou um candidate aceito não tornam isto autônomo.',
+        refs: [{ kind: 'commit', ref: '930ea70', note: 'SDC-08 concluído e integrado em dev por ato humano' }],
+      },
+    ],
+  },
   {
     id: 'agency.recovery-evidence',
     name: 'Evidência entre recoveries',
@@ -630,18 +781,32 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     name: 'Harness externo (Claude Code / Codex)',
     description: 'Usar um harness de código externo como CoderBackend enraizado, sob os mesmos gates, escopo e Verifier.',
     domain: 'agency',
-    maturity: 'projected',
+    maturity: 'implemented',
     dependsOn: ['agency.produce-change', 'governance.authority'],
     reuse: {
-      strategy: 'undecided',
+      strategy: 'wrap',
       tool: 'Claude Code / Codex CLI',
-      status: 'candidate',
+      status: 'integrated',
       externalEvidence:
-        'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado em repo descartável. Bloqueios: auth dedicada do CLI e decisão sobre a classe de autoridade da quota de assinatura.',
+        'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado em repo descartável. Continua pendente a decisão humana sobre a classe de autoridade da quota de assinatura.',
     },
     meaning:
-      'O seam CoderBackend (ADR-001) permite trocar o executor. Um harness por assinatura é outra classe de compute, não um provider de API.',
-    advancement: 'Decisões humanas pendentes: login dedicado em home isolado, e se quota de assinatura é authority ou preferência.',
+      'O seam CoderBackend (ADR-001) permite trocar o executor. Codex CLI e Claude Code são CoderBackends nativos governados (worktree isolada, escopo, gates do host e Verifier do Anima); um harness por assinatura é outra classe de compute, não um provider de API.',
+    advancement:
+      'Existe em código e testes (backends, evidência do coder, especificação canônica preservada até o coder). Não sobe para comprovada por esta reconciliação: o uso real (Claude Code no SDC-01/SDC-03, Codex CLI no SDC-04/05/06/08, com falhas reais no SDC-02, no recovery do SDC-02 e no SDC-07) vem do operador e não é verificável pelo repositório. Falta registrar essa prova em evento/commit auditável e decidir a authority da quota de assinatura.',
+    proofRefs: [
+      { kind: 'commit', ref: '9404bd4', note: 'Codex CLI como backend de código' },
+      { kind: 'commit', ref: 'cd73276', note: 'Claude Code como backend de código' },
+      { kind: 'commit', ref: 'f518d0d', note: 'evidência do coder para backends CLI nativos' },
+      { kind: 'commit', ref: '6eb2dee', note: 'CoderTaskSpecV1 preservada até o coder' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/codex-cli-coder.worktree.test.ts' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/claude-code-coder.worktree.test.ts' },
+    ],
+    frontier: [
+      'Prova de uso real é reportada pelo operador; o histórico de eventos/attempts não foi verificável nesta reconciliação.',
+      'Nem toda attempt por harness chega a verified: houve falhas reais (SDC-02, recovery do SDC-02, SDC-07), segundo o operador.',
+      'A classe de authority da quota de assinatura segue decisão humana.',
+    ],
     history: [
       {
         at: '2026-09-27',
@@ -649,6 +814,46 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         to: 'projected',
         note: 'Candidata externa registrada a partir da Reuse Architecture V1. POC externo ≠ capacidade do Anima.',
         refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+      {
+        at: '2026-10-02',
+        change: 'maturity_changed',
+        from: 'projected',
+        to: 'implemented',
+        note: 'Codex CLI e Claude Code adotados como CoderBackend governado, com evidência do coder e especificação canônica preservada. Implementado ≠ comprovado: sem prova viva verificável aqui.',
+        refs: [
+          { kind: 'commit', ref: '9404bd4' },
+          { kind: 'commit', ref: 'cd73276' },
+          { kind: 'commit', ref: '6eb2dee' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'agency.executor-discovery',
+    name: 'Descoberta de executores',
+    description:
+      'Listar os executores de coding (ollama, openai, deepseek-harness, codex-cli, claude-code) com disponibilidade, elegibilidade e recomendação determinística, só leitura (`anima work executors`).',
+    domain: 'agency',
+    maturity: 'implemented',
+    dependsOn: ['agency.external-harness', 'compute.selection'],
+    meaning:
+      'O humano enxerga, antes de escolher, quais executores estão prontos e elegíveis. A recomendação reflete só readiness, elegibilidade e custo — não afirma que o modelo serve à tarefa, não persiste e não inicia attempt.',
+    advancement:
+      'Existe em código e testes. Falta uso registrado e a escolha deixar de ser ato humano: hoje o Anima recomenda, o humano decide o executor.',
+    proofRefs: [
+      { kind: 'commit', ref: '6f7577f', note: 'anima work executors (discovery + readiness, read-only)' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/executor-discovery.test.ts' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/executor-readiness.test.ts' },
+    ],
+    frontier: ['A seleção do executor continua ato humano; a descoberta só recomenda.'],
+    history: [
+      {
+        at: '2026-10-03',
+        change: 'introduced',
+        to: 'implemented',
+        note: 'Consulta somente leitura pela CLI; sem prova de uso registrada no repositório.',
+        refs: [{ kind: 'commit', ref: '6f7577f' }],
       },
     ],
   },
@@ -984,7 +1189,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         'POC ai-usagebar (G:\\anima-labs): formato `usage --json` bom. WRAP condicionado a uma credencial de observador dedicada: o refresh com write-back rotacionaria o token vivo do Codex. Leitura real não executada.',
     },
     meaning: 'Só faz sentido quando houver harness por assinatura como opção do Router.',
-    advancement: 'Depende do harness externo e de um POC de auth com credencial de observador.',
+    advancement: 'O harness externo já existe em código (implementado); falta um POC de auth com credencial de observador.',
     history: [
       {
         at: '2026-09-27',
@@ -1090,6 +1295,15 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     proofRefs: [
       { kind: 'commit', ref: 'de14178', note: 'CLI operacional como adapter oficial' },
       { kind: 'test', ref: 'apps/web/app/(app)/chat/_components/WorkProposalCard.test.tsx' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/work-reference.test.ts', note: 'referência humana legível (SDC-01) na CLI' },
+    ],
+    history: [
+      {
+        at: '2026-10-05',
+        change: 'proof_added',
+        note: 'A CLI aceita referências humanas legíveis (`anima work show SDC-01`); o UUID continua válido. Maturidade mantida.',
+        refs: [{ kind: 'commit', ref: '930ea70' }],
+      },
     ],
   },
   {

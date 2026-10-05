@@ -512,9 +512,14 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
       expect(el?.getAttribute('aria-label')).not.toMatch(/Operacional/);
     }
     const candidates = container.querySelectorAll('[data-origin="candidate"]');
-    expect(candidates.length).toBe(4);
+    expect(candidates.length).toBe(2);
     candidates.forEach((el) => expect(el.getAttribute('data-future')).toBe('true'));
-    expect(screen.getByRole('button', { name: 'Continuidade entre harnesses — Projetada (a conquistar) · candidata externa (ai-memory)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Disponibilidade de quota de assinatura — Projetada \(a conquistar\) · candidata externa \(ai-usagebar\)/ })).toBeInTheDocument();
+    // SDC-09: ai-memory e o harness externo viraram reuso integrado, mas só implementados
+    const harness = container.querySelector('[data-capid="memory.cross-harness"]');
+    expect(harness?.getAttribute('data-origin')).toBe('integrated');
+    expect(harness?.getAttribute('data-future')).toBe('false');
+    expect(harness?.getAttribute('aria-label')).toMatch(/Implementada · reuso integrado WRAP \(ai-memory\)/);
   });
 
   test('lente Evolução recente destaca só o que foi registrado desde a baseline e lista no painel', () => {
@@ -537,7 +542,7 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     expect(stateOf(container, 'memory.cross-harness')).toBe('strong');
     expect(stateOf(container, 'governance.review')).toBe('dim');
     expect(screen.getByRole('heading', { name: /Reuso já integrado/ })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Candidatas externas (4)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Candidatas externas (2)' })).toBeInTheDocument();
     expect(screen.getByText(/POC externo que funcionou ≠ capacidade do Anima/)).toBeInTheDocument();
   });
 
@@ -572,6 +577,43 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
 });
 
 // ─── Proof Evaluation V0: declarado × derivado ──────────────────────────────────
+
+describe('EvolutionClient — SDC-09 (fronteira e dependência humana)', () => {
+  test('lente Fronteira e humano destaca só capacidades com limites e lista o que depende de humano', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Fronteira e humano/ }));
+    expect(stateOf(container, 'governance.candidate-recovery')).toBe('strong');
+    expect(stateOf(container, 'agency.self-dev-operator')).toBe('strong');
+    expect(stateOf(container, 'interaction.chat')).toBe('dim');
+    expect(screen.getByRole('heading', { name: 'Onde o Anima ainda precisa de humano' })).toBeInTheDocument();
+    expect(screen.getByText(/O Claude Desktop é o operador bootstrap/)).toBeInTheDocument();
+    expect(screen.getByText(/Não é encadeável/)).toBeInTheDocument();
+    expect(screen.getByText(/integration_completed/)).toBeInTheDocument();
+  });
+
+  test('clicar numa capacidade da lente abre o detalhe com a seção de fronteira', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Fronteira e humano/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Recuperação governada de candidato — / }));
+    expect(stateOf(container, 'governance.candidate-recovery')).toBe('selected');
+    expect(screen.getByRole('heading', { name: 'Fronteira e dependência humana' })).toBeInTheDocument();
+    expect(screen.getByText(/Migration e deploy continuam atos humanos/)).toBeInTheDocument();
+  });
+
+  test('capacidade sem limite declarado não mostra a seção de fronteira', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Chat — / }));
+    expect(screen.queryByRole('heading', { name: 'Fronteira e dependência humana' })).not.toBeInTheDocument();
+  });
+
+  test('alternar a lente de volta restaura o mapa completo', () => {
+    const { container } = render(<EvolutionClient {...buildProps()} />);
+    const chip = screen.getByRole('button', { name: /Fronteira e humano/ });
+    fireEvent.click(chip);
+    fireEvent.click(chip);
+    expect(stateOf(container, 'interaction.chat')).not.toBe('dim');
+  });
+});
 
 describe('EvolutionClient — Proof Evaluation V0 (declarado × derivado)', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports

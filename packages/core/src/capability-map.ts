@@ -226,6 +226,14 @@ export interface Capability {
 
   /** Mudanças auditadas desta capacidade (ordem cronológica). */
   history?: CapabilityHistoryEntry[];
+
+  /**
+   * Fronteira / dependência humana CONHECIDA (Evolution Reconciliation V2, SDC-09):
+   * limites declarados e ainda abertos, um por item. Não é maturidade nem prova:
+   * representa o que hoje depende de ato humano ou ainda não existe, sem forçar
+   * uma promoção para esconder a lacuna.
+   */
+  frontier?: string[];
 }
 
 // ─── Validação do registro ──────────────────────────────────────────────────
@@ -599,6 +607,23 @@ export function longestDependencyPath(graph: CapabilityGraph, targetId: string):
     return full;
   };
   return pathTo(targetId);
+}
+
+// ─── Fronteira / dependência humana (SDC-09) ─────────────────────────────────
+
+export interface FrontierEntry {
+  capabilityId: string;
+  items: string[];
+}
+
+/** Capacidades que declaram limites abertos (`frontier`), na ordem do registro. */
+export function listFrontier(capabilities: readonly Capability[]): FrontierEntry[] {
+  const out: FrontierEntry[] = [];
+  for (const cap of capabilities) {
+    const items = (cap.frontier ?? []).filter((item) => item.trim().length > 0);
+    if (items.length > 0) out.push({ capabilityId: cap.id, items });
+  }
+  return out;
 }
 
 // ─── Evolução recente (Evolution V2) ─────────────────────────────────────────
