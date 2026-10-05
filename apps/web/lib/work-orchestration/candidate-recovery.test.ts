@@ -31,7 +31,13 @@ const git = (overrides: Partial<CandidateRecoveryGitPort> = {}): CandidateRecove
 const client = (opts: { rpc?: { data: unknown; error: unknown }; base?: string | null; spec?: Record<string, unknown>; delta?: unknown; evidenceAttempt?: string; olderDelta?: unknown } = {}) => {
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
   const base = opts.base === undefined ? BASE : opts.base;
-  const rows = base ? [{ payload: { data: { evidence: { attemptId: opts.evidenceAttempt ?? ATTEMPT, baseSha: base, observedCommitSha: COMMIT,
+  const rows: { payload: { data: { evidence: {
+    attemptId: string;
+    baseSha: string;
+    observedCommitSha?: string;
+    observedChangedFiles?: string[];
+    observedChangedFilesSinceStart: unknown;
+  } } } }[] = base ? [{ payload: { data: { evidence: { attemptId: opts.evidenceAttempt ?? ATTEMPT, baseSha: base, observedCommitSha: COMMIT,
     observedChangedFiles: [FILE, 'apps/web/outro.ts'], observedChangedFilesSinceStart: opts.delta } } } }] : [];
   const chain: Record<string, unknown> = {};
   for (const m of ['select', 'eq', 'order']) chain[m] = () => chain;
