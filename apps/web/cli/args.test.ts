@@ -11,29 +11,29 @@ describe('parser de argumentos da CLI', () => {
 
   test('budget status exige item e aceita --json', () => {
     expect(parseArgs(['budget', 'status', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'budget-status', id: 'abc', json: true } });
-    expect(parseArgs(['budget', 'status'])).toEqual({ ok: false, error: 'Uso: anima budget status <id>' });
+    expect(parseArgs(['budget', 'status'])).toEqual({ ok: false, error: 'Uso: anima budget status <id|REF>' });
   });
 
   test('work list sem json', () => {
     expect(parseArgs(['work', 'list'])).toEqual({ ok: true, command: { kind: 'work-list', json: false } });
   });
 
-  test('work show <id>', () => {
+  test('work show <id|REF>', () => {
     expect(parseArgs(['work', 'show', 'abc'])).toEqual({ ok: true, command: { kind: 'work-show', id: 'abc', json: false } });
   });
 
   test('work show sem id → uso inválido', () => {
-    expect(parseArgs(['work', 'show'])).toEqual({ ok: false, error: 'Uso: anima work show <id>' });
+    expect(parseArgs(['work', 'show'])).toEqual({ ok: false, error: 'Uso: anima work show <id|REF>' });
   });
 
-  test('work correct <id>', () => {
+  test('work correct <id|REF>', () => {
     expect(parseArgs(['work', 'correct', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'work-correct', id: 'abc', requiredGates: [], json: true } });
     expect(parseArgs(['work', 'correct', 'abc', '--require-gate', 'npm run build --workspace=@anima/web'])).toEqual({ ok: true, command: { kind: 'work-correct', id: 'abc', requiredGates: ['npm run build --workspace=@anima/web'], json: false } });
     expect(parseArgs(['work', 'show', 'abc', '--require-gate', 'npm run build']).ok).toBe(false);
   });
 
   test('work correct sem id → uso inválido', () => {
-    expect(parseArgs(['work', 'correct'])).toEqual({ ok: false, error: 'Uso: anima work correct <id>' });
+    expect(parseArgs(['work', 'correct'])).toEqual({ ok: false, error: 'Uso: anima work correct <id|REF>' });
   });
 
   test('work approve e work accept são comandos distintos', () => {
@@ -57,14 +57,14 @@ describe('parser de argumentos da CLI', () => {
       .toEqual({ ok: true, command: { kind: 'work-resolve-pending', id: 'abc', decision: 'cancel', reason: null, json: false } });
   });
 
-  test('work retry <id> (deriva o resto do estado persistido)', () => {
+  test('work retry <id|REF> (deriva o resto do estado persistido)', () => {
     expect(parseArgs(['work', 'retry', 'abc', '--json'])).toEqual({ ok: true, command: { kind: 'work-retry', id: 'abc', json: true } });
-    expect(parseArgs(['work', 'retry'])).toEqual({ ok: false, error: 'Uso: anima work retry <id>' });
+    expect(parseArgs(['work', 'retry'])).toEqual({ ok: false, error: 'Uso: anima work retry <id|REF>' });
   });
 
-  test('work authorize-resume <id> (deriva o resto do estado persistido)', () => {
+  test('work authorize-resume <id|REF> (deriva o resto do estado persistido)', () => {
     expect(parseArgs(['work', 'authorize-resume', 'abc'])).toEqual({ ok: true, command: { kind: 'work-authorize-resume', id: 'abc', planPath: null, json: false } });
-    expect(parseArgs(['work', 'authorize-resume'])).toEqual({ ok: false, error: 'Uso: anima work authorize-resume <id> [--plan arquivo.json]' });
+    expect(parseArgs(['work', 'authorize-resume'])).toEqual({ ok: false, error: 'Uso: anima work authorize-resume <id|REF> [--plan arquivo.json]' });
   });
   test('work supervise/unsupervise exigem item',()=>{
     expect(parseArgs(['work','supervise','abc'])).toEqual({ok:true,command:{kind:'work-supervise',id:'abc',json:false}});
@@ -142,4 +142,11 @@ test.each([
   ['--rework', 'a.ts'],
 ])('--rework inválido ou fora de work correct: %j', (...argv) => {
   expect(parseArgs(argv)).toMatchObject({ ok: false });
+});
+
+test.each(['show', 'evidence', 'executors', 'approve'])('parser preserva a referência de work %s sem lookup', sub => {
+  expect(parseArgs(['work', sub, 'SDC-01'])).toEqual({ ok: true, command: { kind: `work-${sub}`, id: 'SDC-01', json: false } });
+});
+test('parser deixa a validação da referência para a aplicação', () => {
+  expect(parseArgs(['work', 'show', 'sdc-01'])).toEqual({ ok: true, command: { kind: 'work-show', id: 'sdc-01', json: false } });
 });

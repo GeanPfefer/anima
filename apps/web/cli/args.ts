@@ -156,7 +156,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
 
   if (group === 'budget') {
     if (sub !== 'status' || !rest[0] || rest.length !== 1) {
-      return { ok: false, error: 'Uso: anima budget status <id>' };
+      return { ok: false, error: 'Uso: anima budget status <id|REF>' };
     }
     return { ok: true, command: { kind: 'budget-status', id: rest[0], json } };
   }
@@ -168,59 +168,59 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     }
     const id = rest[0];
     if (sub === 'replan') {
-      if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:'Uso: anima work replan <id> [--diagnosis arquivo.json]' };
+      if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:'Uso: anima work replan <id|REF> [--diagnosis arquivo.json]' };
       return {ok:true, command:{kind:'work-replan',id,diagnosisPath,json}};
     }
     if (sub === 'recover-candidate') {
       if (!id || rest.length !== 1 || reason !== null || !diagnosisPath?.trim()) {
-        return { ok: false, error: 'Uso: anima work recover-candidate <id> --diagnosis arquivo.json' };
+        return { ok: false, error: 'Uso: anima work recover-candidate <id|REF> --diagnosis arquivo.json' };
       }
       return { ok: true, command: { kind: 'work-recover-candidate', id, diagnosisPath: diagnosisPath.trim(), json } };
     }
     if (sub === 'authorize-resume') {
-      if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:'Uso: anima work authorize-resume <id> [--plan arquivo.json]' };
+      if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:'Uso: anima work authorize-resume <id|REF> [--plan arquivo.json]' };
       return {ok:true, command:{kind:'work-authorize-resume',id,planPath,json}};
     }
     if (sub === 'supervise' || sub === 'unsupervise') {
-      if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:`Uso: anima work ${sub} <id>` };
+      if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:`Uso: anima work ${sub} <id|REF>` };
       return {ok:true,command:{kind:sub === 'supervise' ? 'work-supervise' : 'work-unsupervise',id,json}};
     }
     if (sub === 'show') {
-      if (!id) return { ok: false, error: 'Uso: anima work show <id>' };
+      if (!id) return { ok: false, error: 'Uso: anima work show <id|REF>' };
       return { ok: true, command: { kind: 'work-show', id, json } };
     }
     if (sub === 'evidence') {
-      if (!id) return { ok: false, error: 'Uso: anima work evidence <id>' };
+      if (!id) return { ok: false, error: 'Uso: anima work evidence <id|REF>' };
       return { ok: true, command: { kind: 'work-evidence', id, json } };
     }
     if (sub === 'executors') {
-      if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: 'Uso: anima work executors <id> [--json]' };
+      if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: 'Uso: anima work executors <id|REF> [--json]' };
       return { ok: true, command: { kind: 'work-executors', id, json } };
     }
     if (sub === 'request-changes') {
-      if (!id) return { ok: false, error: 'Uso: anima work request-changes <id> --reason "..."' };
+      if (!id) return { ok: false, error: 'Uso: anima work request-changes <id|REF> --reason "..."' };
       if (reason === null || reason.trim().length === 0) return { ok: false, error: 'request-changes exige --reason "<pedido>" não vazio.' };
       return { ok: true, command: { kind: 'work-request-changes', id, reason: reason.trim(), json } };
     }
     if (sub === 'correct') {
-      if (!id) return { ok: false, error: 'Uso: anima work correct <id>' };
+      if (!id) return { ok: false, error: 'Uso: anima work correct <id|REF>' };
       return { ok: true, command: { kind: 'work-correct', id, requiredGates, json, ...(reworkPaths.length ? { reworkPaths } : {}) } };
     }
     if (sub === 'approve') {
-      if (!id) return { ok: false, error: 'Uso: anima work approve <id>' };
+      if (!id) return { ok: false, error: 'Uso: anima work approve <id|REF>' };
       return { ok: true, command: { kind: 'work-approve', id, json } };
     }
     if (sub === 'accept') {
-      if (!id) return { ok: false, error: 'Uso: anima work accept <id>' };
+      if (!id) return { ok: false, error: 'Uso: anima work accept <id|REF>' };
       return { ok: true, command: { kind: 'work-accept', id, json } };
     }
     if (sub === 'withdraw') {
-      if (!id) return { ok: false, error: 'Uso: anima work withdraw <id> --reason "..."' };
+      if (!id) return { ok: false, error: 'Uso: anima work withdraw <id|REF> --reason "..."' };
       if (reason === null || reason.trim().length === 0) return { ok: false, error: 'withdraw exige --reason "<motivo>" não vazio.' };
       return { ok: true, command: { kind: 'work-withdraw', id, reason: reason.trim(), json } };
     }
     if (sub === 'resolve-pending') {
-      const usage = 'Uso: anima work resolve-pending <id> request-changes --reason "..." | anima work resolve-pending <id> cancel [--reason "..."]';
+      const usage = 'Uso: anima work resolve-pending <id|REF> request-changes --reason "..." | anima work resolve-pending <id|REF> cancel [--reason "..."]';
       const action = rest[1];
       if (!id || rest.length !== 2 || (action !== 'request-changes' && action !== 'cancel')) return { ok: false, error: usage };
       if (reason !== null && reason.trim().length === 0) return { ok: false, error: '--reason não pode ser vazio.' };
@@ -228,11 +228,11 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       return { ok: true, command: { kind: 'work-resolve-pending', id, decision: action === 'cancel' ? 'cancel' : 'request_changes', reason: reason === null ? null : reason.trim(), json } };
     }
     if (sub === 'prepare-autonomous') {
-      if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: 'Uso: anima work prepare-autonomous <id>' };
+      if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: 'Uso: anima work prepare-autonomous <id|REF>' };
       return { ok: true, command: { kind: 'work-prepare-autonomous', id, json } };
     }
     if (sub === 'authorize-compute') {
-      const usage = 'Uso: anima work authorize-compute <id> --max-usd <US$> --max-minutes <min> --valid-hours <h>';
+      const usage = 'Uso: anima work authorize-compute <id|REF> --max-usd <US$> --max-minutes <min> --valid-hours <h>';
       if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: usage };
       const maxCostUsd = boundedNumber(limits.maxUsd, COMPUTE_AUTHORITY_LIMIT_BOUNDS.maxUsd);
       const maxMinutes = boundedNumber(limits.maxMinutes, COMPUTE_AUTHORITY_LIMIT_BOUNDS.maxMinutes);
@@ -245,7 +245,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     if (sub === 'set-compute') {
       // Preferência de compute da UNIDADE: NÃO carrega dinheiro (limites de authority são
       // recusados acima) e é validada pela mesma régua do RPC.
-      const usage = 'Uso: anima work set-compute <id> --strategy provider_api --provider openai --model <modelo> | --strategy router_default';
+      const usage = 'Uso: anima work set-compute <id|REF> --strategy provider_api --provider openai --model <modelo> | --strategy router_default';
       if (!id || rest.length !== 1 || reason !== null) return { ok: false, error: usage };
       const preference = parseComputePreference(compute.strategy === 'router_default'
         ? (compute.provider === null && compute.model === null ? { schemaVersion: 1, strategy: 'router_default' } : null)
@@ -254,14 +254,14 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       return { ok: true, command: { kind: 'work-set-compute', id, preference, json } };
     }
     if (sub === 'recover-harness') {
-      const usage = 'Uso: anima work recover-harness <id> --fix <commit> [--fix <commit>] --evidence docs/registros/<registro>.md --reason "<motivo>"';
+      const usage = 'Uso: anima work recover-harness <id|REF> --fix <commit> [--fix <commit>] --evidence docs/registros/<registro>.md --reason "<motivo>"';
       if (!id || rest.length !== 1 || fixes.length === 0 || fixes.some(f => !f.trim()) || !evidence?.trim() || !reason?.trim()) {
         return { ok: false, error: usage };
       }
       return { ok: true, command: { kind: 'work-recover-harness', id, fixCommits: fixes, evidenceReference: evidence.trim(), reason: reason.trim(), json } };
     }
     if (sub === 'retry') {
-      if (!id) return { ok: false, error: 'Uso: anima work retry <id>' };
+      if (!id) return { ok: false, error: 'Uso: anima work retry <id|REF>' };
       return { ok: true, command: { kind: 'work-retry', id, json } };
     }
     return { ok: false, error: `Subcomando de "work" desconhecido: ${sub ?? '(vazio)'}` };
@@ -276,35 +276,37 @@ Uso:
   anima status                                Identidade, conexão e resumo do trabalho
   anima recovery-config check                 Prontidão da configuração recuperável (read-only, sem valores, sem rede)
   anima toolchain check                       Prontidão do toolchain (read-only; só comandos --version; nunca instala)
-  anima budget status <id>                    Orçamento autônomo atual (somente leitura)
+  anima budget status <id|REF>                    Orçamento autônomo atual (somente leitura)
   anima work list                             Lista os trabalhos não terminais (retomáveis)
-  anima work show <id>                        Estado, versão, tentativa, Verifier e cobertura
-  anima work evidence <id>                    Critérios de aceite, provas e lacunas (Verifier)
-  anima work executors <id>                   Executores de coding: prontos, elegíveis e recomendação (read-only; não escolhe nem inicia)
-  anima work request-changes <id> --reason "" Registra REQUEST_CHANGES pelo fluxo canônico
-  anima work correct <id> [--rework path] [--require-gate C]   Materializa o sucessor de correção (proposed); gates extras exigidos pela revisão
-  anima work replan <id> [--diagnosis arquivo] Replaneja unidade mínima; sem diagnóstico, replay persistido
-  anima work authorize-resume <id> [--plan f]  Autoridade humana: +1 tentativa após saldo esgotado (sucessor proposed)
-  anima work supervise <id>                    Inicia/renova supervisão humana por 30 minutos
-  anima work unsupervise <id>                  Revoga a supervisão humana vigente
-  anima work approve <id>                     Aprova uma PROPOSTA (proposed → approved)
-  anima work accept <id>                       Aceita o RESULTADO em review (review → completed)
-  anima work withdraw <id> --reason "..."      Retira um plano APROVADO não iniciado (approved → cancelled)
-  anima work resolve-pending <id> request-changes --reason "..." | cancel [--reason "..."]
+  anima work show <id|REF>                        Estado, versão, tentativa, Verifier e cobertura
+  anima work evidence <id|REF>                    Critérios de aceite, provas e lacunas (Verifier)
+  anima work executors <id|REF>                   Executores de coding: prontos, elegíveis e recomendação (read-only; não escolhe nem inicia)
+  anima work request-changes <id|REF> --reason "" Registra REQUEST_CHANGES pelo fluxo canônico
+  anima work correct <id|REF> [--rework path] [--require-gate C]   Materializa o sucessor de correção (proposed); gates extras exigidos pela revisão
+  anima work replan <id|REF> [--diagnosis arquivo] Replaneja unidade mínima; sem diagnóstico, replay persistido
+  anima work authorize-resume <id|REF> [--plan f]  Autoridade humana: +1 tentativa após saldo esgotado (sucessor proposed)
+  anima work supervise <id|REF>                    Inicia/renova supervisão humana por 30 minutos
+  anima work unsupervise <id|REF>                  Revoga a supervisão humana vigente
+  anima work approve <id|REF>                     Aprova uma PROPOSTA (proposed → approved)
+  anima work accept <id|REF>                       Aceita o RESULTADO em review (review → completed)
+  anima work withdraw <id|REF> --reason "..."      Retira um plano APROVADO não iniciado (approved → cancelled)
+  anima work resolve-pending <id|REF> request-changes --reason "..." | cancel [--reason "..."]
                                                Encerra um resultado CANDIDATO retido pelo Verifier obrigatório (nunca verifica nem libera review)
-  anima work retry <id>                        Solicita o retry governado de um item failed/RETRY_READY
-  anima work prepare-autonomous <id>           Prepara a elegibilidade autônoma (classificação) de um plano aprovado
-  anima work authorize-compute <id> --max-usd N --max-minutes M --valid-hours H
+  anima work retry <id|REF>                        Solicita o retry governado de um item failed/RETRY_READY
+  anima work prepare-autonomous <id|REF>           Prepara a elegibilidade autônoma (classificação) de um plano aprovado
+  anima work authorize-compute <id|REF> --max-usd N --max-minutes M --valid-hours H
                                                Autoridade humana paga p/ uma unidade que o Router pôs em espera
-  anima work set-compute <id> --strategy provider_api --provider openai --model M
+  anima work set-compute <id|REF> --strategy provider_api --provider openai --model M
                                                Preferência de compute da unidade (NÃO autoriza gasto)
-  anima work recover-harness <id> --fix C --evidence docs/registros/R.md --reason "..."
+  anima work recover-harness <id|REF> --fix C --evidence docs/registros/R.md --reason "..."
                                                Recuperação após defeito de HARNESS corrigido: 1 sucessor proposed (sem aprovar/pagar)
-  anima work recover-candidate <id> --diagnosis f
+  anima work recover-candidate <id|REF> --diagnosis f
                                                Recuperação de CANDIDATO com defeito real: 1 sucessor proposed retomando o checkpoint (sem aprovar/executar)
-  anima work set-compute <id> --strategy router_default
+  anima work set-compute <id|REF> --strategy router_default
                                                Volta a unidade ao Router padrão (local-first)
   anima help                                  Esta ajuda
+
+Referências: UUID ou referência canônica exata em maiúsculas, como SDC-01 ([A-Z]{2,6}-\\d{2}).
 
 Flags:
   --json           Saída estável em JSON (para automação/self-dev)

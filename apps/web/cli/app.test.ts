@@ -1,3 +1,6 @@
+import { resolveCommandWorkReference, runWorkEvidence, runWorkWithdraw, runWorkList } from './app';
+import { parseArgs, type ParsedCommand } from './args';
+import { resolveWorkReference } from '@/lib/work-orchestration/work-reference';
 import type {
   ResolveWorkApprovalCommand,
   ReviewWorkResultCommand,
@@ -373,4 +376,94 @@ describe('work executors (discovery read-only)', () => {
     expect(withdrawApprovedWork).not.toHaveBeenCalled();
     expect(listEvents).not.toHaveBeenCalled();
   });
+});
+
+const referenceId = '11111111-1111-1111-1111-111111111111';
+const referenceIntent = { canonical_provenance: { kind: 'canonical_backlog', sourceId: 'SDC-01', document: 'docs/backlog.md', heading: 'SDC', canonicalObjective: 'Executor legível', planningGeneration: 1 } };
+const referenceCandidate = { workItemId: referenceId, state: 'approved', proposalVersion: 1, createdAt: '2026-10-03', intent: referenceIntent };
+const resolveReference = (input: string) => resolveWorkReference({ findByCanonicalSourceId: async () => [referenceCandidate] }, input);
+
+test.each(['show', 'evidence', 'executors'])('work %s REF resolve antes do runner e preserva JSON', async sub => {
+  const parsed = parseArgs(['work', sub, 'SDC-01', '--json']);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const resolved = await resolveCommandWorkReference(parsed.command, resolveReference);
+  if (!resolved.ok || !('id' in resolved.command)) throw new Error('não resolveu');
+  const getItem = jest.fn(async (id: string) => { expect(id).toBe(referenceId); return ok({ ...reviewItem, id, intent: referenceIntent }); });
+  const port = fakePort({ getItem });
+  const result = sub === 'show' ? await runWorkShow(port, resolved.command.id)
+    : sub === 'evidence' ? await runWorkEvidence(port, resolved.command.id)
+    : await runWorkExecutors(port, async () => [], resolved.command.id);
+  expect(result.exitCode).toBe(EXIT.OK);
+  const json = JSON.parse(JSON.stringify(result.payload));
+  expect(json).toMatchObject({ reference: 'SDC-01', title: 'Executor legível', [sub === 'executors' ? 'workItemId' : 'id']: referenceId });
+  expect(renderHuman(result.payload).split('\n').slice(0, 3)).toEqual(['SDC-01 — Executor legível', 'Estado: review', `id interno: ${referenceId}`]);
+});
+test('withdraw mutável recebe UUID pelo mesmo caminho central sem efeito real', async () => {
+  const resolved = await resolveCommandWorkReference({ kind: 'work-withdraw', id: 'SDC-01', reason: 'obsoleto', json: false }, resolveReference);
+  if (!resolved.ok) throw new Error('não resolveu');
+  const withdrawApprovedWork = jest.fn(async () => ok({ ...reviewItem, id: referenceId, state: 'cancelled' as const }));
+  await runWorkWithdraw(fakePort({ getItem: async id => { expect(id).toBe(referenceId); return ok({ ...reviewItem, id, state: 'approved' as const }); }, withdrawApprovedWork }), resolved.command.id, resolved.command.reason);
+  expect(withdrawApprovedWork).toHaveBeenCalledWith({ workItemId: referenceId, expectedProposalVersion: 2, reason: 'obsoleto' });
+});
+test('todos os comandos com id passam pela camada central e preservam opções', async () => {
+  const kinds = ['budget-status', 'work-show', 'work-evidence', 'work-executors', 'work-approve', 'work-prepare-autonomous', 'work-accept', 'work-request-changes', 'work-correct', 'work-retry', 'work-replan', 'work-authorize-resume', 'work-withdraw', 'work-resolve-pending', 'work-supervise', 'work-unsupervise', 'work-set-compute', 'work-authorize-compute', 'work-recover-harness', 'work-recover-candidate'] as const;
+  for (const kind of kinds) {
+    const command = { kind, id: 'SDC-01', json: true } as ParsedCommand;
+    const resolve = jest.fn(resolveReference);
+    expect(await resolveCommandWorkReference(command, resolve)).toEqual({ ok: true, command: { ...command, id: referenceId } });
+    expect(resolve).toHaveBeenCalledTimes(1);
+  }
+  const resolve = jest.fn(resolveReference);
+  expect(await resolveCommandWorkReference({ kind: 'work-list', json: false }, resolve)).toEqual({ ok: true, command: { kind: 'work-list', json: false } });
+  expect(resolve).not.toHaveBeenCalled();
+});
+test('erros têm code e exit; ambiguidade lista candidatos no texto e JSON sem despacho', async () => {
+  for (const [input, candidates, code, exit] of [
+    ['sdc-01', [], 'invalid_work_reference', EXIT.USAGE],
+    ['AKT-04', [], 'work_reference_not_found', EXIT.ERROR],
+    ['SDC-01', [referenceCandidate, { ...referenceCandidate, workItemId: '22222222-2222-2222-2222-222222222222' }], 'work_reference_ambiguous', EXIT.REJECTED],
+  ] as const) {
+    const runner = jest.fn();
+    const resolved = await resolveCommandWorkReference({ kind: 'work-approve', id: input, json: true }, ref => resolveWorkReference({ findByCanonicalSourceId: async () => candidates }, ref));
+    if (resolved.ok) { runner(resolved.command.id); throw new Error('escolheu item'); }
+    expect(runner).not.toHaveBeenCalled();
+    expect(resolved.result).toMatchObject({ exitCode: exit, payload: { code } });
+    if (code === 'work_reference_ambiguous') {
+      expect(JSON.parse(JSON.stringify(resolved.result.payload)).candidates).toHaveLength(2);
+      expect(renderHuman(resolved.result.payload)).toContain(referenceId);
+      expect(renderHuman(resolved.result.payload)).toContain('22222222-2222-2222-2222-222222222222');
+    }
+  }
+});
+test('UUID sem provenance permanece acessível e list prioriza fatos canônicos', async () => {
+  const resolved = await resolveCommandWorkReference({ kind: 'work-show', id: referenceId, json: true }, resolveReference);
+  if (!resolved.ok) throw new Error('não resolveu');
+  const result = await runWorkShow(fakePort({ getItem: async () => ok({ ...reviewItem, id: referenceId }) }), resolved.command.id);
+  expect(result.payload).toMatchObject({ id: referenceId, reference: null, title: null });
+  expect(renderHuman(result.payload)).toContain('sem referência humana canônica');
+  const list = await runWorkList(fakePort({ findResumableWorkItems: async () => ok([{ ...reviewItem, id: referenceId, intent: referenceIntent }, reviewItem]) }));
+  expect(list.payload).toMatchObject({ items: [{ id: referenceId, reference: 'SDC-01', title: 'Executor legível' }, { reference: null, title: null }] });
+  expect(renderHuman(list.payload).split('\n').slice(0, 3)).toEqual(['SDC-01 — Executor legível', 'Estado: review', `id interno: ${referenceId}`]);
+});
+
+test('approve usa o UUID resolvido e o serviço fake', async () => {
+  const resolved = await resolveCommandWorkReference({ kind: 'work-approve', id: 'SDC-01', json: false }, resolveReference);
+  if (!resolved.ok) throw new Error('não resolveu');
+  const resolveApproval = jest.fn(async () => ok({ ...proposedItem, id: referenceId, state: 'approved' as const }));
+  const result = await runWorkApprove(fakePort({ getItem: async id => { expect(id).toBe(referenceId); return ok({ ...proposedItem, id }); }, listEvents: async () => ok(proposedEvents.map(event => ({ ...event, workItemId: referenceId }))), listContexts: async () => ok(sourceContext), resolveApproval }), resolved.command.id);
+  expect(result.exitCode).toBe(EXIT.OK);
+  expect(resolveApproval).toHaveBeenCalledWith({ workItemId: referenceId, expectedProposalVersion: 1, decision: { type: 'approve' } });
+});
+
+test.each([
+  ['work', 'correct', 'SDC-01', '--rework', 'apps/web/cli/app.ts', '--require-gate', 'npm test', '--json'],
+  ['work', 'recover-candidate', 'SDC-01', '--diagnosis', 'diagnosis.json', '--json'],
+])('central resolution preserves current command options: %j', async (...argv) => {
+  const parsed = parseArgs(argv);
+  if (!parsed.ok || !('id' in parsed.command)) throw new Error('invalid fixture');
+  const resolve = jest.fn(resolveReference);
+  expect(await resolveCommandWorkReference(parsed.command, resolve)).toEqual({
+    ok: true, command: { ...parsed.command, id: referenceId },
+  });
+  expect(resolve).toHaveBeenCalledTimes(1);
 });

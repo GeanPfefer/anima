@@ -182,7 +182,7 @@ describe('work recover-candidate (CLI)', () => {
   });
 
   test('USAGE documenta o comando', () => {
-    expect(USAGE).toContain('work recover-candidate <id> --diagnosis');
+    expect(USAGE).toContain('work recover-candidate <id|REF> --diagnosis');
   });
 
   test('sucesso: payload, JSON e texto (aprovação/execução seguem separadas)', async () => {

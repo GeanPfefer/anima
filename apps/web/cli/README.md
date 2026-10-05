@@ -153,3 +153,24 @@ lineage, checkpoint e gates, e registra `correction_scope.rework_source: 'struct
 Sem a flag, permanece o comportamento legado de derivar retrabalho explícito do
 texto, sem acrescentar essa chave. A operação apenas materializa um successor
 `proposed`; aprovação, execução e aceite seguem a governança existente.
+
+## Referências humanas de trabalho
+
+Todos os comandos com `<id|REF>`, incluindo `budget status`, aceitam UUID ou
+referência canônica exata em maiúsculas (`[A-Z]{2,6}-\d{2}`), como `SDC-01` ou
+`AKT-04`. Exemplos: `anima work show SDC-01`, `anima work evidence SDC-01` e
+`anima work executors SDC-01`. O UUID continua válido em todos os comandos e
+permanece a identidade interna no JSON (`id`/`workItemId`).
+
+A referência e o título vêm exclusivamente da provenance canônica persistida.
+Não há busca por título, substring, aproximação ou normalização de maiúsculas.
+Itens sem provenance canônica são acessíveis somente pelo UUID, com `reference`
+e `title` nulos. As saídas humanas de show/evidence/executors/list priorizam
+`REF — Título`, seguido do estado e de `id interno: UUID`.
+
+Uma referência inexistente retorna `work_reference_not_found` (exit 1); formato
+inválido retorna `invalid_work_reference` (exit 2). Mais de um candidato retorna
+`work_reference_ambiguous` (exit 3), sem escolher nem despachar qualquer ação.
+Os candidatos aparecem na mensagem humana e no campo opcional `candidates` do
+JSON, com UUID, estado, versão da proposta, documento e data de criação. Escolha
+explicitamente o UUID desejado; estado, recência e lineage não desempatam.

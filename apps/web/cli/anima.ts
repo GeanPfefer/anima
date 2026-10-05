@@ -1,3 +1,5 @@
+import { createSupabaseWorkReferenceLookup, resolveWorkReference } from '@/lib/work-orchestration/work-reference';
+import { resolveCommandWorkReference } from './app';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { replanFailedWorkItem } from '@/lib/work-orchestration/replan-orchestration';
@@ -50,6 +52,9 @@ async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config
   const identity = await resolveCliIdentity();
   if (!identity.ok) return { exitCode: EXIT.ERROR, payload: { ok: false, kind: 'error', error: identity.error, code: 'authentication_required' } };
   const { client, userId } = identity.identity;
+  const resolved = await resolveCommandWorkReference(command, input => resolveWorkReference(createSupabaseWorkReferenceLookup(client), input));
+  if (!resolved.ok) return resolved.result;
+  command = resolved.command;
   const service = createWorkOrchestrationService(client);
 
   switch (command.kind) {

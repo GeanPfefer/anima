@@ -21,7 +21,7 @@ describe('render humano da CLI', () => {
 
   test('work-show contrasta Verifier ao vivo × registrado e marca cobertura de aceite', () => {
     const payload: CliPayload = {
-      ok: true, kind: 'work-show', id: 'i', state: 'review', proposalVersion: 2, phase: 'Revisando', attemptId: 'a1',
+      ok: true, kind: 'work-show', reference: null, title: null, id: 'i', state: 'review', proposalVersion: 2, phase: 'Revisando', attemptId: 'a1',
       summary: 's', objective: 'o', includedScope: ['pkg/x.ts'], excludedScope: [], risks: [],
       plannedGates: [{ label: 'G', command: 'npm test', covers: ['A'] }],
       latestResult: { eventId: 'r', proposalVersion: 2, summary: 'feito' },
@@ -50,7 +50,7 @@ describe('render humano da CLI', () => {
       observations: [{ provider: 'claude-code', availability: 'ready', reasonUnavailable: null }, { provider: 'codex-cli', availability: 'unavailable', reasonUnavailable: 'codex_not_logged_in' }],
     });
     const outcome = recommendExecutor(candidates, { coderBackend: 'claude-code', model: null });
-    const payload: CliPayload = { ok: true, kind: 'work-executors', workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: 'claude-code', observedAt: '2026-10-03T00:00:00.000Z', candidates, ...outcome };
+    const payload: CliPayload = { ok: true, kind: 'work-executors', reference: null, title: null, workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: 'claude-code', observedAt: '2026-10-03T00:00:00.000Z', candidates, ...outcome };
     const out = renderHuman(payload);
     expect(out).toContain('Backend do contrato: claude-code');
     expect(out).toContain('Recomendado: claude-code:default (regra contract_declared)');
@@ -63,7 +63,7 @@ describe('render humano da CLI', () => {
   test('work-executors sem recomendação lista os motivos', () => {
     const contract = { coderBackend: null, model: null };
     const candidates = projectExecutorCandidates({ contract, observations: [] });
-    const out = renderHuman({ ok: true, kind: 'work-executors', workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: null, observedAt: 't', candidates, ...recommendExecutor(candidates, contract) });
+    const out = renderHuman({ ok: true, kind: 'work-executors', reference: null, title: null, workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: null, observedAt: 't', candidates, ...recommendExecutor(candidates, contract) });
     expect(out).toContain('Sem recomendação: no_ready_candidate');
     expect(out).toContain('ollama: readiness_not_probed');
     expect(out).toContain('(não declarado)');
@@ -73,4 +73,13 @@ describe('render humano da CLI', () => {
     const payload: CliPayload = { ok: false, kind: 'error', error: 'ausente', code: 'work_item_not_found' };
     expect(renderHuman(payload)).toBe('erro [work_item_not_found]: ausente');
   });
+});
+
+test('list prioriza referência e título e mantém diagnóstico do UUID', () => {
+  const out = renderHuman({ ok: true, kind: 'work-list', items: [
+    { id: 'uuid', reference: 'SDC-01', title: 'Título canônico', state: 'approved', proposalVersion: 1, phase: null, summary: 'Resumo' },
+    { id: 'histórico', reference: null, title: null, state: 'review', proposalVersion: 1, phase: null, summary: 'Antigo' },
+  ] });
+  expect(out.split('\n').slice(0, 3)).toEqual(['SDC-01 — Título canônico', 'Estado: approved', 'id interno: uuid']);
+  expect(out).toContain('histórico — sem referência humana canônica\nEstado: review\nid interno: histórico');
 });

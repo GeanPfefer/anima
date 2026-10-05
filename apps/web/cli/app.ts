@@ -1,3 +1,5 @@
+import type { ParsedCommand } from './args';
+import { readWorkHumanReference, type WorkReferenceResult, type WorkReferenceAmbiguousCandidate } from '@/lib/work-orchestration/work-reference';
 import {
   COMPUTE_ROUTER_REQUESTED_DURATION_MS,
   projectComputePreference,
@@ -72,6 +74,8 @@ export interface PlannedGatePayload {
   readonly covers: readonly string[];
 }
 export interface WorkShowPayload {
+  readonly reference: string | null;
+  readonly title: string | null;
   readonly ok: true;
   readonly kind: 'work-show';
   readonly id: string;
@@ -112,6 +116,8 @@ export type ComputePreferencePayload =
   | { readonly status: 'legacy_contract'; readonly provider: 'openai' }
   | { readonly status: 'router_default'; readonly cleared: boolean };
 export interface WorkEvidencePayload {
+  readonly reference: string | null;
+  readonly title: string | null;
   readonly ok: true;
   readonly kind: 'work-evidence';
   readonly id: string;
@@ -128,6 +134,8 @@ export interface WorkEvidencePayload {
   readonly findings: readonly { readonly code: string; readonly severity: string; readonly provenance: string; readonly subject: string | null; readonly detail: string }[];
 }
 export interface WorkExecutorsPayload {
+  readonly reference: string | null;
+  readonly title: string | null;
   readonly ok: true;
   readonly kind: 'work-executors';
   readonly workItemId: string;
@@ -188,7 +196,7 @@ export type BudgetStatusCapability = (workItemId: string) => Promise<unknown>;
 export interface WorkListPayload {
   readonly ok: true;
   readonly kind: 'work-list';
-  readonly items: readonly { readonly id: string; readonly state: string; readonly proposalVersion: number; readonly phase: string | null; readonly summary: string }[];
+  readonly items: readonly { readonly reference: string | null; readonly title: string | null; readonly id: string; readonly state: string; readonly proposalVersion: number; readonly phase: string | null; readonly summary: string }[];
 }
 export interface ReviewPayload {
   readonly ok: true;
@@ -276,6 +284,7 @@ export interface WorkSupervisionPayload {
   readonly message: string;
 }
 export interface ErrorPayload {
+  readonly candidates?: readonly WorkReferenceAmbiguousCandidate[];
   readonly ok: false;
   readonly kind: 'error';
   readonly error: string;
@@ -528,7 +537,7 @@ export async function runWorkList(service: WorkOrchestrationPort): Promise<Comma
     payload: {
       ok: true, kind: 'work-list',
       items: items.value.map(item => ({
-        id: item.id, state: item.state, proposalVersion: item.proposalVersion,
+        id: item.id, ...humanReferenceFields(item.intent), state: item.state, proposalVersion: item.proposalVersion,
         phase: null, summary: item.proposal.data.summary,
       })),
     },
@@ -558,7 +567,7 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
   return {
     exitCode: EXIT.OK,
     payload: {
-      ok: true, kind: 'work-show', id: item.id, state: item.state, proposalVersion: item.proposalVersion,
+      ok: true, kind: 'work-show', ...humanReferenceFields(item.intent), id: item.id, state: item.state, proposalVersion: item.proposalVersion,
       phase: presentation.progress?.label ?? null,
       attemptId: presentation.execution?.attemptId ?? live?.attemptId ?? null,
       summary: item.proposal.data.summary,
@@ -803,7 +812,7 @@ export async function runWorkExecutors(
   return {
     exitCode: EXIT.OK,
     payload: {
-      ok: true, kind: 'work-executors', workItemId: item.value.id, state: item.value.state, proposalVersion: item.value.proposalVersion,
+      ok: true, kind: 'work-executors', ...humanReferenceFields(item.value.intent), workItemId: item.value.id, state: item.value.state, proposalVersion: item.value.proposalVersion,
       contractBackend: contract.coderBackend, observedAt: now().toISOString(), candidates,
       recommendation: outcome.recommendation, noRecommendation: outcome.noRecommendation,
     },
@@ -819,7 +828,7 @@ export async function runWorkEvidence(service: WorkOrchestrationPort, id: string
   return {
     exitCode: EXIT.OK,
     payload: {
-      ok: true, kind: 'work-evidence', id: item.id, state: item.state, proposalVersion: item.proposalVersion,
+      ok: true, kind: 'work-evidence', ...humanReferenceFields(item.intent), id: item.id, state: item.state, proposalVersion: item.proposalVersion,
       attemptId: presentation.execution?.attemptId ?? live?.attemptId ?? null,
       verifierLive: verifierLiveSummary(live),
       verifierRecorded: recordedVerifier(presentation),
@@ -1029,4 +1038,29 @@ export async function runWorkCorrect(correct: ReviewCorrectionCapability, id: st
   const suffix = detail.length > 0 ? ` (${detail.join(', ')})` : result.message ? ` (${result.message})` : '';
   const exitCode = CORRECTION_INFRA_REASONS.has(result.reason) ? EXIT.ERROR : EXIT.REJECTED;
   return errorResult(`${correctionReasonMessage(result.reason)}${suffix}`, result.reason, exitCode);
+}
+
+function humanReferenceFields(intent: unknown): { reference: string | null; title: string | null } {
+  return readWorkHumanReference(intent) ?? { reference: null, title: null };
+}
+
+/** Resolve every command carrying an id before any runner or capability executes. */
+export async function resolveCommandWorkReference<T extends ParsedCommand>(
+  command: T,
+  resolve: (input: string) => Promise<WorkReferenceResult>,
+): Promise<{ ok: true; command: T } | { ok: false; result: CommandResult }> {
+  if (!('id' in command)) return { ok: true, command };
+  const resolved = await resolve(command.id);
+  if (resolved.ok) return { ok: true, command: { ...command, id: resolved.workItemId } };
+  const code = resolved.code;
+  const error = resolved.code === 'invalid_work_reference'
+    ? `Referência inválida: ${command.id}. Use UUID ou referência canônica exata como SDC-01.`
+    : resolved.code === 'work_reference_not_found' ? `Referência canônica não encontrada: ${command.id}.`
+    : `Referência canônica ambígua: ${command.id}. Escolha explicitamente um UUID:\n${resolved.candidates.map(c =>
+      `${c.workItemId} | estado: ${c.state} | proposta v${c.proposalVersion} | documento: ${c.document} | criado: ${c.createdAt}`).join('\n')}`;
+  return { ok: false, result: {
+    exitCode: code === 'invalid_work_reference' ? EXIT.USAGE : code === 'work_reference_not_found' ? EXIT.ERROR : EXIT.REJECTED,
+    payload: { ok: false, kind: 'error', code, error,
+      ...(resolved.code === 'work_reference_ambiguous' ? { candidates: resolved.candidates } : {}) },
+  } };
 }

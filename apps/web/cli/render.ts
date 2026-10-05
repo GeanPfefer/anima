@@ -14,6 +14,12 @@ const verdictLabel = (v: VerifierSummaryPayload | null): string =>
 const proofLabel = (proof: 'gate' | 'scope' | null): string =>
   proof === 'gate' ? 'gate' : proof === 'scope' ? 'escopo' : '—';
 
+const workHeading = (id: string, reference: string | null, title: string | null, state: string): string[] => [
+  reference !== null ? `${reference} — ${title ?? ''}` : `${id} — sem referência humana canônica`,
+  `Estado: ${state}`,
+  `id interno: ${id}`,
+];
+
 export function renderHuman(payload: CliPayload): string {
   switch (payload.kind) {
     case 'help':
@@ -55,13 +61,14 @@ export function renderHuman(payload: CliPayload): string {
     case 'work-list': {
       if (payload.items.length === 0) return 'Nenhum trabalho retomável.';
       return payload.items
-        .map(item => `${item.id}  ${item.state.padEnd(18)}  ${item.summary}`)
+        .map(item => [...workHeading(item.id, item.reference, item.title, item.state), `Resumo: ${item.summary}`].join('\n'))
         .join('\n');
     }
 
     case 'work-show': {
       const lines: string[] = [];
-      lines.push(`${payload.id} ${DOT} ${payload.state}${payload.phase ? ` (${payload.phase})` : ''}`);
+      lines.push(...workHeading(payload.id, payload.reference, payload.title, payload.state));
+      if (payload.phase) lines.push(`Fase: ${payload.phase}`);
       lines.push(`Proposta v${payload.proposalVersion}${payload.attemptId ? ` ${DOT} tentativa ${payload.attemptId}` : ''}`);
       lines.push(`Resumo: ${payload.summary}`);
       lines.push(`Objetivo: ${payload.objective}`);
@@ -120,7 +127,8 @@ export function renderHuman(payload: CliPayload): string {
 
     case 'work-executors': {
       const lines: string[] = [];
-      lines.push(`${payload.workItemId} ${DOT} ${payload.state} ${DOT} proposta v${payload.proposalVersion} ${DOT} executores observados em ${payload.observedAt}`);
+      lines.push(...workHeading(payload.workItemId, payload.reference, payload.title, payload.state));
+      lines.push(`Proposta v${payload.proposalVersion} ${DOT} executores observados em ${payload.observedAt}`);
       lines.push(`Backend do contrato: ${payload.contractBackend ?? '(não declarado)'}`);
       for (const c of payload.candidates) {
         const mark = c.availability === 'ready' ? YES : c.availability === 'unavailable' ? NO : '?';
@@ -143,7 +151,8 @@ export function renderHuman(payload: CliPayload): string {
 
     case 'work-evidence': {
       const lines: string[] = [];
-      lines.push(`${payload.id} ${DOT} ${payload.state}${payload.attemptId ? ` ${DOT} tentativa ${payload.attemptId}` : ''}`);
+      lines.push(...workHeading(payload.id, payload.reference, payload.title, payload.state));
+      if (payload.attemptId) lines.push(`Tentativa: ${payload.attemptId}`);
       lines.push(`Verifier (agora): ${verdictLabel(payload.verifierLive)}`);
       if (payload.verifierRecorded) lines.push(`Verifier (registrado): ${payload.verifierRecorded.verdict}`);
       lines.push('');
