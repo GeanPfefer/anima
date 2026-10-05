@@ -209,18 +209,31 @@ describe('Evolution Reconciliation SDC-09 — ciclo SDC-01→SDC-08', () => {
     expect(get('agency.external-harness').history?.at(-1)).toMatchObject({ change: 'maturity_changed', from: 'projected', to: 'implemented' });
   });
 
-  test('o operador bootstrap segue como fronteira projetada, e o self-dev contínuo depende dele', () => {
-    const operator = get('agency.self-dev-operator');
-    expect(operator.maturity).toBe('projected');
-    expect(operator.frontier?.join(' ')).toMatch(/Claude Desktop/);
-    expect(get('agency.continuous-self-development').dependsOn).toContain('agency.self-dev-operator');
-    expect(graph().byId.get('governance.candidate-recovery')?.unlocks).toContain('agency.self-dev-operator');
+  test('o operador externo é fronteira, não capacidade: nenhum nó o modela', () => {
+    expect(byId.has('agency.self-dev-operator')).toBe(false);
+    for (const c of ANIMA_CAPABILITY_REGISTRY_V0) expect(c.dependsOn ?? []).not.toContain('agency.self-dev-operator');
+    for (const id of ['agency.continuous-self-development', 'governance.progressive-autonomy']) {
+      expect(get(id).maturity).not.toBe('autonomous');
+    }
+    const continuous = (get('agency.continuous-self-development').frontier ?? []).join(' ');
+    expect(continuous).toMatch(/Claude Desktop/);
+    expect(continuous).toMatch(/push/);
+    expect(continuous).toMatch(/Migration e deploy/);
+    expect(continuous).toMatch(/executor/);
+  });
+
+  test('memory.cross-harness: só o wrap opcional está implementado; a correlação com attempt/lineage é fronteira', () => {
+    const c = get('memory.cross-harness');
+    expect(c.maturity).toBe('implemented');
+    expect(c.description).toMatch(/apenas o wrap opcional/);
+    expect(c.description).toMatch(/NÃO está implementada a correlação automática/);
+    expect((c.frontier ?? []).join(' ')).toMatch(/correlacionar automaticamente/);
   });
 
   test('limites conhecidos ficam visíveis como fronteira nas capacidades certas', () => {
     const frontier = listFrontier(ANIMA_CAPABILITY_REGISTRY_V0);
     const ids = frontier.map((f) => f.capabilityId);
-    for (const id of ['governance.candidate-recovery', 'governance.governed-integration', 'agency.verify-change', 'agency.self-dev-operator']) {
+    for (const id of ['governance.candidate-recovery', 'governance.governed-integration', 'agency.verify-change', 'agency.continuous-self-development']) {
       expect(ids).toContain(id);
     }
     const recovery = (get('governance.candidate-recovery').frontier ?? []).join(' ');

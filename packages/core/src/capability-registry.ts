@@ -282,7 +282,8 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   {
     id: 'memory.cross-harness',
     name: 'Continuidade entre harnesses',
-    description: 'Ledger e resume de sessão entre Claude Code e Codex correlacionados a attempt/lineage do Anima.',
+    description:
+      'Implementado apenas o wrap opcional do ai-memory nos native CLI backends (Claude Code e Codex CLI), com workstream configurado e mecanismos new/resume cobertos pelos testes. NÃO está implementada a correlação automática do ledger/resume com attempt/lineage do ANIMA.',
     domain: 'memory',
     maturity: 'implemented',
     dependsOn: ['agency.external-harness', 'memory.continuity'],
@@ -295,13 +296,16 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     },
     meaning: '≠ memory.continuity (checkpoint interno do Anima). Não fundir: esta é continuidade técnica de harnesses externos. Na integração atual o ai-memory é OPCIONAL nos backends nativos.',
     advancement:
-      'Existe em código e testes (wrap opcional nos backends Codex/Claude). Sem prova de uso real verificável aqui; comprovar exige uma attempt real com ledger correlacionado a attempt/lineage.',
+      'O wrap opcional existe em código e testes (backends Codex/Claude). Sem prova de uso real verificável aqui.',
     proofRefs: [
       { kind: 'commit', ref: '2e153ed', note: 'wrap do ai-memory nos backends Claude Code e Codex CLI (opcional)' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/native-cli-coder.ai-memory.test.ts' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/executor-selection.ai-memory.test.ts' },
     ],
-    frontier: ['Opcional e sem prova viva verificável; o ledger guarda prompts e arquivos em texto claro (risco declarado).'],
+    frontier: [
+      'Trabalho futuro: correlacionar automaticamente o ledger/resume do ai-memory com attempt/lineage do ANIMA (não implementado).',
+      'Opcional e sem prova viva verificável; o ledger guarda prompts e arquivos em texto claro (risco declarado).',
+    ],
     history: [
       {
         at: '2026-09-27',
@@ -666,7 +670,6 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'agency.recovery-correction',
       'governance.progressive-autonomy',
       'memory.architectural-memory',
-      'agency.self-dev-operator',
     ],
     target: {
       description: 'Norte do arco de agência: evolução própria contínua e segura sob mandato.',
@@ -675,6 +678,13 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     meaning: 'A capacidade mais ambiciosa do arco: o Anima evolui a si mesmo continuamente, dentro de limites explícitos e revogáveis.',
     advancement:
       'Detectar já é comprovado e formular já está implementado; faltam validar e incorporar sob autonomia progressiva comprovada, e consultar a própria história arquitetural antes de mudar.',
+    frontier: [
+      'O Claude Desktop ainda atua como operador bootstrap do ciclo de self-development.',
+      'Iniciar e continuar o ciclo ainda requer operação externa em pontos do fluxo.',
+      'Integração Git e push continuam atos humanos.',
+      'Migration e deploy continuam atos humanos.',
+      'A seleção final de executor ainda pode exigir decisão humana.',
+    ],
     history: [
       {
         at: '2026-09-27',
@@ -685,39 +695,6 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     ],
   },
 
-  {
-    id: 'agency.self-dev-operator',
-    name: 'Operador próprio do ciclo de self-development',
-    description:
-      'O Anima conduz sozinho, sob mandato, o ciclo operacional de self-development (iniciar, recuperar, integrar, publicar), sem um operador externo.',
-    domain: 'agency',
-    maturity: 'projected',
-    dependsOn: [
-      'governance.candidate-recovery',
-      'governance.governed-integration',
-      'agency.external-harness',
-      'agency.executor-discovery',
-      'agency.recovery-correction',
-    ],
-    target: { description: 'Fechar a dependência do operador externo no ciclo de self-development.' },
-    meaning:
-      'Hoje o Claude Desktop atua como operador bootstrap do ciclo: as peças governadas existem, mas quem as aciona e encadeia é um humano/assistente externo.',
-    advancement:
-      'Falta o Anima escolher executor, recuperar, integrar e publicar sob mandato. Integração, push, migration e deploy ainda são atos humanos.',
-    frontier: [
-      'O Claude Desktop é o operador bootstrap do ciclo de self-development.',
-      'Integração em dev, push para origin/dev, migration e deploy continuam atos humanos.',
-    ],
-    history: [
-      {
-        at: '2026-10-05',
-        change: 'introduced',
-        to: 'projected',
-        note: 'Fronteira declarada na reconciliação SDC-09; nenhuma parte é autônoma. Um gate verde ou um candidate aceito não tornam isto autônomo.',
-        refs: [{ kind: 'commit', ref: '930ea70', note: 'SDC-08 concluído e integrado em dev por ato humano' }],
-      },
-    ],
-  },
   {
     id: 'agency.recovery-evidence',
     name: 'Evidência entre recoveries',
@@ -1073,6 +1050,9 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement:
       'Falta o mecanismo que lê evidência e ajusta authority automaticamente, com processo reforçado para a política máxima. A readiness shadow existe, mas a promoção automática segue bloqueada por decisão ratificada.',
     proofRefs: [{ kind: 'milestone', ref: 'docs/marcos/005-autonomia-progressiva-e-identidade-una.md' }],
+    frontier: [
+      'Hoje a autoridade sobre integração, push, migration, deploy e seleção final de executor é exercida por humano; nenhum desses atos é promovido por evidência.',
+    ],
     history: [
       {
         at: '2026-09-19',

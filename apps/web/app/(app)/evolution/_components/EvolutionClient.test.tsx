@@ -583,10 +583,10 @@ describe('EvolutionClient — SDC-09 (fronteira e dependência humana)', () => {
     const { container } = render(<EvolutionClient {...buildProps()} />);
     fireEvent.click(screen.getByRole('button', { name: /Fronteira e humano/ }));
     expect(stateOf(container, 'governance.candidate-recovery')).toBe('strong');
-    expect(stateOf(container, 'agency.self-dev-operator')).toBe('strong');
+    expect(stateOf(container, 'agency.continuous-self-development')).toBe('strong');
     expect(stateOf(container, 'interaction.chat')).toBe('dim');
     expect(screen.getByRole('heading', { name: 'Onde o Anima ainda precisa de humano' })).toBeInTheDocument();
-    expect(screen.getByText(/O Claude Desktop é o operador bootstrap/)).toBeInTheDocument();
+    expect(screen.getByText(/O Claude Desktop ainda atua como operador bootstrap/)).toBeInTheDocument();
     expect(screen.getByText(/Não é encadeável/)).toBeInTheDocument();
     expect(screen.getByText(/integration_completed/)).toBeInTheDocument();
   });
