@@ -138,6 +138,28 @@ describe('wrap desligado: lançamento direto idêntico ao comportamento atual', 
   });
 });
 
+test('F: Codex direto ignora item.completed(type=error) sem turn.failed como fonte causal', async () => {
+  const providerMessage = "You've hit your usage limit. unexpected status 401 Unauthorized";
+  const { run, calls } = capturing(result({
+    exitCode: 2,
+    stdout: [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thread_f:isolado' }),
+      JSON.stringify({ type: 'item.completed', item: { type: 'error', message: providerMessage } }),
+    ].join('\n'),
+    stderr: '',
+  }));
+  const error: unknown = await codex(run).edit(editRequest(), workspace(ROOT), new AbortController().signal)
+    .catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect(error).toMatchObject({ message: 'Codex CLI terminou com exit 2' });
+  expect(error).toHaveProperty('nativeCliFailure', {
+    version: 1, category: 'unknown_native_cli_failure', exitCode: 2, threadId: 'thread_f:isolado',
+  });
+  expect(JSON.stringify(error)).not.toContain(providerMessage);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.file).toBe(CODEX_EXE);
+});
+
 describe('wrap Claude', () => {
   test('ai-memory é o processo pai; flags nativas preservadas sem --no-session-persistence e com --settings', async () => {
     const { run, calls } = capturing();
