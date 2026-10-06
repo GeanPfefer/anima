@@ -120,13 +120,21 @@ describe('wrap desligado: lançamento direto idêntico ao comportamento atual', 
     ]);
     expect(Object.keys(calls[0]!.options.env ?? {}).filter(k => k.startsWith('AI_MEMORY'))).toEqual([]);
   });
-  test('Codex: mesmos args de sempre (--sandbox/--cd)', async () => {
+  test('Codex: --json no caminho direto, preservando --sandbox/--cd e modelo/perfil', async () => {
     const { run, calls } = capturing();
-    await codex(run).edit(editRequest(), workspace(ROOT), new AbortController().signal);
+    const req = editRequest();
+    await codex(run).edit(req, workspace(ROOT), new AbortController().signal);
     expect(calls[0]!.file).toBe(CODEX_EXE);
-    expect(calls[0]!.args.slice(0, -1)).toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT]);
-    expect(buildCodexExecArgs({ executable: 'c', model: 'm', profile: 'p' }, ROOT, 'x'))
+    expect(calls[0]!.options.cwd).toBe(ROOT);
+    expect(Object.keys(calls[0]!.options.env ?? {}).filter(k => k.startsWith('AI_MEMORY'))).toEqual([]);
+    expect(calls[0]!.args.filter(a => a === '--json')).toEqual(['--json']);
+    expect(calls[0]!.args.slice(0, -1).filter(a => a !== '--json')).toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT]);
+    expect(calls[0]!.args.at(-1)).toContain(renderCoderTaskSection(req)!);
+    const withModelAndProfile = buildCodexExecArgs({ executable: 'c', model: 'm', profile: 'p' }, ROOT, 'x');
+    expect(withModelAndProfile.filter(a => a === '--json')).toEqual(['--json']);
+    expect(withModelAndProfile.filter(a => a !== '--json'))
       .toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT, '--model', 'm', '--profile', 'p', 'x']);
+    expect(withModelAndProfile.at(-1)).toBe('x');
   });
 });
 
@@ -180,6 +188,7 @@ describe('wrap Codex', () => {
     expect(call.args.slice(0, prefix.length)).toEqual(prefix);
     const native = call.args.slice(prefix.length);
     expect(native.slice(0, -1)).toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never']);
+    expect(native).not.toContain('--json');
     for (const flag of ['--sandbox', '-s', '--cd', '-C', '--profile']) expect(native).not.toContain(flag);
     expect(native).not.toContain(ROOT);
     // Simula a reescrita do ai-memory na volta ao Codex: `exec resume <id> <resto>` só com flags que o resume aceita.
