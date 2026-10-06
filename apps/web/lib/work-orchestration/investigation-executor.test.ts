@@ -1,4 +1,6 @@
 /** @jest-environment node */
+import * as worktree from './worktree';
+import { inspectInvestigationEvidence } from './investigation-executor';
 import { buildCoderTaskSpec, type WorkExecutorRequest, type WorkExecutorSignal } from '@anima/core';
 import { buildInvestigationPrompt, hasNewProhibitedInvestigationRefs, InvestigationExecutorAdapter } from './investigation-executor';
 import { CODEX_CLI_PROMPT_MAX_CHARS, buildCodexCliEnvironment } from './codex-cli-coder';
@@ -64,5 +66,25 @@ describe('investigation adapter request boundary', () => {
   test('only newly introduced forbidden names invalidate the snapshot; ordinary concurrent refs are outside this check', () => {
     expect(hasNewProhibitedInvestigationRefs(['refs/heads/anima-work/previous'], ['refs/heads/anima-work/previous'])).toBe(false);
     expect(hasNewProhibitedInvestigationRefs([], ['refs/tags/attempt-1'])).toBe(true);
+  });
+});
+
+describe('evidence host operation diagnostics', () => {
+  afterEach(() => jest.restoreAllMocks());
+  const result = { schemaVersion: 1 as const, outcome: 'conclusive' as const, gaps: [], findings: [{ statement: 'Model text', status: 'established' as const, evidence: [{ kind: 'file_at_commit' as const, commit: 'a'.repeat(40), path: 'private.txt', lines: { start: 1, end: 1 } }] }] };
+  const response = (stdout: string) => ({ command: 'git', stdout, stderr: '', exitCode: 0, cancelled: false, timedOut: false, durationMs: 1 });
+  test('non-blob object fails closed with indices', async () => {
+    jest.spyOn(worktree, 'runProcess').mockResolvedValueOnce(response('commit')).mockResolvedValueOnce(response(`100644 blob ${'b'.repeat(40)}\tprivate.txt`)).mockResolvedValueOnce(response('tree'));
+    expect(await inspectInvestigationEvidence('.', result)).toEqual({ ok: false, failure: { version: 1, stage: 'evidence', reason: 'evidence_object_not_blob', findingIndex: 0, evidenceIndex: 0 } });
+  });
+  test('git exception is classified without stack or stderr', async () => {
+    jest.spyOn(worktree, 'runProcess').mockRejectedValue(new Error('private stack stderr'));
+    const inspection = await inspectInvestigationEvidence('.', result);
+    expect(inspection).toMatchObject({ ok: false, failure: { reason: 'evidence_git_unavailable' } });
+    expect(JSON.stringify(inspection)).not.toContain('private');
+  });
+  test('content byte mismatch remains a hard failure', async () => {
+    jest.spyOn(worktree, 'runProcess').mockResolvedValueOnce(response('commit')).mockResolvedValueOnce(response(`100644 blob ${'b'.repeat(40)}\tprivate.txt`)).mockResolvedValueOnce(response('blob')).mockResolvedValueOnce(response('10')).mockResolvedValueOnce(response('short'));
+    expect(await inspectInvestigationEvidence('.', result)).toMatchObject({ ok: false, failure: { reason: 'evidence_content_invalid' } });
   });
 });

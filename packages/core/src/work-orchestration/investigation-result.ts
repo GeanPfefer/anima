@@ -145,6 +145,89 @@ export function normalizeInvestigationTransport(value: unknown): InvestigationRe
   return parseInvestigationResult(value);
 }
 
+
+/** Closed, content-free diagnostics; EOF range rejections deliberately stay separate. */
+export const INVESTIGATION_FAILURE_REASONS = {
+  transport: ['output_unavailable', 'output_too_large', 'output_not_json'],
+  structure: ['transport_shape_invalid', 'outcome_invariant_invalid', 'evidence_required_missing', 'limits_exceeded', 'evidence_ref_malformed', 'result_invalid'],
+  evidence: ['evidence_commit_missing', 'evidence_path_missing', 'evidence_path_not_regular_file', 'evidence_object_not_blob', 'evidence_file_too_large', 'evidence_content_invalid', 'evidence_git_unavailable'],
+  post_rejection: ['rejection_overflow', 'rejection_inconsistent', 'treated_result_invalid'],
+} as const;
+export type InvestigationFailureV1 = {
+  [S in keyof typeof INVESTIGATION_FAILURE_REASONS]: {
+    readonly version: 1; readonly stage: S; readonly reason: typeof INVESTIGATION_FAILURE_REASONS[S][number];
+    readonly findingIndex?: number; readonly evidenceIndex?: number;
+  }
+}[keyof typeof INVESTIGATION_FAILURE_REASONS];
+
+export function parseInvestigationFailure(value: unknown): InvestigationFailureV1 | null {
+  const v = object(value);
+  if (!v || !keys(v, ['version', 'stage', 'reason', 'findingIndex', 'evidenceIndex']) || v.version !== 1
+    || typeof v.stage !== 'string' || !Object.prototype.hasOwnProperty.call(INVESTIGATION_FAILURE_REASONS, v.stage)) return null;
+  const reasons: readonly string[] = INVESTIGATION_FAILURE_REASONS[v.stage as keyof typeof INVESTIGATION_FAILURE_REASONS];
+  if (typeof v.reason !== 'string' || !reasons.includes(v.reason)) return null;
+  for (const key of ['findingIndex', 'evidenceIndex']) if (Object.prototype.hasOwnProperty.call(v, key)
+    && (v.stage !== 'evidence' || typeof v[key] !== 'number' || !Number.isSafeInteger(v[key]) || (v[key] as number) < 0)) return null;
+  return { version: 1, stage: v.stage, reason: v.reason,
+    ...(v.findingIndex !== undefined ? { findingIndex: v.findingIndex } : {}),
+    ...(v.evidenceIndex !== undefined ? { evidenceIndex: v.evidenceIndex } : {}) } as InvestigationFailureV1;
+}
+
+/** The existing normalizer is authoritative: classification never expands acceptance. */
+export function diagnoseInvestigationTransport(value: unknown): InvestigationFailureV1 | null {
+  if (normalizeInvestigationTransport(value)) return null;
+  const fail = (reason: typeof INVESTIGATION_FAILURE_REASONS.structure[number]): InvestigationFailureV1 => ({ version: 1, stage: 'structure', reason });
+  const root = object(value);
+  if (!root || !keys(root, ['schemaVersion', 'findings', 'gaps', 'outcome']) || !Array.isArray(root.findings)) return fail('transport_shape_invalid');
+  if (root.findings.length > 40 || (Array.isArray(root.gaps) && root.gaps.length > 40)) return fail('limits_exceeded');
+  for (const raw of root.findings) {
+    const f = object(raw);
+    if (!f || !keys(f, ['statement', 'status', 'evidence']) || !Array.isArray(f.evidence)) return fail('transport_shape_invalid');
+    if (f.evidence.length > 20) return fail('limits_exceeded');
+    if ((f.status === 'established' || f.status === 'inferred') && f.evidence.length === 0) return fail('evidence_required_missing');
+    for (const rawEvidence of f.evidence) {
+      const e = object(rawEvidence);
+      if (!e || !keys(e, e.kind === 'commit' ? ['kind', 'commit'] : ['kind', 'commit', 'path', 'lines'])
+        || (e.kind === 'file_at_commit' && !Object.prototype.hasOwnProperty.call(e, 'lines'))) return fail('transport_shape_invalid');
+      if (!isInvestigationCommit(e.commit)) return fail('evidence_ref_malformed');
+      if (e.kind === 'file_at_commit') {
+        const lines = e.lines == null ? null : object(e.lines);
+        if (!isInvestigationPath(e.path) || (e.lines != null && (!lines || !keys(lines, ['start', 'end'])
+          || typeof lines.start !== 'number' || typeof lines.end !== 'number' || !Number.isSafeInteger(lines.start)
+          || !Number.isSafeInteger(lines.end) || lines.start < 1 || lines.end < lines.start))) return fail('evidence_ref_malformed');
+      }
+    }
+  }
+  if (Array.isArray(root.gaps) && (root.outcome === 'conclusive' ? root.findings.length === 0
+    : (root.outcome === 'partial' || root.outcome === 'inconclusive') && root.gaps.length === 0)) return fail('outcome_invariant_invalid');
+  if (root.schemaVersion === 1 && Array.isArray(root.gaps) && root.gaps.every(g => text(g))
+    && ['conclusive', 'partial', 'inconclusive'].includes(String(root.outcome))) {
+    const parts = root.findings.map(f => parseInvestigationResult({ schemaVersion: 1, findings: [f], gaps: [], outcome: 'conclusive' }));
+    if (parts.every(p => p !== null)) {
+      const normalized = { schemaVersion: 1, findings: parts.flatMap(p => p!.findings), gaps: root.gaps, outcome: root.outcome };
+      if (JSON.stringify(normalized).length > 100_000) return fail('limits_exceeded');
+    }
+  }
+  return fail('result_invalid');
+}
+
+export function diagnoseInvestigationRejectionTreatment(result: InvestigationResultV1, rejections: readonly InvestigationEvidenceRejectionV1[]): InvestigationFailureV1 | null {
+  if (applyInvestigationEvidenceRejections(result, rejections)) return null;
+  const fail = (reason: typeof INVESTIGATION_FAILURE_REASONS.post_rejection[number]): InvestigationFailureV1 => ({ version: 1, stage: 'post_rejection', reason });
+  if (rejections.length > 40 || result.gaps.length >= 40) return fail('rejection_overflow');
+  if (!parseInvestigationResult(result)) return fail('treated_result_invalid');
+  const seen = new Set<string>();
+  for (const r of rejections) {
+    const e = result.findings[r.findingIndex]?.evidence[r.evidenceIndex];
+    const key = `${r.findingIndex}:${r.evidenceIndex}`;
+    if (![r.findingIndex, r.evidenceIndex, r.actualLineCount].every(v => Number.isSafeInteger(v) && v >= 0)
+      || !e || e.kind !== 'file_at_commit' || !e.lines || seen.has(key)
+      || r.reason !== (e.lines.start > r.actualLineCount ? 'line_start_out_of_range' : e.lines.end > r.actualLineCount ? 'line_end_out_of_range' : null)) return fail('rejection_inconsistent');
+    seen.add(key);
+  }
+  return fail('treated_result_invalid');
+}
+
 /** Codex strict output schema: every object closes its keys and requires every field.
  * Optional line ranges are transported as null, then normalized to absence. */
 export const INVESTIGATION_OUTPUT_SCHEMA = {

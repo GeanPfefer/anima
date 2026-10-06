@@ -2,9 +2,9 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  applyInvestigationEvidenceRejections, INVESTIGATION_OUTPUT_SCHEMA, isInvestigationCommit, parseInvestigationResult, normalizeInvestigationTransport, parseInvestigationExecution, renderInvestigationEvidence, renderInvestigationSummary,
+  diagnoseInvestigationTransport, diagnoseInvestigationRejectionTreatment, applyInvestigationEvidenceRejections, INVESTIGATION_OUTPUT_SCHEMA, isInvestigationCommit, parseInvestigationResult, normalizeInvestigationTransport, parseInvestigationExecution, renderInvestigationEvidence, renderInvestigationSummary,
   validateEffectClassCoherence, validateWorkExecutorRequest,
-  type InvestigationEvidenceRejectionV1, type InvestigationExecutionV1, type InvestigationResultV1, type WorkExecutorAdapter,
+  type InvestigationFailureV1, type InvestigationEvidenceRejectionV1, type InvestigationExecutionV1, type InvestigationResultV1, type WorkExecutorAdapter,
   type WorkExecutorRequest, type WorkExecutorSignal, type WorkExecutorSignalInput,
 } from '@anima/core';
 import { buildCodexCliEnvironment, resolveCodexCliConfig, CODEX_CLI_DEFAULT_MODEL, CODEX_CLI_PROMPT_MAX_CHARS, type CodexCliProcessRunner } from './codex-cli-coder';
@@ -36,26 +36,37 @@ export const hasNewProhibitedInvestigationRefs = (before: readonly string[], aft
 
 /** Resolve git objects, not files on the live checkout. Blob mode excludes trees,
  * symlinks and submodules. Byte size cross-check fails closed on runProcess truncation. */
-export async function inspectInvestigationEvidence(repo: string, result: InvestigationResultV1): Promise<{ ok: false } | { ok: true; rejections: readonly InvestigationEvidenceRejectionV1[] }> {
-  if (!parseInvestigationResult(result)) return { ok: false };
+export async function inspectInvestigationEvidence(repo: string, result: InvestigationResultV1): Promise<{ ok: false; failure: InvestigationFailureV1 } | { ok: true; rejections: readonly InvestigationEvidenceRejectionV1[] }> {
+  if (!parseInvestigationResult(result)) return { ok: false, failure: { version: 1, stage: 'structure', reason: 'result_invalid' } };
   const rejections: InvestigationEvidenceRejectionV1[] = [];
   for (const [findingIndex, finding] of result.findings.entries()) for (const [evidenceIndex, evidence] of finding.evidence.entries()) {
-    const commit = await git(repo, ['cat-file', '-t', evidence.commit]);
-    if (!successful(commit) || commit.stdout.trim() !== 'commit') return { ok: false };
-    if (evidence.kind === 'commit') continue;
-    const entry = await git(repo, ['ls-tree', evidence.commit, '--', evidence.path]);
-    if (!successful(entry) || !/^100(?:644|755) blob [a-f0-9]{40}\t/.test(entry.stdout)) return { ok: false };
-    const objectName = `${evidence.commit}:${evidence.path}`;
-    const type = await git(repo, ['cat-file', '-t', objectName]);
-    if (!successful(type) || type.stdout.trim() !== 'blob') return { ok: false };
-    if (evidence.lines) {
-      const size = await git(repo, ['cat-file', '-s', objectName]);
-      if (!successful(size) || !/^\d+\s*$/.test(size.stdout) || Number(size.stdout) > 150_000) return { ok: false };
-      const content = await git(repo, ['cat-file', 'blob', objectName]);
-      if (!successful(content) || Buffer.byteLength(content.stdout, 'utf8') !== Number(size.stdout) || content.stdout.includes('\0')) return { ok: false };
-      const count = content.stdout.length === 0 ? 0 : content.stdout.split('\n').length - (content.stdout.endsWith('\n') ? 1 : 0);
-      if (evidence.lines.end > count) rejections.push({ findingIndex, evidenceIndex, actualLineCount: count, reason: evidence.lines.start > count ? 'line_start_out_of_range' : 'line_end_out_of_range' });
-    }
+    const fail = (reason: Extract<InvestigationFailureV1, { stage: 'evidence' }>['reason']) =>
+      ({ ok: false as const, failure: { version: 1 as const, stage: 'evidence' as const, reason, findingIndex, evidenceIndex } });
+    try {
+      const unavailable = (r: Awaited<ReturnType<typeof git>>) => r.cancelled || r.timedOut || r.exitCode === null;
+      const commit = await git(repo, ['cat-file', '-t', evidence.commit]);
+      if (unavailable(commit)) return fail('evidence_git_unavailable');
+      if (!successful(commit) || commit.stdout.trim() !== 'commit') return fail('evidence_commit_missing');
+      if (evidence.kind === 'commit') continue;
+      const entry = await git(repo, ['ls-tree', evidence.commit, '--', evidence.path]);
+      if (!successful(entry)) return fail('evidence_git_unavailable');
+      if (entry.stdout === '') return fail('evidence_path_missing');
+      if (!/^100(?:644|755) blob [a-f0-9]{40}\t/.test(entry.stdout)) return fail('evidence_path_not_regular_file');
+      const objectName = `${evidence.commit}:${evidence.path}`;
+      const type = await git(repo, ['cat-file', '-t', objectName]);
+      if (!successful(type)) return fail('evidence_git_unavailable');
+      if (type.stdout.trim() !== 'blob') return fail('evidence_object_not_blob');
+      if (evidence.lines) {
+        const size = await git(repo, ['cat-file', '-s', objectName]);
+        if (!successful(size) || !/^\d+\s*$/.test(size.stdout)) return fail('evidence_git_unavailable');
+        if (Number(size.stdout) > 150_000) return fail('evidence_file_too_large');
+        const content = await git(repo, ['cat-file', 'blob', objectName]);
+        if (!successful(content)) return fail('evidence_git_unavailable');
+        if (Buffer.byteLength(content.stdout, 'utf8') !== Number(size.stdout) || content.stdout.includes('\0')) return fail('evidence_content_invalid');
+        const count = content.stdout.length === 0 ? 0 : content.stdout.split('\n').length - (content.stdout.endsWith('\n') ? 1 : 0);
+        if (evidence.lines.end > count) rejections.push({ findingIndex, evidenceIndex, actualLineCount: count, reason: evidence.lines.start > count ? 'line_start_out_of_range' : 'line_end_out_of_range' });
+      }
+    } catch { return fail('evidence_git_unavailable'); }
   }
   return { ok: true, rejections };
 }
@@ -101,8 +112,8 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
   }
 
   private async perform(request: WorkExecutorRequest, signal: AbortSignal): Promise<WorkExecutorSignalInput> {
-    const error = (retryable: boolean, message: string, code: 'invalid_request' | 'execution_failed' = 'execution_failed'): WorkExecutorSignalInput =>
-      ({ kind: 'error', code, retryable, message, handoffReference: 'investigation:failure' });
+    const error = (retryable: boolean, message: string, code: 'invalid_request' | 'execution_failed' = 'execution_failed', investigationFailure?: InvestigationFailureV1): WorkExecutorSignalInput =>
+      ({ kind: 'error', code, retryable, message, handoffReference: 'investigation:failure', ...(investigationFailure ? { investigationFailure } : {}) });
     const invalid = validateEffectClassCoherence(request.effectClass, request.permissions, this.id) ?? validateWorkExecutorRequest(request);
     if (invalid) return error(false, invalid, 'invalid_request');
     const target = this.options.targets.resolve(request.target.reference);
@@ -117,6 +128,7 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
     let snapshot: string | undefined;
     let attached = false;
     let checkingIntegrity = false;
+    let transportFailure: InvestigationFailureV1 | undefined;
     let outcome: WorkExecutorSignalInput = error(true, 'Investigation host operation failed.');
     try {
       const before = await readProhibitedInvestigationRefs(target.repoRoot, request.attemptId);
@@ -152,13 +164,26 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
       } else if (!cli || !successful(cli) || Date.now() >= deadline) {
         outcome = error(true, 'Investigation CLI failed or deadline expired.');
       } else {
+        let raw: unknown;
+        transportFailure = { version: 1, stage: 'transport', reason: 'output_unavailable' };
         const size = await stat(outputPath);
-        if (!size.isFile() || size.size > 100_000) throw new Error('output_invalid');
-        const result = normalizeInvestigationTransport(JSON.parse(await readFile(outputPath, 'utf8')) as unknown);
-        const inspection = result ? await inspectInvestigationEvidence(target.repoRoot, result) : { ok: false as const };
-        const treated = result && inspection.ok ? applyInvestigationEvidenceRejections(result, inspection.rejections) : null;
+        if (!size.isFile()) throw new Error('output_invalid');
+        if (size.size > 100_000) {
+          transportFailure = { version: 1, stage: 'transport', reason: 'output_too_large' };
+          throw new Error('output_invalid');
+        }
+        const output = await readFile(outputPath, 'utf8');
+        transportFailure = { version: 1, stage: 'transport', reason: 'output_not_json' };
+        raw = JSON.parse(output) as unknown;
+        transportFailure = undefined;
+        const result = normalizeInvestigationTransport(raw);
+        const inspection = result ? await inspectInvestigationEvidence(target.repoRoot, result) : null;
+        const treated = result && inspection?.ok ? applyInvestigationEvidenceRejections(result, inspection.rejections) : null;
         if (!treated) {
-          outcome = error(true, 'Investigation structure or evidence does not resolve.');
+          const failure = !result ? diagnoseInvestigationTransport(raw)
+            : inspection && !inspection.ok ? inspection.failure
+            : inspection?.ok ? diagnoseInvestigationRejectionTreatment(result, inspection.rejections) : null;
+          outcome = error(true, 'Investigation structure or evidence does not resolve.', 'execution_failed', failure ?? undefined);
         } else {
           const result = treated.result;
           const investigation: InvestigationExecutionV1 = { ...result, hostVerification: { ...(treated.diagnostics.length ? { evidenceDiagnostics: treated.diagnostics } : {}), baseSha: target.baseSha, snapshotClean: true, snapshotHead: target.baseSha, snapshotDetached: true, prohibitedRefsBefore: before } };
@@ -172,7 +197,7 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
       // Diagnostics never copy raw CLI output, secrets, or absolute paths into signals.
       outcome = !checkingIntegrity && signal.aborted
         ? { kind: 'cancelled', acknowledged: true, handoffReference: 'investigation:cancelled' }
-        : error(!checkingIntegrity, 'Investigation host operation or output validation failed.');
+        : error(!checkingIntegrity, 'Investigation host operation or output validation failed.', 'execution_failed', transportFailure);
     } finally {
       if (attached && snapshot) {
         const removed = await git(target.repoRoot, ['worktree', 'remove', '--force', snapshot]);

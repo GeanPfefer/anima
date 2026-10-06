@@ -283,3 +283,26 @@ describe('validateWorkExecutorTranscript — worktreeHandoff opcional (INT-05)',
     expect(validateWorkExecutorTranscript([resultSignal({ ...validHandoff(), attemptId: 'outra-tentativa' })])).toMatch(/correlação/i);
   });
 });
+
+describe('investigation error diagnostic contract', () => {
+  const failure = { version: 1, stage: 'evidence', reason: 'evidence_path_missing', findingIndex: 0, evidenceIndex: 1 };
+  const error = (diagnosis: unknown, handoffReference = 'investigation:failure'): WorkExecutorSignal => ({
+    kind: 'error', code: 'execution_failed', retryable: true, message: 'Investigation structure or evidence does not resolve.', handoffReference,
+    investigationFailure: diagnosis, attemptId: 'attempt', workItemId: 'work', approvedProposalVersion: 1, sequence: 1, origin: 'executor',
+  } as WorkExecutorSignal);
+  test('accepts sanitized diagnosis and historical absence', () => {
+    expect(validateWorkExecutorTranscript([error(failure)], 'investigation-v1')).toBeNull();
+    expect(validateWorkExecutorTranscript([error(failure)], 'worktree-v1')).not.toBeNull();
+    const { investigationFailure: _, ...historical } = error(failure) as Extract<WorkExecutorSignal, { kind: 'error' }>;
+    expect(validateWorkExecutorTranscript([historical])).toBeNull();
+  });
+  test.each([
+    { ...failure, path: 'private' }, { ...failure, reason: 'unknown' }, { ...failure, stage: 'transport' },
+    { ...failure, message: 'raw output' }, { ...failure, findingIndex: -1 }, { ...failure, evidenceIndex: 1.5 },
+    { ...failure, evidenceIndex: Number.MAX_SAFE_INTEGER + 1 }, { ...failure, version: 2 }, null, undefined,
+  ])('refuses invalid payload %p', value => expect(validateWorkExecutorTranscript([error(value)])).not.toBeNull());
+  test('refuses programming error and non-error signals', () => {
+    expect(validateWorkExecutorTranscript([error(failure, 'checkpoint:failure')])).not.toBeNull();
+    expect(validateWorkExecutorTranscript([{ ...error(failure), kind: 'progress' } as WorkExecutorSignal])).not.toBeNull();
+  });
+});

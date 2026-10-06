@@ -7,7 +7,7 @@ import type { WorkCapability, WorkContextReference, WorkResultValidation } from 
 import { parseWorktreeHandoff, type WorktreeHandoffV1 } from './worktree-handoff';
 import type { Json } from '@anima/types';
 import { parseEffectClass, type WorkEffectClass } from './effect-class';
-import { parseInvestigationExecution, renderInvestigationSummary, type InvestigationExecutionV1 } from './investigation-result';
+import { parseInvestigationFailure, parseInvestigationExecution, renderInvestigationSummary, type InvestigationFailureV1, type InvestigationExecutionV1 } from './investigation-result';
 
 export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
   /** SDC-10 projection; absence preserves the existing mutating execution lane. */
@@ -116,7 +116,7 @@ export type WorkExecutorSignal =
   | (CorrelatedSignal & { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 })
   | (CorrelatedSignal & { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] })
   | (CorrelatedSignal & { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1; readonly investigation?: InvestigationExecutionV1 })
-  | (CorrelatedSignal & { readonly kind: 'error'; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string })
+  | (CorrelatedSignal & { readonly kind: 'error'; readonly investigationFailure?: InvestigationFailureV1; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string })
   | (CorrelatedSignal & { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string });
 
 export type WorkExecutorErrorCode = 'invalid_request' | 'execution_failed' | 'attempt_payload_conflict' | 'contract_violation';
@@ -125,7 +125,7 @@ export type WorkExecutorSignalInput =
   | { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 }
   | { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] }
   | { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1; readonly investigation?: InvestigationExecutionV1 }
-  | { readonly kind: 'error'; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string }
+  | { readonly kind: 'error'; readonly investigationFailure?: InvestigationFailureV1; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string }
   | { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string };
 
 export interface WorkExecutorAdapter {
@@ -199,7 +199,7 @@ export function validateWorkCheckpoint(checkpoint: WorkCheckpointV1): string | n
   return null;
 }
 
-export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSignal[]): string | null {
+export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSignal[], executorId?: string): string | null {
   const correlation = signals[0];
   if (!correlation) return 'O executor não emitiu sinais.';
   let terminalCount = 0;
@@ -207,6 +207,15 @@ export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSig
   for (const signal of signals) {
     if (signal.sequence !== index + 1) return 'A sequência de sinais não é contínua.';
     if (signal.attemptId !== correlation.attemptId || signal.workItemId !== correlation.workItemId || signal.approvedProposalVersion !== correlation.approvedProposalVersion || signal.origin !== 'executor') return 'Um sinal perdeu a correlação da tentativa.';
+    if (Object.prototype.hasOwnProperty.call(signal, 'investigationFailure')) {
+      // Signals carry no adapter id; the existing investigation handoff namespace
+      // is the lane discriminator at this contract boundary.
+      if (Object.keys(signal).some(key => !['kind', 'code', 'message', 'retryable', 'handoffReference', 'investigationFailure', 'attemptId', 'workItemId', 'approvedProposalVersion', 'origin', 'sequence'].includes(key))
+        || (executorId !== undefined && executorId !== 'investigation-v1')
+        || signal.kind !== 'error' || signal.handoffReference !== 'investigation:failure'
+        || signal.code !== 'execution_failed' || typeof signal.retryable !== 'boolean'
+        || !parseInvestigationFailure(signal.investigationFailure)) return 'Diagn?stico de investiga??o inv?lido.';
+    }
     if (signal.kind === 'decision_required') {
       const ids = new Set(signal.options.map(option => option.id));
       if (!nonBlank(signal.explanation) || signal.options.length < 2 || ids.size !== signal.options.length

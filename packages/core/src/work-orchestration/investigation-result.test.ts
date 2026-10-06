@@ -1,3 +1,4 @@
+import { diagnoseInvestigationTransport, diagnoseInvestigationRejectionTreatment, parseInvestigationFailure } from './investigation-result';
 import { applyInvestigationEvidenceRejections, type InvestigationResultV1, computeInvestigationVerifierOpinion, INVESTIGATION_OUTPUT_SCHEMA, normalizeInvestigationTransport, parseInvestigationExecution, parseInvestigationResult, renderInvestigationSummary } from './investigation-result';
 
 const commit = 'a'.repeat(40);
@@ -129,5 +130,76 @@ describe('host line-range rejections', () => {
     expect(parseInvestigationExecution({ ...execution, hostVerification: { ...hostVerification, evidenceDiagnostics: Array(41).fill(treated.diagnostics[0]) } })).toBeNull();
     expect(normalizeInvestigationTransport({ ...valid(), evidenceDiagnostics: treated.diagnostics })).toBeNull();
     expect(normalizeInvestigationTransport(execution)).toBeNull();
+  });
+});
+
+describe('closed investigation failure diagnostics', () => {
+  const withFinding = (patch: Record<string, unknown>) => ({ ...valid(), findings: [{ ...valid().findings[0], ...patch }] });
+  test.each([
+    [null, 'transport_shape_invalid'],
+    [{ ...valid(), extra: 'raw' }, 'transport_shape_invalid'],
+    [withFinding({ evidence: null }), 'transport_shape_invalid'],
+    [withFinding({ evidence: [{ kind: 'file_at_commit', commit, path: 'src/file.ts' }] }), 'transport_shape_invalid'],
+    [{ ...valid(), findings: [] }, 'outcome_invariant_invalid'],
+    [{ ...valid(), outcome: 'partial' }, 'outcome_invariant_invalid'],
+    [withFinding({ evidence: [] }), 'evidence_required_missing'],
+    [{ ...valid(), findings: Array(41).fill(valid().findings[0]) }, 'limits_exceeded'],
+    [{ ...valid(), gaps: Array(41).fill('Gap') }, 'limits_exceeded'],
+    [withFinding({ evidence: Array(21).fill({ kind: 'commit', commit }) }), 'limits_exceeded'],
+    [withFinding({ evidence: [{ kind: 'commit', commit: 'bad' }] }), 'evidence_ref_malformed'],
+    [withFinding({ evidence: [{ kind: 'file_at_commit', commit, path: '../bad', lines: null }] }), 'evidence_ref_malformed'],
+    [withFinding({ evidence: [{ kind: 'file_at_commit', commit, path: 'file', lines: { start: 2, end: 1 } }] }), 'evidence_ref_malformed'],
+    [withFinding({ statement: '' }), 'result_invalid'],
+    [{ ...valid(), schemaVersion: 2 }, 'result_invalid'],
+    [{ ...valid(), findings: Array(40).fill({ ...valid().findings[0], statement: 'x'.repeat(2000) }), gaps: Array(40).fill('g'.repeat(2000)) }, 'limits_exceeded'],
+  ])('classifies invalid input without changing normalization', (value, reason) => {
+    expect(normalizeInvestigationTransport(value)).toBeNull();
+    expect(diagnoseInvestigationTransport(value)).toEqual({ version: 1, stage: 'structure', reason });
+  });
+  test('normalizer and diagnostic agree for varied inputs', () => {
+    for (const value of [valid(), {}, [], null, true, { ...valid(), outcome: 'unknown' }, withFinding({ status: 'unknown' }), withFinding({ evidence: [{ kind: 'url', commit }] }), { ...valid(), gaps: [4] }]) {
+      expect(diagnoseInvestigationTransport(value) !== null).toBe(normalizeInvestigationTransport(value) === null);
+    }
+  });
+  test('post-rejection categories and consistency preserve EOF treatment', () => {
+    const result = parseInvestigationResult(valid())!;
+    const rejection = { findingIndex: 0, evidenceIndex: 0, actualLineCount: 1, reason: 'line_end_out_of_range' as const };
+    const cases = [
+      { result, rejections: [], reason: null },
+      { result, rejections: [rejection], reason: null },
+      { result, rejections: Array(41).fill(rejection), reason: 'rejection_overflow' },
+      { result: { ...result, gaps: Array(40).fill('gap') }, rejections: [rejection], reason: 'rejection_overflow' },
+      { result, rejections: [rejection, rejection], reason: 'rejection_inconsistent' },
+      { result, rejections: [{ ...rejection, evidenceIndex: 99 }], reason: 'rejection_inconsistent' },
+      { result, rejections: [{ ...rejection, actualLineCount: 10 }], reason: 'rejection_inconsistent' },
+      { result, rejections: [{ ...rejection, findingIndex: -1 }], reason: 'rejection_inconsistent' },
+      { result: { ...result, schemaVersion: 2 } as unknown as InvestigationResultV1, rejections: [rejection], reason: 'treated_result_invalid' },
+    ];
+    for (const c of cases) {
+      const diagnosis = diagnoseInvestigationRejectionTreatment(c.result, c.rejections);
+      expect(diagnosis?.reason ?? null).toBe(c.reason);
+      expect(diagnosis !== null).toBe(applyInvestigationEvidenceRejections(c.result, c.rejections) === null);
+    }
+  });
+  test('treated result exceeding serialized limit is diagnosed', () => {
+    const seed = parseInvestigationResult(valid())!;
+    const finding = { ...seed.findings[0]!, statement: 'x'.repeat(2000) };
+    const base = { ...seed, findings: Array(40).fill(finding), gaps: [] as string[] };
+    const remaining = 100_000 - JSON.stringify(base).length;
+    // Fill to just below the parser boundary with bounded individual gaps.
+    const gaps: string[] = [];
+    let budget = remaining - 10;
+    while (budget > 3) { const length = Math.min(2000, budget - 3); gaps.push('g'.repeat(length)); budget -= length + 3; }
+    const result = { ...base, gaps };
+    expect(parseInvestigationResult(result)).not.toBeNull();
+    const rejections = [{ findingIndex: 0, evidenceIndex: 0, actualLineCount: 1, reason: 'line_end_out_of_range' as const }];
+    expect(applyInvestigationEvidenceRejections(result, rejections)).toBeNull();
+    expect(diagnoseInvestigationRejectionTreatment(result, rejections)).toEqual({ version: 1, stage: 'post_rejection', reason: 'treated_result_invalid' });
+  });
+  test('failure parser accepts transport categories and rejects open payloads', () => {
+    for (const reason of ['output_unavailable', 'output_too_large', 'output_not_json']) {
+      expect(parseInvestigationFailure({ version: 1, stage: 'transport', reason })).not.toBeNull();
+    }
+    expect(parseInvestigationFailure({ version: 1, stage: 'transport', reason: 'output_unavailable', raw: 'private' })).toBeNull();
   });
 });

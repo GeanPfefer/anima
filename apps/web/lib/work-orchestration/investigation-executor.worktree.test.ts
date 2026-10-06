@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildCoderTaskSpec, parseInvestigationResult, renderInvestigationSummary, validateWorkExecutorTranscript, type WorkExecutorRequest, type WorkExecutorSignal } from '@anima/core';
@@ -29,12 +29,12 @@ describe('investigation host with real git', () => {
     objective: 'Investigate', includedScope: ['file.txt'], excludedScope: ['secrets'], permissions: ['workspace_read'], target: { kind: 'project', reference: 'fixture' },
     validationCriteria: [{ label: 'refs' }], limits: { maxDurationMinutes: 1 }, contextReferences: [],
     taskSpec: buildCoderTaskSpec({ workItemId: 'work-1', approvedProposalVersion: 1, proposal: { summary: 'Investigate', objective: 'Investigate', includedScope: ['file.txt'], excludedScope: ['secrets'], expectedEffects: [], risks: [] }, spec: { validationCriteria: [{ label: 'refs' }] }, verifierRequirement: 'advisory', contextReferences: [] }) });
-  async function execute(action?: (snapshot: string, args: readonly string[]) => Promise<unknown>, output: unknown = inconclusive) {
+  async function execute(action?: (snapshot: string, args: readonly string[]) => Promise<unknown>, output: unknown = inconclusive, transport?: { bytes: string | null }) {
     const run: CodexCliProcessRunner = async (_file, args, options) => {
       expect(args.slice(0, 8)).toEqual(['exec', '--sandbox', 'read-only', '-c', 'approval_policy=never', '--ephemeral', '--cd', options.cwd]);
       expect(options.env).not.toHaveProperty('OPENAI_API_KEY'); expect(options.timeoutMs).toBeGreaterThan(0);
       await action?.(options.cwd, args);
-      await writeFile(args[args.indexOf('-o') + 1]!, JSON.stringify(output));
+      if (!transport || transport.bytes !== null) await writeFile(args[args.indexOf('-o') + 1]!, transport ? transport.bytes! : JSON.stringify(output));
       return { command: 'fake', exitCode: 0, stdout: '', stderr: '', durationMs: 1, timedOut: false, cancelled: false };
     };
     const adapter = new InvestigationExecutorAdapter({ targets: { resolve: () => ({ repoRoot: repo, baseSha: sha }) }, run, environmentSource: { ANIMA_CODEX_CLI_PATH: 'codex', OPENAI_API_KEY: 'secret' } });
@@ -47,6 +47,7 @@ describe('investigation host with real git', () => {
     await git(repo, ['branch', 'anima-work/old']); await writeFile(join(repo, 'operator.txt'), 'operator');
     const signals = await execute(async () => { await git(repo, ['branch', 'operator-branch']); });
     expect(signals[0]).toMatchObject({ kind: 'result', investigation: { outcome: 'inconclusive', hostVerification: { snapshotClean: true, snapshotDetached: true, baseSha: sha, prohibitedRefsBefore: ['refs/heads/anima-work/old'] } } });
+    expect(signals[0]).not.toHaveProperty('investigationFailure');
     expect(signals[0]).not.toHaveProperty('worktreeHandoff'); expect(validateWorkExecutorTranscript(signals)).toBeNull();
     expect(await git(repo, ['status', '--porcelain'])).toContain('operator.txt');
   });
@@ -82,6 +83,7 @@ describe('investigation host with real git', () => {
     expect(await resolveInvestigationEvidence(repo, parsed)).toBe(false);
     const signal = (await execute(undefined, output))[0]!;
     expect(signal).toMatchObject({ kind: 'result', resultReferences: [], investigation: { outcome: 'inconclusive', findings: [{ statement: 'Original finding', status: 'undetermined', evidence: [] }], hostVerification: { evidenceDiagnostics: [{ requestedLines: { start: 1, end: 3 }, actualLineCount: 2, reason: 'line_end_out_of_range', findingDowngraded: true }] } } });
+    expect(signal).not.toHaveProperty('investigationFailure');
     expect(validateWorkExecutorTranscript([signal])).toBeNull();
   });
   test.each([[87, 17, 89], [97, 61, 98], [133, 113, 134]])('EOF fixture %i lines removes requested %i?%i and preserves valid findings', async (count, start, end) => {
@@ -94,6 +96,7 @@ describe('investigation host with real git', () => {
     expect(signal).toMatchObject({ kind: 'result', resultReferences: [`range.txt@${sha}:1-${count}`], investigation: { outcome: 'partial', findings: [{ status: 'undetermined', evidence: [] }, { status: 'established', evidence: [valid] }], hostVerification: { evidenceDiagnostics: [{ findingIndex: 0, evidenceIndex: 0, commit: sha, path: 'range.txt', requestedLines: { start, end }, actualLineCount: count, reason: 'line_end_out_of_range', findingDowngraded: true }] } } });
     if (signal.kind !== 'result' || !signal.investigation) throw new Error('expected investigation result');
     expect(signal.summary).toBe(renderInvestigationSummary(signal.investigation));
+    expect(signal).not.toHaveProperty('investigationFailure');
     expect(validateWorkExecutorTranscript([signal])).toBeNull();
     expect(await resolveInvestigationEvidence(repo, signal.investigation)).toBe(true);
   });
@@ -140,4 +143,55 @@ describe('investigation host with real git', () => {
     expect((await execute(undefined, { ...inconclusive, gaps: [] }))[0]).toMatchObject({ kind: 'error', retryable: true });
     expect((await execute(async snapshot => { await writeFile(join(snapshot, 'untracked.txt'), 'bad'); }, { ...inconclusive, gaps: [] }))[0]).toMatchObject({ kind: 'error', retryable: false });
   });
+  test.each([
+    [null, 'output_unavailable'], ['x'.repeat(100_001), 'output_too_large'], ['private model text', 'output_not_json'],
+  ])('classifies transport failure without raw content: %s', async (bytes, reason) => {
+    const signal = (await execute(undefined, inconclusive, { bytes }))[0]!;
+    expect(signal).toMatchObject({ kind: 'error', retryable: true, message: 'Investigation host operation or output validation failed.', investigationFailure: { version: 1, stage: 'transport', reason } });
+    expect(JSON.stringify(signal)).not.toContain('private model text');
+    expect(validateWorkExecutorTranscript([signal])).toBeNull();
+  });
+  test.each([
+    ['missing.txt', 'evidence_path_missing'], ['large.txt', 'evidence_file_too_large'], ['binary.txt', 'evidence_content_invalid'],
+  ])('classifies evidence %s and preserves privacy', async (path, reason) => {
+    await writeFile(join(repo, 'large.txt'), 'x'.repeat(150_001));
+    await writeFile(join(repo, 'binary.txt'), 'private content\0');
+    await git(repo, ['add', '.']); await git(repo, ['commit', '-m', 'diagnostic fixtures']); sha = await git(repo, ['rev-parse', 'HEAD']);
+    const signal = (await execute(undefined, outputWith([{ kind: 'file_at_commit', commit: sha, path, lines: { start: 1, end: 1 } }])))[0]!;
+    expect(signal).toMatchObject({ kind: 'error', retryable: true, message: 'Investigation structure or evidence does not resolve.', investigationFailure: { version: 1, stage: 'evidence', reason, findingIndex: 0, evidenceIndex: 0 } });
+    for (const raw of [path, sha, 'Original finding', 'private content']) expect(JSON.stringify(signal)).not.toContain(raw);
+    expect(validateWorkExecutorTranscript([signal])).toBeNull();
+  });
+  test('missing commit, non-commit object and tree path have distinct sanitized categories', async () => {
+    const blob = await git(repo, ['rev-parse', `${sha}:file.txt`]);
+    for (const commit of ['f'.repeat(40), blob]) {
+      expect((await execute(undefined, outputWith([{ kind: 'commit', commit }])))[0]).toMatchObject({ investigationFailure: { stage: 'evidence', reason: 'evidence_commit_missing', findingIndex: 0, evidenceIndex: 0 } });
+    }
+    await git(repo, ['update-index', '--add', '--cacheinfo', '120000', blob, 'link.txt']);
+    await git(repo, ['commit', '-m', 'symlink fixture']); sha = await git(repo, ['rev-parse', 'HEAD']);
+    expect(await inspectInvestigationEvidence(repo, parseInvestigationResult(outputWith([{ kind: 'file_at_commit', commit: sha, path: 'link.txt', lines: null }]))!)).toMatchObject({ ok: false, failure: { reason: 'evidence_path_not_regular_file' } });
+  });
+  test.each([
+    [{ ...inconclusive, gaps: [] }, 'outcome_invariant_invalid'],
+    [{ ...inconclusive, extra: 'private model text' }, 'transport_shape_invalid'],
+    [{ ...inconclusive, schemaVersion: 2 }, 'result_invalid'],
+    [{ ...inconclusive, gaps: Array(41).fill('gap') }, 'limits_exceeded'],
+    [{ ...inconclusive, findings: [{ statement: 'private model text', status: 'established', evidence: [] }] }, 'evidence_required_missing'],
+  ])('structure diagnostic %p contains no model text', async (output, reason) => {
+    const signal = (await execute(undefined, output))[0]!;
+    expect(signal).toMatchObject({ retryable: true, message: 'Investigation structure or evidence does not resolve.', investigationFailure: { version: 1, stage: 'structure', reason } });
+    expect(JSON.stringify(signal)).not.toContain('private model text');
+  });
+
+  test('non-regular output is unavailable and preserves the catch message', async () => {
+    const signal = (await execute(async (_snapshot, args) => { await mkdir(args[args.indexOf('-o') + 1]!); }, inconclusive, { bytes: null }))[0]!;
+    expect(signal).toMatchObject({ kind: 'error', retryable: true, message: 'Investigation host operation or output validation failed.', investigationFailure: { stage: 'transport', reason: 'output_unavailable' } });
+  });
+  test('EOF rejection with a full gap budget is a post-rejection overflow', async () => {
+    const output = { ...outputWith([{ kind: 'file_at_commit', commit: sha, path: 'file.txt', lines: { start: 1, end: 3 } }]), gaps: Array(40).fill('Gap') };
+    const signal = (await execute(undefined, output))[0]!;
+    expect(signal).toMatchObject({ kind: 'error', retryable: true, message: 'Investigation structure or evidence does not resolve.', investigationFailure: { version: 1, stage: 'post_rejection', reason: 'rejection_overflow' } });
+    for (const raw of [sha, 'file.txt', 'Original finding']) expect(JSON.stringify(signal)).not.toContain(raw);
+  });
+
 });
