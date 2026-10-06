@@ -1,5 +1,5 @@
 import { resolveCommandWorkReference, runWorkEvidence, runWorkWithdraw, runWorkList } from './app';
-import { parseArgs, type ParsedCommand } from './args';
+import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveWorkReference } from '@/lib/work-orchestration/work-reference';
 import type {
   ResolveWorkApprovalCommand,
@@ -466,4 +466,114 @@ test.each([
     ok: true, command: { ...parsed.command, id: referenceId },
   });
   expect(resolve).toHaveBeenCalledTimes(1);
+});
+import { runWorkProposeInvestigation } from './app';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { buildInvestigationProposal, type InvestigationPreparationDeps } from '@/lib/work-orchestration/investigation-preparation';
+describe('propose-investigation runner e dispatch real',()=>{
+ const input={question:'Qual o contrato?',baseSha:'a'.repeat(40)};
+ const depsFor=():InvestigationPreparationDeps=>({readReferences:jest.fn(async()=>['INV-01','INV-02','INV-03']),commitExists:jest.fn(async()=>true),persistSourceMessage:jest.fn(async()=>'origin'),service:{createProposal:jest.fn(async command=>ok({...proposedItem,...command,id:'internal-investigation',state:'proposed' as const}))},now:()=>new Date('2026-10-05T12:00:00.000Z')});
+ test('runner cria proposed, saída humana INV-NN sem UUID, JSON preserva diagnóstico',async()=>{
+  const deps=depsFor(), result=await runWorkProposeInvestigation(input,deps);
+  expect(result.exitCode).toBe(EXIT.OK);expect(result.payload).toMatchObject({kind:'work-propose-investigation',state:'proposed',reference:'INV-04',capability:'research',workItemId:'internal-investigation'});
+  expect(renderHuman(result.payload)).toContain('INV-04 — Qual o contrato?'); expect(renderHuman(result.payload)).not.toContain('internal-investigation');
+  expect(JSON.parse(JSON.stringify(result.payload))).toHaveProperty('workItemId','internal-investigation');
+  expect(deps.service.createProposal).toHaveBeenCalledTimes(1);expect(deps.persistSourceMessage).toHaveBeenCalledTimes(1);
+ });
+ test('dispatch importável leva command.kind real à run function sem main ou authority',async()=>{
+  const parsed=parseArgs(['work','propose-investigation','--question',input.question,'--base-sha',input.baseSha,'--json']);
+  if(!parsed.ok || parsed.command.kind!=='work-propose-investigation') throw new Error('parser failed');
+  const child = runCliModule(`
+    const { dispatch } = await import('./cli/anima.ts');
+    let identities = 0, proposals = 0, sources = 0;
+    const result = await dispatch(${JSON.stringify(parsed.command)}, {
+      resolveIdentity: async () => { identities++; return { ok: true, identity: { userId: 'u', client: {} } }; },
+      service: {},
+      investigationDeps: {
+        readReferences: async () => ['INV-01', 'INV-02', 'INV-03'],
+        commitExists: async () => true,
+        persistSourceMessage: async () => { sources++; return 'origin'; },
+        service: { createProposal: async command => { proposals++; return { ok: true, value: { ...command, id: 'internal-investigation', state: 'proposed', proposalVersion: 1 } }; } },
+        now: () => new Date('2026-10-05T12:00:00.000Z'),
+      },
+    });
+    console.log(JSON.stringify({ result, identities, proposals, sources }));
+  `);
+  expect(child.status).toBe(EXIT.OK);
+  expect(child.stderr).toBe('');
+  expect(JSON.parse(child.stdout)).toMatchObject({
+    result: { payload: { kind: 'work-propose-investigation', reference: 'INV-04', state: 'proposed' } },
+    identities: 1, proposals: 1, sources: 1,
+  });
+ });
+ test('validação recusada não grava origem ou proposal',async()=>{
+  const deps=depsFor();expect((await runWorkProposeInvestigation({...input,question:''},deps)).exitCode).toBe(EXIT.REJECTED);
+  expect(deps.persistSourceMessage).not.toHaveBeenCalled();expect(deps.service.createProposal).not.toHaveBeenCalled();
+ });
+});
+
+// Exercise native ESM through the same loader as the operational npm script.
+function runCliModule(source: string) {
+  return spawnSync(process.execPath, [
+    '--no-warnings', '--experimental-transform-types', '--import', './scripts/ts-resolve.mjs',
+    '--input-type=module', '--eval', source,
+  ], { cwd: resolve(__dirname, '..'), encoding: 'utf8', timeout: 20000, windowsHide: true });
+}
+
+describe('entrypoint nativo da CLI', () => {
+  test('importar não imprime, autentica ou define exitCode, mesmo com sufixo de outro entrypoint', () => {
+    const child = runCliModule(`
+      process.argv = [process.execPath, '/another/cli/anima.ts', 'status'];
+      globalThis.fetch = () => { throw new Error('unexpected network'); };
+      await import('./cli/anima.ts');
+      if (process.exitCode !== undefined) throw new Error('main executed');
+    `);
+    expect(child.error).toBeUndefined();
+    expect(child.status).toBe(EXIT.OK);
+    expect(child.stdout).toBe('');
+    expect(child.stderr).toBe('');
+  });
+
+  test('o comando real do npm script e a execução direta chegam a main e dispatch help', () => {
+    const webRoot = resolve(__dirname, '..');
+    const pkg = JSON.parse(readFileSync(resolve(webRoot, 'package.json'), 'utf8')) as { scripts: { anima: string } };
+    const [program, ...args] = pkg.scripts.anima.split(/\s+/);
+    expect(program).toBe('node');
+    for (const entry of ['cli/anima.ts', resolve(webRoot, 'cli', 'anima.ts')]) {
+      const child = spawnSync(process.execPath, args.map(arg => arg === 'cli/anima.ts' ? entry : arg).concat('--help'), {
+        cwd: webRoot, encoding: 'utf8', timeout: 20000, windowsHide: true,
+      });
+      expect(child.error).toBeUndefined();
+      expect(child.status).toBe(EXIT.OK);
+      // Node 24 may report the optional env file missing in a clean worktree.
+      const residualStderr = child.stderr.replace(/^\.env\.local not found\. Continuing without it\.(?:\r?\n|$)/gm, '');
+      expect(residualStderr).toBe('');
+      expect(child.stdout).toBe(`${renderHuman({ ok: true, kind: 'help', usage: USAGE })}\n`);
+    }
+  });
+
+  test('isMainModule compara URLs completas com caminhos relativos e separadores nativos', () => {
+    const child = runCliModule(`
+      import assert from 'node:assert/strict';
+      import { resolve, sep } from 'node:path';
+      import { pathToFileURL } from 'node:url';
+      const { isMainModule } = await import('./cli/anima.ts');
+      const entry = resolve('folder with spaces', 'entry #1.ts');
+      assert.equal(entry.includes('/cli/anima.ts'), false);
+      assert.equal(isMainModule(pathToFileURL(entry).href, entry), true);
+      assert.equal(isMainModule(pathToFileURL(entry).href, ['folder with spaces', 'entry #1.ts'].join(sep)), true);
+      assert.equal(isMainModule(pathToFileURL(entry).href, undefined), false);
+      assert.equal(isMainModule(pathToFileURL(entry).href, resolve('other', 'entry #1.ts')), false);
+      if (process.platform === 'win32') {
+        assert.equal(entry.includes('\\\\'), true);
+        assert.equal(isMainModule(pathToFileURL(entry).href, entry.replaceAll('\\\\', '/')), true);
+      }
+    `);
+    expect(child.error).toBeUndefined();
+    expect(child.status).toBe(EXIT.OK);
+    expect(child.stdout).toBe('');
+    expect(child.stderr).toBe('');
+  });
 });

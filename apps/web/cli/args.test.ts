@@ -150,3 +150,16 @@ test.each(['show', 'evidence', 'executors', 'approve'])('parser preserva a refer
 test('parser deixa a validação da referência para a aplicação', () => {
   expect(parseArgs(['work', 'show', 'sdc-01'])).toEqual({ ok: true, command: { kind: 'work-show', id: 'sdc-01', json: false } });
 });
+
+describe('work propose-investigation',()=>{
+ const base=['work','propose-investigation','--question','O que existe?','--base-sha','a'.repeat(40)];
+ test('default research explícito e flags',()=>{
+  expect(parseArgs(base)).toEqual({ok:true,command:{kind:'work-propose-investigation',question:'O que existe?',baseSha:'a'.repeat(40),capability:'research',json:false}});
+  expect(parseArgs([...base,'--capability','programming','--json'])).toMatchObject({ok:true,command:{capability:'programming',json:true}});
+ });
+ test.each([[],['--question',''],['--question','x','--base-sha','bad'],['--question','x'.repeat(4001),'--base-sha','a'.repeat(40)]].map(flags=>[flags] as const))('uso inválido %j',flags=>{
+  expect(parseArgs(['work','propose-investigation',...flags]).ok).toBe(false);
+ });
+ test.each([['--capability','unknown'],['--question','dup'],['--reason','não'],['unexpected'],['--json','--json'],['--capability']].map(flags=>[flags] as const))('recusa flags inválidas/duplicadas %j',flags=>expect(parseArgs([...base,...flags]).ok).toBe(false));
+ test('não aceita flags de investigação em outro comando',()=>expect(parseArgs(['work','list','--question','x']).ok).toBe(false));
+});

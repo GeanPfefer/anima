@@ -1,3 +1,4 @@
+import { validateInvestigationInput } from '@/lib/work-orchestration/investigation-preparation';
 // Parser PURO de argumentos da CLI: `argv` (já sem node+script) → um comando
 // tipado, ou uma recusa de USO. Sem I/O, sem process.exit, sem env — só a decisão
 // estrutural do que o usuário pediu. Isolado para ser provado à exaustão e para
@@ -6,6 +7,7 @@
 import { parseComputePreference, type ComputePreferenceV1 } from '@anima/core';
 
 export type ParsedCommand =
+  | { readonly kind: 'work-propose-investigation'; readonly question: string; readonly baseSha: string; readonly capability: string; readonly json: boolean }
   | { readonly kind: 'help' }
   | { readonly kind: 'status'; readonly json: boolean }
   | { readonly kind: 'recovery-config-check'; readonly json: boolean }
@@ -109,6 +111,21 @@ const boundedNumber = (raw: string | null, bounds: { readonly min: number; reado
 };
 
 export function parseArgs(argv: readonly string[]): ParseResult {
+  if (argv[0] === 'work' && argv[1] === 'propose-investigation') {
+    const values: Record<string,string> = {}; let json = false;
+    for (let i=2;i<argv.length;i++) {
+      const flag=argv[i]!;
+      if (flag==='--help' || flag==='-h') return {ok:true,command:{kind:'help'}};
+      if (flag==='--json') { if(json) return {ok:false,error:'--json duplicado.'}; json=true; continue; }
+      if (!['--question','--base-sha','--capability'].includes(flag) || values[flag] !== undefined
+        || argv[i+1] === undefined || argv[i+1]!.startsWith('--')) return {ok:false,error:'Uso: anima work propose-investigation --question "<texto>" --base-sha <40hex> [--capability research] [--json]'};
+      values[flag]=argv[++i]!;
+    }
+    const input={question:values['--question'] ?? '',baseSha:values['--base-sha'] ?? '',capability:values['--capability'] ?? 'research'};
+    const error=validateInvestigationInput(input);
+    return error ? {ok:false,error} : {ok:true,command:{kind:'work-propose-investigation',...input,json}};
+  }
+
   const { positionals, json, reason, diagnosisPath, planPath, limits, compute, fixes, evidence, requiredGates, reworkPaths, help, unknownFlag } = extract(argv);
 
   if (reworkPaths.length && (positionals[0] !== 'work' || positionals[1] !== 'correct' || reworkPaths.some(path => !path.trim()))) {
@@ -277,6 +294,8 @@ Uso:
   anima recovery-config check                 Prontidão da configuração recuperável (read-only, sem valores, sem rede)
   anima toolchain check                       Prontidão do toolchain (read-only; só comandos --version; nunca instala)
   anima budget status <id|REF>                    Orçamento autônomo atual (somente leitura)
+  anima work propose-investigation --question T --base-sha SHA [--capability research] [--json]
+                                               Cria investiga\u00e7\u00e3o proposed; aprova\u00e7\u00e3o humana posterior
   anima work list                             Lista os trabalhos não terminais (retomáveis)
   anima work show <id|REF>                        Estado, versão, tentativa, Verifier e cobertura
   anima work evidence <id|REF>                    Critérios de aceite, provas e lacunas (Verifier)
