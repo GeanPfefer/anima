@@ -163,12 +163,12 @@ describe('investigation host with real git', () => {
     for (const raw of [path, sha, 'Original finding', 'private content']) expect(JSON.stringify(signal)).not.toContain(raw);
     expect(validateWorkExecutorTranscript([signal])).toBeNull();
   });
-  test.each(['known_git_failure', 'unexpected_exception'])('evidence inspection %s preserves the appropriate host outcome', async mode => {
+  test.each(['cancelled', 'timedOut', 'unexpected_exception'])('evidence inspection %s preserves the appropriate host outcome', async mode => {
     const originalRun = worktree.runProcess;
     const spy = jest.spyOn(worktree, 'runProcess').mockImplementation((file, args, options) => {
       if (file === 'git' && args.includes('cat-file')) {
         if (mode === 'unexpected_exception') throw new Error('private exception stack');
-        return Promise.resolve({ command: 'git', stdout: '', stderr: 'private git stderr', exitCode: null, cancelled: false, timedOut: false, durationMs: 1 });
+        return Promise.resolve({ command: 'git', stdout: '', stderr: 'private git stderr', exitCode: -1, cancelled: mode === 'cancelled', timedOut: mode === 'timedOut', durationMs: 1 });
       }
       return originalRun(file, args, options);
     });

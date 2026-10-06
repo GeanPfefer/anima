@@ -43,7 +43,7 @@ export async function inspectInvestigationEvidence(repo: string, result: Investi
     const fail = (reason: Extract<InvestigationFailureV1, { stage: 'evidence' }>['reason']) =>
       ({ ok: false as const, failure: { version: 1 as const, stage: 'evidence' as const, reason, findingIndex, evidenceIndex } });
     // Classify observed Git outcomes only; unexpected exceptions reach the host catch.
-    const unavailable = (r: Awaited<ReturnType<typeof git>>) => r.cancelled || r.timedOut || r.exitCode === null;
+    const unavailable = (r: Awaited<ReturnType<typeof git>>) => r.cancelled || r.timedOut;
     const commit = await git(repo, ['cat-file', '-t', evidence.commit]);
     if (unavailable(commit)) return fail('evidence_git_unavailable');
     if (!successful(commit) || commit.stdout.trim() !== 'commit') return fail('evidence_commit_missing');

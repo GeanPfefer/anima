@@ -78,15 +78,15 @@ describe('evidence host operation diagnostics', () => {
     expect(await inspectInvestigationEvidence('.', result)).toEqual({ ok: false, failure: { version: 1, stage: 'evidence', reason: 'evidence_object_not_blob', findingIndex: 0, evidenceIndex: 0 } });
   });
   test.each([
-    { exitCode: null }, { cancelled: true }, { timedOut: true },
+    { exitCode: -1, cancelled: true }, { exitCode: -1, timedOut: true },
   ])('known git unavailability %p is classified without stderr', async flags => {
     jest.spyOn(worktree, 'runProcess').mockResolvedValue({ ...response(''), ...flags, stderr: 'private stderr' });
     const inspection = await inspectInvestigationEvidence('.', result);
     expect(inspection).toEqual({ ok: false, failure: { version: 1, stage: 'evidence', reason: 'evidence_git_unavailable', findingIndex: 0, evidenceIndex: 0 } });
     expect(JSON.stringify(inspection)).not.toContain('private');
   });
-  test('known ls-tree failure is classified as git unavailable', async () => {
-    jest.spyOn(worktree, 'runProcess').mockResolvedValueOnce(response('commit')).mockResolvedValueOnce({ ...response(''), exitCode: 128 });
+  test.each([1, 128, -1])('known ls-tree exit code %i is classified as git unavailable', async exitCode => {
+    jest.spyOn(worktree, 'runProcess').mockResolvedValueOnce(response('commit')).mockResolvedValueOnce({ ...response(''), exitCode });
     expect(await inspectInvestigationEvidence('.', result)).toMatchObject({ ok: false, failure: { reason: 'evidence_git_unavailable' } });
   });
   test('unexpected evidence inspection exception propagates to the historical host catch', async () => {
