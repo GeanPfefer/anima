@@ -42,31 +42,30 @@ export async function inspectInvestigationEvidence(repo: string, result: Investi
   for (const [findingIndex, finding] of result.findings.entries()) for (const [evidenceIndex, evidence] of finding.evidence.entries()) {
     const fail = (reason: Extract<InvestigationFailureV1, { stage: 'evidence' }>['reason']) =>
       ({ ok: false as const, failure: { version: 1 as const, stage: 'evidence' as const, reason, findingIndex, evidenceIndex } });
-    try {
-      const unavailable = (r: Awaited<ReturnType<typeof git>>) => r.cancelled || r.timedOut || r.exitCode === null;
-      const commit = await git(repo, ['cat-file', '-t', evidence.commit]);
-      if (unavailable(commit)) return fail('evidence_git_unavailable');
-      if (!successful(commit) || commit.stdout.trim() !== 'commit') return fail('evidence_commit_missing');
-      if (evidence.kind === 'commit') continue;
-      const entry = await git(repo, ['ls-tree', evidence.commit, '--', evidence.path]);
-      if (!successful(entry)) return fail('evidence_git_unavailable');
-      if (entry.stdout === '') return fail('evidence_path_missing');
-      if (!/^100(?:644|755) blob [a-f0-9]{40}\t/.test(entry.stdout)) return fail('evidence_path_not_regular_file');
-      const objectName = `${evidence.commit}:${evidence.path}`;
-      const type = await git(repo, ['cat-file', '-t', objectName]);
-      if (!successful(type)) return fail('evidence_git_unavailable');
-      if (type.stdout.trim() !== 'blob') return fail('evidence_object_not_blob');
-      if (evidence.lines) {
-        const size = await git(repo, ['cat-file', '-s', objectName]);
-        if (!successful(size) || !/^\d+\s*$/.test(size.stdout)) return fail('evidence_git_unavailable');
-        if (Number(size.stdout) > 150_000) return fail('evidence_file_too_large');
-        const content = await git(repo, ['cat-file', 'blob', objectName]);
-        if (!successful(content)) return fail('evidence_git_unavailable');
-        if (Buffer.byteLength(content.stdout, 'utf8') !== Number(size.stdout) || content.stdout.includes('\0')) return fail('evidence_content_invalid');
-        const count = content.stdout.length === 0 ? 0 : content.stdout.split('\n').length - (content.stdout.endsWith('\n') ? 1 : 0);
-        if (evidence.lines.end > count) rejections.push({ findingIndex, evidenceIndex, actualLineCount: count, reason: evidence.lines.start > count ? 'line_start_out_of_range' : 'line_end_out_of_range' });
-      }
-    } catch { return fail('evidence_git_unavailable'); }
+    // Classify observed Git outcomes only; unexpected exceptions reach the host catch.
+    const unavailable = (r: Awaited<ReturnType<typeof git>>) => r.cancelled || r.timedOut || r.exitCode === null;
+    const commit = await git(repo, ['cat-file', '-t', evidence.commit]);
+    if (unavailable(commit)) return fail('evidence_git_unavailable');
+    if (!successful(commit) || commit.stdout.trim() !== 'commit') return fail('evidence_commit_missing');
+    if (evidence.kind === 'commit') continue;
+    const entry = await git(repo, ['ls-tree', evidence.commit, '--', evidence.path]);
+    if (!successful(entry)) return fail('evidence_git_unavailable');
+    if (entry.stdout === '') return fail('evidence_path_missing');
+    if (!/^100(?:644|755) blob [a-f0-9]{40}\t/.test(entry.stdout)) return fail('evidence_path_not_regular_file');
+    const objectName = `${evidence.commit}:${evidence.path}`;
+    const type = await git(repo, ['cat-file', '-t', objectName]);
+    if (!successful(type)) return fail('evidence_git_unavailable');
+    if (type.stdout.trim() !== 'blob') return fail('evidence_object_not_blob');
+    if (evidence.lines) {
+      const size = await git(repo, ['cat-file', '-s', objectName]);
+      if (!successful(size) || !/^\d+\s*$/.test(size.stdout)) return fail('evidence_git_unavailable');
+      if (Number(size.stdout) > 150_000) return fail('evidence_file_too_large');
+      const content = await git(repo, ['cat-file', 'blob', objectName]);
+      if (!successful(content)) return fail('evidence_git_unavailable');
+      if (Buffer.byteLength(content.stdout, 'utf8') !== Number(size.stdout) || content.stdout.includes('\0')) return fail('evidence_content_invalid');
+      const count = content.stdout.length === 0 ? 0 : content.stdout.split('\n').length - (content.stdout.endsWith('\n') ? 1 : 0);
+      if (evidence.lines.end > count) rejections.push({ findingIndex, evidenceIndex, actualLineCount: count, reason: evidence.lines.start > count ? 'line_start_out_of_range' : 'line_end_out_of_range' });
+    }
   }
   return { ok: true, rejections };
 }

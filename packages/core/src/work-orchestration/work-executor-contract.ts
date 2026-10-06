@@ -199,7 +199,7 @@ export function validateWorkCheckpoint(checkpoint: WorkCheckpointV1): string | n
   return null;
 }
 
-export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSignal[], executorId?: string): string | null {
+export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSignal[]): string | null {
   const correlation = signals[0];
   if (!correlation) return 'O executor não emitiu sinais.';
   let terminalCount = 0;
@@ -209,12 +209,12 @@ export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSig
     if (signal.attemptId !== correlation.attemptId || signal.workItemId !== correlation.workItemId || signal.approvedProposalVersion !== correlation.approvedProposalVersion || signal.origin !== 'executor') return 'Um sinal perdeu a correlação da tentativa.';
     if (Object.prototype.hasOwnProperty.call(signal, 'investigationFailure')) {
       // Signals carry no adapter id; the existing investigation handoff namespace
-      // is the lane discriminator at this contract boundary.
+      // is the lane discriminator at this contract boundary. This validates transcript
+      // shape only; authenticating the producing adapter belongs to the host.
       if (Object.keys(signal).some(key => !['kind', 'code', 'message', 'retryable', 'handoffReference', 'investigationFailure', 'attemptId', 'workItemId', 'approvedProposalVersion', 'origin', 'sequence'].includes(key))
-        || (executorId !== undefined && executorId !== 'investigation-v1')
         || signal.kind !== 'error' || signal.handoffReference !== 'investigation:failure'
         || signal.code !== 'execution_failed' || typeof signal.retryable !== 'boolean'
-        || !parseInvestigationFailure(signal.investigationFailure)) return 'Diagn?stico de investiga??o inv?lido.';
+        || !parseInvestigationFailure(signal.investigationFailure)) return 'Invalid investigation diagnostic.';
     }
     if (signal.kind === 'decision_required') {
       const ids = new Set(signal.options.map(option => option.id));

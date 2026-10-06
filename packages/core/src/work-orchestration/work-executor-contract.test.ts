@@ -291,10 +291,10 @@ describe('investigation error diagnostic contract', () => {
     investigationFailure: diagnosis, attemptId: 'attempt', workItemId: 'work', approvedProposalVersion: 1, sequence: 1, origin: 'executor',
   } as WorkExecutorSignal);
   test('accepts sanitized diagnosis and historical absence', () => {
-    expect(validateWorkExecutorTranscript([error(failure)], 'investigation-v1')).toBeNull();
-    expect(validateWorkExecutorTranscript([error(failure)], 'worktree-v1')).not.toBeNull();
+    expect(validateWorkExecutorTranscript([error(failure)])).toBeNull();
     const { investigationFailure: _, ...historical } = error(failure) as Extract<WorkExecutorSignal, { kind: 'error' }>;
     expect(validateWorkExecutorTranscript([historical])).toBeNull();
+    expect(validateWorkExecutorTranscript([{ ...historical, handoffReference: 'worktree:failure' }])).toBeNull();
   });
   test.each([
     { ...failure, path: 'private' }, { ...failure, reason: 'unknown' }, { ...failure, stage: 'transport' },
@@ -302,7 +302,10 @@ describe('investigation error diagnostic contract', () => {
     { ...failure, evidenceIndex: Number.MAX_SAFE_INTEGER + 1 }, { ...failure, version: 2 }, null, undefined,
   ])('refuses invalid payload %p', value => expect(validateWorkExecutorTranscript([error(value)])).not.toBeNull());
   test('refuses programming error and non-error signals', () => {
-    expect(validateWorkExecutorTranscript([error(failure, 'checkpoint:failure')])).not.toBeNull();
+    for (const handoff of ['worktree:failure', 'checkpoint:failure', 'fake:failure']) {
+      expect(validateWorkExecutorTranscript([error(failure, handoff)])).toBe('Invalid investigation diagnostic.');
+    }
+    expect(validateWorkExecutorTranscript([{ ...error(failure), code: 'invalid_request' } as WorkExecutorSignal])).toBe('Invalid investigation diagnostic.');
     expect(validateWorkExecutorTranscript([{ ...error(failure), kind: 'progress' } as WorkExecutorSignal])).not.toBeNull();
   });
 });

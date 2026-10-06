@@ -77,11 +77,22 @@ describe('evidence host operation diagnostics', () => {
     jest.spyOn(worktree, 'runProcess').mockResolvedValueOnce(response('commit')).mockResolvedValueOnce(response(`100644 blob ${'b'.repeat(40)}\tprivate.txt`)).mockResolvedValueOnce(response('tree'));
     expect(await inspectInvestigationEvidence('.', result)).toEqual({ ok: false, failure: { version: 1, stage: 'evidence', reason: 'evidence_object_not_blob', findingIndex: 0, evidenceIndex: 0 } });
   });
-  test('git exception is classified without stack or stderr', async () => {
-    jest.spyOn(worktree, 'runProcess').mockRejectedValue(new Error('private stack stderr'));
+  test.each([
+    { exitCode: null }, { cancelled: true }, { timedOut: true },
+  ])('known git unavailability %p is classified without stderr', async flags => {
+    jest.spyOn(worktree, 'runProcess').mockResolvedValue({ ...response(''), ...flags, stderr: 'private stderr' });
     const inspection = await inspectInvestigationEvidence('.', result);
-    expect(inspection).toMatchObject({ ok: false, failure: { reason: 'evidence_git_unavailable' } });
+    expect(inspection).toEqual({ ok: false, failure: { version: 1, stage: 'evidence', reason: 'evidence_git_unavailable', findingIndex: 0, evidenceIndex: 0 } });
     expect(JSON.stringify(inspection)).not.toContain('private');
+  });
+  test('known ls-tree failure is classified as git unavailable', async () => {
+    jest.spyOn(worktree, 'runProcess').mockResolvedValueOnce(response('commit')).mockResolvedValueOnce({ ...response(''), exitCode: 128 });
+    expect(await inspectInvestigationEvidence('.', result)).toMatchObject({ ok: false, failure: { reason: 'evidence_git_unavailable' } });
+  });
+  test('unexpected evidence inspection exception propagates to the historical host catch', async () => {
+    const exception = new Error('private stack stderr');
+    jest.spyOn(worktree, 'runProcess').mockRejectedValue(exception);
+    await expect(inspectInvestigationEvidence('.', result)).rejects.toBe(exception);
   });
   test('content byte mismatch remains a hard failure', async () => {
     jest.spyOn(worktree, 'runProcess').mockResolvedValueOnce(response('commit')).mockResolvedValueOnce(response(`100644 blob ${'b'.repeat(40)}\tprivate.txt`)).mockResolvedValueOnce(response('blob')).mockResolvedValueOnce(response('10')).mockResolvedValueOnce(response('short'));

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { buildCoderTaskSpec, parseInvestigationResult, renderInvestigationSummary, validateWorkExecutorTranscript, type WorkExecutorRequest, type WorkExecutorSignal } from '@anima/core';
 import { inspectInvestigationEvidence, InvestigationExecutorAdapter, readProhibitedInvestigationRefs, resolveInvestigationEvidence } from './investigation-executor';
 import { runProcess } from './worktree';
+import * as worktree from './worktree';
 import type { CodexCliProcessRunner } from './codex-cli-coder';
 
 jest.setTimeout(30_000);
@@ -161,6 +162,28 @@ describe('investigation host with real git', () => {
     expect(signal).toMatchObject({ kind: 'error', retryable: true, message: 'Investigation structure or evidence does not resolve.', investigationFailure: { version: 1, stage: 'evidence', reason, findingIndex: 0, evidenceIndex: 0 } });
     for (const raw of [path, sha, 'Original finding', 'private content']) expect(JSON.stringify(signal)).not.toContain(raw);
     expect(validateWorkExecutorTranscript([signal])).toBeNull();
+  });
+  test.each(['known_git_failure', 'unexpected_exception'])('evidence inspection %s preserves the appropriate host outcome', async mode => {
+    const originalRun = worktree.runProcess;
+    const spy = jest.spyOn(worktree, 'runProcess').mockImplementation((file, args, options) => {
+      if (file === 'git' && args.includes('cat-file')) {
+        if (mode === 'unexpected_exception') throw new Error('private exception stack');
+        return Promise.resolve({ command: 'git', stdout: '', stderr: 'private git stderr', exitCode: null, cancelled: false, timedOut: false, durationMs: 1 });
+      }
+      return originalRun(file, args, options);
+    });
+    try {
+      const signal = (await execute(undefined, outputWith([{ kind: 'commit', commit: sha }])))[0]!;
+      expect(signal).toMatchObject({ kind: 'error', code: 'execution_failed', retryable: true, handoffReference: 'investigation:failure' });
+      if (mode === 'unexpected_exception') {
+        expect(signal).toMatchObject({ message: 'Investigation host operation or output validation failed.' });
+        expect(signal).not.toHaveProperty('investigationFailure');
+      } else {
+        expect(signal).toMatchObject({ message: 'Investigation structure or evidence does not resolve.', investigationFailure: { version: 1, stage: 'evidence', reason: 'evidence_git_unavailable', findingIndex: 0, evidenceIndex: 0 } });
+      }
+      expect(JSON.stringify(signal)).not.toContain('private');
+      expect(validateWorkExecutorTranscript([signal])).toBeNull();
+    } finally { spy.mockRestore(); }
   });
   test('missing commit, non-commit object and tree path have distinct sanitized categories', async () => {
     const blob = await git(repo, ['rev-parse', `${sha}:file.txt`]);
