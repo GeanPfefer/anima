@@ -203,3 +203,70 @@ describe('closed investigation failure diagnostics', () => {
     expect(parseInvestigationFailure({ version: 1, stage: 'transport', reason: 'output_unavailable', raw: 'private' })).toBeNull();
   });
 });
+
+describe('large-file range rejections', () => {
+  const large = (findingIndex = 0, evidenceIndex = 0) => ({ findingIndex, evidenceIndex, reason: 'range_not_validated_file_too_large' as const, actualByteSize: 150001, maxReadableByteSize: 150000 });
+  const seed = () => parseInvestigationResult(valid())!;
+  const host = { baseSha: commit, snapshotHead: commit, snapshotClean: true, snapshotDetached: true, prohibitedRefsBefore: [] };
+  test('removes only rejected refs and keeps supported status; no rejection preserves identity', () => {
+    const input = seed();
+    const supported = { ...input, findings: [{ ...input.findings[0]!, evidence: [...input.findings[0]!.evidence, { kind: 'commit' as const, commit }] }] };
+    const treated = applyInvestigationEvidenceRejections(supported, [large()])!;
+    expect(treated.result.findings[0]).toMatchObject({ status: 'established', evidence: [{ kind: 'commit', commit }] });
+    expect(treated.result.outcome).toBe('conclusive');
+    expect(treated.diagnostics[0]).not.toHaveProperty('actualLineCount');
+    expect(applyInvestigationEvidenceRejections(input, [])!.result).toBe(input);
+    expect(applyInvestigationEvidenceRejections(input, [{ ...large(), actualByteSize: 150000 }])).toBeNull();
+    expect(diagnoseInvestigationRejectionTreatment(input, [large()])).toBeNull();
+    expect(diagnoseInvestigationRejectionTreatment(input, [{ ...large(), actualByteSize: 150000 }])?.reason).toBe('rejection_inconsistent');
+  });
+  test('downgrades unsupported findings, adjusts outcomes and computes counters independently of model gaps', () => {
+    const input = seed();
+    const partial = applyInvestigationEvidenceRejections({ ...input, findings: [...input.findings, input.findings[0]!] }, [large()])!;
+    expect(partial.result.outcome).toBe('partial');
+    expect(partial.result.findings[0]).toMatchObject({ status: 'undetermined', evidence: [] });
+    const treated = applyInvestigationEvidenceRejections({ ...input, gaps: ['Host: 999 evidence line reference(s); 999 finding(s).'] }, [large()])!;
+    expect(treated.result.outcome).toBe('inconclusive');
+    expect(treated.result.gaps[1]).toBe('Host: 1 evidence line reference(s) could not be validated because the file exceeds the host read limit and were not accepted; 1 finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.');
+    expect(treated.result.gaps[1]).not.toMatch(/invalid|failed/);
+  });
+  test('one gap per class; a shared downgraded finding counts once in each class, regardless of rejection order', () => {
+    const input = seed();
+    const mixed = { ...input, findings: [{ ...input.findings[0]!, evidence: Array(3).fill(input.findings[0]!.evidence[0]) }] };
+    const eof = { findingIndex: 0, evidenceIndex: 2, reason: 'line_end_out_of_range' as const, actualLineCount: 1 };
+    const rejections = [large(0, 1), eof, large()];
+    const treated = applyInvestigationEvidenceRejections(mixed, rejections)!;
+    expect(treated).toEqual(applyInvestigationEvidenceRejections(mixed, [...rejections].reverse()));
+    expect(treated.result.gaps).toEqual([
+      'Host: 1 evidence reference(s) failed line-range validation and were not accepted; 1 finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.',
+      'Host: 2 evidence line reference(s) could not be validated because the file exceeds the host read limit and were not accepted; 1 finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.',
+    ]);
+    expect(treated.diagnostics).toHaveLength(3);
+    expect(treated.diagnostics[2]).toHaveProperty('actualLineCount', 1);
+    expect(treated.diagnostics[2]).not.toHaveProperty('actualByteSize');
+    const same = applyInvestigationEvidenceRejections(mixed, [large(), large(0, 1), large(0, 2)])!;
+    expect(same.result.gaps).toHaveLength(1);
+    expect(same.result.gaps[0]).toContain('Host: 3 evidence line reference(s)');
+    expect(same.result.outcome).toBe('inconclusive');
+    expect(applyInvestigationEvidenceRejections({ ...mixed, gaps: Array(39).fill('Gap') }, rejections)).toBeNull();
+    expect(diagnoseInvestigationRejectionTreatment({ ...mixed, gaps: Array(39).fill('Gap') }, rejections)?.reason).toBe('rejection_overflow');
+    expect(applyInvestigationEvidenceRejections(mixed, Array(41).fill(large()))).toBeNull();
+  });
+  test('execution union closes keys by reason and remains host-only', () => {
+    const treated = applyInvestigationEvidenceRejections(seed(), [large()])!;
+    const diagnostic = treated.diagnostics[0]!;
+    const execution = (d: unknown[]) => ({ ...treated.result, hostVerification: { ...host, evidenceDiagnostics: d } });
+    expect(parseInvestigationExecution(execution([diagnostic]))).not.toBeNull();
+    for (const d of [{ ...diagnostic, actualLineCount: 0 }, { ...diagnostic, actualByteSize: 150000 }, { ...diagnostic, maxReadableByteSize: 0 }, { ...diagnostic, actualByteSize: Number.MAX_SAFE_INTEGER + 1 }, { ...diagnostic, reason: 'unknown' }, { ...diagnostic, commit: 'bad' }, { ...diagnostic, path: '/absolute' }]) {
+      expect(parseInvestigationExecution(execution([d]))).toBeNull();
+    }
+    const eof = applyInvestigationEvidenceRejections(seed(), [{ findingIndex: 0, evidenceIndex: 0, reason: 'line_end_out_of_range', actualLineCount: 1 }])!.diagnostics[0]!;
+    expect(parseInvestigationExecution(execution([eof]))).not.toBeNull();
+    expect(parseInvestigationExecution(execution([{ ...eof, actualByteSize: 150001, maxReadableByteSize: 150000 }]))).toBeNull();
+    expect(parseInvestigationExecution(execution(Array(41).fill(diagnostic)))).toBeNull();
+    expect(parseInvestigationExecution({ ...treated.result, evidenceDiagnostics: [diagnostic] })).toBeNull();
+    expect(parseInvestigationExecution({ ...treated.result, hostVerification: host })).not.toBeNull();
+    expect(normalizeInvestigationTransport(execution([diagnostic]))).toBeNull();
+    expect(normalizeInvestigationTransport({ ...valid(), evidenceDiagnostics: [diagnostic] })).toBeNull();
+  });
+});

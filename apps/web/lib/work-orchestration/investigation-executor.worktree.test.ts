@@ -128,7 +128,41 @@ describe('investigation host with real git', () => {
     expect(signal.investigation?.hostVerification.evidenceDiagnostics).toHaveLength(2);
     expect(signal.investigation?.gaps).toHaveLength(1);
   });
-  test.each(['large.txt', 'contains-nul.txt', '.gitignore/child'])('hard blob failure %s remains fail-closed even after an EOF rejection', async path => {
+  test('large blobs reject ranges without reading content; boundary and whole-file references remain valid', async () => {
+    const privateContent = 'private-large-content';
+    await writeFile(join(repo, 'large.txt'), privateContent + 'x'.repeat(150001 - privateContent.length));
+    await writeFile(join(repo, 'boundary.txt'), 'x'.repeat(150000));
+    await git(repo, ['add', '.']); await git(repo, ['commit', '-m', 'large fixtures']); sha = await git(repo, ['rev-parse', 'HEAD']);
+    const ref = { kind: 'file_at_commit', commit: sha, path: 'large.txt', lines: { start: 1, end: 1 } };
+    const originalRun = worktree.runProcess;
+    const spy = jest.spyOn(worktree, 'runProcess').mockImplementation((file, args, options) => {
+      if (args.includes('blob') && args.includes(`${sha}:large.txt`)) throw new Error('large blob must not be read');
+      return originalRun(file, args, options);
+    });
+    try {
+      const signal = (await execute(undefined, outputWith([ref])))[0]!;
+      expect(signal).toMatchObject({ kind: 'result', investigation: { outcome: 'inconclusive', findings: [{ status: 'undetermined', evidence: [] }], hostVerification: { evidenceDiagnostics: [{ reason: 'range_not_validated_file_too_large', actualByteSize: 150001, maxReadableByteSize: 150000 }] } } });
+      if (signal.kind !== 'result') throw new Error('expected result');
+      expect(signal.investigation?.hostVerification.evidenceDiagnostics?.[0]).not.toHaveProperty('actualLineCount');
+      expect(JSON.stringify(signal)).not.toContain(privateContent);
+      expect(await resolveInvestigationEvidence(repo, parseInvestigationResult(outputWith([ref]))!)).toBe(false);
+      expect(await resolveInvestigationEvidence(repo, parseInvestigationResult(outputWith([{ ...ref, path: 'file.txt', lines: { start: 1, end: 3 } }]))!)).toBe(false);
+      for (const evidence of [{ ...ref, path: 'boundary.txt' }, { ...ref, lines: null }]) {
+        const output = outputWith([evidence]);
+        expect(await resolveInvestigationEvidence(repo, parseInvestigationResult(output)!)).toBe(true);
+        const validSignal = (await execute(undefined, output))[0]!;
+        expect(validSignal).toMatchObject({ kind: 'result', investigation: { outcome: 'conclusive' } });
+        if (validSignal.kind !== 'result') throw new Error('expected result');
+        expect(validSignal.investigation?.hostVerification).not.toHaveProperty('evidenceDiagnostics');
+      }
+      const mixed = (await execute(undefined, outputWith([ref, { ...ref, path: 'file.txt', lines: { start: 1, end: 3 } }])))[0]!;
+      expect(mixed).toMatchObject({ kind: 'result', investigation: { outcome: 'inconclusive' } });
+      if (mixed.kind !== 'result') throw new Error('expected result');
+      expect(mixed.investigation?.gaps).toHaveLength(2);
+      expect(mixed.investigation?.hostVerification.evidenceDiagnostics).toHaveLength(2);
+    } finally { spy.mockRestore(); }
+  });
+  test.each(['contains-nul.txt', '.gitignore/child'])('hard blob failure %s remains fail-closed even after an EOF rejection', async path => {
     await writeFile(join(repo, 'large.txt'), 'x'.repeat(150_001)); await writeFile(join(repo, 'contains-nul.txt'), 'a\0b');
     await git(repo, ['add', '.']); await git(repo, ['commit', '-m', 'hard blobs']); sha = await git(repo, ['rev-parse', 'HEAD']);
     const output = outputWith([{ kind: 'file_at_commit', commit: sha, path: 'file.txt', lines: { start: 1, end: 3 } }, { kind: 'file_at_commit', commit: sha, path, lines: { start: 1, end: 1 } }]);
@@ -153,7 +187,7 @@ describe('investigation host with real git', () => {
     expect(validateWorkExecutorTranscript([signal])).toBeNull();
   });
   test.each([
-    ['missing.txt', 'evidence_path_missing'], ['large.txt', 'evidence_file_too_large'], ['binary.txt', 'evidence_content_invalid'],
+    ['missing.txt', 'evidence_path_missing'], ['binary.txt', 'evidence_content_invalid'],
   ])('classifies evidence %s and preserves privacy', async (path, reason) => {
     await writeFile(join(repo, 'large.txt'), 'x'.repeat(150_001));
     await writeFile(join(repo, 'binary.txt'), 'private content\0');

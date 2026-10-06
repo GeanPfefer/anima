@@ -4,18 +4,38 @@ import type { VerifierOpinionV1, VerifierOpinionFinding } from './verifier-opini
 export type InvestigationEvidenceV1 =
   | { readonly kind: 'commit'; readonly commit: string }
   | { readonly kind: 'file_at_commit'; readonly commit: string; readonly path: string; readonly lines?: { readonly start: number; readonly end: number } };
-export interface InvestigationEvidenceDiagnosticV1 {
+export const INVESTIGATION_EVIDENCE_MAX_READABLE_BYTES = 150_000;
+type InvestigationEvidenceRejectionDetailsV1 =
+  | { readonly reason: 'line_start_out_of_range' | 'line_end_out_of_range'; readonly actualLineCount: number }
+  | { readonly reason: 'range_not_validated_file_too_large'; readonly actualByteSize: number; readonly maxReadableByteSize: number };
+export type InvestigationEvidenceDiagnosticV1 = InvestigationEvidenceRejectionDetailsV1 & {
   readonly findingIndex: number;
   readonly evidenceIndex: number;
   readonly kind: 'file_at_commit';
   readonly commit: string;
   readonly path: string;
   readonly requestedLines: { readonly start: number; readonly end: number };
-  readonly actualLineCount: number;
-  readonly reason: 'line_start_out_of_range' | 'line_end_out_of_range';
   readonly findingDowngraded: boolean;
+};
+export type InvestigationEvidenceRejectionV1 = InvestigationEvidenceRejectionDetailsV1 & { readonly findingIndex: number; readonly evidenceIndex: number };
+const safeNonnegative = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+function rejectionDetails(value: Record<string, unknown>): InvestigationEvidenceRejectionDetailsV1 | null {
+  if (value.reason === 'range_not_validated_file_too_large') {
+    return safeNonnegative(value.actualByteSize) && safeNonnegative(value.maxReadableByteSize)
+      && value.actualByteSize > value.maxReadableByteSize && value.maxReadableByteSize > 0
+      ? { reason: value.reason, actualByteSize: value.actualByteSize, maxReadableByteSize: value.maxReadableByteSize } : null;
+  }
+  return (value.reason === 'line_start_out_of_range' || value.reason === 'line_end_out_of_range') && safeNonnegative(value.actualLineCount)
+    ? { reason: value.reason, actualLineCount: value.actualLineCount } : null;
 }
-export type InvestigationEvidenceRejectionV1 = Pick<InvestigationEvidenceDiagnosticV1, 'findingIndex' | 'evidenceIndex' | 'reason' | 'actualLineCount'>;
+function consistentRejection(r: InvestigationEvidenceRejectionV1, e: InvestigationEvidenceV1 | undefined): boolean {
+  const details = rejectionDetails({ ...r });
+  return safeNonnegative(r.findingIndex) && safeNonnegative(r.evidenceIndex) && !!e && e.kind === 'file_at_commit' && !!e.lines && !!details
+    && (details.reason === 'range_not_validated_file_too_large'
+      || details.reason === (e.lines.start > details.actualLineCount ? 'line_start_out_of_range' : e.lines.end > details.actualLineCount ? 'line_end_out_of_range' : null));
+}
+const rejectionClassCount = (rejections: readonly InvestigationEvidenceRejectionV1[]): number =>
+  Number(rejections.some(r => r.reason !== 'range_not_validated_file_too_large')) + Number(rejections.some(r => r.reason === 'range_not_validated_file_too_large'));
 export interface InvestigationResultV1 {
   readonly schemaVersion: 1;
   readonly findings: readonly { readonly statement: string; readonly status: 'established' | 'inferred' | 'undetermined'; readonly evidence: readonly InvestigationEvidenceV1[] }[];
@@ -82,30 +102,28 @@ export function parseInvestigationExecution(value: unknown): InvestigationExecut
     if (!Array.isArray(h.evidenceDiagnostics) || h.evidenceDiagnostics.length > 40) return null;
     for (const raw of h.evidenceDiagnostics) {
       const d = object(raw), lines = object(d?.requestedLines);
-      if (!d || !keys(d, ['findingIndex', 'evidenceIndex', 'kind', 'commit', 'path', 'requestedLines', 'actualLineCount', 'reason', 'findingDowngraded'])
+      if (!d || !keys(d, ['findingIndex', 'evidenceIndex', 'kind', 'commit', 'path', 'requestedLines', 'reason', 'findingDowngraded', ...(d.reason === 'range_not_validated_file_too_large' ? ['actualByteSize', 'maxReadableByteSize'] : ['actualLineCount'])])
         || !lines || !keys(lines, ['start', 'end']) || d.kind !== 'file_at_commit' || !isInvestigationCommit(d.commit) || !isInvestigationPath(d.path)
-        || ![d.findingIndex, d.evidenceIndex, d.actualLineCount].every(v => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0)
+        || ![d.findingIndex, d.evidenceIndex].every(v => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0)
         || typeof lines.start !== 'number' || typeof lines.end !== 'number' || !Number.isSafeInteger(lines.start) || !Number.isSafeInteger(lines.end)
         || lines.start < 1 || lines.end < lines.start || typeof d.findingDowngraded !== 'boolean'
-        || (d.reason !== 'line_start_out_of_range' && d.reason !== 'line_end_out_of_range')) return null;
+        || !rejectionDetails(d)) return null;
       diagnostics.push({ findingIndex: d.findingIndex as number, evidenceIndex: d.evidenceIndex as number, kind: 'file_at_commit', commit: d.commit, path: d.path,
-        requestedLines: { start: lines.start, end: lines.end }, actualLineCount: d.actualLineCount as number, reason: d.reason, findingDowngraded: d.findingDowngraded });
+        requestedLines: { start: lines.start, end: lines.end }, ...rejectionDetails(d)!, findingDowngraded: d.findingDowngraded });
     }
   }
   return { ...result, hostVerification: { ...(h.evidenceDiagnostics !== undefined ? { evidenceDiagnostics: diagnostics } : {}), baseSha: h.baseSha, snapshotClean: true, snapshotHead: h.baseSha, snapshotDetached: true, prohibitedRefsBefore: h.prohibitedRefsBefore as string[] } };
 }
 
-/** Reject only host-inspected EOF ranges; original indices are preserved in diagnostics. */
+/** Reject host-inspected unsupported ranges; original indices are preserved in diagnostics. */
 export function applyInvestigationEvidenceRejections(result: InvestigationResultV1, rejections: readonly InvestigationEvidenceRejectionV1[]): { result: InvestigationResultV1; diagnostics: readonly InvestigationEvidenceDiagnosticV1[] } | null {
   if (rejections.length === 0) return { result, diagnostics: [] };
-  if (rejections.length > 40 || result.gaps.length >= 40 || !parseInvestigationResult(result)) return null;
+  if (rejections.length > 40 || result.gaps.length + rejectionClassCount(rejections) > 40 || !parseInvestigationResult(result)) return null;
   const rejected = new Map<string, InvestigationEvidenceRejectionV1>();
   for (const r of rejections) {
-    if (![r.findingIndex, r.evidenceIndex, r.actualLineCount].every(v => Number.isSafeInteger(v) && v >= 0)) return null;
     const e = result.findings[r.findingIndex]?.evidence[r.evidenceIndex];
     const key = `${r.findingIndex}:${r.evidenceIndex}`;
-    if (!e || e.kind !== 'file_at_commit' || !e.lines || rejected.has(key)
-      || r.reason !== (e.lines.start > r.actualLineCount ? 'line_start_out_of_range' : e.lines.end > r.actualLineCount ? 'line_end_out_of_range' : null)) return null;
+    if (!consistentRejection(r, e) || rejected.has(key)) return null;
     rejected.set(key, r);
   }
   let downgraded = 0;
@@ -121,12 +139,22 @@ export function applyInvestigationEvidenceRejections(result: InvestigationResult
   const diagnostics: InvestigationEvidenceDiagnosticV1[] = [];
   result.findings.forEach((f, fi) => f.evidence.forEach((e, ei) => {
     const r = rejected.get(`${fi}:${ei}`);
-    if (r && e.kind === 'file_at_commit' && e.lines) diagnostics.push({ findingIndex: fi, evidenceIndex: ei, reason: r.reason, actualLineCount: r.actualLineCount, kind: e.kind, commit: e.commit, path: e.path,
+    if (r && e.kind === 'file_at_commit' && e.lines) diagnostics.push({ findingIndex: fi, evidenceIndex: ei, ...rejectionDetails({ ...r })!, kind: e.kind, commit: e.commit, path: e.path,
       requestedLines: { ...e.lines }, findingDowngraded: f.status !== 'undetermined' && findings[fi]!.status === 'undetermined' });
   }));
+  // A downgraded finding counts once in every rejection class it contained.
+  const hostGaps: string[] = [];
+  for (const large of [false, true]) {
+    const entries = diagnostics.filter(d => (d.reason === 'range_not_validated_file_too_large') === large);
+    if (!entries.length) continue;
+    const count = new Set(entries.filter(d => d.findingDowngraded).map(d => d.findingIndex)).size;
+    hostGaps.push(large
+      ? `Host: ${entries.length} evidence line reference(s) could not be validated because the file exceeds the host read limit and were not accepted; ${count} finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.`
+      : `Host: ${entries.length} evidence reference(s) failed line-range validation and were not accepted; ${count} finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.`);
+  }
   const treated: InvestigationResultV1 = { ...result, findings,
     outcome: downgraded > 0 && !findings.some(f => f.status !== 'undetermined') ? 'inconclusive' : downgraded > 0 && result.outcome === 'conclusive' ? 'partial' : result.outcome,
-    gaps: [...result.gaps, `Host: ${diagnostics.length} evidence reference(s) failed line-range validation and were not accepted; ${downgraded} finding(s) downgraded to undetermined. See hostVerification.evidenceDiagnostics.`] };
+    gaps: [...result.gaps, ...hostGaps] };
   return parseInvestigationResult(treated) ? { result: treated, diagnostics } : null;
 }
 
@@ -214,15 +242,13 @@ export function diagnoseInvestigationTransport(value: unknown): InvestigationFai
 export function diagnoseInvestigationRejectionTreatment(result: InvestigationResultV1, rejections: readonly InvestigationEvidenceRejectionV1[]): InvestigationFailureV1 | null {
   if (applyInvestigationEvidenceRejections(result, rejections)) return null;
   const fail = (reason: typeof INVESTIGATION_FAILURE_REASONS.post_rejection[number]): InvestigationFailureV1 => ({ version: 1, stage: 'post_rejection', reason });
-  if (rejections.length > 40 || result.gaps.length >= 40) return fail('rejection_overflow');
+  if (rejections.length > 40 || result.gaps.length + rejectionClassCount(rejections) > 40) return fail('rejection_overflow');
   if (!parseInvestigationResult(result)) return fail('treated_result_invalid');
   const seen = new Set<string>();
   for (const r of rejections) {
     const e = result.findings[r.findingIndex]?.evidence[r.evidenceIndex];
     const key = `${r.findingIndex}:${r.evidenceIndex}`;
-    if (![r.findingIndex, r.evidenceIndex, r.actualLineCount].every(v => Number.isSafeInteger(v) && v >= 0)
-      || !e || e.kind !== 'file_at_commit' || !e.lines || seen.has(key)
-      || r.reason !== (e.lines.start > r.actualLineCount ? 'line_start_out_of_range' : e.lines.end > r.actualLineCount ? 'line_end_out_of_range' : null)) return fail('rejection_inconsistent');
+    if (!consistentRejection(r, e) || seen.has(key)) return fail('rejection_inconsistent');
     seen.add(key);
   }
   return fail('treated_result_invalid');

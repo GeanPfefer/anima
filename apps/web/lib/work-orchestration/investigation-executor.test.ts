@@ -63,6 +63,15 @@ describe('investigation adapter request boundary', () => {
     expect(prompt).toContain('beyond the last line (EOF)');
     expect(prompt.length).toBeLessThan(CODEX_CLI_PROMPT_MAX_CHARS);
   });
+  test('prompt omits ranges in large files while preserving EOF mitigation', () => {
+    const prompt = buildInvestigationPrompt(request(), 'a'.repeat(40));
+    expect(prompt).toContain('For large files (> ~150 KB');
+    expect(prompt).toContain('omit lines (use null)');
+    expect(prompt).toContain('confirmed by reading the file');
+    expect(prompt).toContain('file@commit:lines');
+    expect(prompt).toContain('Do not EDIT');
+    expect(prompt.length).toBeLessThan(CODEX_CLI_PROMPT_MAX_CHARS);
+  });
   test('only newly introduced forbidden names invalidate the snapshot; ordinary concurrent refs are outside this check', () => {
     expect(hasNewProhibitedInvestigationRefs(['refs/heads/anima-work/previous'], ['refs/heads/anima-work/previous'])).toBe(false);
     expect(hasNewProhibitedInvestigationRefs([], ['refs/tags/attempt-1'])).toBe(true);
@@ -93,6 +102,12 @@ describe('evidence host operation diagnostics', () => {
     const exception = new Error('private stack stderr');
     jest.spyOn(worktree, 'runProcess').mockRejectedValue(exception);
     await expect(inspectInvestigationEvidence('.', result)).rejects.toBe(exception);
+  });
+  test('large range is rejected before any blob read', async () => {
+    const run = jest.spyOn(worktree, 'runProcess').mockResolvedValueOnce(response('commit')).mockResolvedValueOnce(response(`100644 blob ${'b'.repeat(40)}\tprivate.txt`)).mockResolvedValueOnce(response('blob')).mockResolvedValueOnce(response('150001'));
+    expect(await inspectInvestigationEvidence('.', result)).toEqual({ ok: true, rejections: [{ findingIndex: 0, evidenceIndex: 0, reason: 'range_not_validated_file_too_large', actualByteSize: 150001, maxReadableByteSize: 150000 }] });
+    expect(run).toHaveBeenCalledTimes(4);
+    expect(run.mock.calls.some(([, args]) => args.includes('blob'))).toBe(false);
   });
   test('content byte mismatch remains a hard failure', async () => {
     jest.spyOn(worktree, 'runProcess').mockResolvedValueOnce(response('commit')).mockResolvedValueOnce(response(`100644 blob ${'b'.repeat(40)}\tprivate.txt`)).mockResolvedValueOnce(response('blob')).mockResolvedValueOnce(response('10')).mockResolvedValueOnce(response('short'));

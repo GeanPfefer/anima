@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  diagnoseInvestigationTransport, diagnoseInvestigationRejectionTreatment, applyInvestigationEvidenceRejections, INVESTIGATION_OUTPUT_SCHEMA, isInvestigationCommit, parseInvestigationResult, normalizeInvestigationTransport, parseInvestigationExecution, renderInvestigationEvidence, renderInvestigationSummary,
+  diagnoseInvestigationTransport, diagnoseInvestigationRejectionTreatment, applyInvestigationEvidenceRejections, INVESTIGATION_EVIDENCE_MAX_READABLE_BYTES, INVESTIGATION_OUTPUT_SCHEMA, isInvestigationCommit, parseInvestigationResult, normalizeInvestigationTransport, parseInvestigationExecution, renderInvestigationEvidence, renderInvestigationSummary,
   validateEffectClassCoherence, validateWorkExecutorRequest,
   type InvestigationFailureV1, type InvestigationEvidenceRejectionV1, type InvestigationExecutionV1, type InvestigationResultV1, type WorkExecutorAdapter,
   type WorkExecutorRequest, type WorkExecutorSignal, type WorkExecutorSignalInput,
@@ -59,7 +59,12 @@ export async function inspectInvestigationEvidence(repo: string, result: Investi
     if (evidence.lines) {
       const size = await git(repo, ['cat-file', '-s', objectName]);
       if (!successful(size) || !/^\d+\s*$/.test(size.stdout)) return fail('evidence_git_unavailable');
-      if (Number(size.stdout) > 150_000) return fail('evidence_file_too_large');
+      const actualByteSize = Number(size.stdout);
+      if (!Number.isSafeInteger(actualByteSize)) return fail('evidence_git_unavailable');
+      if (actualByteSize > INVESTIGATION_EVIDENCE_MAX_READABLE_BYTES) {
+        rejections.push({ findingIndex, evidenceIndex, reason: 'range_not_validated_file_too_large', actualByteSize, maxReadableByteSize: INVESTIGATION_EVIDENCE_MAX_READABLE_BYTES });
+        continue;
+      }
       const content = await git(repo, ['cat-file', 'blob', objectName]);
       if (!successful(content)) return fail('evidence_git_unavailable');
       if (Buffer.byteLength(content.stdout, 'utf8') !== Number(size.stdout) || content.stdout.includes('\0')) return fail('evidence_content_invalid');
@@ -85,6 +90,7 @@ export function buildInvestigationPrompt(request: WorkExecutorRequest, baseSha: 
     'Source scope is an instruction subject to human audit, not a guaranteed confidentiality boundary. Read-only isolates effects; it does not guarantee confinement of reads.',
     'Return only the strict InvestigationResultV1 JSON schema supplied with --output-schema. Cite file_at_commit evidence as file@commit:lines (relative file path, full 40-hex commit, optional start/end); commit evidence identifies a full commit.',
     'Omit lines (use null) unless the exact range was confirmed by reading the file. Never estimate the end of a file or cite a line beyond the last line (EOF). Prefer a few small ranges.',
+    'For large files (> ~150 KB, such as extensive PRDs), omit lines (use null).',
     'established/inferred require evidence. undetermined may have none. partial/inconclusive require explicit gaps. Do not expose secrets or absolute local paths. Findings are subject to human review; resolving a citation does not prove its statement.',
   ].join('\n');
 }
