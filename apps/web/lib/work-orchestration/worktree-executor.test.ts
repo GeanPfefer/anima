@@ -1568,3 +1568,28 @@ describe('WorktreeExecutorAdapter — deadline: preparação e result (rodada 3)
     } finally { commitSpy.mockRestore(); }
   });
 });
+
+test('Codex terminal failure persists only closed cause and restores edits', async () => {
+  const { CodexCliCoderBackend } = await import('./codex-cli-coder');
+  const ctx = await makeNpmRepo();
+  let restoreRoot: string | undefined;
+  try {
+    const backend = new CodexCliCoderBackend({ config: { executable: 'fake', model: 'default' },
+      run: async (_file, _args, options) => {
+        restoreRoot = options.cwd;
+        await writeFile(join(options.cwd, 'src', 'added.ts'), 'private-sentinel');
+        return { command: 'fake', exitCode: 1, durationMs: 1, timedOut: false, cancelled: false,
+          stdout: [JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+            JSON.stringify({ type: 'turn.failed', error: { message: "You've hit your usage limit. cf-ray request id private-sentinel" } })].join('\n'), stderr: 'private-sentinel' };
+      } });
+    const signals = await collect(new WorktreeExecutorAdapter({ targets: ctx.resolver, backend }), request(), new AbortController().signal);
+    expect(signals.at(-1)).toMatchObject({ kind: 'error', code: 'execution_failed', retryable: true,
+      nativeCliFailure: { version: 1, category: 'usage_limit_exceeded', exitCode: 1, threadId: 'thread-1' } });
+    expect(JSON.stringify(signals)).not.toMatch(/private-sentinel|cf-ray|request id|turn.failed/);
+    expect(signals.at(-1)).toMatchObject({ message: expect.stringContaining('[usage_limit_exceeded]') });
+    expect(validateWorkExecutorTranscript(signals)).toBeNull();
+    expect(restoreRoot).toBeDefined();
+    const branch = await git(ctx.repo, ['status', '--porcelain']);
+    expect(branch.stdout.trim()).toBe('');
+  } finally { await ctx.cleanup(); }
+});

@@ -1,3 +1,4 @@
+import type { NativeCliFailureV1 } from '@anima/core';
 import { renderCoderTaskSection, type CoderEditRequest } from './coder-backend';
 import { summarizeCommandOutput } from './output-sanitization';
 import { runProcess, type CommandResult } from './worktree';
@@ -225,7 +226,17 @@ export function aiMemoryTurnNotes(config: AiMemoryWrapConfig, harness: AiMemoryH
   ];
 }
 
+export class NativeCliFailureError extends Error {
+  constructor(message: string, readonly nativeCliFailure: NativeCliFailureV1) {
+    super(message);
+    this.name = 'NativeCliFailureError';
+  }
+}
+
+export type NativeCliFailureClassifier = (stdout: string, exitCode: number) => NativeCliFailureV1;
+
 export interface NativeCliTurnInput {
+  readonly classifyFailure?: NativeCliFailureClassifier;
   /** Nome humano nas mensagens (ex.: "Codex CLI"). */
   readonly label: string;
   readonly executable: string;
@@ -306,6 +317,15 @@ export async function runNativeCliTurn(input: NativeCliTurnInput): Promise<Nativ
   if (result.cancelled || signal.aborted) throw new Error(`${label} cancelado pelo host após ${seconds}s.`);
   if (result.timedOut) throw new Error(`[runner_timeout] ${label} encerrado pelo deadline global após ${seconds}s.`);
   if (result.exitCode !== 0) {
+    if (input.classifyFailure && !wrap) {
+      const failure = input.classifyFailure(result.stdout, result.exitCode);
+      const prefix = `${label} terminou com exit ${result.exitCode}`;
+      if (failure.category !== 'unknown_native_cli_failure') {
+        throw new NativeCliFailureError(`${prefix} [${failure.category}].`, failure);
+      }
+      const diagnostic = sanitizeNativeCliDiagnostic({ stdout: '', stderr: result.stderr }, rootPath);
+      throw new NativeCliFailureError(`${prefix}${diagnostic ? `: ${diagnostic}` : ''}`, failure);
+    }
     const diagnostic = sanitizeNativeCliDiagnostic(result, rootPath);
     throw new Error(`${label}${wrap ? ' (via ai-memory)' : ''} terminou com exit ${result.exitCode}${diagnostic ? `: ${diagnostic}` : ''}`);
   }

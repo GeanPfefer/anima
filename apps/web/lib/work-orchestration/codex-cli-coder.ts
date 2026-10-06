@@ -1,3 +1,4 @@
+import type { NativeCliFailureV1 } from '@anima/core';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import {
   NATIVE_CLI_DEFAULT_MODEL,
@@ -89,7 +90,8 @@ export function resolveCodexCliConfig(
  * `aiMemoryWrapped`: o `ai-memory run` reescreve `exec <args>` para `exec resume <id> <args>`
  * ao voltar ao Codex, e `codex exec resume` (0.159) NÃO aceita `--sandbox` nem `--cd`. Nesse
  * modo o sandbox vai por `-c sandbox_mode=workspace-write` (aceito por exec E exec resume) e a
- * raiz é o cwd do processo (a worktree). Sem wrap, os args são exatamente os de antes.
+ * raiz é o cwd do processo (a worktree). No caminho direto, `--json` habilita
+ * o diagnóstico terminal; os demais argumentos permanecem iguais.
  */
 export function buildCodexExecArgs(config: CodexCliConfig, rootPath: string, prompt: string, aiMemoryWrapped = false): readonly string[] {
   if (aiMemoryWrapped) {
@@ -106,10 +108,36 @@ export function buildCodexExecArgs(config: CodexCliConfig, rootPath: string, pro
     '--sandbox', 'workspace-write',
     '-c', 'approval_policy=never',
     '--cd', rootPath,
+    '--json',
     ...(config.model !== CODEX_CLI_DEFAULT_MODEL ? ['--model', config.model] : []),
     ...(config.profile ? ['--profile', config.profile] : []),
     prompt,
   ];
+}
+
+/** Public JSONL has no error enum: deliberately narrow textual heuristics.
+ * Changed messages fall back to unknown; only the LAST terminal decides. */
+export function classifyCodexCliFailure(stdout: string, exitCode: number): NativeCliFailureV1 {
+  let threadId: string | undefined;
+  let terminalMessage: unknown;
+  for (const line of stdout.split(/\r?\n/)) {
+    let event: unknown;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (typeof event !== 'object' || event === null || Array.isArray(event)) continue;
+    const v = event as Record<string, unknown>;
+    if (v.type === 'thread.started' && typeof v.thread_id === 'string' && /^[A-Za-z0-9._:-]{1,80}$/.test(v.thread_id)) threadId = v.thread_id;
+    if (v.type === 'turn.failed') {
+      const error = v.error;
+      terminalMessage = typeof error === 'object' && error !== null && !Array.isArray(error)
+        ? (error as Record<string, unknown>).message : undefined;
+    }
+  }
+  let category: NativeCliFailureV1['category'] = 'unknown_native_cli_failure';
+  if (typeof terminalMessage === 'string') {
+    if (/^You[\u2019']ve hit your usage limit\./.test(terminalMessage)) category = 'usage_limit_exceeded';
+    else if (/\b401\b/.test(terminalMessage) && /\bUnauthorized\b/.test(terminalMessage)) category = 'unauthorized';
+  }
+  return { version: 1, category, exitCode, ...(threadId ? { threadId } : {}) };
 }
 
 /** Instrução determinística (comum aos executores nativos). */
@@ -158,6 +186,7 @@ export class CodexCliCoderBackend implements CoderBackend {
     if (wrap && this.config.profile) throw new Error('Codex CLI com ai-memory não suporta ANIMA_CODEX_CLI_PROFILE (codex exec resume não aceita --profile).');
     const { seconds, aiMemoryNotes } = await runNativeCliTurn({
       label: 'Codex CLI',
+      ...(!wrap ? { classifyFailure: classifyCodexCliFailure } : {}),
       executable: this.config.executable,
       buildArgs: (rootPath, prompt) => buildCodexExecArgs(this.config, rootPath, prompt, Boolean(wrap)),
       env: buildCodexCliEnvironment(this.environmentSource),

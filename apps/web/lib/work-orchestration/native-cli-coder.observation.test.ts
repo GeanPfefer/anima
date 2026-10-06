@@ -102,3 +102,23 @@ describe('seam governada: persistPostTurnHostObservations grava a evidência do 
     expect(recorded).toHaveLength(0);
   });
 });
+
+test('generic turn classifier runs only on nonzero direct exit; legacy format unchanged', async () => {
+  const { runNativeCliTurn, NativeCliFailureError } = await import('./native-cli-coder');
+  const classifyFailure = jest.fn(() => ({ version: 1 as const, category: 'usage_limit_exceeded' as const, exitCode: 1 }));
+  const input = { label: 'Codex CLI', executable: 'fake', buildArgs: () => [], env: {},
+    rootPath: 'fixture', signal: new AbortController().signal,
+    request: { objective: 'fixture', includedScope: [], excludedScope: [], deadlineAtMs: Date.now() + 60000 } as import('./coder-backend').CoderEditRequest,
+    classifyFailure };
+  const result = { command: 'fake', exitCode: 0, stdout: 'private-sentinel', stderr: '', durationMs: 1, cancelled: false, timedOut: false };
+  await expect(runNativeCliTurn({ ...input, run: async () => result })).resolves.toHaveProperty('result.exitCode', 0);
+  for (const flags of [{ cancelled: true }, { timedOut: true }]) {
+    const error = await runNativeCliTurn({ ...input, run: async () => ({ ...result, exitCode: 1, ...flags }) }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(NativeCliFailureError);
+    expect(error).not.toHaveProperty('nativeCliFailure');
+  }
+  expect(classifyFailure).not.toHaveBeenCalled();
+  await expect(runNativeCliTurn({ ...input, classifyFailure: undefined, run: async () => ({ ...result, exitCode: 1, stdout: 'legacy diagnostic' }) }))
+    .rejects.toThrow('Codex CLI terminou com exit 1: legacy diagnostic');
+});

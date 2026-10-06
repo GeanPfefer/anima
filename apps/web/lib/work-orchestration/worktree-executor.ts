@@ -1,3 +1,4 @@
+import { NativeCliFailureError } from './native-cli-coder';
 import {
   buildWorktreeHandoff,
   coderTaskSpecMismatch,
@@ -560,6 +561,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             )}.${restoreNote}`,
             retryable: true,
             handoffReference,
+            ...(error instanceof NativeCliFailureError && this.options.backend.id.startsWith('codex-cli:')
+              ? { nativeCliFailure: error.nativeCliFailure } : {}),
           });
           return;
         }

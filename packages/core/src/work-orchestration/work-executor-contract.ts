@@ -9,6 +9,25 @@ import type { Json } from '@anima/types';
 import { parseEffectClass, type WorkEffectClass } from './effect-class';
 import { parseInvestigationFailure, parseInvestigationExecution, renderInvestigationSummary, type InvestigationFailureV1, type InvestigationExecutionV1 } from './investigation-result';
 
+export interface NativeCliFailureV1 {
+  readonly version: 1;
+  readonly category: 'usage_limit_exceeded' | 'unauthorized' | 'unknown_native_cli_failure';
+  readonly exitCode: number;
+  readonly threadId?: string;
+}
+
+/** Closed diagnostic: no provider prose or raw process output can cross this boundary. */
+export function parseNativeCliFailure(value: unknown): NativeCliFailureV1 | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (Object.keys(v).some(key => !['version', 'category', 'exitCode', 'threadId'].includes(key))
+    || v.version !== 1 || typeof v.category !== 'string'
+    || !['usage_limit_exceeded', 'unauthorized', 'unknown_native_cli_failure'].includes(v.category) || typeof v.exitCode !== 'number' || !Number.isInteger(v.exitCode)
+    || (Object.prototype.hasOwnProperty.call(v, 'threadId') && (typeof v.threadId !== 'string' || !/^[A-Za-z0-9._:-]{1,80}$/.test(v.threadId)))) return null;
+  return { version: 1, category: v.category as NativeCliFailureV1['category'], exitCode: v.exitCode,
+    ...(typeof v.threadId === 'string' ? { threadId: v.threadId } : {}) };
+}
+
 export interface WorkExecutorRequest extends ExecutionAttemptCorrelation {
   /** SDC-10 projection; absence preserves the existing mutating execution lane. */
   readonly effectClass?: WorkEffectClass;
@@ -116,7 +135,7 @@ export type WorkExecutorSignal =
   | (CorrelatedSignal & { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 })
   | (CorrelatedSignal & { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] })
   | (CorrelatedSignal & { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1; readonly investigation?: InvestigationExecutionV1 })
-  | (CorrelatedSignal & { readonly kind: 'error'; readonly investigationFailure?: InvestigationFailureV1; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string })
+  | (CorrelatedSignal & { readonly kind: 'error'; readonly investigationFailure?: InvestigationFailureV1; readonly nativeCliFailure?: NativeCliFailureV1; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string })
   | (CorrelatedSignal & { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string });
 
 export type WorkExecutorErrorCode = 'invalid_request' | 'execution_failed' | 'attempt_payload_conflict' | 'contract_violation';
@@ -125,7 +144,7 @@ export type WorkExecutorSignalInput =
   | { readonly kind: 'checkpoint'; readonly checkpoint: WorkCheckpointV1 }
   | { readonly kind: 'decision_required'; readonly reason: HumanInterruptionReason; readonly explanation: string; readonly options: readonly WorkDecisionOption[] }
   | { readonly kind: 'result'; readonly summary: string; readonly resultReferences: readonly string[]; readonly validations: readonly WorkResultValidation[]; readonly limitations: readonly string[]; readonly handoffReference: string; readonly worktreeHandoff?: WorktreeHandoffV1; readonly investigation?: InvestigationExecutionV1 }
-  | { readonly kind: 'error'; readonly investigationFailure?: InvestigationFailureV1; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string }
+  | { readonly kind: 'error'; readonly investigationFailure?: InvestigationFailureV1; readonly nativeCliFailure?: NativeCliFailureV1; readonly code: WorkExecutorErrorCode; readonly message: string; readonly retryable: boolean; readonly handoffReference: string }
   | { readonly kind: 'cancelled'; readonly acknowledged: true; readonly handoffReference: string };
 
 export interface WorkExecutorAdapter {
@@ -207,6 +226,12 @@ export function validateWorkExecutorTranscript(signals: readonly WorkExecutorSig
   for (const signal of signals) {
     if (signal.sequence !== index + 1) return 'A sequência de sinais não é contínua.';
     if (signal.attemptId !== correlation.attemptId || signal.workItemId !== correlation.workItemId || signal.approvedProposalVersion !== correlation.approvedProposalVersion || signal.origin !== 'executor') return 'Um sinal perdeu a correlação da tentativa.';
+    if (Object.prototype.hasOwnProperty.call(signal, 'nativeCliFailure')) {
+      if (Object.keys(signal).some(key => !['kind', 'code', 'message', 'retryable', 'handoffReference', 'nativeCliFailure', 'attemptId', 'workItemId', 'approvedProposalVersion', 'origin', 'sequence'].includes(key))
+        || signal.kind !== 'error' || signal.code !== 'execution_failed'
+        || typeof signal.retryable !== 'boolean' || !parseNativeCliFailure(signal.nativeCliFailure)
+        || Object.prototype.hasOwnProperty.call(signal, 'investigationFailure')) return 'Invalid native CLI diagnostic.';
+    }
     if (Object.prototype.hasOwnProperty.call(signal, 'investigationFailure')) {
       // Signals carry no adapter id; the existing investigation handoff namespace
       // is the lane discriminator at this contract boundary. This validates transcript

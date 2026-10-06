@@ -1,4 +1,4 @@
-import { decideRecovery, recoveryFailureCode, type WorkRecoveryAssessment } from '@anima/core';
+import { parseNativeCliFailure, nativeCliFailureRecoveryCode, decideRecovery, recoveryFailureCode, type WorkRecoveryAssessment } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -20,8 +20,11 @@ const failureEvidence = (event: EventRow) => {
   // tamanho e rejeita padrões óbvios de segredo antes de entregá-la ao core.
   const safeMessage = message && message.length <= 600 && !/(?:token|password|secret|api[_-]?key)\s*[:=]/i.test(message)
     ? message : null;
+  const failure = parseNativeCliFailure(signal?.['nativeCliFailure']);
+  const projectedCode = text(signal?.['code']) === 'execution_failed' && failure
+    ? nativeCliFailureRecoveryCode(failure) : null;
   return {
-    code: text(signal?.['code']) ?? text(root?.['reason']),
+    code: projectedCode ?? text(signal?.['code']) ?? text(root?.['reason']),
     safeMessage,
     retryable: root?.['retryable'] === true,
   };

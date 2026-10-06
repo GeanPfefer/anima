@@ -1,3 +1,9 @@
+import type { NativeCliFailureV1 } from './work-executor-contract';
+
+export function nativeCliFailureRecoveryCode(failure: NativeCliFailureV1): string | null {
+  return failure.category === 'usage_limit_exceeded' ? 'provider_usage_limit_exceeded' : null;
+}
+
 export type RecoveryFailureKind =
   | 'code_failure'
   | 'environment_failure'
@@ -44,7 +50,7 @@ const KNOWN_CODES = new Set([
   'resource_pressure', 'insufficient_memory', 'insufficient_vram',
   'ollama_timeout', 'runner_timeout', 'provider_timeout',
   'no_progress', 'loop_detected', 'ollama_no_effective_edits', 'ollama_no_progress',
-  'provider_unavailable', 'external_unavailable', 'ollama_transport_error',
+  'provider_usage_limit_exceeded', 'provider_unavailable', 'external_unavailable', 'ollama_transport_error',
   'execution_cancelled', 'cancelled',
   'invalid_request', 'contract_violation', 'attempt_payload_conflict',
 ] as const);
@@ -79,7 +85,7 @@ const kindFor = (code: string | null): RecoveryFailureKind => {
     case 'gate_failed': return 'gate_failure';
     case 'ollama_timeout': case 'runner_timeout': case 'provider_timeout': return 'timeout';
     case 'no_progress': case 'loop_detected': case 'ollama_no_effective_edits': case 'ollama_no_progress': return 'no_progress';
-    case 'provider_unavailable': case 'external_unavailable': case 'ollama_transport_error': return 'external_unavailable';
+    case 'provider_usage_limit_exceeded': case 'provider_unavailable': case 'external_unavailable': case 'ollama_transport_error': return 'external_unavailable';
     case 'execution_cancelled': case 'cancelled': return 'contract_violation';
     case 'invalid_request': case 'contract_violation': case 'attempt_payload_conflict': return 'contract_violation';
     default: return 'unknown';

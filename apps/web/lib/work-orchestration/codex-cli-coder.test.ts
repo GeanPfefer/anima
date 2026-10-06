@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { buildCoderTaskSpec, type WorkExecutorRequest } from '@anima/core';
 import { renderCoderTaskSection, type CoderEditRequest, type CoderWorkspace } from './coder-backend';
 import {
+  classifyCodexCliFailure,
   CODEX_CLI_DEFAULT_MODEL,
   CODEX_CLI_PROMPT_MAX_CHARS,
   CodexCliCoderBackend,
@@ -98,7 +99,7 @@ describe('CodexCliCoderBackend — lançamento determinístico', () => {
 
   test('modelo e perfil explícitos viram flags; config do operador recusa wrapper de shell', () => {
     expect(buildCodexExecArgs({ executable: 'codex', model: 'gpt-x', profile: 'anima' }, ROOT, 'p'))
-      .toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT, '--model', 'gpt-x', '--profile', 'anima', 'p']);
+      .toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT, '--json', '--model', 'gpt-x', '--profile', 'anima', 'p']);
     expect(resolveCodexCliConfig(null, {})).toEqual({ ok: true, value: { executable: 'codex', model: CODEX_CLI_DEFAULT_MODEL } });
     expect(resolveCodexCliConfig('gpt-x', { ANIMA_CODEX_CLI_PATH: ' C:\\bin\\codex.exe ', ANIMA_CODEX_CLI_MODEL: 'ignored', ANIMA_CODEX_CLI_PROFILE: 'p' }))
       .toEqual({ ok: true, value: { executable: 'C:\\bin\\codex.exe', model: 'gpt-x', profile: 'p' } });
@@ -236,4 +237,59 @@ describe('CodexCliCoderBackend — processo falso real', () => {
     await expect(backend(fakeRunner(script), { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot })
       .edit(editRequest(), workspace(dir), new AbortController().signal)).rejects.toThrow(/exit 3: falha simulada do codex/);
   });
+});
+
+describe('terminal JSONL diagnostics (closed textual heuristics, no public enum)', () => {
+  const failed = (message: string) => JSON.stringify({ type: 'turn.failed', error: { message } });
+  test.each([
+    ["You've hit your usage limit. cf-ray=private-sentinel", 'usage_limit_exceeded'],
+    ["You\u2019ve hit your usage limit. request id private-sentinel", 'usage_limit_exceeded'],
+    ['unexpected status 401 Unauthorized: private-sentinel', 'unauthorized'],
+    ['some usage limit', 'unknown_native_cli_failure'],
+    ["prefix You've hit your usage limit.", 'unknown_native_cli_failure'],
+    ['429 Too Many Requests', 'unknown_native_cli_failure'],
+  ])('classifies ONLY terminal %s', (message, category) => {
+    expect(classifyCodexCliFailure(failed(message), 1)).toEqual({ version: 1, category, exitCode: 1 });
+  });
+  test('thread, last terminal, malformed and intermediate events', () => {
+    const stdout = [JSON.stringify({ type: 'thread.started', thread_id: 'thread_1:abc' }),
+      '{bad JSON', JSON.stringify({ type: 'error', message: '401 Unauthorized' }),
+      JSON.stringify({ type: 'item.completed', item: { type: 'error', message: "You've hit your usage limit." } }),
+      failed('401 Unauthorized'), failed('different terminal')].join('\n');
+    expect(classifyCodexCliFailure(stdout, 2)).toEqual({ version: 1, exitCode: 2, threadId: 'thread_1:abc', category: 'unknown_native_cli_failure' });
+    expect(classifyCodexCliFailure('{bad 401 Unauthorized', 1).category).toBe('unknown_native_cli_failure');
+    expect(classifyCodexCliFailure(JSON.stringify({ type: 'error', message: '401 Unauthorized' }), 1).category).toBe('unknown_native_cli_failure');
+    expect(classifyCodexCliFailure(JSON.stringify({ type: 'thread.started', thread_id: '/private/path' }), 1)).not.toHaveProperty('threadId');
+  });
+  test('known failure has stable short message, unknown never includes stdout', async () => {
+    const error = await backend(capturingRunner(commandResult({ exitCode: 1, stdout: failed("You've hit your usage limit. cf-ray private-sentinel"), stderr: 'private-sentinel' })).run)
+      .edit(editRequest(), workspace(ROOT), new AbortController().signal).catch((e: unknown) => e);
+    expect(error).toMatchObject({ message: 'Codex CLI terminou com exit 1 [usage_limit_exceeded].', nativeCliFailure: { version: 1, category: 'usage_limit_exceeded', exitCode: 1 } });
+    expect(JSON.stringify(error)).not.toContain('private-sentinel');
+    await expect(backend(capturingRunner(commandResult({ exitCode: 1, stdout: failed('private-sentinel') })).run)
+      .edit(editRequest(), workspace(ROOT), new AbortController().signal)).rejects.toThrow(/^Codex CLI terminou com exit 1$/);
+  });
+  test('wrapped args retain old protocol without json', () => {
+    expect(buildCodexExecArgs({ executable: 'codex', model: 'default' }, ROOT, 'p', true))
+      .toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never', 'p']);
+  });
+});
+
+test('wrapped Codex keeps legacy failure format and stdout protocol', async () => {
+  const { run, calls } = capturingRunner(commandResult({ exitCode: 1, stdout: 'legacy diagnostic' }));
+  const wrapped = new CodexCliCoderBackend({ config: { executable: 'fake', model: 'default' }, run,
+    aiMemory: { executable: 'ai-memory', serverUrl: 'http://127.0.0.1:1234', dataDir: 'fixture', workstream: { mode: 'new', name: 'fixture' } },
+    aiMemoryProbe: async () => true });
+  const error = await wrapped.edit(editRequest(), workspace(ROOT), new AbortController().signal).catch((e: unknown) => e);
+  expect(error).toMatchObject({ message: 'Codex CLI (via ai-memory) terminou com exit 1: legacy diagnostic' });
+  expect(error).not.toHaveProperty('nativeCliFailure');
+  expect(calls[0]!.args).not.toContain('--json');
+  expect(calls[0]!.args.slice(-6, -1)).toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never']);
+});
+test('exit zero ignores terminal-looking stdout and does not expose a native cause', async () => {
+  const result = await backend(capturingRunner(commandResult({ stdout: JSON.stringify({ type: 'turn.failed', error: { message: "You've hit your usage limit." } }) })).run)
+    .edit(editRequest(), workspace(ROOT), new AbortController().signal);
+  expect(result).not.toHaveProperty('nativeCliFailure');
+  expect(result.touchedResources).toEqual([]);
+  expect(result.notes).toEqual(['turn-outcome:exited-0', 'duration-s:1']);
 });

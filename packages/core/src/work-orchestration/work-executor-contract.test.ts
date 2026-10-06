@@ -309,3 +309,20 @@ describe('investigation error diagnostic contract', () => {
     expect(validateWorkExecutorTranscript([{ ...error(failure), kind: 'progress' } as WorkExecutorSignal])).not.toBeNull();
   });
 });
+
+test('native CLI diagnostic parser is closed and transcripts remain compatible', async () => {
+  const { parseNativeCliFailure } = await import('./work-executor-contract');
+  const valid = { version: 1, category: 'usage_limit_exceeded', exitCode: 1, threadId: 'abc:123' };
+  expect(parseNativeCliFailure(valid)).toEqual(valid);
+  expect(parseNativeCliFailure({ version: 1, category: 'unauthorized', exitCode: 2 })).not.toBeNull();
+  for (const invalid of [{ ...valid, category: 'provider_unavailable' }, { ...valid, exitCode: 1.5 },
+    { ...valid, threadId: '/secret' }, { ...valid, extra: 'private' }, { ...valid, threadId: undefined }]) {
+    expect(parseNativeCliFailure(invalid)).toBeNull();
+  }
+  const signals = await collect(new FakeWorkExecutor([{ kind: 'error', code: 'execution_failed', message: 'safe', retryable: true, handoffReference: 'checkpoint:failure', nativeCliFailure: valid as NonNullable<Extract<WorkExecutorSignal, { kind: 'error' }>['nativeCliFailure']> }]), request);
+  expect(validateWorkExecutorTranscript(signals)).toBeNull();
+  const signal = signals[0]!;
+  for (const override of [{ code: 'contract_violation' }, { investigationFailure: {} }, { kind: 'progress' }, { nativeCliFailure: { ...valid, raw: 'secret' } }]) {
+    expect(validateWorkExecutorTranscript([{ ...signal, ...override } as WorkExecutorSignal])).not.toBeNull();
+  }
+});

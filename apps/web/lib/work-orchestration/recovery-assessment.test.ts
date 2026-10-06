@@ -74,3 +74,18 @@ test('estado não terminal, versão sem falha e limites inválidos não produzem
   expect(projectWorkRecoveryAssessment(item(), [{ ...event('f', 'execution_failed', 1, 'a1', 'gate_failed'), proposal_version: 1 }])).toBeNull();
   expect(projectWorkRecoveryAssessment({ ...item(), intent: {} }, [event('f', 'execution_failed', 1, 'a1', 'gate_failed')])).toBeNull();
 });
+
+test.each(['usage_limit_exceeded', 'unauthorized', 'unknown_native_cli_failure'])('projects native %s without changing attempts', category => {
+  const failed = event('f', 'execution_failed', 2, 'a1');
+  failed.payload = { data: { attempt_id: 'a1', reason: 'execution_failed', retryable: true,
+    executor_signal: { code: 'execution_failed', nativeCliFailure: { version: 1, category, exitCode: 1 } } } };
+  const result = projectWorkRecoveryAssessment(item(), [event('s', 'execution_started', 1, 'a1'), failed]);
+  expect(result).toMatchObject({ attemptsUsed: 1, maxAttempts: 2, decision: { failureKind: category === 'usage_limit_exceeded' ? 'external_unavailable' : 'unknown' } });
+  if (category !== 'usage_limit_exceeded') expect(result?.decision.action).toBe('human_required');
+});
+test('malformed native payload and historic failure remain unknown', () => {
+  const failed = event('f', 'execution_failed', 2, 'a1');
+  expect(projectWorkRecoveryAssessment(item(), [failed])?.decision.failureKind).toBe('unknown');
+  failed.payload = { data: { attempt_id: 'a1', executor_signal: { code: 'execution_failed', nativeCliFailure: { version: 1, category: 'usage_limit_exceeded', exitCode: 1, extra: 'private' } } } };
+  expect(projectWorkRecoveryAssessment(item(), [failed])?.decision.failureKind).toBe('unknown');
+});

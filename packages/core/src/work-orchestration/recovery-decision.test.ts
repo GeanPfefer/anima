@@ -70,3 +70,13 @@ describe('decideRecovery', () => {
     });
   });
 });
+
+test('native diagnostics project only usage and preserve recovery policy', async () => {
+  const { nativeCliFailureRecoveryCode } = await import('./recovery-decision');
+  for (const category of ['usage_limit_exceeded', 'unauthorized', 'unknown_native_cli_failure'] as const) {
+    const code = nativeCliFailureRecoveryCode({ version: 1, category, exitCode: 1 });
+    const decision = decideRecovery({ code, retryable: false, attemptsUsed: 1, maxAttempts: 1, repeatedSameFailure: false });
+    expect(decision.failureKind).toBe(category === 'usage_limit_exceeded' ? 'external_unavailable' : 'unknown');
+    expect(decision.action).not.toBe('retry');
+  }
+});
