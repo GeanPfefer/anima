@@ -407,9 +407,6 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement:
       'O Proof Engine deriva "operacional" (8 ocasiões verificadas), mas conta sucessos, não taxa: na lineage dev-readiness só 2 de 5 attempts pagas chegaram a verified e 1 foi aceita. Declarado segue comprovada até a produção ser confiável (e a barreira local de RAM ser resolvida).',
     proofRefs: [
-      { kind: 'commit', ref: '3bfa619' },
-      { kind: 'commit', ref: '2d8546f' },
-      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/executor-selection.ts' },
       { kind: 'commit', ref: '87a3ad8', note: 'PIN-02 provado ao vivo pelo self-dev' },
       { kind: 'commit', ref: 'fbf0baa', note: 'fallback governado de coder por capacidade' },
     ],

@@ -337,6 +337,10 @@ describe('Evolution Reconciliation SDC-21', () => {
       .toEqual(['apps/web/lib/work-orchestration/integration-effect.integration.test.ts', 'supabase/tests/integration_effect.test.sql']);
     expect(integration.history?.flatMap((h) => h.refs).some((p) => p.ref === '349a35e')).toBe(false);
     expect(integration.advancement).not.toContain('349a35e');
+    const produceChangeProofRefs = get('agency.produce-change').proofRefs?.map((p) => p.ref) ?? [];
+    for (const ref of ['3bfa619', '2d8546f', 'apps/web/lib/work-orchestration/executor-selection.ts']) {
+      expect(produceChangeProofRefs).not.toContain(ref);
+    }
     expect(get('agency.produce-change').history?.filter((h) => h.change === 'proof_added') ?? []).toEqual([]);
     expect(get('agency.continuous-self-development').history?.filter((h) => h.change === 'proof_added')).toEqual([]);
     const verifierNote = get('governance.verifier').history?.find((h) => h.at === '2026-10-05')?.note;
