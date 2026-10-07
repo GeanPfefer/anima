@@ -348,8 +348,11 @@ describe('Evolution Reconciliation SDC-21', () => {
     expect(frontier('agency.continuous-self-development')).toMatch(/Migration e deploy.*humanos/);
     expect(frontier('interaction.resident-host')).toMatch(/Recovery\/rework/);
     for (const c of ANIMA_CAPABILITY_REGISTRY_V0) {
-      const claims = [c.description, c.meaning, c.advancement, ...(c.frontier ?? []), ...(c.history ?? []).map((h) => h.note)].join(' ');
-      expect(claims).not.toMatch(/Classificação pós-aprovação pelo Resident Host.*?é missing|Host não classifica aprovados não classificados/);
+      const claims = [c.description, c.meaning, c.advancement, ...(c.frontier ?? []), ...(c.history ?? []).map((h) => h.note)];
+      // Uma claim não pode atravessar outra frontier nem outra frase do mesmo item.
+      for (const claim of claims) {
+        expect(claim ?? '').not.toMatch(/Classificação pós-aprovação pelo Resident Host[^.!?]*?é missing|Host não classifica aprovados não classificados/);
+      }
     }
     expect(get('agency.continuous-self-development').maturity).toBe('projected');
     expect(get('agency.investigation-sessions').maturity).toBe('implemented');
