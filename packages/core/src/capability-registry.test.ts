@@ -305,7 +305,6 @@ describe('Evolution Reconciliation SDC-21', () => {
 
   test('fronteiras humanas e capacidades missing/future sobrevivem nos nós certos', () => {
     for (const id of ['interaction.resident-host', 'agency.continuous-self-development']) {
-      expect(frontier(id)).toMatch(/Classificação pós-aprovação pelo Resident Host.*missing/);
       expect(frontier(id)).toMatch(/Lifecycle autônomo.*future/);
       expect(frontier(id)).toMatch(/configuração\/autenticação/);
       expect(frontier(id)).toMatch(/executor/);
@@ -326,7 +325,54 @@ describe('Evolution Reconciliation SDC-21', () => {
       expect(frontier(id)).toContain('versão/login');
     }
     expect(text('interaction.resident-host')).toContain('ensurePlannedProjectClassification');
-    expect(text('interaction.resident-host')).toContain('work prepare-autonomous');
+    expect(text('interaction.resident-host')).toMatch(/work prepare-autonomous.*fallback manual/);
+  });
+
+  test('SDC-23 descreve classificação T3 opt-in e prova viva parcial sem promoção', () => {
+    const host = text('interaction.resident-host');
+    for (const term of ['SDC-22', 'T3', 'canonical_backlog_v1', 'cli_propose_investigation_v1', 'fila do host-turn', 'ANIMA_POST_APPROVAL_CLASSIFICATION=1', 'ANIMA_POST_APPROVAL_CLASSIFICATION_SINCE', 'ISO-8601 com fuso']) {
+      expect(host).toContain(term);
+    }
+    expect(host).toMatch(/INV-09.*UMA ocasião viva.*só no ramo Investigation.*sem prepare-autonomous.*user_attempt_budget_exhausted.*zero attempts.*sem promoção/);
+    expect(host).toMatch(/canonical_backlog_v1.*código e testes.*sem prova viva equivalente/);
+    expect(host).toMatch(/controles negativos só.*testes/);
+    for (const id of ['interaction.resident-host', 'agency.continuous-self-development']) {
+      const current = text(id);
+      for (const term of ['opt-in', 'flag', 'cutoff', 'default off', 'planners/chat', 'sucessores de recovery/correção', 'approve', 'supervise', 'humanos']) {
+        expect(current.toLowerCase()).toContain(term.toLowerCase());
+      }
+      expect(current).toMatch(/work prepare-autonomous.*fallback manual.*demais origens/);
+      expect(current).not.toMatch(/default[- ]on|habilitad[ao] por padrão/);
+    }
+    expect(frontier('agency.continuous-self-development')).toMatch(/Retry\/recovery genérico.*Investigation.*missing/);
+    expect(frontier('agency.continuous-self-development')).toMatch(/Migration e deploy.*humanos/);
+    expect(frontier('interaction.resident-host')).toMatch(/Recovery\/rework/);
+    for (const c of ANIMA_CAPABILITY_REGISTRY_V0) {
+      const claims = [c.description, c.meaning, c.advancement, ...(c.frontier ?? []), ...(c.history ?? []).map((h) => h.note)].join(' ');
+      expect(claims).not.toMatch(/Classificação pós-aprovação pelo Resident Host.*?é missing|Host não classifica aprovados não classificados/);
+    }
+    expect(get('agency.continuous-self-development').maturity).toBe('projected');
+    expect(get('agency.investigation-sessions').maturity).toBe('implemented');
+    expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => isRealizedMaturity(c.maturity))).toHaveLength(50);
+    expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => isFutureMaturity(c.maturity))).toHaveLength(17);
+    expect(EVOLUTION_BASELINE).toEqual({ commit: '7f276d8', date: '2026-09-16', label: 'Evolution UX V1' });
+    const resident = get('interaction.resident-host');
+    const added = resident.history?.filter((h) => h.at === '2026-10-07') ?? [];
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatchObject({ change: 'proof_added' });
+    expect(added[0]?.note).toMatch(/SDC-22.*T3.*INV-09.*uma ocasião viva.*operational preservada/);
+    expect(added[0]?.refs).toEqual([
+      { kind: 'commit', ref: '534a1bd' },
+      { kind: 'commit', ref: '6efcc68' },
+      { kind: 'record', ref: 'docs/registros/2026-10-07-sdc22-post-approval-classification-live-proof.md' },
+    ]);
+    expect(resident.proofRefs).toEqual(expect.arrayContaining([
+      { kind: 'commit', ref: '534a1bd', note: expect.any(String) },
+      ...['post-approval-classification', 'backlog-host-turn-run'].flatMap((name) => [
+        { kind: 'doc', ref: `apps/web/lib/work-orchestration/${name}.ts` },
+        { kind: 'test', ref: `apps/web/lib/work-orchestration/${name}.test.ts` },
+      ]),
+    ]));
   });
 
   test('provas de integração pertencem ao primitive; Investigation não prova produção nem ciclo contínuo', () => {

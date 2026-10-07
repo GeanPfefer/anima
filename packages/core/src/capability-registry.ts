@@ -30,6 +30,10 @@
 // Investigation entrega conhecimento read_only distinto de candidato mutante.
 // Nenhuma maturity existente muda; fronteiras humanas permanecem explícitas.
 
+// SDC-23 (2026-10-07): SDC-22 implementou, integrou e publicou classificação
+// pós-aprovação T3 opt-in; INV-09 deu uma ocasião viva só no ramo Investigation.
+// Reuso dos nós existentes, sem promoção de maturity, novos nós ou relações.
+
 import { buildCapabilityGraph, type Capability, type CapabilityGraph } from './capability-map';
 
 /** Baseline da última Evolution relevante: "Evolução recente" = mudanças desde aqui. */
@@ -708,7 +712,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'Detectar já é comprovado e formular já está implementado; faltam validar e incorporar sob autonomia progressiva comprovada, e consultar a própria história arquitetural antes de mudar.',
     frontier: [
       'O Claude Desktop ainda atua como operador bootstrap do ciclo de self-development.',
-      'Classificação pós-aprovação pelo Resident Host é missing; preparação/classificação e configuração/autenticação são humanas.',
+      'Classificação pós-aprovação pelo Resident Host existe no lane T3 (SDC-22), mas continua parcial: opt-in por flag e cutoff, default off, sem planners/chat e sem sucessores de recovery/correção. work prepare-autonomous é fallback manual e caminho das demais origens; approve, supervise e configuração/autenticação continuam humanos.',
       'Retry/recovery genérico de Investigation read_only falha é missing; INV-08 é nova investigação, não continuação de lineage.',
       'Lifecycle autônomo do Resident Host é future: iniciar/continuar ainda exige operação externa em pontos do fluxo.',
       'Integração exige clone dedicado; sync do checkout humano e push são manuais, sem push governado.',
@@ -1418,13 +1422,19 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     maturity: 'operational',
     dependsOn: ['interaction.web-interface', 'governance.attempt'],
     meaning: 'O Anima tem um "corpo" residente que roda continuamente e reage a eventos, em vez de só responder a cliques.',
-    advancement: 'Operational do runtime admitido não é lifecycle autônomo. ensurePlannedProjectClassification existe para humanos via CLI work prepare-autonomous, rota API e botão da UI; Host não classifica aprovados não classificados.',
+    advancement: 'Operational do runtime admitido não é lifecycle autônomo. SDC-22 implementou, integrou e publicou classificação pós-aprovação V0 pelo Resident Host, reutilizando ensurePlannedProjectClassification para a allowlist T3 (canonical_backlog_v1 e cli_propose_investigation_v1), somente no caminho da fila do host-turn. Opt-in: flag ANIMA_POST_APPROVAL_CLASSIFICATION=1 mais cutoff ANIMA_POST_APPROVAL_CLASSIFICATION_SINCE ISO-8601 com fuso; default off. INV-09 deu UMA ocasião viva só no ramo Investigation, sem prepare-autonomous, parando em user_attempt_budget_exhausted com zero attempts; sem promoção de maturity.',
     frontier: [
-      'Classificação pós-aprovação pelo Resident Host é missing; preparação/classificação exige ato humano (ensurePlannedProjectClassification). SDC-17 falhou e não está integrado.',
+      'Classificação pós-aprovação V0 é parcial: canonical_backlog_v1 tem código e testes, mas ainda sem prova viva equivalente; controles negativos só foram exercitados por testes. Generalização para outras origens, planners/chat e sucessores de recovery/correção permanece future. CLI work prepare-autonomous, rota API e botão da UI continuam fallback manual e caminho das demais origens; approve e supervise continuam humanos.',
       'Lifecycle autônomo é future: configuração/autenticação e bootstrap continuam humanos.',
       'Recovery/rework, seleção final de executor, integração em clone dedicado, sync do checkout humano e push continuam fronteiras humanas.',
     ],
     proofRefs: [
+      { kind: 'commit', ref: '534a1bd', note: 'SDC-22: classificação pós-aprovação V0 T3' },
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/post-approval-classification.ts' },
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/backlog-host-turn-run.ts' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/post-approval-classification.test.ts' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/backlog-host-turn-run.test.ts' },
+      { kind: 'record', ref: 'docs/registros/2026-10-07-sdc22-post-approval-classification-live-proof.md', note: 'Versionado em 6efcc68; UMA ocasião viva Investigation, sem prova viva canonical_backlog_v1 ou controles negativos' },
       { kind: 'commit', ref: '732ff60' },
       { kind: 'doc', ref: 'apps/web/lib/work-orchestration/planned-project-classification.ts' },
       { kind: 'doc', ref: 'apps/web/lib/resident-host/resident-host.ts' },
@@ -1440,6 +1450,16 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'commit', ref: '732ff60' },
           { kind: 'doc', ref: 'apps/web/lib/work-orchestration/planned-project-classification.ts' },
           { kind: 'doc', ref: 'apps/web/lib/resident-host/resident-host.ts' },
+        ],
+      },
+      {
+        at: '2026-10-07',
+        change: 'proof_added',
+        note: 'SDC-22 implementou T3; INV-09 deu uma ocasião viva Investigation. Maturity operational preservada, sem promoção.',
+        refs: [
+          { kind: 'commit', ref: '534a1bd' },
+          { kind: 'commit', ref: '6efcc68' },
+          { kind: 'record', ref: 'docs/registros/2026-10-07-sdc22-post-approval-classification-live-proof.md' },
         ],
       },
     ],
