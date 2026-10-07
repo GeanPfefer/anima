@@ -329,6 +329,32 @@ describe('Evolution Reconciliation SDC-21', () => {
     expect(text('interaction.resident-host')).toContain('work prepare-autonomous');
   });
 
+  test('provas de integração pertencem ao primitive; Investigation não prova produção nem ciclo contínuo', () => {
+    const integration = get('governance.governed-integration');
+    expect(integration.proofRefs?.filter((p) => p.kind === 'commit').map((p) => p.ref))
+      .toEqual(['f6117f7', '52a745e']);
+    expect(integration.proofRefs?.filter((p) => p.kind === 'test').map((p) => p.ref))
+      .toEqual(['apps/web/lib/work-orchestration/integration-effect.integration.test.ts', 'supabase/tests/integration_effect.test.sql']);
+    expect(integration.history?.flatMap((h) => h.refs).some((p) => p.ref === '349a35e')).toBe(false);
+    expect(integration.advancement).not.toContain('349a35e');
+    expect(get('agency.produce-change').history?.filter((h) => h.change === 'proof_added') ?? []).toEqual([]);
+    expect(get('agency.continuous-self-development').history?.filter((h) => h.change === 'proof_added')).toEqual([]);
+    const verifierNote = get('governance.verifier').history?.find((h) => h.at === '2026-10-05')?.note;
+    expect(verifierNote).toContain('A Investigation read_only não exige gates mutantes.');
+  });
+
+  test('Investigation justifica cada dependência candidata sem criar edges por proximidade', () => {
+    const investigation = get('agency.investigation-sessions');
+    const relation = investigation.history?.find((h) => h.change === 'relation_added');
+    expect(investigation.dependsOn).toEqual(['governance.authority']);
+    expect(relation?.note).toContain('governance.authority: request/envelope e snapshot autorizados são pré-condições');
+    for (const candidate of ['agency.produce-change', 'agency.external-harness', 'governance.verifier', 'interaction.action-cards', 'agency.executor-discovery', 'agency.supervised-self-development', 'agency.verify-change', 'research.web.*']) {
+      expect(relation?.note).toContain(candidate);
+      expect(investigation.dependsOn).not.toContain(candidate);
+    }
+    expect(relation?.note).toContain('Sem edges automáticas');
+  });
+
   test('settlement cita código canônico e preserva a barreira de prova paga', () => {
     const c = get('compute.paid-settlement');
     expect(c.advancement).not.toMatch(/pricing=null|migração.*não aplicada/);
@@ -362,7 +388,7 @@ describe('Evolution Reconciliation SDC-21', () => {
   });
 
   test('history e proofs têm refs não vazias, datas válidas, sem duplicação; evolução inclui os nós atualizados', () => {
-    const updated = ['agency.produce-change', 'agency.recovery-correction', 'governance.candidate-recovery', 'governance.governed-integration', 'agency.continuous-self-development', 'agency.external-harness', 'agency.executor-discovery', 'governance.verifier', 'compute.paid-settlement', 'interaction.resident-host', 'interaction.action-cards', 'agency.investigation-sessions'];
+    const updated = ['agency.recovery-correction', 'governance.candidate-recovery', 'governance.governed-integration', 'agency.continuous-self-development', 'agency.external-harness', 'agency.executor-discovery', 'governance.verifier', 'compute.paid-settlement', 'interaction.resident-host', 'interaction.action-cards', 'agency.investigation-sessions'];
     const recent = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date).map((r) => r.capabilityId));
     for (const id of updated) expect(recent.has(id)).toBe(true);
     for (const c of ANIMA_CAPABILITY_REGISTRY_V0) {

@@ -413,18 +413,6 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'commit', ref: '87a3ad8', note: 'PIN-02 provado ao vivo pelo self-dev' },
       { kind: 'commit', ref: 'fbf0baa', note: 'fallback governado de coder por capacidade' },
     ],
-    history: [
-      {
-        at: '2026-10-05',
-        change: 'proof_added',
-        note: 'SDC-11 separa investigação da produção mutante; proven preservada.',
-        refs: [
-          { kind: 'commit', ref: '3bfa619' },
-          { kind: 'commit', ref: '2d8546f' },
-          { kind: 'doc', ref: 'apps/web/lib/work-orchestration/executor-selection.ts' },
-        ],
-      },
-    ],
   },
   {
     id: 'agency.verify-change',
@@ -565,10 +553,9 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     maturity: 'implemented',
     dependsOn: ['governance.review', 'agency.supervised-self-development'],
     meaning: 'O primitive de biblioteca autoriza integration_effect_authorized e executa ff_only por CAS de ref, receipt com mergeCommitSha null e integration_completed pelo Trusted System Writer. Implementação existente é separada de prova canônica do exercício.',
-    advancement: 'SDC-20 está integrado no Git (349a35e). Exercício do primitive via wrapper scratch em clone dedicado é relato operacional/banco local, sem proofRef canônica versionada; implemented permanece. Falta prova versionada de autorização, receipt ff_only e integration_completed.',
+    advancement: 'Código e testes do primitive estão versionados em f6117f7 e 52a745e. Exercício do primitive via wrapper scratch em clone dedicado é relato operacional/banco local, sem proofRef canônica versionada; implemented permanece. Falta prova versionada de autorização, receipt ff_only e integration_completed.',
     proofRefs: [
       { kind: 'doc', ref: 'apps/web/lib/work-orchestration/integration-effect.ts' },
-      { kind: 'commit', ref: '349a35e' },
       { kind: 'commit', ref: 'f6117f7', note: 'modo ff_only no efeito de integração governada' },
       { kind: 'commit', ref: '52a745e', note: 'endurecimento SQL do receipt após auditoria' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/integration-effect.integration.test.ts' },
@@ -589,14 +576,6 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         refs: [
           { kind: 'commit', ref: 'f6117f7' },
           { kind: 'commit', ref: '52a745e' },
-        ],
-      },
-      {
-        at: '2026-10-06',
-        change: 'proof_added',
-        note: 'SDC-20 integrado no snapshot. Primitive com autorização, receipt ff_only e integration_completed existe; exercício local/relatado não é proofRef canônica e não promove maturity.',
-        refs: [
-          { kind: 'commit', ref: '349a35e' },
         ],
       },
     ],
@@ -745,14 +724,6 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         change: 'relation_added',
         note: 'Passa a depender da memória arquitetural: não repetir abordagens que já falharam ou foram abandonadas.',
         refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
-      },
-      {
-        at: '2026-10-05',
-        change: 'proof_added',
-        note: 'SDC-14 oferece criação de investigação, não lifecycle contínuo. Relações preservadas: nenhuma necessidade demonstrada de dependência nova para norte projected.',
-        refs: [
-          { kind: 'commit', ref: '732ff60' },
-        ],
       },
     ],
   },
@@ -963,7 +934,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       },
       {
         at: '2026-10-05', change: 'relation_added',
-        note: 'Depende de governance.authority: request/envelope e snapshot autorizados. Não importa dependência mutante de external-harness nem research.web; hipóteses advisory do INV-08 não são autoridade de modelagem.',
+        note: 'Depende de governance.authority: request/envelope e snapshot autorizados são pré-condições. Candidatos excluídos individualmente: agency.produce-change gera candidato mutante, dispensado nesta lane; agency.external-harness fornece backend, mas o wiring investigation-v1 usa Codex read-only sem depender do fluxo mutante desse nó; governance.verifier opina sobre o resultado, não é pré-condição para entregar conhecimento; interaction.action-cards prepara/decide, mas a criação oficial também ocorre pela CLI; agency.executor-discovery lista/roteia executores, não é pré-condição do backend Codex configurado; agency.supervised-self-development exige mudança própria aceita, ausente nesta lane; agency.verify-change confere gates mutantes, dispensados nesta lane; research.web.* usa browser/rede, ausentes nesta lane. Sem edges automáticas por reuso, proximidade ou hipóteses advisory do INV-08.',
         refs: [{ kind: 'doc', ref: 'apps/web/lib/work-orchestration/investigation-executor.ts' }],
       },
       {
@@ -1059,7 +1030,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       {
         at: '2026-10-05',
         change: 'proof_added',
-        note: 'SDC-10: verifier advisory de Investigation; proven anterior preservada. dependsOn agency.run-tests permanece para verificação de mudanças, sem impor gates mutantes é investigação.',
+        note: 'SDC-10: verifier advisory de Investigation; proven anterior preservada. dependsOn agency.run-tests permanece para verificação de mudanças. A Investigation read_only não exige gates mutantes.',
         refs: [
           { kind: 'commit', ref: '11ae49f' },
           { kind: 'doc', ref: 'packages/core/src/work-orchestration/investigation-result.ts' },
