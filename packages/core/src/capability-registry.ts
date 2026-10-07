@@ -25,6 +25,11 @@
 // `implemented`); uso real reportado pelo operador NÃO promove nada. Limites
 // abertos e dependência humana ficam em `frontier`.
 
+// SDC-21 (2026-10-06): registry 44db504 reconciliado até 349a35e (SDC-20).
+// INV-08 é advisory, não autoridade de maturity. Reuso antes de novo nó;
+// Investigation entrega conhecimento read_only distinto de candidato mutante.
+// Nenhuma maturity existente muda; fronteiras humanas permanecem explícitas.
+
 import { buildCapabilityGraph, type Capability, type CapabilityGraph } from './capability-map';
 
 /** Baseline da última Evolution relevante: "Evolução recente" = mudanças desde aqui. */
@@ -394,16 +399,31 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   {
     id: 'agency.produce-change',
     name: 'Produzir alteração de código',
-    description: 'Um coder backend (Ollama/OpenAI) produz uma mudança de código coerente.',
+    description: 'Produzir mudança de código coerente por executor substituível (Ollama/OpenAI; backends nativos em agency.external-harness).',
     domain: 'agency',
     maturity: 'proven',
     dependsOn: ['agency.edit-file', 'agency.run-tests', 'compute.selection'],
-    meaning: 'O núcleo da agência: transformar uma intenção aprovada em código real, por um executor substituível.',
+    meaning: 'Transformar intenção aprovada em candidato mutante com Git e gates; Investigation read_only entrega conhecimento, não uma mudança.',
     advancement:
       'O Proof Engine deriva "operacional" (8 ocasiões verificadas), mas conta sucessos, não taxa: na lineage dev-readiness só 2 de 5 attempts pagas chegaram a verified e 1 foi aceita. Declarado segue comprovada até a produção ser confiável (e a barreira local de RAM ser resolvida).',
     proofRefs: [
+      { kind: 'commit', ref: '3bfa619' },
+      { kind: 'commit', ref: '2d8546f' },
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/executor-selection.ts' },
       { kind: 'commit', ref: '87a3ad8', note: 'PIN-02 provado ao vivo pelo self-dev' },
       { kind: 'commit', ref: 'fbf0baa', note: 'fallback governado de coder por capacidade' },
+    ],
+    history: [
+      {
+        at: '2026-10-05',
+        change: 'proof_added',
+        note: 'SDC-11 separa investigação da produção mutante; proven preservada.',
+        refs: [
+          { kind: 'commit', ref: '3bfa619' },
+          { kind: 'commit', ref: '2d8546f' },
+          { kind: 'doc', ref: 'apps/web/lib/work-orchestration/executor-selection.ts' },
+        ],
+      },
     ],
   },
   {
@@ -429,10 +449,11 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     domain: 'agency',
     maturity: 'proven',
     dependsOn: ['agency.produce-change', 'governance.recovery-authority', 'governance.attempt'],
-    meaning: 'Falhar não é o fim: o Anima produz o sucessor correto, preserva o que já valia e retoma com +1 tentativa autorizada.',
+    meaning: 'Request-changes/correction/rework preservam o que já valia e reabrem somente o autorizado por ato humano; nova attempt não é recovery genérica de Investigation.',
     advancement:
       'Reproduzir correções bem-sucedidas de forma rotineira até virar operacional. Hoje há três lineages de correção que terminaram aceitas, mas a de dev-readiness precisou de 6 unidades e 5 attempts pagas: não é rotina.',
     proofRefs: [
+      { kind: 'commit', ref: 'b9d617c' },
       { kind: 'commit', ref: '4b5c500', note: 'replanejamento após falha determinística' },
       { kind: 'commit', ref: '1c6c656', note: 'Human Recovery Authority' },
       { kind: 'work_item', ref: 'bd4092af', note: 'seq3 da lineage de correção de a703e92f, aceito (2026-09-25)' },
@@ -443,7 +464,8 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     ],
     frontier: [
       'Gates sequenciais revelam defeitos um de cada vez: um defeito fica mascarado até o gate seguinte.',
-      'A correção por retomada de checkpoint e o rework estruturado dependem de ato humano.',
+      'Correção por checkpoint e rework estruturado dependem de ato humano.',
+      'Retry/recovery genérico de Investigation read_only falha é missing: max_attempts=1 bloqueia retry por attempt_budget_exhausted; resume/replan/recover-harness/recover-candidate exigem evidências de worktree que investigation-v1 não produz. INV-08 é nova investigação, não continuação de lineage.',
     ],
     history: [
       {
@@ -475,13 +497,20 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'commit', ref: '243b740' },
         ],
       },
+      {
+        at: '2026-10-06',
+        change: 'proof_added',
+        note: 'SDC-19: correção de diagnóstico nativo por checkpoint; proven preservada, sem alegar recovery de Investigation.',
+        refs: [
+          { kind: 'commit', ref: 'b9d617c' },
+        ],
+      },
     ],
   },
   {
     id: 'governance.candidate-recovery',
     name: 'Recuperação governada de candidato',
-    description:
-      'Por ato humano, recuperar um work item cujo CANDIDATO tem defeito real (`work recover-candidate`), preservando a lineage; função + migration + pgTAP.',
+    description: 'Por ato humano, recuperar candidato com defeito real preservando lineage; checkpoint ancestral distinto do candidato e delta Git exato checkpoint→candidate contra observedChangedFilesSinceStart.',
     domain: 'governance',
     maturity: 'implemented',
     dependsOn: ['governance.recovery-authority', 'governance.attempt', 'agency.recovery-correction'],
@@ -490,6 +519,9 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement:
       'Existe em código, migration e pgTAP. O primeiro uso real (SDC-02) é reportado pelo operador e não é verificável pelo repositório, então não vira comprovada aqui. Exige as lacunas abaixo fechadas e prova registrada.',
     proofRefs: [
+      { kind: 'commit', ref: '57f2e66', note: 'SDC-15: finalização da correção de checkpoint/delta' },
+      { kind: 'commit', ref: 'f46e124' },
+      { kind: 'commit', ref: '5f14add' },
       { kind: 'commit', ref: '4bc07fa', note: 'work recover-candidate + migration 20261004000000_candidate_recovery' },
       { kind: 'commit', ref: 'd4db97f', note: 'typegen e pgTAP alinhados' },
       { kind: 'test', ref: 'supabase/tests/candidate_recovery.test.sql' },
@@ -512,6 +544,16 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'commit', ref: 'd4db97f' },
         ],
       },
+      {
+        at: '2026-10-05',
+        change: 'proof_added',
+        note: 'SDC-15: checkpoint ancestral distinto e delta Git exato contra observedChangedFilesSinceStart; ausência/divergência falha fechada. Implemented preservada.',
+        refs: [
+          { kind: 'commit', ref: '57f2e66' },
+          { kind: 'commit', ref: 'f46e124' },
+          { kind: 'commit', ref: '5f14add' },
+        ],
+      },
     ],
   },
   {
@@ -522,19 +564,21 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     domain: 'governance',
     maturity: 'implemented',
     dependsOn: ['governance.review', 'agency.supervised-self-development'],
-    meaning:
-      'A integração é um efeito externo de impacto: o núcleo existe sob contrato e teste, mas no ciclo de self-development atual quem integra em dev é o humano.',
-    advancement:
-      'Existe em código, migration e testes. No fluxo SDC a integração do candidate aceito foi manual (ff-only ou merge de dois pais) e o `integration_completed` governado esteve ausente; falta o fluxo usar este efeito.',
+    meaning: 'O primitive de biblioteca autoriza integration_effect_authorized e executa ff_only por CAS de ref, receipt com mergeCommitSha null e integration_completed pelo Trusted System Writer. Implementação existente é separada de prova canônica do exercício.',
+    advancement: 'SDC-20 está integrado no Git (349a35e). Exercício do primitive via wrapper scratch em clone dedicado é relato operacional/banco local, sem proofRef canônica versionada; implemented permanece. Falta prova versionada de autorização, receipt ff_only e integration_completed.',
     proofRefs: [
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/integration-effect.ts' },
+      { kind: 'commit', ref: '349a35e' },
       { kind: 'commit', ref: 'f6117f7', note: 'modo ff_only no efeito de integração governada' },
       { kind: 'commit', ref: '52a745e', note: 'endurecimento SQL do receipt após auditoria' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/integration-effect.integration.test.ts' },
       { kind: 'test', ref: 'supabase/tests/integration_effect.test.sql' },
     ],
     frontier: [
-      'A integração do candidate aceito em dev é manual (merge ff-only ou de dois pais) e o push para origin/dev também.',
-      'O `integration_completed` governado está ausente nesse fluxo.',
+      'CLI/UX first-class de integração governada ainda missing: o primitive é só biblioteca; Modo W é fase posterior.',
+      'Clone dedicado necessário: guarda target_checked_out impede integrar no checkout humano ativo.',
+      'Sync do checkout humano é manual; push é manual e não existe push governado.',
+      'O exercício de integration_completed e do receipt no banco local não é prova canônica versionada.',
     ],
     history: [
       {
@@ -545,6 +589,14 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         refs: [
           { kind: 'commit', ref: 'f6117f7' },
           { kind: 'commit', ref: '52a745e' },
+        ],
+      },
+      {
+        at: '2026-10-06',
+        change: 'proof_added',
+        note: 'SDC-20 integrado no snapshot. Primitive com autorização, receipt ff_only e integration_completed existe; exercício local/relatado não é proofRef canônica e não promove maturity.',
+        refs: [
+          { kind: 'commit', ref: '349a35e' },
         ],
       },
     ],
@@ -680,8 +732,10 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'Detectar já é comprovado e formular já está implementado; faltam validar e incorporar sob autonomia progressiva comprovada, e consultar a própria história arquitetural antes de mudar.',
     frontier: [
       'O Claude Desktop ainda atua como operador bootstrap do ciclo de self-development.',
-      'Iniciar e continuar o ciclo ainda requer operação externa em pontos do fluxo.',
-      'Integração Git e push continuam atos humanos.',
+      'Classificação pós-aprovação pelo Resident Host é missing; preparação/classificação e configuração/autenticação são humanas.',
+      'Retry/recovery genérico de Investigation read_only falha é missing; INV-08 é nova investigação, não continuação de lineage.',
+      'Lifecycle autônomo do Resident Host é future: iniciar/continuar ainda exige operação externa em pontos do fluxo.',
+      'Integração exige clone dedicado; sync do checkout humano e push são manuais, sem push governado.',
       'Migration e deploy continuam atos humanos.',
       'A seleção final de executor ainda pode exigir decisão humana.',
     ],
@@ -691,6 +745,14 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         change: 'relation_added',
         note: 'Passa a depender da memória arquitetural: não repetir abordagens que já falharam ou foram abandonadas.',
         refs: [{ kind: 'record', ref: RECONCILIATION_V2_RECORD }],
+      },
+      {
+        at: '2026-10-05',
+        change: 'proof_added',
+        note: 'SDC-14 oferece criação de investigação, não lifecycle contínuo. Relações preservadas: nenhuma necessidade demonstrada de dependência nova para norte projected.',
+        refs: [
+          { kind: 'commit', ref: '732ff60' },
+        ],
       },
     ],
   },
@@ -767,11 +829,14 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       externalEvidence:
         'POC ai-memory × ANIMA (G:\\anima-labs): Claude→Codex→Claude provado em repo descartável. Continua pendente a decisão humana sobre a classe de autoridade da quota de assinatura.',
     },
-    meaning:
-      'O seam CoderBackend (ADR-001) permite trocar o executor. Codex CLI e Claude Code são CoderBackends nativos governados (worktree isolada, escopo, gates do host e Verifier do Anima); um harness por assinatura é outra classe de compute, não um provider de API.',
+    meaning: 'Codex CLI e Claude Code são CoderBackends nativos governados. Caminho direto do Codex usa --json e thread.started/turn.failed: usage_limit_exceeded por heurística textual estreita, 401 Unauthorized vira unauthorized, demais casos unknown_native_cli_failure. Diagnóstico não prova disponibilidade de assinatura.',
     advancement:
       'Existe em código e testes (backends, evidência do coder, especificação canônica preservada até o coder). Não sobe para comprovada por esta reconciliação: o uso real (Claude Code no SDC-01/SDC-03, Codex CLI no SDC-04/05/06/08, com falhas reais no SDC-02, no recovery do SDC-02 e no SDC-07) vem do operador e não é verificável pelo repositório. Falta registrar essa prova em evento/commit auditável e decidir a authority da quota de assinatura.',
     proofRefs: [
+      { kind: 'commit', ref: 'ad669c3' },
+      { kind: 'commit', ref: '29cd393' },
+      { kind: 'commit', ref: 'b9d617c' },
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/codex-cli-coder.ts' },
       { kind: 'commit', ref: '9404bd4', note: 'Codex CLI como backend de código' },
       { kind: 'commit', ref: 'cd73276', note: 'Claude Code como backend de código' },
       { kind: 'commit', ref: 'f518d0d', note: 'evidência do coder para backends CLI nativos' },
@@ -780,9 +845,9 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/claude-code-coder.worktree.test.ts' },
     ],
     frontier: [
-      'Prova de uso real é reportada pelo operador; o histórico de eventos/attempts não foi verificável nesta reconciliação.',
-      'Nem toda attempt por harness chega a verified: houve falhas reais (SDC-02, recovery do SDC-02, SDC-07), segundo o operador.',
-      'A classe de authority da quota de assinatura segue decisão humana.',
+      'Prova de uso real reportada pelo operador não promove maturity sem registro canônico versionado.',
+      'A classe de authority da quota de assinatura segue decisão humana; diagnóstico não certifica quota disponível.',
+      'Descoberta durável do executável Codex é missing: ANIMA_CODEX_CLI_PATH de deploy do operador ou codex no PATH; readiness só faz probes de versão/login.',
     ],
     history: [
       {
@@ -804,13 +869,22 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'commit', ref: '6eb2dee' },
         ],
       },
+      {
+        at: '2026-10-06',
+        change: 'proof_added',
+        note: 'SDC-18/19: JSON nativo --json com thread.started/turn.failed e diagnóstico estreito, sem certificar disponibilidade de assinatura. Implemented preservada.',
+        refs: [
+          { kind: 'commit', ref: 'ad669c3' },
+          { kind: 'commit', ref: '29cd393' },
+          { kind: 'commit', ref: 'b9d617c' },
+        ],
+      },
     ],
   },
   {
     id: 'agency.executor-discovery',
     name: 'Descoberta de executores',
-    description:
-      'Listar os executores de coding (ollama, openai, deepseek-harness, codex-cli, claude-code) com disponibilidade, elegibilidade e recomendação determinística, só leitura (`anima work executors`).',
+    description: 'Listar executores e recomendar por readiness/elegibilidade; read_only exige exatamente Codex CLI, sem fallback, modelo ausente/default, project:anima e SHA de 40 hex, encaminhando a investigation-v1.',
     domain: 'agency',
     maturity: 'implemented',
     dependsOn: ['agency.external-harness', 'compute.selection'],
@@ -819,11 +893,18 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement:
       'Existe em código e testes. Falta uso registrado e a escolha deixar de ser ato humano: hoje o Anima recomenda, o humano decide o executor.',
     proofRefs: [
+      { kind: 'commit', ref: '3bfa619' },
+      { kind: 'commit', ref: '2d8546f' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/executor-selection.investigation.test.ts' },
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/codex-cli-coder.ts' },
       { kind: 'commit', ref: '6f7577f', note: 'anima work executors (discovery + readiness, read-only)' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/executor-discovery.test.ts' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/executor-readiness.test.ts' },
     ],
-    frontier: ['A seleção do executor continua ato humano; a descoberta só recomenda.'],
+    frontier: [
+      'Seleção final do executor continua ato humano; descoberta só recomenda.',
+      'Descoberta durável do executável Codex é missing: ANIMA_CODEX_CLI_PATH de deploy do operador ou codex no PATH; readiness apenas probes de versão/login.',
+    ],
     history: [
       {
         at: '2026-10-03',
@@ -831,6 +912,69 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         to: 'implemented',
         note: 'Consulta somente leitura pela CLI; sem prova de uso registrada no repositório.',
         refs: [{ kind: 'commit', ref: '6f7577f' }],
+      },
+      {
+        at: '2026-10-05',
+        change: 'proof_added',
+        note: 'SDC-11: read_only roteado sem fallback. Relações existentes preservadas; não há descoberta durável do executável.',
+        refs: [
+          { kind: 'commit', ref: '3bfa619' },
+          { kind: 'commit', ref: '2d8546f' },
+        ],
+      },
+    ],
+  },
+
+  // Único nó novo SDC-21; comparação semântica de reuso explícita no meaning.
+  {
+    id: 'agency.investigation-sessions',
+    name: 'Investigation Sessions',
+    description: 'Entregar conhecimento read_only em snapshot autorizado detached por investigation-v1 e Codex CLI read-only/ephemeral, sem candidato, branch de trabalho ou gates mutantes.',
+    domain: 'agency',
+    maturity: 'implemented',
+    dependsOn: ['governance.authority'],
+    meaning: 'InvestigationResultV1 entrega findings, evidências e lacunas. Reuso comparado: agency.produce-change e agency.supervised-self-development entregam candidato mutante; agency.external-harness fornece backend; governance.verifier opina; interaction.action-cards prepara/decide; agency.executor-discovery lista/roteia; agency.verify-change confere gates. Nenhum representa honestamente a entrega first-class de conhecimento read_only. research.web.* permanece separado: sem browser/rede nesta lane.',
+    advancement: 'Código/testes existem; INV-08 advisory, banco local e uso relatado não bastam para proven. Exige prova canônica versionada de funcionamento; verified do investigation-verifier-v1 não certifica a verdade.',
+    proofRefs: [
+      { kind: 'commit', ref: '11ae49f' },
+      { kind: 'commit', ref: '3bfa619' },
+      { kind: 'commit', ref: '2d8546f' },
+      { kind: 'commit', ref: 'ebf5be8' },
+      { kind: 'commit', ref: 'a173f40' },
+      { kind: 'commit', ref: '74f3c5c' },
+      { kind: 'commit', ref: '448fdde' },
+      { kind: 'commit', ref: '349a35e' },
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/investigation-executor.ts' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/investigation-executor.worktree.test.ts', note: 'Git real: EOF e blob grande; range_not_validated_file_too_large sustentado por testes, não exercício vivo.' },
+      { kind: 'test', ref: 'packages/core/src/work-orchestration/investigation-result.test.ts' },
+    ],
+    frontier: [
+      'Read_only isola efeitos no snapshot, não garante confinamento de leituras, integridade de todo filesystem ou ausência de efeitos externos; revisão humana necessária.',
+      'Retry/recovery genérico de Investigation falha é missing: max_attempts=1 resulta em attempt_budget_exhausted; resume/replan/recover-harness/recover-candidate exigem evidências da lane worktree não produzidas por investigation-v1. INV-08 é nova investigação, não continuação de lineage.',
+      'SDC-12 rejeita por-ref line_start_out_of_range/line_end_out_of_range, sem clamp; SDC-20 rejeita range_not_validated_file_too_large antes de ler o blob. Ref inteira sem lines continua válida; findings sem evidências restantes são rebaixados e lacunas ficam explícitas.',
+      'Falhas duras de commit/path ausente, objeto não-blob, conteúdo inválido ou Git indisponível derrubam resultado inteiro. Diagnósticos estruturados transport/structure/evidence/post_rejection não são novas capacidades; evidence_file_too_large permanece no enum por compatibilidade.',
+      'INV-08 só relatou mitigação de origem: anima-prd.md (~198 KB), lines=null aceito sem rejeição; não exerceu ao vivo o ramo range_not_validated_file_too_large.',
+    ],
+    history: [
+      {
+        at: '2026-10-05', change: 'introduced', to: 'implemented',
+        note: 'Antes: nó ausente; agora implemented por núcleo/wiring em código e testes. Comparados os sete nós existentes descritos no meaning: conhecimento read_only sem candidato/gates mutantes é capacidade distinta. Sem prova canônica suficiente para proven.',
+        refs: [{ kind: 'commit', ref: '11ae49f' }, { kind: 'commit', ref: '2d8546f' }],
+      },
+      {
+        at: '2026-10-05', change: 'relation_added',
+        note: 'Depende de governance.authority: request/envelope e snapshot autorizados. Não importa dependência mutante de external-harness nem research.web; hipóteses advisory do INV-08 não são autoridade de modelagem.',
+        refs: [{ kind: 'doc', ref: 'apps/web/lib/work-orchestration/investigation-executor.ts' }],
+      },
+      {
+        at: '2026-10-05', change: 'proof_added',
+        note: 'SDC-12/16: rejeição por-ref além do EOF e diagnósticos estruturados; implemented preservada.',
+        refs: [{ kind: 'commit', ref: 'a173f40' }, { kind: 'commit', ref: '448fdde' }],
+      },
+      {
+        at: '2026-10-06', change: 'proof_added',
+        note: 'SDC-20: arquivo grande rejeita só range antes do blob; teste com Git real, não exercício vivo do ramo. INV-08 advisory não promove maturity.',
+        refs: [{ kind: 'commit', ref: '349a35e' }, { kind: 'test', ref: 'apps/web/lib/work-orchestration/investigation-executor.worktree.test.ts' }],
       },
     ],
   },
@@ -900,11 +1044,27 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     domain: 'governance',
     maturity: 'proven',
     dependsOn: ['agency.run-tests'],
-    meaning: 'Um segundo par de olhos automatizado: opina se o resultado cumpre o contrato, sem aceitar/publicar por conta própria.',
+    meaning: 'Parecer separado de produzir/aceitar. investigation-verifier-v1 advisory: checks A–E (snapshot clean; HEAD detached no base; ausência de novas refs proibidas; referências resolvidas; estrutura válida). A/B atestados, C–E independentes; verified não certifica a verdade semântica.',
     advancement: 'Falso positivo já observado; operacional exige que "verified" resista à revisão humana de forma consistente.',
+    frontier: [
+      'Verifier advisory de Investigation não certifica verdade, confinamento de leituras ou ausência de efeitos externos; revisão humana necessária.',
+    ],
     proofRefs: [
+      { kind: 'commit', ref: '11ae49f' },
+      { kind: 'doc', ref: 'packages/core/src/work-orchestration/investigation-result.ts' },
       { kind: 'commit', ref: '824c714', note: 'Verifier v2 — cobertura heterogênea' },
       { kind: 'record', ref: 'docs/registros', note: 'VerifierOpinionV1 append-only, fail-open' },
+    ],
+    history: [
+      {
+        at: '2026-10-05',
+        change: 'proof_added',
+        note: 'SDC-10: verifier advisory de Investigation; proven anterior preservada. dependsOn agency.run-tests permanece para verificação de mudanças, sem impor gates mutantes é investigação.',
+        refs: [
+          { kind: 'commit', ref: '11ae49f' },
+          { kind: 'doc', ref: 'packages/core/src/work-orchestration/investigation-result.ts' },
+        ],
+      },
     ],
   },
   {
@@ -1218,11 +1378,44 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     maturity: 'implemented',
     dependsOn: ['compute.external-provider', 'governance.budgets'],
     meaning: 'Reservar não é gastar e derivar não é liquidar: o Anima precisa fechar o custo real do que consumiu, com honestidade.',
-    advancement:
-      'Seam pronto (ProviderPricingV1, calculateApiAttemptCost) e infra mínima canonizada, mas pricing=null p/ gpt-5.6-terra ⇒ custo real indisponível; migração de settlement não aplicada.',
+    advancement: 'Catálogo versionado provider-pricing-catalog.json (anima/provider-pricing-catalog@2026-09-28.1) precifica gpt-5.6-terra e gpt-5.6-sol. provider-api-settlement.ts liquida somente decisão settle; demais decisões deixam reserva aberta/cost_unknown; catálogo fail-closed. Migrations 20260927000000_provider_api_usage_priced_settlement.sql e 20260927000001_restore_provider_api_reservation_correlation.sql existem. Barreira: prova viva paga e aplicação operacional das migrations fora do ambiente local.',
+    frontier: [
+      'Prova viva paga com authority humana necessária; implemented não implica settlement operacional.',
+      'Aplicação operacional das migrations fora do ambiente local precisa de confirmação/prova, não inferida pelo código.',
+    ],
     proofRefs: [
+      { kind: 'commit', ref: 'e0adff7' },
+      { kind: 'commit', ref: 'a68eada' },
+      { kind: 'commit', ref: '2c435b2' },
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/provider-pricing-catalog.json' },
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/provider-api-settlement.ts' },
+      { kind: 'doc', ref: 'supabase/migrations/20260927000000_provider_api_usage_priced_settlement.sql' },
+      { kind: 'doc', ref: 'supabase/migrations/20260927000001_restore_provider_api_reservation_correlation.sql' },
       { kind: 'commit', ref: 'b14a32c', note: 'infraestrutura mínima de settlement do ledger de compute pago' },
       { kind: 'record', ref: 'docs/registros', note: 'benchmark settlement V3 — barreira de actual-cost' },
+    ],
+    history: [
+      {
+        at: '2026-09-27',
+        change: 'proof_added',
+        note: 'Settlement pós-attempt usage_priced e migrations de liquidação/correlação existem no repositório. Código não prova aplicação operacional fora do ambiente local; implemented preservada.',
+        refs: [
+          { kind: 'commit', ref: 'e0adff7' },
+          { kind: 'doc', ref: 'apps/web/lib/work-orchestration/provider-api-settlement.ts' },
+          { kind: 'doc', ref: 'supabase/migrations/20260927000000_provider_api_usage_priced_settlement.sql' },
+          { kind: 'doc', ref: 'supabase/migrations/20260927000001_restore_provider_api_reservation_correlation.sql' },
+        ],
+      },
+      {
+        at: '2026-09-28',
+        change: 'proof_added',
+        note: 'Catálogo versionado precifica terra/sol, com vigência epistemológica e carregamento fail-closed. Substitui texto stale; implemented preservada: sem prova viva paga canônica.',
+        refs: [
+          { kind: 'commit', ref: 'a68eada' },
+          { kind: 'commit', ref: '2c435b2' },
+          { kind: 'doc', ref: 'apps/web/lib/work-orchestration/provider-pricing-catalog.json' },
+        ],
+      },
     ],
   },
 
@@ -1257,22 +1450,46 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     maturity: 'operational',
     dependsOn: ['interaction.web-interface', 'governance.attempt'],
     meaning: 'O Anima tem um "corpo" residente que roda continuamente e reage a eventos, em vez de só responder a cliques.',
-    advancement: 'Operacional (idle → item → verified → review provado ao vivo); evolui com perfis autônomos vivos.',
+    advancement: 'Operational do runtime admitido não é lifecycle autônomo. ensurePlannedProjectClassification existe para humanos via CLI work prepare-autonomous, rota API e botão da UI; Host não classifica aprovados não classificados.',
+    frontier: [
+      'Classificação pós-aprovação pelo Resident Host é missing; preparação/classificação exige ato humano (ensurePlannedProjectClassification). SDC-17 falhou e não está integrado.',
+      'Lifecycle autônomo é future: configuração/autenticação e bootstrap continuam humanos.',
+      'Recovery/rework, seleção final de executor, integração em clone dedicado, sync do checkout humano e push continuam fronteiras humanas.',
+    ],
     proofRefs: [
+      { kind: 'commit', ref: '732ff60' },
+      { kind: 'doc', ref: 'apps/web/lib/work-orchestration/planned-project-classification.ts' },
+      { kind: 'doc', ref: 'apps/web/lib/resident-host/resident-host.ts' },
       { kind: 'record', ref: 'docs/registros', note: 'Marco Resident Local Host V0' },
       { kind: 'commit', ref: '3d5aa65', note: 'autoridade de execução do Resident Host' },
+    ],
+    history: [
+      {
+        at: '2026-10-05',
+        change: 'proof_added',
+        note: 'SDC-14 reconhece envelope Investigation na classificação humana; não automatiza preparação no Host. Operational do runtime preservada.',
+        refs: [
+          { kind: 'commit', ref: '732ff60' },
+          { kind: 'doc', ref: 'apps/web/lib/work-orchestration/planned-project-classification.ts' },
+          { kind: 'doc', ref: 'apps/web/lib/resident-host/resident-host.ts' },
+        ],
+      },
     ],
   },
   {
     id: 'interaction.action-cards',
     name: 'Interação com ações',
-    description: 'Confirmar, aprovar, aceitar, pedir mudanças e retomar trabalho pelo chat e pela CLI.',
+    description: 'Confirmar, aprovar, aceitar, pedir mudanças e retomar trabalho; CLI oficial anima work propose-investigation cria proposta read_only (INV-NN), sem aprovar nem executar.',
     domain: 'interaction',
     maturity: 'operational',
     dependsOn: ['interaction.chat', 'governance.review'],
-    meaning: 'As decisões humanas de impacto acontecem na própria conversa (cards) e na CLI oficial — mesma camada de serviços.',
+    meaning: 'Decisões humanas compartilham serviços. Criação oficial de Investigation usa cli_propose_investigation_v1, 1 attempt, 30 min, workspace_read e verifier advisory; criação não é execução.',
     advancement: 'Operacional; web e CLI compartilham os serviços com identidade residente (RLS, sem service_role).',
     proofRefs: [
+      { kind: 'commit', ref: '732ff60' },
+      { kind: 'commit', ref: '96606b4' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/investigation-preparation.test.ts' },
+      { kind: 'test', ref: 'apps/web/cli/app.test.ts' },
       { kind: 'commit', ref: 'de14178', note: 'CLI operacional como adapter oficial' },
       { kind: 'test', ref: 'apps/web/app/(app)/chat/_components/WorkProposalCard.test.tsx' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/work-reference.test.ts', note: 'referência humana legível (SDC-01) na CLI' },
@@ -1283,6 +1500,15 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         change: 'proof_added',
         note: 'A CLI aceita referências humanas legíveis (`anima work show SDC-01`); o UUID continua válido. Maturidade mantida.',
         refs: [{ kind: 'commit', ref: '930ea70' }],
+      },
+      {
+        at: '2026-10-05',
+        change: 'proof_added',
+        note: 'SDC-14: CLI propose-investigation, INV-NN e provenance estrita criam proposed, sem aprovar/executar. Operational da interação preservada.',
+        refs: [
+          { kind: 'commit', ref: '732ff60' },
+          { kind: 'commit', ref: '96606b4' },
+        ],
       },
     ],
   },
