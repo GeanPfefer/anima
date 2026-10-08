@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -7,7 +8,8 @@ import {
   type InvestigationFailureV1, type InvestigationEvidenceRejectionV1, type InvestigationExecutionV1, type InvestigationResultV1, type WorkExecutorAdapter,
   type WorkExecutorRequest, type WorkExecutorSignal, type WorkExecutorSignalInput,
 } from '@anima/core';
-import { buildCodexCliEnvironment, resolveCodexCliConfig, CODEX_CLI_DEFAULT_MODEL, CODEX_CLI_PROMPT_MAX_CHARS, type CodexCliProcessRunner } from './codex-cli-coder';
+import { buildCodexCliEnvironment, classifyCodexLoginStatus, resolveCodexCliConfig, CODEX_CLI_DEFAULT_MODEL, CODEX_CLI_PROMPT_MAX_CHARS, type CodexCliProcessRunner } from './codex-cli-coder';
+import { buildWslCodexInvocation, buildWslLoginStatusInvocation, buildWslPathCheckInvocation, resolveInvestigationTransport, windowsPathToWsl } from './investigation-wsl-transport';
 import { runProcess } from './worktree';
 
 export interface InvestigationTarget { readonly repoRoot: string; readonly baseSha: string; }
@@ -122,7 +124,11 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
     const invalid = validateEffectClassCoherence(request.effectClass, request.permissions, this.id) ?? validateWorkExecutorRequest(request);
     if (invalid) return error(false, invalid, 'invalid_request');
     const target = this.options.targets.resolve(request.target.reference);
-    const config = resolveCodexCliConfig(null, this.options.environmentSource ?? process.env);
+    const environment = this.options.environmentSource ?? process.env;
+    const config = resolveCodexCliConfig(null, environment);
+    const transport = resolveInvestigationTransport(environment);
+    if (!transport.ok) return error(false, 'Invalid investigation transport configuration.', 'invalid_request');
+    const wsl = transport.value;
     if (!target || !isInvestigationCommit(target.baseSha) || !config.ok || request.taskSpec.verifierRequirement !== 'advisory') return error(false, 'Invalid target, CLI configuration or advisory lane.', 'invalid_request');
     const prompt = buildInvestigationPrompt(request, target.baseSha);
     if (prompt.length > CODEX_CLI_PROMPT_MAX_CHARS) return error(false, 'Investigation prompt exceeds CLI limit.', 'invalid_request');
@@ -135,11 +141,24 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
     let checkingIntegrity = false;
     let transportFailure: InvestigationFailureV1 | undefined;
     let outcome: WorkExecutorSignalInput = error(true, 'Investigation host operation failed.');
+    const launcher = this.options.run ?? runProcess;
+    const childEnv = buildCodexCliEnvironment(this.options.environmentSource) as NodeJS.ProcessEnv;
     try {
+      if (wsl) {
+        // Fail-closed antes de qualquer snapshot: WSL acessível e Codex Linux autenticado por assinatura (não API).
+        const invocation = buildWslLoginStatusInvocation(wsl);
+        const login = await launcher(invocation.file, invocation.args, { cwd: tmpdir(), timeoutMs: Math.min(remaining(), 60_000), signal, env: childEnv }).catch(() => null);
+        if (signal.aborted) return { kind: 'cancelled', acknowledged: true, handoffReference: 'investigation:cancelled' };
+        if (!login || classifyCodexLoginStatus(login) !== 'subscription') return error(false, 'WSL transport preflight failed (distro, user, Codex or subscription login).');
+      }
       const before = await readProhibitedInvestigationRefs(target.repoRoot, request.attemptId);
       if (before.some(ref => ref.includes(request.attemptId))) return error(false, 'Attempt-owned ref already exists.', 'invalid_request');
       temporary = await mkdtemp(join(tmpdir(), 'anima-investigation-'));
+      // Nomes longos (8.3) viram o caminho canônico antes da tradução; o snapshot é criado e verificado pelo host Windows.
+      if (wsl) temporary = realpathSync.native(temporary);
       snapshot = join(temporary, 'snapshot');
+      const linuxTemporary = wsl ? windowsPathToWsl(temporary) : null;
+      if (wsl && !linuxTemporary) return error(false, 'Windows path cannot be translated for WSL.', 'invalid_request');
       const add = await git(target.repoRoot, ['worktree', 'add', '--detach', snapshot, target.baseSha], remaining(), signal);
       if (!successful(add)) throw new Error('snapshot_creation_failed');
       attached = true;
@@ -147,12 +166,22 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
       const outputPath = join(temporary, 'result.json');
       await writeFile(schemaPath, JSON.stringify(INVESTIGATION_OUTPUT_SCHEMA), { flag: 'wx' });
       if (Date.now() >= deadline) throw new Error('deadline_expired');
-      const cli = await (this.options.run ?? runProcess)(config.value.executable, [
-        'exec', '--sandbox', 'read-only', '-c', 'approval_policy=never', '--ephemeral', '--cd', snapshot,
-        '--output-schema', schemaPath, '-o', outputPath,
+      const codexArguments = (root: string, schema: string, output: string): string[] => [
+        'exec', '--sandbox', 'read-only', '-c', 'approval_policy=never', '--ephemeral', '--cd', root,
+        '--output-schema', schema, '-o', output,
         ...(config.value.model !== CODEX_CLI_DEFAULT_MODEL ? ['--model', config.value.model] : []),
         ...(config.value.profile ? ['--profile', config.value.profile] : []), prompt,
-      ], { cwd: snapshot, timeoutMs: remaining(), signal, env: buildCodexCliEnvironment(this.options.environmentSource) as NodeJS.ProcessEnv }).catch(() => null);
+      ];
+      let invocation: { readonly file: string; readonly args: readonly string[] } = { file: config.value.executable, args: codexArguments(snapshot, schemaPath, outputPath) };
+      if (wsl && linuxTemporary) {
+        const linuxSnapshot = `${linuxTemporary}/snapshot`;
+        const linuxSchema = `${linuxTemporary}/schema.json`;
+        const check = buildWslPathCheckInvocation(wsl, linuxSnapshot, linuxSchema, linuxTemporary);
+        const checked = await launcher(check.file, check.args, { cwd: snapshot, timeoutMs: Math.min(remaining(), 60_000), signal, env: childEnv }).catch(() => null);
+        if (!signal.aborted && (!checked || !successful(checked))) throw new Error('wsl_path_check_failed');
+        invocation = buildWslCodexInvocation(wsl, codexArguments(linuxSnapshot, linuxSchema, `${linuxTemporary}/result.json`), linuxSnapshot);
+      }
+      const cli = await launcher(invocation.file, invocation.args, { cwd: snapshot, timeoutMs: remaining(), signal, env: childEnv }).catch(() => null);
       // Integrity checks deliberately ignore an aborted CLI signal: the host must still
       // observe effect violations before considering cancellation or output validity.
       checkingIntegrity = true;
@@ -195,7 +224,8 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
           if (!parseInvestigationExecution(investigation)) throw new Error('host_observation_invalid');
           const resultReferences = [...new Set(result.findings.flatMap(f => f.evidence.map(renderInvestigationEvidence)))];
           outcome = { kind: 'result', summary: renderInvestigationSummary(result), investigation, resultReferences, validations: [],
-            limitations: ['A/B are adapter attestations after snapshot disposal. No guarantee of confined reads, arbitrary filesystem integrity, absence of external/network effects, or semantic truth. Human review required.'], handoffReference: 'investigation:result' };
+            limitations: ['A/B are adapter attestations after snapshot disposal. No guarantee of confined reads, arbitrary filesystem integrity, absence of external/network effects, or semantic truth. Human review required.',
+              ...(wsl ? ['Codex ran in WSL over the host-created snapshot; Git verification was performed by the Windows host, not inside WSL.'] : [])], handoffReference: 'investigation:result' };
         }
       }
     } catch {

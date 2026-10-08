@@ -74,6 +74,45 @@ describe('readiness: codex-cli', () => {
   });
 });
 
+describe('readiness: codex-cli com transporte WSL opt-in', () => {
+  const wslEnv = { PATH: '/usr/bin', SystemRoot: String.raw`C:\Windows`, ANIMA_INVESTIGATION_CODEX_TRANSPORT: 'wsl', ANIMA_CODEX_WSL_DISTRO: 'Ubuntu-24.04', ANIMA_CODEX_WSL_USER: 'geanteco', ANIMA_CODEX_WSL_CLI_PATH: '/home/geanteco/.nvm/versions/node/v22.23.3/bin/codex' };
+  const WSL_EXE = String.raw`C:\Windows\System32\wsl.exe`;
+  const wslOk: Handler = (_f, args) => args.includes('login') ? { stdout: 'Logged in using ChatGPT' } : { stdout: 'codex-cli 0.161.0' };
+  test('ready via wsl.exe --exec (versão + login) sem tocar o executável nativo', async () => {
+    const deps = makeDeps({ platform: 'win32', env: { ...wslEnv, ANIMA_CODEX_CLI_PATH: String.raw`C:\broken\codex.cmd` }, handler: wslOk, fileExists: () => false });
+    expect(await probeExecutorReadiness('codex-cli', deps)).toEqual({ provider: 'codex-cli', availability: 'ready', reasonUnavailable: null });
+    expect(deps.calls.map(c => [c[0], c.includes('--exec'), c.at(-1)])).toEqual([[WSL_EXE, true, '--version'], [WSL_EXE, true, 'status']]);
+  });
+  test.each([
+    ['versão falha', (_f: string, a: readonly string[]) => a.includes('login') ? { stdout: 'Logged in using ChatGPT' } : { exitCode: 1 }, 'wsl_version_check_failed'],
+    ['versão expira', (_f: string, a: readonly string[]) => a.includes('login') ? { stdout: 'Logged in using ChatGPT' } : { exitCode: -1, timedOut: true }, 'wsl_version_probe_timeout'],
+    ['não logado', (_f: string, a: readonly string[]) => a.includes('login') ? { exitCode: 1 } : {}, 'wsl_codex_not_logged_in'],
+    ['login expira', (_f: string, a: readonly string[]) => a.includes('login') ? { exitCode: -1, timedOut: true } : {}, 'wsl_auth_probe_timeout'],
+    ['API key', (_f: string, a: readonly string[]) => a.includes('login') ? { stdout: 'Logged in using an API key' } : {}, 'codex_login_not_subscription'],
+  ])('%s ⇒ unavailable/%s', async (_n, handler, reason) => {
+    expect(await probeExecutorReadiness('codex-cli', makeDeps({ platform: 'win32', env: wslEnv, handler }))).toMatchObject({ availability: 'unavailable', reasonUnavailable: reason });
+  });
+  test('modo de login irreconhecido ⇒ unknown (mesma interpretação do nativo)', async () => {
+    expect(await probeExecutorReadiness('codex-cli', makeDeps({ platform: 'win32', env: wslEnv, handler: (_f, a) => a.includes('login') ? { stdout: 'ok' } : {} })))
+      .toMatchObject({ availability: 'unknown', reasonUnavailable: 'codex_login_mode_unrecognized' });
+  });
+  test('configuração de transporte inválida falha fechada sem sondar', async () => {
+    const deps = makeDeps({ platform: 'win32', env: { ...wslEnv, ANIMA_CODEX_WSL_DISTRO: '' }, handler: wslOk });
+    expect(await probeExecutorReadiness('codex-cli', deps)).toMatchObject({ availability: 'unavailable', reasonUnavailable: 'investigation_transport_invalid' });
+    expect(deps.calls).toEqual([]);
+  });
+  test('sem a variável de transporte o probe nativo permanece idêntico', async () => {
+    const deps = makeDeps({ handler: codexOk });
+    expect(await probeExecutorReadiness('codex-cli', deps)).toMatchObject({ availability: 'ready' });
+    expect(deps.calls).toEqual([['codex', '--version'], ['codex', 'login', 'status']]);
+  });
+  test('o ambiente do probe WSL não carrega segredos', async () => {
+    const deps = makeDeps({ platform: 'win32', env: { ...wslEnv, OPENAI_API_KEY: SECRET, CODEX_API_KEY: SECRET }, handler: wslOk });
+    await probeExecutorReadiness('codex-cli', deps);
+    expect(JSON.stringify(deps.envs)).not.toContain(SECRET);
+  });
+});
+
 describe('readiness: claude-code', () => {
   test('ready em linux com loggedIn true', async () => {
     const deps = makeDeps({ handler: claudeOk });

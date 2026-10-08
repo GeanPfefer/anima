@@ -140,6 +140,17 @@ export function classifyCodexCliFailure(stdout: string, exitCode: number): Nativ
   return { version: 1, category, exitCode, ...(threadId ? { threadId } : {}) };
 }
 
+export type CodexLoginStatus = 'subscription' | 'api_key' | 'not_logged_in' | 'timeout' | 'unrecognized';
+
+/** Interpreta `codex login status` (nativo OU via WSL). Fonte única de readiness e do pré-voo do investigation. */
+export function classifyCodexLoginStatus(login: { readonly exitCode: number; readonly timedOut: boolean; readonly stdout: string; readonly stderr: string }): CodexLoginStatus {
+  if (login.timedOut) return 'timeout';
+  if (login.exitCode !== 0) return 'not_logged_in';
+  const output = `${login.stdout} ${login.stderr}`;
+  if (/api[ _-]?key/i.test(output)) return 'api_key';
+  return /chatgpt/i.test(output) ? 'subscription' : 'unrecognized';
+}
+
 /** Instrução determinística (comum aos executores nativos). */
 export const buildCodexCliPrompt = (request: CoderEditRequest): string => buildNativeCliPrompt(request);
 

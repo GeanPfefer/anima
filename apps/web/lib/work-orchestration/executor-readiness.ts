@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs';
 import { win32 } from 'node:path';
 import { WORKTREE_CODER_BACKENDS, type CoderProvider } from './coder-backend';
 import { buildClaudeCodeEnvironment, resolveClaudeCodeConfig } from './claude-code-coder';
-import { buildCodexCliEnvironment, resolveCodexCliConfig } from './codex-cli-coder';
+import { buildCodexCliEnvironment, classifyCodexLoginStatus, resolveCodexCliConfig } from './codex-cli-coder';
+import { buildWslLoginStatusInvocation, buildWslVersionInvocation, resolveInvestigationTransport } from './investigation-wsl-transport';
 import type { ExecutorObservation } from './executor-discovery';
 import { resolveOllamaCoderRuntimeConfig } from './ollama-coder-config';
 import { runProcess } from './worktree';
@@ -66,19 +67,45 @@ async function checkVersion(deps: ExecutorReadinessDeps, executable: string, env
   return result.exitCode === 0 ? null : 'version_check_failed';
 }
 
+/**
+ * Transporte WSL opt-in (investigation-v1): a observação de `codex-cli` passa a refletir o Codex Linux que o
+ * investigation realmente usa (distro acessível + `--version` + login por assinatura), reutilizando a MESMA
+ * interpretação de login do pré-voo do adaptador. Limitação: o provider `codex-cli` tem uma única observação;
+ * com o transporte WSL configurado ela NÃO atesta o binário nativo do Windows (usado pelo coder `workspace-write`).
+ */
+async function probeCodexViaWsl(deps: ExecutorReadinessDeps, wsl: Parameters<typeof buildWslVersionInvocation>[0]): Promise<ExecutorObservation> {
+  const env = buildCodexCliEnvironment(deps.env);
+  const version = buildWslVersionInvocation(wsl);
+  const versionResult = await deps.run(version.file, version.args, { cwd: deps.cwd, timeoutMs: READINESS_VERSION_TIMEOUT_MS, env });
+  if (versionResult.timedOut) return unavailable('codex-cli', 'wsl_version_probe_timeout');
+  if (versionResult.exitCode !== 0) return unavailable('codex-cli', 'wsl_version_check_failed');
+  const login = buildWslLoginStatusInvocation(wsl);
+  switch (classifyCodexLoginStatus(await deps.run(login.file, login.args, { cwd: deps.cwd, timeoutMs: READINESS_AUTH_TIMEOUT_MS, env }))) {
+    case 'subscription': return ready('codex-cli');
+    case 'timeout': return unavailable('codex-cli', 'wsl_auth_probe_timeout');
+    case 'not_logged_in': return unavailable('codex-cli', 'wsl_codex_not_logged_in');
+    case 'api_key': return unavailable('codex-cli', 'codex_login_not_subscription');
+    case 'unrecognized': return unknown('codex-cli', 'codex_login_mode_unrecognized');
+  }
+}
+
 async function probeCodex(deps: ExecutorReadinessDeps): Promise<ExecutorObservation> {
+  const transport = resolveInvestigationTransport(deps.env, deps.platform as NodeJS.Platform);
+  if (!transport.ok) return unavailable('codex-cli', 'investigation_transport_invalid');
+  if (transport.value) return probeCodexViaWsl(deps, transport.value);
   const config = resolveCodexCliConfig(null, deps.env);
   if (!config.ok) return unavailable('codex-cli', 'executable_is_shell_wrapper');
   const env = buildCodexCliEnvironment(deps.env);
   const versionFailure = await checkVersion(deps, config.value.executable, env);
   if (versionFailure) return unavailable('codex-cli', versionFailure);
   const login = await deps.run(config.value.executable, ['login', 'status'], { cwd: deps.cwd, timeoutMs: READINESS_AUTH_TIMEOUT_MS, env });
-  if (login.timedOut) return unavailable('codex-cli', 'auth_probe_timeout');
-  if (login.exitCode !== 0) return unavailable('codex-cli', 'codex_not_logged_in');
-  const output = `${login.stdout}\n${login.stderr}`;
-  if (/api[ _-]?key/i.test(output)) return unavailable('codex-cli', 'codex_login_not_subscription');
-  if (/chatgpt/i.test(output)) return ready('codex-cli');
-  return unknown('codex-cli', 'codex_login_mode_unrecognized');
+  switch (classifyCodexLoginStatus(login)) {
+    case 'timeout': return unavailable('codex-cli', 'auth_probe_timeout');
+    case 'not_logged_in': return unavailable('codex-cli', 'codex_not_logged_in');
+    case 'api_key': return unavailable('codex-cli', 'codex_login_not_subscription');
+    case 'subscription': return ready('codex-cli');
+    case 'unrecognized': return unknown('codex-cli', 'codex_login_mode_unrecognized');
+  }
 }
 
 const pathVariable = (env: Record<string, string>): string => {
