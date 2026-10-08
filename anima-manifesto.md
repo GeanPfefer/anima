@@ -93,6 +93,8 @@ Dentro de uma solicitação aprovada, o Anima pode escolher quais capacidades in
 
 Quatro camadas não devem ser confundidas (ver [Marco 005](docs/marcos/005-autonomia-progressiva-e-identidade-una.md)): **identidade** é o Anima, a única frente conversacional; **persona/lente** é uma forma de comunicação (como o tom reflexivo), nunca uma segunda frente; **capacidade** é algo que o Anima consegue fazer; **provider/modelo** é a ferramenta substituível que realiza uma capacidade. O usuário não escolhe qual "especialista" chamar — o Anima roteia internamente.
 
+Corolário (ver [Marco 009](docs/marcos/009-resiliencia-por-substituicao-versatilidade-infinita.md)): como provider, modelo, executor e ambiente são instrumentos substituíveis, **a continuidade pertence ao Anima, não às ferramentas** — alternativas compatíveis, comprovadas e autorizadas podem substituir um instrumento que falha, **sem ampliar autoridade nem contornar governança**. É direção, não backlog.
+
 ---
 
 ## Autonomia por nível de impacto
