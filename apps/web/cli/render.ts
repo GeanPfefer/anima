@@ -1,4 +1,5 @@
 import type { CliPayload, VerifierSummaryPayload } from './app';
+import { renderInvestigationEvidence, type InvestigationReviewV1 } from '@anima/core';
 
 // Render HUMANO derivado do payload estável. Curto e legível; o `--json` é a
 // interface de automação. Sem cores/ANSI (funciona em log e pipe). Uma única
@@ -20,8 +21,47 @@ const workHeading = (id: string, reference: string | null, title: string | null,
   `id interno: ${id}`,
 ];
 
+function investigationLines(review: InvestigationReviewV1, full: boolean): string[] {
+  const lines = ['Cobertura automática de aceite: não aplicável; atendimento da pergunta depende de revisão humana.'];
+  if (review.status === 'not_submitted') return [...lines, 'Relatório: ainda não submetido.'];
+  if (review.status === 'invalid') return [...lines, `Relatório inválido: ${review.issue}.`];
+  const source = review.source!;
+  const result = review.investigation!;
+  lines.push(`Resultado: ${result.outcome} · ${result.findings.length} findings · ${result.gaps.length} lacunas`,
+    `Evento-fonte: ${source.eventId}${source.seq === null ? '' : ` · seq ${source.seq}`} · proposta v${source.proposalVersion} · tentativa ${source.attemptId}`,
+    `Revisão humana: ${review.humanReview.status === 'accepted' ? `aceito (evento ${review.humanReview.eventId})` : 'sem aceite registrado'}`);
+  const opinion = review.verifierRecorded;
+  lines.push(opinion ? `Verifier técnico (registrado): ${opinion.verdict} · ${opinion.verifierVersion}` : 'Verifier técnico (registrado): sem parecer correlacionado.');
+  if (opinion) {
+    lines.push('Checks técnicos (não certificam verdade semântica nem completude):');
+    for (const check of opinion.findings) lines.push(`  ${DOT} ${check.subject ?? check.code} [${check.severity}/${check.provenance}]`);
+  }
+  if (full) {
+    lines.push(`Snapshot: ${result.hostVerification.baseSha} · clean=${result.hostVerification.snapshotClean} · detached=${result.hostVerification.snapshotDetached}`,
+      `Handoff: ${review.handoffReference}`, '', 'Findings:');
+    result.findings.forEach((finding, index) => {
+      lines.push(`${index + 1}. [${finding.status}] ${finding.statement}`);
+      for (const evidence of finding.evidence) lines.push(`   Evidência: ${renderInvestigationEvidence(evidence)}`);
+    });
+  }
+  lines.push('', 'Lacunas da investigação:');
+  for (const gap of result.gaps) lines.push(`  ${DOT} ${gap}`);
+  if (!result.gaps.length) lines.push('  Nenhuma declarada.');
+  lines.push('Limitações declaradas:');
+  for (const limitation of review.limitations) lines.push(`  ${DOT} ${limitation}`);
+  if (full && result.hostVerification.evidenceDiagnostics?.length) {
+    lines.push('Diagnósticos de evidência do host:');
+    for (const diagnostic of result.hostVerification.evidenceDiagnostics) lines.push(`  ${JSON.stringify(diagnostic)}`);
+  }
+  return lines;
+}
+
 export function renderHuman(payload: CliPayload): string {
   switch (payload.kind) {
+    case 'work-investigation':
+      return [...workHeading(payload.id, payload.reference, payload.title, payload.state),
+        `Pergunta: ${payload.question}`, `Proposta vigente: v${payload.proposalVersion}`,
+        ...investigationLines(payload.review, true)].join('\n');
     case 'work-propose-investigation':
       return `${payload.reference} \u2014 ${payload.title}\nEstado: ${payload.state}\nCapability: ${payload.capability}\nAprova\u00e7\u00e3o humana e prepara\u00e7\u00e3o aut\u00f4noma s\u00e3o atos posteriores.`;
     case 'help':
@@ -76,7 +116,7 @@ export function renderHuman(payload: CliPayload): string {
       lines.push(`Objetivo: ${payload.objective}`);
       if (payload.includedScope.length > 0) lines.push(`Escopo incluído: ${payload.includedScope.join(' | ')}`);
       if (payload.excludedScope.length > 0) lines.push(`Escopo excluído: ${payload.excludedScope.join(' | ')}`);
-      if (payload.plannedGates.length > 0) {
+      if (!payload.investigationReview && payload.plannedGates.length > 0) {
         lines.push('');
         lines.push('Gates planejados (execution_spec · covers):');
         for (const g of payload.plannedGates) {
@@ -85,13 +125,14 @@ export function renderHuman(payload: CliPayload): string {
         }
       }
       lines.push('');
-      lines.push(`Verifier (agora): ${verdictLabel(payload.verifierLive)}`);
-      if (payload.verifierRecorded) {
+      if (payload.investigationReview) lines.push(...investigationLines(payload.investigationReview, false));
+      else lines.push(`Verifier (agora): ${verdictLabel(payload.verifierLive)}`);
+      if (!payload.investigationReview && payload.verifierRecorded) {
         lines.push(`Verifier (registrado): ${payload.verifierRecorded.verdict} (${payload.verifierRecorded.opinions} parecer(es))`);
       }
       lines.push('');
-      lines.push(`Cobertura de aceite: ${payload.acceptance.covered}/${payload.acceptance.total} com evidência`);
-      for (const c of payload.acceptance.criteria) {
+      if (!payload.investigationReview) lines.push(`Cobertura de aceite: ${payload.acceptance.covered}/${payload.acceptance.total} com evidência`);
+      for (const c of payload.investigationReview ? [] : payload.acceptance.criteria) {
         lines.push(`  ${c.covered ? YES : NO} ${c.criterion}  [prova: ${proofLabel(c.proof)}]`);
       }
       if (payload.provenance.issues.length > 0) {
@@ -155,6 +196,11 @@ export function renderHuman(payload: CliPayload): string {
       const lines: string[] = [];
       lines.push(...workHeading(payload.id, payload.reference, payload.title, payload.state));
       if (payload.attemptId) lines.push(`Tentativa: ${payload.attemptId}`);
+      if (payload.investigationReview) {
+        lines.push(...investigationLines(payload.investigationReview, false));
+        lines.push(`Relatório completo: anima work investigation ${payload.reference ?? payload.id}`);
+        return lines.join('\n');
+      }
       lines.push(`Verifier (agora): ${verdictLabel(payload.verifierLive)}`);
       if (payload.verifierRecorded) lines.push(`Verifier (registrado): ${payload.verifierRecorded.verdict}`);
       lines.push('');

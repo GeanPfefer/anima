@@ -2100,3 +2100,25 @@ Regressão preexistente descoberta durante o B1 e corrigida: `20260910000001` re
 Catálogo oficial de preços `provider_api` versionado no repositório (`apps/web/lib/work-orchestration/provider-pricing-catalog.json`; env `ANIMA_PROVIDER_PRICING_CATALOG` vira override): OpenAI Standard, `gpt-5.6-sol` 4.00/0.40/20.00 (promocional, `effectiveUntil` 2026-11-21) e `gpt-5.6-terra` 2.00/0.20/12.00 USD por 1M (input/cached/output), cache write 1,25× input, `effectiveFrom` 2026-09-28 (nada anterior é reprecificado). `sol`/`terra` não são aliases: são os IDs enviados verbatim à API. A reconstrução achou dimensões de cobrança não observadas pelo settlement (cache writes, long context > 272K por requisição, tier): o coder agora pede `service_tier: default` e captura `cache_write_tokens`/`service_tier`/`model` da resposta; o settlement exige esses fatos (ausentes ⇒ `cost_unknown`) e não precifica long context. Pricing e settlement prontos; **operational** depende de prova viva paga em unidade separada com authority humana. US$0. [Registro](docs/registros/2026-09-28-pricing-catalog-v1-b1c.md).
 
 V1.1 (mesma data, após revisão humana): a V1 tratava "at least through November 21, 2026" do Sol como `effectiveUntil`; agora é `sourceGuaranteedThrough` (garantia, não término). A versão não expira por inferência; reservas com data UTC posterior à garantia ficam `cost_unknown` (`pricing_guarantee_lapsed`) até reverificação humana. `effectiveFrom` = início da evidência autoritativa do ANIMA, não a data de início do preço no provider.
+
+
+## Estado operacional — Investigation Review V1 local (2026-10-08)
+
+Implementação supervisionada local: `anima work investigation <id|REF> [--json]`
+recupera InvestigationExecutionV1 pelo application service/event log, preservando
+findings, evidências, gaps, outcome, limitações, evento-fonte/seq/attempt/versão,
+parecer técnico registrado correlacionado e aceite humano quando registrado.
+`work show`/`work evidence` distinguem checks técnicos e revisão humana de cobertura
+automática de programação (não aplicável, contagens null). `listEvents` pagina por
+seq; regras e gates do Verifier de programação inalterados. Código e testes locais
+concluídos (380 testes verdes). Prova viva de leitura em 2026-10-08, pela identidade
+residente, confirmada pelo humano: INV-10 completed v2, resultado partial com
+26 findings/7 gaps, evento original seq 86353, parecer verified com cinco checks
+e aceite humano correlacionado; show/evidence exibiram cobertura não aplicável.
+Prova RLS com dois usuários ainda pendente de autorização; leitura autenticada não
+prova isolamento cruzado. Fechamento documental sem nova consulta ou mudança no
+banco, attempt, API paga, interface web, migration, commit ou push. A fase "Pronto
+para integrar" em completed/read_only permanece como correção separada. Typecheck core/supabase e web
+sem scripts scratch verdes; typecheck web completo tem 85 erros preexistentes em
+scripts/_session. [Plano](docs/planos/041-investigation-review-v1.md) ·
+[Registro](docs/registros/2026-10-08-investigation-review-v1.md).

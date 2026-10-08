@@ -53,6 +53,8 @@ export interface WorkEvent {
   readonly id: string; readonly workItemId: WorkItemId; readonly type: WorkEventType;
   readonly author: WorkEventAuthor; readonly proposalVersion: ProposalVersion | null;
   readonly payload: Json; readonly occurredAt: Date;
+  /** Global append-only event order; optional for existing in-memory fixtures. */
+  readonly seq?: number;
 }
 export interface WorkContextReference { readonly kind: string; readonly id: string; }
 export interface WorkContextSnapshot {

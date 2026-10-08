@@ -91,3 +91,4 @@ export * from './harness-recovery';
 export * from './candidate-recovery';
 export * from './effect-class';
 export * from './investigation-result';
+export * from './investigation-review';

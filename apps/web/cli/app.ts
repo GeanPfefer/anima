@@ -2,6 +2,8 @@ import { prepareInvestigation, type InvestigationInput, type InvestigationPrepar
 import type { ParsedCommand } from './args';
 import { readWorkHumanReference, type WorkReferenceResult, type WorkReferenceAmbiguousCandidate } from '@/lib/work-orchestration/work-reference';
 import {
+  projectInvestigationReview,
+  type InvestigationReviewV1,
   COMPUTE_ROUTER_REQUESTED_DURATION_MS,
   projectComputePreference,
   projectComputeRoutingWait,
@@ -53,7 +55,7 @@ export type ReviewOutcomeState = 'changes_requested' | 'completed' | string;
 
 export interface AcceptanceCriterionCoverage {
   readonly criterion: string;
-  readonly covered: boolean;
+  readonly covered: boolean | null;
   /** Requisito de prova declarado no execution_spec: `gate` (comando), `scope`
    * (invariante observada) ou `null` quando nenhum critério de validação o cobre. */
   readonly proof: 'gate' | 'scope' | null;
@@ -98,7 +100,8 @@ export interface WorkShowPayload {
   readonly verifierLive: VerifierSummaryPayload | null;
   /** Último parecer PERSISTIDO (pode ter sido gravado por uma versão anterior do Verifier). */
   readonly verifierRecorded: { readonly verdict: WorkVerificationReport['verdict']; readonly opinions: number } | null;
-  readonly acceptance: { readonly total: number; readonly covered: number; readonly missing: number; readonly criteria: readonly AcceptanceCriterionCoverage[] };
+  readonly acceptance: { readonly total: number; readonly covered: number | null; readonly missing: number | null; readonly criteria: readonly AcceptanceCriterionCoverage[] };
+  readonly investigationReview?: InvestigationReviewV1;
   readonly availableActions: readonly string[];
   readonly suggestedDecision: 'request_changes' | null;
   readonly provenance: { readonly status: string; readonly issues: readonly string[] };
@@ -116,7 +119,20 @@ export type ComputePreferencePayload =
   | { readonly status: 'explicit'; readonly strategy: 'provider_api'; readonly provider: 'openai'; readonly model: string; readonly recordedAt: string | null }
   | { readonly status: 'legacy_contract'; readonly provider: 'openai' }
   | { readonly status: 'router_default'; readonly cleared: boolean };
+export interface WorkInvestigationPayload {
+  readonly ok: true;
+  readonly kind: 'work-investigation';
+  readonly schemaVersion: 1;
+  readonly id: string;
+  readonly reference: string | null;
+  readonly title: string | null;
+  readonly state: string;
+  readonly proposalVersion: number;
+  readonly question: string;
+  readonly review: InvestigationReviewV1;
+}
 export interface WorkEvidencePayload {
+  readonly investigationReview?: InvestigationReviewV1;
   readonly reference: string | null;
   readonly title: string | null;
   readonly ok: true;
@@ -285,6 +301,7 @@ export interface WorkSupervisionPayload {
   readonly message: string;
 }
 export interface ErrorPayload {
+  readonly investigationReview?: InvestigationReviewV1;
   readonly candidates?: readonly WorkReferenceAmbiguousCandidate[];
   readonly ok: false;
   readonly kind: 'error';
@@ -299,7 +316,7 @@ export interface HelpPayload {
 
 export type CliPayload =
   | (Extract<InvestigationPreparationResult, {ok:true}> & {readonly kind:'work-propose-investigation'})
-  | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkRecoverCandidatePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
+  | WorkInvestigationPayload | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkRecoverCandidatePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -554,12 +571,29 @@ export async function runWorkList(service: WorkOrchestrationPort): Promise<Comma
   };
 }
 
+export async function runWorkInvestigation(service: WorkOrchestrationPort, id: string): Promise<CommandResult> {
+  const item = await service.getItem(id);
+  if (!item.ok) return errorResult(item.error.message, item.error.code, exitCodeForError(item.error.code));
+  const events = await service.listEvents(id);
+  if (!events.ok) return errorResult(events.error.message, events.error.code, exitCodeForError(events.error.code));
+  const review = projectInvestigationReview(item.value, events.value);
+  if (!review) return errorResult('O item não é uma investigação.', 'not_investigation', EXIT.ERROR);
+  if (review.status === 'invalid') return { exitCode: EXIT.ERROR, payload: { ok: false, kind: 'error', code: `investigation_${review.issue}`, error: `Resultado de investigação inválido: ${review.issue}.`, investigationReview: review } };
+  return { exitCode: EXIT.OK, payload: {
+    ok: true, kind: 'work-investigation', schemaVersion: 1, id: item.value.id,
+    ...humanReferenceFields(item.value.intent), state: item.value.state, proposalVersion: item.value.proposalVersion,
+    question: typeof item.value.intent.investigation_question === 'string' ? item.value.intent.investigation_question : item.value.originalRequest,
+    review,
+  } };
+}
+
 export async function runWorkShow(service: WorkOrchestrationPort, id: string): Promise<CommandResult> {
   const loaded = await loadPresentation(service, id);
   if (!loaded.ok) return loaded.result;
   const { item, events, presentation } = loaded;
-  const live = presentation.verification;
-  const coverage = acceptanceCoverage(item, live);
+  const investigationReview = projectInvestigationReview(item, events);
+  const live = investigationReview ? null : presentation.verification;
+  const coverage = investigationReview ? item.proposal.data.expectedEffects.map(criterion => ({ criterion, covered: null, proof: null })) : acceptanceCoverage(item, live);
   const missing = coverage.filter(c => !c.covered).length;
   const inReview = item.state === 'review';
   const computeRouting = projectComputeRoutingWait({
@@ -567,9 +601,9 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
   });
   const computePreference = projectComputePreferencePayload(item, events);
   const suggestedDecision: 'request_changes' | null =
-    inReview && ((live && live.verdict !== 'verified') || missing > 0) ? 'request_changes' : null;
+    !investigationReview && inReview && ((live && live.verdict !== 'verified') || missing > 0) ? 'request_changes' : null;
   const spec = readAutonomousExecutionSpec(item.intent);
-  const plannedGates: readonly PlannedGatePayload[] = (spec?.validationCriteria ?? []).map(criterion => ({
+  const plannedGates: readonly PlannedGatePayload[] = (investigationReview ? [] : spec?.validationCriteria ?? []).map(criterion => ({
     label: criterion.label,
     command: criterion.command ?? null,
     covers: criterion.covers ?? [],
@@ -579,7 +613,7 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
     payload: {
       ok: true, kind: 'work-show', ...humanReferenceFields(item.intent), id: item.id, state: item.state, proposalVersion: item.proposalVersion,
       phase: presentation.progress?.label ?? null,
-      attemptId: presentation.execution?.attemptId ?? live?.attemptId ?? null,
+      attemptId: investigationReview?.source?.attemptId ?? presentation.execution?.attemptId ?? live?.attemptId ?? null,
       summary: item.proposal.data.summary,
       objective: item.proposal.data.objective,
       includedScope: item.proposal.data.includedScope,
@@ -590,8 +624,9 @@ export async function runWorkShow(service: WorkOrchestrationPort, id: string): P
         ? { eventId: presentation.latestResult.eventId, proposalVersion: presentation.latestResult.proposalVersion, summary: presentation.latestResult.summary }
         : null,
       verifierLive: verifierLiveSummary(live),
-      verifierRecorded: recordedVerifier(presentation),
-      acceptance: { total: coverage.length, covered: coverage.length - missing, missing, criteria: coverage },
+      verifierRecorded: investigationReview ? (investigationReview.verifierRecorded ? { verdict: investigationReview.verifierRecorded.verdict, opinions: 1 } : null) : recordedVerifier(presentation),
+      ...(investigationReview ? { investigationReview } : {}),
+      acceptance: { total: coverage.length, covered: investigationReview ? null : coverage.length - missing, missing: investigationReview ? null : missing, criteria: coverage },
       availableActions: presentation.availableActions,
       suggestedDecision,
       provenance: { status: presentation.provenance?.status ?? 'unknown', issues: presentation.provenance?.issues ?? [] },
@@ -832,17 +867,19 @@ export async function runWorkExecutors(
 export async function runWorkEvidence(service: WorkOrchestrationPort, id: string): Promise<CommandResult> {
   const loaded = await loadPresentation(service, id);
   if (!loaded.ok) return loaded.result;
-  const { item, presentation } = loaded;
-  const live = presentation.verification;
+  const { item, events, presentation } = loaded;
+  const investigationReview = projectInvestigationReview(item, events);
+  const live = investigationReview ? null : presentation.verification;
   const findings = live?.findings ?? [];
   return {
     exitCode: EXIT.OK,
     payload: {
       ok: true, kind: 'work-evidence', ...humanReferenceFields(item.intent), id: item.id, state: item.state, proposalVersion: item.proposalVersion,
-      attemptId: presentation.execution?.attemptId ?? live?.attemptId ?? null,
+      attemptId: investigationReview?.source?.attemptId ?? presentation.execution?.attemptId ?? live?.attemptId ?? null,
       verifierLive: verifierLiveSummary(live),
-      verifierRecorded: recordedVerifier(presentation),
-      acceptanceCriteria: acceptanceCoverage(item, live),
+      verifierRecorded: investigationReview ? (investigationReview.verifierRecorded ? { verdict: investigationReview.verifierRecorded.verdict, opinions: 1 } : null) : recordedVerifier(presentation),
+      ...(investigationReview ? { investigationReview } : {}),
+      acceptanceCriteria: investigationReview ? item.proposal.data.expectedEffects.map(criterion => ({ criterion, covered: null, proof: null })) : acceptanceCoverage(item, live),
       validationCriteria: validationCoverage(live),
       declaredValidations: presentation.latestResult?.validations
         ? presentation.latestResult.validations.map(v => ({ label: v.label, outcome: v.outcome }))

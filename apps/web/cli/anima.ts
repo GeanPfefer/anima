@@ -24,7 +24,7 @@ import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recov
 import { recoverFromFailedCandidate } from '@/lib/work-orchestration/candidate-recovery';
 import { runWorkRecoverCandidate } from './app';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
-import { runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkExecutors, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
+import { runWorkInvestigation, runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkExecutors, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { createNodeExecutorReadinessDeps, probeAllExecutors } from '@/lib/work-orchestration/executor-readiness';
 import { renderHuman } from './render';
 import { EXIT, type ExitCode } from './exit-codes';
@@ -78,6 +78,7 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
         return result.data;
       }, command.id);
     case 'work-list': return runWorkList(service);
+    case 'work-investigation': return runWorkInvestigation(service, command.id);
     case 'work-show': return runWorkShow(service, command.id);
     case 'work-evidence': return runWorkEvidence(service, command.id);
     case 'work-executors': return runWorkExecutors(service, () => probeAllExecutors(createNodeExecutorReadinessDeps()), command.id);

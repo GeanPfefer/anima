@@ -174,3 +174,47 @@ inválido retorna `invalid_work_reference` (exit 2). Mais de um candidato retorn
 Os candidatos aparecem na mensagem humana e no campo opcional `candidates` do
 JSON, com UUID, estado, versão da proposta, documento e data de criação. Escolha
 explicitamente o UUID desejado; estado, recência e lineage não desempatam.
+
+
+## Investigation Review V1
+
+```bash
+npm run anima -- work investigation INV-10
+npm run anima -- work investigation INV-10 --json
+npm run anima -- work investigation <uuid> --json
+```
+
+Consulta somente leitura pelo application service e pelo event log residente, com a
+mesma identidade GoTrue/Bearer/RLS dos demais comandos. Não depende de Next, arquivos
+scratch, Git local, executor ou recomputação do Verifier. Supabase deve estar disponível
+para a consulta; o comando não inicia serviços.
+
+O JSON tem `kind: work-investigation`, `schemaVersion: 1`, identidade do item, pergunta,
+proposta vigente e `review` versionado. `review.source` preserva evento, seq, versão e
+attempt; `review.investigation` preserva outcome, findings, evidências, gaps e
+hostVerification; limitações, referências, handoff, parecer registrado correlacionado
+e aceite humano são campos separados. O texto exibe todos os findings/evidências,
+lacunas, limitações e proveniência dos checks técnicos.
+
+Resultado partial/inconclusive válido e relatório ainda não submetido retornam exit 0.
+Ausência é `review.status: not_submitted`, com investigation null. Payload inválido,
+correlação divergente ou resultado de versão antiga retornam exit 1 e diagnóstico,
+sem fallback para summary ou resultado anterior. Item não investigativo retorna
+`not_investigation`. REF ambígua continua exit 3; uso inválido, exit 2. Sucesso vai para
+stdout; erros, para stderr, inclusive em --json.
+
+`work show` e `work evidence` incluem `investigationReview` para investigações e usam
+null para cobertura automática de critérios (covered/missing), pois gates de programação
+não medem o atendimento semântico da pergunta. O parecer técnico registrado A–E não
+implica completude, verdade semântica ou aceite humano. O Verifier "agora" não é
+recomputado. Critérios e comportamento de programação permanecem inalterados.
+
+Prova viva de leitura da INV-10 realizada em 2026-10-08 pela identidade residente,
+conforme evidência humana registrada: completed, proposta v2, resultado partial,
+26 findings, 7 gaps, evento original seq 86353, parecer verified com cinco checks
+e aceite humano correlacionado. `work show` e `work evidence` exibiram cobertura
+automática não aplicável. Ver [registro da prova](../../../docs/registros/2026-10-08-investigation-review-v1.md#atualização--prova-viva-de-leitura-em-2026-10-08).
+Os 380 testes locais e a prova de leitura são evidências distintas. A prova RLS
+com dois usuários permanece pendente de autorização; esta leitura autenticada e
+os mocks não demonstram isolamento entre usuários. A fase "Pronto para integrar"
+em completed/read_only é uma pendência preexistente separada desta entrega.

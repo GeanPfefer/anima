@@ -28,7 +28,27 @@ export class SupabaseWorkOrchestrationRepository implements WorkOrchestrationRep
   // UX-04 — itens não terminais do usuário (RLS isola por user_id, como nos demais
   // reads). Ordem determinística: mais recentes primeiro, id como desempate estável.
   async findResumableWorkItems():Promise<WorkOperationResult<readonly WorkItem[]>>{const{data,error}=await this.client.from('work_items').select('*').in('state',[...RESUMABLE_WORK_STATES]).order('updated_at',{ascending:false}).order('id',{ascending:false});if(error)return mapSupabaseFailure(error,false);try{return{ok:true,value:(data??[]).map(mapWorkItem)}}catch(cause){return failure('persistence_failure','Resposta persistida inválida.',false,cause)}}
-  async listEvents(id:WorkItemId):Promise<WorkOperationResult<readonly WorkEvent[]>>{const{data,error}=await this.client.from('work_events').select('*').eq('work_item_id',id).order('seq',{ascending:true});if(error)return mapSupabaseFailure(error,false);try{return{ok:true,value:(data??[]).map(mapWorkEvent)}}catch(cause){return failure('persistence_failure','Resposta persistida inválida.',false,cause)}}
+  async listEvents(id:WorkItemId):Promise<WorkOperationResult<readonly WorkEvent[]>> {
+    const events: WorkEvent[] = [];
+    let after: number | null = null;
+    // Keyset pagination over the unique append-only seq avoids offset drift.
+    // Read until empty: a server cap below 1000 must not truncate the history.
+    for (;;) {
+      let query = this.client.from('work_events').select('*').eq('work_item_id',id)
+        .order('seq',{ascending:true}).limit(1000);
+      if (after !== null) query = query.gt('seq',after);
+      const {data,error} = await query;
+      if (error) return mapSupabaseFailure(error,false);
+      if (!data?.length) return {ok:true,value:events};
+      try {
+        for (const row of data) {
+          if (!Number.isSafeInteger(row.seq) || (after !== null && row.seq <= after)) throw new Error('Invalid event order');
+          events.push(mapWorkEvent(row));
+          after = row.seq;
+        }
+      } catch (cause) { return failure('persistence_failure','Resposta persistida inválida.',false,cause); }
+    }
+  }
   // Machine-scoped: eventos de um tipo em TODOS os itens do usuário. Sem filtro de
   // work_item_id — a RLS de work_events (EXISTS item do dono) é a única fronteira de
   // isolamento, o mesmo padrão de findResumableWorkItems. Índice work_events_type_time_idx

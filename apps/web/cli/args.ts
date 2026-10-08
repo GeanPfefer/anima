@@ -14,6 +14,7 @@ export type ParsedCommand =
   | { readonly kind: 'toolchain-check'; readonly json: boolean }
   | { readonly kind: 'budget-status'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-list'; readonly json: boolean }
+  | { readonly kind: 'work-investigation'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-show'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-evidence'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-executors'; readonly id: string; readonly json: boolean }
@@ -202,6 +203,10 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       if (!id || rest.length !== 1 || reason !== null) return { ok:false, error:`Uso: anima work ${sub} <id|REF>` };
       return {ok:true,command:{kind:sub === 'supervise' ? 'work-supervise' : 'work-unsupervise',id,json}};
     }
+    if (sub === 'investigation') {
+      if (!id || rest.length !== 1 || reason !== null || requiredGates.length > 0) return { ok: false, error: 'Uso: anima work investigation <id|REF> [--json]' };
+      return { ok: true, command: { kind: 'work-investigation', id, json } };
+    }
     if (sub === 'show') {
       if (!id) return { ok: false, error: 'Uso: anima work show <id|REF>' };
       return { ok: true, command: { kind: 'work-show', id, json } };
@@ -298,6 +303,7 @@ Uso:
                                                Cria investiga\u00e7\u00e3o proposed; aprova\u00e7\u00e3o humana posterior
   anima work list                             Lista os trabalhos não terminais (retomáveis)
   anima work show <id|REF>                        Estado, versão, tentativa, Verifier e cobertura
+  anima work investigation <id|REF> [--json]      Relatório persistido de investigação
   anima work evidence <id|REF>                    Critérios de aceite, provas e lacunas (Verifier)
   anima work executors <id|REF>                   Executores de coding: prontos, elegíveis e recomendação (read-only; não escolhe nem inicia)
   anima work request-changes <id|REF> --reason "" Registra REQUEST_CHANGES pelo fluxo canônico

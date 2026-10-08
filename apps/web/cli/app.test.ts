@@ -577,3 +577,41 @@ describe('entrypoint nativo da CLI', () => {
     expect(child.stderr).toBe('');
   });
 });
+
+
+describe('investigation dispatch nativo com identidade injetada (sem banco)', () => {
+  test.each(['INV-10', '10000000-0000-0000-0000-000000000001'])('consulta %s pelo dispatch real', input => {
+    const child = runCliModule(`
+      import { dispatch } from './cli/anima.ts';
+      import { renderHuman } from './cli/render.ts';
+      import { investigationItem as item, investigationFixture } from '../../packages/core/src/work-orchestration/__fixtures__/investigation-review.ts';
+      const f = investigationFixture();
+      const ok = value => ({ ok: true, value });
+      let identities = 0;
+      let reads = 0;
+      const query = {
+        select() { return this; }, or() { return this; }, order() { return this; },
+        async range() { return { data: [{ id: item.id, state: item.state, proposal_version: item.proposalVersion, created_at: item.createdAt.toISOString(), intent: item.intent }], error: null }; }
+      };
+      const service = {
+        async getItem(id) { if (id !== item.id) throw new Error('Wrong resolved id'); reads++; return ok(item); },
+        async listEvents(id) { if (id !== item.id) throw new Error('Wrong resolved id'); reads++; return ok([f.result, f.verifier]); }
+      };
+      const result = await dispatch({ kind: 'work-investigation', id: '${input}', json: true }, {
+        service,
+        resolveIdentity: async () => { identities++; return { ok: true, identity: { userId: 'owner', client: { from: () => query } } }; }
+      });
+      console.log(JSON.stringify({ result, identities, reads, human: renderHuman(result.payload) }));
+    `);
+    expect(child.error).toBeUndefined();
+    expect(child.status).toBe(EXIT.OK);
+    expect(child.stderr).toBe('');
+    const parsed = JSON.parse(child.stdout);
+    expect(parsed).toMatchObject({ identities: 1, reads: 2, result: { exitCode: 0, payload: {
+      kind: 'work-investigation', schemaVersion: 1, reference: 'INV-10', review: {
+        investigation: { outcome: 'partial' }, verifierRecorded: { verdict: 'verified' }, humanReview: { status: 'pending' }
+      }
+    } } });
+    expect(parsed.human).toContain('[established] Contract exists');
+  });
+});
