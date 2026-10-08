@@ -2122,3 +2122,17 @@ para integrar" em completed/read_only permanece como correção separada. Typech
 sem scripts scratch verdes; typecheck web completo tem 85 erros preexistentes em
 scripts/_session. [Plano](docs/planos/041-investigation-review-v1.md) ·
 [Registro](docs/registros/2026-10-08-investigation-review-v1.md).
+
+
+## Estado operacional — fase completed/read_only corrigida localmente (2026-10-08)
+
+A pendência de fase da seção Investigation Review V1 acima foi corrigida no core:
+completed/read_only aparece Concluído/terminal e sem integração de código pendente;
+review/read_only continua em revisão. Programação mantém integração governada.
+O leitor histórico, eventos, gates e aceite humano permanecem intactos. Validação
+local: 190 testes verdes (dez novos), typechecks core/supabase e web sem scripts
+scratch verdes; web completo com 85 erros preexistentes em scripts/_session.
+Sem prova viva desta correção, acesso ao banco, Resident Host, API paga, migration,
+staging, commit ou push. Referência dev/a9b95aa; WIPs preservados.
+[Plano 042](docs/planos/042-fase-completed-read-only.md) ·
+[Registro](docs/registros/2026-10-08-fase-completed-read-only.md).

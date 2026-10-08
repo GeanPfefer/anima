@@ -1,4 +1,5 @@
 import type { Json } from '@anima/types';
+import { readEffectClass } from './effect-class';
 import type { WorkEvent, WorkItem, WorkResultValidation, WorkResultValidationOutcome } from './types';
 import { HUMAN_INTERRUPTION_REASONS, type AutonomousLimitKind, type HumanInterruptionReason } from './human-interruption';
 import type { WorkBudgetReason } from './work-budget';
@@ -215,6 +216,9 @@ export function projectPendingBudgetWait(item:WorkItem,events:readonly WorkEvent
 }
 export function projectWorkIntegration(item:WorkItem,events:readonly WorkEvent[]):WorkIntegrationProjection|null{
   if(item.state!=='completed')return null;
+  const effect=readEffectClass(item.intent);
+  // Aceitar uma investigação encerra a leitura, sem oferecer integração de código.
+  if(effect.ok&&effect.value==='read_only')return null;
   const boundary=projectIntegrationBoundary(events);
   if(!boundary||boundary.correlation.workItemId!==item.id||boundary.correlation.approvedProposalVersion!==item.proposalVersion)return null;
   const acceptance=boundary.acceptance;
@@ -316,10 +320,14 @@ const integrationProgressPhase=(integration:WorkIntegrationProjection):WorkProgr
  */
 export function deriveWorkProgressPhase(input:{readonly item:WorkItem;readonly execution:AutonomousExecutionProjection|null;readonly integration:WorkIntegrationProjection|null;readonly autonomousAdmission?:AutonomousAdmissionProjection|null;}):WorkProgressPhaseProjection{
   const{item,execution,integration,autonomousAdmission}=input;
+  const effect=readEffectClass(item.intent);
+  const readOnly=effect.ok&&effect.value==='read_only';
   // Estados terminais NEGATIVOS do item vêm primeiro (autoridade do domínio).
   if(item.state==='rejected')return progressPhase('rejected');
   if(item.state==='cancelled')return progressPhase('cancelled');
   if(item.state==='failed')return progressPhase('failed');
+  // O aceite read_only é terminal, mesmo com a attempt ainda projetada em review.
+  if(item.state==='completed'&&readOnly)return progressPhase('done');
   // Execução autônoma ATIVA tem precedência (running/paused).
   if(execution){
     if(execution.status==='running')return progressPhase(execution.latestCheckpoint!==null?'testing':'implementing');
@@ -330,7 +338,7 @@ export function deriveWorkProgressPhase(input:{readonly item:WorkItem;readonly e
   }
   // Integração (pós-aceite) ANTES de `completed`: um item aceito (completed) ainda
   // pode ter uma decisão de integração pendente — é justamente o `ready_to_integrate`.
-  if(integration)return integrationProgressPhase(integration);
+  if(integration&&!readOnly)return integrationProgressPhase(integration);
   // Resultado submetido, ainda não aceito → revisão.
   if(execution?.status==='submitted_for_review')return progressPhase('reviewing');
   // Concluído sem fronteira de integração → done.
