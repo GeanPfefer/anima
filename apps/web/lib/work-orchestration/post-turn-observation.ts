@@ -5,7 +5,7 @@ import { persistHostObservedGateEvidence } from './gate-evidence';
 import { persistHostObservedCoderEvidence } from './coder-evidence';
 import { observeAndPersistHostGitEvidence } from './host-evidence';
 import { defaultTrustedSystemWriter, type TrustedSystemWriter } from './trusted-system-writer';
-import { verifyAndReleaseCandidate, type MandatedVerificationOutcome } from './mandated-verification';
+import { MANDATED_VERIFIER_TIMEOUT_MS, TIMEOUT, withTimeout, verifyAndReleaseCandidate, type MandatedVerificationOutcome } from './mandated-verification';
 import { projectRoot, type ExecutionContract } from './executor-selection';
 import { createWorkOrchestrationService } from './server';
 import type { SupervisorTurnResult } from './supervisor';
@@ -18,12 +18,13 @@ import { worktreeBranchFor } from './worktree-executor';
 // primeira parte (gate/coder cronometrados, git observado na worktree) e o
 // Verifier registra seu parecer sobre o estado FRESCO.
 //
-// TUDO fail-open: persistir evidência ou parecer NUNCA altera o desfecho da
-// tentativa nem a resposta. Um defeito de telemetria vira evidência AUSENTE,
-// jamais um erro que contamine o turno. Não aceita, autoriza, integra nem aplica.
+// O fluxo global conserva fail-open. Single-Item exige evidências e parecer
+// persistidos antes de reportar sucesso. Não aceita, integra nem aplica.
 // ============================================================
 
 export interface PostTurnObservationInput {
+  readonly singleItem?: boolean;
+  readonly finalizationTimeoutMs?: number;
   readonly client: SupabaseClient<Database>;
   readonly result: SupervisorTurnResult;
   /** Contrato do executor desta volta (null quando não há caminho worktree). */
@@ -52,6 +53,9 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // humana/residente (`client`), só pelo writer de sistema. `client` segue lendo estado.
   const writer = input.systemWriter ?? defaultTrustedSystemWriter();
 
+  const strict = input.singleItem === true && result.terminalKind === 'result';
+  const held = (): MandatedVerificationOutcome => ({ status: 'held', reason: 'persist_failed' });
+  if (strict && (!gateObservations.length || !coderObservations.length || contract?.executor !== 'worktree' || !contract.baseSha)) return held();
   const correlation = {
     workItemId: result.selection.workItemId,
     attemptId: result.attemptId,
@@ -61,13 +65,15 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // (0) GATE observado pelo host — persiste INCLUSIVE em terminal de erro (um gate
   // falho é a evidência mais valiosa: contradiz um executor que minta que passou).
   if (gateObservations.length > 0) {
-    await persistHostObservedGateEvidence(correlation, gateObservations, writer.gateEvidence, undefined, changeAuthorization).catch(() => undefined);
+    const persisted = await persistHostObservedGateEvidence(correlation, gateObservations, writer.gateEvidence, undefined, changeAuthorization).catch(() => null);
+    if (strict && !persisted?.ok) return held();
   }
 
   // (0b) CODER observado pelo host — UMA evidência por tentativa, agregando a
   // duração wall-clock de todas as chamadas `backend.edit()` observadas.
   if (coderObservations.length > 0) {
-    await persistHostObservedCoderEvidence(correlation, coderObservations, writer.coderEvidence).catch(() => undefined);
+    const persisted = await persistHostObservedCoderEvidence(correlation, coderObservations, writer.coderEvidence).catch(() => null);
+    if (strict && !persisted?.ok) return held();
   }
 
   // (1) GIT observado pelo host. Só o caminho worktree deixa uma branch real; o
@@ -80,7 +86,7 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // nada é gravado —, então um erro sem edit efetivo não fabrica evidência.
   if ((result.terminalKind === 'result' || result.terminalKind === 'error')
       && contract?.executor === 'worktree' && contract.baseSha) {
-    await observeAndPersistHostGitEvidence(
+    const persisted = await observeAndPersistHostGitEvidence(
       {
         repoRoot: projectRoot(),
         baseSha: contract.baseSha,
@@ -89,7 +95,8 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
         ...correlation,
       },
       writer.hostEvidence,
-    ).catch(() => undefined);
+    ).catch(() => null);
+    if (strict && !persisted?.ok) return held();
   }
 
   // (2) PARECER do Verifier sobre o estado FRESCO — só no terminal `result` (sem
@@ -104,5 +111,50 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
     getItem: (id) => service.getItem(id),
     listEvents: (id) => service.listEvents(id),
     sink: writer.verifierOpinion,
+    ...(strict ? { requireVerified: true } : {}),
   });
+}
+
+/** Somente terminal já persistido: sem criar attempts, retries ou manutenção. */
+export async function finalizeSingleItemTurn(input: PostTurnObservationInput): Promise<SupervisorTurnResult> {
+  const turn = input.result;
+  if (!turn.terminalKind || !turn.claimId || !turn.attemptId || !turn.selection || turn.claimReleased) return turn;
+  let verification: MandatedVerificationOutcome | null = null;
+  let failure: string | null = null;
+  const coder = input.contract?.coderBackend;
+  if (coder === 'codex-cli' && input.coderObservations.some(o => o.backendId !== 'codex-cli:default')) {
+    failure = 'single_item_executor_mismatch';
+  } else {
+    try {
+      const observed = await withTimeout(persistPostTurnHostObservations({ ...input, singleItem: true }),
+        Math.max(1, Math.min(MANDATED_VERIFIER_TIMEOUT_MS, input.finalizationTimeoutMs ?? MANDATED_VERIFIER_TIMEOUT_MS)));
+      if (observed === TIMEOUT) failure = 'single_item_verification_timeout';
+      else verification = observed;
+    }
+    catch { failure = 'single_item_evidence_failed'; }
+  }
+  if (turn.terminalKind === 'result' && (!verification || verification.status !== 'released' || verification.verdict !== 'verified')) {
+    failure ??= 'single_item_verification_failed';
+  }
+  // O executor já encerrou e há terminal durável; falha de Verifier não mantém
+  // posse de execução fictícia. O resultado continua não aprovado e é reportado.
+  let releaseFailure: string | null = null;
+  try {
+    const released = await withTimeout(Promise.resolve(input.client.rpc('release_work_claim', { claim_id: turn.claimId, reason: 'attempt_finished' })),
+      Math.max(1, Math.min(MANDATED_VERIFIER_TIMEOUT_MS, input.finalizationTimeoutMs ?? MANDATED_VERIFIER_TIMEOUT_MS)));
+    if (released === TIMEOUT) releaseFailure = 'claim release timeout; outcome unknown';
+    else if (released.error) releaseFailure = released.error.message;
+    else {
+      const row = Array.isArray(released.data) && released.data.length === 1 ? released.data[0] : released.data;
+      if (!row || typeof row !== 'object' || Array.isArray(row)
+        || row.id !== turn.claimId || row.work_item_id !== turn.selection.workItemId
+        || row.attempt_id !== turn.attemptId || row.approved_proposal_version !== turn.selection.approvedProposalVersion
+        || row.release_reason !== 'attempt_finished' || typeof row.released_at !== 'string'
+        || !Number.isFinite(Date.parse(row.released_at))) releaseFailure = 'claim release not confirmed by correlated response';
+    }
+  } catch { releaseFailure = 'claim release unavailable'; }
+  return { ...turn, outcome: failure || releaseFailure ? 'execution_interrupted' : turn.terminalKind === 'result' ? 'execution_completed' : turn.outcome,
+    claimReleased: !releaseFailure, requiresAnotherTurn: false,
+    refusal: releaseFailure ? { code: 'single_item_claim_release_failed', message: releaseFailure }
+      : failure ? { code: failure, message: 'Finalização incompleta; nenhuma nova attempt ou integração autorizada.' } : null };
 }

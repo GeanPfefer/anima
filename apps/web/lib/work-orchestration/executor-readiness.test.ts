@@ -211,3 +211,11 @@ describe('probeAllExecutors', () => {
     expect(JSON.stringify(observations)).not.toContain(SECRET);
   });
 });
+
+
+test('coder WSL readiness probes the selected Linux runtime', async () => {
+  const deps = makeDeps({ platform: 'win32', env: { ANIMA_CODEX_CLI_TRANSPORT: 'wsl', ANIMA_CODEX_WSL_DISTRO: 'Ubuntu-24.04', ANIMA_CODEX_WSL_USER: 'geanteco', ANIMA_CODEX_WSL_CLI_PATH: '/home/geanteco/.nvm/versions/node/v22.23.3/bin/codex', SystemRoot: 'C:/Windows' }, handler: (_file, args) => ({ stdout: args.includes('--version') ? 'codex-cli 0.162.0' : 'Logged in using ChatGPT' }) });
+  expect(await probeExecutorReadiness('codex-cli', deps)).toMatchObject({ availability: 'ready' });
+  expect(deps.calls).toHaveLength(2);
+  expect(deps.calls.every(call => call[0]!.endsWith('wsl.exe') && call.includes('/home/geanteco/.nvm/versions/node/v22.23.3/bin/codex'))).toBe(true);
+});

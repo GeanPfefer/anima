@@ -7,6 +7,7 @@ import { validateInvestigationInput } from '@/lib/work-orchestration/investigati
 import { parseComputePreference, type ComputePreferenceV1 } from '@anima/core';
 
 export type ParsedCommand =
+  | { readonly kind: 'work-execute-one'; readonly id: string; readonly expectedProposalVersion: number; readonly json: boolean }
   | { readonly kind: 'work-propose-investigation'; readonly question: string; readonly baseSha: string; readonly capability: string; readonly json: boolean }
   | { readonly kind: 'help' }
   | { readonly kind: 'status'; readonly json: boolean }
@@ -112,6 +113,19 @@ const boundedNumber = (raw: string | null, bounds: { readonly min: number; reado
 };
 
 export function parseArgs(argv: readonly string[]): ParseResult {
+  if (argv[0] === 'work' && argv[1] === 'execute-one') {
+    const id = argv[2] ?? '';
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)) return { ok: false, error: 'execute-one exige UUID explícito.' };
+    let version: number | undefined; let json = false;
+    for (let i = 3; i < argv.length; i++) {
+      if (argv[i] === '--json' && !json) { json = true; continue; }
+      if (argv[i] === '--version' && version === undefined && /^[1-9]\d*$/.test(argv[i + 1] ?? '')) { version = Number(argv[++i]); continue; }
+      return { ok: false, error: 'Uso: anima work execute-one <UUID> --version <N> [--json]' };
+    }
+    return version !== undefined && Number.isSafeInteger(version)
+      ? { ok: true, command: { kind: 'work-execute-one', id, expectedProposalVersion: version, json } }
+      : { ok: false, error: 'execute-one exige --version inteira positiva.' };
+  }
   if (argv[0] === 'work' && argv[1] === 'propose-investigation') {
     const values: Record<string,string> = {}; let json = false;
     for (let i=2;i<argv.length;i++) {
@@ -299,6 +313,7 @@ Uso:
   anima recovery-config check                 Prontidão da configuração recuperável (read-only, sem valores, sem rede)
   anima toolchain check                       Prontidão do toolchain (read-only; só comandos --version; nunca instala)
   anima budget status <id|REF>                    Orçamento autônomo atual (somente leitura)
+  anima work execute-one <UUID> --version N [--json]  Uma volta isolada; exige aprovação/classificação prévias
   anima work propose-investigation --question T --base-sha SHA [--capability research] [--json]
                                                Cria investiga\u00e7\u00e3o proposed; aprova\u00e7\u00e3o humana posterior
   anima work list                             Lista os trabalhos não terminais (retomáveis)

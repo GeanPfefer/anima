@@ -1,3 +1,5 @@
+import { buildWslCodexInvocation, buildWslLoginStatusInvocation, resolveInvestigationTransport, windowsPathToWsl, type InvestigationWslConfig } from './investigation-wsl-transport';
+import { runProcess } from './worktree';
 import type { NativeCliFailureV1 } from '@anima/core';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import {
@@ -52,6 +54,7 @@ export function buildCodexCliEnvironment(source: Record<string, string | undefin
 export interface CodexCliConfig {
   /** Executável NATIVO do Codex (caminho absoluto ou nome resolvido pelo PATH). */
   readonly executable: string;
+  readonly wsl?: InvestigationWslConfig;
   /** Modelo explícito (`-m`); `CODEX_CLI_DEFAULT_MODEL` ⇒ sem `-m`. */
   readonly model: string;
   /** Perfil explícito do config do Codex (`--profile`), quando fornecido. */
@@ -72,14 +75,17 @@ export type CodexCliConfigResult =
 export function resolveCodexCliConfig(
   contractModel: string | null,
   env: Record<string, string | undefined> = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): CodexCliConfigResult {
-  const executable = env.ANIMA_CODEX_CLI_PATH?.trim() || 'codex';
+  const transport = resolveInvestigationTransport({ ...env, ANIMA_INVESTIGATION_CODEX_TRANSPORT: env.ANIMA_CODEX_CLI_TRANSPORT }, platform);
+  if (!transport.ok) return transport;
+  const executable = transport.value?.wslExecutable ?? (env.ANIMA_CODEX_CLI_PATH?.trim() || 'codex');
   if (isShellWrapperPath(executable)) {
     return { ok: false, error: 'ANIMA_CODEX_CLI_PATH aponta para um wrapper de shell (.cmd/.bat/.ps1); configure o executável nativo do Codex.' };
   }
   const model = contractModel?.trim() || env.ANIMA_CODEX_CLI_MODEL?.trim() || CODEX_CLI_DEFAULT_MODEL;
   const profile = env.ANIMA_CODEX_CLI_PROFILE?.trim();
-  return { ok: true, value: { executable, model, ...(profile ? { profile } : {}) } };
+  return { ok: true, value: { executable, model, ...(profile ? { profile } : {}), ...(transport.value ? { wsl: transport.value } : {}) } };
 }
 
 /**
@@ -158,6 +164,7 @@ export const buildCodexCliPrompt = (request: CoderEditRequest): string => buildN
 export type CodexCliProcessRunner = NativeCliProcessRunner;
 
 export interface CodexCliCoderOptions {
+  readonly requireSubscription?: boolean;
   readonly config: CodexCliConfig;
   /** Default: `runProcess` (spawn sem shell). */
   readonly run?: CodexCliProcessRunner;
@@ -178,6 +185,7 @@ export class CodexCliCoderBackend implements CoderBackend {
   private readonly aiMemoryProbe: AiMemoryServerProbe | undefined;
 
   constructor(options: CodexCliCoderOptions) {
+    this.requireSubscription = options.requireSubscription === true;
     this.config = options.config;
     this.id = coderBackendId('codex-cli', options.config.model);
     // SEM `observation` (identidade de placement): `placement:'remote'` exige um `nodeId` estável que o host
@@ -191,17 +199,39 @@ export class CodexCliCoderBackend implements CoderBackend {
     this.aiMemoryProbe = options.aiMemoryProbe;
   }
 
+  private readonly requireSubscription: boolean;
+
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
     const wrap = this.aiMemory;
+    if (wrap && this.config.wsl) throw new Error('Codex WSL coder não suporta ai-memory wrap.');
     // `exec resume` não aceita `--profile`: com wrap, perfil explícito falha fechado (nunca é descartado em silêncio).
     if (wrap && this.config.profile) throw new Error('Codex CLI com ai-memory não suporta ANIMA_CODEX_CLI_PROFILE (codex exec resume não aceita --profile).');
+    const linuxRoot = this.config.wsl ? windowsPathToWsl(workspace.rootPath ?? '') : null;
+    if (this.config.wsl && !linuxRoot) throw new Error('Worktree Windows não traduzível para WSL.');
+    const run = this.run ?? runProcess;
+    if (this.requireSubscription) {
+      if (!this.config.wsl || this.config.model !== 'default' || this.config.profile || wrap || !workspace.rootPath) {
+        throw new Error('single_item_codex_contract_invalid');
+      }
+      const remainingMs = request.deadlineAtMs === undefined ? 15_000 : request.deadlineAtMs - Date.now();
+      if (remainingMs <= 0) throw new Error('Codex CLI: deadline excedido antes da autenticação.');
+      const login = buildWslLoginStatusInvocation(this.config.wsl);
+      const status = await run(login.file, login.args, { cwd: workspace.rootPath, timeoutMs: Math.min(15_000, remainingMs),
+        signal, env: buildCodexCliEnvironment(this.environmentSource) as NodeJS.ProcessEnv });
+      if (classifyCodexLoginStatus(status) !== 'subscription' || status.cancelled || signal.aborted) {
+        throw new Error('single_item_codex_authentication_unproved');
+      }
+    }
     const { seconds, aiMemoryNotes } = await runNativeCliTurn({
       label: 'Codex CLI',
       ...(!wrap ? { classifyFailure: classifyCodexCliFailure } : {}),
       executable: this.config.executable,
-      buildArgs: (rootPath, prompt) => buildCodexExecArgs(this.config, rootPath, prompt, Boolean(wrap)),
+      buildArgs: (rootPath, prompt) => {
+        const args = buildCodexExecArgs(this.config, linuxRoot ?? rootPath, prompt, Boolean(wrap));
+        return this.config.wsl && linuxRoot ? buildWslCodexInvocation(this.config.wsl, args, linuxRoot).args : args;
+      },
       env: buildCodexCliEnvironment(this.environmentSource),
-      ...(this.run ? { run: this.run } : {}),
+      run,
       request,
       rootPath: workspace.rootPath,
       signal,

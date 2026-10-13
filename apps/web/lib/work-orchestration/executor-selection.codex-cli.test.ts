@@ -49,3 +49,13 @@ describe('Codex CLI executor routing (Akita Baseline V1)', () => {
     expect(declaredCoderBackendId(item, {})).toBe('codex-cli:default');
   });
 });
+
+
+test('seleção estrita Single-Item recusa runtime Windows antes de construir coder, legado permanece', () => {
+  const saved={...process.env};
+  try {
+    delete process.env.ANIMA_CODEX_CLI_TRANSPORT; delete process.env.ANIMA_INVESTIGATION_TRANSPORT;
+    expect(resolveExecutorRoute(codexContract,{repoRoot,codexSubscriptionOnly:true})).toMatchObject({ok:false,error:{code:'coder_backend_invalid'}});
+    expect(resolveExecutorRoute(codexContract,{repoRoot}).ok).toBe(true);
+  } finally {process.env={...saved};}
+});

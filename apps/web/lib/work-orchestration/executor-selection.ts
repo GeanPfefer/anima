@@ -142,6 +142,7 @@ const backendFor = (
   ollamaRuntimeOverride?: OllamaCoderRuntimeConfig,
   openAIAdmission?: OpenAIAdmissionControl,
   coderRuntimeMode: AgenticRuntimeMode = 'autonomous',
+  codexSubscriptionOnly = false,
 ): CoderBackend | { readonly error: string } => {
   if (override) return override;
   const kind = contract.coderBackend ?? 'ollama';
@@ -212,7 +213,10 @@ const backendFor = (
     // ai-memory (opt-in, default desligado): continuidade cross-harness na mesma worktree.
     const aiMemory = resolveAiMemoryWrapConfig();
     if (!aiMemory.ok) return { error: aiMemory.error };
-    return new CodexCliCoderBackend({ config: config.value, ...(aiMemory.value ? { aiMemory: aiMemory.value } : {}) });
+    if (codexSubscriptionOnly && (!config.value.wsl || config.value.model !== 'default' || config.value.profile || aiMemory.value)) {
+      return { error: 'Single-Item exige Codex WSL/default sem profile ou ai-memory.' };
+    }
+    return new CodexCliCoderBackend({ config: config.value, requireSubscription: codexSubscriptionOnly, ...(aiMemory.value ? { aiMemory: aiMemory.value } : {}) });
   }
 
   if (kind === 'claude-code') {
@@ -343,6 +347,7 @@ export function resolveExecutorRoute(
   contract: ExecutionContract,
   options: {
     readonly backendOverride?: CoderBackend;
+    readonly codexSubscriptionOnly?: boolean;
     /** Runtime escolhido pelo placement host-side. Só troca a inferência; worktree e efeitos continuam locais. */
     readonly ollamaRuntimeOverride?: OllamaCoderRuntimeConfig;
     readonly repoRoot?: string;
@@ -395,7 +400,7 @@ export function resolveExecutorRoute(
     if (!contract.baseSha || !SHA.test(contract.baseSha)) return err('worktree_base_sha_missing', 'O SHA-base autorizado não foi persistido ou é inválido.');
     const repoRoot = options.repoRoot ?? projectRoot();
     if (!isAnimaProjectRoot(repoRoot)) return err('project_root_invalid', 'A raiz do projeto Anima não é um repositório válido.');
-    const backend = backendFor(contract, repoRoot, options.backendOverride, options.ollamaRuntimeOverride, options.openAIAdmission, options.coderRuntimeMode);
+    const backend = backendFor(contract, repoRoot, options.backendOverride, options.ollamaRuntimeOverride, options.openAIAdmission, options.coderRuntimeMode, options.codexSubscriptionOnly);
     if ('error' in backend) return err('coder_backend_invalid', backend.error);
     const reference = contract.targetReference;
     const baseSha = contract.baseSha;

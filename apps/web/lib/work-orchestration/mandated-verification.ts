@@ -41,6 +41,7 @@ export type MandatedVerificationOutcome =
   | { readonly status: 'held'; readonly reason: MandatedVerificationHoldReason; readonly detail?: string };
 
 export interface MandatedVerificationDeps {
+  readonly requireVerified?: boolean;
   readonly getItem: (id: string) => Promise<WorkOperationResult<WorkItem>>;
   readonly listEvents: (id: string) => Promise<WorkOperationResult<readonly WorkEvent[]>>;
   readonly sink: VerifierOpinionSink;
@@ -49,9 +50,9 @@ export interface MandatedVerificationDeps {
   readonly computeAndPersist?: typeof computeAndPersistVerifierOpinion;
 }
 
-const TIMEOUT = Symbol('timeout');
+export const TIMEOUT = Symbol('timeout');
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMEOUT> {
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMEOUT> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<typeof TIMEOUT>((resolve) => { timer = setTimeout(() => resolve(TIMEOUT), ms); });
   return Promise.race([promise, timeout]).finally(() => { if (timer) clearTimeout(timer); });
@@ -81,7 +82,7 @@ export async function verifyAndReleaseCandidate(workItemId: string, deps: Mandat
     return held('item_read_failed', error instanceof Error ? error.message : String(error));
   }
 
-  if (readVerifierRequirement(item.intent) === 'advisory') {
+  if (readVerifierRequirement(item.intent) === 'advisory' && !deps.requireVerified) {
     // Comportamento anterior: parecer advisory, fail-open, sem releitura.
     const opinion = await compute({ item, events }, deps.sink).catch(() => null);
     return { status: 'advisory', opinion };
@@ -107,7 +108,7 @@ export async function verifyAndReleaseCandidate(workItemId: string, deps: Mandat
   try {
     const reread = await deps.getItem(workItemId);
     if (!reread.ok) return held('readback_failed', reread.error.message);
-    if (reread.value.state === 'review') return { status: 'released', verdict: outcome.opinion.verdict };
+    if (reread.value.state === 'review' && (!deps.requireVerified || outcome.opinion.verdict === 'verified')) return { status: 'released', verdict: outcome.opinion.verdict };
     return outcome.opinion.verdict === 'inconclusive' ? held('not_conclusive') : held('release_not_observed', reread.value.state);
   } catch (error) {
     return held('readback_failed', error instanceof Error ? error.message : String(error));

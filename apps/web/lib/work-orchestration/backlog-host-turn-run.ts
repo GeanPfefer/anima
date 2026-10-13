@@ -1,3 +1,4 @@
+import { isSingleItemExecution, singleItemExecutionRefusal, type SingleItemExecution } from '@anima/core';
 import { planAutonomousBacklogTurn, type AgenticRuntimeMode } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -35,6 +36,8 @@ export interface RunProjectBacklogHostTurnInput {
   readonly signal: AbortSignal;
   /** Quando veio de um ato explícito, limita ESTA invocação ao item solicitado. */
   readonly requestedWorkItemId?: string;
+  /** One UUID/version, one turn, no global maintenance/classification/recovery. */
+  readonly singleItem?: SingleItemExecution;
   /** Overrides only for composition tests; production uses process.env and the caller's RLS client. */
   readonly postApprovalClassificationConfig?: PostApprovalClassificationConfig | null;
   readonly postApprovalClassificationEnsure?: PostApprovalClassificationEnsure;
@@ -55,27 +58,50 @@ export interface RunProjectBacklogHostTurnInput {
  * resultado tipado do host-turn (continuation | wait | stop + moreWorkAvailable).
  */
 export function runProjectBacklogHostTurn(input: RunProjectBacklogHostTurnInput): Promise<BacklogHostTurnResult> {
+  if (input.singleItem && (!isSingleItemExecution(input.singleItem)
+    || (input.requestedWorkItemId !== undefined && input.requestedWorkItemId !== input.singleItem.workItemId))) {
+    return Promise.reject(new Error('single_item_scope_invalid'));
+  }
+  if (input.singleItem && input.signal.aborted) {
+    return Promise.reject(new Error('single_item_cancelled'));
+  }
+  const requestedWorkItemId = input.singleItem?.workItemId ?? input.requestedWorkItemId;
   // SUPERVISED nunca vale para a fila: só para UM item pedido explicitamente.
-  if (input.coderRuntimeMode === 'supervised' && !input.requestedWorkItemId) {
+  if (input.coderRuntimeMode === 'supervised' && !requestedWorkItemId) {
     return Promise.reject(new Error('coderRuntimeMode=supervised exige requestedWorkItemId (nunca vale para a fila autônoma).'));
   }
   const depsOptions = {
+    ...(input.singleItem ? { singleItem: input.singleItem } : {}),
     ...(input.coderRuntimeMode ? { coderRuntimeMode: input.coderRuntimeMode } : {}),
     ...(input.coderNodePreflight ? { coderNodePreflight: input.coderNodePreflight } : {}),
   };
   const baseDeps = Object.keys(depsOptions).length > 0
     ? buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId, depsOptions)
     : buildProjectBacklogCycleDeps(input.client, input.ownerInstanceId);
-  const deps = input.requestedWorkItemId ? {
+  const deps = requestedWorkItemId ? {
     ...baseDeps,
     // Amarração ao item pedido, MAS preservando as dependências `completed`: a projeção pura
     // precisa vê-las para satisfazer `depends_on_work_item_ids` (senão o próprio item pedido
     // sairia da fila por dependência "não-satisfeita"). Candidatos `completed` são INERTES —
     // nunca entram na fila nem executam —, então mantê-los não amplia o escopo da execução.
-    readBacklog: async () => (await baseDeps.readBacklog()).filter(candidate =>
-      candidate.item.id === input.requestedWorkItemId || candidate.item.state === 'completed'),
+    readBacklog: async () => {
+      const candidates = (await baseDeps.readBacklog()).filter(candidate =>
+        candidate.item.id === requestedWorkItemId || candidate.item.state === 'completed');
+      if (input.singleItem) {
+        const selected = candidates.find(candidate => candidate.item.id === requestedWorkItemId);
+        if (!selected) throw new Error('single_item_unavailable');
+        const refusal = singleItemExecutionRefusal(input.singleItem, selected.item);
+        if (refusal) throw new Error(refusal);
+        const decision = planAutonomousBacklogTurn({ candidates, now: new Date() });
+        if (decision.action !== 'execute_next' || decision.entry.workItemId !== requestedWorkItemId
+          || decision.entry.approvedProposalVersion !== input.singleItem.expectedProposalVersion) {
+          throw new Error('single_item_not_eligible');
+        }
+      }
+      return candidates;
+    },
   } : baseDeps;
-  const config = input.requestedWorkItemId ? null
+  const config = requestedWorkItemId ? null
     : input.postApprovalClassificationConfig === undefined
       ? readPostApprovalClassificationConfig(process.env) : input.postApprovalClassificationConfig;
   const attempted = new Set<string>();
@@ -92,9 +118,10 @@ export function runProjectBacklogHostTurn(input: RunProjectBacklogHostTurnInput)
   } : deps;
   return runAutonomousBacklogHostTurn({
     // Um ciclo bounded = o driver já provado, com `maxTurns = maxTurnsPerCycle`.
-    runCycle: signal => runAutonomousBacklogCycle({ ...cycleDeps, maxTurns: input.maxTurnsPerCycle, signal }),
+    runCycle: signal => runAutonomousBacklogCycle({ ...cycleDeps, maxTurns: input.singleItem ? 1 : input.maxTurnsPerCycle, signal }),
     // Peek read-only usado só no bound de host: sobrou `execute_next` por fazer?
     peekMoreWork: async () => {
+      if (input.singleItem) return false;
       const candidates = await deps.readBacklog();
       const decision = planAutonomousBacklogTurn({
         candidates,
@@ -103,7 +130,7 @@ export function runProjectBacklogHostTurn(input: RunProjectBacklogHostTurnInput)
       });
       return decision.action === 'execute_next';
     },
-    maxCycles: input.maxCycles,
+    maxCycles: input.singleItem ? 1 : input.maxCycles,
     signal: input.signal,
   });
 }

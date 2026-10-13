@@ -182,3 +182,51 @@ describe('runProjectBacklogHostTurn — modo do laço do coder', () => {
     expect(buildProjectBacklogCycleDeps).not.toHaveBeenCalled();
   });
 });
+
+
+describe('single-item explícito — versão e bounds antes de efeitos', () => {
+  const id = 'aa6b3d64-1e0b-414d-984d-5264b9c89968';
+  const classification: WorkIntelligenceClassificationV1 = { schemaVersion: 1, complexity: 'bounded', risk: 'low', reversibility: 'reversible', planClarity: 'clear', urgency: 'normal', provenance: { kind: 'system_assessed', classifiedAt: '2026-10-08T00:00:00Z', classifierId: 'test', policyVersion: 'test' } };
+  const chosen: AutonomousQueueCandidate = {
+    item: { id, userId: 'u', sourceMessageId: 'm', originalRequest: 'test', state: 'approved', capability: 'programming', impactLevel: 'low', proposalVersion: 1, createdAt: new Date(), updatedAt: new Date(),
+      intent: { execution_spec: { schema_version: 1, target: { kind: 'project', reference: 'anima' }, permissions: ['workspace_read', 'workspace_write_isolated'], validation_criteria: [{ label: 'test', command: 'npm test' }], limits: { max_attempts: 1, max_duration_minutes: 30 } } },
+      proposal: { schemaVersion: 1, data: { summary: 's', objective: 'o', includedScope: ['src'], excludedScope: ['deploy'], expectedEffects: ['test'], risks: [] } } },
+    approval: { seq: 1, approvedAt: new Date(), proposalVersion: 1 }, currentClassification: classification, openClaim: null,
+  };
+  const base = { client: {} as SupabaseClient<Database>, ownerInstanceId: 'owner', maxTurnsPerCycle: 10, maxCycles: 10, signal: new AbortController().signal, singleItem: { workItemId: id, expectedProposalVersion: 1 } };
+  const ensure = jest.fn();
+  function setup(snapshot: readonly AutonomousQueueCandidate[]) {
+    jest.clearAllMocks();
+    (buildProjectBacklogCycleDeps as jest.Mock).mockReturnValue({ readBacklog: async () => snapshot, hostPermitsAutonomousWork: () => true, runTurn: jest.fn() });
+    (runAutonomousBacklogCycle as jest.Mock).mockImplementation(async (deps: { readBacklog: () => Promise<unknown> }) => { await deps.readBacklog(); return { turns: [] }; });
+    (runAutonomousBacklogHostTurn as jest.Mock).mockImplementation(async (deps: { runCycle: (signal: AbortSignal) => Promise<unknown>; peekMoreWork: () => Promise<boolean>; maxCycles: number }) => {
+      await deps.runCycle(base.signal); expect(deps.maxCycles).toBe(1); expect(await deps.peekMoreWork()).toBe(false); return RESULT;
+    });
+  }
+  test('limita a uma volta e desliga classificação de outros itens', async () => {
+    setup([chosen, { ...chosen, item: { ...chosen.item, id: 'other' } }]);
+    await runProjectBacklogHostTurn({ ...base, postApprovalClassificationEnsure: ensure, postApprovalClassificationConfig: { since: new Date(0) } });
+    expect(buildProjectBacklogCycleDeps).toHaveBeenCalledWith(base.client, 'owner', { singleItem: base.singleItem });
+    const deps = (runAutonomousBacklogCycle as jest.Mock).mock.calls[0][0];
+    expect(deps.maxTurns).toBe(1); expect(await deps.readBacklog()).toEqual([chosen]); expect(ensure).not.toHaveBeenCalled();
+  });
+  test.each(['missing', 'version', 'state', 'classification'])('recusa %s sem fallback', async mode => {
+    const selected = { ...chosen, item: { ...chosen.item, ...(mode === 'version' ? { proposalVersion: 2 } : {}), ...(mode === 'state' ? { state: 'proposed' as const } : {}) }, currentClassification: mode === 'classification' ? null : classification };
+    setup([...(mode === 'missing' ? [] : [selected]), { ...chosen, item: { ...chosen.item, id: 'other' } }]);
+    await expect(runProjectBacklogHostTurn(base)).rejects.toThrow('single_item_');
+    expect(ensure).not.toHaveBeenCalled();
+  });
+  test('UUID ausente ou mandato contraditório recusa antes de compor', async () => {
+    setup([chosen]);
+    await expect(runProjectBacklogHostTurn({ ...base, singleItem: { ...base.singleItem, workItemId: '' } })).rejects.toThrow('single_item_scope_invalid');
+    await expect(runProjectBacklogHostTurn({ ...base, requestedWorkItemId: 'other' })).rejects.toThrow('single_item_scope_invalid');
+    expect(buildProjectBacklogCycleDeps).not.toHaveBeenCalled();
+  });
+});
+
+test('single-item cancelado antes da composicao nao cria dependencias', async () => {
+  jest.clearAllMocks();
+  const controller = new AbortController(); controller.abort();
+  await expect(runProjectBacklogHostTurn({ client: {} as SupabaseClient<Database>, ownerInstanceId: 'test', maxTurnsPerCycle: 1, maxCycles: 1, signal: controller.signal, singleItem: { workItemId: 'aa6b3d64-1e0b-414d-984d-5264b9c89968', expectedProposalVersion: 1 } })).rejects.toThrow('single_item_cancelled');
+  expect(buildProjectBacklogCycleDeps).not.toHaveBeenCalled();
+});

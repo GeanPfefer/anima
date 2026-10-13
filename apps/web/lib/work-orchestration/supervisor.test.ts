@@ -1,3 +1,11 @@
+import * as codexReadiness from './single-item-codex-readiness';
+import * as gateEvidence from './gate-evidence';
+import * as coderEvidence from './coder-evidence';
+import * as gitEvidence from './host-evidence';
+import * as mandatedVerification from './mandated-verification';
+import { finalizeSingleItemTurn } from './post-turn-observation';
+import type { PostTurnObservationInput } from './post-turn-observation';
+import * as sqlBoundary from './single-item-sql-boundary';
 import type { WorkCheckpointV1, WorkContextSnapshot, WorkExecutorAdapter, WorkExecutorRequest, WorkExecutorSignal, WorkItem, WorkRoutingAdjustmentContextV1 } from '@anima/core';
 import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -30,6 +38,8 @@ interface FakeItem {
 interface FakeClaim { readonly id: string; readonly itemId: string; readonly target: string; attemptId: string | null; released: boolean; reason: string | null; }
 
 interface FakeOptions {
+  readonly previousAttempts?: boolean;
+  readonly failAttemptHistory?: boolean;
   readonly items: readonly FakeItem[];
   readonly reconciliation?: readonly Record<string, unknown>[];
   /** Modela a leitura não bloqueante do SUP-02: a seleção ignora posse já adquirida. */
@@ -55,6 +65,8 @@ interface FakeOptions {
   readonly interruptBudgetAfterCheckpoint?: string;
   /** UX-01: modela um pedido de pausa/cancelamento pendente aplicável no checkpoint. */
   readonly controlAfterCheckpoint?: 'pause' | 'cancel';
+  /** `missing`: a RPC scoped não existe no residente (PostgREST PGRST202), como antes da promoção. */
+  readonly scopedRpc?: 'missing';
 }
 
 class FakeDatabase {
@@ -84,6 +96,19 @@ class FakeDatabase {
   }
 
   readonly client = {
+    from: (table: string) => {
+      const query = {
+        select: (_columns: string) => query,
+        eq: (_column: string, _value: string) => query,
+        limit: (_limit: number) => {
+          this.calls.push('read_attempt_history');
+          if (table !== 'work_events') throw new Error('unexpected history table');
+          return Promise.resolve(this.options.failAttemptHistory ? fail('XX000', 'history unavailable')
+            : ok(this.options.previousAttempts ? [{ seq: 1 }] : []));
+        },
+      };
+      return query;
+    },
     rpc: (name: string, args?: Record<string, unknown>): Promise<Rpc> => {
       this.calls.push(name);
       return Promise.resolve(this.dispatch(name, args ?? {}));
@@ -282,13 +307,26 @@ class FakeDatabase {
         return ok(item);
       }
 
+      case 'acquire_single_item_work_claim':
       case 'acquire_work_claim': {
+        if (name === 'acquire_single_item_work_claim') {
+          if (this.options.scopedRpc === 'missing') {
+            return fail('PGRST202', 'Could not find the function public.acquire_single_item_work_claim in the schema cache');
+          }
+          // Espelha a RPC instalada (medida no descartável restaurado): a validação de entrada vem
+          // antes de qualquer leitura de item, lock ou escrita.
+          const owner = args['owner_instance_id']; const lease = args['lease_seconds'];
+          if (args['claim_id'] == null || typeof owner !== 'string' || owner.trim() === '' || typeof lease !== 'number' || lease <= 0) {
+            return fail('22023', 'invalid claim request');
+          }
+        }
         const item = this.items.get(args['work_item_id'] as string)!;
         if (item.classification !== 'complete') {
           return fail('55000', item.classification === 'incomplete'
             ? 'work_intelligence_classification_incomplete'
             : 'work_intelligence_classification_missing');
         }
+        if (item.version !== args['expected_proposal_version']) return fail('55000', 'work item state or proposal version changed');
         if (item.state !== 'approved') return fail('55000', 'work item is not eligible for an autonomous claim');
         if (this.activeClaimOfItem(item.id)) return fail('55000', 'work item is held by an active claim');
         if (this.runningOnTarget(item.target, item.id)) return fail('55000', 'work target is busy with a running attempt');
@@ -455,13 +493,13 @@ class FakeDatabase {
         if (!claim) return fail('P0002', 'claim not found');
         const reason = args['reason'] as string;
         if (claim.released) {
-          return claim.reason === reason ? ok(claim) : fail('55000', 'claim already released with a different reason');
+          return claim.reason === reason ? ok({id:claim.id,work_item_id:claim.itemId,attempt_id:claim.attemptId,approved_proposal_version:this.items.get(claim.itemId)?.version,release_reason:reason,released_at:'2026-10-10T12:00:00Z'}) : fail('55000', 'claim already released with a different reason');
         }
         if (reason === 'attempt_finished' && claim.attemptId === null) return fail('22023', 'no attempt was started under this claim');
         if (reason === 'released_without_attempt' && claim.attemptId !== null) return fail('22023', 'an attempt was started under this claim');
         claim.released = true; claim.reason = reason;
         this.events.push({ itemId: claim.itemId, type: 'work_claim_released', attemptId: claim.attemptId, reason });
-        return ok(claim);
+        return ok({id:claim.id,work_item_id:claim.itemId,attempt_id:claim.attemptId,approved_proposal_version:this.items.get(claim.itemId)?.version,release_reason:reason,released_at:'2026-10-10T12:00:00Z'});
       }
 
       default:
@@ -572,7 +610,7 @@ const scriptedExecutor = (specs: readonly SignalSpec[], opts: { readonly throwAt
 
 const ids = (values: readonly string[]) => { let index = 0; return () => values[index++]!; };
 
-const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: readonly WorkItem[], identifiers: readonly string[], contexts?: readonly WorkContextSnapshot[], requestedWork?: { readonly workItemId: string; readonly expectedProposalVersion: number }, recoveryEvidenceLoader: SupervisorTurnDependencies['recoveryEvidenceLoader'] = async () => null) =>
+const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: readonly WorkItem[], identifiers: readonly string[], contexts?: readonly WorkContextSnapshot[], requestedWork?: { readonly workItemId: string; readonly expectedProposalVersion: number }, recoveryEvidenceLoader: SupervisorTurnDependencies['recoveryEvidenceLoader'] = async () => null, singleItem?: SupervisorTurnDependencies['singleItem']) =>
   runSupervisorTurn({
     client: database.asClient(),
     routes: [{
@@ -586,7 +624,7 @@ const turn = (database: FakeDatabase, adapter: WorkExecutorAdapter, items: reado
     ownerInstanceId: 'supervisor-test',
     newId: ids(identifiers), signal: new AbortController().signal, reader: reader(items, contexts),
     recoveryEvidenceLoader,
-    requestedWork,
+    requestedWork, singleItem,
   });
 
 // ============================================================
@@ -1375,4 +1413,246 @@ test('17. candidato resolvido por humano (reconcile não relata pendência) ⇒ 
   expect(database.calls).toEqual(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work', 'next_autonomous_work']);
   expect(calls).toHaveLength(0);
   expect(result.reconciliation).toEqual([]);
+});
+
+
+describe('single-item — nenhuma manutenção global ou fallback', () => {
+  const chosen = 'aa6b3d64-1e0b-414d-984d-5264b9c89968';
+  const other = '41f80b3a-2043-4e2f-8c67-0c62aa795bda';
+  const scope = { workItemId: chosen, expectedProposalVersion: 1 };
+  const fake = (classification: FakeClassification = 'complete', scopedRpc?: 'missing') => new FakeDatabase({
+    items: [
+      { id: chosen, version: 1, state: 'approved', target: 'chosen', approvalSeq: 20, classification },
+      { id: other, version: 1, state: 'blocked', target: 'other', approvalSeq: 10, classification: 'complete' },
+    ], readmitBudgetBlocked: [other], readmitBudgetInterrupted: [other],
+    reconciliation: [{ work_item_id: other, finding: 'result_pending_verification' }],
+    ...(scopedRpc ? { scopedRpc } : {}),
+  });
+  test('fail-closed com a RPC scoped ausente; vizinho, eventos e claims preservados', async () => {
+    const db = fake('complete', 'missing'); const runner = executor();
+    const result = await turn(db, runner.adapter, [workItem(chosen)], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.refusal?.code).toBe('single_item_atomic_claim_unavailable');
+    expect(result.claimId).toBeNull(); expect(db.claims.size).toBe(0);
+    // Única chamada além da seleção é a sonda sem efeitos da RPC scoped.
+    expect(runner.calls).toHaveLength(0); expect(db.calls).toEqual(['select_autonomous_work', 'acquire_single_item_work_claim']);
+    expect(db.events).toEqual([]);
+    expect(db.calls).not.toEqual(expect.arrayContaining(['reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work', 'next_autonomous_work', 'acquire_work_claim', 'release_work_claim']));
+    for (const forbidden of ['reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work', 'next_autonomous_work', 'acquire_work_claim', 'release_work_claim']) expect(db.calls).not.toContain(forbidden);
+    expect(db.items.get(other)?.state).toBe('blocked');
+    expect(db.events.every(event => event.itemId === chosen)).toBe(true);
+    expect([...db.claims.values()].every(claim => claim.itemId === chosen)).toBe(true);
+  });
+  test.each(['version', 'state', 'missing', 'invalid_scope'])('recusa %s antes de RPC/claim/attempt', async mode => {
+    const db = fake(); const runner = executor();
+    const item = { ...workItem(chosen), ...(mode === 'version' ? { proposalVersion: 2 } : {}), ...(mode === 'state' ? { state: 'proposed' as const } : {}) };
+    const result = await turn(db, runner.adapter, mode === 'missing' ? [] : [item], ['claim', 'attempt'], undefined,
+      mode === 'invalid_scope' ? undefined : scope, undefined, scope);
+    expect(result.outcome).toBe('selection_not_executable'); expect(db.calls).toEqual([]);
+    expect(db.events).toEqual([]); expect(runner.calls).toEqual([]);
+  });
+  test('inelegível nunca seleciona vizinho', async () => {
+    const db = fake('missing'); const runner = executor();
+    const result = await turn(db, runner.adapter, [workItem(chosen)], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.refusal?.code).toBe('single_item_not_eligible');
+    expect(db.calls).toEqual(['select_autonomous_work']); expect(db.events).toEqual([]); expect(runner.calls).toEqual([]);
+  });
+  test('versão muda depois da seleção: recusa antes do orçamento e claim', async () => {
+    const db = fake(); const runner = executor(); let reads = 0;
+    const source = reader([workItem(chosen)]);
+    const result = await runSupervisorTurn({ client: db.asClient(), routes: [], ownerInstanceId: 'test', newId: () => 'unused', signal: new AbortController().signal,
+      requestedWork: scope, singleItem: scope,
+      reader: { ...source, getItem: async () => ({ ok: true, value: { ...workItem(chosen), proposalVersion: ++reads === 1 ? 1 : 2 } }) },
+    });
+    expect(result.refusal?.code).toBe('single_item_version_changed'); expect(db.calls).toEqual(['select_autonomous_work']);
+    expect(db.events).toEqual([]); expect(runner.calls).toEqual([]);
+  });
+});
+
+
+test('single-item recusa seleção SQL divergente antes de efeitos', async () => {
+  const workItemId = 'aa6b3d64-1e0b-414d-984d-5264b9c89968';
+  const scope = { workItemId, expectedProposalVersion: 1 };
+  const rpc = jest.fn(async () => ({ data: [{ work_item_id: 'other', approved_proposal_version: 1 }], error: null }));
+  const result = await runSupervisorTurn({ client: { rpc } as unknown as SupabaseClient<Database>, reader: reader([workItem(workItemId)]), routes: [], ownerInstanceId: 'test', newId: jest.fn(), signal: new AbortController().signal, singleItem: scope, requestedWork: scope });
+  expect(result.refusal?.code).toBe('single_item_selection_mismatch');
+  expect(rpc).toHaveBeenCalledTimes(1); expect(rpc).toHaveBeenCalledWith('select_autonomous_work', { p_work_item_id: workItemId, p_expected_proposal_version: 1 });
+  expect(result.attemptId).toBeNull(); expect(result.claimId).toBeNull();
+});
+
+
+// Gate REAL (sem mock da fronteira): só a resposta da RPC scoped decide. O FakeDatabase espelha a
+// validação de entrada medida na RPC instalada; a prova SQL permanece nos registros de 10/10 e 13/10.
+describe('Single-Item V1 — gate real sobre a RPC scoped', () => {
+  const chosen = 'aa6b3d64-1e0b-414d-984d-5264b9c89968';
+  const scope = { workItemId: chosen, expectedProposalVersion: 1 };
+  const selected = (): WorkItem => {
+    const item = workItem(chosen);
+    const spec = item.intent['execution_spec'] as Record<string, unknown>;
+    return { ...item, intent: { ...item.intent, execution_spec: { ...spec, coder_backend: 'ollama' } } };
+  };
+  const database = (options: Partial<FakeOptions> = {}) => new FakeDatabase({
+    items: [{ id: chosen, version: 1, state: 'approved', target: 'anima', approvalSeq: 20, classification: 'complete' }], ...options,
+  });
+  afterEach(() => jest.restoreAllMocks());
+  test('RPC instalada: a sonda precede orçamento e claim real; um claim, uma attempt, sem manutenção global', async () => {
+    const db = database(); const runner = executor('result');
+    const result = await turn(db, runner.adapter, [selected()], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    const scoped = db.calls.map((name, index) => ({ name, index })).filter(call => call.name === 'acquire_single_item_work_claim');
+    expect(scoped).toHaveLength(2); // [0] sonda sem efeitos, [1] claim real
+    expect(scoped[0]!.index).toBeLessThan(db.calls.indexOf('autonomous_work_budget_status'));
+    expect(db.calls.indexOf('autonomous_work_budget_status')).toBeGreaterThanOrEqual(0);
+    expect(scoped[1]!.index).toBeLessThan(db.calls.indexOf('start_claimed_work_attempt'));
+    expect(db.claims.size).toBe(1); expect(runner.calls).toHaveLength(1);
+    expect(result.claimId).toBe('claim');
+    for (const forbidden of ['acquire_work_claim', 'next_autonomous_work', 'reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work']) expect(db.calls).not.toContain(forbidden);
+  });
+  test('RPC ausente: nenhuma escrita, orçamento intocado e executor não roda', async () => {
+    const db = database({ scopedRpc: 'missing' }); const runner = executor('result');
+    const result = await turn(db, runner.adapter, [selected()], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.outcome).toBe('selection_not_executable');
+    expect(result.refusal?.code).toBe('single_item_atomic_claim_unavailable');
+    expect(db.claims.size).toBe(0); expect(db.events).toEqual([]); expect(runner.calls).toHaveLength(0);
+    expect(db.calls).not.toContain('autonomous_work_budget_status');
+    expect(db.calls).not.toContain('start_claimed_work_attempt');
+  });
+});
+
+
+// Somente doubles: esta simulação NÃO habilita a fronteira de produção.
+describe('Single-Item V1 — integração preparada sob prova SQL simulada', () => {
+  const chosen = 'aa6b3d64-1e0b-414d-984d-5264b9c89968';
+  const other = '41f80b3a-2043-4e2f-8c67-0c62aa795bda';
+  const scope = { workItemId: chosen, expectedProposalVersion: 1 };
+  const selected = (): WorkItem => {
+    const item = workItem(chosen);
+    const spec = item.intent['execution_spec'] as Record<string, unknown>;
+    return { ...item, intent: { ...item.intent, execution_spec: { ...spec, coder_backend: 'ollama' } } };
+  };
+  const database = (options: Partial<FakeOptions> = {}) => new FakeDatabase({
+    items: [
+      { id: chosen, version: 1, state: 'approved', target: 'anima', approvalSeq: 20, classification: 'complete' },
+      { id: other, version: 1, state: 'blocked', target: 'other', approvalSeq: 10, classification: 'complete' },
+    ], ...options,
+  });
+  beforeEach(() => jest.spyOn(sqlBoundary, 'singleItemSqlBoundaryRefusal').mockResolvedValue(null));
+  afterEach(() => jest.restoreAllMocks());
+  test.each(['result', 'error', 'cancelled'] as const)('terminal %s só toca o escolhido', async kind => {
+    const db = database(); const runner = executor(kind);
+    const before = { ...db.items.get(other)! };
+    const result = await turn(db, runner.adapter, [selected()], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.terminalKind).toBe(kind);
+    expect(result.claimReleased).toBe(false);
+    expect(db.calls).not.toContain('release_work_claim');
+    if (kind === 'result') expect(result.refusal?.code).toBe('single_item_verification_pending');
+    expect(runner.calls).toHaveLength(1);
+    expect(db.calls).toContain('acquire_single_item_work_claim');
+    for (const forbidden of ['acquire_work_claim', 'next_autonomous_work', 'reconcile_supervised_work', 'readmit_budget_blocked_work', 'readmit_budget_interrupted_work']) expect(db.calls).not.toContain(forbidden);
+    expect(db.items.get(other)).toEqual(before);
+    expect(db.events.every(event => event.itemId === chosen)).toBe(true);
+    expect([...db.claims.values()].every(claim => claim.itemId === chosen)).toBe(true);
+  });
+  test.each(['result', 'error', 'cancelled'] as const)('ciclo Codex WSL simulado completo %s sem tocar terceiro', async kind => {
+    jest.spyOn(codexReadiness, 'singleItemCodexRefusal').mockResolvedValue(null);
+    jest.spyOn(gateEvidence, 'persistHostObservedGateEvidence').mockResolvedValue({ok:true} as Awaited<ReturnType<typeof gateEvidence.persistHostObservedGateEvidence>>);
+    jest.spyOn(coderEvidence, 'persistHostObservedCoderEvidence').mockResolvedValue({ok:true} as Awaited<ReturnType<typeof coderEvidence.persistHostObservedCoderEvidence>>);
+    jest.spyOn(gitEvidence, 'observeAndPersistHostGitEvidence').mockResolvedValue({ok:true} as Awaited<ReturnType<typeof gitEvidence.observeAndPersistHostGitEvidence>>);
+    jest.spyOn(mandatedVerification, 'verifyAndReleaseCandidate').mockResolvedValue({status:'released',verdict:'verified'});
+    const db=database(); const otherBefore={...db.items.get(other)!};
+    db.claims.set('foreign', {id:'foreign',itemId:other,target:'other',attemptId:null,released:false,reason:null});
+    const foreignBefore={...db.claims.get('foreign')!};
+    const runner=executor(kind); const adapter={...runner.adapter,id:'worktree-v1'};
+    const original=selected(); const item={...original,intent:{...original.intent,execution_spec:{...(original.intent['execution_spec'] as Record<string,unknown>),executor:'worktree',coder_backend:'codex-cli',model:'default'}}};
+    const result=await runSupervisorTurn({client:db.asClient(),reader:reader([item]),routes:[{adapter,candidate:{schemaVersion:1,routeId:'codex',executorId:adapter.id,providerRef:'codex-cli',modelRef:'codex-cli:default',effort:'standard',capabilities:['programming'],availability:'available',latency:'normal',priority:1}}],
+      singleItem:scope, requestedWork:scope,signal:new AbortController().signal,ownerInstanceId:'test',newId:ids(['claim','attempt']),recoveryEvidenceLoader:async()=>null});
+    expect(result.claimReleased).toBe(false); expect(result.terminalKind).toBe(kind);
+    const final=await finalizeSingleItemTurn({client:db.asClient(),result,contract:{executor:'worktree',coderBackend:'codex-cli',model:'default',baseSha:'1'.repeat(40),targetKind:'project',targetReference:'anima',resumeCheckpointCommitSha:null},
+      gateObservations:[{label:'tests',command:'npm test',durationMs:1,exitCode:0,timedOut:false,cancelled:false}],coderObservations:[{backendId:'codex-cli:default',durationMs:1,outcome:'succeeded'}],systemWriter:{} as PostTurnObservationInput['systemWriter']});
+    expect(final.outcome).toBe(kind==='result'?'execution_completed':kind==='error'?'execution_failed':'execution_cancelled');
+    expect(final.claimReleased).toBe(true); expect(db.claims.get('claim')?.released).toBe(true);
+    expect(db.items.get(other)).toEqual(otherBefore);expect(db.claims.get('foreign')).toEqual(foreignBefore);
+    expect(db.calls.indexOf('acquire_single_item_work_claim')).toBeLessThan(db.calls.indexOf('start_claimed_work_attempt'));
+    expect(db.calls.indexOf('record_commanded_work_terminal')).toBeLessThan(db.calls.indexOf('release_work_claim'));
+    expect(db.events.every(event=>event.itemId===chosen)).toBe(true);
+    expect(db.calls).not.toContain('reconcile_supervised_work');expect(db.calls).not.toContain('readmit_budget_blocked_work');
+  });
+  test.each(['item_attempt_budget_exhausted', 'user_attempt_budget_exhausted'])('orçamento %s recusa sem claim/attempt', async budgetReason => {
+    const db = database({ budgetReason }); const runner = executor();
+    await turn(db, runner.adapter, [selected()], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(db.claims.size).toBe(0); expect(runner.calls).toHaveLength(0);
+    expect(db.calls).not.toContain('start_claimed_work_attempt');
+    expect(db.events.every(event => event.itemId === chosen)).toBe(true);
+  });
+  test('recusa atômica no início libera somente o próprio claim', async () => {
+    const db = database({ startRefusal: { code: 'P0001', message: 'item_attempt_budget_exhausted' } }); const runner = executor();
+    const result = await turn(db, runner.adapter, [selected()], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.outcome).toBe('attempt_start_refused'); expect(result.claimReleased).toBe(true);
+    expect(runner.calls).toHaveLength(0); expect(db.items.get(chosen)?.state).toBe('approved');
+    expect(db.claims.get('claim')?.attemptId).toBeNull();
+    expect(db.events.every(event => event.itemId === chosen)).toBe(true);
+  });
+  test.each(['resumptionSource', 'decisionResumptionSource', 'budgetInterruptionSource'] as const)('recusa fonte %s antes de routing/claim', async field => {
+    const db = database({ [field]: { kind: field === 'resumptionSource' ? 'abandoned_checkpoint' : field === 'decisionResumptionSource' ? 'human_decision_checkpoint' : 'budget_interruption_checkpoint' } });
+    const runner = executor();
+    const result = await turn(db, runner.adapter, [selected()], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.refusal?.code).toBe('single_item_resumption_unproved');
+    expect(db.events).toEqual([]); expect(db.claims.size).toBe(0); expect(runner.calls).toHaveLength(0);
+  });
+  test.each(['previousAttempts', 'failAttemptHistory'] as const)('histórico %s recusa antes de orçamento e claim', async field => {
+    const db = database({ [field]: true, resumptionSource: { kind: 'new_execution' } });
+    const runner = executor();
+    const result = await turn(db, runner.adapter, [selected()], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.refusal?.code).toBe('single_item_resumption_unproved');
+    expect(db.calls).not.toContain('autonomous_work_budget_status');
+    expect(db.events).toEqual([]); expect(db.claims.size).toBe(0); expect(runner.calls).toHaveLength(0);
+  });
+  test('Codex sem autenticação comprovada recusa antes de efeitos', async () => {
+    const db = database(); const runner = executor(); const item = selected();
+    const result = await turn(db, runner.adapter, [{ ...item, intent: { ...item.intent, execution_spec: { ...(item.intent['execution_spec'] as Record<string, unknown>), coder_backend: 'codex-cli' } } }], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.refusal?.code).toBe('single_item_codex_contract_invalid');
+    expect(db.events).toEqual([]); expect(db.calls).toEqual(['select_autonomous_work']);
+  });
+  test('backend pago recusa antes do orçamento/eventos', async () => {
+    const db = database(); const runner = executor(); const item = selected();
+    const result = await turn(db, runner.adapter, [{ ...item, intent: { ...item.intent, execution_spec: { ...(item.intent['execution_spec'] as Record<string, unknown>), coder_backend: 'openai' } } }], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.refusal?.code).toBe('single_item_compute_not_allowed'); expect(db.events).toEqual([]);
+    expect(db.calls).toEqual(['select_autonomous_work']);
+  });
+  test('versão muda no banco após seleção: claim scoped recusa sem fallback', async () => {
+    const db = database(); const runner = executor(); const rpc = db.client.rpc;
+    jest.spyOn(db.client, 'rpc').mockImplementation((name, args) => {
+      if (name === 'acquire_single_item_work_claim') db.items.get(chosen)!.version = 2;
+      return rpc(name, args);
+    });
+    const result = await turn(db, runner.adapter, [selected()], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.outcome).toBe('claim_refused'); expect(db.claims.size).toBe(0); expect(runner.calls).toHaveLength(0);
+    expect(db.calls).not.toContain('acquire_work_claim'); expect(db.calls).not.toContain('start_claimed_work_attempt');
+    expect(db.events.every(event => event.itemId === chosen)).toBe(true);
+  });
+  test('cancelamento depois do claim devolve somente a posse própria', async () => {
+    const db = database(); const controller = new AbortController(); const rpc = db.client.rpc;
+    jest.spyOn(db.client, 'rpc').mockImplementation(async (name, args) => {
+      const result = await rpc(name, args);
+      if (name === 'acquire_single_item_work_claim') controller.abort();
+      return result;
+    });
+    const result = await runSupervisorTurn({ client: db.asClient(), reader: reader([selected()]),
+      routes: [{ adapter: executor().adapter, candidate: { schemaVersion: 1, routeId: 'test', executorId: 'local-runner-v1', providerRef: 'test', modelRef: 'test', effort: 'standard', capabilities: ['programming'], availability: 'available', latency: 'normal', priority: 1 } }],
+      requestedWork: scope, singleItem: scope, signal: controller.signal, ownerInstanceId: 'test', newId: ids(['claim', 'attempt']), recoveryEvidenceLoader: async () => null });
+    expect(result.refusal?.code).toBe('single_item_cancelled'); expect(result.claimReleased).toBe(true);
+    expect(db.calls).not.toContain('start_claimed_work_attempt'); expect(db.claims.get('claim')?.attemptId).toBeNull();
+    expect(db.events.every(event => event.itemId === chosen)).toBe(true);
+  });
+  test('falha do executor não dispara retry ou seleção global', async () => {
+    const db = database();
+    const result = await turn(db, throwingExecutor(), [selected()], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.outcome).toBe('execution_interrupted');
+    expect(db.events.filter(event => event.type === 'execution_started')).toHaveLength(1);
+    expect(db.calls.filter(name => name === 'acquire_single_item_work_claim')).toHaveLength(1);
+    expect(db.calls).not.toContain('next_autonomous_work');
+  });
+  test('cancelamento prévio não escreve eventos nem adquire claim', async () => {
+    const db = database(); const controller = new AbortController(); controller.abort();
+    const result = await runSupervisorTurn({ client: db.asClient(), routes: [], reader: reader([selected()]), requestedWork: scope, singleItem: scope, signal: controller.signal, ownerInstanceId: 'test', newId: () => 'unused' });
+    expect(result.refusal?.code).toBe('single_item_cancelled'); expect(db.events).toEqual([]); expect(db.claims.size).toBe(0);
+  });
 });

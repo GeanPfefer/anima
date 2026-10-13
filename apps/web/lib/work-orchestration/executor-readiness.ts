@@ -90,6 +90,11 @@ async function probeCodexViaWsl(deps: ExecutorReadinessDeps, wsl: Parameters<typ
 }
 
 async function probeCodex(deps: ExecutorReadinessDeps): Promise<ExecutorObservation> {
+  if (deps.env.ANIMA_CODEX_CLI_TRANSPORT) {
+    const coderConfig = resolveCodexCliConfig(null, deps.env, deps.platform as NodeJS.Platform);
+    if (!coderConfig.ok) return unavailable('codex-cli', 'codex_transport_invalid');
+    if (coderConfig.value.wsl) return probeCodexViaWsl(deps, coderConfig.value.wsl);
+  }
   const transport = resolveInvestigationTransport(deps.env, deps.platform as NodeJS.Platform);
   if (!transport.ok) return unavailable('codex-cli', 'investigation_transport_invalid');
   if (transport.value) return probeCodexViaWsl(deps, transport.value);

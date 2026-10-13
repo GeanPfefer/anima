@@ -1,9 +1,12 @@
+import { singleItemCodexRefusal } from './single-item-codex-readiness';
+import { SINGLE_ITEM_SQL_BOUNDARY_MESSAGE, singleItemSqlBoundaryRefusal } from './single-item-sql-boundary';
+import { type SingleItemExecution } from '@anima/core';
 import { COMPUTE_PREFERENCE_EVENT_TYPE, COMPUTE_ROUTER_REQUESTED_DURATION_MS, decideComputeRoute, projectComputePreference, resolveEffectiveComputePreference, type ComputePreferenceV1, deriveLocalFailureSignal, evaluatePaidComputeAuthorization, selectGovernedCoderModel, type AgenticRuntimeMode, type AutonomousQueueEntry, type ChangeAuthorizationFactsV1, type ComputeRouteDecisionV1, type LocalFailureHistoryEventV1, type ObservedCoderInput, type ObservedGateInput } from '@anima/core';
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
-import { persistPostTurnHostObservations } from './post-turn-observation';
+import { finalizeSingleItemTurn, persistPostTurnHostObservations } from './post-turn-observation';
 import { loadProviderPricingCatalog, providerApiSettlementStoreFor, settleProviderApiAttemptCost } from './provider-api-settlement';
 import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
 import { runSupervisorTurn, type SupervisorTurnResult } from './supervisor';
@@ -223,6 +226,7 @@ export function buildProjectBacklogCycleDeps(
   options: {
     /** Modo do laço do coder local. Ausente ⇒ `autonomous` (Resident Host/rota HTTP).
      * `supervised` só por declaração explícita de um invocador acompanhado por humano. */
+    readonly singleItem?: SingleItemExecution;
     readonly coderRuntimeMode?: AgenticRuntimeMode;
     /**
      * Preflight opcional do node CLOUD já pronto (endpoint/túnel/modelo), executado DEPOIS da
@@ -249,13 +253,14 @@ export function buildProjectBacklogCycleDeps(
   });
 
   return {
-    readBacklog: () => readAutonomousBacklogCandidates(client),
+    readBacklog: () => readAutonomousBacklogCandidates(client, options.singleItem?.workItemId),
     // Snapshot NOVO por consulta, antes de cada volta. Somente `permit` inicia;
     // defer e indisponibilidade da autoridade falham fechados.
     hostPermitsAutonomousWork: () => {
       const admission = readResourceAdmission();
       admittedPressure = admission.pressure;
       if (admission.verdict === 'permit') return true;
+      if (options.singleItem) return false;
       // Com o Router LIGADO e credencial de operador, provider_api pode executar sem
       // consumir RAM local: apenas ADMITE avaliar a fila (a autoridade paga continua
       // obrigatória e a decisão é persistida na volta). Router OFF ⇒ caminho legado.
@@ -274,14 +279,53 @@ export function buildProjectBacklogCycleDeps(
     },
     runTurn: async (entry, signal) => {
       // Contrato persistido do item escolhido → executor de worktree (project:anima).
-      const item = await client.from('work_items').select('intent').eq('id', entry.workItemId).maybeSingle();
+      const item = await client.from('work_items').select('intent,state,proposal_version').eq('id', entry.workItemId).maybeSingle();
       if (item.error || !item.data) {
         return notExecutable(entry, 'work_item_unavailable', 'O item selecionado não pôde ser lido para execução.');
+      }
+      if (options.singleItem && (entry.workItemId !== options.singleItem.workItemId
+        || entry.approvedProposalVersion !== options.singleItem.expectedProposalVersion
+        || item.data.proposal_version !== options.singleItem.expectedProposalVersion || item.data.state !== 'approved')) {
+        return notExecutable(entry, 'single_item_changed', 'Item/versão mudou antes de qualquer efeito da volta.');
+      }
+      const boundaryRefusal = options.singleItem ? await singleItemSqlBoundaryRefusal(client) : null;
+      if (boundaryRefusal) return notExecutable(entry, boundaryRefusal,
+        `${SINGLE_ITEM_SQL_BOUNDARY_MESSAGE} Nenhuma escrita ou execução foi iniciada.`);
+      if (options.singleItem && signal.aborted) return notExecutable(entry, 'single_item_cancelled', 'Invocação cancelada antes de efeitos.');
+      if (options.singleItem) {
+        const contractRefusal = await singleItemCodexRefusal(item.data.intent);
+        if (contractRefusal) return notExecutable(entry, contractRefusal, 'Contrato fora da fronteira Single-Item V1.');
+        if (readExecutionContract(item.data.intent).coderBackend === 'ollama' && (process.env.ANIMA_WORKTREE_OLLAMA_LOCALITY?.trim() === 'remote'
+          || process.env.ANIMA_WORKTREE_OLLAMA_URL?.trim())) {
+          return notExecutable(entry, 'single_item_remote_compute_forbidden', 'Endpoint remoto não pertence à prova V1.');
+        }
+        if (readExecutionContract(item.data.intent).coderBackend === 'ollama') try {
+          const endpoint = new URL(process.env.OLLAMA_URL?.trim() || 'http://127.0.0.1:11434');
+          if (endpoint.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname)
+            || endpoint.username || endpoint.password || endpoint.search || endpoint.hash
+            || endpoint.pathname !== '/') throw new Error('not local');
+        } catch {
+          return notExecutable(entry, 'single_item_remote_compute_forbidden', 'Ollama deve usar HTTP loopback sem credenciais/path/query.');
+        }
       }
       let contract = readExecutionContract(item.data.intent);
       const history = await client.from('work_events').select('event_type,payload')
         .eq('work_item_id', entry.workItemId).order('seq', { ascending: false }).limit(40);
-      if (!history.error) contract = resumeLatestRetryCheckpoint(contract, history.data ?? []);
+      if (options.singleItem) {
+        const priorAttempt = await client.from('work_events').select('seq')
+          .eq('work_item_id', entry.workItemId).eq('event_type', 'execution_started').limit(1);
+        if (priorAttempt.error || !Array.isArray(priorAttempt.data) || priorAttempt.data.length > 0) {
+          return notExecutable(entry, 'single_item_resumption_unproved', 'Histórico de attempts não permite primeira execução V1; sem reinício implícito.');
+        }
+      }
+      if (options.singleItem && (history.error || contract.resumeCheckpointCommitSha
+        || (history.data ?? []).some(event => event.event_type === 'execution_started'))) {
+        return notExecutable(entry, 'single_item_resumption_unproved', 'V1 exige primeira attempt; retomadas não foram comprovadas.');
+      }
+      if (!options.singleItem && !history.error) contract = resumeLatestRetryCheckpoint(contract, history.data ?? []);
+      if (options.singleItem && contract.coderBackend !== 'ollama' && contract.coderBackend !== 'codex-cli') {
+        return notExecutable(entry, 'single_item_compute_not_allowed', 'V1 admite somente contrato explícito Ollama local ou Codex CLI; sem fallback.');
+      }
 
       // ── Compute Router V1 — atrás do feature gate explícito de operador ──────────
       // DESLIGADO ⇒ `computeDecision` permanece null e NADA do Router roda: nenhuma
@@ -292,6 +336,9 @@ export function buildProjectBacklogCycleDeps(
       if (!preference.ok) {
         return notExecutable(entry, 'compute_preference_unavailable', 'A preferência de compute da unidade não pôde ser lida; nada é executado às cegas.');
       }
+      if (options.singleItem && preference.preference?.strategy === 'provider_api') {
+        return notExecutable(entry, 'single_item_paid_compute_forbidden', 'Compute pago não autorizado nesta fronteira.');
+      }
       let computeDecision: ComputeRouteDecisionV1 | null = null;
       // Preferência provider_api só é honrável pelo Router: com ele desligado o caminho
       // legado executaria o backend do contrato (local) — um downgrade silencioso. Para.
@@ -299,7 +346,7 @@ export function buildProjectBacklogCycleDeps(
         return notExecutable(entry, 'compute_preference_requires_router',
           `A unidade prefere ${preference.preference.provider}/${preference.preference.model}, mas o Compute Router está desligado; o compute local não a substitui.`);
       }
-      if (computeRouterEnabled()) {
+      if (!options.singleItem && computeRouterEnabled()) {
         const decision = await routeCompute(client, entry, contract, history.error ? [] : history.data ?? [], admittedPressure, economicTaskClass(item.data.intent), preference.preference);
         if (decision.status !== 'selected') {
           await client.rpc('record_compute_routing_decision', {
@@ -317,8 +364,8 @@ export function buildProjectBacklogCycleDeps(
       // OpenAI resolve o executor. Router OFF ou Router→Ollama seguem o placement legado.
       const routedToOpenAI = computeDecision?.selectedProvider === 'openai';
       const model = computeDecision ? computeDecision.selectedModel! : contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
-      const node = readExplicitCoderNodeV0(model);
-      let placement = routedToOpenAI ? null : decideCoderPlacement({
+      const node = options.singleItem ? null : readExplicitCoderNodeV0(model);
+      let placement = routedToOpenAI || (options.singleItem && contract.coderBackend === 'codex-cli') ? null : decideCoderPlacement({
         pressure: admittedPressure,
         model,
         nodes: node ? [node] : [],
@@ -328,7 +375,7 @@ export function buildProjectBacklogCycleDeps(
       let ollamaRuntimeOverride;
       // On-demand engata sob defer (pressão moderada/alta) OU quando o lever de prova/ops
       // força a pré-condição; `unknown` permanece fail-closed (sensor indisponível).
-      if (placement && (placement.placement === 'defer' || onDemandBurstForced()) && admittedPressure !== 'unknown') {
+      if (!options.singleItem && placement && (placement.placement === 'defer' || onDemandBurstForced()) && admittedPressure !== 'unknown') {
         const onDemand = readResidentOnDemandNodeConfig(model);
         if (onDemand) {
           // Caminho canônico: RunPod PAGO com o gate ligado passa pela SESSÃO RESILIENTE (troca de
@@ -367,6 +414,7 @@ export function buildProjectBacklogCycleDeps(
       const coderObservations: ObservedCoderInput[] = [];
       let changeAuthorization: ChangeAuthorizationFactsV1 | undefined;
       const selection = resolveExecutorRoute(contract, {
+        codexSubscriptionOnly: options.singleItem !== undefined,
         ...(contract.coderBackend === null || contract.coderBackend === 'ollama' ? { ollamaRuntimeOverride } : {}),
         gateObserver: outcome => gateObservations.push(outcome),
         coderObserver: outcome => coderObservations.push(outcome),
@@ -377,6 +425,7 @@ export function buildProjectBacklogCycleDeps(
       if (!selection.ok) return notExecutable(entry, selection.error.code, selection.error.message);
 
       let turn: SupervisorTurnResult | null = null;
+      if (options.singleItem && contract.coderBackend === 'codex-cli' && selection.route.candidate.modelRef !== 'codex-cli:default') return notExecutable(entry, 'single_item_executor_mismatch', 'Rota divergente do contrato aprovado.');
       // Watchdog best-effort: numa lease paga, a volta é abortada no DEADLINE da lease para parar
       // o gasto mais cedo (o teardown/reconciler durável segue como rede de segurança). O
       // `finish` usa o sinal BASE (não este) para garantir teardown mesmo após o abort.
@@ -385,6 +434,7 @@ export function buildProjectBacklogCycleDeps(
         turn = await runSupervisorTurn({
           client, routes: [selection.route], ownerInstanceId,
           newId: () => crypto.randomUUID(), signal: turnDeadline?.signal ?? signal,
+          ...(options.singleItem ? { singleItem: options.singleItem } : {}),
           requestedWork: { workItemId: entry.workItemId, expectedProposalVersion: entry.approvedProposalVersion },
           ...(computeDecision ? { computeRoutingDecision: computeDecision } : {}),
         });
@@ -396,6 +446,10 @@ export function buildProjectBacklogCycleDeps(
 
       // Observação host-side pós-volta (evidência de gate/coder/git + parecer do
       // Verifier) — a MESMA da rota supervisor-turn. Fail-open: nunca altera o desfecho.
+      if (options.singleItem) {
+        return finalizeSingleItemTurn({ client, result: turn, contract, gateObservations, coderObservations,
+          ...(changeAuthorization ? { changeAuthorization } : {}) });
+      }
       await persistPostTurnHostObservations({ client, result: turn, contract, gateObservations, coderObservations, ...(changeAuthorization ? { changeAuthorization } : {}) });
       // B1: settlement pós-attempt da reserva `provider_api` — em QUALQUER desfecho (o provider
       // cobra tokens, não resultado). Só liquida com usage completa + preço versionado vigente;

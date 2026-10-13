@@ -1,3 +1,5 @@
+import { runProjectBacklogHostTurn } from '@/lib/work-orchestration/backlog-host-turn-run';
+import { runWorkExecuteOne } from './app';
 import { createInvestigationPreparationDeps, type InvestigationPreparationDeps } from '@/lib/work-orchestration/investigation-preparation';
 import { runWorkProposeInvestigation } from './app';
 import type { WorkOrchestrationService } from '@anima/core';
@@ -68,6 +70,18 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
   const service = injection.service ?? createWorkOrchestrationService(client);
 
   switch (command.kind) {
+    case 'work-execute-one': {
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      process.on('SIGINT', abort); process.on('SIGTERM', abort);
+      try {
+        return await runWorkExecuteOne(command.id, command.expectedProposalVersion, () => runProjectBacklogHostTurn({
+          client, ownerInstanceId: `single-item-${randomUUID()}`, maxTurnsPerCycle: 1, maxCycles: 1,
+          singleItem: { workItemId: command.id, expectedProposalVersion: command.expectedProposalVersion },
+          signal: controller.signal,
+        }));
+      } finally { process.off('SIGINT', abort); process.off('SIGTERM', abort); }
+    }
     case 'work-propose-investigation':
       return runWorkProposeInvestigation(command, injection.investigationDeps ?? createInvestigationPreparationDeps(client, userId, service));
     case 'status': return runStatus(service, userId, process.env);

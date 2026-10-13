@@ -122,3 +122,17 @@ describe('verifyAndReleaseCandidate — Pending Verification Human Recovery V0',
     expect(d.compute).not.toHaveBeenCalled();
   });
 });
+
+
+describe('Single-Item exige verificação mesmo em advisory, sem mudar o legado', () => {
+  test.each(['verified','rejected','inconclusive'] as const)('advisory com %s persistido', async verdict => {
+    const d = deps({ required:false, states:['review','review'], outcome:async () => ({ok:true,action:'recorded',opinion:opinion(verdict)}) });
+    const result = await verifyAndReleaseCandidate('work-1', {...d, requireVerified:true});
+    expect(result.status).toBe(verdict === 'verified' ? 'released' : 'held');
+    expect(d.getItem).toHaveBeenCalledTimes(2);
+  });
+  test('advisory estrito não faz fail-open na persistência', async () => {
+    const d=deps({required:false, states:['review','review'], outcome:async()=>({ok:false,stage:'persist',reason:'writer denied'})});
+    expect(await verifyAndReleaseCandidate('work-1',{...d,requireVerified:true})).toMatchObject({status:'held',reason:'persist_failed'});
+  });
+});

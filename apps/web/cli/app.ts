@@ -1,3 +1,4 @@
+import type { BacklogHostTurnResult } from '@/lib/work-orchestration/autonomous-backlog-host-turn';
 import { prepareInvestigation, type InvestigationInput, type InvestigationPreparationDeps, type InvestigationPreparationResult } from '@/lib/work-orchestration/investigation-preparation';
 import type { ParsedCommand } from './args';
 import { readWorkHumanReference, type WorkReferenceResult, type WorkReferenceAmbiguousCandidate } from '@/lib/work-orchestration/work-reference';
@@ -315,10 +316,22 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
+  | { readonly ok: true; readonly kind: 'work-execute-one'; readonly workItemId: string; readonly proposalVersion: number; readonly result: BacklogHostTurnResult }
   | (Extract<InvestigationPreparationResult, {ok:true}> & {readonly kind:'work-propose-investigation'})
   | WorkInvestigationPayload | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkRecoverCandidatePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
+
+export async function runWorkExecuteOne(id: string, version: number, execute: () => Promise<BacklogHostTurnResult>): Promise<CommandResult> {
+  try {
+    const result = await execute();
+    if (result.notExecutableReason) return { exitCode: EXIT.REJECTED, payload: { ok: false, kind: 'error', code: result.notExecutableReason.code, error: result.notExecutableReason.message } };
+    if (result.turnsExecuted === 0) return { exitCode: EXIT.REJECTED, payload: { ok: false, kind: 'error', code: result.stopReason, error: 'Nenhuma tentativa iniciada; sem fallback ou retry.' } };
+    return { exitCode: EXIT.OK, payload: { ok: true, kind: 'work-execute-one', workItemId: id, proposalVersion: version, result } };
+  } catch (error) {
+    return { exitCode: EXIT.ERROR, payload: { ok: false, kind: 'error', code: 'single_item_execution_failed', error: error instanceof Error ? error.message : 'Falha na volta isolada; consulte o estado antes de qualquer novo ato.' } };
+  }
+}
 
 export async function runWorkProposeInvestigation(input: InvestigationInput, deps: InvestigationPreparationDeps): Promise<CommandResult> {
   const result = await prepareInvestigation(input, deps);

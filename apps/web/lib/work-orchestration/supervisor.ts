@@ -1,3 +1,6 @@
+import { singleItemCodexRefusal } from './single-item-codex-readiness';
+import { SINGLE_ITEM_SQL_BOUNDARY_MESSAGE, singleItemSqlBoundaryRefusal, workClaimRpc } from './single-item-sql-boundary';
+import { isSingleItemExecution, singleItemExecutionRefusal, type SingleItemExecution } from '@anima/core';
 import {
   evaluateAutonomousEligibility,
   planWorkResumption,
@@ -102,6 +105,8 @@ export interface SupervisorTurnResult {
 export type SupervisorReader = Pick<ReturnType<typeof createWorkOrchestrationService>, 'getItem' | 'listContexts'>;
 
 export interface SupervisorTurnDependencies {
+  /** No global maintenance or fallback; recovery is a separate human operation. */
+  readonly singleItem?: SingleItemExecution;
   readonly client: SupabaseClient<Database>;
   readonly routes: readonly {
     readonly candidate: WorkRoutingCandidateV1;
@@ -178,12 +183,23 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   const { client, routes, ownerInstanceId, newId, signal } = dependencies;
   const service = dependencies.reader ?? createWorkOrchestrationService(client);
 
+  if (dependencies.singleItem) {
+    const scope = dependencies.singleItem;
+    if (!isSingleItemExecution(scope) || dependencies.requestedWork?.workItemId !== scope.workItemId
+      || dependencies.requestedWork.expectedProposalVersion !== scope.expectedProposalVersion) {
+      return { ...base([]), outcome: 'selection_not_executable', refusal: { code: 'single_item_scope_invalid', message: 'UUID e versão explícitos são obrigatórios.' } };
+    }
+    const current = await service.getItem(scope.workItemId);
+    const code = current.ok ? singleItemExecutionRefusal(scope, current.value) : 'work_item_unavailable';
+    if (code) return { ...base([]), outcome: 'selection_not_executable', refusal: { code, message: 'Item/versão não executável.' } };
+  }
+
   // ---------- (1) Reconciliação, sempre antes da seleção ----------
   //
   // Religar sem reconciliar selecionaria sobre um estado que a interrupção
   // deixou mentindo. A rotina é do SUP-04 e não é reimplementada aqui: a
   // aplicação apenas a invoca e relata o que ela produziu.
-  const reconciled = await client.rpc('reconcile_supervised_work');
+  const reconciled = dependencies.singleItem ? { data: [], error: null } : await client.rpc('reconcile_supervised_work');
   if (reconciled.error) {
     return { ...base([]), outcome: 'selection_not_executable', refusal: refusalOf(reconciled.error), requiresAnotherTurn: true };
   }
@@ -222,14 +238,14 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   // re-admite exatamente esses itens. Sem ela, um item bloqueado por orçamento
   // ficaria preso para sempre em `work_blocked_unresolved`. Como a reconciliação
   // do SUP-04, roda a cada volta e não é scheduler.
-  const readmitted = await client.rpc('readmit_budget_blocked_work');
+  const readmitted = dependencies.singleItem ? { data: [], error: null } : await client.rpc('readmit_budget_blocked_work');
   if (readmitted.error) {
     return { ...base(reconciliation), outcome: 'selection_not_executable', refusal: refusalOf(readmitted.error), requiresAnotherTurn: true };
   }
   // Interrupções de orçamento EM tentativa (com checkpoint) cuja janela recuperou
   // voltam a `approved` aqui; a retomada DO CHECKPOINT (não um restart cego) é
   // resolvida abaixo pela fonte `budget_interruption_resumption_source`.
-  const readmittedInterrupted = await client.rpc('readmit_budget_interrupted_work');
+  const readmittedInterrupted = dependencies.singleItem ? { data: [], error: null } : await client.rpc('readmit_budget_interrupted_work');
   if (readmittedInterrupted.error) {
     return { ...base(reconciliation), outcome: 'selection_not_executable', refusal: refusalOf(readmittedInterrupted.error), requiresAnotherTurn: true };
   }
@@ -245,7 +261,13 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     return { ...base(reconciliation), outcome: 'selection_not_executable', refusal: refusalOf(selected.error), requiresAnotherTurn: true };
   }
   const head = (selected.data ?? [])[0];
-  if (!head) return base(reconciliation);
+  if (!head) return dependencies.singleItem
+    ? { ...base([]), outcome: 'selection_not_executable', refusal: { code: 'single_item_not_eligible', message: 'Item/versão fora da fila canônica; sem fallback.' } }
+    : base(reconciliation);
+  if (dependencies.singleItem && (head.work_item_id !== dependencies.singleItem.workItemId
+    || head.approved_proposal_version !== dependencies.singleItem.expectedProposalVersion)) {
+    return { ...base([]), outcome: 'selection_not_executable', refusal: { code: 'single_item_selection_mismatch', message: 'Seleção divergente do mandato.' } };
+  }
 
   const selection: SupervisorSelection = {
     workItemId: head.work_item_id, approvedProposalVersion: head.approved_proposal_version,
@@ -264,11 +286,39 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   // O predicado do core é o parser canônico do `execution_spec`; a fila usa o
   // espelho SQL da mesma régua. Divergência entre os dois é defeito, não
   // permissão para executar às cegas — daí a saída fail-closed sem posse.
+  if (dependencies.singleItem) {
+    const code = singleItemExecutionRefusal(dependencies.singleItem, item.value);
+    if (code) return { ...started, outcome: 'selection_not_executable', refusal: { code, message: 'Item mudou antes do claim.' } };
+  }
   const eligibility = evaluateAutonomousEligibility(item.value);
   if (!eligibility.eligible) {
     return {
       ...started, outcome: 'selection_not_executable', gaps: eligibility.gaps,
       refusal: { code: 'eligibility_divergence', message: 'A fila ofereceu um item que o predicado do domínio recusa.' },
+    };
+  }
+
+  const sqlBoundaryRefusal = dependencies.singleItem ? await singleItemSqlBoundaryRefusal(client) : null;
+  if (sqlBoundaryRefusal) {
+    return { ...started, outcome: 'selection_not_executable', requiresAnotherTurn: false, refusal: {
+      code: sqlBoundaryRefusal,
+      message: SINGLE_ITEM_SQL_BOUNDARY_MESSAGE,
+    } };
+  }
+
+  if (dependencies.singleItem) {
+    const contractRefusal = await singleItemCodexRefusal(item.value.intent);
+    if (contractRefusal || dependencies.computeRoutingDecision) return {
+      ...started, outcome: 'selection_not_executable', requiresAnotherTurn: false,
+      refusal: { code: contractRefusal ?? 'single_item_compute_routing_forbidden', message: 'V1 exige compute explícito sem Router pago e sem retomada.' },
+    };
+    // As fontes de retomada podem devolver new_execution mesmo com attempts
+    // anteriores. Consulte o ledger completo antes de qualquer escrita.
+    const history = await client.from('work_events').select('seq')
+      .eq('work_item_id', selection.workItemId).eq('event_type', 'execution_started').limit(1);
+    if (history.error || !Array.isArray(history.data) || history.data.length > 0) return {
+      ...started, outcome: 'selection_not_executable', requiresAnotherTurn: false,
+      refusal: { code: 'single_item_resumption_unproved', message: 'Primeira execução V1 exige histórico verificável sem attempts anteriores.' },
     };
   }
 
@@ -325,6 +375,18 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
     persistedSource = object(abandonedSourceRead.data);
   }
   const isResumption = persistedSource?.kind === 'abandoned_checkpoint' || persistedSource?.kind === 'human_decision_checkpoint';
+
+  if (dependencies.singleItem && persistedSource && (persistedSource.kind !== 'new_execution'
+    || (Array.isArray(persistedSource.previous_attempt_ids) && persistedSource.previous_attempt_ids.length > 0))) {
+    return { ...started, outcome: 'selection_not_executable', requiresAnotherTurn: false, refusal: {
+      code: 'single_item_resumption_unproved', message: 'Retomada exige prova scoped própria; nenhuma tentativa nova substitui o checkpoint.',
+    } };
+  }
+  if (dependencies.singleItem && signal.aborted) {
+    return { ...started, outcome: 'selection_not_executable', requiresAnotherTurn: false, refusal: {
+      code: 'single_item_cancelled', message: 'Invocação cancelada antes de claim/attempt.',
+    } };
+  }
 
   const claimId = newId();
   const leaseSeconds = (eligibility.spec.limits.maxDurationMinutes ?? 30) * 60 + 300;
@@ -413,6 +475,10 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
       refusal: { code: 'routing_adapter_missing', message: 'A rota selecionada não possui adaptador correspondente.' },
     };
   }
+  if (dependencies.singleItem && (item.value.intent['execution_spec'] as Record<string, unknown>)['coder_backend'] === 'codex-cli'
+      && (configuredRoute.candidate.modelRef !== 'codex-cli:default' || configuredRoute.adapter.id !== 'worktree-v1')) {
+    return { ...started, outcome: 'routing_refused', refusal: { code: 'single_item_executor_mismatch', message: 'A rota diverge do backend/modelo aprovado.' } };
+  }
   const adapter = configuredRoute.adapter;
   const adjustmentRecorded = await client.rpc('record_work_routing_adjustment', {
     p_work_item_id: selection.workItemId,
@@ -435,6 +501,10 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   const routed = { ...started, routingDecision: routing.decision, routingAdjustment: adjustment };
   let carriedContext: WorkExecutorRequest['carriedContext'];
   let attempt;
+  if (dependencies.singleItem && signal.aborted) return {
+    ...routed, outcome: 'selection_not_executable', requiresAnotherTurn: false,
+    refusal: { code: 'single_item_cancelled', message: 'Cancelado antes de adquirir claim.' },
+  };
   if (persistedSource?.kind === 'human_decision_checkpoint') {
     const handoff = object(persistedSource.handoff) as unknown as WorkHandoffV1 | null;
     const inputRequestedEventId = String(persistedSource.input_requested_event_id ?? '');
@@ -531,11 +601,16 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
       owner_instance_id: ownerInstanceId, lease_seconds: leaseSeconds, executor_id: adapter.id,
     });
   } else {
-    const claim = await client.rpc('acquire_work_claim', {
+    const claim = await client.rpc(workClaimRpc(Boolean(dependencies.singleItem)), {
       work_item_id: selection.workItemId, expected_proposal_version: selection.approvedProposalVersion,
       claim_id: claimId, owner_instance_id: ownerInstanceId, lease_seconds: leaseSeconds,
     });
     if (claim.error) return { ...routed, outcome: 'claim_refused', refusal: refusalOf(claim.error) };
+    if (dependencies.singleItem && signal.aborted) {
+      const released = await client.rpc('release_work_claim', { claim_id: claimId, reason: 'released_without_attempt' });
+      return { ...routed, outcome: 'attempt_start_refused', claimId, claimReleased: !released.error,
+        requiresAnotherTurn: false, refusal: { code: 'single_item_cancelled', message: 'Cancelado depois do claim e antes da attempt.' } };
+    }
     attempt = await client.rpc('start_claimed_work_attempt', {
       claim_id: claimId, attempt_id: attemptId, executor_id: adapter.id,
     });
@@ -685,6 +760,11 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
   }
 
   // ---------- (8) Liberação auditável ----------
+  if (dependencies.singleItem) {
+    return { ...running, outcome: terminalKind === 'result' ? 'execution_interrupted' : outcomeForTerminal(terminalKind),
+      terminalKind, claimReleased: false, requiresAnotherTurn: false,
+      refusal: terminalKind === 'result' ? { code: 'single_item_verification_pending', message: 'Resultado persistido; evidências/Verifier ainda pendentes.' } : null };
+  }
   const released = await client.rpc('release_work_claim', { claim_id: claimId, reason: 'attempt_finished' });
   return {
     ...running, outcome: outcomeForTerminal(terminalKind), terminalKind,

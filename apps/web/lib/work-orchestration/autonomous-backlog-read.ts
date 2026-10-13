@@ -50,8 +50,10 @@ const readDependencyIds = (item: WorkItem): readonly string[] => {
  */
 export async function readAutonomousBacklogCandidates(
   client: SupabaseClient<Database>,
+  workItemId?: string,
 ): Promise<readonly AutonomousQueueCandidate[]> {
-  const itemsRes = await client.from('work_items').select('*').in('state', NON_TERMINAL_STATES);
+  const query = client.from('work_items').select('*').in('state', NON_TERMINAL_STATES);
+  const itemsRes = await (workItemId ? query.eq('id', workItemId) : query);
   if (itemsRes.error || !itemsRes.data) return [];
 
   const items: WorkItem[] = [];

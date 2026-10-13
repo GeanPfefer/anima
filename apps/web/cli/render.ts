@@ -58,6 +58,8 @@ function investigationLines(review: InvestigationReviewV1, full: boolean): strin
 
 export function renderHuman(payload: CliPayload): string {
   switch (payload.kind) {
+    case 'work-execute-one':
+      return `${payload.workItemId} · proposta v${payload.proposalVersion} · ${payload.result.lastOutcome ?? payload.result.stopReason}\nConsulte work show/evidence; este comando não aceita ou integra resultados.`;
     case 'work-investigation':
       return [...workHeading(payload.id, payload.reference, payload.title, payload.state),
         `Pergunta: ${payload.question}`, `Proposta vigente: v${payload.proposalVersion}`,

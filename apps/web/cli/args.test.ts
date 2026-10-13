@@ -163,3 +163,13 @@ describe('work propose-investigation',()=>{
  test.each([['--capability','unknown'],['--question','dup'],['--reason','não'],['unexpected'],['--json','--json'],['--capability']].map(flags=>[flags] as const))('recusa flags inválidas/duplicadas %j',flags=>expect(parseArgs([...base,...flags]).ok).toBe(false));
  test('não aceita flags de investigação em outro comando',()=>expect(parseArgs(['work','list','--question','x']).ok).toBe(false));
 });
+
+
+describe('execute-one exige UUID e versão sem defaults', () => {
+  const id = 'aa6b3d64-1e0b-414d-984d-5264b9c89968';
+  test('parse explícito', () => expect(parseArgs(['work', 'execute-one', id, '--version', '1', '--json'])).toEqual({ ok: true, command: { kind: 'work-execute-one', id, expectedProposalVersion: 1, json: true } }));
+  test.each([
+    ['INV-11', '--version', '1'], [id], [id, '--version', '0'], [id, '--version', '1.5'],
+    [id, '--version', '1', '--version', '2'], [id, '--version', '1', '--all'], [id, '--version', '9007199254740992'],
+  ])('recusa argv %s', (...args) => expect(parseArgs(['work', 'execute-one', ...args]).ok).toBe(false));
+});

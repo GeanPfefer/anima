@@ -218,3 +218,23 @@ Os 380 testes locais e a prova de leitura são evidências distintas. A prova RL
 com dois usuários permanece pendente de autorização; esta leitura autenticada e
 os mocks não demonstram isolamento entre usuários. A fase "Pronto para integrar"
 em completed/read_only é uma pendência preexistente separada desta entrega.
+
+
+## Single-item V1 — uma volta isolada, fail-closed
+
+`npm.cmd run anima -- work execute-one <UUID> --version <N> --json` exige
+UUID/versão, aprovação/classificação prévias e limita uma volta. **Recusa antes de
+qualquer escrita ou attempt** (`single_item_atomic_claim_unavailable`) enquanto a RPC
+scoped do residente não responder com o contrato esperado. Não iniciar Host global ou
+usar `work supervise` como isolamento. Nenhuma prova viva autorizada por este comando.
+[Contrato, limitações e procedimento](../../../docs/arquitetura/single-item-governed-execution-v0.md).
+
+
+Single-Item V1 (2026-10-13): as migrations scoped foram promovidas ao residente
+([registro](../../../docs/registros/2026-10-13-single-item-promocao-residente.md)). O gate
+`single_item_atomic_claim_unavailable` deixou de ser incondicional: agora é uma sonda
+sem efeitos da RPC `acquire_single_item_work_claim` e recusa (fail-closed) se a RPC estiver
+ausente, incompatível, sem permissão ou indisponível. Sem flag de bypass. A primeira attempt
+real continua dependendo de autorização humana específica; compute pago, retomadas não
+comprovadas e fallback para backlog permanecem recusados.
+Contrato SQL provado em [single_item_work_claim.test.sql](../../../supabase/tests/single_item_work_claim.test.sql).
