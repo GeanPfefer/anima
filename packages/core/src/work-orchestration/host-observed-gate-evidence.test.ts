@@ -1,3 +1,4 @@
+import { deriveGateTestReport, type GateTestReportV1 } from './gate-test-report';
 import {
   buildHostObservedGateEvidence,
   classifyDifferentialGate,
@@ -336,5 +337,60 @@ describe('projectHostObservedGateEvidence', () => {
   });
   test('envelope discordante ⇒ null', () => {
     expect(projectHostObservedGateEvidence([event(evidence(), { attempt_id: 'outro' })])).toBeNull();
+  });
+});
+
+// I2a: relatório é somente observação aditiva, jamais fonte do outcome/policy.
+const testReportFixture = (count = 1): GateTestReportV1 => {
+  const result = deriveGateTestReport({
+    numTotalTestSuites: 1, numFailedTestSuites: 0, numRuntimeErrorTestSuites: 0,
+    numTotalTests: count, numPassedTests: count, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0, success: true,
+    testResults: [{ name: '/repo/core.test.ts', status: 'passed', message: '', assertionResults: Array.from({ length: count }, (_, i) => ({
+      fullName: `test ${i}`, title: `test ${i}`, ancestorTitles: [], status: 'passed', invocations: 1, failureMessages: [], retryReasons: [],
+    })) }],
+  }, { rootDir: '/repo' });
+  if (result.status !== 'ok') throw new Error(result.reason);
+  return result.report;
+};
+describe('testReport aditivo I2a', () => {
+  test('build → JSON → parse preserva relatório; outcome continua pelos fatos do processo', () => {
+    const testReport = testReportFixture();
+    const result = build({ gates: [gate({ testReport, exitCode: 1 })] });
+    expect(result.ok).toBe(true); if (!result.ok) return;
+    expect(result.value.gates[0]!.testReport).toEqual(testReport);
+    expect(result.value.gates[0]!.outcome).toBe('failed');
+    expect(parseHostObservedGateEvidence(JSON.parse(JSON.stringify(result.value)) as Json)).toEqual(result.value);
+  });
+  test('evidência legada byte a byte igual após omissão; shadow decisions iguais com/sem report', () => {
+    const original = build(); const absent = build({ gates: [gate({ testReport: undefined })] });
+    expect(JSON.stringify(absent)).toBe(JSON.stringify(original));
+    const enriched = build({ gates: [gate({ testReport: testReportFixture() })] });
+    if (!original.ok || !enriched.ok) throw new Error('invalid fixture');
+    expect(enriched.value.shadowPolicyDecisions).toEqual(original.value.shadowPolicyDecisions);
+    expect(enriched.value.shadowReadinessDecisions).toEqual(original.value.shadowReadinessDecisions);
+    const stripped = JSON.parse(JSON.stringify(enriched.value)) as { gates: { testReport?: unknown }[] };
+    delete stripped.gates[0]!.testReport;
+    expect(JSON.stringify(stripped)).toBe(JSON.stringify(original.value));
+    expect(JSON.stringify(parseHostObservedGateEvidence(stripped as unknown as Json))).toBe(JSON.stringify(original.value));
+  });
+  test.each([null, 'bad', {}, { ...testReportFixture(), digest: 'invalid' }])('report inválido omitido %# no build e parse', testReport => {
+    const result = build({ gates: [gate({ testReport })] }); const original = build();
+    expect(JSON.stringify(result)).toBe(JSON.stringify(original));
+    if (!original.ok) throw new Error('invalid fixture');
+    const raw = JSON.parse(JSON.stringify(original.value)) as { gates: { testReport?: unknown }[] };
+    raw.gates[0]!.testReport = testReport;
+    expect(parseHostObservedGateEvidence(raw as unknown as Json)).toEqual(original.value);
+  });
+  test('soma limitada a 4000 na ordem dos gates, excesso omitido, gates posteriores menores cabem', () => {
+    const large = testReportFixture(2000), small = testReportFixture(1);
+    const result = build({ gates: [gate({ testReport: large }), gate({ testReport: small }), gate({ testReport: large }), gate({ testReport: small })] });
+    expect(result.ok).toBe(true); if (!result.ok) return;
+    expect(result.value.gates.map(g => g.testReport?.totals.tests)).toEqual([2000, 1, undefined, 1]);
+    const raw = JSON.parse(JSON.stringify(result.value)) as { gates: { testReport?: unknown }[] };
+    raw.gates[2]!.testReport = large;
+    expect(parseHostObservedGateEvidence(raw as unknown as Json)).toEqual(result.value);
+    const exact = build({ gates: [gate({ testReport: large }), gate({ testReport: large }), gate({ testReport: small })] });
+    if (!exact.ok) throw new Error('invalid fixture');
+    expect(exact.value.gates.map(g => g.testReport?.totals.tests)).toEqual([2000, 2000, undefined]);
   });
 });

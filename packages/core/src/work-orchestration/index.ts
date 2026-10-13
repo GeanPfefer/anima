@@ -96,3 +96,5 @@ export * from './investigation-review';
 export * from './single-item-execution';
 
 export * from './acceptance-contract-lint';
+
+export * from './gate-test-report';

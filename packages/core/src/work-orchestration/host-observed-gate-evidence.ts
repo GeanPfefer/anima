@@ -1,3 +1,4 @@
+import { parseGateTestReport, GATE_TEST_REPORT_LIMITS, type GateTestReportV1 } from './gate-test-report';
 import { containsSensitiveData } from './execution-attempt';
 import type { ProposalVersion, WorkEvent, WorkItemId } from './types';
 import type { Json } from '@anima/types';
@@ -92,6 +93,7 @@ export type DifferentialGateStatus =
   | 'inconclusive';
 
 export interface ObservedGateOutcomeV1 {
+  readonly testReport?: GateTestReportV1;
   readonly label: string;
   readonly command: string;
   readonly exitCode: number;
@@ -147,6 +149,7 @@ export interface DifferentialGateBaselineInput {
 }
 
 export interface ObservedGateInput {
+  readonly testReport?: unknown;
   readonly label: string;
   readonly command: string;
   readonly exitCode: number;
@@ -355,6 +358,7 @@ export function buildHostObservedGateEvidence(input: BuildHostObservedGateEviden
     return fail('invalid_timestamp', 'observedAt precisa ser um instante ISO-8601 válido.');
   }
   const gates: ObservedGateOutcomeV1[] = [];
+  let reportedTests = 0;
   for (const gate of input.gates) {
     if (typeof gate !== 'object' || gate === null
       || !nonBlank(gate.label) || !nonBlank(gate.command)
@@ -367,7 +371,11 @@ export function buildHostObservedGateEvidence(input: BuildHostObservedGateEviden
     }
     // Baseline OPCIONAL e ADITIVO: malformado ⇒ omitido (nunca falha o outcome do resultado).
     const baseline = gate.baseline === undefined ? null : deriveDifferentialBaseline(gate.baseline);
+    const candidate = parseGateTestReport(gate.testReport as Json | undefined);
+    const testReport = candidate && reportedTests + candidate.totals.tests <= GATE_TEST_REPORT_LIMITS.maxTotalTestsPerEvidence ? candidate : null;
+    if (testReport) reportedTests += testReport.totals.tests;
     gates.push({
+      ...(testReport === null ? {} : { testReport }),
       label: gate.label, command: gate.command, exitCode: gate.exitCode,
       durationMs: gate.durationMs, timedOut: gate.timedOut, cancelled: gate.cancelled,
       outcome: deriveObservedGateOutcome(gate),
@@ -414,6 +422,7 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
     return null;
   }
   const gates: ObservedGateOutcomeV1[] = [];
+  let reportedTests = 0;
   for (const entry of root.gates) {
     const gate = object(entry);
     if (!gate || !nonBlank(gate.label) || !nonBlank(gate.command)
@@ -426,7 +435,11 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
     // Baseline OPCIONAL: ausente ⇒ retrocompatível (evidência antiga); presente mas
     // malformado ⇒ OMITIDO (não invalida o gate/evidência do resultado).
     const baseline = gate.baseline === undefined ? null : deriveDifferentialBaseline(gate.baseline);
+    const candidate = parseGateTestReport(gate.testReport as Json | undefined);
+    const testReport = candidate && reportedTests + candidate.totals.tests <= GATE_TEST_REPORT_LIMITS.maxTotalTestsPerEvidence ? candidate : null;
+    if (testReport) reportedTests += testReport.totals.tests;
     gates.push({
+      ...(testReport === null ? {} : { testReport }),
       label: gate.label, command: gate.command, exitCode: gate.exitCode,
       durationMs: gate.durationMs, timedOut: gate.timedOut, cancelled: gate.cancelled,
       outcome: deriveObservedGateOutcome({ exitCode: gate.exitCode, timedOut: gate.timedOut, cancelled: gate.cancelled }),
