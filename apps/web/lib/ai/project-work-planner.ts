@@ -6,7 +6,7 @@ import { CLAUDE_CODE_DEFAULT_MODEL } from '@/lib/work-orchestration/claude-code-
 import { resolveOpenAICoderModel } from '@/lib/work-orchestration/gpt-coder';
 import { parseProposal, scopeTestCommandToWorkspace, targetPathsAreExactFilesOrAbsent, type PlannerProposalResult, type ProjectWorkPlanner } from './project-work-planner-shared';
 import { OpenAIProjectWorkPlanner } from './project-work-planner-openai';
-import { LocalOllamaProjectWorkPlanner } from './project-work-planner-local';
+import { LocalOllamaProjectWorkPlanner, resolveLocalProjectPlannerModel } from './project-work-planner-local';
 import { OpenAIAdmissionDenied } from './openai-paid-transport';
 import { createInteractiveOpenAIAdmission } from './openai-interactive-admission';
 import type { ChatProviderId } from './chat-provider';
@@ -38,6 +38,17 @@ export function resolveConfiguredProjectPlannerProvider(
   env: Record<string, string | undefined> = process.env,
 ): ProjectWorkPlannerProvider {
   return env.ANIMA_PROJECT_PLANNER_PROVIDER?.trim() === 'local' ? 'local' : 'openai';
+}
+
+/** Diagnóstico puro da configuração: lê somente provider e modelo local. */
+export function diagnoseConfiguredProjectPlanner(
+  env: Record<string, string | undefined> = process.env,
+  model?: string,
+): { provider: 'openai' } | { provider: 'local'; model: string } {
+  const provider = resolveConfiguredProjectPlannerProvider(env);
+  return provider === 'local'
+    ? { provider, model: resolveLocalProjectPlannerModel(env, model) }
+    : { provider };
 }
 
 /**

@@ -159,6 +159,14 @@ function normalizeNativeAssistantResponse(value: unknown): NormalizedAssistantMe
 const argString = (value: unknown): string =>
   typeof value === 'string' ? value : JSON.stringify(value ?? {});
 
+/** Resolução pura; preserva valores vazios e espaços da configuração existente. */
+export function resolveLocalProjectPlannerModel(
+  env: Record<string, string | undefined> = process.env,
+  model?: string,
+): string {
+  return model ?? env.ANIMA_PROJECT_PLANNER_MODEL ?? 'qwen3-coder:latest';
+}
+
 export interface LocalPlannerDeps {
   readonly fetchImpl?: typeof fetch;
   readonly executeTool?: (name: string, rawArguments: string) => Promise<string>;
@@ -191,7 +199,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
     this.fetchImpl = deps.fetchImpl ?? fetch;
     this.executeTool = deps.executeTool ?? executeProjectTool;
     this.baseUrl = (deps.baseUrl ?? env.OLLAMA_URL ?? 'http://localhost:11434').replace(/\/+$/, '');
-    this.model = deps.model ?? env.ANIMA_PROJECT_PLANNER_MODEL ?? 'qwen3-coder:latest';
+    this.model = resolveLocalProjectPlannerModel(env, deps.model);
     this.maxTurns = deps.maxTurns ?? 16;
     this.forceAfterEvidence = deps.forceAfterEvidence ?? 4;
     this.roundTimeoutMs = deps.roundTimeoutMs ?? resolveLocalPlannerRoundTimeoutMs(env);

@@ -4,6 +4,7 @@ import {
   planExecutableProjectWork,
   planExecutableProjectWorkRevision,
   resolveConfiguredProjectPlannerProvider,
+  diagnoseConfiguredProjectPlanner,
   createConfiguredProjectPlanner,
   createChatProjectPlanner,
   shouldRunProjectPlanner,
@@ -12,6 +13,70 @@ import {
   type ProjectWorkPlanner,
 } from './project-work-planner';
 import { workspaceForScope, scopeTestCommandToWorkspace, safeValidationCommand, parseProposal, parseAdditionalValidations } from './project-work-planner-shared';
+
+describe('diagnóstico e resolução compartilhada do modelo local', () => {
+  test.each([undefined, 'openai', 'desconhecido', ''])('provider %s mantém default openai sem modelo', provider => {
+    expect(diagnoseConfiguredProjectPlanner({
+      ANIMA_PROJECT_PLANNER_PROVIDER: provider,
+      ANIMA_PROJECT_PLANNER_MODEL: 'modelo-local',
+    }, 'injetado')).toEqual({ provider: 'openai' });
+  });
+
+  test.each([
+    [undefined, undefined, 'qwen3-coder:latest'],
+    ['modelo-env', undefined, 'modelo-env'],
+    ['modelo-env', 'modelo-injetado', 'modelo-injetado'],
+    [undefined, 'modelo-injetado', 'modelo-injetado'],
+    ['', undefined, ''],
+    ['modelo-env', '', ''],
+    ['  modelo-env  ', undefined, '  modelo-env  '],
+    ['modelo-env', '  modelo-injetado  ', '  modelo-injetado  '],
+  ])('env=%s, injetado=%s: diagnóstico e request usam %s', async (configured, injected, expected) => {
+    const env = {
+      ANIMA_PROJECT_PLANNER_PROVIDER: '  local  ',
+      ANIMA_PROJECT_PLANNER_MODEL: configured,
+    };
+    const fetchImpl = jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>().mockRejectedValue(new Error('transporte simulado'));
+    const executeTool = jest.fn(async () => '');
+    const planner = new LocalOllamaProjectWorkPlanner({ env, model: injected, fetchImpl, executeTool });
+    const diagnostic = diagnoseConfiguredProjectPlanner(env, injected);
+    expect(diagnostic).toEqual({ provider: 'local', model: expected });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(executeTool).not.toHaveBeenCalled();
+    await planner.proposeArguments('planeje');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const request = fetchImpl.mock.calls[0]![1]!;
+    const body: unknown = JSON.parse(String(request.body));
+    expect(body).toEqual(expect.objectContaining({ model: expected }));
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  test.each(['local', 'openai'])('diagnóstico %s não acessa segredos, transporte ou outras configs', provider => {
+    const reads: string[] = [];
+    const env = new Proxy<Record<string, string | undefined>>({
+      ANIMA_PROJECT_PLANNER_PROVIDER: provider,
+      ANIMA_PROJECT_PLANNER_MODEL: 'modelo-local',
+      OPENAI_API_KEY: 'segredo-falso',
+      DEEPSEEK_API_KEY: 'outro-segredo-falso',
+      Authorization: 'Bearer token-falso',
+    }, {
+      get(target, key: string) {
+        reads.push(key);
+        if (key !== 'ANIMA_PROJECT_PLANNER_PROVIDER' && key !== 'ANIMA_PROJECT_PLANNER_MODEL') {
+          throw new Error('leitura não autorizada');
+        }
+        return target[key];
+      },
+      ownKeys() { throw new Error('enumeração não autorizada'); },
+    });
+    expect(diagnoseConfiguredProjectPlanner(env)).toEqual(provider === 'local'
+      ? { provider: 'local', model: 'modelo-local' }
+      : { provider: 'openai' });
+    expect(reads).toEqual(provider === 'local'
+      ? ['ANIMA_PROJECT_PLANNER_PROVIDER', 'ANIMA_PROJECT_PLANNER_MODEL']
+      : ['ANIMA_PROJECT_PLANNER_PROVIDER']);
+  });
+});
 
 const base: CreateWorkProposalCommand = {
   sourceMessageId: 'message-1',
