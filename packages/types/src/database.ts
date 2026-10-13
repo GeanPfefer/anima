@@ -2210,6 +2210,35 @@ export type Database = {
         Args: { p_work_item_id: string }
         Returns: Json
       }
+      // Signature of migration 20261008000000, checked against the promoted resident catalog on 2026-10-13; official typegen regeneration pending.
+      acquire_single_item_work_claim: {
+        Args: {
+          claim_id: string
+          expected_proposal_version: number
+          lease_seconds: number
+          owner_instance_id: string
+          work_item_id: string
+        }
+        Returns: {
+          acquired_at: string
+          approved_proposal_version: number
+          attempt_id: string | null
+          expires_at: string
+          id: string
+          owner_instance_id: string
+          release_reason: string | null
+          released_at: string | null
+          target_reference: string
+          user_id: string
+          work_item_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "work_claims"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       acquire_work_claim: {
         Args: {
           claim_id: string
