@@ -40,13 +40,14 @@ import type { Json } from '@anima/types';
 /** Versão da lógica do Verifier. Bump quando a derivação do parecer mudar de forma
  * que um mesmo estado de evidência possa produzir veredito diferente.
  *
+ * v5: binding explicito de testes host-observados, fail-closed.
  * v4: revisão humana pendente explícita, sem convertê-la em prova automática.
  * v3: suficiência semântica por CLASSE DE AFIRMAÇÃO (`claim_kind`). Um aceite
  * funcional SUBSTANTIVO coberto apenas por `covers` + gate verde deixa de ser
  * `acceptance_criterion_covered` (era `verified` em v2) e passa a lacuna explícita
  * (`acceptance_substantive_gate_insufficient` ⇒ inconclusive); só `gate_assertion`
  * (gate host-observado que passou) ou escopo observado independentemente provam. */
-export const VERIFIER_VERSION = 'work-verifier-v4';
+export const VERIFIER_VERSION = 'work-verifier-v5';
 
 /** Achado compactado para o parecer durável: a espinha estruturada (código +
  * severidade + proveniência + sujeito), sem a prosa `detail` — que é recomputável. */

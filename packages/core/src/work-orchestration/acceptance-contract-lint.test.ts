@@ -36,3 +36,19 @@ test.each([undefined, 2, 1, '2'] as const)('modo só é v2 para número 2: %s', 
   const item = { intent: { execution_spec: { acceptance_contract: marker } }, proposal: { data: { expectedEffects: [] } } } as unknown as WorkItem;
   expect(lintItemAcceptanceContract(item).mode).toBe(marker === 2 ? 'v2' : 'legacy');
 });
+
+describe('lint test_binding', () => {
+  const binding: AutonomousValidationCriterion = { label: 'binding', command: 'npm test', proof: 'gate',
+    claimKind: 'test_binding', covers: ['aceite'], targetPaths: ['src/a.test.ts'],
+    binding: { testFiles: ['src/a.test.ts'], minNewTests: 1 } };
+  test.each(['npm test', 'npm test --workspace=@anima/core', 'npm run test', 'npm run test -- x'])('prova automática possível %s', command =>
+    expect(codes(['aceite'], [{ ...binding, command }])).toEqual([]));
+  test('ordem dos três códigos novos', () => expect(codes(['aceite'], [{
+    ...binding, command: 'jest', targetPaths: [], binding: { testFiles: ['src/a.test.ts'] },
+  }])).toEqual(['test_binding_files_outside_target_paths', 'test_binding_command_not_jest', 'test_binding_vacuous']));
+  test.each(['npm testing', 'npm run tests', 'npx jest'])('prefixo inválido %s', command =>
+    expect(codes(['aceite'], [{ ...binding, command }])).toEqual(['test_binding_command_not_jest']));
+  test('bound_tests evita vacuidade', () => expect(codes(['aceite'], [{
+    ...binding, binding: { testFiles: ['src/a.test.ts'], minNewTests: 0, boundTests: [{ file: 'src/a.test.ts', fullName: 'case' }] },
+  }])).toEqual([]));
+});

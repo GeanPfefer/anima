@@ -56,6 +56,7 @@ export type GateTargetScopeVerificationV1 =
  * (ex.: `git cat-file -e base:path`, `changedFiles ∩ alvo do gate`), nunca por regex.
  */
 export interface DifferentialGateBaselineV1 {
+  readonly testReport?: GateTestReportV1;
   readonly baseExitCode: number;
   readonly baseTimedOut: boolean;
   readonly baseCancelled: boolean;
@@ -136,6 +137,7 @@ export interface HostObservedGateEvidenceV1 {
 /** Baseline diferencial fornecido ao build (host). `baseOutcome` é DERIVADO no
  * build, nunca aceito aqui. Ausente ⇒ gate sem diferencial. */
 export interface DifferentialGateBaselineInput {
+  readonly testReport?: unknown;
   readonly baseExitCode: number;
   readonly baseTimedOut: boolean;
   readonly baseCancelled: boolean;
@@ -213,6 +215,7 @@ export const deriveObservedGateOutcome = (gate: { exitCode: number; timedOut: bo
 export function deriveDifferentialBaseline(value: unknown): DifferentialGateBaselineV1 | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const b = value as Record<string, unknown>;
+  const testReport = parseGateTestReport(b.testReport as Json | undefined);
   if (!isInt(b.baseExitCode)
     || typeof b.baseTimedOut !== 'boolean' || typeof b.baseCancelled !== 'boolean') {
     return null;
@@ -273,6 +276,7 @@ export function deriveDifferentialBaseline(value: unknown): DifferentialGateBase
     if ((scopeVerification.status === 'verified' && !equal) || (scopeVerification.status === 'mismatch' && equal)) return null;
   } else if (scopeVerification && !targets) return null;
   return {
+    ...(testReport === null ? {} : { testReport }),
     baseExitCode: b.baseExitCode,
     baseTimedOut: b.baseTimedOut,
     baseCancelled: b.baseCancelled,
@@ -443,7 +447,7 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
       label: gate.label, command: gate.command, exitCode: gate.exitCode,
       durationMs: gate.durationMs, timedOut: gate.timedOut, cancelled: gate.cancelled,
       outcome: deriveObservedGateOutcome({ exitCode: gate.exitCode, timedOut: gate.timedOut, cancelled: gate.cancelled }),
-      ...(gate.claimKind === 'gate_assertion' || gate.claimKind === 'substantive' ? { claimKind: gate.claimKind } : {}),
+      ...(gate.claimKind === 'gate_assertion' || gate.claimKind === 'substantive' || gate.claimKind === 'test_binding' ? { claimKind: gate.claimKind } : {}),
       ...(baseline === null ? {} : { baseline }),
     });
   }

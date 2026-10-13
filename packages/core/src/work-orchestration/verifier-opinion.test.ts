@@ -114,7 +114,7 @@ describe('computeVerifierOpinion', () => {
     // Bump obrigatório: a mesma evidência (aceite substantivo coberto só por gate)
     // passa a produzir verdict diferente sob a nova semântica; não pode ser gravada
     // como se ainda fosse v2.
-    expect(VERIFIER_VERSION).toBe('work-verifier-v4');
+    expect(VERIFIER_VERSION).toBe('work-verifier-v5');
   });
 
   test('sem handoff durável ⇒ null (parecer é sobre um resultado produzido)', () => {
@@ -235,9 +235,9 @@ describe('projectVerifierOpinionHistory', () => {
 
 describe('parecer v4 e revisão humana', () => {
   const opinion = () => computeVerifierOpinion(item(), [resultEvent(handoffWith())])!;
-  test('campo opcional ausente sem pendências e histórico v1-v3 preservado', () => {
+  test('campo opcional ausente sem pendências e histórico v1-v5 preservado', () => {
     expect(opinion().humanReview).toBeUndefined();
-    for (const verifierVersion of ['work-verifier-v1', 'work-verifier-v2', 'work-verifier-v3']) {
+    for (const verifierVersion of ['work-verifier-v1', 'work-verifier-v2', 'work-verifier-v3', 'work-verifier-v4', 'work-verifier-v5']) {
       const old = { ...opinion(), verifierVersion };
       expect(parseVerifierOpinion(old as unknown as Json)).toEqual(old);
     }
@@ -248,7 +248,7 @@ describe('parecer v4 e revisão humana', () => {
       schema_version: 1, target: { kind: 'project', reference: 'proj' }, permissions: [], limits: { max_attempts: 1 },
       validation_criteria: [{ label: 'human', proof: 'human_review', covers: ['e'] }],
     } } }, [resultEvent(handoffWith())])!;
-    expect(value.verifierVersion).toBe('work-verifier-v4');
+    expect(value.verifierVersion).toBe('work-verifier-v5');
     expect(value.humanReview).toEqual({ pending: ['e'] });
     expect(parseVerifierOpinion(value as unknown as Json)).toEqual(value);
   });

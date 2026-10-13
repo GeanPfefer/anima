@@ -50,7 +50,7 @@ export type WorkProofKind = 'gate' | 'scope' | 'human_review';
  * Irrelevante para `proof:'scope'` (prova independente por contenção observada) e
  * para critérios apenas declarados (a cargo do humano).
  */
-export type WorkClaimKind = 'gate_assertion' | 'substantive';
+export type WorkClaimKind = 'gate_assertion' | 'substantive' | 'test_binding';
 
 export interface AutonomousValidationCriterion {
   readonly label: string;
@@ -62,6 +62,11 @@ export interface AutonomousValidationCriterion {
   /** Classe de afirmação de um critério `proof:'gate'` (ver `WorkClaimKind`). Ausente
    * ⇒ o Verifier a trata de forma CONSERVADORA (não promovida a `gate_assertion`). */
   readonly claimKind?: WorkClaimKind;
+  readonly binding?: {
+    readonly testFiles: readonly string[];
+    readonly minNewTests?: number;
+    readonly boundTests?: readonly { readonly file: string; readonly fullName: string }[];
+  };
   /**
    * Alvo(s) ESTRUTURAL(is) do gate: caminhos relativos EXATOS DE ARQUIVO que este gate exercita/alveja
    * (inclui o(s) arquivo(s) de teste). Declarado, nunca inferido do `command`. Serve a
@@ -236,7 +241,33 @@ const parseValidationCriteria = (raw: Readonly<Record<string, Json>>): readonly 
     // FAIL-CLOSED: valor de `claim_kind` fora do domínio invalida o spec inteiro; ausência
     // é honesta (o Verifier trata como conservador, NÃO promove a `gate_assertion`).
     const claimKind = entry['claim_kind'];
-    if (claimKind !== undefined && claimKind !== 'gate_assertion' && claimKind !== 'substantive') return null;
+    if (claimKind !== undefined && claimKind !== 'gate_assertion' && claimKind !== 'substantive' && claimKind !== 'test_binding') return null;
+    let binding: AutonomousValidationCriterion['binding'];
+    if (claimKind === 'test_binding') {
+      if (proof !== 'gate' || command === undefined || raw['acceptance_contract'] !== 2) return null;
+      const rawBinding = entry['binding'];
+      if (!isPlainObject(rawBinding)) return null;
+      const files = rawBinding['test_files'];
+      if (!Array.isArray(files) || files.length === 0 || files.length > 20
+        || !files.every(file => isSafeRelativePath(file) && !/[\x00-\x1f*?\[\]{}]/.test(file)
+          && /\.(?:test|spec)\.(?:tsx?|jsx?)$/.test(file))
+        || new Set(files).size !== files.length) return null;
+      const min = rawBinding['min_new_tests'];
+      if (min !== undefined && (typeof min !== 'number' || !Number.isInteger(min) || min < 0 || min > 100)) return null;
+      const bound = rawBinding['bound_tests'];
+      const boundTests: { file: string; fullName: string }[] = [];
+      if (bound !== undefined) {
+        if (!Array.isArray(bound) || bound.length > 100) return null;
+        for (const test of bound) {
+          if (!isPlainObject(test) || typeof test['file'] !== 'string' || !files.includes(test['file'])
+            || typeof test['full_name'] !== 'string' || !test['full_name'].trim() || test['full_name'].length > 400) return null;
+          boundTests.push({ file: test['file'], fullName: test['full_name'] });
+        }
+        if (new Set(boundTests.map(test => JSON.stringify([test.file, test.fullName]))).size !== boundTests.length) return null;
+      }
+      binding = { testFiles: files as string[], ...(min === undefined ? {} : { minNewTests: min as number }),
+        ...(bound === undefined ? {} : { boundTests }) };
+    } else if (entry['binding'] !== undefined) return null;
     // FAIL-CLOSED: `target_paths`, quando presente, é lista NÃO-VAZIA de caminhos
     // relativos seguros; ausência é honesta (critério idêntico ao anterior). Qualquer
     // item malformado (não-array, vazio, não-string, absoluto/traversal/sensível)
@@ -244,7 +275,7 @@ const parseValidationCriteria = (raw: Readonly<Record<string, Json>>): readonly 
     const targetPaths = entry['target_paths'];
     if (targetPaths !== undefined && (!Array.isArray(targetPaths) || targetPaths.length === 0
       || !targetPaths.every(isSafeRelativePath))) return null;
-    criteria.push({ label, ...(command === undefined ? {} : { command }),
+    criteria.push({ label, ...(binding === undefined ? {} : { binding }), ...(command === undefined ? {} : { command }),
       ...(covers === undefined ? {} : { covers: covers as readonly string[] }),
       ...(proof === undefined ? {} : { proof: proof as WorkProofKind }),
       ...(claimKind === undefined ? {} : { claimKind: claimKind as WorkClaimKind }),

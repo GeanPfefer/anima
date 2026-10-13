@@ -394,3 +394,24 @@ describe('testReport aditivo I2a', () => {
     expect(exact.value.gates.map(g => g.testReport?.totals.tests)).toEqual([2000, 2000, undefined]);
   });
 });
+
+describe('I2c — baseline.testReport e claimKind aditivos', () => {
+  test('build e parse preservam test_binding e relatório do baseline', () => {
+    const result = build({ gates: [gate({ claimKind: 'test_binding',
+      baseline: { baseExitCode: 0, baseTimedOut: false, baseCancelled: false,
+        targetExistedAtBase: true, changeTouchedGateTargets: true, testReport: testReportFixture() } })] });
+    if (!result.ok) throw new Error(result.explanation);
+    expect(result.value.gates[0]?.claimKind).toBe('test_binding');
+    expect(result.value.gates[0]?.baseline?.testReport).toEqual(testReportFixture());
+    expect(parseHostObservedGateEvidence(result.value as unknown as Json)?.gates).toEqual(result.value.gates);
+  });
+  test('relatório inválido omitido sem invalidar baseline', () => {
+    const base = { baseExitCode: 0, baseTimedOut: false, baseCancelled: false,
+      targetExistedAtBase: true, changeTouchedGateTargets: true };
+    const clean = build({ gates: [gate({ baseline: base })] });
+    const bad = build({ gates: [gate({ baseline: { ...base, testReport: { invalid: true } } })] });
+    expect(bad).toEqual(clean);
+    if (!bad.ok) throw new Error(bad.explanation);
+    expect(parseHostObservedGateEvidence(bad.value as unknown as Json)).toEqual(bad.value);
+  });
+});

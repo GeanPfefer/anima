@@ -4,7 +4,8 @@ import type { WorkItem } from './types';
 export type AcceptanceContractLintCode =
   | 'covers_unknown_acceptance' | 'covers_noncanonical_text' | 'duplicate_cover'
   | 'acceptance_without_possible_proof' | 'gate_assertion_without_gate'
-  | 'human_review_with_command' | 'no_automated_proof';
+  | 'human_review_with_command' | 'no_automated_proof'
+  | 'test_binding_files_outside_target_paths' | 'test_binding_command_not_jest' | 'test_binding_vacuous';
 export interface AcceptanceContractLintFinding {
   readonly code: AcceptanceContractLintCode;
   readonly subject?: string;
@@ -26,9 +27,14 @@ export function lintAcceptanceContract(expectedEffects: readonly string[], crite
   for (const criterion of criteria) {
     const command = typeof criterion.command === 'string' && criterion.command.trim().length > 0;
     const proof = criterion.proof ?? (command ? 'gate' : 'declared');
-    const automatic = proof === 'scope' || (proof === 'gate' && command && criterion.claimKind === 'gate_assertion');
+    const automatic = proof === 'scope' || (proof === 'gate' && command && (criterion.claimKind === 'gate_assertion' || criterion.claimKind === 'test_binding'));
     if (criterion.claimKind === 'gate_assertion' && !(proof === 'gate' && command)) add('gate_assertion_without_gate', criterion.label);
     if (proof === 'human_review' && criterion.command !== undefined) add('human_review_with_command', criterion.label);
+    if (criterion.claimKind === 'test_binding') {
+      if (criterion.binding?.testFiles.some(file => !criterion.targetPaths?.includes(file))) add('test_binding_files_outside_target_paths', criterion.label);
+      if (!/^npm (?:test|run test)(?:\s|$)/.test(criterion.command ?? '')) add('test_binding_command_not_jest', criterion.label);
+      if (!(criterion.binding?.minNewTests ?? 0) && !criterion.binding?.boundTests?.length) add('test_binding_vacuous', criterion.label);
+    }
     for (const covered of criterion.covers ?? []) {
       if (!acceptance.has(covered)) {
         add('covers_unknown_acceptance', covered);

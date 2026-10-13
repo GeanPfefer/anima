@@ -893,3 +893,197 @@ test('revisão humana não suplanta scope observado nem torna contrato vazio inc
   const empty = verifyWorkResult({ ...base, authorized: { ...base.authorized, acceptanceCriteria: [], validationCriteria: [{ label: 'human', proof: 'human_review' }] } });
   expect(empty.verdict).toBe('verified');
 });
+import { deriveGateTestReport, type GateTestFileV1, type GateTestV1 } from './gate-test-report';
+import type { AutonomousValidationCriterion } from './eligibility';
+
+describe('Verifier v5 — test_binding observado', () => {
+  const path = 'src/a.test.ts';
+  const report = (names: readonly string[] = ['new case'], test: Partial<GateTestV1> = {},
+    suite: GateTestFileV1['suiteStatus'] = 'passed') => {
+    const status = test.status ?? 'passed';
+    const result = deriveGateTestReport({
+      success: status !== 'failed' && suite !== 'failed',
+      numTotalTestSuites: 1, numFailedTestSuites: suite === 'failed' ? 1 : 0,
+      numRuntimeErrorTestSuites: 0, numTotalTests: names.length,
+      numPassedTests: status === 'passed' ? names.length : 0,
+      numFailedTests: status === 'failed' ? names.length : 0,
+      numPendingTests: ['pending', 'skipped', 'disabled'].includes(status) ? names.length : 0,
+      numTodoTests: status === 'todo' ? names.length : 0,
+      testResults: [{ name: '/repo/' + path, status: suite, message: '',
+        assertionResults: names.map(fullName => ({ fullName, title: fullName, ancestorTitles: [], status, failureMessages: [],
+          invocations: test.invocations ?? 1 })) }],
+    }, { rootDir: '/repo' });
+    if (result.status !== 'ok') throw new Error(result.reason);
+    return result.report;
+  };
+  const criterion: AutonomousValidationCriterion = { label: 'unit', command: 'npm test', proof: 'gate',
+    claimKind: 'test_binding', covers: ['behavior'], targetPaths: [path],
+    binding: { testFiles: [path], minNewTests: 1, boundTests: [{ file: path, fullName: 'new case' }] } };
+  const input = (): WorkResultVerificationInput => {
+    const git = buildHostObservedGitEvidence({ workItemId: 'work-1', attemptId: 'attempt-1',
+      approvedProposalVersion: 2, baseSha: BASE, observedCommitSha: COMMIT,
+      observedChangedFiles: ['src/a.ts'], observedDiffFiles: [{ path: 'src/a.ts', insertions: 3, deletions: 1 }],
+      observedAt: '2026-08-14T12:00:00.000Z' });
+    if (!git.ok) throw new Error(git.explanation);
+    return baseInput({ observed: git.value,
+      authorized: { includedScope: ['src/a.ts'], excludedScope: [], acceptanceCriteria: ['behavior'],
+        validationCriteria: [criterion] },
+      observedGates: gateEvidenceWith({ changeAuthorization: { declaredScope: ['src/a.ts'], excludedScope: [], changedFiles: ['src/a.ts'] },
+        gates: [{ label: 'unit', command: 'npm test', exitCode: 0, durationMs: 1, timedOut: false,
+          cancelled: false, testReport: report(), baseline: { baseExitCode: 1, baseTimedOut: false, baseCancelled: false,
+            targets: [{ path, existedAtBase: false, changed: true }] } }] }),
+    });
+  };
+  const gateInput = (mutate: (gate: NonNullable<WorkResultVerificationInput['observedGates']>['gates'][number]) =>
+    NonNullable<WorkResultVerificationInput['observedGates']>['gates'][number]) => {
+    const value = input();
+    return { ...value, observedGates: { ...value.observedGates!, gates: [mutate(value.observedGates!.gates[0]!)] } };
+  };
+  const check = (value: WorkResultVerificationInput, code: string, violation = false) => {
+    const result = verifyWorkResult(value);
+    expect(codes(result)).toContain(code);
+    expect(codes(result)).toContain('acceptance_test_binding_unmet');
+    expect(codes(result)).not.toContain('test_binding_satisfied');
+    expect(codes(result)).not.toContain('acceptance_criterion_covered');
+    expect(result.verdict).toBe(violation ? 'rejected' : 'inconclusive');
+    expect(result.findings.find(f => f.code === code)).toMatchObject({
+      severity: violation ? 'violation' : 'gap', provenance: 'independent', subject: 'unit',
+    });
+  };
+  test('arquivo novo satisfaz minNewTests, prova independente completa', () => {
+    const value = input();
+    const before = JSON.stringify(value);
+    const result = verifyWorkResult(value);
+    expect(result.verdict).toBe('verified');
+    expect(result.findings.find(f => f.code === 'test_binding_satisfied')).toMatchObject({
+      severity: 'ok', provenance: 'independent', subject: 'unit',
+    });
+    expect(codes(result)).toContain('acceptance_criterion_covered');
+    expect(verifyWorkResult(value)).toEqual(result);
+    expect(JSON.stringify(value)).toBe(before);
+  });
+  test('atestação passed nunca substitui observação', () => check({ ...input(), observedGates: null }, 'test_report_uncorrelated'));
+  test('sem git ou autorização não prova', () => {
+    check({ ...input(), observed: null }, 'test_report_uncorrelated');
+    const value = input();
+    check({ ...value, observedGates: { ...value.observedGates!, changeAuthorization: undefined } }, 'test_report_uncorrelated');
+  });
+  test('rótulo diferente não prova', () => check(gateInput(g => ({ ...g, label: 'other' })), 'test_report_uncorrelated'));
+  test('correlação diferente não prova', () => {
+    const value = input();
+    expect(codes(verifyWorkResult({ ...value, observedGates: { ...value.observedGates!, attemptId: 'other' } })))
+      .toContain('test_report_uncorrelated');
+  });
+  test('revisão diferente é violação antes de verificar presença de relatório', () => {
+    const value = gateInput(g => ({ ...g, testReport: undefined }));
+    check({ ...value, observedGates: { ...value.observedGates!, changeAuthorization: {
+      ...value.observedGates!.changeAuthorization!, changedFiles: ['src/other.ts'],
+    } } }, 'test_report_revision_mismatch', true);
+  });
+  test('igualdade normaliza caixa e barras só para revisão', () => {
+    const value = input();
+    expect(verifyWorkResult({ ...value, observedGates: { ...value.observedGates!, changeAuthorization: {
+      ...value.observedGates!.changeAuthorization!, changedFiles: ['SRC\\A.TS', 'src/a.ts'],
+    } } }).verdict).toBe('verified');
+  });
+  test('relatório inválido omitido pelo builder vira lacuna', () => {
+    const value = input();
+    const original = value.observedGates!.gates[0]!;
+    const evidence = gateEvidenceWith({
+      changeAuthorization: { declaredScope: ['src/a.ts'], excludedScope: [], changedFiles: ['src/a.ts'] },
+      gates: [{ ...original, testReport: { ...original.testReport!, digest: 'invalid' } }],
+    });
+    expect(evidence.gates[0]!.testReport).toBeUndefined();
+    check({ ...value, observedGates: evidence }, 'test_report_missing');
+  });
+  test('gate terminal falho nunca prova mesmo com relatório passed', () => {
+    const result = verifyWorkResult(gateInput(g => ({ ...g, outcome: 'failed', exitCode: 1 })));
+    expect(codes(result)).toContain('test_report_uncorrelated');
+    expect(codes(result)).toContain('acceptance_test_binding_unmet');
+    expect(result.verdict).toBe('rejected');
+  });
+  test('relatório ausente', () => check(gateInput(g => ({ ...g, testReport: undefined })), 'test_report_missing'));
+  test('relatório apenas em gate anterior nunca prova reparo terminal', () => {
+    const value = input();
+    const gate = value.observedGates!.gates[0]!;
+    check({ ...value, observedGates: { ...value.observedGates!, gates: [gate, { ...gate, testReport: undefined }] } }, 'test_report_missing');
+  });
+  test('arquivo ligado ausente', () => check(gateInput(g => ({ ...g, testReport: {
+    ...g.testReport!, files: [{ ...g.testReport!.files[0]!, path: 'src/other.test.ts' }],
+  } })), 'test_binding_unmet'));
+  test('contradição exit 0 vs teste failed', () => check(gateInput(g => ({
+    ...g, testReport: report(['new case'], { status: 'failed' }),
+  })), 'test_report_contradicts_gate', true));
+  test('contradição exit 0 vs suíte failed', () => check(gateInput(g => ({
+    ...g, testReport: report(['new case'], {}, 'failed'),
+  })), 'test_report_contradicts_gate', true));
+  test.each(['pending', 'skipped', 'todo', 'disabled'] as const)('teste %s não executado', status =>
+    check(gateInput(g => ({ ...g, testReport: report(['new case'], { status }) })), 'bound_test_not_executed'));
+  test.each(['focused', 'unknown'] as const)('suíte %s não prova', suite =>
+    check(gateInput(g => ({ ...g, testReport: report(['new case'], {}, suite) })), 'bound_test_not_executed'));
+  test('runtimeError não prova', () => check(gateInput(g => ({ ...g, testReport: {
+    ...g.testReport!, files: [{ ...g.testReport!.files[0]!, runtimeError: true }],
+  } })), 'bound_test_not_executed'));
+  test('retry não prova', () => check(gateInput(g => ({
+    ...g, testReport: report(['new case'], { invocations: 2 }),
+  })), 'test_report_flaky'));
+  test('boundTests ausente no relatório', () => check(gateInput(g => ({
+    ...g, testReport: report(['different case']),
+  })), 'test_binding_unmet'));
+  test('baseline ausente não conta testes como novos', () => check(gateInput(g => ({
+    ...g, baseline: undefined,
+  })), 'test_binding_baseline_missing'));
+  test('arquivo existente exige baseline report', () => check(gateInput(g => ({
+    ...g, baseline: { ...g.baseline!, targets: [{ path, existedAtBase: true, changed: true }] },
+  })), 'test_binding_baseline_missing'));
+  test('arquivo existente conta apenas nomes novos', () => {
+    const value = gateInput(g => ({ ...g, testReport: report(['old case', 'new case']),
+      baseline: { ...g.baseline!, targets: [{ path, existedAtBase: true, changed: true }],
+        testReport: report(['old case']) } }));
+    expect(verifyWorkResult(value).verdict).toBe('verified');
+    check({ ...value, observedGates: { ...value.observedGates!, gates: [{
+      ...value.observedGates!.gates[0]!, testReport: report(['new case']),
+      baseline: { ...value.observedGates!.gates[0]!.baseline!, testReport: report(['new case']) },
+    }] } }, 'test_binding_unmet');
+  });
+  test('teste removido é lacuna', () => check(gateInput(g => ({
+    ...g, baseline: { ...g.baseline!, testReport: report(['removed']) },
+  })), 'bound_test_removed'));
+  test('boundTests pode provar sem baseline quando minNewTests é zero', () => {
+    const value = gateInput(g => ({ ...g, baseline: undefined }));
+    expect(verifyWorkResult({ ...value, authorized: { ...value.authorized,
+      validationCriteria: [{ ...criterion, binding: { ...criterion.binding!, minNewTests: 0 } }],
+    } }).verdict).toBe('verified');
+  });
+  test('outra prova automática suficiente mantém aceite coberto', () => {
+    const value = gateInput(g => ({ ...g, testReport: undefined }));
+    const result = verifyWorkResult({ ...value, authorized: { ...value.authorized, validationCriteria: [
+      criterion, { label: 'unit', command: 'npm test', claimKind: 'gate_assertion', covers: ['behavior'] },
+    ] } });
+    expect(codes(result)).toContain('acceptance_criterion_covered');
+    expect(codes(result)).not.toContain('acceptance_test_binding_unmet');
+    expect(result.verdict).toBe('inconclusive');
+  });
+  test('human_review coexiste sem substituir binding', () => {
+    const value = gateInput(g => ({ ...g, testReport: undefined }));
+    check({ ...value, authorized: { ...value.authorized, validationCriteria: [
+      criterion, { label: 'human', proof: 'human_review', covers: ['behavior'] },
+    ] } }, 'test_report_missing');
+    const green = input();
+    const result = verifyWorkResult({ ...green, authorized: { ...green.authorized,
+      acceptanceCriteria: ['behavior', 'human'], validationCriteria: [
+        criterion, { label: 'human', proof: 'human_review', covers: ['human'] },
+      ],
+    } });
+    expect(result.verdict).toBe('verified');
+    expect(result.humanReview.pending).toEqual(['human']);
+  });
+  test('critérios binding em ordem e somente primeiro defeito por critério', () => {
+    const value = gateInput(g => ({ ...g, testReport: undefined }));
+    const result = verifyWorkResult({ ...value, authorized: { ...value.authorized, validationCriteria: [
+      criterion, { ...criterion, label: 'second' },
+    ] } });
+    expect(result.findings.filter(f => ['test_report_missing', 'test_report_uncorrelated'].includes(f.code))
+      .map(f => [f.code, f.subject])).toEqual([['test_report_missing', 'unit'], ['test_report_uncorrelated', 'second']]);
+  });
+});

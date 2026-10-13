@@ -167,3 +167,46 @@ describe('contrato de aceite v2 opt-in', () => {
     expect(codes(withContract(undefined, [{ label: 'bad', proof: 'unknown' }]))).toEqual(['validation_criteria_missing']);
   });
 });
+
+describe('test_binding — parser fail-closed', () => {
+  const criterion = { label: 'unit', proof: 'gate', command: 'npm test', claim_kind: 'test_binding',
+    binding: { test_files: ['src/a.test.ts'], min_new_tests: 1,
+      bound_tests: [{ file: 'src/a.test.ts', full_name: 'suite case' }] } };
+  const parse = (entry: Json, version: Json = 2) => readAutonomousExecutionSpec(makeItem({}, {
+    ...(fullSpec as object), acceptance_contract: version, validation_criteria: [entry],
+  } as Json).intent);
+  test('projeta binding explícito', () => {
+    expect(parse(criterion)?.validationCriteria[0]?.binding).toEqual({
+      testFiles: ['src/a.test.ts'], minNewTests: 1, boundTests: [{ file: 'src/a.test.ts', fullName: 'suite case' }],
+    });
+    expect(parse({ ...criterion, binding: { test_files: ['src/a.spec.jsx'], min_new_tests: 0, bound_tests: [] } })).not.toBeNull();
+  });
+  test.each([
+    { ...criterion, proof: undefined }, { ...criterion, proof: 'scope' },
+    { ...criterion, command: undefined }, { ...criterion, command: ' ' },
+    { ...criterion, binding: undefined }, { ...criterion, binding: null },
+    { ...criterion, claim_kind: 'substantive' }, { ...criterion, claim_kind: undefined },
+    { ...criterion, claim_kind: 'unknown' },
+  ])('rejeita envelope inválido %#', entry => expect(parse(entry as Json)).toBeNull());
+  test('legado não aceita binding', () => expect(parse(criterion, 1)).toBeNull());
+  test.each([
+    [], ['src/a.ts'], ['../a.test.ts'], ['/a.test.ts'], ['C:/a.test.ts'],
+    ['.git/a.test.ts'], ['.env/a.test.ts'], ['node_modules/a.test.ts'],
+    ['src/*.test.ts'], ['src/?.test.ts'], ['src/[a].test.ts'], ['src/{a}.test.ts'],
+    ['src/a.test.ts', 'src/a.test.ts'], Array.from({ length: 21 }, (_, i) => `src/${i}.test.ts`),
+    [42], 'src/a.test.ts',
+  ].map(value => [value]))('rejeita test_files %#', test_files => expect(parse({ ...criterion, binding: { test_files } } as Json)).toBeNull());
+  test.each([-1, 101, 1.1, '1', null])('rejeita min_new_tests %#', min_new_tests =>
+    expect(parse({ ...criterion, binding: { ...criterion.binding, min_new_tests } } as Json)).toBeNull());
+  test.each([
+    [{ file: 'src/other.test.ts', full_name: 'case' }],
+    [{ file: 'src/a.test.ts', full_name: ' ' }],
+    [{ file: 'src/a.test.ts', full_name: 'x'.repeat(401) }],
+    [{ file: 'src/a.test.ts', full_name: 42 }],
+    [{ file: 'src/a.test.ts' }], [null],
+    Array.from({ length: 101 }, (_, i) => ({ file: 'src/a.test.ts', full_name: String(i) })),
+    [{ file: 'src/a.test.ts', full_name: 'case' }, { file: 'src/a.test.ts', full_name: 'case' }],
+    'case',
+  ].map(value => [value]))('rejeita bound_tests %#', bound_tests =>
+    expect(parse({ ...criterion, binding: { ...criterion.binding, bound_tests } } as Json)).toBeNull());
+});

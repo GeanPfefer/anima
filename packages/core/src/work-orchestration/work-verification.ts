@@ -63,6 +63,18 @@ export type WorkVerificationSeverity = 'ok' | 'gap' | 'violation';
 export type WorkVerificationProvenance = 'independent' | 'attested';
 
 export type WorkVerificationFindingCode =
+  | 'test_binding_satisfied'
+  | 'test_report_uncorrelated'
+  | 'test_report_revision_mismatch'
+  | 'test_report_missing'
+  | 'test_binding_unmet'
+  | 'test_report_contradicts_gate'
+  | 'bound_test_not_executed'
+  | 'test_report_flaky'
+  | 'test_binding_baseline_missing'
+  | 'bound_test_removed'
+  | 'acceptance_test_binding_unmet'
+
   // Correlação da tentativa (INT-02).
   | 'correlation_verified'
   | 'correlation_mismatch'
@@ -437,8 +449,55 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     observedGatesUsable ? terminalGates : handoff.gates;
   const passedByLabel = new Set(gateOutcomeSource.filter(g => g.outcome === 'passed').map(g => g.label));
   const anyGateByLabel = new Set(gateOutcomeSource.map(g => g.label));
+  const bindingProven = new Set<AutonomousValidationCriterion>();
+  const evaluateBinding = (criterion: AutonomousValidationCriterion): WorkVerificationFindingCode => {
+    const matching = terminalGates.filter(gate => gate.label === criterion.label);
+    const gate = matching[matching.length - 1];
+    if (!observedGatesUsable || !gate || gate.outcome !== 'passed') return 'test_report_uncorrelated';
+    if (!observedUsable || !observedGates!.changeAuthorization) return 'test_report_uncorrelated';
+    const revisionPath = (path: string): string => norm(path).toLowerCase();
+    const gitPaths = new Set([...observed!.observedChangedFiles,
+      ...observed!.observedDiffSummary.files.map(file => file.path)].map(revisionPath));
+    const gatePaths = new Set(observedGates!.changeAuthorization.changedFiles.map(revisionPath));
+    if (gitPaths.size !== gatePaths.size || [...gitPaths].some(path => !gatePaths.has(path))) return 'test_report_revision_mismatch';
+    const report = gate.testReport;
+    if (!report) return 'test_report_missing';
+    const binding = criterion.binding;
+    if (!binding || !binding.testFiles.length) return 'test_binding_unmet';
+    const files = binding.testFiles.map(path => report.files.find(file => file.path === path));
+    if (files.some(file => !file)) return 'test_binding_unmet';
+    if (report.files.some(file => file.suiteStatus === 'failed' || file.tests.some(test => test.status === 'failed'))) return 'test_report_contradicts_gate';
+    if (files.some(file => file!.suiteStatus !== 'passed' || file!.runtimeError
+      || file!.tests.some(test => test.status !== 'passed'))) return 'bound_test_not_executed';
+    if (files.some(file => file!.tests.some(test => test.retried || test.invocations > 1))) return 'test_report_flaky';
+    if (binding.boundTests?.some(bound => !files.find(file => file!.path === bound.file)!
+      .tests.some(test => test.fullName === bound.fullName && test.status === 'passed'))) return 'test_binding_unmet';
+    let newTests = 0;
+    for (const file of files) {
+      const baselineFile = gate.baseline?.testReport?.files.find(base => base.path === file!.path);
+      const names = new Set(file!.tests.map(test => test.fullName));
+      if (baselineFile?.tests.some(test => !names.has(test.fullName))) return 'bound_test_removed';
+      if (gate.baseline?.targets?.some(target => target.path === file!.path && !target.existedAtBase)) {
+        newTests += file!.tests.length;
+      } else if (baselineFile) {
+        const oldNames = new Set(baselineFile.tests.map(test => test.fullName));
+        newTests += file!.tests.filter(test => !oldNames.has(test.fullName)).length;
+      } else if ((binding.minNewTests ?? 0) > 0) return 'test_binding_baseline_missing';
+    }
+    if (newTests < (binding.minNewTests ?? 0)
+      || (!(binding.minNewTests ?? 0) && !binding.boundTests?.length)) return 'test_binding_unmet';
+    return 'test_binding_satisfied';
+  };
   for (const criterion of authorized.validationCriteria) {
     const proofKind = proofKindOf(criterion);
+    if (criterion.claimKind === 'test_binding') {
+      const code = evaluateBinding(criterion);
+      const finding = code === 'test_binding_satisfied' ? ok
+        : code === 'test_report_revision_mismatch' || code === 'test_report_contradicts_gate' ? violation : gap;
+      findings.push(finding(code, code, criterion.label, 'independent'));
+      if (code === 'test_binding_satisfied') bindingProven.add(criterion);
+      continue;
+    }
     if (proofKind === 'human_review') continue;
     if (proofKind === 'scope') {
       // Prova por INVARIANTE DE ESCOPO: satisfeita quando o host confirmou a contenção
@@ -499,7 +558,8 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     const gatePassed = proofKind === 'gate' && passedByLabel.has(criterion.label);
     const isGateAssertion = criterion.claimKind === 'gate_assertion';
     // A prova deste critério está SATISFEITA pela evidência do seu PRÓPRIO tipo?
-    const proven = proofKind === 'gate' ? (isGateAssertion && gatePassed)
+    const proven = criterion.claimKind === 'test_binding' ? bindingProven.has(criterion)
+      : proofKind === 'gate' ? (isGateAssertion && gatePassed)
       : proofKind === 'scope' ? scopeIndependentlyClean
       : false; // `declared` não cobre aceite (a cargo do humano).
     for (const covered of criterion.covers ?? []) {
@@ -508,7 +568,7 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
           `O critério "${criterion.label}" declara cobrir um item que não pertence ao aceite aprovado.`, covered, 'independent'));
       } else if (proven) {
         coveredAcceptance.add(covered);
-      } else if (gatePassed && !isGateAssertion) {
+      } else if (gatePassed && !isGateAssertion && criterion.claimKind !== 'test_binding') {
         // Gate verde + covers, mas a afirmação é substantiva (ou não classificada):
         // associação declarada insuficiente. Marca para a lacuna explícita (a menos
         // que outra prova suficiente cubra o mesmo aceite — `coveredAcceptance` vence).
@@ -520,6 +580,8 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     if (coveredAcceptance.has(approved)) {
       findings.push(ok('acceptance_criterion_covered',
         `O critério aprovado possui associação explícita com uma prova suficiente (gate-assertion aprovado ou escopo observado).`, approved));
+    } else if (authorized.validationCriteria.some(c => c.claimKind === 'test_binding' && c.covers?.includes(approved))) {
+      findings.push(gap('acceptance_test_binding_unmet', 'O binding de testes não foi provado.', approved, 'independent'));
     } else if (authorized.validationCriteria.some(c => c.proof === 'human_review' && c.covers?.includes(approved))) {
       findings.push(ok('human_review_pending', 'O aceite aguarda revisão humana; não constitui prova automática.', approved));
     } else if (substantiveOnlyAcceptance.has(approved)) {
