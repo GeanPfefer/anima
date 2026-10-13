@@ -615,3 +615,97 @@ describe('investigation dispatch nativo com identidade injetada (sem banco)', ()
     expect(parsed.human).toContain('[established] Contract exists');
   });
 });
+
+
+describe('work evidence — Verifier v4 I1b', () => {
+  const itemWithContract = (marker: boolean, human: boolean): WorkItem => ({
+    ...reviewItem,
+    intent: { execution_spec: {
+      schema_version: 1, ...(marker ? { acceptance_contract: 2 } : {}),
+      target: { kind: 'project', reference: 'anima' }, permissions: ['workspace_read'],
+      limits: { max_attempts: 1 },
+      validation_criteria: [
+        { label: 'Escopo', proof: 'scope', covers: ['Escopo preservado'] },
+        ...(human ? [{ label: 'Revisão', proof: 'human_review', covers: ['Apresentação adequada'] }] : []),
+      ],
+    } },
+    proposal: { ...reviewItem.proposal, data: { ...reviewItem.proposal.data,
+      expectedEffects: ['Escopo preservado', ...(human ? ['Apresentação adequada'] : [])],
+    } },
+  });
+
+  test('JSON legado sem resultado mantém todos os campos antigos intactos e só adiciona os dois campos', async () => {
+    const result = await runWorkEvidence(fakePort(), 'i');
+    expect(JSON.parse(JSON.stringify(result.payload))).toEqual({
+      ok: true, kind: 'work-evidence', reference: null, title: null, id: 'i', state: 'review', proposalVersion: 2,
+      attemptId: null, verifierLive: null, verifierRecorded: null,
+      acceptanceCriteria: [], validationCriteria: [], declaredValidations: null,
+      gaps: [], violations: [], findings: [],
+      humanReviewPending: [], contractLint: { mode: 'legacy', findings: [] },
+    });
+  });
+
+  test.each([false, true])('contrato sem achados preserva mode; marcador v2 = %s', async marker => {
+    const item = itemWithContract(marker, false);
+    const result = await runWorkEvidence(fakePort({ getItem: async () => ok(item) }), 'i');
+    expect(result.payload).toMatchObject({ humanReviewPending: [], contractLint: { mode: marker ? 'v2' : 'legacy', findings: [] },
+      acceptanceCriteria: [{ criterion: 'Escopo preservado', covered: false, proof: 'scope' }],
+    });
+  });
+
+  test('achados incluem code, detail e subject null quando ausente', async () => {
+    const item = itemWithContract(true, true);
+    const raw = item.intent.execution_spec;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('spec ausente');
+    const invalid: WorkItem = { ...item, intent: { execution_spec: { ...raw,
+      validation_criteria: [{ label: 'Revisão', proof: 'human_review', covers: ['Apresentação adequada'] }],
+    } } };
+    const result = await runWorkEvidence(fakePort({ getItem: async () => ok(invalid) }), 'i');
+    expect(result.payload).toMatchObject({ contractLint: { mode: 'v2', findings: [
+      { code: 'acceptance_without_possible_proof', subject: 'Escopo preservado', detail: 'acceptance_without_possible_proof: Escopo preservado' },
+      { code: 'no_automated_proof', subject: null, detail: 'no_automated_proof' },
+    ] } });
+  });
+
+  test.each([false, true])('pendências vêm da verificação viva; revisão declarada = %s', async human => {
+    const { buildWorktreeHandoff, reconstructWorkPresentation } = await import('@anima/core');
+    const item = itemWithContract(true, human);
+    const handoff = buildWorktreeHandoff({ workItemId: 'i', attemptId: 'a1', approvedProposalVersion: 2,
+      executorId: 'worktree-v1', backendId: 'ollama', model: null,
+      baseSha: 'a'.repeat(40), branch: 'anima-work/a1', commitSha: 'b'.repeat(40), status: 'succeeded',
+      changedFiles: ['apps/web/cli/app.ts'], diffFiles: [{ path: 'apps/web/cli/app.ts', insertions: 1, deletions: 0 }],
+      gates: [{ label: 'Teste', command: 'npm test', exitCode: 0, outcome: 'passed' }],
+    });
+    if (!handoff.ok) throw new Error(handoff.explanation);
+    const event: WorkEvent = { ...resultEvent, payload: { schema_version: 1, data: {
+      summary: 'feito', result_references: ['commit:a'], work_item_id: 'i', attempt_id: 'a1', approved_proposal_version: 2,
+      executor_signal: { worktreeHandoff: JSON.parse(JSON.stringify(handoff.value)) },
+    } } };
+    const presentation = reconstructWorkPresentation(item, [event], []);
+    expect(presentation.verification).not.toBeNull();
+    const result = await runWorkEvidence(fakePort({ getItem: async () => ok(item), listEvents: async () => ok([event]) }), 'i');
+    expect(result.payload).toMatchObject({
+      humanReviewPending: human ? ['Apresentação adequada'] : [],
+      contractLint: { mode: 'v2', findings: [] },
+      acceptanceCriteria: [
+        { criterion: 'Escopo preservado', proof: 'scope' },
+        ...(human ? [{ criterion: 'Apresentação adequada', covered: false, proof: 'human_review' }] : []),
+      ],
+    });
+    if (result.payload.kind !== 'work-evidence') throw new Error('payload errado');
+    expect(result.payload.humanReviewPending).toEqual(presentation.verification?.humanReview.pending);
+    expect(result.payload.findings).toEqual(presentation.verification?.findings.map(f => ({ ...f, subject: f.subject ?? null })));
+  });
+
+  test('investigação mantém revisão própria e nenhuma pendência de verificação de programação', async () => {
+    const { investigationItem, investigationFixture } = await import('../../../packages/core/src/work-orchestration/__fixtures__/investigation-review');
+    const fixture = investigationFixture();
+    const result = await runWorkEvidence(fakePort({ getItem: async () => ok(investigationItem),
+      listEvents: async () => ok([fixture.result, fixture.verifier]),
+    }), investigationItem.id);
+    expect(result.payload).toMatchObject({ verifierLive: null, humanReviewPending: [],
+      acceptanceCriteria: [{ criterion: 'Answer the question', covered: null, proof: null }],
+      investigationReview: { humanReview: { status: 'pending' } }, contractLint: { mode: 'legacy' },
+    });
+  });
+});

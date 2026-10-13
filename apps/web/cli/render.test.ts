@@ -1,5 +1,5 @@
 import { renderHuman } from './render';
-import type { CliPayload } from './app';
+import type { CliPayload, WorkEvidencePayload } from './app';
 import { projectExecutorCandidates, recommendExecutor } from '@/lib/work-orchestration/executor-discovery';
 
 describe('render humano da CLI', () => {
@@ -82,4 +82,51 @@ test('list prioriza referência e título e mantém diagnóstico do UUID', () =>
   ] });
   expect(out.split('\n').slice(0, 3)).toEqual(['SDC-01 — Título canônico', 'Estado: approved', 'id interno: uuid']);
   expect(out).toContain('histórico — sem referência humana canônica\nEstado: review\nid interno: histórico');
+});
+
+
+describe('work evidence — apresentação aditiva v4', () => {
+  const payload: WorkEvidencePayload = {
+    ok: true, kind: 'work-evidence', reference: null, title: null, id: 'i', state: 'review', proposalVersion: 2,
+    attemptId: null, verifierLive: null, verifierRecorded: null,
+    acceptanceCriteria: [{ criterion: 'A', covered: true, proof: 'gate' }, { criterion: 'B', covered: false, proof: 'scope' }],
+    validationCriteria: [], declaredValidations: null, gaps: [], violations: [], findings: [],
+    humanReviewPending: [], contractLint: { mode: 'legacy', findings: [] },
+  };
+  const previousOutput = [
+    'i — sem referência humana canônica', 'Estado: review', 'id interno: i',
+    'Verifier (agora): sem parecer (sem handoff durável)', '',
+    'Critérios de aceite (aprovados pelo humano):',
+    '  ✓ A  [prova: gate]', '  ✗ B  [prova: escopo]   (sem evidência suficiente)',
+  ].join('\n');
+
+  test.each(['legacy', 'v2'] as const)('sem pendências nem achados mantém saída byte a byte (%s)', mode => {
+    expect(renderHuman({ ...payload, contractLint: { mode, findings: [] } })).toBe(previousOutput);
+  });
+
+  test('pendências mostram um item por aceite e rótulo human_review sem seção de lint vazia', () => {
+    const out = renderHuman({ ...payload, humanReviewPending: ['C', 'D'],
+      acceptanceCriteria: [{ criterion: 'C', covered: false, proof: 'human_review' }],
+    });
+    expect(out).toContain('Revisão humana pendente:\n  · C\n  · D');
+    expect(out).toContain('[prova: human_review]');
+    expect(out).not.toContain('Contrato de aceite');
+  });
+
+  test.each(['legacy', 'v2'] as const)('lint mostra mode, code e detail sem seção humana vazia (%s)', mode => {
+    const out = renderHuman({ ...payload, contractLint: { mode, findings: [
+      { code: 'duplicate_cover', subject: 'A', detail: 'Aceite duplicado' },
+      { code: 'no_automated_proof', subject: null, detail: 'Sem prova automática' },
+    ] } });
+    expect(out).toContain(`Contrato de aceite (${mode}):\n  [duplicate_cover] Aceite duplicado\n  [no_automated_proof] Sem prova automática`);
+    expect(out).not.toContain('Revisão humana pendente');
+  });
+
+  test('ambas as seções aparecem quando preenchidas', () => {
+    const out = renderHuman({ ...payload, humanReviewPending: ['C'], contractLint: { mode: 'v2', findings: [
+      { code: 'no_automated_proof', subject: null, detail: 'Sem prova automática' },
+    ] } });
+    expect(out).toContain('Revisão humana pendente:');
+    expect(out).toContain('Contrato de aceite (v2):');
+  });
 });

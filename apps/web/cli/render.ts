@@ -12,8 +12,8 @@ const DOT = '·'; // ·
 const verdictLabel = (v: VerifierSummaryPayload | null): string =>
   v === null ? 'sem parecer (sem handoff durável)' : `${v.verdict} (violations ${v.violations} ${DOT} gaps ${v.gaps} ${DOT} checks ${v.checks})`;
 
-const proofLabel = (proof: 'gate' | 'scope' | null): string =>
-  proof === 'gate' ? 'gate' : proof === 'scope' ? 'escopo' : '—';
+const proofLabel = (proof: 'gate' | 'scope' | 'human_review' | null): string =>
+  proof === 'gate' ? 'gate' : proof === 'scope' ? 'escopo' : proof === 'human_review' ? 'human_review' : '—';
 
 const workHeading = (id: string, reference: string | null, title: string | null, state: string): string[] => [
   reference !== null ? `${reference} — ${title ?? ''}` : `${id} — sem referência humana canônica`,
@@ -198,6 +198,14 @@ export function renderHuman(payload: CliPayload): string {
       const lines: string[] = [];
       lines.push(...workHeading(payload.id, payload.reference, payload.title, payload.state));
       if (payload.attemptId) lines.push(`Tentativa: ${payload.attemptId}`);
+      if (payload.humanReviewPending.length > 0) {
+        lines.push('', 'Revisão humana pendente:');
+        for (const criterion of payload.humanReviewPending) lines.push(`  ${DOT} ${criterion}`);
+      }
+      if (payload.contractLint.findings.length > 0) {
+        lines.push('', `Contrato de aceite (${payload.contractLint.mode}):`);
+        for (const finding of payload.contractLint.findings) lines.push(`  [${finding.code}] ${finding.detail}`);
+      }
       if (payload.investigationReview) {
         lines.push(...investigationLines(payload.investigationReview, false));
         lines.push(`Relatório completo: anima work investigation ${payload.reference ?? payload.id}`);

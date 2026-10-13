@@ -4,6 +4,7 @@ import type { ParsedCommand } from './args';
 import { readWorkHumanReference, type WorkReferenceResult, type WorkReferenceAmbiguousCandidate } from '@/lib/work-orchestration/work-reference';
 import {
   projectInvestigationReview,
+  lintItemAcceptanceContract,
   type InvestigationReviewV1,
   COMPUTE_ROUTER_REQUESTED_DURATION_MS,
   projectComputePreference,
@@ -58,8 +59,8 @@ export interface AcceptanceCriterionCoverage {
   readonly criterion: string;
   readonly covered: boolean | null;
   /** Requisito de prova declarado no execution_spec: `gate` (comando), `scope`
-   * (invariante observada) ou `null` quando nenhum critério de validação o cobre. */
-  readonly proof: 'gate' | 'scope' | null;
+   * (invariante observada), `human_review` (revisão humana) ou `null` quando nenhum critério de validação o cobre. */
+  readonly proof: 'gate' | 'scope' | 'human_review' | null;
 }
 export interface ValidationCriterionCoverage {
   readonly label: string;
@@ -133,6 +134,11 @@ export interface WorkInvestigationPayload {
   readonly review: InvestigationReviewV1;
 }
 export interface WorkEvidencePayload {
+  readonly humanReviewPending: readonly string[];
+  readonly contractLint: {
+    readonly mode: 'v2' | 'legacy';
+    readonly findings: readonly { readonly code: string; readonly subject: string | null; readonly detail: string }[];
+  };
   readonly investigationReview?: InvestigationReviewV1;
   readonly reference: string | null;
   readonly title: string | null;
@@ -433,13 +439,14 @@ function verifierLiveSummary(report: WorkVerificationReport | null | undefined):
   };
 }
 
-/** Mapa critério de aceite → requisito de prova declarado (gate/scope), lido do
+/** Mapa critério de aceite → requisito de prova declarado (gate/scope/human_review), lido do
  * execution_spec (independente do resultado). Nem toda prova é um gate. */
-function acceptanceProofKinds(item: WorkItem): ReadonlyMap<string, 'gate' | 'scope'> {
+function acceptanceProofKinds(item: WorkItem): ReadonlyMap<string, 'gate' | 'scope' | 'human_review'> {
   const spec = readAutonomousExecutionSpec(item.intent);
-  const map = new Map<string, 'gate' | 'scope'>();
+  const map = new Map<string, 'gate' | 'scope' | 'human_review'>();
   for (const criterion of spec?.validationCriteria ?? []) {
-    const kind: 'gate' | 'scope' | null = criterion.proof === 'scope' ? 'scope'
+    const kind: 'gate' | 'scope' | 'human_review' | null = criterion.proof === 'scope' ? 'scope'
+      : criterion.proof === 'human_review' ? 'human_review'
       : criterion.proof === 'gate' ? 'gate'
       : typeof criterion.command === 'string' && criterion.command.trim().length > 0 ? 'gate' : null;
     if (kind === null) continue;
@@ -884,9 +891,12 @@ export async function runWorkEvidence(service: WorkOrchestrationPort, id: string
   const investigationReview = projectInvestigationReview(item, events);
   const live = investigationReview ? null : presentation.verification;
   const findings = live?.findings ?? [];
+  const contractLint = lintItemAcceptanceContract(item);
   return {
     exitCode: EXIT.OK,
     payload: {
+      humanReviewPending: live?.humanReview.pending ?? [],
+      contractLint: { mode: contractLint.mode, findings: contractLint.findings.map(f => ({ code: f.code, subject: subjectOf(f.subject), detail: f.detail })) },
       ok: true, kind: 'work-evidence', ...humanReferenceFields(item.intent), id: item.id, state: item.state, proposalVersion: item.proposalVersion,
       attemptId: investigationReview?.source?.attemptId ?? presentation.execution?.attemptId ?? live?.attemptId ?? null,
       verifierLive: verifierLiveSummary(live),
