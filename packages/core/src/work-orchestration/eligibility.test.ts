@@ -1,4 +1,4 @@
-import { buildNotEligibleBlockPayload, evaluateAutonomousEligibility, readAutonomousExecutionSpec, type AutonomousEligibilityGapCode, type WorkItem, type WorkState } from '.';
+import { buildNotEligibleBlockPayload, evaluateAutonomousEligibility, evaluateTechnicalApprovalReadiness, readAutonomousExecutionSpec, type AutonomousEligibilityGapCode, type WorkItem, type WorkState } from '.';
 import type { Json } from '@anima/types';
 
 const fullSpec: Json = { schema_version: 1, target: { kind: 'project', reference: 'G:/anima' }, permissions: ['read_repo', 'run_tests'], validation_criteria: [{ label: 'npm test', command: 'npm test' }], limits: { max_attempts: 3 } };
@@ -139,5 +139,31 @@ describe('elegibilidade autônoma — combinações e payload de bloqueio', () =
   test('payload de bloqueio carrega razão tipada e códigos exatos', () => {
     const payload = buildNotEligibleBlockPayload(evaluateAutonomousEligibility(makeItem({ state: 'blocked' })));
     expect(payload).toEqual({ schema_version: 1, reason: 'not_eligible', gaps: ['work_blocked_unresolved'] });
+  });
+});
+
+describe('contrato de aceite v2 opt-in', () => {
+  const effect = makeItem().proposal.data.expectedEffects[0]!;
+  const withContract = (marker: Json | undefined, criteria: Json): WorkItem => makeItem({}, {
+    ...(fullSpec as object), ...(marker === undefined ? {} : { acceptance_contract: marker }), validation_criteria: criteria,
+  } as Json);
+  test.each([1, '2', null, true])('marcador inválido %s falha fechado', marker => {
+    const value = withContract(marker, [{ label: 'unit', command: 'test' }]);
+    expect(codes(value)).toEqual(['execution_spec_invalid']);
+    expect(readAutonomousExecutionSpec(value.intent)).toBeNull();
+  });
+  test('duplicata legada rejeitada; v2 é parseada e reportada pelo lint', () => {
+    const criteria = [{ label: 'unit', command: 'test', claim_kind: 'gate_assertion', covers: [effect, effect] }];
+    expect(codes(withContract(undefined, criteria))).toEqual(['validation_criteria_missing']);
+    const value = withContract(2, criteria);
+    expect(readAutonomousExecutionSpec(value.intent)).not.toBeNull();
+    expect(evaluateTechnicalApprovalReadiness({ ...value, state: 'proposed' })).toEqual(evaluateAutonomousEligibility(value));
+    expect(evaluateAutonomousEligibility(value)).toMatchObject({ eligible: false, gaps: [{ code: 'acceptance_contract_invalid', explanation: `duplicate_cover: ${effect}` }] });
+  });
+  test('legado não executa lint e v2 válido permanece elegível', () => {
+    expect(codes(withContract(undefined, [{ label: 'unit', covers: ['fora'] }]))).toEqual([]);
+    expect(codes(withContract(2, [{ label: 'unit', command: 'test', claim_kind: 'gate_assertion', covers: [effect] }]))).toEqual([]);
+    expect(codes(withContract(2, [{ label: 'human', proof: 'human_review', covers: [effect] }]))).toEqual(['acceptance_contract_invalid']);
+    expect(codes(withContract(undefined, [{ label: 'bad', proof: 'unknown' }]))).toEqual(['validation_criteria_missing']);
   });
 });

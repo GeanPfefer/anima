@@ -40,12 +40,13 @@ import type { Json } from '@anima/types';
 /** Versão da lógica do Verifier. Bump quando a derivação do parecer mudar de forma
  * que um mesmo estado de evidência possa produzir veredito diferente.
  *
+ * v4: revisão humana pendente explícita, sem convertê-la em prova automática.
  * v3: suficiência semântica por CLASSE DE AFIRMAÇÃO (`claim_kind`). Um aceite
  * funcional SUBSTANTIVO coberto apenas por `covers` + gate verde deixa de ser
  * `acceptance_criterion_covered` (era `verified` em v2) e passa a lacuna explícita
  * (`acceptance_substantive_gate_insufficient` ⇒ inconclusive); só `gate_assertion`
  * (gate host-observado que passou) ou escopo observado independentemente provam. */
-export const VERIFIER_VERSION = 'work-verifier-v3';
+export const VERIFIER_VERSION = 'work-verifier-v4';
 
 /** Achado compactado para o parecer durável: a espinha estruturada (código +
  * severidade + proveniência + sujeito), sem a prosa `detail` — que é recomputável. */
@@ -72,6 +73,7 @@ export interface VerifierOpinionEvidenceBasis {
 }
 
 export interface VerifierOpinionV1 {
+  readonly humanReview?: { readonly pending: readonly string[] };
   readonly schemaVersion: 1;
   readonly workItemId: WorkItemId;
   readonly attemptId: string;
@@ -126,6 +128,7 @@ export function computeVerifierOpinion(item: WorkItem, events: readonly WorkEven
     verdict: report.verdict,
     restsOnAttestedEvidence: report.restsOnAttestedEvidence,
     summary: report.summary,
+    ...(report.humanReview.pending.length === 0 ? {} : { humanReview: report.humanReview }),
     findings: report.findings.map(finding => finding.subject === undefined
       ? { code: finding.code, severity: finding.severity, provenance: finding.provenance }
       : { code: finding.code, severity: finding.severity, provenance: finding.provenance, subject: finding.subject }),
@@ -154,6 +157,13 @@ const isProvenance = (value: unknown): value is WorkVerificationProvenance => va
 export function parseVerifierOpinion(value: Json | undefined): VerifierOpinionV1 | null {
   const root = object(value);
   if (!root || root.schemaVersion !== 1) return null;
+  let humanReview: VerifierOpinionV1['humanReview'];
+  if (root.humanReview !== undefined) {
+    const human = object(root.humanReview);
+    if (!human || !Array.isArray(human.pending) || !human.pending.every(nonBlank)
+      || new Set(human.pending).size !== human.pending.length) return null;
+    humanReview = { pending: human.pending as string[] };
+  }
   const summary = object(root.summary);
   const basis = object(root.evidenceBasis);
   const coverage = basis ? object(basis.coverage) : null;
@@ -189,6 +199,7 @@ export function parseVerifierOpinion(value: Json | undefined): VerifierOpinionV1
       attested: summary.attested as number, independent: summary.independent as number,
     },
     findings,
+    ...(humanReview === undefined ? {} : { humanReview }),
     evidenceBasis: {
       resultEventId: basis.resultEventId,
       observedEventId: (basis.observedEventId as string | null) ?? null,

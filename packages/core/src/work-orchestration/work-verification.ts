@@ -88,6 +88,8 @@ export type WorkVerificationFindingCode =
   // Cobertura dos critérios declarados por um gate factual.
   | 'criterion_covered'
   | 'criterion_without_gate_coverage'
+  | 'human_review_pending'
+  | 'no_automated_acceptance_proof'
   | 'acceptance_criterion_covered'
   | 'acceptance_criterion_without_evidence'
   // Aceite com associação declarada a um gate que passou, mas cuja afirmação é
@@ -125,6 +127,7 @@ export interface WorkVerificationFinding {
 }
 
 export interface WorkVerificationReport {
+  readonly humanReview: { readonly pending: readonly string[] };
   readonly schemaVersion: 1;
   readonly verdict: WorkVerificationVerdict;
   // Correlação ESPERADA (do item/tentativa em curso), nunca inferida do handoff.
@@ -214,8 +217,9 @@ const nonBlankCommand = (criterion: AutonomousValidationCriterion): boolean =>
   typeof criterion.command === 'string' && criterion.command.trim().length > 0;
 // Requisito de prova de um critério: explícito (`proof`) ou inferido do `command`.
 // `declared` = sem comando e sem `proof` (informativo, a cargo do humano).
-const proofKindOf = (criterion: AutonomousValidationCriterion): 'gate' | 'scope' | 'declared' =>
-  criterion.proof === 'scope' ? 'scope'
+const proofKindOf = (criterion: AutonomousValidationCriterion): 'gate' | 'scope' | 'human_review' | 'declared' =>
+  criterion.proof === 'human_review' ? 'human_review'
+  : criterion.proof === 'scope' ? 'scope'
   : criterion.proof === 'gate' ? 'gate'
   : nonBlankCommand(criterion) ? 'gate' : 'declared';
 
@@ -246,6 +250,13 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     findings.push(gap('missing_result_evidence',
       'Não há handoff durável de worktree para conferir: sem evidência estruturada, o resultado não é independentemente verificável.',
       undefined, 'independent'));
+    for (const criterion of authorized.validationCriteria.filter(c => c.proof === 'human_review')) {
+      for (const covered of criterion.covers ?? []) {
+        if (!(authorized.acceptanceCriteria ?? []).includes(covered)) findings.push(violation('criterion_covers_unknown_acceptance',
+          `O critério "${criterion.label}" declara cobrir um item que não pertence ao aceite aprovado.`, covered, 'independent'));
+      }
+    }
+    addHumanReviewFindings(authorized, new Set(), findings);
     return finalize(expected, findings);
   }
 
@@ -428,6 +439,7 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
   const anyGateByLabel = new Set(gateOutcomeSource.map(g => g.label));
   for (const criterion of authorized.validationCriteria) {
     const proofKind = proofKindOf(criterion);
+    if (proofKind === 'human_review') continue;
     if (proofKind === 'scope') {
       // Prova por INVARIANTE DE ESCOPO: satisfeita quando o host confirmou a contenção
       // de forma INDEPENDENTE (git). Sem observação independente ⇒ lacuna (não `verified`).
@@ -508,6 +520,8 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     if (coveredAcceptance.has(approved)) {
       findings.push(ok('acceptance_criterion_covered',
         `O critério aprovado possui associação explícita com uma prova suficiente (gate-assertion aprovado ou escopo observado).`, approved));
+    } else if (authorized.validationCriteria.some(c => c.proof === 'human_review' && c.covers?.includes(approved))) {
+      findings.push(ok('human_review_pending', 'O aceite aguarda revisão humana; não constitui prova automática.', approved));
     } else if (substantiveOnlyAcceptance.has(approved)) {
       findings.push(gap('acceptance_substantive_gate_insufficient',
         `O critério aprovado tem associação declarada (covers) a um gate que passou, mas a afirmação é substantiva: um gate verde não demonstra sozinho o comportamento exigido — falta uma classe de prova suficiente.`, approved, 'independent'));
@@ -516,6 +530,8 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
         `O critério aprovado não possui associação com prova suficiente (gate-assertion aprovado ou escopo observado independentemente).`, approved, 'independent'));
     }
   }
+
+  addHumanReviewFindings(authorized, coveredAcceptance, findings, false);
 
   // ---------- Cross-check das validações autodeclaradas do resultado × gates ----------
   // Ambas as fontes são atestadas pelo Executor: isto pega inconsistência interna
@@ -610,6 +626,20 @@ const finalize = (
     findings,
     summary: { violations, gaps, checks: findings.length, attested, independent: findings.length - attested },
     restsOnAttestedEvidence,
+    humanReview: { pending: [...new Set(findings.filter(f => f.code === 'human_review_pending').map(f => f.subject!))] },
     advisory: true,
   };
 };
+
+function addHumanReviewFindings(authorized: WorkResultVerificationInput['authorized'], covered: ReadonlySet<string>, findings: WorkVerificationFinding[], includePending = true): void {
+  const acceptance = authorized.acceptanceCriteria ?? [];
+  const human = authorized.validationCriteria.filter(c => c.proof === 'human_review');
+  if (includePending) for (const approved of new Set(acceptance)) {
+    if (!covered.has(approved) && human.some(c => c.covers?.includes(approved))) {
+      findings.push(ok('human_review_pending', 'O aceite aguarda revisão humana; não constitui prova automática.', approved));
+    }
+  }
+  if (acceptance.length > 0 && human.length > 0 && covered.size === 0) {
+    findings.push(gap('no_automated_acceptance_proof', 'Nenhum aceite aprovado foi fechado por prova automática.', undefined, 'independent'));
+  }
+}

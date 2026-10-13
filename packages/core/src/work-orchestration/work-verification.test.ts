@@ -842,3 +842,54 @@ describe('verifyWorkResult — suficiência semântica por claim_kind (gate_asse
     expect(codes(result)).not.toContain('acceptance_substantive_gate_insufficient');
   });
 });
+
+describe('revisão humana pendente', () => {
+  const input = (automatic = false): WorkResultVerificationInput => {
+    const base = baseInput();
+    return { ...base, authorized: { ...base.authorized, acceptanceCriteria: ['humano', 'humano', ...(automatic ? ['auto'] : [])], validationCriteria: [
+      { label: 'human', proof: 'human_review', covers: ['humano'] },
+      ...(automatic ? [{ label: 'unit', command: 'npm test', claimKind: 'gate_assertion' as const, covers: ['auto'] }] : []),
+    ] } };
+  };
+  test.each([false, true])('pendência não fecha aceite; prova automática = %s', automatic => {
+    const report = verifyWorkResult(input(automatic));
+    expect(report.humanReview.pending).toEqual(['humano']);
+    expect(report.findings.filter(f => f.code === 'acceptance_criterion_covered').map(f => f.subject)).toEqual(automatic ? ['auto'] : []);
+    expect(report.findings.find(f => f.code === 'human_review_pending')).toMatchObject({ severity: 'ok', provenance: 'attested', subject: 'humano' });
+    expect(report.verdict).toBe(automatic ? 'verified' : 'inconclusive');
+    expect(codes(report).includes('no_automated_acceptance_proof')).toBe(!automatic);
+  });
+  test('sem handoff também registra pendências e lacuna automática', () => {
+    const report = verifyWorkResult({ ...input(), handoff: null });
+    expect(report.humanReview.pending).toEqual(['humano']);
+    expect(codes(report)).toContain('no_automated_acceptance_proof');
+  });
+  test('prova suficiente vence revisão e covers desconhecido continua violação', () => {
+    const base = input(true);
+    const report = verifyWorkResult({ ...base, authorized: { ...base.authorized, validationCriteria: [...base.authorized.validationCriteria,
+      { label: 'human-auto', proof: 'human_review', covers: ['auto', 'fora'] },
+    ] } });
+    expect(report.humanReview.pending).toEqual(['humano']);
+    expect(codes(report)).toContain('criterion_covers_unknown_acceptance');
+    expect(report.verdict).toBe('rejected');
+  });
+  test('legado mantém achados e contagens com lista humana vazia', () => {
+    const base = baseInput();
+    expect(verifyWorkResult(base)).toEqual(verifyWorkResult({ ...base, authorized: { ...base.authorized, acceptanceCriteria: [] } }));
+    expect(verifyWorkResult(base).humanReview.pending).toEqual([]);
+  });
+});
+
+test('revisão humana não suplanta scope observado nem torna contrato vazio inconclusivo', () => {
+  const base = baseInput();
+  const built = buildHostObservedGitEvidence({ workItemId: 'work-1', attemptId: 'attempt-1', approvedProposalVersion: 2, baseSha: BASE, observedCommitSha: COMMIT, observedChangedFiles: ['src/a.ts'], observedDiffFiles: [{ path: 'src/a.ts', insertions: 3, deletions: 1 }], observedAt: '2026-08-14T12:00:00.000Z' });
+  if (!built.ok) throw new Error(built.explanation);
+  const report = verifyWorkResult({ ...base, observed: built.value, authorized: { ...base.authorized, acceptanceCriteria: ['escopo'], validationCriteria: [
+    { label: 'scope', proof: 'scope', covers: ['escopo'] }, { label: 'human', proof: 'human_review', covers: ['escopo'] },
+  ] } });
+  expect(report.humanReview.pending).toEqual([]);
+  expect(codes(report)).toContain('acceptance_criterion_covered');
+  expect(codes(report)).not.toContain('no_automated_acceptance_proof');
+  const empty = verifyWorkResult({ ...base, authorized: { ...base.authorized, acceptanceCriteria: [], validationCriteria: [{ label: 'human', proof: 'human_review' }] } });
+  expect(empty.verdict).toBe('verified');
+});

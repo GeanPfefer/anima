@@ -114,7 +114,7 @@ describe('computeVerifierOpinion', () => {
     // Bump obrigatório: a mesma evidência (aceite substantivo coberto só por gate)
     // passa a produzir verdict diferente sob a nova semântica; não pode ser gravada
     // como se ainda fosse v2.
-    expect(VERIFIER_VERSION).toBe('work-verifier-v3');
+    expect(VERIFIER_VERSION).toBe('work-verifier-v4');
   });
 
   test('sem handoff durável ⇒ null (parecer é sobre um resultado produzido)', () => {
@@ -230,5 +230,29 @@ describe('projectVerifierOpinionHistory', () => {
     const opinion = computeVerifierOpinion(item(), [resultEvent(handoffWith())])!;
     expect(projectVerifierOpinionHistory([opinionEvent(opinion, 'op-x', { attemptId: 'outro' })])).toEqual([]);
     expect(projectVerifierOpinionHistory([])).toEqual([]);
+  });
+});
+
+describe('parecer v4 e revisão humana', () => {
+  const opinion = () => computeVerifierOpinion(item(), [resultEvent(handoffWith())])!;
+  test('campo opcional ausente sem pendências e histórico v1-v3 preservado', () => {
+    expect(opinion().humanReview).toBeUndefined();
+    for (const verifierVersion of ['work-verifier-v1', 'work-verifier-v2', 'work-verifier-v3']) {
+      const old = { ...opinion(), verifierVersion };
+      expect(parseVerifierOpinion(old as unknown as Json)).toEqual(old);
+    }
+  });
+  test('compute e round-trip preservam a pendência', () => {
+    const original = item();
+    const value = computeVerifierOpinion({ ...original, intent: { execution_spec: {
+      schema_version: 1, target: { kind: 'project', reference: 'proj' }, permissions: [], limits: { max_attempts: 1 },
+      validation_criteria: [{ label: 'human', proof: 'human_review', covers: ['e'] }],
+    } } }, [resultEvent(handoffWith())])!;
+    expect(value.verifierVersion).toBe('work-verifier-v4');
+    expect(value.humanReview).toEqual({ pending: ['e'] });
+    expect(parseVerifierOpinion(value as unknown as Json)).toEqual(value);
+  });
+  test.each([null, [], {}, { pending: 'e' }, { pending: [''] }, { pending: [' '] }, { pending: [1] }, { pending: ['e', 'e'] }])('formato humano inválido falha fechado: %j', humanReview => {
+    expect(parseVerifierOpinion({ ...opinion(), humanReview } as unknown as Json)).toBeNull();
   });
 });

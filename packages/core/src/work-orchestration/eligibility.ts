@@ -1,3 +1,4 @@
+import { lintAcceptanceContract } from './acceptance-contract-lint';
 import { Constants, type Json } from '@anima/types';
 import type { WorkCapability, WorkIntent, WorkItem, WorkState } from './types';
 
@@ -30,7 +31,7 @@ export interface AutonomousExecutionLimits {
  * Ausente ⇒ inferido: `gate` quando há `command`, senão um critério apenas
  * declarado (a cargo do humano) — preserva o comportamento pré-existente.
  */
-export type WorkProofKind = 'gate' | 'scope';
+export type WorkProofKind = 'gate' | 'scope' | 'human_review';
 
 /**
  * Classe de AFIRMAÇÃO de um critério `proof:'gate'` — o que a passagem do gate
@@ -99,7 +100,8 @@ export type AutonomousEligibilityGapCode =
   | 'permissions_not_declared'
   | 'validation_criteria_missing'
   | 'limits_missing'
-  | 'execution_spec_invalid';
+  | 'execution_spec_invalid'
+  | 'acceptance_contract_invalid';
 
 export interface AutonomousEligibilityGap {
   readonly code: AutonomousEligibilityGapCode;
@@ -194,7 +196,7 @@ type SpecParse =
 const readSpec = (intent: WorkIntent): SpecParse => {
   const raw = intent['execution_spec'];
   if (raw === undefined || raw === null) return { kind: 'absent' };
-  if (!isPlainObject(raw) || raw['schema_version'] !== 1) return { kind: 'invalid' };
+  if (!isPlainObject(raw) || raw['schema_version'] !== 1 || (raw['acceptance_contract'] !== undefined && raw['acceptance_contract'] !== 2)) return { kind: 'invalid' };
   return { kind: 'declared', raw };
 };
 
@@ -228,9 +230,9 @@ const parseValidationCriteria = (raw: Readonly<Record<string, Json>>): readonly 
     const covers = entry['covers'];
     if (covers !== undefined && (!Array.isArray(covers) || covers.length === 0
       || !covers.every(value => typeof value === 'string' && value.trim().length > 0)
-      || new Set(covers).size !== covers.length)) return null;
+      || (raw['acceptance_contract'] !== 2 && new Set(covers).size !== covers.length))) return null;
     const proof = entry['proof'];
-    if (proof !== undefined && proof !== 'gate' && proof !== 'scope') return null;
+    if (proof !== undefined && proof !== 'gate' && proof !== 'scope' && proof !== 'human_review') return null;
     // FAIL-CLOSED: valor de `claim_kind` fora do domínio invalida o spec inteiro; ausência
     // é honesta (o Verifier trata como conservador, NÃO promove a `gate_assertion`).
     const claimKind = entry['claim_kind'];
@@ -302,6 +304,11 @@ export function evaluateAutonomousEligibility(item: WorkItem): AutonomousEligibi
     const target = parseTarget(spec.raw);
     const permissions = parsePermissions(spec.raw);
     const validationCriteria = parseValidationCriteria(spec.raw);
+    if (spec.raw['acceptance_contract'] === 2 && validationCriteria !== null) {
+      for (const finding of lintAcceptanceContract(expectedEffects, validationCriteria)) {
+        gaps.push(gap('acceptance_contract_invalid', REQUIREMENT.validation, `${finding.code}: ${finding.subject ?? '(contrato)'}`));
+      }
+    }
     const limits = parseLimits(spec.raw);
     const dependsOnWorkItemIds = parseDependencies(spec.raw);
     if (target === null) gaps.push(gap('target_missing', REQUIREMENT.target, 'O alvo de execução declarado é ausente ou inválido (kind e reference são obrigatórios).'));
