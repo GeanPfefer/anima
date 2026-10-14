@@ -232,8 +232,8 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     dependsOn: ['memory.persistence', 'memory.event-history'],
     target: { description: 'Progresso importante sempre recuperável fora da máquina que o produziu, sem depender de lembrança humana.' },
     meaning:
-      'Hoje a durabilidade é um PROCESSO HUMANO comprovado (push de dev e branch de backup remota), não capacidade do sistema. O Anima nem detecta progresso não publicado.',
-    advancement: 'Falta detectar progresso só-local e propor/executar a publicação sob authority. Push é efeito externo: continua ato humano até haver mandato.',
+      'Hoje a durabilidade é um PROCESSO HUMANO comprovado, não capacidade do sistema: push de dev e branch de backup remota (2026-09-27) e, em 2026-10-14, um ciclo local supervisionado por humano na goma — backup criptografado (restic), restauração PostgreSQL isolada e recuperação após reinício do alvo, numa única ocasião. O Anima nem detecta progresso não publicado nem executa o backup sozinho.',
+    advancement: 'Falta detectar progresso só-local e propor/executar a publicação sob authority. Não comprovados: backup automático, cópia e recuperação fora da goma (o repositório restic está na mesma máquina, sem off-site nem segunda máquina) e operação autônoma do Anima — o E-0 foi ato humano supervisionado. Push é efeito externo: continua ato humano até haver mandato.',
     history: [
       {
         at: '2026-09-27',
@@ -243,6 +243,18 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         refs: [
           { kind: 'commit', ref: '117fb46', note: 'publicado por ato humano' },
           { kind: 'record', ref: RECONCILIATION_V2_RECORD },
+        ],
+      },
+      {
+        at: '2026-10-14',
+        change: 'proof_added',
+        note: 'Ciclo E-0 supervisionado por humano, uma ocasião, só na goma: backup restic criptografado (snapshot 77b180ce), restauração PostgreSQL isolada (5/5 projeções e 12/12 digests de segurança iguais ao estado de origem) e recuperação após reinício do alvo. Não prova backup automático, recuperação fora da goma nem operação autônoma; a maturity segue projected.',
+        refs: [
+          { kind: 'commit', ref: '2627534' },
+          { kind: 'commit', ref: 'f7c629a' },
+          { kind: 'record', ref: 'docs/registros/2026-10-14-e0-restauracao-isolada-comprovada.md' },
+          { kind: 'record', ref: 'docs/registros/2026-10-14-e0-limpeza-concluida.md' },
+          { kind: 'doc', ref: 'docs/planos/070-d1-preparacao-e0-v2.md' },
         ],
       },
     ],

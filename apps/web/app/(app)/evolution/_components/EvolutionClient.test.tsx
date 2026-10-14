@@ -641,7 +641,7 @@ describe('EvolutionClient — Proof Evaluation V0 (declarado × derivado)', () =
 
     expect(panel().getAttribute('data-status')).toBe('insufficient_evidence');
     expect(within(panel()).getByText('Declarado: Projetada · Derivado: —')).toBeInTheDocument();
-    expect(within(panel()).getAllByText('procedimento')).toHaveLength(3);
+    expect(within(panel()).getAllByText('procedimento')).toHaveLength(6);
     expect(within(panel()).getByText(/Durable State/)).toBeInTheDocument();
   });
 

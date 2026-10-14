@@ -410,9 +410,52 @@ describe('regras V0 sobre o registry real', () => {
     expect(durability.declaredMaturity).toBe('projected');
     expect(durability.status).toBe('insufficient_evidence');
     expect(durability.derivedMaturity).toBeNull();
-    expect(durability.summary.assistedProcedures).toBe(3);
+    expect(durability.summary.assistedProcedures).toBe(6);
     expect(durability.summary.inconclusive).toBe(2);
     expect(durability.gaps[0]).toMatch(/Durable State/);
+  });
+
+  test('E-0: exatamente três provas locais supervisionadas com proveniência registrada', () => {
+    const evidence = RECORDED_CAPABILITY_EVIDENCE_V0.filter(
+      (entry) => entry.capabilityId === 'memory.durability' && entry.id.includes(':e0-'),
+    );
+    expect(evidence.map((entry) => entry.id)).toEqual([
+      'recorded:memory.durability:e0-local-encrypted-backup-v1',
+      'recorded:memory.durability:e0-isolated-restore-v1',
+      'recorded:memory.durability:e0-restart-recovery-v1',
+    ]);
+    for (const entry of evidence) {
+      expect(entry).toMatchObject({
+        evidenceClass: 'assisted_procedure',
+        outcome: 'positive',
+        freshness: 'durable',
+        source: 'recorded_proof',
+        observedAt: '2026-10-14T20:18:44Z',
+        occasionId: 'e0-20261014T193034Z',
+      });
+      for (const scope of ['goma', 'supervisionado', 'uma única ocasião']) {
+        expect(entry.scope).toContain(scope);
+      }
+      expect(entry.proofRefs.some(
+        (ref) => ref.kind === 'record' && ref.ref.startsWith('docs/registros/2026-10-14-e0-'),
+      )).toBe(true);
+    }
+  });
+
+  test('E-0: nenhuma observação de durabilidade promove ou inventa fato inconclusivo', () => {
+    const evidence = RECORDED_CAPABILITY_EVIDENCE_V0.filter(
+      (entry) => entry.capabilityId === 'memory.durability',
+    );
+    for (const observations of [evidence, ...evidence.map((entry) => [entry])]) {
+      expect(evaluateCapabilityProof('memory.durability', { evidence: observations })).toMatchObject({
+        status: 'insufficient_evidence',
+        derivedMaturity: null,
+        maturitySource: 'manual',
+        declaredMaturity: 'projected',
+        summary: { contributing: 0 },
+      });
+    }
+    expect(evidence.some((entry) => entry.outcome === 'inconclusive' && entry.id.includes('e0-'))).toBe(false);
   });
 
   test('histórico vazio lido: piloto canônico com regra ⇒ insuficiente (não rebaixa)', () => {
