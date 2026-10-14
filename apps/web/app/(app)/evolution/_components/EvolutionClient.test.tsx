@@ -780,12 +780,12 @@ describe('EvolutionClient — evidência de supervisão', () => {
   });
   test('mostra sem dados quando não há médias', () => {
     render(<EvolutionClient {...buildProps()} autonomyEvidence={{ status: 'available', summary }} />);
-    expect(within(screen.getByTestId('autonomy-evidence')).getAllByText(/sem dados/)).toHaveLength(4);
+    expect(within(screen.getByTestId('autonomy-evidence')).getAllByText(/sem dados/)).toHaveLength(5);
   });
   test('mostra zero ciclos verificados sem inferir autonomia', () => {
     render(<EvolutionClient {...buildProps()} autonomyEvidence={{ status: 'available', summary }} />);
-    expect(screen.getByText('Ciclos sem humano verificados: 0')).toBeInTheDocument();
-    expect(screen.getByText('Operacional ≠ autônomo; ausência de evento não prova ausência de intervenção')).toBeInTheDocument();
+    expect(screen.getByTestId('autonomy-evidence-headline')).toHaveTextContent('Ciclos sem intervenção humana comprovados: 0.');
+    expect(screen.getByTestId('autonomy-evidence-explanation')).toHaveTextContent('Sem evidência positiva de execução autônoma. Isso não significa que nenhum ciclo ocorreu.');
   });
   test('mostra motivo da evidência indisponível', () => {
     render(<EvolutionClient {...buildProps()} autonomyEvidence={{ status: 'unavailable', reason: 'items_read_failed' }} />);

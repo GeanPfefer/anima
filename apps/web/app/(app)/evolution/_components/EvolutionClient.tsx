@@ -831,6 +831,7 @@ export default function EvolutionClient({
         </div>
 
         <aside className={styles.panel} aria-live="polite">
+          {autonomyEvidence && <AutonomyEvidencePanel evidence={autonomyEvidence} />}
           {selectedNode ? (
             <CapabilityDetail
               capabilityAssessment={capabilityAssessment}
@@ -860,9 +861,6 @@ export default function EvolutionClient({
               nameById={nameById}
               onSelect={selectCapability}
             />
-          )}
-          {!selectedNode && (lens === 'frontier' || (lens !== 'recent' && lens !== 'external')) && autonomyEvidence && (
-            <AutonomyEvidencePanel evidence={autonomyEvidence} />
           )}
         </aside>
       </div>
@@ -1521,33 +1519,64 @@ const EVIDENCE_LIMITATIONS: Record<string, string> = {
   execution_mode_fact_absent: 'Nenhum fato de modo de execução registrado.',
   leases_unavailable: 'Leitura de leases indisponível.',
 };
+function formatPtBr(value: number, fractionDigits = 0): string {
+  return new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value);
+}
+
 function AutonomyEvidencePanel({ evidence }: { evidence: AutonomyEvidenceReadState }) {
+  if (evidence.status === 'unavailable') {
+    return (
+      <section className={styles.autonomyEvidence} data-testid="autonomy-evidence">
+        <p>Evidência de autonomia indisponível — {evidence.reason === 'items_read_failed' ? 'falha na leitura de itens' : 'histórico de eventos indisponível'}</p>
+      </section>
+    );
+  }
+
+  const { summary } = evidence;
+  const count = summary.unattendedVerifiedUntilReview;
+  const historical = summary.windows.find(window => window.label === 'all_time');
+  const explanation = [
+    count === 0
+      ? 'Sem evidência positiva de execução autônoma. Isso não significa que nenhum ciclo ocorreu.'
+      : `Há evidência positiva de execução sem humano até review em ${formatPtBr(count)} ciclo(s); o aceite continua humano.`,
+    count === 0 && summary.limitations.includes('execution_mode_fact_absent')
+      ? 'Motivo: o host ainda não registra o modo de execução.'
+      : '',
+    summary.verdict === 'insufficient_evidence'
+      ? 'Evidência insuficiente para avaliar (histórico ou leases indisponíveis).'
+      : '',
+  ].filter(Boolean).join(' ');
+  const value = (number: number) => <strong>{formatPtBr(number)}</strong>;
+
   return (
-    <section data-testid="autonomy-evidence">
-      <h3>Dependência de supervisão humana (evidência do ledger)</h3>
-      {evidence.status === 'unavailable' ? (
-        <p className={styles.detailEmpty}>Evidência de autonomia indisponível — {evidence.reason === 'items_read_failed' ? 'falha na leitura de itens' : 'histórico de eventos indisponível'}</p>
-      ) : (
-        <>
-          {evidence.summary.windows.map(window => (
-            <div key={window.label} data-testid={`autonomy-evidence-window-${window.label}`}>
-              <h4>{window.days === null ? 'Histórico completo' : `Últimos ${window.days} dias`}</h4>
-              <p className={styles.detailText}>Itens concluídos: {window.completedItems} · Em review: {window.reviewItems}</p>
-              <p className={styles.detailText}>Atos humanos por item concluído: {window.humanActsPerCompleted === null ? 'sem dados' : `média ${window.humanActsPerCompleted.mean.toFixed(2)} · mín–máx ${window.humanActsPerCompleted.min}–${window.humanActsPerCompleted.max}`}</p>
-              <p className={styles.detailText}>Atos de política: {window.policyActsPerCompleted === null ? 'sem dados' : `média ${window.policyActsPerCompleted.mean.toFixed(2)} · total ${window.policyActsPerCompleted.total}`}</p>
-              <p className={styles.detailText}>Itens com lease E0: {window.completedWithLease} concluídos · {window.reviewWithLease} em review</p>
-              <p className={styles.detailText}>Leases: {window.leases === null ? 'indisponíveis' : `${window.leases.issued} emitidos · ${window.leases.active} ativos · ${window.leases.expired} expirados · ${window.leases.revoked} revogados`}</p>
-              <p className={styles.detailText}>Attempts: {window.attempts.claimed} iniciadas · {window.attempts.resultSubmitted} com resultado · {window.attempts.failed} falhas · {window.attempts.abandoned} abandonadas</p>
-              <p className={styles.detailText}>Classes: {window.classes.unattended_verified} unattended verificado · {window.classes.human_observed} humano observado · {window.classes.unknown} desconhecido · {window.classes.insufficient_evidence} evidência insuficiente</p>
-            </div>
-          ))}
-          <p className={styles.detailText}>Ciclos sem humano verificados: {evidence.summary.unattendedVerifiedUntilReview}</p>
-          <p className={styles.detailHint}>Operacional ≠ autônomo; ausência de evento não prova ausência de intervenção</p>
-          <ul className={styles.proofList}>
-            {evidence.summary.limitations.map(code => <li key={code} className={styles.proofItem}><span className={styles.proofNote}>{EVIDENCE_LIMITATIONS[code] ?? code}</span></li>)}
-          </ul>
-        </>
-      )}
+    <section className={styles.autonomyEvidence} data-testid="autonomy-evidence">
+      <h3 className={styles.detailLabel}>Dependência de supervisão humana</h3>
+      <p data-testid="autonomy-evidence-headline">Ciclos sem intervenção humana comprovados: <strong>{formatPtBr(count)}</strong>.</p>
+      <p data-testid="autonomy-evidence-explanation">{explanation}</p>
+      <p data-testid="autonomy-evidence-figures">
+        <strong>{historical?.humanActsPerCompleted == null ? 'sem dados' : formatPtBr(historical.humanActsPerCompleted.mean, 2)}</strong> atos humanos por item concluído (histórico) · <strong>{historical ? formatPtBr(historical.completedItems) : 'sem dados'}</strong> concluídos · <strong>{historical ? formatPtBr(historical.completedWithLease) : 'sem dados'}</strong> com lease E0
+      </p>
+      <details className={styles.autonomyDetails} data-testid="autonomy-evidence-details">
+        <summary>Ver detalhes (14 dias e histórico completo)</summary>
+        {summary.windows.map(window => (
+          <div className={styles.autonomyWindow} key={window.label} data-testid={`autonomy-evidence-window-${window.label}`}>
+            <h4 className={styles.detailLabel}>{window.days === null ? 'Histórico completo' : `Últimos ${formatPtBr(window.days)} dias`}</h4>
+            <p>Itens concluídos: {value(window.completedItems)} · Em revisão: {value(window.reviewItems)}</p>
+            <p>Atos humanos por item concluído: {window.humanActsPerCompleted === null ? 'sem dados' : <>média <strong>{formatPtBr(window.humanActsPerCompleted.mean, 2)}</strong> · mín–máx {value(window.humanActsPerCompleted.min)}–{value(window.humanActsPerCompleted.max)}</>}</p>
+            <p>Atos de política: {window.policyActsPerCompleted === null ? 'sem dados' : <>média <strong>{formatPtBr(window.policyActsPerCompleted.mean, 2)}</strong> · total {value(window.policyActsPerCompleted.total)}</>}</p>
+            <p>Itens com lease E0: {value(window.completedWithLease)} concluídos · {value(window.reviewWithLease)} em revisão</p>
+            <p>Leases: {window.leases === null ? 'indisponíveis' : <>{value(window.leases.issued)} emitidos · {value(window.leases.active)} ativos · {value(window.leases.expired)} expirados · {value(window.leases.revoked)} revogados</>}</p>
+            <p>Tentativas: {value(window.attempts.claimed)} iniciadas · {value(window.attempts.resultSubmitted)} com resultado · {value(window.attempts.failed)} falhas · {value(window.attempts.abandoned)} abandonadas</p>
+            <p>Classes: {value(window.classes.unattended_verified)} sem humano comprovado · {value(window.classes.human_observed)} humano observado · {value(window.classes.unknown)} desconhecido · {value(window.classes.insufficient_evidence)} evidência insuficiente</p>
+          </div>
+        ))}
+        <ul className={styles.proofList}>
+          {summary.limitations.map(code => <li key={code} className={styles.proofItem}><span className={styles.proofNote}>{EVIDENCE_LIMITATIONS[code] ?? code}</span></li>)}
+        </ul>
+      </details>
     </section>
   );
 }

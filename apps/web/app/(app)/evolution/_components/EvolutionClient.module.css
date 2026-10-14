@@ -619,6 +619,9 @@
 /* ─── Responsivo ────────────────────────────────────────── */
 
 @media (max-width: 900px) {
+  .page {
+    padding-bottom: 96px;
+  }
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -704,4 +707,40 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+
+.autonomyEvidence {
+  min-width: 0;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.autonomyEvidence > p {
+  margin-top: 4px;
+}
+
+.autonomyEvidence strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.autonomyDetails > summary {
+  min-height: 44px;
+  padding: 12px 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.autonomyWindow {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 12px;
 }
