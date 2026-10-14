@@ -1,4 +1,8 @@
 import {
+  computeAutonomyEvidence,
+  type AutonomyEvidenceSummary,
+  type AutonomyEvidenceItem,
+  type AutonomyEvidenceLease,
   classifyCanonicalResidentEvent,
   deriveCapabilityAssessmentsFromWorkHistory,
   evaluateCapabilityProofsFromHistory,
@@ -195,7 +199,12 @@ export async function readCapabilityAssessments(
     eventCount: history.events.length,
   };
 }
+export type AutonomyEvidenceReadState =
+  | { status: 'available'; summary: AutonomyEvidenceSummary }
+  | { status: 'unavailable'; reason: 'event_history_unavailable' | 'items_read_failed' };
+
 export interface CapabilityEvolutionRead {
+  readonly autonomyEvidence: AutonomyEvidenceReadState;
   readonly assessment: CapabilityAssessmentReadResult;
   /**
    * Proof Evaluation V0: declarado × derivado de TODAS as capacidades. Sempre
@@ -215,20 +224,24 @@ export interface CapabilityEvolutionRead {
 /** Uma leitura do histórico alimenta a projeção V1 e a avaliação V0. */
 export async function readCapabilityEvolution(
   client: SupabaseClient<Database>,
+  options?: { now?: Date },
 ): Promise<CapabilityEvolutionRead> {
   const history = await readCanonicalWorkHistory(client);
 
   if (!history.ok) {
     const evaluations = evaluateCapabilityProofsFromHistory({ events: null });
     return {
+      autonomyEvidence: { status: 'unavailable', reason: 'event_history_unavailable' },
       assessment: { ok: false, reason: history.reason },
       evaluations,
       autonomyReadiness: evaluateReferenceAutonomyReadiness(evaluations),
     };
   }
 
+  const autonomyEvidence = await readAutonomyEvidence(client, history.events, options?.now ?? new Date());
   const evaluations = evaluateCapabilityProofsFromHistory({ events: history.events });
   return {
+    autonomyEvidence,
     assessment: {
       ok: true,
       projection: deriveCapabilityAssessmentsFromWorkHistory(history.events),
@@ -238,3 +251,48 @@ export async function readCapabilityEvolution(
     autonomyReadiness: evaluateReferenceAutonomyReadiness(evaluations),
   };
 }
+
+async function readAutonomyEvidence(
+  client: SupabaseClient<Database>, events: readonly WorkEvent[], now: Date,
+): Promise<AutonomyEvidenceReadState> {
+  const items: AutonomyEvidenceItem[] = [];
+  try {
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const result = await client.from('work_items').select('id,state')
+        .order('id', { ascending: true }).range(from, from + PAGE_SIZE - 1);
+      if (!result || result.error !== null || !Array.isArray(result.data)) throw new Error('items unavailable');
+      for (const row of result.data) {
+        if (!row || typeof row.id !== 'string' || !WORK_STATES.has(row.state)) throw new Error('item invalid');
+        items.push({ id: row.id, state: row.state });
+      }
+      if (result.data.length < PAGE_SIZE) break;
+    }
+  } catch {
+    return { status: 'unavailable', reason: 'items_read_failed' };
+  }
+  let leases: AutonomyEvidenceLease[] | null = [];
+  try {
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const result = await client.from('work_supervision_leases')
+        .select('work_item_id,proposal_version,issued_at,expires_at,revoked_at')
+        .order('issued_at', { ascending: true }).range(from, from + PAGE_SIZE - 1);
+      if (!result || result.error !== null || !Array.isArray(result.data)) throw new Error('leases unavailable');
+      for (const row of result.data) {
+        if (!row || typeof row.work_item_id !== 'string' || !Number.isInteger(row.proposal_version)
+          || typeof row.issued_at !== 'string' || !Number.isFinite(Date.parse(row.issued_at))
+          || typeof row.expires_at !== 'string' || !Number.isFinite(Date.parse(row.expires_at))
+          || (row.revoked_at !== null && (typeof row.revoked_at !== 'string' || !Number.isFinite(Date.parse(row.revoked_at))))) throw new Error('lease invalid');
+        leases.push({ workItemId: row.work_item_id, proposalVersion: row.proposal_version,
+          issuedAt: row.issued_at, expiresAt: row.expires_at, revokedAt: row.revoked_at });
+      }
+      if (result.data.length < PAGE_SIZE) break;
+    }
+  } catch {
+    leases = null;
+  }
+  return { status: 'available', summary: computeAutonomyEvidence({ events, items, leases, now }) };
+}
+const WORK_STATES = new Set<string>([
+  'proposed', 'approved', 'in_progress', 'blocked', 'rejected',
+  'review', 'changes_requested', 'completed', 'failed', 'cancelled',
+]);

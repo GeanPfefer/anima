@@ -613,3 +613,93 @@ describe('readCapabilityEvolution (Proof Evaluation V0)', () => {
     expect(runTests).toMatchObject({ status: 'insufficient_evidence', declaredMaturity: 'operational' });
   });
 });
+
+function evidenceClient(failure?: 'items' | 'leases' | 'throw' | 'unexpected'): SupabaseClient<Database> {
+  const history = fakeClient({ rows: [row()] });
+  return {
+    from: (table: string) => {
+      if (table === 'work_events') return history.from('work_events');
+      if (failure === 'throw') throw new Error('mock unavailable');
+      const query = {
+        select: () => query,
+        order: () => query,
+        range: async () => {
+          if (failure === 'unexpected') return undefined;
+          if ((failure === 'items' && table === 'work_items') || (failure === 'leases' && table === 'work_supervision_leases')) return { data: null, error: { message: 'failed' } };
+          return { data: table === 'work_items' ? [{ id: 'work-1', state: 'review' }] : [], error: null };
+        },
+      };
+      return query;
+    },
+  } as unknown as SupabaseClient<Database>;
+}
+describe('Leitura de evidência de autonomia', () => {
+  test('disponibiliza evidência com itens e leases lidos', async () => {
+    const result = await readCapabilityEvolution(evidenceClient(), { now: new Date('2026-10-14T00:00:00Z') });
+    expect(result.autonomyEvidence.status).toBe('available');
+    if (result.autonomyEvidence.status !== 'available') return;
+    expect(result.autonomyEvidence.summary.coverage).toMatchObject({ eventsRead: 1, itemsRead: 1, leasesStatus: 'read' });
+    expect(result.autonomyEvidence.summary.generatedAt).toBe('2026-10-14T00:00:00.000Z');
+  });
+  test('falha de leases mantém summary com cobertura indisponível', async () => {
+    const result = await readCapabilityEvolution(evidenceClient('leases'));
+    expect(result.autonomyEvidence.status).toBe('available');
+    if (result.autonomyEvidence.status !== 'available') return;
+    expect(result.autonomyEvidence.summary.windows[0].leases).toBeNull();
+    expect(result.autonomyEvidence.summary.verdict).toBe('insufficient_evidence');
+  });
+  test('falha de itens fecha evidência', async () => {
+    expect((await readCapabilityEvolution(evidenceClient('items'))).autonomyEvidence).toEqual({ status: 'unavailable', reason: 'items_read_failed' });
+  });
+  test('histórico ilegível fecha evidência', async () => {
+    expect((await readCapabilityEvolution(fakeClient({ failAtFrom: 0 }))).autonomyEvidence).toEqual({ status: 'unavailable', reason: 'event_history_unavailable' });
+  });
+  test('leituras novas não alteram assessments avaliações nem readiness', async () => {
+    const available = await readCapabilityEvolution(evidenceClient());
+    for (const failure of ['items', 'leases', 'throw', 'unexpected'] as const) {
+      const failed = await readCapabilityEvolution(evidenceClient(failure));
+      expect(failed.assessment).toEqual(available.assessment);
+      expect(failed.evaluations).toEqual(available.evaluations);
+      expect(failed.autonomyReadiness).toEqual(available.autonomyReadiness);
+    }
+  });
+  test('mock antigo com rows inesperadas falha fechado', async () => {
+    expect((await readCapabilityEvolution(fakeClient({ rows: [row()] }))).autonomyEvidence).toEqual({ status: 'unavailable', reason: 'items_read_failed' });
+  });
+});
+
+test('pagina itens e leases em blocos ordenados sem reler eventos', async () => {
+  const history = fakeClient();
+  const calls: string[] = [];
+  const client = {
+    from: (table: string) => {
+      calls.push(table);
+      if (table === 'work_events') return history.from('work_events');
+      const query = {
+        select: (columns: string) => {
+          expect(columns).toBe(table === 'work_items' ? 'id,state' : 'work_item_id,proposal_version,issued_at,expires_at,revoked_at');
+          return query;
+        },
+        order: (column: string, options: { ascending: boolean }) => {
+          expect(column).toBe(table === 'work_items' ? 'id' : 'issued_at');
+          expect(options).toEqual({ ascending: true });
+          return query;
+        },
+        range: async (start: number, end: number) => {
+          expect(end - start).toBe(499);
+          const length = start === 0 ? 500 : 1;
+          return { error: null, data: Array.from({ length }, (_, index) => table === 'work_items'
+            ? { id: `work-${start + index}`, state: 'in_progress' }
+            : { work_item_id: `work-${start + index}`, proposal_version: 1, issued_at: '2026-10-13T00:00:00Z', expires_at: '2026-10-15T00:00:00Z', revoked_at: null }) };
+        },
+      };
+      return query;
+    },
+  } as unknown as SupabaseClient<Database>;
+  const read = await readCapabilityEvolution(client, { now: new Date('2026-10-14T00:00:00Z') });
+  expect(calls).toEqual(['work_events', 'work_items', 'work_items', 'work_supervision_leases', 'work_supervision_leases']);
+  expect(read.autonomyEvidence.status).toBe('available');
+  if (read.autonomyEvidence.status !== 'available') return;
+  expect(read.autonomyEvidence.summary.coverage.itemsRead).toBe(501);
+  expect(read.autonomyEvidence.summary.windows[0].leases?.issued).toBe(501);
+});

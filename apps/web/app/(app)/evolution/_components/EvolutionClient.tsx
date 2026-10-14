@@ -43,6 +43,7 @@ import type {
   CapabilityProofStatus,
 } from '@anima/core';
 import { explainCapabilityAssessment } from '@anima/core';
+import type { AutonomyEvidenceReadState } from '@/lib/evolution/capability-assessment-read';
 import styles from './EvolutionClient.module.css';
 
 // ─── Vocabulário de produto / apresentação (valores puros; tipos vêm do core) ───
@@ -357,6 +358,7 @@ export interface EvolutionClientProps {
    * nenhum bloco de readiness. Readiness ≠ authority.
    */
   autonomyReadiness?: readonly AutonomyReadinessResult[];
+  autonomyEvidence?: AutonomyEvidenceReadState;
   /** Mudanças registradas no registry desde a baseline (nunca inferidas). */
   recentEvolution: RecentEvolutionEntry[];
   evolutionBaseline: EvolutionBaseline;
@@ -376,6 +378,7 @@ export default function EvolutionClient({
   capabilityAssessment,
   proofEvaluations,
   autonomyReadiness,
+  autonomyEvidence,
   recentEvolution,
   evolutionBaseline,
 }: EvolutionClientProps) {
@@ -857,6 +860,9 @@ export default function EvolutionClient({
               nameById={nameById}
               onSelect={selectCapability}
             />
+          )}
+          {!selectedNode && (lens === 'frontier' || (lens !== 'recent' && lens !== 'external')) && autonomyEvidence && (
+            <AutonomyEvidencePanel evidence={autonomyEvidence} />
           )}
         </aside>
       </div>
@@ -1502,5 +1508,46 @@ function ReuseSummary({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; onSel
         <ul className={styles.reuseList}>{candidates.map(item)}</ul>
       </section>
     </div>
+  );
+}
+
+const EVIDENCE_LIMITATIONS: Record<string, string> = {
+  actor_kind_not_recorded: 'Autor user não distingue humano de supervisor autenticado.',
+  supervision_lease_not_in_ledger: 'Lease de supervisão E0 está fora do ledger.',
+  owner_instance_id_untrusted: 'Identificador de instância não comprova identidade.',
+  work_proposed_authorship_not_autonomy: 'Autoria da proposta não comprova autonomia.',
+  failure_code_unstructured: 'Códigos de falha não são estruturados.',
+  external_supervision_unrecorded: 'Supervisão externa pode não estar registrada.',
+  execution_mode_fact_absent: 'Nenhum fato de modo de execução registrado.',
+  leases_unavailable: 'Leitura de leases indisponível.',
+};
+function AutonomyEvidencePanel({ evidence }: { evidence: AutonomyEvidenceReadState }) {
+  return (
+    <section data-testid="autonomy-evidence">
+      <h3>Dependência de supervisão humana (evidência do ledger)</h3>
+      {evidence.status === 'unavailable' ? (
+        <p className={styles.detailEmpty}>Evidência de autonomia indisponível — {evidence.reason === 'items_read_failed' ? 'falha na leitura de itens' : 'histórico de eventos indisponível'}</p>
+      ) : (
+        <>
+          {evidence.summary.windows.map(window => (
+            <div key={window.label} data-testid={`autonomy-evidence-window-${window.label}`}>
+              <h4>{window.days === null ? 'Histórico completo' : `Últimos ${window.days} dias`}</h4>
+              <p className={styles.detailText}>Itens concluídos: {window.completedItems} · Em review: {window.reviewItems}</p>
+              <p className={styles.detailText}>Atos humanos por item concluído: {window.humanActsPerCompleted === null ? 'sem dados' : `média ${window.humanActsPerCompleted.mean.toFixed(2)} · mín–máx ${window.humanActsPerCompleted.min}–${window.humanActsPerCompleted.max}`}</p>
+              <p className={styles.detailText}>Atos de política: {window.policyActsPerCompleted === null ? 'sem dados' : `média ${window.policyActsPerCompleted.mean.toFixed(2)} · total ${window.policyActsPerCompleted.total}`}</p>
+              <p className={styles.detailText}>Itens com lease E0: {window.completedWithLease} concluídos · {window.reviewWithLease} em review</p>
+              <p className={styles.detailText}>Leases: {window.leases === null ? 'indisponíveis' : `${window.leases.issued} emitidos · ${window.leases.active} ativos · ${window.leases.expired} expirados · ${window.leases.revoked} revogados`}</p>
+              <p className={styles.detailText}>Attempts: {window.attempts.claimed} iniciadas · {window.attempts.resultSubmitted} com resultado · {window.attempts.failed} falhas · {window.attempts.abandoned} abandonadas</p>
+              <p className={styles.detailText}>Classes: {window.classes.unattended_verified} unattended verificado · {window.classes.human_observed} humano observado · {window.classes.unknown} desconhecido · {window.classes.insufficient_evidence} evidência insuficiente</p>
+            </div>
+          ))}
+          <p className={styles.detailText}>Ciclos sem humano verificados: {evidence.summary.unattendedVerifiedUntilReview}</p>
+          <p className={styles.detailHint}>Operacional ≠ autônomo; ausência de evento não prova ausência de intervenção</p>
+          <ul className={styles.proofList}>
+            {evidence.summary.limitations.map(code => <li key={code} className={styles.proofItem}><span className={styles.proofNote}>{EVIDENCE_LIMITATIONS[code] ?? code}</span></li>)}
+          </ul>
+        </>
+      )}
+    </section>
   );
 }

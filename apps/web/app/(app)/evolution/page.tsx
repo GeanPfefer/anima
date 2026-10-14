@@ -73,6 +73,7 @@ export default async function EvolutionPage() {
       capabilityAssessment={capabilityAssessment}
       proofEvaluations={evolutionRead.evaluations}
       autonomyReadiness={evolutionRead.autonomyReadiness}
+      autonomyEvidence={evolutionRead.autonomyEvidence}
       recentEvolution={listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date)}
       evolutionBaseline={{ ...EVOLUTION_BASELINE }}
     />

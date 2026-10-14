@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import {
+  computeAutonomyEvidence,
   ANIMA_CAPABILITY_REGISTRY_V0,
   EVOLUTION_BASELINE,
   getAnimaCapabilityGraph,
@@ -764,5 +765,34 @@ describe('EvolutionClient — Autonomy Readiness V0 (maturidade ≠ readiness �
     renderWith([]);
     fireEvent.click(screen.getByRole('button', { name: 'Chat — Operacional' }));
     expect(screen.queryByTestId('autonomy-readiness')).not.toBeInTheDocument();
+  });
+});
+
+describe('EvolutionClient — evidência de supervisão', () => {
+  const summary = computeAutonomyEvidence({ events: [], items: [], leases: [], now: new Date('2026-10-14T00:00:00Z') });
+  test('renderiza evidência disponível nas duas janelas e na lente de fronteira', () => {
+    render(<EvolutionClient {...buildProps()} autonomyEvidence={{ status: 'available', summary }} />);
+    expect(screen.getByTestId('autonomy-evidence')).toBeInTheDocument();
+    expect(screen.getByTestId('autonomy-evidence-window-last_14_days')).toBeInTheDocument();
+    expect(screen.getByTestId('autonomy-evidence-window-all_time')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Fronteira e humano/ }));
+    expect(screen.getByTestId('autonomy-evidence')).toBeInTheDocument();
+  });
+  test('mostra sem dados quando não há médias', () => {
+    render(<EvolutionClient {...buildProps()} autonomyEvidence={{ status: 'available', summary }} />);
+    expect(within(screen.getByTestId('autonomy-evidence')).getAllByText(/sem dados/)).toHaveLength(4);
+  });
+  test('mostra zero ciclos verificados sem inferir autonomia', () => {
+    render(<EvolutionClient {...buildProps()} autonomyEvidence={{ status: 'available', summary }} />);
+    expect(screen.getByText('Ciclos sem humano verificados: 0')).toBeInTheDocument();
+    expect(screen.getByText('Operacional ≠ autônomo; ausência de evento não prova ausência de intervenção')).toBeInTheDocument();
+  });
+  test('mostra motivo da evidência indisponível', () => {
+    render(<EvolutionClient {...buildProps()} autonomyEvidence={{ status: 'unavailable', reason: 'items_read_failed' }} />);
+    expect(screen.getByText(/Evidência de autonomia indisponível — falha na leitura de itens/)).toBeInTheDocument();
+  });
+  test('omite bloco quando prop não é passada', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    expect(screen.queryByTestId('autonomy-evidence')).not.toBeInTheDocument();
   });
 });
