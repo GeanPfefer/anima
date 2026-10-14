@@ -94,6 +94,8 @@ export type DifferentialGateStatus =
   | 'inconclusive';
 
 export interface ObservedGateOutcomeV1 {
+  readonly worktreeTree?: { readonly before: string; readonly after: string };
+  readonly outputTail?: { readonly text: string; readonly truncated: boolean };
   readonly testReport?: GateTestReportV1;
   readonly label: string;
   readonly command: string;
@@ -151,6 +153,8 @@ export interface DifferentialGateBaselineInput {
 }
 
 export interface ObservedGateInput {
+  readonly worktreeTree?: { readonly before: string; readonly after: string };
+  readonly outputTail?: { readonly text: string; readonly truncated: boolean };
   readonly testReport?: unknown;
   readonly label: string;
   readonly command: string;
@@ -184,6 +188,24 @@ export type HostObservedGateEvidenceDefect =
 export type HostObservedGateEvidenceResult =
   | { readonly ok: true; readonly value: HostObservedGateEvidenceV1 }
   | { readonly ok: false; readonly defect: HostObservedGateEvidenceDefect; readonly explanation: string };
+
+const parseWorktreeTree = (value: unknown): ObservedGateOutcomeV1['worktreeTree'] | null => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const tree = value as Record<string, unknown>;
+  return typeof tree.before === 'string' && /^[a-f0-9]{40}$/.test(tree.before)
+    && typeof tree.after === 'string' && /^[a-f0-9]{40}$/.test(tree.after)
+    ? { before: tree.before, after: tree.after } : null;
+};
+
+const parseOutputTail = (value: unknown): ObservedGateOutcomeV1['outputTail'] | null => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const tail = value as Record<string, unknown>;
+  if (typeof tail.text !== 'string' || tail.text.length === 0 || tail.text.length > 4096
+    || tail.text.split('\n').length > 60 || typeof tail.truncated !== 'boolean'
+    || /[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(tail.text)
+    || /sk-[a-z0-9]{20,}|Bearer\s+\S+|eyJ[a-z0-9_-]*\.[a-z0-9_-]+\.[a-z0-9_-]+|-----BEGIN|\b(?:password|secret|token|api[ _-]key)\s*[:=]/i.test(tail.text)) return null;
+  return { text: tail.text, truncated: tail.truncated };
+};
 
 const nonBlank = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 const isInt = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value);
@@ -363,6 +385,7 @@ export function buildHostObservedGateEvidence(input: BuildHostObservedGateEviden
   }
   const gates: ObservedGateOutcomeV1[] = [];
   let reportedTests = 0;
+  let outputCharacters = 0;
   for (const gate of input.gates) {
     if (typeof gate !== 'object' || gate === null
       || !nonBlank(gate.label) || !nonBlank(gate.command)
@@ -378,7 +401,14 @@ export function buildHostObservedGateEvidence(input: BuildHostObservedGateEviden
     const candidate = parseGateTestReport(gate.testReport as Json | undefined);
     const testReport = candidate && reportedTests + candidate.totals.tests <= GATE_TEST_REPORT_LIMITS.maxTotalTestsPerEvidence ? candidate : null;
     if (testReport) reportedTests += testReport.totals.tests;
+    const worktreeTree = parseWorktreeTree(gate.worktreeTree);
+    const tail = deriveObservedGateOutcome({ exitCode: gate.exitCode, timedOut: gate.timedOut, cancelled: gate.cancelled }) === 'failed'
+      ? parseOutputTail(gate.outputTail) : null;
+    const outputTail = tail && outputCharacters + tail.text.length <= 32768 ? tail : null;
+    if (outputTail) outputCharacters += outputTail.text.length;
     gates.push({
+      ...(worktreeTree ? { worktreeTree } : {}),
+      ...(outputTail ? { outputTail } : {}),
       ...(testReport === null ? {} : { testReport }),
       label: gate.label, command: gate.command, exitCode: gate.exitCode,
       durationMs: gate.durationMs, timedOut: gate.timedOut, cancelled: gate.cancelled,
@@ -427,6 +457,7 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
   }
   const gates: ObservedGateOutcomeV1[] = [];
   let reportedTests = 0;
+  let outputCharacters = 0;
   for (const entry of root.gates) {
     const gate = object(entry);
     if (!gate || !nonBlank(gate.label) || !nonBlank(gate.command)
@@ -442,7 +473,14 @@ export function parseHostObservedGateEvidence(value: Json | undefined): HostObse
     const candidate = parseGateTestReport(gate.testReport as Json | undefined);
     const testReport = candidate && reportedTests + candidate.totals.tests <= GATE_TEST_REPORT_LIMITS.maxTotalTestsPerEvidence ? candidate : null;
     if (testReport) reportedTests += testReport.totals.tests;
+    const worktreeTree = parseWorktreeTree(gate.worktreeTree);
+    const tail = deriveObservedGateOutcome({ exitCode: gate.exitCode, timedOut: gate.timedOut, cancelled: gate.cancelled }) === 'failed'
+      ? parseOutputTail(gate.outputTail) : null;
+    const outputTail = tail && outputCharacters + tail.text.length <= 32768 ? tail : null;
+    if (outputTail) outputCharacters += outputTail.text.length;
     gates.push({
+      ...(worktreeTree ? { worktreeTree } : {}),
+      ...(outputTail ? { outputTail } : {}),
       ...(testReport === null ? {} : { testReport }),
       label: gate.label, command: gate.command, exitCode: gate.exitCode,
       durationMs: gate.durationMs, timedOut: gate.timedOut, cancelled: gate.cancelled,

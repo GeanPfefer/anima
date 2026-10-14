@@ -415,3 +415,93 @@ describe('I2c — baseline.testReport e claimKind aditivos', () => {
     expect(parseHostObservedGateEvidence(bad.value as unknown as Json)).toEqual(bad.value);
   });
 });
+
+describe('campos opcionais de árvore e saída limitada', () => {
+  const tree = { before: 'c'.repeat(40), after: 'c'.repeat(40) };
+  const roundTrip = (result: ReturnType<typeof build>) => {
+    if (!result.ok) throw new Error(result.explanation);
+    return parseHostObservedGateEvidence(JSON.parse(JSON.stringify(result.value)) as Json);
+  };
+  test('preserva árvore e saída de falha no round-trip', () => {
+    const result = build({ gates: [gate({ exitCode: 1, worktreeTree: tree,
+      outputTail: { text: 'Falha na comparação\n\tdetalhe', truncated: true } })] });
+    if (!result.ok) throw new Error(result.explanation);
+    expect(roundTrip(result)).toEqual(result.value);
+    expect(result.value.gates[0]!.worktreeTree).toEqual(tree);
+    expect(result.value.gates[0]!.outputTail?.truncated).toBe(true);
+  });
+  test.each([
+    { before: 'C'.repeat(40), after: tree.after }, { before: tree.before, after: 'x' },
+    { before: tree.before }, null, [], 'invalid',
+  ])('omite árvore inteira malformada %#', worktreeTree => {
+    const legacy = build();
+    expect(build({ gates: [gate({ worktreeTree: worktreeTree as never })] })).toEqual(legacy);
+    if (!legacy.ok) throw new Error(legacy.explanation);
+    const raw = JSON.parse(JSON.stringify(legacy.value)) as { gates: Record<string, unknown>[] };
+    raw.gates[0]!.worktreeTree = worktreeTree;
+    expect(parseHostObservedGateEvidence(raw as unknown as Json)).toEqual(roundTrip(legacy));
+  });
+  test.each([
+    '', 'x'.repeat(4097), Array(61).fill('x').join('\n'), 'a\u0000b', 'a\rb', 'a\u007fb', 'a\u0085b',
+    'sk-' + 'a'.repeat(20), 'Bearer abc', 'eyJabc.def.ghi', '-----BEGIN PUBLIC',
+    'PASSWORD: abc', 'secret=abc', 'Token :abc', 'api key=abc', 'API_KEY:abc', 'api-key=abc',
+  ])('omite saída rejeitada pela regra %#', text => {
+    const legacy = build({ gates: [gate({ exitCode: 1 })] });
+    expect(build({ gates: [gate({ exitCode: 1, outputTail: { text, truncated: false } })] })).toEqual(legacy);
+    if (!legacy.ok) throw new Error(legacy.explanation);
+    const raw = JSON.parse(JSON.stringify(legacy.value)) as { gates: Record<string, unknown>[] };
+    raw.gates[0]!.outputTail = { text, truncated: false };
+    expect(parseHostObservedGateEvidence(raw as unknown as Json)).toEqual(roundTrip(legacy));
+  });
+  test.each([null, [], 'invalid', { text: 1, truncated: false }, { text: 'falha' },
+    { text: 'falha', truncated: 1 }])('omite saída com estrutura inválida %#', outputTail => {
+    const legacy = build({ gates: [gate({ exitCode: 1 })] });
+    expect(build({ gates: [gate({ exitCode: 1, outputTail: outputTail as never })] })).toEqual(legacy);
+    if (!legacy.ok) throw new Error(legacy.explanation);
+    const raw = JSON.parse(JSON.stringify(legacy.value)) as { gates: Record<string, unknown>[] };
+    raw.gates[0]!.outputTail = outputTail;
+    expect(parseHostObservedGateEvidence(raw as unknown as Json)).toEqual(roundTrip(legacy));
+  });
+  test('omite saída em aprovação mesmo com desfecho persistido adulterado', () => {
+    const legacy = build();
+    expect(build({ gates: [gate({ outputTail: { text: 'detalhe', truncated: false } })] })).toEqual(legacy);
+    if (!legacy.ok) throw new Error(legacy.explanation);
+    const raw = JSON.parse(JSON.stringify(legacy.value)) as { gates: Record<string, unknown>[] };
+    Object.assign(raw.gates[0]!, { outcome: 'failed', outputTail: { text: 'detalhe', truncated: false } });
+    expect(parseHostObservedGateEvidence(raw as unknown as Json)).toEqual(roundTrip(legacy));
+  });
+  test.each([{ timedOut: true }, { cancelled: true }])('aceita saída com falha derivada %#', flags => {
+    const result = build({ gates: [gate({ ...flags, outputTail: { text: 'falha', truncated: false } })] });
+    if (!result.ok) throw new Error(result.explanation);
+    expect(result.value.gates[0]!.outputTail?.text).toBe('falha');
+    expect(roundTrip(result)).toEqual(result.value);
+  });
+  test('respeita limites inclusivos e orçamento na ordem de chegada', () => {
+    const result = build({ gates: Array.from({ length: 10 }, (_, index) => gate({ label: 'gate ' + index,
+      exitCode: 1, outputTail: { text: index === 9 ? 'fim' : 'x'.repeat(4096), truncated: false } })) });
+    if (!result.ok) throw new Error(result.explanation);
+    expect(result.value.gates.slice(0, 8).every(g => g.outputTail?.text.length === 4096)).toBe(true);
+    expect(result.value.gates[8]!.outputTail).toBeUndefined();
+    expect(result.value.gates[9]!.outputTail).toBeUndefined();
+    expect(roundTrip(result)).toEqual(result.value);
+    const raw = JSON.parse(JSON.stringify(result.value)) as { gates: Record<string, unknown>[] };
+    raw.gates[8]!.outputTail = { text: 'x'.repeat(4096), truncated: false };
+    expect(parseHostObservedGateEvidence(raw as unknown as Json)).toEqual(result.value);
+    const lines = build({ gates: [gate({ exitCode: 1, outputTail: { text: Array(60).fill('x').join('\n'), truncated: false } })] });
+    if (!lines.ok) throw new Error(lines.explanation);
+    expect(lines.value.gates[0]!.outputTail).toBeDefined();
+  });
+
+  test('omissão por orçamento permite saída posterior que ainda cabe', () => {
+    const texts = [...Array<string>(7).fill('x'.repeat(4096)), 'x'.repeat(4080), 'x'.repeat(17), 'x'.repeat(16)];
+    const result = build({ gates: texts.map((text, index) => gate({ label: 'limite ' + index,
+      exitCode: 1, outputTail: { text, truncated: false } })) });
+    if (!result.ok) throw new Error(result.explanation);
+    expect(result.value.gates[8]!.outputTail).toBeUndefined();
+    expect(result.value.gates[9]!.outputTail?.text).toHaveLength(16);
+    expect(roundTrip(result)).toEqual(result.value);
+    const raw = JSON.parse(JSON.stringify(result.value)) as { gates: Record<string, unknown>[] };
+    raw.gates[8]!.outputTail = { text: texts[8]!, truncated: false };
+    expect(parseHostObservedGateEvidence(raw as unknown as Json)).toEqual(result.value);
+  });
+});

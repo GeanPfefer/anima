@@ -35,6 +35,7 @@ export interface HostObservedGitEvidenceV1 {
   // Fatos observados pelo host no Git, nunca vindos do sinal do executor.
   readonly baseSha: string;
   readonly observedCommitSha: string;
+  readonly observedTreeSha?: string;
   readonly observedChangedFiles: readonly string[];
   /** Delta produzido por esta tentativa contra seu startSha. Ausente somente em
    * evidência histórica anterior à introdução da retomada incremental. */
@@ -79,6 +80,7 @@ export interface BuildHostObservedGitEvidenceInput {
   readonly approvedProposalVersion: ProposalVersion;
   readonly baseSha: string;
   readonly observedCommitSha: string;
+  readonly observedTreeSha?: string;
   readonly observedChangedFiles: readonly string[];
   readonly observedChangedFilesSinceStart?: readonly string[];
   readonly observedDiffFiles: readonly WorktreeFileChange[];
@@ -139,6 +141,7 @@ export function buildHostObservedGitEvidence(input: BuildHostObservedGitEvidence
       approvedProposalVersion: input.approvedProposalVersion,
       baseSha: input.baseSha,
       observedCommitSha: input.observedCommitSha,
+      ...(typeof input.observedTreeSha === 'string' && SHA.test(input.observedTreeSha) ? { observedTreeSha: input.observedTreeSha } : {}),
       observedChangedFiles: changedFiles,
       ...(changedFilesSinceStart ? { observedChangedFilesSinceStart: changedFilesSinceStart } : {}),
       observedDiffSummary: { filesChanged: diffFiles.length, insertions, deletions, files: diffFiles },
@@ -194,6 +197,7 @@ export function parseHostObservedGitEvidence(value: Json | undefined): HostObser
     approvedProposalVersion: root.approvedProposalVersion,
     baseSha: root.baseSha,
     observedCommitSha: root.observedCommitSha,
+    ...(typeof root.observedTreeSha === 'string' && SHA.test(root.observedTreeSha) ? { observedTreeSha: root.observedTreeSha } : {}),
     observedChangedFiles: changedFiles,
     ...(changedFilesSinceStart ? { observedChangedFilesSinceStart: changedFilesSinceStart } : {}),
     observedDiffSummary: { filesChanged: diff.filesChanged, insertions: diff.insertions, deletions: diff.deletions, files },

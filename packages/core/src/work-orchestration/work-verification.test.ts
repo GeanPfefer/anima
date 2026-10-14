@@ -1087,3 +1087,15 @@ describe('Verifier v5 — test_binding observado', () => {
       .map(f => [f.code, f.subject])).toEqual([['test_report_missing', 'unit'], ['test_report_uncorrelated', 'second']]);
   });
 });
+
+describe('compatibilidade de evidência sem campos novos', () => {
+  test('campos opcionais ausentes preservam parecer e contagens legados', () => {
+    const value = baseInput({ observedGates: gateEvidenceWith() });
+    const expected = verifyWorkResult(value);
+    expect(expected.verdict).toBe('verified');
+    expect(expected.summary.violations).toBe(0);
+    expect(expected.summary.gaps).toBe(0);
+    expect(verifyWorkResult({ ...value, observedGates: { ...value.observedGates!,
+      gates: value.observedGates!.gates.map(gate => ({ ...gate, worktreeTree: undefined, outputTail: undefined })) } })).toEqual(expected);
+  });
+});

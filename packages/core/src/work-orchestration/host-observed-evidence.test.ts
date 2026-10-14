@@ -124,3 +124,20 @@ describe('projectHostObservedEvidence', () => {
     expect(projectHostObservedEvidence([wrap(ev, { evidence: broken as unknown as Json })])).toBeNull();
   });
 });
+
+describe('árvore Git opcional', () => {
+  test('preserva árvore válida no round-trip', () => {
+    const result = build({ observedTreeSha: 'c'.repeat(40) });
+    if (!result.ok) throw new Error(result.explanation);
+    expect(result.value.observedTreeSha).toBe('c'.repeat(40));
+    expect(parseHostObservedGitEvidence(JSON.parse(JSON.stringify(result.value)) as Json)).toEqual(result.value);
+  });
+  test.each(['', 'C'.repeat(40), 'c'.repeat(39), 'c'.repeat(41), 'g'.repeat(40)])('omite árvore inválida %s', observedTreeSha => {
+    const result = build({ observedTreeSha });
+    const legacy = build();
+    expect(result).toEqual(legacy);
+    if (!legacy.ok) throw new Error(legacy.explanation);
+    expect(parseHostObservedGitEvidence({ ...JSON.parse(JSON.stringify(legacy.value)), observedTreeSha } as Json))
+      .toEqual(parseHostObservedGitEvidence(JSON.parse(JSON.stringify(legacy.value)) as Json));
+  });
+});

@@ -65,6 +65,8 @@ export type WorkVerificationProvenance = 'independent' | 'attested';
 export type WorkVerificationFindingCode =
   | 'test_binding_satisfied'
   | 'test_report_uncorrelated'
+  | 'test_report_tree_unbound'
+  | 'test_report_tree_mutated'
   | 'test_report_revision_mismatch'
   | 'test_report_missing'
   | 'test_binding_unmet'
@@ -455,6 +457,13 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     const gate = matching[matching.length - 1];
     if (!observedGatesUsable || !gate || gate.outcome !== 'passed') return 'test_report_uncorrelated';
     if (!observedUsable || !observedGates!.changeAuthorization) return 'test_report_uncorrelated';
+    const tree = gate.worktreeTree;
+    const observedTree = observed!.observedTreeSha;
+    if ((tree === undefined) !== (observedTree === undefined)) return 'test_report_tree_unbound';
+    if (tree && observedTree !== undefined) {
+      if (tree.before !== tree.after) return 'test_report_tree_mutated';
+      if (tree.after !== observedTree) return 'test_report_revision_mismatch';
+    }
     const revisionPath = (path: string): string => norm(path).toLowerCase();
     const gitPaths = new Set([...observed!.observedChangedFiles,
       ...observed!.observedDiffSummary.files.map(file => file.path)].map(revisionPath));
