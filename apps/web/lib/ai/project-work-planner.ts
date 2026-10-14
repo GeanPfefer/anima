@@ -106,10 +106,10 @@ export function createChatProjectPlanner(provider: ChatProviderId, userId: strin
 export function createConfiguredProjectPlanner(
   env: Record<string, string | undefined> = process.env,
 ): ProjectWorkPlanner {
-  if (resolveConfiguredProjectPlannerProvider(env) === 'local') return new LocalOllamaProjectWorkPlanner();
+  if (resolveConfiguredProjectPlannerProvider(env) === 'local') return new LocalOllamaProjectWorkPlanner({ env });
   return new AdmissionGatedOpenAIPlanner(
     new OpenAIProjectWorkPlanner({ admission: createInteractiveOpenAIAdmission() }),
-    new LocalOllamaProjectWorkPlanner(),
+    new LocalOllamaProjectWorkPlanner({ env }),
   );
 }
 
