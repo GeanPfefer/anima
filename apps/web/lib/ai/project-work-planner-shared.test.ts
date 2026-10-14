@@ -204,3 +204,85 @@ describe('target_paths por gate — superfície explícita e conservadora', () =
     expect(parseProposal(validArgs({ validation_target_paths: ['apps/web/lib/*.ts'] }))).toBeNull();
   });
 });
+
+const bindingFile = 'apps/web/lib/ai/project-work-planner-env.test.ts';
+const explicitBinding = { label: 'Prova funcional', covers: ['Comportamento'], test_files: [bindingFile], min_new_tests: 1, bound_tests: [] };
+const bindingArgs = (over: Record<string, unknown> = {}) => validArgs({ included_scope: [bindingFile],
+  expected_effects: ['gate verde', 'Comportamento'], test_bindings: [explicitBinding], human_review_effects: [], ...over });
+
+describe('declarações explícitas de prova funcional', () => {
+  test('aceita declaração completa e preserva campos do modelo', () => {
+    expect(parseProposal(bindingArgs())?.test_bindings).toEqual([explicitBinding]);
+  });
+  test.each([
+    ['glob asterisco', 'apps/web/lib/ai/*.test.ts'],
+    ['glob interrogação', 'apps/web/lib/ai/a?.test.ts'],
+    ['glob colchetes', 'apps/web/lib/ai/[ab].test.ts'],
+    ['glob alternativas', 'apps/web/lib/ai/{a,b}.test.ts'],
+    ['diretório', 'apps/web/lib/ai/'],
+    ['travessia', '../exemplo.test.ts'],
+    ['sufixo comum', 'apps/web/lib/ai/exemplo.ts'],
+  ])('recusa arquivo inexato ou inseguro: %s', (_label, file) => {
+    expect(validatePlannerProposal(bindingArgs({ included_scope: [file], test_bindings: [{ ...explicitBinding, test_files: [file] }] })).ok).toBe(false);
+  });
+  test.each([
+    ['sem arquivos', { test_files: [] }],
+    ['muitos arquivos', { test_files: Array(5).fill(bindingFile) }],
+    ['arquivos repetidos', { test_files: [bindingFile, bindingFile] }],
+    ['quantidade fracionária', { min_new_tests: 1.5 }],
+    ['quantidade negativa', { min_new_tests: -1 }],
+    ['quantidade acima do teto', { min_new_tests: 101 }],
+    ['prova vazia', { min_new_tests: 0 }],
+    ['vínculo fora dos arquivos', { bound_tests: [{ file: 'apps/web/lib/ai/outro.test.ts', full_name: 'Exemplo' }] }],
+    ['nome vazio', { bound_tests: [{ file: bindingFile, full_name: ' ' }] }],
+    ['nome longo', { bound_tests: [{ file: bindingFile, full_name: 'a'.repeat(401) }] }],
+    ['par repetido', { bound_tests: Array(2).fill({ file: bindingFile, full_name: 'Exemplo' }) }],
+    ['aceite desconhecido', { covers: ['Ausente'] }],
+  ])('recusa declaração incompleta: %s', (_label, override) => {
+    expect(validatePlannerProposal(bindingArgs({ test_bindings: [{ ...explicitBinding, ...override }] })).ok).toBe(false);
+  });
+  test.each(['ts', 'tsx', 'js', 'jsx'])('aceita teste novo com extensão %s', extension => {
+    const file = `apps/web/lib/ai/exemplo.spec.${extension}`;
+    expect(validatePlannerProposal(bindingArgs({ included_scope: [file], test_bindings: [{ ...explicitBinding, test_files: [file] }] })).ok).toBe(true);
+  });
+  test('recusa revisão humana desconhecida', () => {
+    expect(validatePlannerProposal(bindingArgs({ human_review_effects: ['Ausente'] })).ok).toBe(false);
+  });
+  test('recusa cobertura repetida entre provas', () => {
+    expect(validatePlannerProposal(bindingArgs({ human_review_effects: ['Comportamento'] }))).toMatchObject({ ok: false, issue: { rule: 'duplicate_coverage' } });
+  });
+  test('recusa aceite sem cobertura', () => {
+    expect(validatePlannerProposal(bindingArgs({ test_bindings: [] }))).toMatchObject({ ok: false, issue: { rule: 'missing_coverage' } });
+  });
+  test('aceita revisão humana junto ao gate automático', () => {
+    expect(validatePlannerProposal(bindingArgs({ test_bindings: [], human_review_effects: ['Comportamento'] })).ok).toBe(true);
+  });
+  test('exige listas e teto de três bindings', () => {
+    for (const test_bindings of [null, 'texto', Array(4).fill(explicitBinding)])
+      expect(validatePlannerProposal(bindingArgs({ test_bindings })).ok).toBe(false);
+    for (const human_review_effects of [null, 'texto', ['']])
+      expect(validatePlannerProposal(bindingArgs({ human_review_effects })).ok).toBe(false);
+  });
+  test('schema estrito exige todas as novas declarações', () => {
+    expect(SUBMIT_PARAMETERS.required).toEqual(expect.arrayContaining(['test_bindings', 'human_review_effects']));
+    expect(SUBMIT_PARAMETERS.properties.test_bindings.items.additionalProperties).toBe(false);
+    expect(SUBMIT_PARAMETERS.properties.test_bindings.items.required).toEqual(['label', 'covers', 'test_files', 'min_new_tests', 'bound_tests']);
+  });
+});
+
+test('recusa arquivo vinculado inexistente na validação compartilhada', () => {
+  const file = 'apps/web/lib/ai/prova-inexistente.test.ts';
+  expect(validatePlannerProposal(bindingArgs({ included_scope: [file], test_bindings: [{ ...explicitBinding,
+    test_files: [file], bound_tests: [{ file, full_name: 'Comportamento declarado' }] }] })))
+    .toMatchObject({ ok: false, issue: { rule: 'bound_test_file_missing' } });
+});
+test('recusa arquivo de teste declarado fora do escopo compartilhado', () => {
+  expect(validatePlannerProposal(bindingArgs({ included_scope: ['apps/web/lib/ai/project-work-planner.ts'] })))
+    .toMatchObject({ ok: false, issue: { rule: 'test_file_outside_scope' } });
+});
+test('recusa cobertura repetida entre dois bindings', () => {
+  const other = 'apps/web/lib/ai/outro-exemplo.test.ts';
+  expect(validatePlannerProposal(bindingArgs({ included_scope: [bindingFile, other], test_bindings: [explicitBinding,
+    { ...explicitBinding, test_files: [other] }] })))
+    .toMatchObject({ ok: false, issue: { rule: 'duplicate_coverage' } });
+});

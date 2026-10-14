@@ -20,7 +20,14 @@ import { OPENAI_PROJECT_TOOLS } from './project-tools';
 
 /** Argumentos que o modelo propõe. É o ÚNICO grau de liberdade do LLM: escopo,
  * um comando de validação e texto descritivo. Todo o resto é fixado pelo host. */
+export type PlannerTestBinding = {
+  label: string; covers: string[]; test_files: string[]; min_new_tests: number;
+  bound_tests: { file: string; full_name: string }[];
+};
+
 export type PlannerArguments = {
+  test_bindings?: PlannerTestBinding[];
+  human_review_effects?: string[];
   summary: string;
   objective: string;
   included_scope: string[];
@@ -92,6 +99,22 @@ export const FORCE_SUBMISSION_AFTER_EVIDENCE = 8;
 export const SUBMIT_PARAMETERS = {
   type: 'object',
   properties: {
+    test_bindings: {
+      type: 'array', maxItems: 3, items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          label: { type: 'string' }, covers: { type: 'array', items: { type: 'string' } },
+          test_files: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'string' } },
+          min_new_tests: { type: 'integer', minimum: 0, maximum: 100 },
+          bound_tests: { type: 'array', items: {
+            type: 'object', additionalProperties: false,
+            properties: { file: { type: 'string' }, full_name: { type: 'string', maxLength: 400 } },
+            required: ['file', 'full_name'],
+          } },
+        }, required: ['label', 'covers', 'test_files', 'min_new_tests', 'bound_tests'],
+      },
+    },
+    human_review_effects: { type: 'array', items: { type: 'string' } },
     summary: { type: 'string' },
     objective: { type: 'string' },
     included_scope: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 12 },
@@ -126,7 +149,7 @@ export const SUBMIT_PARAMETERS = {
       maxItems: 6,
     },
   },
-  required: ['summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command', 'validation_covers', 'validation_claim_kind', 'validation_target_paths', 'max_attempts', 'additional_validations'],
+  required: ['test_bindings', 'human_review_effects', 'summary', 'objective', 'included_scope', 'excluded_scope', 'expected_effects', 'risks', 'validation_label', 'validation_command', 'validation_covers', 'validation_claim_kind', 'validation_target_paths', 'max_attempts', 'additional_validations'],
   additionalProperties: false,
 } as const;
 
@@ -165,7 +188,7 @@ export const PLANNER_CHAT_TOOLS = [
 ];
 
 export const PLANNER_SYSTEM_INSTRUCTIONS =
-  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Para cada gate, `covers` deve repetir literalmente os itens de `expected_effects` que aquela prova demonstra; TODO expected_effect deve ser coberto por ao menos um gate. Para cada gate, declare também `claim_kind`: use "gate_assertion" quando os itens de `covers` afirmam o PRÓPRIO resultado do gate (ex.: "as validações declaradas passam", "o typecheck passa"); use "substantive" quando `covers` descreve um COMPORTAMENTO material que um gate verde apenas associa, mas não demonstra sozinho (ex.: "o parser rejeita entrada inválida"). Na dúvida, use "substantive". A escolha é a intenção real do critério, nunca uma inferência por palavra-chave, nome de teste ou comando. Declare ainda `target_paths` por gate: somente paths relativos exatos que a investigação demonstrou serem a superfície material exercitada por aquela prova (incluindo testes quando aplicável), nunca o projeto inteiro; use [] quando não houver evidência suficiente. Quando o trabalho exigir MAIS DE UMA prova independente, registre a primeira em validation_label/validation_command/validation_covers/validation_claim_kind/validation_target_paths e as demais em additional_validations, cada uma com seu label, command, covers, claim_kind e target_paths. Use additional_validations = [] quando uma única prova basta. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS de strings. Inclua no included_scope TODOS os arquivos que o trabalho cria ou altera — inclusive arquivos novos e seus testes —, nunca arquivos não relacionados só porque já existem. Um arquivo novo pode ficar em uma pasta nova quando a pasta acima dela já existe (ex.: uma nova rota apps/web/app/api/<nome>/route.ts). Executar um teste NÃO concede permissão de editar o arquivo testado: só o included_scope autoriza escrita. Quando houver evidência suficiente, chame submit_project_work_proposal.';
+  'Você é a capacidade interna de planejamento técnico do Anima. Investigue o repositório real com as ferramentas read-only antes de propor. Produza uma proposta pequena, concreta, verificável e compatível com as regras do repositório. Nunca alegue execução nem edite arquivos. A aprovação e a execução ocorrerão depois, por contratos locais do host. O alvo é fixado pelo servidor como "anima". Escolha somente caminhos exatos de arquivos necessários. O comando de validação deve ser um único npm test, npm run typecheck, npm run test ou npm run build. Para cada gate, `covers` deve repetir literalmente os itens de `expected_effects` que aquela prova demonstra; TODO expected_effect deve ser coberto por ao menos um gate. Para cada gate, declare também `claim_kind`: use "gate_assertion" quando os itens de `covers` afirmam o PRÓPRIO resultado do gate (ex.: "as validações declaradas passam", "o typecheck passa"); use "substantive" quando `covers` descreve um COMPORTAMENTO material que um gate verde apenas associa, mas não demonstra sozinho (ex.: "o parser rejeita entrada inválida"). Na dúvida, use "substantive". A escolha é a intenção real do critério, nunca uma inferência por palavra-chave, nome de teste ou comando. Declare ainda `target_paths` por gate: somente paths relativos exatos que a investigação demonstrou serem a superfície material exercitada por aquela prova (incluindo testes quando aplicável), nunca o projeto inteiro; use [] quando não houver evidência suficiente. Quando o trabalho exigir MAIS DE UMA prova independente, registre a primeira em validation_label/validation_command/validation_covers/validation_claim_kind/validation_target_paths e as demais em additional_validations, cada uma com seu label, command, covers, claim_kind e target_paths. Use additional_validations = [] quando uma única prova basta. Ao chamar submit_project_work_proposal, os campos included_scope, excluded_scope, expected_effects e risks são LISTAS de strings. Inclua no included_scope TODOS os arquivos que o trabalho cria ou altera — inclusive arquivos novos e seus testes —, nunca arquivos não relacionados só porque já existem. Um arquivo novo pode ficar em uma pasta nova quando a pasta acima dela já existe (ex.: uma nova rota apps/web/app/api/<nome>/route.ts). Executar um teste NÃO concede permissão de editar o arquivo testado: só o included_scope autoriza escrita. Quando houver evidência suficiente, chame submit_project_work_proposal. Declare test_bindings apenas para alvo funcional concretamente testável por Jest em workspace único, com arquivo exato, nomes de teste ÚNICOS sem segredo/senha/token/chave/credencial/key/secret/password e min_new_tests coerente. Nunca invente teste existente. Na dúvida declare o efeito em human_review_effects. Use test_bindings e human_review_effects = [] quando não aplicáveis; bindings e revisão humana também cobrem expected_effects, sem duplicar cobertura.';
 
 export function buildPlannerUserPrompt(message: string): string {
   return `Prepare uma proposta executável para este pedido:\n\n${message}\n\nInvestigue primeiro o repositório com as ferramentas locais (project_search, project_read_file, project_list_files, project_git_status, project_git_diff). Leia AGENTS.md e os arquivos relevantes. Não altere nada. O alvo será fixado pelo servidor como anima. Escolha somente caminhos exatos de arquivos necessários. Quando houver informação suficiente, chame submit_project_work_proposal.`;
@@ -477,12 +500,72 @@ export function validatePlannerProposal(raw: string): PlannerProposalValidationR
   // Teto de tentativas: declarado estruturalmente (1–3); ausência ⇒ 3; qualquer outro valor reprova.
   if (value.max_attempts !== undefined && value.max_attempts !== 1 && value.max_attempts !== 2 && value.max_attempts !== 3)
     return proposalIssue('max_attempts', 'unsupported_value', 'max_attempts deve ser um dos inteiros 1, 2 ou 3.');
+  const bindings = value.test_bindings ?? [];
+  const reviews = value.human_review_effects ?? [];
+  if (value.test_bindings === null || !Array.isArray(bindings) || bindings.length > 3)
+    return proposalIssue('test_bindings', 'invalid_list', 'test_bindings aceita no máximo três itens.');
+  if (value.human_review_effects === null || !Array.isArray(reviews) || !reviews.every(nonBlank))
+    return proposalIssue('human_review_effects', 'invalid_list', 'human_review_effects deve ser lista de textos.');
+  const filesSeen = new Set<string>();
+  for (const [index, entry] of bindings.entries()) {
+    const field = `test_bindings[${index}]`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !nonBlank(entry.label)
+      || !Array.isArray(entry.covers) || !entry.covers.every(nonBlank))
+      return proposalIssue(field, 'invalid_binding', 'Binding deve declarar label e covers.');
+    if (!Array.isArray(entry.test_files) || entry.test_files.length < 1 || entry.test_files.length > 4
+      || !entry.test_files.every(nonBlank))
+      return proposalIssue(field, 'invalid_test_files', 'Binding exige um a quatro arquivos de teste.');
+    for (const file of entry.test_files) {
+      if (!safePath(file) || file.split('/').some(segment => !segment || segment === '.'))
+        return proposalIssue(field, 'safe_path', 'Arquivo de teste inseguro.');
+      if (!/^[A-Za-z0-9_./-]+$/.test(file) || /[ *?\[\]{}]/.test(file) || file.includes('\\') || file.endsWith('/') || !/\.(test|spec)\.(ts|tsx|js|jsx)$/.test(file))
+        return proposalIssue(field, 'exact_test_file', 'Arquivo de teste deve ser exato com sufixo suportado.');
+      try {
+        const target = resolve(projectRoot(), file);
+        if (existsSync(target) && !statSync(target).isFile())
+          return proposalIssue(field, 'exact_test_file', 'Arquivo de teste não pode ser diretório.');
+      } catch { return proposalIssue(field, 'exact_test_file', 'Arquivo de teste indisponível.'); }
+      if (!value.included_scope!.includes(file)) return proposalIssue(field, 'test_file_outside_scope', 'Arquivo de teste fora de included_scope.');
+      if (filesSeen.has(file)) return proposalIssue(field, 'duplicate_test_file', 'Arquivo de teste repetido.');
+      filesSeen.add(file);
+    }
+    if (!Number.isInteger(entry.min_new_tests) || entry.min_new_tests < 0 || entry.min_new_tests > 100)
+      return proposalIssue(field, 'invalid_min_new_tests', 'min_new_tests deve ser inteiro entre zero e cem.');
+    if (!Array.isArray(entry.bound_tests)) return proposalIssue(field, 'invalid_bound_tests', 'bound_tests deve ser lista.');
+    if (!entry.bound_tests.length && entry.min_new_tests < 1)
+      return proposalIssue(field, 'vacuous_binding', 'Binding vazio exige teste novo.');
+    const pairs = new Set<string>();
+    for (const bound of entry.bound_tests) {
+      if (!bound || typeof bound !== 'object' || !entry.test_files.includes(bound.file)
+        || !nonBlank(bound.full_name) || bound.full_name.length > 400)
+        return proposalIssue(field, 'invalid_bound_test', 'Teste vinculado inválido.');
+      const pair = JSON.stringify([bound.file, bound.full_name]);
+      if (pairs.has(pair)) return proposalIssue(field, 'duplicate_bound_test', 'Teste vinculado repetido.');
+      pairs.add(pair);
+      try {
+        const target = resolve(projectRoot(), bound.file);
+        if (!existsSync(target) || !statSync(target).isFile())
+          return proposalIssue(field, 'bound_test_file_missing', 'Teste vinculado exige arquivo existente.');
+      } catch { return proposalIssue(field, 'bound_test_file_missing', 'Arquivo vinculado indisponível.'); }
+    }
+    if (entry.min_new_tests < 1) {
+      for (const file of entry.test_files) {
+        try {
+          const target = resolve(projectRoot(), file);
+          if (!existsSync(target) || !statSync(target).isFile())
+            return proposalIssue(field, 'new_test_file_without_new_tests', 'Arquivo novo exige min_new_tests positivo.');
+        } catch { return proposalIssue(field, 'new_test_file_without_new_tests', 'Arquivo novo exige teste novo.'); }
+      }
+    }
+  }
   const expectedEffects = value.expected_effects!;
   const validationCovers = value.validation_covers!;
   const expected = new Set(expectedEffects);
-  const allCovered = [validationCovers, ...(additionalValidations ?? []).map(v => v.covers)].flat();
+  const allCovered = [validationCovers, ...(additionalValidations ?? []).map(v => v.covers), ...bindings.map(binding => binding.covers), reviews].flat();
   if (allCovered.some(criterion => !expected.has(criterion)))
     return proposalIssue('validation_covers', 'unknown_criterion', 'validation_covers contém item ausente de expected_effects.');
+  if ((bindings.length || reviews.length) && new Set(allCovered).size !== allCovered.length)
+    return proposalIssue('validation_covers', 'duplicate_coverage', 'Cada efeito deve ser coberto uma única vez.');
   if (expectedEffects.some(criterion => !allCovered.includes(criterion)))
     return proposalIssue('validation_covers', 'missing_coverage', 'Todo item de expected_effects deve aparecer em covers.');
   const normalized = { ...(value as PlannerArguments), validation_claim_kind: validationClaimKind,

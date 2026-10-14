@@ -1,10 +1,10 @@
-import { readVerifierRequirement, VERIFIER_REQUIREMENT_KEY, type CreateWorkProposalCommand, type RequestProposalRevisionCommand, type WorkItem } from '@anima/core';
+import { evaluateAutonomousEligibility, lintAcceptanceContract, readAutonomousExecutionSpec, readVerifierRequirement, VERIFIER_REQUIREMENT_KEY, type CreateWorkProposalCommand, type RequestProposalRevisionCommand, type WorkItem } from '@anima/core';
 import { readAuthorizedBaseSha } from '@/lib/work-orchestration/executor-selection';
 import { resolveConfiguredCoderBackend } from '@/lib/work-orchestration/coder-backend';
 import { CODEX_CLI_DEFAULT_MODEL } from '@/lib/work-orchestration/codex-cli-coder';
 import { CLAUDE_CODE_DEFAULT_MODEL } from '@/lib/work-orchestration/claude-code-coder';
 import { resolveOpenAICoderModel } from '@/lib/work-orchestration/gpt-coder';
-import { parseProposal, scopeTestCommandToWorkspace, targetPathsAreExactFilesOrAbsent, type PlannerProposalResult, type ProjectWorkPlanner } from './project-work-planner-shared';
+import { validatePlannerProposal, workspaceForScope, scopeTestCommandToWorkspace, targetPathsAreExactFilesOrAbsent, type PlannerProposalResult, type ProjectWorkPlanner } from './project-work-planner-shared';
 import { OpenAIProjectWorkPlanner } from './project-work-planner-openai';
 import { LocalOllamaProjectWorkPlanner, resolveLocalProjectPlannerModel } from './project-work-planner-local';
 import { OpenAIAdmissionDenied } from './openai-paid-transport';
@@ -128,8 +128,21 @@ export async function planExecutableProjectWork(
 
   // VALIDAÇÃO HOST (fail-closed): escopo, paths e comando. O planejador não tem voz
   // aqui — argumentos fora dos limites são rejeitados, qualquer que seja o provedor.
-  const proposal = parseProposal(proposed.rawArguments);
-  if (!proposal) return { ok: false, message: 'O planejador produziu uma proposta fora dos limites locais permitidos.' };
+  const validation = validatePlannerProposal(proposed.rawArguments);
+  if (!validation.ok) return { ok: false, message: `${validation.issue.rule}: ${validation.issue.message}` };
+  const proposal = validation.proposal;
+  const bindings = proposal.test_bindings ?? [];
+  const reviews = proposal.human_review_effects ?? [];
+  const v2 = bindings.length > 0 || reviews.length > 0;
+  const workspace = workspaceForScope(proposal.included_scope);
+  if (bindings.length && (!workspace || bindings.some(binding => binding.test_files.some(file => !file.startsWith(`${workspace}/`)))))
+    return { ok: false, message: 'test_binding_workspace_ambiguous: binding exige workspace único.' };
+  if (v2 && [
+    { claim_kind: proposal.validation_claim_kind, covers: proposal.validation_covers },
+    ...(proposal.additional_validations ?? []),
+  ].some(gate => gate.claim_kind === 'substantive' && gate.covers.some(effect =>
+    !reviews.includes(effect) && !bindings.some(binding => binding.covers.includes(effect)))))
+    return { ok: false, message: 'substantive_gate_without_proof: gate substantivo exige prova.' };
   if (!targetPathsAreExactFilesOrAbsent(proposal)) {
     return { ok: false, message: 'Os target_paths precisam apontar para arquivos exatos; diretórios e globs não são suportados.' };
   }
@@ -140,7 +153,7 @@ export async function planExecutableProjectWork(
   if (!baseSha) return { ok: false, message: 'Não foi possível capturar o SHA-base autorizado do repositório.' };
   const coderBackend = resolveConfiguredCoderBackend();
 
-  return {
+  const result: ProjectWorkPlanningResult = {
     ok: true,
     command: {
       ...base,
@@ -151,6 +164,7 @@ export async function planExecutableProjectWork(
         planner: planner.id,
         execution_spec: {
           schema_version: 1,
+          ...(v2 ? { acceptance_contract: 2 } : {}),
           target: { kind: 'project', reference: 'anima' },
           // Executor e backend persistidos pelo HOST (ADR-001): project:anima usa a
           // worktree isolada com o backend de código local selecionável por deploy.
@@ -202,6 +216,14 @@ export async function planExecutableProjectWork(
               claim_kind: validation.claim_kind,
               ...(validation.target_paths ? { target_paths: validation.target_paths } : {}),
             })),
+            ...bindings.map(binding => ({
+              label: binding.label, proof: 'gate', claim_kind: 'test_binding', covers: binding.covers,
+              target_paths: binding.test_files,
+              command: `npm test --workspace=${workspace} -- ${binding.test_files.map(file => file.slice(workspace!.length + 1)).join(' ')}`,
+              binding: { test_files: binding.test_files, min_new_tests: binding.min_new_tests,
+                ...(binding.bound_tests.length ? { bound_tests: binding.bound_tests } : {}) },
+            })),
+            ...reviews.map(effect => ({ label: `Revisão humana: ${effect}`, proof: 'human_review', covers: [effect] })),
           ],
           limits: { max_attempts: proposal.max_attempts ?? 3, max_duration_minutes: 30 },
         },
@@ -219,6 +241,18 @@ export async function planExecutableProjectWork(
       },
     },
   };
+  if (v2) {
+    // A elegibilidade avalia o envelope como aprovado; isto não aprova nem persiste a proposta.
+    const item: WorkItem = { ...result.command, id: 'planner-preview', userId: 'planner-preview',
+      state: 'approved', originalRequest: message, proposalVersion: 1, createdAt: new Date(0), updatedAt: new Date(0) };
+    const eligibility = evaluateAutonomousEligibility(item);
+    const spec = readAutonomousExecutionSpec(item.intent);
+    const findings = lintAcceptanceContract(item.proposal.data.expectedEffects, spec?.validationCriteria ?? []);
+    if (!eligibility.eligible || findings.length)
+      return { ok: false, message: [...(!eligibility.eligible ? eligibility.gaps.map(gap => `${gap.code}: ${gap.explanation}`) : []),
+        ...findings.map(finding => finding.code)].join('; ') };
+  }
+  return result;
 }
 export type ProjectWorkRevisionPlanningResult =
   | {

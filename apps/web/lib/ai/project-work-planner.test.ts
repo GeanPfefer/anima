@@ -345,3 +345,26 @@ describe('planejador executável do projeto', () => {
       rawArguments: JSON.stringify(args),
     });
   });});
+
+describe('montagem aditiva de contrato de aceite', () => {
+  const file = 'apps/web/lib/ai/project-work-planner-env.test.ts';
+  const payload = (over: Record<string, unknown> = {}) => ({
+    summary: 'Prova explícita', objective: 'Demonstrar alteração', included_scope: [file],
+    excluded_scope: ['Não alterar banco'], risks: ['Regressão'], expected_effects: ['Gate passa', 'Efeito funcional'],
+    validation_label: 'Gate', validation_command: 'npm run typecheck --workspace=apps/web',
+    validation_covers: ['Gate passa'], validation_claim_kind: 'gate_assertion',
+    test_bindings: [{ label: 'Teste funcional', covers: ['Efeito funcional'], test_files: [file], min_new_tests: 1, bound_tests: [] }], ...over,
+  });
+  const run = (over: Record<string, unknown> = {}) => planExecutableProjectWork('Implementar', base, {
+    id: 'simulado', proposeArguments: async () => ({ ok: true, rawArguments: JSON.stringify(payload(over)) }),
+  });
+  test('recusa gate substantivo adicional sem prova no contrato novo', async () => {
+    expect(await run({ expected_effects: ['Gate passa', 'Efeito funcional', 'Outro efeito'], additional_validations: [
+      { label: 'Outro gate', command: 'npm run typecheck', covers: ['Outro efeito'], claim_kind: 'substantive' },
+    ] })).toMatchObject({ ok: false, message: expect.stringContaining('substantive_gate_without_proof') });
+  });
+  test('recusa cobertura compartilhada por gate e binding', async () => {
+    expect(await run({ validation_covers: ['Gate passa', 'Efeito funcional'] }))
+      .toMatchObject({ ok: false, message: expect.stringContaining('duplicate_coverage') });
+  });
+});
