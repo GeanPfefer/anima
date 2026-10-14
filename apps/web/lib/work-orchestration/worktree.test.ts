@@ -1,8 +1,9 @@
 /** @jest-environment node */
+import childProcess from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { GitWorktree, isTransientWorktreeError, parseGateCommand, runGate, runProcess, safeJoin } from './worktree';
+import { dirname, join } from 'node:path';
+import { captureJestReport, type CommandResult, withJestJsonReport, GitWorktree, isTransientWorktreeError, parseGateCommand, runGate, runProcess, safeJoin } from './worktree';
 
 // Operações git reais podem ficar lentas sob carga paralela; folga o timeout
 // para não flakar por contenção (o padrão de 5s do jest é curto demais aqui).
@@ -514,4 +515,79 @@ describe('GitWorktree.runCommand — execução governada confinada (V3, 3ª fat
     expect(r.timedOut).toBe(true);
     expect(r.exitCode).not.toBe(0);
   });
+});
+
+describe('captura Jest host-side', () => {
+  const root = join(tmpdir(), 'anima-report-root');
+  const fixture = (name = join(root, 'a.test.ts')) => ({
+    numTotalTestSuites: 1, numFailedTestSuites: 0, numRuntimeErrorTestSuites: 0,
+    numTotalTests: 1, numPassedTests: 1, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0, success: true,
+    testResults: [{ name, status: 'passed', message: '', assertionResults: [{
+      fullName: 'suite passes', title: 'passes', ancestorTitles: ['suite'], status: 'passed', invocations: 1, failureMessages: [],
+    }] }],
+  });
+  const result: CommandResult = { command: 'npm test', exitCode: 0, durationMs: 17, timedOut: false, cancelled: false, stdout: '', stderr: '' };
+  test('runGate preserva argv sem opção e command original com flags host', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'anima-gate-argv-'));
+    const spawn = jest.spyOn(childProcess, 'spawn');
+    try {
+      await writeFile(join(cwd, 'package.json'), JSON.stringify({ scripts: { test: 'node argv.js' } }));
+      await writeFile(join(cwd, 'argv.js'), 'console.log(JSON.stringify(process.argv.slice(2)));');
+      const plain = await runGate('npm test -- a.test.ts', cwd, 10_000);
+      expect(plain.exitCode).toBe(0);
+      expect(spawn.mock.calls[0]?.slice(0, 2)).toEqual(process.platform === 'win32'
+        ? ['npm.cmd test -- a.test.ts', expect.any(Object)] : ['npm', ['test', '--', 'a.test.ts']]);
+      const captured = await runGate('npm test -- a.test.ts', cwd, 10_000, undefined, { jestReportFile: '/tmp/report.json' });
+      expect(captured.exitCode).toBe(0);
+      expect(captured.command).toBe('npm test -- a.test.ts');
+      expect(spawn.mock.calls[1]?.slice(0, 2)).toEqual(process.platform === 'win32'
+        ? ['npm.cmd test -- a.test.ts --json --outputFile=/tmp/report.json', expect.any(Object)]
+        : ['npm', ['test', '--', 'a.test.ts', '--json', '--outputFile=/tmp/report.json']]);
+      const unsafe = await runGate('npm test -- a.test.ts', cwd, 10_000, undefined, { jestReportFile: '/tmp/a b.json' });
+      expect(unsafe.exitCode).toBe(0);
+      expect(spawn.mock.calls[2]?.slice(0, 2)).toEqual(spawn.mock.calls[0]?.slice(0, 2));
+    } finally { spawn.mockRestore(); await rm(cwd, { recursive: true, force: true }); }
+  });
+  test('acrescenta separador e preserva passthrough sem mutar argv', () => {
+    const args = ['test'];
+    expect(withJestJsonReport(args, '/tmp/report.json')).toEqual(['test', '--', '--json', '--outputFile=/tmp/report.json']);
+    expect(args).toEqual(['test']);
+    expect(withJestJsonReport(['run', 'test', '--', 'a.test.ts'], 'C:/tmp/report.json'))
+      .toEqual(['run', 'test', '--', 'a.test.ts', '--json', '--outputFile=C:/tmp/report.json']);
+  });
+  test.each(['--json', '--json=true', '--outputFile', '--outputFile=x', '--coverage', '--coverageDirectory=x'])(
+    'recusa flag %s', flag => expect(withJestJsonReport(['test', '--', flag], '/tmp/report.json')).toBeNull(),
+  );
+  test.each(['a b', 'a"b', "a'b", 'a&b', 'a%b', 'a|b'])(
+    'recusa caminho %s', path => expect(withJestJsonReport(['test'], path)).toBeNull(),
+  );
+  test.each([['run', 'build'], ['run', 'typecheck'], ['exec', 'jest']])('recusa não-test %s', (...args) => {
+    expect(withJestJsonReport(args, '/tmp/report.json')).toBeNull();
+  });
+  test.each(['ok', 'missing', 'invalid', 'outside', 'large', 'timeout', 'cancelled', 'throws'])(
+    'captura bounded e cleanup: %s', async mode => {
+      let directory: string | undefined;
+      const real = { ...result, exitCode: mode === 'timeout' || mode === 'cancelled' ? -1 : 0,
+        timedOut: mode === 'timeout', cancelled: mode === 'cancelled' };
+      const pending = captureJestReport(root, async options => {
+        expect(options?.jestReportFile).toBeDefined();
+        const file = options!.jestReportFile!;
+        directory = dirname(file);
+        expect(directory.startsWith(root)).toBe(false);
+        if (mode === 'throws') throw new Error('runner failed');
+        if (mode !== 'missing') await writeFile(file, mode === 'invalid' ? '{' : mode === 'large'
+          ? 'x'.repeat(8 * 1024 * 1024 + 1) : JSON.stringify(fixture(mode === 'outside' ? join(tmpdir(), 'outside.test.ts') : undefined)));
+        return real;
+      });
+      if (mode === 'throws') await expect(pending).rejects.toThrow('runner failed');
+      else {
+        const captured = await pending;
+        expect(captured).toMatchObject(real);
+        if (mode === 'ok') expect(captured.testReport).toBeDefined();
+        else expect(captured).not.toHaveProperty('testReport');
+      }
+      expect(directory).toBeDefined();
+      await expect(stat(directory!)).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
 });

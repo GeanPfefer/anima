@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, mkdir, readFile, readdir, rm, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, open, readFile, readdir, rm, rmdir, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { isAllowedGateCommand } from '@anima/core';
+import { deriveGateTestReport, type GateTestReportV1, isAllowedGateCommand } from '@anima/core';
 import { delimiter, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 
 // ============================================================
@@ -123,14 +123,62 @@ export function parseGateCommand(command: string): { readonly file: string; read
   return { file, args };
 }
 
+/** Acrescenta flags exclusivamente do host ao passthrough do Jest. */
+export function withJestJsonReport(args: readonly string[], outputFile: string): string[] | null {
+  if (!(args[0] === 'test' || (args[0] === 'run' && args[1] === 'test'))
+    || !/^[A-Za-z0-9_./:\-]+$/.test(outputFile)
+    || args.some(arg => /^--(?:json(?:=|$)|outputFile(?:=|$)|coverage)/.test(arg))) return null;
+  return [...args, ...(args.includes('--') ? [] : ['--']), '--json', `--outputFile=${outputFile}`];
+}
+
+export interface GateReportOptions { readonly jestReportFile?: string; }
+export type CapturedGateResult = CommandResult & { readonly testReport?: GateTestReportV1 };
+
+/** Leitura bounded fora da worktree; nenhuma falha de captura modifica o gate. */
+export async function captureJestReport(
+  rootDir: string,
+  run: (options?: GateReportOptions) => Promise<CommandResult>,
+): Promise<CapturedGateResult> {
+  let directory: string;
+  try { directory = await mkdtemp(join(tmpdir(), 'anima-jest-')); }
+  catch { return run(); }
+  try {
+    const file = join(directory, 'report.json').replace(/\\/g, '/');
+    const safe = withJestJsonReport(['test'], file) !== null;
+    const result = await run(safe ? { jestReportFile: file } : undefined);
+    if (!safe || result.timedOut || result.cancelled) return result;
+    try {
+      const handle = await open(file, 'r');
+      try {
+        const limit = 8 * 1024 * 1024;
+        if ((await handle.stat()).size > limit) return result;
+        const buffer = Buffer.alloc(limit + 1);
+        let size = 0;
+        while (size < buffer.length) {
+          const { bytesRead } = await handle.read(buffer, size, buffer.length - size, null);
+          if (!bytesRead) break;
+          size += bytesRead;
+        }
+        if (size > limit) return result;
+        const raw: unknown = JSON.parse(buffer.subarray(0, size).toString('utf8'));
+        const derived = deriveGateTestReport(raw, { rootDir });
+        return derived.status === 'ok' ? { ...result, testReport: derived.report } : result;
+      } finally { await handle.close(); }
+    } catch { return result; }
+  } finally { await rm(directory, { recursive: true, force: true }).catch(() => {}); }
+}
+
 /** Roda um comando de gate permitido no worktree. Comando fora da allowlist é
  * recusado sem spawnar (exitCode -2). No Windows npm é batch (npm.cmd) e o Node
  * atual recusa spawnar batch sem shell; como o comando já passou pela allowlist
  * estrita (sem metacaracteres de encadeamento), rodamos com shell só ali. */
-export function runGate(command: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<CommandResult> {
+export function runGate(command: string, cwd: string, timeoutMs: number, signal?: AbortSignal, options?: GateReportOptions): Promise<CommandResult> {
   const parsed = parseGateCommand(command);
   if (!parsed) return Promise.resolve({ command, exitCode: -2, stdout: '', stderr: 'Comando de gate fora da allowlist.', durationMs: 0, timedOut: false, cancelled: false });
-  return runProcess(parsed.file, parsed.args, { cwd, timeoutMs, signal, shell: process.platform === 'win32' });
+  if (!options?.jestReportFile) return runProcess(parsed.file, parsed.args, { cwd, timeoutMs, signal, shell: process.platform === 'win32' });
+  const args = withJestJsonReport(parsed.args, options.jestReportFile);
+  return runProcess(parsed.file, args ?? parsed.args, { cwd, timeoutMs, signal, shell: process.platform === 'win32' })
+    .then(result => ({ ...result, command }));
 }
 
 const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promise<CommandResult> =>

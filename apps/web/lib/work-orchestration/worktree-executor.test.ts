@@ -18,6 +18,7 @@ import {
   type WorkExecutorSignal,
   type WorktreeHandoffV1,
 } from '@anima/core';
+import * as worktreeModule from './worktree';
 import { GitWorktree, runProcess } from './worktree';
 import { prepareAnimaValidation } from './executor-selection';
 import { ScriptedCoderBackend, withCoderFailureUsage, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
@@ -1592,4 +1593,73 @@ test('Codex terminal failure persists only closed cause and restores edits', asy
     const branch = await git(ctx.repo, ['status', '--porcelain']);
     expect(branch.stdout.trim()).toBe('');
   } finally { await ctx.cleanup(); }
+});
+
+describe('test_binding — relatórios da mesma execução, sem git real', () => {
+  afterEach(() => jest.restoreAllMocks());
+  test.each(['report', 'missing', 'assertion', 'repair'])('%s', async mode => {
+    const root = join(tmpdir(), 'anima-mocked-tree');
+    let edits = 0;
+    const tree = Object.create(GitWorktree.prototype) as GitWorktree;
+    Object.defineProperty(tree, 'root', { value: root });
+    jest.spyOn(GitWorktree, 'create').mockResolvedValue(tree);
+    jest.spyOn(tree, 'restoreToCheckpoint').mockResolvedValue(true);
+    jest.spyOn(tree, 'restoreToBase').mockResolvedValue(true);
+    jest.spyOn(tree, 'workspacePathKind').mockResolvedValue('file');
+    jest.spyOn(tree, 'changedFiles').mockResolvedValue(['src/added.ts']);
+    jest.spyOn(tree, 'changedFilesSinceStart').mockResolvedValue(['src/added.ts']);
+    jest.spyOn(tree, 'readWorkspaceFile').mockResolvedValue('export const added = 1;');
+    jest.spyOn(tree, 'diffNumstat').mockResolvedValue([{ path: 'src/added.ts', insertions: 1, deletions: 0 }]);
+    jest.spyOn(tree, 'diff').mockImplementation(async () => `diff ${edits}`);
+    jest.spyOn(tree, 'commit').mockResolvedValue('a'.repeat(40));
+    jest.spyOn(tree, 'unlinkNodeModules').mockResolvedValue(undefined);
+    jest.spyOn(tree, 'dispose').mockResolvedValue(undefined);
+    const files: string[] = [];
+    let calls = 0;
+    const runner = jest.spyOn(worktreeModule, 'runGate').mockImplementation(async (command, _cwd, _timeout, _signal, options) => {
+      calls += 1;
+      const failed = mode === 'repair' && calls === 2;
+      if (options?.jestReportFile) {
+        files.push(options.jestReportFile);
+        if (mode !== 'missing') await writeFile(options.jestReportFile, JSON.stringify({
+          numTotalTestSuites: 1, numFailedTestSuites: failed ? 1 : 0, numRuntimeErrorTestSuites: 0,
+          numTotalTests: 1, numPassedTests: failed ? 0 : 1, numFailedTests: failed ? 1 : 0,
+          numPendingTests: 0, numTodoTests: 0, success: !failed,
+          testResults: [{ name: join(root, 'src/added.ts'), status: failed ? 'failed' : 'passed', message: '',
+            assertionResults: [{ fullName: `execution ${calls}`, title: 'passes', ancestorTitles: [],
+              status: failed ? 'failed' : 'passed', invocations: 1, failureMessages: failed ? ['assertion failed'] : [] }] }],
+        }));
+      }
+      return { command, exitCode: failed ? 1 : 0, durationMs: 7, timedOut: false, cancelled: false, stdout: '', stderr: failed ? 'assertion failed' : '' };
+    });
+    const outputs: ObservedGateInput[] = [];
+    const signals = await collect(new WorktreeExecutorAdapter({
+      targets: { resolve: () => ({ repoRoot: root, sha: 'a'.repeat(40) }) },
+      backend: { id: 'fixture', edit: async () => { edits += 1; return { summary: 'added', touchedResources: ['src/added.ts'] }; } },
+      gateRetryLimit: mode === 'repair' ? 1 : 0,
+      onGateObserved: output => { outputs.push(output); },
+    }), request({ validationCriteria: [{ label: 'tests', command: 'npm test -- src/added.ts',
+      targetPaths: ['src/added.ts'], claimKind: mode === 'assertion' ? 'gate_assertion' : 'test_binding' }] }), new AbortController().signal);
+    expect(signals.at(-1)?.kind).toBe('result');
+    expect(outputs).toHaveLength(mode === 'repair' ? 2 : 1);
+    expect(outputs[0]?.command).toBe('npm test -- src/added.ts');
+    if (mode === 'missing' || mode === 'assertion') {
+      expect(outputs[0]).not.toHaveProperty('testReport');
+      expect(outputs[0]?.baseline).not.toHaveProperty('testReport');
+    } else {
+      expect(outputs[0]?.testReport).toBeDefined();
+      expect(outputs[0]?.baseline?.testReport).toBeDefined();
+    }
+    if (mode === 'assertion') {
+      expect(files).toHaveLength(0);
+      expect(runner.mock.calls.every(call => call.length === 4 && call[0] === 'npm test -- src/added.ts')).toBe(true);
+    }
+    if (mode === 'repair') {
+      expect(files).toHaveLength(3);
+      expect(new Set(files).size).toBe(3);
+      expect(outputs[0]?.exitCode).toBe(1);
+      expect(outputs[1]?.exitCode).toBe(0);
+      expect(outputs[0]?.testReport).not.toEqual(outputs[1]?.testReport);
+    }
+  });
 });

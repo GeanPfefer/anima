@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import { coderFailureUsage, type CoderBackend, type CoderWorkspace, type HostValidationFeedback } from './coder-backend';
 import { analyzeCoderOutputFiles, collectCoderOutputForHarness } from './coder-output-analysis';
 import { summarizeCommandOutput } from './output-sanitization';
-import { GitWorktree, parseGateCommand, runGate } from './worktree';
+import { captureJestReport, type CapturedGateResult, GitWorktree, parseGateCommand, runGate } from './worktree';
 import { gateIdentityFromExecution } from './gate-identity';
 
 // ============================================================
@@ -352,6 +352,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
       // descartada; falha aqui apenas omite o baseline advisory — o gate final ainda
       // seguirá seu caminho fail-closed normal após a edição.
       const differentialBaselines = new Map<number, {
+        testReport?: CapturedGateResult['testReport'];
         baseExitCode: number;
         baseTimedOut: boolean;
         baseCancelled: boolean;
@@ -386,8 +387,11 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
               return { path: norm(path), existedAtBase: kindAtBase === 'file', kindAtBase };
             }));
             const commandScope = verifyGateTargetScope(criterion.command!, criterion.targetPaths!);
-            const baseline = await runGate(criterion.command!, worktree.root, boundedMs(attemptBudgetMs), signal);
+            const baseline: CapturedGateResult = criterion.claimKind === 'test_binding'
+              ? await captureJestReport(worktree.root, options => runGate(criterion.command!, worktree!.root, boundedMs(attemptBudgetMs), signal, options))
+              : await runGate(criterion.command!, worktree.root, boundedMs(attemptBudgetMs), signal);
             differentialBaselines.set(index, {
+              ...(baseline.testReport === undefined ? {} : { testReport: baseline.testReport }),
               baseExitCode: baseline.exitCode,
               baseTimedOut: baseline.timedOut,
               baseCancelled: baseline.cancelled,
@@ -790,12 +794,11 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           if (signal.aborted) break;
           if (remainingMs() <= 0) { yield await deadlineSignal(`antes do gate "${criterion.label}"`); return; }
 
-          const gate = await runGate(
-            criterion.command,
-            worktree.root,
-            boundedMs(attemptBudgetMs),
-            signal,
-          );
+          const gate: CapturedGateResult = criterion.claimKind === 'test_binding'
+            ? await captureJestReport(worktree.root, options => runGate(
+              criterion.command!, worktree!.root, boundedMs(attemptBudgetMs), signal, options,
+            ))
+            : await runGate(criterion.command, worktree.root, boundedMs(attemptBudgetMs), signal);
 
           const differential = differentialBaselines.get(criterionIndex);
           const changedSet = new Set(changed.map(norm));
@@ -804,6 +807,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           const changedFilesWithinTargetScope = changedFiles.filter(path => declaredTargetSet.has(path));
           const changedFilesOutsideTargetScope = changedFiles.filter(path => !declaredTargetSet.has(path));
           this.options.onGateObserved?.({
+            ...(gate.testReport === undefined ? {} : { testReport: gate.testReport }),
             label: criterion.label,
             command: gate.command,
             exitCode: gate.exitCode,
@@ -813,6 +817,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
             ...(criterion.claimKind === undefined ? {} : { claimKind: criterion.claimKind }),
             ...(differential && criterion.targetPaths ? {
               baseline: {
+                ...(differential.testReport === undefined ? {} : { testReport: differential.testReport }),
                 baseExitCode: differential.baseExitCode,
                 baseTimedOut: differential.baseTimedOut,
                 baseCancelled: differential.baseCancelled,
