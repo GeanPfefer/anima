@@ -163,11 +163,10 @@ describe('Evolution Reconciliation V2 — honestidade epistemológica do registr
     }
   });
 
-  test('"Evolução recente" desde a baseline cobre Research Web e recovery, e nada antes da baseline', () => {
+  test('"Evolução recente" desde a baseline cobre as sete capacidades V5, e nada antes da baseline', () => {
     const recent = listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date);
     const ids = new Set(recent.map((r) => r.capabilityId));
-    expect(ids.has('research.web.search')).toBe(true);
-    expect(ids.has('governance.harness-recovery')).toBe(true);
+    for (const id of V5_CAPABILITY_IDS) expect(ids.has(id)).toBe(true);
     expect(recent.every((r) => r.entry.at >= EVOLUTION_BASELINE.date)).toBe(true);
     expect(ids.has('interaction.chat')).toBe(false);
   });
@@ -249,9 +248,9 @@ describe('Evolution Reconciliation SDC-09 — ciclo SDC-01→SDC-08', () => {
     for (const commit of ['a15698f', '5aad729', '243b740']) expect(commitRefs('agency.recovery-correction')).toContain(commit);
   });
 
-  test('a Evolução recente inclui o ciclo SDC-01→SDC-08', () => {
+  test('a Evolução recente inclui as sete capacidades reconciliadas em V5', () => {
     const ids = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date).map((r) => r.capabilityId));
-    for (const id of ['agency.external-harness', 'governance.candidate-recovery', 'governance.governed-integration', 'interaction.action-cards']) {
+    for (const id of V5_CAPABILITY_IDS) {
       expect(ids.has(id)).toBe(true);
     }
   });
@@ -358,7 +357,7 @@ describe('Evolution Reconciliation SDC-21', () => {
     expect(get('agency.investigation-sessions').maturity).toBe('implemented');
     expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => isRealizedMaturity(c.maturity))).toHaveLength(50);
     expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => isFutureMaturity(c.maturity))).toHaveLength(17);
-    expect(EVOLUTION_BASELINE).toEqual({ commit: '7f276d8', date: '2026-09-16', label: 'Evolution UX V1' });
+    expect(EVOLUTION_BASELINE).toEqual({ commit: '6226324', date: '2026-10-07', label: 'Evolution Reconciliation V4' });
     const resident = get('interaction.resident-host');
     const added = resident.history?.filter((h) => h.at === '2026-10-07') ?? [];
     expect(added).toHaveLength(1);
@@ -381,7 +380,7 @@ describe('Evolution Reconciliation SDC-21', () => {
   test('provas de integração pertencem ao primitive; Investigation não prova produção nem ciclo contínuo', () => {
     const integration = get('governance.governed-integration');
     expect(integration.proofRefs?.filter((p) => p.kind === 'commit').map((p) => p.ref))
-      .toEqual(['f6117f7', '52a745e']);
+      .toEqual(['1a18fc8', '1f4b052', '3c7aab8', '828f2d1', '51a7919', 'c7a5571', '64270c8', '038cc62', '4060390', 'a7d0ca4', '704e959', 'af9c557', 'f6117f7', '52a745e']);
     expect(integration.proofRefs?.filter((p) => p.kind === 'test').map((p) => p.ref))
       .toEqual(['apps/web/lib/work-orchestration/integration-effect.integration.test.ts', 'supabase/tests/integration_effect.test.sql']);
     expect(integration.history?.flatMap((h) => h.refs).some((p) => p.ref === '349a35e')).toBe(false);
@@ -441,7 +440,7 @@ describe('Evolution Reconciliation SDC-21', () => {
   });
 
   test('history e proofs têm refs não vazias, datas válidas, sem duplicação; evolução inclui os nós atualizados', () => {
-    const updated = ['agency.recovery-correction', 'governance.candidate-recovery', 'governance.governed-integration', 'agency.continuous-self-development', 'agency.external-harness', 'agency.executor-discovery', 'governance.verifier', 'compute.paid-settlement', 'interaction.resident-host', 'interaction.action-cards', 'agency.investigation-sessions'];
+    const updated = V5_CAPABILITY_IDS;
     const recent = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date).map((r) => r.capabilityId));
     for (const id of updated) expect(recent.has(id)).toBe(true);
     for (const c of ANIMA_CAPABILITY_REGISTRY_V0) {
@@ -538,3 +537,81 @@ const SDC_09_MATURITIES: Readonly<Record<string, string>> = {
   'research.web.compare': 'projected',
   'research.web.persist-findings': 'projected',
 };
+
+const V5_CAPABILITY_IDS = [
+  'governance.verifier', 'agency.verify-change', 'agency.supervised-self-development',
+  'governance.governed-integration', 'governance.budgets', 'agency.external-harness',
+  'interaction.resident-host',
+] as const;
+
+// Universo fechado autorizado para as novas entradas V5 (kind:ref).
+const V5_ALLOWED_REFS = new Set([
+  ...['1a18fc8', '1f4b052', '3c7aab8', '828f2d1', '51a7919', 'c7a5571',
+    '64270c8', '038cc62', '4060390', 'a7d0ca4', '704e959', 'af9c557',
+    'db75ce0', 'bbb9c0e', 'a4f46f8', 'fcb8243', '6226324'].map((ref) => `commit:${ref}`),
+  ...['d795e414', '8e24f4a8', 'fc3b841c', '8013c5e2', 'b972846e', '46b23286',
+    '42053b69', 'aa3a860c', '9a7503ec', '5f573801', '4c47e9e3', 'c42ccb12']
+    .map((ref) => `work_item:${ref}`),
+  'event:86647',
+  ...['2026-10-13-single-item-gate-integracao', '2026-10-13-single-item-promocao-residente',
+    '2026-10-10-single-item-integracao-wsl', '2026-10-10-single-item-terminal-prova']
+    .map((name) => `record:docs/registros/${name}.md`),
+  'doc:supabase/migrations/20260905000004_human_supervised_work.sql',
+  'doc:supabase/migrations/20261008000000_single_item_work_claim.sql',
+]);
+
+describe('Evolution Reconciliation V5', () => {
+  const get = (id: string) => {
+    const capability = ANIMA_CAPABILITY_REGISTRY_V0.find((c) => c.id === id);
+    if (!capability) throw new Error(`capacidade ausente: ${id}`);
+    return capability;
+  };
+
+  test('congela maturities, distribuição e todos os 67 ids', () => {
+    const maturities = ['proven', 'proven', 'proven', 'implemented', 'operational', 'implemented', 'operational'];
+    V5_CAPABILITY_IDS.forEach((id, index) => expect(get(id).maturity).toBe(maturities[index]));
+    expect(ANIMA_CAPABILITY_REGISTRY_V0).toHaveLength(67);
+    expect(ANIMA_CAPABILITY_REGISTRY_V0.map((c) => c.id).sort())
+      .toEqual([...Object.keys(SDC_09_MATURITIES), 'agency.investigation-sessions'].sort());
+    const counts: Record<string, number> = {};
+    for (const capability of ANIMA_CAPABILITY_REGISTRY_V0) {
+      counts[capability.maturity] = (counts[capability.maturity] ?? 0) + 1;
+    }
+    expect(counts).toEqual({ operational: 15, proven: 21, projected: 14, implemented: 14, specified: 3 });
+  });
+
+  test('cada capacidade tem uma entrada proof_added V5 com refs do universo autorizado', () => {
+    for (const id of V5_CAPABILITY_IDS) {
+      const entries = get(id).history?.filter((entry) => entry.at === '2026-10-14') ?? [];
+      expect(entries).toHaveLength(1);
+      const entry = entries[0];
+      if (!entry) throw new Error(`history V5 ausente: ${id}`);
+      expect(entry.change).toBe('proof_added');
+      expect(entry.from).toBeUndefined();
+      expect(entry.to).toBeUndefined();
+      expect(entry.refs.length).toBeGreaterThan(0);
+      for (const ref of entry.refs) {
+        expect(ref.ref.trim()).not.toBe('');
+        expect(V5_ALLOWED_REFS.has(`${ref.kind}:${ref.ref}`)).toBe(true);
+      }
+    }
+  });
+
+  test('janela recente exclui todo nó sem history desde a baseline', () => {
+    const recent = listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date);
+    const ids = new Set(recent.map((entry) => entry.capabilityId));
+    for (const id of V5_CAPABILITY_IDS) expect(ids.has(id)).toBe(true);
+    for (const capability of ANIMA_CAPABILITY_REGISTRY_V0) {
+      if (!(capability.history ?? []).some((entry) => entry.at >= EVOLUTION_BASELINE.date)) {
+        expect(ids.has(capability.id)).toBe(false);
+      }
+    }
+    expect(ids.has('interaction.chat')).toBe(false);
+    expect(recent.every((entry) => entry.entry.at >= EVOLUTION_BASELINE.date)).toBe(true);
+  });
+
+  test('integração não usa event como proofRef e self-development explicita limite de autonomia', () => {
+    expect(get('governance.governed-integration').proofRefs?.some((ref) => ref.kind === 'event')).toBe(false);
+    expect(get('agency.supervised-self-development').frontier?.join(' ')).toContain('autonomia não comprovada');
+  });
+});

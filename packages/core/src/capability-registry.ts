@@ -34,13 +34,17 @@
 // pós-aprovação T3 opt-in; INV-09 deu uma ocasião viva só no ramo Investigation.
 // Reuso dos nós existentes, sem promoção de maturity, novos nós ou relações.
 
+// Evolution Reconciliation V5 (2026-10-14): provas de 2026-10-07 a 2026-10-14
+// reconciliadas em sete nós existentes, com baseline V4 e fronteiras humanas.
+// Nenhuma maturity, capacidade ou relação muda; verified permanece advisory.
+
 import { buildCapabilityGraph, type Capability, type CapabilityGraph } from './capability-map';
 
 /** Baseline da última Evolution relevante: "Evolução recente" = mudanças desde aqui. */
 export const EVOLUTION_BASELINE = {
-  commit: '7f276d8',
-  date: '2026-09-16',
-  label: 'Evolution UX V1',
+  commit: '6226324',
+  date: '2026-10-07',
+  label: 'Evolution Reconciliation V4',
 } as const;
 
 const RECONCILIATION_V2_RECORD = 'docs/registros/2026-09-27c-evolution-reconciliation-v2.md';
@@ -426,10 +430,26 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement:
       'O Proof Engine deriva "operacional" (8 ocasiões), mas o critério é a verificação não enganar a revisão humana: das 7 decisões humanas sobre resultados verified, 5 pediram mudanças. Declarado segue comprovada.',
     proofRefs: [
+      { kind: 'commit', ref: 'c7a5571' },
+      { kind: 'commit', ref: '4060390' },
+      { kind: 'commit', ref: '038cc62' },
       { kind: 'commit', ref: '824c714', note: 'requisitos de prova heterogêneos pós-review' },
       { kind: 'record', ref: 'docs/registros', note: 'seq4→seq5: verified foi falso positivo, corrigido por request_changes' },
     ],
-    frontier: ['Gates sequenciais revelam defeitos um de cada vez: um defeito real pode ficar mascarado até o gate seguinte (segundo o operador, causa do defeito do SDC-02).'],
+    frontier: ['Há 12 pareceres desde 2026-10-13 (11 verified e 1 rejected); test_binding e árvore reduzem o risco, mas verified não substitui revisão humana.', 'Gates sequenciais revelam defeitos um de cada vez: um defeito real pode ficar mascarado até o gate seguinte (segundo o operador, causa do defeito do SDC-02).'],
+    history: [
+      {
+        at: '2026-10-14',
+        change: 'proof_added',
+        note: 'V5 capturou test_binding no host; v6 vinculou teste à revisão por árvore Git e outputTail. Evento 86647: work-verifier-v6 verified, 14 checagens, 0 lacunas e 0 violações.',
+        refs: [
+          { kind: 'commit', ref: 'c7a5571' },
+          { kind: 'commit', ref: '4060390' },
+          { kind: 'commit', ref: '038cc62' },
+          { kind: 'event', ref: '86647' },
+        ],
+      },
+    ],
   },
   {
     id: 'agency.recovery-correction',
@@ -556,6 +576,19 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     meaning: 'O primitive de biblioteca autoriza integration_effect_authorized e executa ff_only por CAS de ref, receipt com mergeCommitSha null e integration_completed pelo Trusted System Writer. Implementação existente é separada de prova canônica do exercício.',
     advancement: 'Código e testes do primitive estão versionados em f6117f7 e 52a745e. Exercício do primitive via wrapper scratch em clone dedicado é relato operacional/banco local, sem proofRef canônica versionada; implemented permanece. Falta prova versionada de autorização, receipt ff_only e integration_completed.',
     proofRefs: [
+      { kind: 'commit', ref: '1a18fc8', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: '1f4b052', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: '3c7aab8', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: '828f2d1', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: '51a7919', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: 'c7a5571', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: '64270c8', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: '038cc62', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: '4060390', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: 'a7d0ca4', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: '704e959', note: 'integrado por ff_only' },
+      { kind: 'commit', ref: 'af9c557', note: 'integrado por ff_only' },
+      { kind: 'record', ref: 'docs/registros/2026-10-13-single-item-gate-integracao.md' },
       { kind: 'doc', ref: 'apps/web/lib/work-orchestration/integration-effect.ts' },
       { kind: 'commit', ref: 'f6117f7', note: 'modo ff_only no efeito de integração governada' },
       { kind: 'commit', ref: '52a745e', note: 'endurecimento SQL do receipt após auditoria' },
@@ -566,7 +599,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'CLI/UX first-class de integração governada ainda missing: o primitive é só biblioteca; Modo W é fase posterior.',
       'Clone dedicado necessário: guarda target_checked_out impede integrar no checkout humano ativo.',
       'Sync do checkout humano é manual; push é manual e não existe push governado.',
-      'O exercício de integration_completed e do receipt no banco local não é prova canônica versionada.',
+      'Os commits integrados em dev por ff_only são versionados; a prova de autorização e do receipt de integration_completed continua no ledger, não versionada; o caminho segue por wrappers por item fora do repositório.',
     ],
     history: [
       {
@@ -577,6 +610,25 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         refs: [
           { kind: 'commit', ref: 'f6117f7' },
           { kind: 'commit', ref: '52a745e' },
+        ],
+      },
+      {
+        at: '2026-10-14',
+        change: 'proof_added',
+        note: '12 itens independentes codex-cli foram aceitos por humano e integrados por ff_only em 2026-10-13/14, com mergeCommitSha null e Trusted System Writer.',
+        refs: [
+          { kind: 'commit', ref: '1a18fc8' },
+          { kind: 'commit', ref: '1f4b052' },
+          { kind: 'commit', ref: '3c7aab8' },
+          { kind: 'commit', ref: '828f2d1' },
+          { kind: 'commit', ref: '51a7919' },
+          { kind: 'commit', ref: 'c7a5571' },
+          { kind: 'commit', ref: '64270c8' },
+          { kind: 'commit', ref: '038cc62' },
+          { kind: 'commit', ref: '4060390' },
+          { kind: 'commit', ref: 'a7d0ca4' },
+          { kind: 'commit', ref: '704e959' },
+          { kind: 'commit', ref: 'af9c557' },
         ],
       },
     ],
@@ -592,10 +644,19 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement:
       'Operacional exige reprodutibilidade local (RAM) e provas pagas confiáveis; hoje é comprovado ponta a ponta, não rotineiro.',
     proofRefs: [
+      { kind: 'work_item', ref: 'd795e414' },
+      { kind: 'work_item', ref: 'b972846e' },
+      { kind: 'work_item', ref: '42053b69' },
+      { kind: 'work_item', ref: '9a7503ec' },
+      { kind: 'work_item', ref: '5f573801' },
+      { kind: 'work_item', ref: 'c42ccb12' },
+      { kind: 'commit', ref: 'a4f46f8' },
+      { kind: 'record', ref: 'docs/registros/2026-10-13-single-item-promocao-residente.md' },
       { kind: 'work_item', ref: '8a2515d8', note: 'work item que foi fim-a-fim até review→completed com OpenAI forte (2026-09-11)' },
       { kind: 'milestone', ref: 'docs/marcos/008-dev-local-v1-review-rework-incremental.md' },
       { kind: 'verifier', ref: 'f6c326b1/515c4d83', note: 'verified (0 violações, 0 lacunas, 13 checks) + aceite humano (result_accepted 54738)' },
     ],
+    frontier: ['autonomia não comprovada: cada item exigiu proposta, aprovação, classificação humana e aceite humano; integrações por wrappers por item fora do repositório, sem CLI first-class de integração; sync do checkout e push seguem manuais.'],
     history: [
       {
         at: '2026-09-27',
@@ -605,6 +666,21 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         refs: [
           { kind: 'work_item', ref: 'f6c326b1' },
           { kind: 'event', ref: '54738', note: 'result_accepted' },
+        ],
+      },
+      {
+        at: '2026-10-14',
+        change: 'proof_added',
+        note: '12 itens independentes codex-cli foram aceitos por humano e integrados por ff_only em 2026-10-13/14. Desde 2026-10-07: 18 result_accepted e 16 integration_completed, quatro integrações em 10-07. Single-Item V1 foi promovido ao residente em 10-12/13; o ciclo permanece supervisionado.',
+        refs: [
+          { kind: 'work_item', ref: 'd795e414' },
+          { kind: 'work_item', ref: 'b972846e' },
+          { kind: 'work_item', ref: '42053b69' },
+          { kind: 'work_item', ref: '9a7503ec' },
+          { kind: 'work_item', ref: '5f573801' },
+          { kind: 'work_item', ref: 'c42ccb12' },
+          { kind: 'commit', ref: 'a4f46f8' },
+          { kind: 'record', ref: 'docs/registros/2026-10-13-single-item-promocao-residente.md' },
         ],
       },
     ],
@@ -805,6 +881,8 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     advancement:
       'Existe em código e testes (backends, evidência do coder, especificação canônica preservada até o coder). Não sobe para comprovada por esta reconciliação: o uso real (Claude Code no SDC-01/SDC-03, Codex CLI no SDC-04/05/06/08, com falhas reais no SDC-02, no recovery do SDC-02 e no SDC-07) vem do operador e não é verificável pelo repositório. Falta registrar essa prova em evento/commit auditável e decidir a authority da quota de assinatura.',
     proofRefs: [
+      { kind: 'commit', ref: 'fcb8243' },
+      { kind: 'record', ref: 'docs/registros/2026-10-10-single-item-integracao-wsl.md' },
       { kind: 'commit', ref: 'ad669c3' },
       { kind: 'commit', ref: '29cd393' },
       { kind: 'commit', ref: 'b9d617c' },
@@ -817,6 +895,7 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/claude-code-coder.worktree.test.ts' },
     ],
     frontier: [
+      '12 itens integrados usaram coder_backend codex-cli, mas o uso real por registro do ledger não promove maturity; a classe de authority da assinatura segue decisão humana',
       'Prova de uso real reportada pelo operador não promove maturity sem registro canônico versionado.',
       'A classe de authority da quota de assinatura segue decisão humana; diagnóstico não certifica quota disponível.',
       'Descoberta durável do executável Codex é missing: ANIMA_CODEX_CLI_PATH de deploy do operador ou codex no PATH; readiness só faz probes de versão/login.',
@@ -849,6 +928,18 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'commit', ref: 'ad669c3' },
           { kind: 'commit', ref: '29cd393' },
           { kind: 'commit', ref: 'b9d617c' },
+        ],
+      },
+      {
+        at: '2026-10-14',
+        change: 'proof_added',
+        note: '12 itens independentes usaram coder_backend codex-cli via transporte WSL, foram aceitos por humano e integrados por ff_only em 2026-10-13/14.',
+        refs: [
+          { kind: 'commit', ref: 'fcb8243' },
+          { kind: 'record', ref: 'docs/registros/2026-10-10-single-item-integracao-wsl.md' },
+          { kind: 'record', ref: 'docs/registros/2026-10-13-single-item-gate-integracao.md' },
+          { kind: 'work_item', ref: 'd795e414' },
+          { kind: 'work_item', ref: 'c42ccb12' },
         ],
       },
     ],
@@ -1019,9 +1110,19 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     meaning: 'Parecer separado de produzir/aceitar. investigation-verifier-v1 advisory: checks A–E (snapshot clean; HEAD detached no base; ausência de novas refs proibidas; referências resolvidas; estrutura válida). A/B atestados, C–E independentes; verified não certifica a verdade semântica.',
     advancement: 'Falso positivo já observado; operacional exige que "verified" resista à revisão humana de forma consistente.',
     frontier: [
+      'Verifier v4–v6 é advisory: falso positivo humano já observado (seq4→seq5); test_binding e vínculo por árvore reduzem, não eliminam, o risco; verified nunca é autoridade de aceite.',
       'Verifier advisory de Investigation não certifica verdade, confinamento de leituras ou ausência de efeitos externos; revisão humana necessária.',
     ],
     proofRefs: [
+      { kind: 'commit', ref: '1f4b052' },
+      { kind: 'commit', ref: '3c7aab8' },
+      { kind: 'commit', ref: '828f2d1' },
+      { kind: 'commit', ref: '51a7919' },
+      { kind: 'commit', ref: 'c7a5571' },
+      { kind: 'commit', ref: '038cc62' },
+      { kind: 'commit', ref: '4060390' },
+      { kind: 'commit', ref: 'a7d0ca4' },
+      { kind: 'event', ref: '86647', note: 'work-verifier-v6 verified, 14 checagens, c42ccb12' },
       { kind: 'commit', ref: '11ae49f' },
       { kind: 'doc', ref: 'packages/core/src/work-orchestration/investigation-result.ts' },
       { kind: 'commit', ref: '824c714', note: 'Verifier v2 — cobertura heterogênea' },
@@ -1037,6 +1138,22 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'doc', ref: 'packages/core/src/work-orchestration/investigation-result.ts' },
         ],
       },
+      {
+        at: '2026-10-14',
+        change: 'proof_added',
+        note: 'Desde 2026-10-13: 12 pareceres, 11 verified e 1 rejected v3 preservado. V4 trouxe contrato de aceite verificável; v5, test_binding com Jest normalizado e captura no host; v6, árvore Git e outputTail, com correção de evaluateBinding. Evento 86647: v6 verified, 14 checagens, 0 lacunas e 0 violações.',
+        refs: [
+          { kind: 'commit', ref: '1f4b052' },
+          { kind: 'commit', ref: '3c7aab8' },
+          { kind: 'commit', ref: '828f2d1' },
+          { kind: 'commit', ref: '51a7919' },
+          { kind: 'commit', ref: 'c7a5571' },
+          { kind: 'commit', ref: '038cc62' },
+          { kind: 'commit', ref: '4060390' },
+          { kind: 'commit', ref: 'a7d0ca4' },
+          { kind: 'event', ref: '86647' },
+        ],
+      },
     ],
   },
   {
@@ -1049,8 +1166,24 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     meaning: 'O Anima trabalha dentro de um envelope econômico: quando o orçamento esgota, ele bloqueia e re-admite sem perder trabalho.',
     advancement: 'Já operacional; settlement de custo real de compute pago ainda é barreira (ver compute.paid-settlement).',
     proofRefs: [
+      { kind: 'doc', ref: 'supabase/migrations/20260905000004_human_supervised_work.sql' },
+      { kind: 'doc', ref: 'supabase/migrations/20261008000000_single_item_work_claim.sql' },
       { kind: 'commit', ref: '6bef210', note: 'orçamento V0 — bloqueio temporal + re-admissão' },
       { kind: 'commit', ref: '636aa7b', note: 'interrupção de orçamento retoma do checkpoint' },
+    ],
+    frontier: ['Lease E0 de 1800 s < attempt de 35 min: pode expirar durante a attempt; cota interna de attempts por 24 h contornada por lease humano; lease não consumível; 59 leases em 56 itens, dez desde 2026-10-13.'],
+    history: [
+      {
+        at: '2026-10-14',
+        change: 'proof_added',
+        note: '59 leases em 56 itens entre 2026-09-05 e 2026-10-14, dez desde 10-13. Lease E0 de 1800 s pode expirar durante attempt de 35 min; lease humano contorna a cota interna de attempts por 24 h.',
+        refs: [
+          { kind: 'record', ref: 'docs/registros/2026-10-13-single-item-promocao-residente.md' },
+          { kind: 'doc', ref: 'supabase/migrations/20260905000004_human_supervised_work.sql' },
+          { kind: 'doc', ref: 'supabase/migrations/20261008000000_single_item_work_claim.sql' },
+          { kind: 'work_item', ref: 'c42ccb12' },
+        ],
+      },
     ],
   },
   {
@@ -1424,11 +1557,15 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     meaning: 'O Anima tem um "corpo" residente que roda continuamente e reage a eventos, em vez de só responder a cliques.',
     advancement: 'Operational do runtime admitido não é lifecycle autônomo. SDC-22 implementou, integrou e publicou classificação pós-aprovação V0 pelo Resident Host, reutilizando ensurePlannedProjectClassification para a allowlist T3 (canonical_backlog_v1 e cli_propose_investigation_v1), somente no caminho da fila do host-turn. Opt-in: flag ANIMA_POST_APPROVAL_CLASSIFICATION=1 mais cutoff ANIMA_POST_APPROVAL_CLASSIFICATION_SINCE ISO-8601 com fuso; default off. INV-09 deu UMA ocasião viva só no ramo Investigation, sem prepare-autonomous, parando em user_attempt_budget_exhausted com zero attempts; sem promoção de maturity.',
     frontier: [
+      'Single-Item V1 foi promovido ao residente, mas a execução segue por execute-one supervisionado; autonomia do ciclo não comprovada',
       'Classificação pós-aprovação V0 é parcial: canonical_backlog_v1 tem código e testes, mas ainda sem prova viva equivalente; controles negativos só foram exercitados por testes. Generalização para outras origens, planners/chat e sucessores de recovery/correção permanece future. CLI work prepare-autonomous, rota API e botão da UI continuam fallback manual e caminho das demais origens; approve e supervise continuam humanos.',
       'Lifecycle autônomo é future: configuração/autenticação e bootstrap continuam humanos.',
       'Recovery/rework, seleção final de executor, integração em clone dedicado, sync do checkout humano e push continuam fronteiras humanas.',
     ],
     proofRefs: [
+      { kind: 'commit', ref: 'db75ce0' },
+      { kind: 'commit', ref: 'a4f46f8' },
+      { kind: 'record', ref: 'docs/registros/2026-10-13-single-item-promocao-residente.md' },
       { kind: 'commit', ref: '534a1bd', note: 'SDC-22: classificação pós-aprovação V0 T3' },
       { kind: 'doc', ref: 'apps/web/lib/work-orchestration/post-approval-classification.ts' },
       { kind: 'doc', ref: 'apps/web/lib/work-orchestration/backlog-host-turn-run.ts' },
@@ -1460,6 +1597,16 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'commit', ref: '534a1bd' },
           { kind: 'commit', ref: '6efcc68' },
           { kind: 'record', ref: 'docs/registros/2026-10-07-sdc22-post-approval-classification-live-proof.md' },
+        ],
+      },
+      {
+        at: '2026-10-14',
+        change: 'proof_added',
+        note: 'Single-Item V1 (claim, lease e integração) foi promovido ao residente em 2026-10-12/13.',
+        refs: [
+          { kind: 'commit', ref: 'db75ce0' },
+          { kind: 'commit', ref: 'a4f46f8' },
+          { kind: 'record', ref: 'docs/registros/2026-10-13-single-item-promocao-residente.md' },
         ],
       },
     ],

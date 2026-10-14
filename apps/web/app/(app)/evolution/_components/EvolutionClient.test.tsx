@@ -125,7 +125,8 @@ describe('EvolutionClient (Evolution UX V1)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Self-development supervisionado — Comprovada' }));
     const provas = screen.getByRole('heading', { name: 'Provas' }).parentElement as HTMLElement;
     // 8a2515d8 é WORK ITEM (tem lineage/sucessores), não attempt.
-    expect(within(provas).getByText('WORK ITEM')).toBeInTheDocument();
+    const workItem = within(provas).getByText('8a2515d8').closest('li') as HTMLElement;
+    expect(within(workItem).getByText('WORK ITEM')).toBeInTheDocument();
     expect(within(provas).getByText('8a2515d8')).toBeInTheDocument();
     expect(within(provas).queryByText('ATTEMPT')).not.toBeInTheDocument();
   });
@@ -525,14 +526,14 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
   test('lente Evolução recente destaca só o que foi registrado desde a baseline e lista no painel', () => {
     const { container } = render(<EvolutionClient {...buildProps()} />);
     fireEvent.click(screen.getByRole('button', { name: /Evolução recente/ }));
-    expect(stateOf(container, 'research.web.search')).toBe('strong');
-    expect(stateOf(container, 'agency.run-tests')).toBe('strong');
+    expect(stateOf(container, 'governance.verifier')).toBe('strong');
+    expect(stateOf(container, 'agency.verify-change')).toBe('strong');
     expect(stateOf(container, 'interaction.chat')).toBe('dim');
-    const panel = screen.getByText(/Desde Evolution UX V1/).closest('div') as HTMLElement;
-    expect(within(panel).getByText(/Baseline 7f276d8/)).toBeInTheDocument();
+    const panel = screen.getByText(/Desde Evolution Reconciliation V4/).closest('div') as HTMLElement;
+    expect(within(panel).getByText(/Baseline 6226324/)).toBeInTheDocument();
     // clicar numa entrada seleciona a capacidade
-    fireEvent.click(within(panel).getAllByRole('button', { name: 'Executar testes e comandos governados' })[0]!);
-    expect(stateOf(container, 'agency.run-tests')).toBe('selected');
+    fireEvent.click(within(panel).getAllByRole('button', { name: 'Verifier' })[0]!);
+    expect(stateOf(container, 'governance.verifier')).toBe('selected');
   });
 
   test('lente Reuso externo separa temos × integrado × candidatas', () => {
