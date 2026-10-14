@@ -479,8 +479,8 @@ export function verifyWorkResult(input: WorkResultVerificationInput): WorkVerifi
     if (files.some(file => file!.suiteStatus !== 'passed' || file!.runtimeError
       || file!.tests.some(test => test.status !== 'passed'))) return 'bound_test_not_executed';
     if (files.some(file => file!.tests.some(test => test.retried || test.invocations > 1))) return 'test_report_flaky';
-    if (binding.boundTests?.some(bound => !files.find(file => file!.path === bound.file)!
-      .tests.some(test => test.fullName === bound.fullName && test.status === 'passed'))) return 'test_binding_unmet';
+    if (binding.boundTests?.some(bound => !files.find(file => file?.path === bound.file)
+      ?.tests.some(test => test.fullName === bound.fullName && test.status === 'passed'))) return 'test_binding_unmet';
     let newTests = 0;
     for (const file of files) {
       const baselineFile = gate.baseline?.testReport?.files.find(base => base.path === file!.path);
