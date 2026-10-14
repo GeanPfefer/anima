@@ -23,7 +23,7 @@ import { GitWorktree, runProcess } from './worktree';
 import { prepareAnimaValidation } from './executor-selection';
 import { ScriptedCoderBackend, withCoderFailureUsage, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
 import { OllamaCoderBackend } from './ollama-coder';
-import { WorktreeExecutorAdapter, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, verifyGateTargetScope, type WorktreeTargetResolver } from './worktree-executor';
+import { WorktreeExecutorAdapter, gateOutputTail, isGateFailureEligibleForCoderRepair, summarizeGateFailureForRetry, verifyGateTargetScope, type WorktreeTargetResolver } from './worktree-executor';
 import { gateIdentityFromExecution } from './gate-identity';
 
 // Operações git reais podem ficar lentas sob carga paralela; folga o timeout
@@ -1614,6 +1614,7 @@ describe('test_binding — relatórios da mesma execução, sem git real', () =>
     jest.spyOn(tree, 'commit').mockResolvedValue('a'.repeat(40));
     jest.spyOn(tree, 'unlinkNodeModules').mockResolvedValue(undefined);
     jest.spyOn(tree, 'dispose').mockResolvedValue(undefined);
+    jest.spyOn(tree, 'stagedTreeSha').mockResolvedValue('c'.repeat(40));
     const files: string[] = [];
     let calls = 0;
     const runner = jest.spyOn(worktreeModule, 'runGate').mockImplementation(async (command, _cwd, _timeout, _signal, options) => {
@@ -1643,6 +1644,9 @@ describe('test_binding — relatórios da mesma execução, sem git real', () =>
     expect(signals.at(-1)?.kind).toBe('result');
     expect(outputs).toHaveLength(mode === 'repair' ? 2 : 1);
     expect(outputs[0]?.command).toBe('npm test -- src/added.ts');
+    expect(outputs[0]?.worktreeTree).toEqual({ before: 'c'.repeat(40), after: 'c'.repeat(40) });
+    expect(outputs[0]?.durationMs).toBe(7);
+    expect(outputs[0]?.outputTail).toEqual(mode === 'repair' ? { text: 'assertion failed', truncated: false } : undefined);
     if (mode === 'missing' || mode === 'assertion') {
       expect(outputs[0]).not.toHaveProperty('testReport');
       expect(outputs[0]?.baseline).not.toHaveProperty('testReport');
@@ -1661,5 +1665,78 @@ describe('test_binding — relatórios da mesma execução, sem git real', () =>
       expect(outputs[1]?.exitCode).toBe(0);
       expect(outputs[0]?.testReport).not.toEqual(outputs[1]?.testReport);
     }
+  });
+});
+
+describe('diagnóstico opcional do gate', () => {
+  const result = (overrides: Partial<import('./worktree').CapturedGateResult> = {}): import('./worktree').CapturedGateResult => ({
+    command: 'npm test', exitCode: 1, stdout: '', stderr: '', durationMs: 37, timedOut: false, cancelled: false, ...overrides,
+  });
+  test('normaliza linhas e redige caminhos removendo controles', () => {
+    expect(gateOutputTail(result({ stdout: 'início\r\n/home/user/file.ts\rmeio\u0000', stderr: 'fim' })))
+      .toEqual({ text: 'início\n<path>\nmeio\nfim', truncated: false });
+  });
+  test.each(['password=private', 'token=private', 'Bearer abcdefghijkl', 'sk-' + 'a'.repeat(24), '-----BEGIN PUBLIC DATA'])('descarta diagnóstico residual sensível %s', stdout => {
+    expect(gateOutputTail(result({ stdout }))).toBeUndefined();
+  });
+  test('omite diagnóstico de gate aprovado', () => {
+    expect(gateOutputTail(result({ exitCode: 0, stdout: 'aviso' }))).toBeUndefined();
+  });
+  test.each([{ timedOut: true }, { cancelled: true }])('preserva diagnóstico em interrupção %j', flags => {
+    const gate = result({ exitCode: 0, stdout: 'interrompido', ...flags });
+    expect(gateOutputTail(gate)?.text).toBe('interrompido');
+    expect(gate.durationMs).toBe(37);
+    expect(gate.exitCode).toBe(0);
+  });
+  test('mantém últimas posições quando corta caracteres e linhas', () => {
+    const tail = gateOutputTail(result({ stdout: Array(65).fill('início').join('\n') + '\n' + 'a'.repeat(5000) + 'FIM' }));
+    expect(tail?.text).toHaveLength(4096);
+    expect(tail?.text.endsWith('FIM')).toBe(true);
+    expect(tail?.truncated).toBe(true);
+  });
+  test('omite diagnóstico vazio após limpeza', () => {
+    expect(gateOutputTail(result({ stdout: '\u0000' }))).toBeUndefined();
+  });
+});
+
+describe('árvore observada ao redor do gate', () => {
+  test.each(['igual', 'novo', 'erro', 'parcial', 'inválida'])('registra árvore com cenário %s', async mode => {
+    const ctx = await makeNpmRepo();
+    const observed: ObservedGateInput[] = [];
+    const events: string[] = [];
+    const original = GitWorktree.prototype.stagedTreeSha;
+    const spy = jest.spyOn(GitWorktree.prototype, 'stagedTreeSha').mockImplementation(async function (this: GitWorktree, signal?: AbortSignal) {
+      events.push('árvore');
+      if (mode === 'erro') throw new Error('git indisponível');
+      if (mode === 'parcial' && events.length === 2) return null;
+      if (mode === 'inválida') return 'ABC';
+      return original.call(this, signal);
+    });
+    try {
+      if (mode === 'novo') {
+        await writeFile(join(ctx.repo, 'retry-gate.js'), "require('fs').writeFileSync('gate-created.txt', 'novo');");
+        await git(ctx.repo, ['add', '-A']);
+        await git(ctx.repo, ['commit', '-m', 'Prepare gate']);
+        const sha = (await git(ctx.repo, ['rev-parse', 'HEAD'])).stdout.trim();
+        ctx.resolver = { resolve: () => ({ repoRoot: ctx.repo, sha }) };
+      }
+      const signals = await collect(new WorktreeExecutorAdapter({ targets: ctx.resolver,
+        backend: new ScriptedCoderBackend([{ path: 'src/added.ts', content: 'export const two = 2;\n' }]),
+        onGateObserved: gate => { events.push('observação'); observed.push(gate); },
+      }), request(), new AbortController().signal);
+      expect(observed).toHaveLength(1);
+      expect(events).toEqual(['árvore', 'árvore', 'observação']);
+      expect(observed[0]?.exitCode).toBe(0);
+      expect(observed[0]?.durationMs).toEqual(expect.any(Number));
+      expect(observed[0]?.outputTail).toBeUndefined();
+      if (['erro', 'parcial', 'inválida'].includes(mode)) expect(observed[0]?.worktreeTree).toBeUndefined();
+      else {
+        expect(observed[0]?.worktreeTree?.before).toMatch(/^[a-f0-9]{40}$/);
+        expect(observed[0]?.worktreeTree?.after).toMatch(/^[a-f0-9]{40}$/);
+        if (mode === 'novo') expect(observed[0]?.worktreeTree?.after).not.toBe(observed[0]?.worktreeTree?.before);
+        else expect(observed[0]?.worktreeTree?.after).toBe(observed[0]?.worktreeTree?.before);
+      }
+      expect(signals.length).toBeGreaterThan(0);
+    } finally { spy.mockRestore(); await ctx.cleanup(); }
   });
 });

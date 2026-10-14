@@ -484,7 +484,22 @@ export class GitWorktree {
     }
   }
 
-  async stageAll(signal?: AbortSignal): Promise<void> { await git(this.root, ['add', '-A'], signal); }
+  async stageAll(signal?: AbortSignal, observe?: (result: CommandResult) => void): Promise<void> {
+    const result = await git(this.root, ['add', '-A'], signal);
+    observe?.(result);
+  }
+
+  /** Materializa somente a árvore do índice, sem criar commit ou referência. */
+  async stagedTreeSha(signal?: AbortSignal): Promise<string | null> {
+    try {
+      let staged = false;
+      await this.stageAll(signal, result => { staged = result.exitCode === 0 && !result.timedOut && !result.cancelled; });
+      if (!staged) return null;
+      const tree = await git(this.root, ['write-tree'], signal);
+      const sha = tree.stdout.trim();
+      return tree.exitCode === 0 && !tree.timedOut && !tree.cancelled && /^[a-f0-9]{40}$/.test(sha) ? sha : null;
+    } catch { return null; }
+  }
 
   async changedFiles(signal?: AbortSignal): Promise<readonly string[]> {
     await this.stageAll(signal);

@@ -24,9 +24,22 @@ import {
 import { createHash } from 'node:crypto';
 import { coderFailureUsage, type CoderBackend, type CoderWorkspace, type HostValidationFeedback } from './coder-backend';
 import { analyzeCoderOutputFiles, collectCoderOutputForHarness } from './coder-output-analysis';
-import { summarizeCommandOutput } from './output-sanitization';
+import { sanitizeStream, summarizeCommandOutput } from './output-sanitization';
 import { captureJestReport, type CapturedGateResult, GitWorktree, parseGateCommand, runGate } from './worktree';
 import { gateIdentityFromExecution } from './gate-identity';
+
+/** Diagnóstico opcional: nunca participa da decisão ou do reparo do gate. */
+export function gateOutputTail(gate: CapturedGateResult): ObservedGateInput['outputTail'] {
+  if (gate.exitCode === 0 && !gate.timedOut && !gate.cancelled) return undefined;
+  const normalized = `${gate.stdout}\n${gate.stderr}`.replace(/\r\n?/g, '\n');
+  // Sanitiza o conteúdo inteiro antes do corte por caracteres, conservando o tail.
+  const sanitized = sanitizeStream(normalized, Number.MAX_SAFE_INTEGER, 60);
+  const cleaned = sanitized.text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
+  const text = cleaned.slice(-4096);
+  if (!text.trim() || text.split('\n').length > 60
+    || /sk-[a-z0-9]{20,}|Bearer\s+\S+|eyJ[a-z0-9_-]*\.[a-z0-9_-]+\.[a-z0-9_-]+|-----BEGIN|\b(?:password|secret|token|api[ _-]key)\s*[:=]/i.test(text)) return undefined;
+  return { text, truncated: sanitized.truncated || cleaned.length > 4096 };
+}
 
 // ============================================================
 // Executor da Opção A (ADR-001): roda o toolchain real do Anima numa git
@@ -794,12 +807,17 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           if (signal.aborted) break;
           if (remainingMs() <= 0) { yield await deadlineSignal(`antes do gate "${criterion.label}"`); return; }
 
+          const before = await worktree.stagedTreeSha(signal).catch(() => null);
           const gate: CapturedGateResult = criterion.claimKind === 'test_binding'
             ? await captureJestReport(worktree.root, options => runGate(
               criterion.command!, worktree!.root, boundedMs(attemptBudgetMs), signal, options,
             ))
             : await runGate(criterion.command, worktree.root, boundedMs(attemptBudgetMs), signal);
 
+          const after = await worktree.stagedTreeSha(signal).catch(() => null);
+          const worktreeTree = before && after && /^[a-f0-9]{40}$/.test(before) && /^[a-f0-9]{40}$/.test(after)
+            ? { before, after } : undefined;
+          const outputTail = gateOutputTail(gate);
           const differential = differentialBaselines.get(criterionIndex);
           const changedSet = new Set(changed.map(norm));
           const declaredTargetSet = new Set(criterion.targetPaths?.map(norm) ?? []);
@@ -807,6 +825,8 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
           const changedFilesWithinTargetScope = changedFiles.filter(path => declaredTargetSet.has(path));
           const changedFilesOutsideTargetScope = changedFiles.filter(path => !declaredTargetSet.has(path));
           this.options.onGateObserved?.({
+            ...(worktreeTree === undefined ? {} : { worktreeTree }),
+            ...(outputTail === undefined ? {} : { outputTail }),
             ...(gate.testReport === undefined ? {} : { testReport: gate.testReport }),
             label: criterion.label,
             command: gate.command,

@@ -227,3 +227,22 @@ describe('hostEvidenceSinkFor — tradução para a RPC record_host_observed_evi
     expect(result).toEqual({ ok: false, message: 'attempt not found' });
   });
 });
+
+describe('árvore observada da branch', () => {
+  test.each(['válida', 'falha', 'inválida', 'exceção'])('observa árvore com resposta %s', async mode => {
+    const emitted: string[][] = [];
+    const runner: GitRunner = async args => {
+      emitted.push([...args]);
+      if (args[2]?.endsWith('^{tree}')) {
+        if (mode === 'exceção') throw new Error('git indisponível');
+        return { exitCode: mode === 'falha' ? 1 : 0, stdout: mode === 'inválida' ? 'inválido' : 'c'.repeat(40) };
+      }
+      return { exitCode: 0, stdout: args[0] === 'rev-parse' ? 'b'.repeat(40) : args[1] === '--numstat' ? '1\t0\tsrc/a.ts' : 'src/a.ts' };
+    };
+    const result = await observeHostGitEvidence({ repoRoot: '/unused', baseSha: 'a'.repeat(40), branch: 'candidate', workItemId: 'w', attemptId: 'a', approvedProposalVersion: 1 }, runner);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.observedTreeSha).toBe(mode === 'válida' ? 'c'.repeat(40) : undefined);
+    expect(emitted).toContainEqual(['rev-parse', '--verify', 'candidate^{tree}']);
+  });
+});

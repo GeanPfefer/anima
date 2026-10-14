@@ -591,3 +591,13 @@ describe('captura Jest host-side', () => {
     },
   );
 });
+
+test('stagedTreeSha omite árvore quando staging falha', async () => {
+  const ctx = await makeRepo();
+  const tree = await GitWorktree.create({ repoRoot: ctx.repo, sha: ctx.sha, branch: 'staging-falha' });
+  try {
+    const failed: CommandResult = { command: 'git add -A', exitCode: 1, stdout: '', stderr: '', durationMs: 0, timedOut: false, cancelled: false };
+    jest.spyOn(tree, 'stageAll').mockImplementation(async (_signal, observe) => { observe?.(failed); });
+    expect(await tree.stagedTreeSha()).toBeNull();
+  } finally { await tree.dispose({ deleteBranch: true }); await ctx.cleanup(); }
+});

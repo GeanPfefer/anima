@@ -73,6 +73,8 @@ export async function observeHostGitEvidence(
   if (head.exitCode !== 0 || !SHA.test(observedCommitSha)) {
     return { ok: false, defect: 'invalid_git_reference', explanation: 'A branch observada não existe ou não aponta um commit.' };
   }
+  const tree = await runGit(['rev-parse', '--verify', `${input.branch}^{tree}`]).catch(() => null);
+  const observedTreeSha = tree?.exitCode === 0 && SHA.test(tree.stdout.trim()) ? tree.stdout.trim() : undefined;
   const range = `${input.baseSha}..${input.branch}`;
   const names = await runGit(['diff', '--name-only', range]);
   const numstat = await runGit(['diff', '--numstat', range]);
@@ -86,6 +88,7 @@ export async function observeHostGitEvidence(
     approvedProposalVersion: input.approvedProposalVersion,
     baseSha: input.baseSha,
     observedCommitSha,
+    ...(observedTreeSha === undefined ? {} : { observedTreeSha }),
     observedChangedFiles: parseNameOnly(names.stdout),
     observedChangedFilesSinceStart: parseNameOnly(namesSinceStart.stdout),
     observedDiffFiles: parseNumstat(numstat.stdout),
