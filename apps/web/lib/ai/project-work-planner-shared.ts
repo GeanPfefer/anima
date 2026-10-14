@@ -100,15 +100,15 @@ export const SUBMIT_PARAMETERS = {
   type: 'object',
   properties: {
     test_bindings: {
-      type: 'array', maxItems: 3, items: {
+      type: 'array', maxItems: 3, description: 'No máximo três bindings; use [] quando não aplicáveis.', items: {
         type: 'object', additionalProperties: false,
         properties: {
           label: { type: 'string' }, covers: { type: 'array', items: { type: 'string' } },
-          test_files: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'string' } },
-          min_new_tests: { type: 'integer', minimum: 0, maximum: 100 },
+          test_files: { type: 'array', minItems: 1, maxItems: 4, description: 'Um a quatro arquivos exatos de teste por binding.', items: { type: 'string' } },
+          min_new_tests: { type: 'integer', description: 'Inteiro entre 0 e 100, validado pelo host.' },
           bound_tests: { type: 'array', items: {
             type: 'object', additionalProperties: false,
-            properties: { file: { type: 'string' }, full_name: { type: 'string', maxLength: 400 } },
+            properties: { file: { type: 'string' }, full_name: { type: 'string', description: 'Nome completo do teste, com no máximo 400 caracteres.' } },
             required: ['file', 'full_name'],
           } },
         }, required: ['label', 'covers', 'test_files', 'min_new_tests', 'bound_tests'],
@@ -214,6 +214,27 @@ export function coercePlannerArrayFields(rawArguments: string): string {
   }
   for (const field of ['included_scope', 'excluded_scope', 'expected_effects', 'risks']) {
     if (nonBlank(parsed[field])) parsed[field] = [parsed[field]];
+  }
+  for (const field of ['test_bindings', 'human_review_effects']) {
+    if (parsed[field] === null || parsed[field] === '') delete parsed[field];
+  }
+  if (typeof parsed.human_review_effects === 'string') {
+    parsed.human_review_effects = [parsed.human_review_effects];
+  }
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (isObject(parsed.test_bindings)) parsed.test_bindings = [parsed.test_bindings];
+  if (Array.isArray(parsed.test_bindings)) {
+    for (const binding of parsed.test_bindings) {
+      if (!isObject(binding)) continue;
+      for (const field of ['covers', 'test_files']) {
+        if (typeof binding[field] === 'string') binding[field] = [binding[field]];
+      }
+      if (isObject(binding.bound_tests)) binding.bound_tests = [binding.bound_tests];
+      if (typeof binding.min_new_tests === 'string' && /^[0-9]{1,3}$/.test(binding.min_new_tests)) {
+        binding.min_new_tests = Number(binding.min_new_tests);
+      }
+    }
   }
   return JSON.stringify(parsed);
 }

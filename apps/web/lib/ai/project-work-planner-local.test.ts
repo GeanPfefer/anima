@@ -1,4 +1,5 @@
 /** @jest-environment node */
+import { validatePlannerProposal } from './project-work-planner-shared';
 import { LocalOllamaProjectWorkPlanner } from './project-work-planner-local';
 
 const VALID_ARGS = JSON.stringify({
@@ -171,6 +172,11 @@ describe('LocalOllamaProjectWorkPlanner', () => {
     const forcedBody = JSON.parse(String(calls[2]!.init.body)) as { tools: Array<{ function: { name: string } }>; tool_choice?: unknown };
     expect(forcedBody.tools.map(t => t.function.name)).toEqual(['submit_project_work_proposal']);
     expect(forcedBody.tool_choice).toBeUndefined();
+    const messages = (JSON.parse(String(calls[2]!.init.body)) as { messages: Msg[] }).messages;
+    const instruction = messages.find(message => message.content?.includes('Pare de investigar'))?.content;
+    expect(instruction).toContain('test_bindings');
+    expect(instruction).toContain('human_review_effects');
+    expect(instruction).toContain('use [] quando não aplicáveis');
   });
 
   test('não executa tool de investigação emitida fora do catálogo da rodada forçada', async () => {
@@ -407,3 +413,36 @@ describe('LocalOllamaProjectWorkPlanner', () => {
     const result = await planner.proposeArguments('faça');
     expect(result.ok).toBe(true);
   });});
+
+test('cutucada após evidência exige os campos aditivos', async () => {
+  const { impl, calls } = scriptedFetch([
+    { role: 'assistant', tool_calls: [toolCall('project_read_file', '{}')] },
+    { role: 'assistant', content: 'Evidência suficiente' },
+    { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', VALID_ARGS)] },
+  ]);
+  const result = await new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool }).proposeArguments('Ajustar');
+  expect(result.ok).toBe(true);
+  const messages = (JSON.parse(String(calls[2]!.init.body)) as { messages: Msg[] }).messages;
+  const instruction = messages.find(message => message.content?.startsWith('Chame agora a ferramenta'))?.content;
+  expect(instruction).toContain('test_bindings');
+  expect(instruction).toContain('human_review_effects');
+  expect(instruction).toContain('use [] quando não aplicáveis');
+});
+test('submissão local com binding único chega válida ao host', async () => {
+  const file = 'apps/web/lib/ai/project-work-planner-local.test.ts';
+  const args = { ...JSON.parse(VALID_ARGS) as Record<string, unknown>, included_scope: [file],
+    expected_effects: ['gate verde', 'Comportamento', 'Revisar'], validation_claim_kind: 'gate_assertion',
+    human_review_effects: 'Revisar', test_bindings: { label: 'Funcional', covers: 'Comportamento',
+      test_files: file, min_new_tests: '1', bound_tests: { file, full_name: 'Prova existente' } } };
+  const { impl } = scriptedFetch([
+    { role: 'assistant', tool_calls: [toolCall('project_read_file', '{}')] },
+    { role: 'assistant', tool_calls: [toolCall('submit_project_work_proposal', JSON.stringify(args))] },
+  ]);
+  const result = await new LocalOllamaProjectWorkPlanner({ fetchImpl: impl, executeTool: evidenceTool }).proposeArguments('Ajustar');
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(validatePlannerProposal(result.rawArguments)).toMatchObject({ ok: true, proposal: {
+    human_review_effects: ['Revisar'], test_bindings: [{ covers: ['Comportamento'], test_files: [file],
+      min_new_tests: 1, bound_tests: [{ file, full_name: 'Prova existente' }] }],
+  } });
+});

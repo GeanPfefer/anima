@@ -272,8 +272,8 @@ export type ProjectWorkRevisionPlanningResult =
  * validação de paths/gates e reconstrói execution_spec/base_sha no host.
  */
 const revisionSpec = (intent: unknown) => {
-  const spec = (intent as { execution_spec?: { validation_criteria?: unknown; limits?: unknown } } | null)?.execution_spec;
-  return { validation_criteria: spec?.validation_criteria ?? null, limits: spec?.limits ?? null };
+  const spec = (intent as { execution_spec?: { validation_criteria?: unknown; limits?: unknown; acceptance_contract?: unknown } } | null)?.execution_spec;
+  return { validation_criteria: spec?.validation_criteria ?? null, limits: spec?.limits ?? null, ...(spec?.acceptance_contract === undefined ? {} : { acceptance_contract: spec.acceptance_contract }) };
 };
 
 /** Resumo estrutural da versão vigente para o planner saber o que corrigir. */
@@ -286,6 +286,7 @@ function describeProposalForRevision(item: WorkItem): string {
     expected_effects: item.proposal.data.expectedEffects,
     validation_criteria: spec.validation_criteria,
     limits: spec.limits,
+    ...('acceptance_contract' in spec ? { acceptance_contract: spec.acceptance_contract } : {}),
     impact_level: item.impactLevel,
   });
 }
@@ -308,6 +309,7 @@ export async function planExecutableProjectWorkRevision(
   const planningMessage = [
     'Replaneje semanticamente o trabalho a partir das fontes autoritativas abaixo.',
     'Produza uma proposta COMPLETA substituta que ATENDA a correção pedida.',
+    'Critérios test_binding/human_review da versão anterior só são preservados se você os REEMITIR em test_bindings/human_review_effects. Não declare provas inexistentes; use [] quando não aplicáveis.',
     'Não reutilize fatos da proposta anterior: ela pode estar errada ou desatualizada.',
     'Investigue novamente o repositório real antes de afirmar paths, defaults ou comportamento existente.',
     'Tudo o que a correção pedir e o contrato permitir (included_scope, gates, max_attempts) deve estar nos CAMPOS estruturados; nunca só no texto.',

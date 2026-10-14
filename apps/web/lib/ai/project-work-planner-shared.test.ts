@@ -1,6 +1,7 @@
 /** @jest-environment node */
 import {
   SUBMIT_PARAMETERS,
+  coercePlannerArrayFields,
   parseProposal,
   parseAdditionalValidations,
   normalizeClaimKind,
@@ -285,4 +286,13 @@ test('recusa cobertura repetida entre dois bindings', () => {
   expect(validatePlannerProposal(bindingArgs({ included_scope: [bindingFile, other], test_bindings: [explicitBinding,
     { ...explicitBinding, test_files: [other] }] })))
     .toMatchObject({ ok: false, issue: { rule: 'duplicate_coverage' } });
+});
+
+test('normaliza campos aditivos sem modificar os tipos não reconhecidos', () => {
+  const raw = validArgs({ human_review_effects: 'Revisar', test_bindings: { covers: 'Efeito', test_files: 'a.test.ts', min_new_tests: '02', bound_tests: {} } });
+  expect(JSON.parse(coercePlannerArrayFields(raw))).toMatchObject({ human_review_effects: ['Revisar'],
+    test_bindings: [{ covers: ['Efeito'], test_files: ['a.test.ts'], min_new_tests: 2, bound_tests: [{}] }] });
+  const invalid = validArgs({ test_bindings: false, human_review_effects: 4 });
+  expect(coercePlannerArrayFields(invalid)).toBe(invalid);
+  expect(JSON.stringify(SUBMIT_PARAMETERS)).not.toMatch(/"(?:maxLength|minimum|maximum)":/);
 });

@@ -4,9 +4,10 @@ jest.mock('./project-tools', () => ({
   executeProjectTool: jest.fn(async () => JSON.stringify({ ok: true, result: { text: 'evidência' } })),
 }));
 
-import type { CreateWorkProposalCommand } from '@anima/core';
+import * as executorSelection from '@/lib/work-orchestration/executor-selection';
+import type { WorkItem, CreateWorkProposalCommand } from '@anima/core';
 import type { OpenAIAdmissionControl } from './openai-paid-transport';
-import { OpenAIProjectWorkPlanner, planExecutableProjectWork } from './project-work-planner';
+import { OpenAIProjectWorkPlanner, planExecutableProjectWork, planExecutableProjectWorkRevision } from './project-work-planner';
 import { executeProjectTool } from './project-tools';
 
 // Admissão financeira em memória que CONCEDE: exercita o caminho OpenAI do planner
@@ -366,5 +367,51 @@ describe('montagem aditiva de contrato de aceite', () => {
   test('recusa cobertura compartilhada por gate e binding', async () => {
     expect(await run({ validation_covers: ['Gate passa', 'Efeito funcional'] }))
       .toMatchObject({ ok: false, message: expect.stringContaining('duplicate_coverage') });
+  });
+});
+
+describe('reemissão explícita na revisão do contrato de aceite', () => {
+  const file = 'apps/web/lib/ai/project-work-planner.test.ts';
+  const binding = { label: 'Funcional', covers: ['Comportamento'], test_files: [file], min_new_tests: 1, bound_tests: [] };
+  const payload = { summary: 'Revisada', objective: 'Objetivo revisado', included_scope: [file], excluded_scope: ['Banco'],
+    expected_effects: ['Gate', 'Comportamento', 'Revisar'], risks: ['Regressão'], validation_label: 'Gate',
+    validation_command: 'npm run typecheck --workspace=apps/web', validation_covers: ['Gate'], validation_claim_kind: 'gate_assertion' };
+  const item = { id: 'revisao', userId: 'u', sourceMessageId: 'm', state: 'proposed', impactLevel: 'significant',
+    capability: 'programming', originalRequest: 'Implementar', proposalVersion: 1, createdAt: new Date(), updatedAt: new Date(),
+    proposal: { ...base.proposal, data: { ...base.proposal.data, summary: 'Anterior' } },
+    intent: { execution_spec: { acceptance_contract: 2, verifier_requirement: 'required_fail_closed',
+      validation_criteria: [{ claim_kind: 'test_binding', binding }, { proof: 'human_review', covers: ['Revisar'] }] } },
+  } as WorkItem;
+  beforeEach(() => { jest.spyOn(executorSelection, 'readAuthorizedBaseSha').mockResolvedValue('a'.repeat(40)); });
+  afterEach(() => { jest.restoreAllMocks(); });
+  test('resumo inclui o marcador vigente e exige reemissão dos critérios', async () => {
+    const proposeArguments = jest.fn(async (_message: string) => ({ ok: false as const, message: 'Simulado' }));
+    await planExecutableProjectWorkRevision(item, 'Corrigir', { id: 'simulado', proposeArguments });
+    const message = proposeArguments.mock.calls[0]?.[0];
+    expect(message).toContain('"acceptance_contract":2');
+    expect(message).toContain('test_binding/human_review');
+    expect(message).toContain('REEMITIR em test_bindings/human_review_effects');
+  });
+  test('revisão que reemite conserva binding e revisão humana', async () => {
+    const result = await planExecutableProjectWorkRevision(item, 'Corrigir', { id: 'simulado',
+      proposeArguments: async () => ({ ok: true, rawArguments: JSON.stringify({ ...payload, test_bindings: [binding], human_review_effects: ['Revisar'] }) }) });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.revision.intent).toMatchObject({ execution_spec: { acceptance_contract: 2,
+      verifier_requirement: 'required_fail_closed', validation_criteria: expect.arrayContaining([
+        expect.objectContaining({ claim_kind: 'test_binding', binding: { test_files: [file], min_new_tests: 1 } }),
+        expect.objectContaining({ proof: 'human_review', covers: ['Revisar'] }),
+      ]) } });
+  });
+  test('revisão sem reemissão não herda bindings nem revisão humana', async () => {
+    const result = await planExecutableProjectWorkRevision(item, 'Corrigir', { id: 'simulado',
+      proposeArguments: async () => ({ ok: true, rawArguments: JSON.stringify({ ...payload, validation_covers: payload.expected_effects }) }) });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const spec = result.revision.intent.execution_spec as { acceptance_contract?: unknown; validation_criteria: unknown[] };
+    expect(spec).not.toHaveProperty('acceptance_contract');
+    expect(spec.validation_criteria).toHaveLength(1);
+    expect(spec.validation_criteria[0]).toMatchObject({ claim_kind: 'gate_assertion', proof: 'gate' });
+    expect(spec).toMatchObject({ verifier_requirement: 'required_fail_closed' });
   });
 });

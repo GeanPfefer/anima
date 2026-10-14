@@ -224,7 +224,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
       if (forceSubmit && !directedToSubmit) {
         messages.push({
           role: 'user',
-          content: 'Você já reuniu evidência suficiente. Pare de investigar e chame AGORA submit_project_work_proposal com todos os campos exigidos (summary, objective, included_scope, excluded_scope, expected_effects, risks, validation_label, validation_command).',
+          content: 'Você já reuniu evidência suficiente. Pare de investigar e chame AGORA submit_project_work_proposal com todos os campos exigidos (summary, objective, included_scope, excluded_scope, expected_effects, risks, validation_label, validation_command, test_bindings, human_review_effects; use [] quando não aplicáveis).',
         });
         directedToSubmit = true;
       }
@@ -283,7 +283,7 @@ export class LocalOllamaProjectWorkPlanner implements ProjectWorkPlanner {
         messages.push({
           role: 'user',
           content: evidenceCalls > 0
-            ? 'Chame agora a ferramenta submit_project_work_proposal com todos os campos exigidos (summary, objective, included_scope, excluded_scope, expected_effects, risks, validation_label, validation_command).'
+            ? 'Chame agora a ferramenta submit_project_work_proposal com todos os campos exigidos (summary, objective, included_scope, excluded_scope, expected_effects, risks, validation_label, validation_command, test_bindings, human_review_effects; use [] quando não aplicáveis).'
             : 'Use as ferramentas read-only para investigar o repositório e depois chame submit_project_work_proposal.',
         });
         continue;
