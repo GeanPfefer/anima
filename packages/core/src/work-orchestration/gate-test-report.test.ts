@@ -101,7 +101,12 @@ describe('deriveGateTestReport', () => {
     const result = derive(r, 'C:\\repo\\'); expect(result.status).toBe('ok');
     if (result.status === 'ok') expect(result.report.files[0]!.path).toBe('nested/a.test.ts');
   });
-  test.each(['password=hidden', 'Bearer hidden', 'sk-hidden', '/home/alice/private'])('segredo no fullName %s', fullName => {
+  test.each([
+    { label: 'senha em atribuicao', fullName: 'password=hidden' },
+    { label: 'cabecalho de autorizacao', fullName: 'Bearer hidden' },
+    { label: 'chave com prefixo', fullName: 'sk-hidden' },
+    { label: '/home/alice/private', fullName: '/home/alice/private' },
+  ])('segredo no fullName $label', ({ fullName }) => {
     const r = fixture(); r.testResults[0]!.assertionResults[0]!.fullName = fullName; expectReason(r, 'sensitive_data');
   });
   test('segredo no path', () => { const r = fixture(); r.testResults[0]!.name = '/repo/password=hidden.ts'; expectReason(r, 'sensitive_data'); });
