@@ -40,6 +40,14 @@ const integer = (v: unknown): v is number => typeof v === 'number' && Number.isS
 const nonBlank = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 const statuses: readonly string[] = ['passed', 'failed', 'pending', 'skipped', 'todo', 'disabled'];
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+function compareCodePoints(a: string, b: string): number {
+  const left = Array.from(a), right = Array.from(b);
+  for (let i = 0; i < Math.min(left.length, right.length); i++) {
+    const difference = left[i]!.codePointAt(0)! - right[i]!.codePointAt(0)!;
+    if (difference) return difference;
+  }
+  return left.length - right.length;
+}
 const relative = (p: string) => !/^(?:\/|[a-z]:)/i.test(p) && !/[\\\x00-\x1f]/.test(p)
   && p.split('/').every(s => s !== '' && s !== '.' && s !== '..') && !/[?*]/.test(p);
 const credential = (s: string) => containsSensitiveData(s)
@@ -108,21 +116,33 @@ export function deriveGateTestReport(raw: unknown, options: { rootDir: string })
       if (paths.has(identity)) return fail('duplicate_file');
       paths.add(identity);
       const tests: GateTestV1[] = [];
-      const names = new Set<string>();
+      const groups = new Map<string, GateTestV1[]>();
       for (const assertion of suite.assertionResults) {
         if (!object(assertion) || !nonBlank(assertion.fullName) || typeof assertion.title !== 'string'
           || !Array.isArray(assertion.ancestorTitles) || !assertion.ancestorTitles.every(v => typeof v === 'string')
           || typeof assertion.status !== 'string' || !integer(assertion.invocations) || assertion.invocations < 1
           || !Array.isArray(assertion.failureMessages) || !assertion.failureMessages.every(v => typeof v === 'string')) return fail('malformed');
         if (!statuses.includes(assertion.status)) return fail('unknown_status');
-        if (++count > GATE_TEST_REPORT_LIMITS.maxTests || assertion.fullName.length > GATE_TEST_REPORT_LIMITS.maxFullName) return fail('too_large');
         if (credential(assertion.fullName)) return fail('sensitive_data');
-        if (names.has(assertion.fullName)) return fail('duplicate_test');
-        names.add(assertion.fullName);
+        if (++count > GATE_TEST_REPORT_LIMITS.maxTests || assertion.fullName.length > GATE_TEST_REPORT_LIMITS.maxFullName) return fail('too_large');
         const failure = assertion.failureMessages.length ? sanitizeFailure(assertion.failureMessages[0] as string) : undefined;
-        tests.push({ fullName: assertion.fullName, status: assertion.status as GateTestStatus,
+        const group = groups.get(assertion.fullName) ?? [];
+        group.push({ fullName: assertion.fullName, status: assertion.status as GateTestStatus,
           invocations: assertion.invocations, retried: assertion.invocations > 1,
           ...(failure ? { failure } : {}) });
+        groups.set(assertion.fullName, group);
+      }
+      const names = new Set<string>();
+      for (const [original, group] of [...groups].sort(([a], [b]) => compare(a, b))) {
+        group.sort((a, b) => compare(a.status, b.status) || a.invocations - b.invocations
+          || compareCodePoints(a.failure ?? '', b.failure ?? ''));
+        for (const [index, test] of group.entries()) {
+          const fullName = index === 0 ? original : `${original} #${index + 1}`;
+          if (fullName.length > GATE_TEST_REPORT_LIMITS.maxFullName) return fail('too_large');
+          if (names.has(fullName)) return fail('duplicate_test');
+          names.add(fullName);
+          tests.push({ ...test, fullName });
+        }
       }
       tests.sort((a, b) => compare(a.fullName, b.fullName));
       const suiteStatus = ['passed', 'failed', 'focused'].includes(suite.status)

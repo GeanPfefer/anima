@@ -92,7 +92,85 @@ describe('deriveGateTestReport', () => {
     expectReason(r, 'inconsistent_totals');
   });
   test('arquivo duplicado', () => { const r = fixture(); r.testResults[1]!.name = r.testResults[0]!.name; expectReason(r, 'duplicate_file'); });
-  test('teste duplicado na mesma suíte', () => { const r = fixture(); r.testResults[0]!.assertionResults[1]!.fullName = r.testResults[0]!.assertionResults[0]!.fullName; expectReason(r, 'duplicate_test'); });
+  test('teste duplicado na mesma suíte', () => {
+    const raw = many(2); raw.testResults[0]!.assertionResults = [assertion('X'), assertion('X')];
+    const r = derive(raw); expect(r.status).toBe('ok');
+    if (r.status === 'ok') {
+      expect(r.report.files[0]!.tests.map(t => t.fullName)).toEqual(['X', 'X #2']);
+      expect(r.report.totals).toEqual({ suites: 1, suitesFailed: 0, suitesRuntimeError: 0,
+        tests: 2, passed: 2, failed: 0, pending: 0, skipped: 0, todo: 0, disabled: 0 });
+    }
+  });
+  test('ordinais de três ocorrências seguem status invocations e falha sanitizada', () => {
+    const cases = [
+      [assertion('X', 'passed'), assertion('X', 'failed'), assertion('X', 'pending')],
+      [assertion('X', 'passed', 10), assertion('X', 'passed', 2), assertion('X', 'passed', 3)],
+      [assertion('X', 'passed', 1, ['z']), assertion('X', 'passed', 1, ['\u001b[31ma\u001b[0m']), assertion('X')],
+      [assertion('X', 'passed', 1, ['\u{10000}']), assertion('X', 'passed', 1, ['\ue000']), assertion('X')],
+    ];
+    for (const [index, assertions] of cases.entries()) {
+      const raw = many(3); raw.testResults[0]!.assertionResults = assertions;
+      if (index === 0) { raw.numPassedTests = 1; raw.numFailedTests = 1; raw.numPendingTests = 1; raw.success = false; }
+      const r = derive(raw); expect(r.status).toBe('ok');
+      if (r.status === 'ok') {
+        const expected = index === 0 ? [assertions[1]!, assertions[0]!, assertions[2]!]
+          : index === 1 ? [assertions[1]!, assertions[2]!, assertions[0]!]
+          : [assertions[2]!, assertions[1]!, assertions[0]!];
+        expect(r.report.files[0]!.tests).toEqual(expected.map((a, i) => ({
+          fullName: i === 0 ? 'X' : `X #${i + 1}`, status: a.status,
+          invocations: a.invocations, retried: a.invocations > 1,
+          ...(a.failureMessages.length ? { failure: index === 2 && i === 1 ? 'a' : a.failureMessages[0] } : {}),
+        })));
+        expect(r.report.totals.tests).toBe(3);
+      }
+    }
+  });
+  test('duplicatas e suítes embaralhadas preservam relatório e digest', () => {
+    const raw = fixture(); raw.testResults[0]!.assertionResults.forEach(a => { a.fullName = 'X'; });
+    const original = JSON.stringify(raw);
+    const shuffled = fixture(); shuffled.testResults[0]!.assertionResults.forEach(a => { a.fullName = 'X'; });
+    shuffled.testResults.reverse(); shuffled.testResults.forEach(s => s.assertionResults.reverse());
+    const r = derive(raw), s = derive(shuffled); expect(r.status).toBe('ok'); expect(s).toEqual(r);
+    if (r.status === 'ok' && s.status === 'ok') expect(s.report.digest).toBe(r.report.digest);
+    expect(JSON.stringify(raw)).toBe(original);
+  });
+  test('nomes únicos e homônimos entre arquivos preservam valores sem ordinal', () => {
+    const baseline = derive(many(1)); expect(baseline.status).toBe('ok');
+    const raw = many(1); raw.testResults.push({ ...raw.testResults[0]!, name: '/repo/b.ts' });
+    raw.numTotalTestSuites = 2; raw.numTotalTests = 2; raw.numPassedTests = 2;
+    const r = derive(raw); expect(r.status).toBe('ok');
+    if (r.status === 'ok' && baseline.status === 'ok') {
+      expect(baseline.report.files[0]!.tests).toEqual([{ fullName: 'test 0', status: 'passed', invocations: 1, retried: false }]);
+      expect(r.report.files).toEqual([baseline.report.files[0], { ...baseline.report.files[0]!, path: 'b.ts' }]);
+      expect(r.report.digest).toBe(sha256Hex(JSON.stringify({ files: r.report.files, totals: r.report.totals })));
+    }
+  });
+  test('colisão de ordinal com nome real falha em ambas as ordens', () => {
+    const raw = many(3); raw.testResults[0]!.assertionResults = ['a', 'a', 'a #2'].map(n => assertion(n));
+    expectReason(raw, 'duplicate_test'); raw.testResults[0]!.assertionResults.reverse(); expectReason(raw, 'duplicate_test');
+  });
+  test('sufixo respeita fronteira de comprimento do nome', () => {
+    const raw = many(2); raw.testResults[0]!.assertionResults = [assertion('x'.repeat(398)), assertion('x'.repeat(398))];
+    expectReason(raw, 'too_large');
+    raw.testResults[0]!.assertionResults = [assertion('x'.repeat(397)), assertion('x'.repeat(397))];
+    const r = derive(raw); expect(r.status).toBe('ok');
+    if (r.status === 'ok') expect(r.report.files[0]!.tests.map(t => t.fullName.length)).toEqual([397, 400]);
+  });
+  test('roundtrip de duplicatas preserva relatório totais e digest', () => {
+    const raw = fixture(); raw.testResults[0]!.assertionResults.forEach(a => { a.fullName = 'X'; });
+    const r = derive(raw); expect(r.status).toBe('ok');
+    if (r.status === 'ok') {
+      const parsed = parseGateTestReport(json(r.report)); expect(parsed).toEqual(r.report);
+      expect(parsed?.totals).toEqual(r.report.totals); expect(parsed?.digest).toBe(r.report.digest);
+    }
+  });
+  test('duplicatas mantêm proteção de nomes e falhas de arquivo e totais', () => {
+    const raw = many(2); raw.testResults[0]!.assertionResults = [assertion('password=hidden'), assertion('password=hidden')];
+    expectReason(raw, 'sensitive_data');
+    raw.testResults[0]!.assertionResults = [assertion('X'), assertion('X')];
+    raw.testResults.push({ ...raw.testResults[0]! }); expectReason(raw, 'duplicate_file');
+    raw.testResults.pop(); raw.numPassedTests++; expectReason(raw, 'inconsistent_totals');
+  });
   test.each(['/other/a.ts', '/repository/a.ts', '/repo/../a.ts', '/repo/a/../b.ts', 'a.ts', '/repo/./a.ts', '/repo//a.ts'])('path suspeito %s', name => {
     const r = fixture(); r.testResults[0]!.name = name; expectReason(r, 'path_outside_root');
   });
