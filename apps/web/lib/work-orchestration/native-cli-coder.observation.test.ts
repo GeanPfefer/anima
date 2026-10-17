@@ -76,6 +76,7 @@ describe('seam governada: persistPostTurnHostObservations grava a evidência do 
       gateEvidence: { record: unused } as never,
       coderEvidence: { record: async (evidence: HostObservedCoderEvidenceV1) => { recorded.push(evidence); return { ok: true as const }; } } as never,
       executionContext: { record: unused } as never,
+      mandatedAcceptance: { accept: unused } as never,
       verifierOpinion: { record: unused } as never,
       integrationReceipt: unused as never,
     };

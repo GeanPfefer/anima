@@ -204,6 +204,22 @@ describe('Evidência observada de autonomia', () => {
       expect(withContext(contextData({ execution_mode: 'manual', actor_kind: 'human_operator' }, { executionMode: 'manual', actorKind: 'human_operator' })).unattendedVerifiedUntilReview).toBe(0);
     });
   });
+  describe('A2-0 R2: mandato de aceite', () => {
+    test('conceder e revogar mandato contam como atos humanos', () => {
+      const events = [...fixture().events, event('work_mandate_granted', 'user', {}, '2026-10-09'), event('work_mandate_revoked', 'user', {}, '2026-10-09')];
+      const summary = compute({ events, items: [{ id: 'a', state: 'review' }] });
+      expect(summary.windows[0].humanActsByType).toMatchObject({ work_mandate_granted: 1, work_mandate_revoked: 1 });
+      expect(summary.windows[0].classes.human_observed).toBe(1);
+      expect(summary.unattendedVerifiedUntilReview).toBe(0);
+    });
+    test('aceite de sistema sob mandato NÃO vira ciclo autônomo comprovado (a concessão humana veio antes do resultado)', () => {
+      const events = [...fixture().events, event('work_mandate_granted', 'user', {}, '2026-10-09'), event('result_accepted', 'system', { decided_by: 'trusted_system_writer', authority: { kind: 'human_mandate' } }, '2026-10-14')];
+      const summary = compute({ events, items: [{ id: 'a', state: 'completed' }] });
+      expect(summary.unattendedVerifiedFullCycle).toBe(0);
+      expect(summary.windows[0].humanActsByType.result_accepted).toBeUndefined();
+      expect(summary.windows[0].humanActsByType.work_mandate_granted).toBe(1);
+    });
+  });
   test('cálculo é puro determinístico e não produz maturidade', () => {
     const input = fixture();
     const before = JSON.stringify(input);

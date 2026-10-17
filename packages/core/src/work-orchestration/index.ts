@@ -42,6 +42,7 @@ export * from './enforcement-readiness-policy';
 export * from './readiness-calibration';
 export * from './host-observed-coder-evidence';
 export * from './host-observed-execution-context';
+export * from './acceptance-mandate';
 export * from './canonical-resident-contract';
 export * from './coder-model-selection';
 export * from './node-lifecycle';

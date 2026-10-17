@@ -39,6 +39,8 @@ const HUMAN_TYPES = new Set<string>([
   'work_approved', 'work_intelligence_classified', 'result_accepted', 'integration_effect_authorized',
   'changes_requested', 'proposal_changes_requested', 'work_cancelled', 'work_rejected', 'input_provided',
   'manual_work_released', 'work_deferred', 'work_paused', 'work_control_requested',
+  // A2-0 R2: conceder/revogar mandato de aceite é ATO HUMANO (identidade dedicada de grantor, autor user).
+  'work_mandate_granted', 'work_mandate_revoked',
 ]);
 const HOST_TYPES = new Set<string>([
   'host_observed_evidence_recorded', 'host_observed_gate_evidence_recorded',

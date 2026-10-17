@@ -1926,6 +1926,80 @@ export type Database = {
           },
         ]
       }
+      work_acceptance_mandates: {
+        Row: {
+          allowed_actions: string[]
+          base_sha: string
+          consumed_at: string | null
+          consumed_event_id: string | null
+          contract_sha256: string
+          created_at: string
+          expires_at: string
+          granted_event_id: string
+          granted_event_seq: number
+          id: string
+          not_before: string
+          policy_version: string
+          proposal_version: number
+          request_id: string
+          revoke_reason: string | null
+          revoked_at: string | null
+          scope_files: string[]
+          user_id: string
+          work_item_id: string
+        }
+        Insert: {
+          allowed_actions?: string[]
+          base_sha: string
+          consumed_at?: string | null
+          consumed_event_id?: string | null
+          contract_sha256: string
+          created_at?: string
+          expires_at: string
+          granted_event_id: string
+          granted_event_seq: number
+          id?: string
+          not_before: string
+          policy_version: string
+          proposal_version: number
+          request_id: string
+          revoke_reason?: string | null
+          revoked_at?: string | null
+          scope_files: string[]
+          user_id: string
+          work_item_id: string
+        }
+        Update: {
+          allowed_actions?: string[]
+          base_sha?: string
+          consumed_at?: string | null
+          consumed_event_id?: string | null
+          contract_sha256?: string
+          created_at?: string
+          expires_at?: string
+          granted_event_id?: string
+          granted_event_seq?: number
+          id?: string
+          not_before?: string
+          policy_version?: string
+          proposal_version?: number
+          request_id?: string
+          revoke_reason?: string | null
+          revoked_at?: string | null
+          scope_files?: string[]
+          user_id?: string
+          work_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_acceptance_mandates_work_item_id_fkey"
+            columns: ["work_item_id"]
+            isOneToOne: false
+            referencedRelation: "work_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_supervision_leases: {
         Row: {
           expires_at: string
@@ -2760,6 +2834,37 @@ export type Database = {
         }
         Returns: Json
       }
+      accept_work_result_under_mandate: {
+        Args: {
+          p_expected_proposal_version: number
+          p_integrity: Json
+          p_mandate_id: string
+          p_reviewed_result_event_id: string
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
+      grant_acceptance_mandate: {
+        Args: {
+          p_base_sha: string
+          p_contract_sha256: string
+          p_expected_proposal_version: number
+          p_expires_at: string
+          p_not_before: string
+          p_request_id: string
+          p_scope_files: string[]
+          p_work_item_id: string
+        }
+        Returns: Json
+      }
+      preview_acceptance_contract: {
+        Args: { p_work_item_id: string }
+        Returns: Json
+      }
+      revoke_acceptance_mandate: {
+        Args: { p_mandate_id: string; p_reason: string }
+        Returns: Json
+      }
       record_host_observed_execution_context: {
         Args: {
           attempt_id: string
@@ -3496,6 +3601,8 @@ export type Database = {
         | "integration_effect_authorized"
         | "integration_completed"
         | "host_observed_execution_context_recorded"
+        | "work_mandate_granted"
+        | "work_mandate_revoked"
       work_impact_level:
         | "low"
         | "significant"
@@ -3847,6 +3954,8 @@ export const Constants = {
         "integration_effect_authorized",
         "integration_completed",
         "host_observed_execution_context_recorded",
+        "work_mandate_granted",
+        "work_mandate_revoked",
       ],
       work_impact_level: [
         "low",

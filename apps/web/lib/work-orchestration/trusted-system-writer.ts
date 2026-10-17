@@ -3,6 +3,7 @@ import { createBearerClient } from '../supabase/bearer';
 import { coderEvidenceSinkFor, type CoderEvidenceSink } from './coder-evidence';
 import { gateEvidenceSinkFor, type GateEvidenceSink } from './gate-evidence';
 import { executionContextSinkFor, type ExecutionContextSink } from './execution-context-evidence';
+import { mandatedAcceptanceSinkFor, type MandatedAcceptanceSink } from './acceptance-mandate';
 import { hostEvidenceSinkFor, type HostEvidenceSink } from './host-evidence';
 import { supabaseIntegrationReceiptPersistence, type PersistIntegrationReceipt } from './integration-effect';
 import { verifierOpinionSinkFor, type VerifierOpinionSink } from './verifier-opinion';
@@ -33,6 +34,7 @@ export interface TrustedSystemWriter {
   readonly gateEvidence: GateEvidenceSink;
   readonly coderEvidence: CoderEvidenceSink;
   readonly executionContext: ExecutionContextSink;
+  readonly mandatedAcceptance: MandatedAcceptanceSink;
   readonly verifierOpinion: VerifierOpinionSink;
   readonly integrationReceipt: PersistIntegrationReceipt;
 }
@@ -59,6 +61,7 @@ export function createTrustedSystemWriter(
     gateEvidence: { record: (evidence) => withClient(down, (c) => gateEvidenceSinkFor(c).record(evidence)) },
     coderEvidence: { record: (evidence) => withClient(down, (c) => coderEvidenceSinkFor(c).record(evidence)) },
     executionContext: { record: (evidence) => withClient(down, (c) => executionContextSinkFor(c).record(evidence)) },
+    mandatedAcceptance: { accept: (request) => withClient(down, (c) => mandatedAcceptanceSinkFor(c).accept(request)) },
     verifierOpinion: { record: (opinion) => withClient(down, (c) => verifierOpinionSinkFor(c).record(opinion)) },
     integrationReceipt: async (auth, receipt) => {
       const session = await identity().catch(() => null);
