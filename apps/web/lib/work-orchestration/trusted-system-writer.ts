@@ -2,6 +2,7 @@ import { createGoTrueIdentityProvider } from '../resident-host/ports';
 import { createBearerClient } from '../supabase/bearer';
 import { coderEvidenceSinkFor, type CoderEvidenceSink } from './coder-evidence';
 import { gateEvidenceSinkFor, type GateEvidenceSink } from './gate-evidence';
+import { executionContextSinkFor, type ExecutionContextSink } from './execution-context-evidence';
 import { hostEvidenceSinkFor, type HostEvidenceSink } from './host-evidence';
 import { supabaseIntegrationReceiptPersistence, type PersistIntegrationReceipt } from './integration-effect';
 import { verifierOpinionSinkFor, type VerifierOpinionSink } from './verifier-opinion';
@@ -10,8 +11,8 @@ import { verifierOpinionSinkFor, type VerifierOpinionSink } from './verifier-opi
 // Trusted System Writer V0 (2026-09-28) — `author=system` é FRONTEIRA DE CONFIANÇA.
 //
 // Única porta server-side para persistir fatos que significam "o Anima observou/produziu
-// isto como sistema": evidência git, de gate e do coder observada pelo host, parecer do
-// Verifier e receipt de integração. As RPCs correspondentes só executam para o papel
+// isto como sistema": evidência git, de gate e do coder observada pelo host, contexto de
+// execução (A2-0), parecer do Verifier e receipt de integração. As RPCs correspondentes só executam para o papel
 // Postgres `anima_system_writer` (migração 20260928000003) — a sessão humana é recusada.
 //
 // Identidade: um usuário GoTrue DEDICADO (não o residente, nunca o humano), cujo
@@ -31,6 +32,7 @@ export interface TrustedSystemWriter {
   readonly hostEvidence: HostEvidenceSink;
   readonly gateEvidence: GateEvidenceSink;
   readonly coderEvidence: CoderEvidenceSink;
+  readonly executionContext: ExecutionContextSink;
   readonly verifierOpinion: VerifierOpinionSink;
   readonly integrationReceipt: PersistIntegrationReceipt;
 }
@@ -56,6 +58,7 @@ export function createTrustedSystemWriter(
     hostEvidence: { record: (evidence) => withClient(down, (c) => hostEvidenceSinkFor(c).record(evidence)) },
     gateEvidence: { record: (evidence) => withClient(down, (c) => gateEvidenceSinkFor(c).record(evidence)) },
     coderEvidence: { record: (evidence) => withClient(down, (c) => coderEvidenceSinkFor(c).record(evidence)) },
+    executionContext: { record: (evidence) => withClient(down, (c) => executionContextSinkFor(c).record(evidence)) },
     verifierOpinion: { record: (opinion) => withClient(down, (c) => verifierOpinionSinkFor(c).record(opinion)) },
     integrationReceipt: async (auth, receipt) => {
       const session = await identity().catch(() => null);

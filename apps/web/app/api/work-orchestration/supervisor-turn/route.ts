@@ -173,6 +173,10 @@ export async function POST(request: Request) {
     gateObservations,
     coderObservations,
     ...(changeAuthorization ? { changeAuthorization } : {}),
+    // A2-0 R1: o processo web (HTTP) NUNCA declara contexto de execução. O modo/ator só pode vir do
+    // launcher/Host dedicado; sem isto, ANIMA_EXECUTION_MODE definido no ambiente do servidor Next
+    // passaria a valer para turnos disparados por clientes HTTP. `null` = nenhum fato é registrado.
+    executionContext: null,
   });
 
   // (3) ADVISORY do Resource Governor (read-only), anexado ao read-model da resposta.

@@ -2,6 +2,13 @@
 import { computeAutonomyEvidence, type AutonomyEvidenceInput, type AutonomyEvidenceLease } from './autonomy-evidence';
 import type { WorkEvent } from './work-orchestration/types';
 const now = new Date('2026-10-14T12:00:00Z');
+const contextData = (over: Record<string, unknown> = {}, evidenceOver: Record<string, unknown> = {}) => ({
+  work_item_id: 'a', attempt_id: 'att-1', approved_proposal_version: 1, origin: 'host', recorded_by: 'trusted_system_writer',
+  execution_mode: 'unattended', actor_kind: 'automated_runner',
+  evidence: { schemaVersion: 1, workItemId: 'a', attemptId: 'att-1', approvedProposalVersion: 1, executionMode: 'unattended', actorKind: 'automated_runner', ...evidenceOver },
+  authority: { approval_author: 'system', approval_authority: 'autonomous_policy', approved_seq: 1, classified_seq: 2, leases_observed: 0, human_acts_after_mandate: 0 },
+  ...over,
+});
 function event(type: WorkEvent['type'], author: WorkEvent['author'] = 'system', data: WorkEvent['payload'] = {}, day = '2026-10-13', workItemId = 'a'): WorkEvent {
   return { id: `${type}-${author}-${day}`, workItemId, type, author, proposalVersion: 1,
     payload: { data }, occurredAt: new Date(`${day}T12:00:00Z`) };
@@ -10,7 +17,8 @@ function fixture(): AutonomyEvidenceInput {
   return { now, items: [{ id: 'a', state: 'review' }], leases: [], events: [
     event('work_approved', 'system', { authority: 'autonomous_policy' }, '2026-10-10'),
     event('work_intelligence_classified', 'system', { classification: { provenance: { kind: 'system_assessed' } } }, '2026-10-10'),
-    event('host_observed_gate_evidence_recorded', 'system', { execution_mode: 'unattended' }, '2026-10-11'),
+    event('execution_started', 'anima', { attempt_id: 'att-1' }, '2026-10-11'),
+    event('host_observed_execution_context_recorded', 'system', contextData(), '2026-10-11'),
     event('result_submitted', 'executor'),
   ] };
 }
@@ -73,7 +81,7 @@ describe('Evidência observada de autonomia', () => {
   });
   test('rejeita alegações de execução sem autor system', () => {
     for (const author of ['user', 'anima', 'executor'] as const) {
-      const summary = compute({ events: fixture().events.map(e => e.type === 'host_observed_gate_evidence_recorded' ? { ...e, author } : e) });
+      const summary = compute({ events: fixture().events.map(e => e.type === 'host_observed_execution_context_recorded' ? { ...e, author } : e) });
       expect(summary.coverage.rejectedExecutionModeFacts).toBe(1);
       expect(summary.coverage.unattendedFactsValid).toBe(0);
       expect(summary.unattendedVerifiedUntilReview).toBe(0);
@@ -135,9 +143,66 @@ describe('Evidência observada de autonomia', () => {
     expect(summary.windows[1].humanActsPerCompleted).toBeNull();
   });
   test('cada requisito positivo é necessário para verificação', () => {
-    for (const type of ['work_approved', 'work_intelligence_classified', 'result_submitted', 'host_observed_gate_evidence_recorded']) {
+    for (const type of ['work_approved', 'work_intelligence_classified', 'result_submitted', 'execution_started', 'host_observed_execution_context_recorded']) {
       expect(compute({ events: fixture().events.filter(e => e.type !== type) }).unattendedVerifiedUntilReview).toBe(0);
     }
+  });
+  describe('fato A2-0 de contexto de execução', () => {
+    const withContext = (data: Record<string, unknown>, mutate: Partial<WorkEvent> = {}) => compute({
+      events: fixture().events.map(e => e.type === 'host_observed_execution_context_recorded' ? { ...e, payload: { data } as WorkEvent['payload'], ...mutate } : e),
+    });
+    test('fato íntegro conta como válido e não como rejeitado', () => {
+      const summary = compute();
+      expect(summary.coverage.executionModeFactsObserved).toBe(1);
+      expect(summary.coverage.unattendedFactsValid).toBe(1);
+      expect(summary.coverage.rejectedExecutionModeFacts).toBe(0);
+      expect(summary.limitations).not.toContain('execution_mode_fact_absent');
+    });
+    test('legado: execution_mode em evento host antigo nunca vale como prova', () => {
+      const events = fixture().events.filter(e => e.type !== 'host_observed_execution_context_recorded')
+        .concat(event('host_observed_gate_evidence_recorded', 'system', { execution_mode: 'unattended' }, '2026-10-11'));
+      const summary = compute({ events });
+      expect(summary.unattendedVerifiedUntilReview).toBe(0);
+      expect(summary.coverage.unattendedFactsValid).toBe(0);
+      expect(summary.coverage.rejectedExecutionModeFacts).toBe(1);
+    });
+    test('campos de topo divergentes da evidência assinada são rejeitados', () => {
+      const summary = withContext(contextData({ execution_mode: 'supervised' }));
+      expect(summary.coverage.rejectedExecutionModeFacts).toBe(1);
+      expect(summary.unattendedVerifiedUntilReview).toBe(0);
+    });
+    test('unattended com ator humano é rejeitado', () => {
+      const summary = withContext(contextData({ actor_kind: 'human_operator' }, { actorKind: 'human_operator' }));
+      expect(summary.coverage.rejectedExecutionModeFacts).toBe(1);
+      expect(summary.unattendedVerifiedUntilReview).toBe(0);
+    });
+    test('sem recorded_by do Trusted System Writer ou sem origem host é rejeitado', () => {
+      expect(withContext(contextData({ recorded_by: 'executor' })).unattendedVerifiedUntilReview).toBe(0);
+      expect(withContext(contextData({ origin: 'executor' })).unattendedVerifiedUntilReview).toBe(0);
+    });
+    test('divergência de attempt: fato de outra attempt não verifica a corrente', () => {
+      const summary = withContext(contextData({ attempt_id: 'att-OLD' }, { attemptId: 'att-OLD' }));
+      expect(summary.coverage.rejectedExecutionModeFacts).toBe(0);
+      expect(summary.unattendedVerifiedUntilReview).toBe(0);
+    });
+    test('divergência de versão aprovada não verifica', () => {
+      const summary = withContext(contextData({ approved_proposal_version: 2 }, { approvedProposalVersion: 2 }));
+      expect(summary.unattendedVerifiedUntilReview).toBe(0);
+    });
+    test('autoridade com lease observada ou ato humano após o mandato não verifica', () => {
+      const authority = { approval_author: 'system', approval_authority: 'autonomous_policy', approved_seq: 1, classified_seq: 2 };
+      expect(withContext(contextData({ authority: { ...authority, leases_observed: 1, human_acts_after_mandate: 0 } })).unattendedVerifiedUntilReview).toBe(0);
+      expect(withContext(contextData({ authority: { ...authority, leases_observed: 0, human_acts_after_mandate: 1 } })).unattendedVerifiedUntilReview).toBe(0);
+    });
+    test('autoria diferente de system invalida o fato', () => {
+      for (const author of ['user', 'anima', 'executor'] as const) {
+        expect(withContext(contextData(), { author }).unattendedVerifiedUntilReview).toBe(0);
+      }
+    });
+    test('modo supervised ou manual registrado não verifica unattended', () => {
+      expect(withContext(contextData({ execution_mode: 'supervised' }, { executionMode: 'supervised' })).unattendedVerifiedUntilReview).toBe(0);
+      expect(withContext(contextData({ execution_mode: 'manual', actor_kind: 'human_operator' }, { executionMode: 'manual', actorKind: 'human_operator' })).unattendedVerifiedUntilReview).toBe(0);
+    });
   });
   test('cálculo é puro determinístico e não produz maturidade', () => {
     const input = fixture();

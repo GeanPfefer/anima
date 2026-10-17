@@ -61,8 +61,8 @@ describe('Trusted System Writer V0 — porta única dos fatos de sistema', () =>
     const serialized = JSON.stringify(calls);
     expect(serialized).not.toContain(FAKE_TOKEN);
     expect(serialized).not.toContain(FAKE_PASSWORD);
-    // O writer não expõe cliente algum: só os cinco sinks.
-    expect(Object.keys(writer).sort()).toEqual(['available', 'coderEvidence', 'gateEvidence', 'hostEvidence', 'integrationReceipt', 'verifierOpinion']);
+    // O writer não expõe cliente algum: só os sinks estreitos.
+    expect(Object.keys(writer).sort()).toEqual(['available', 'coderEvidence', 'executionContext', 'gateEvidence', 'hostEvidence', 'integrationReceipt', 'verifierOpinion']);
   });
 
   test('identidade do writer falha ⇒ sink recusa, sem tentar outra identidade', async () => {

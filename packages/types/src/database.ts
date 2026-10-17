@@ -2760,6 +2760,15 @@ export type Database = {
         }
         Returns: Json
       }
+      record_host_observed_execution_context: {
+        Args: {
+          attempt_id: string
+          evidence: Json
+          expected_proposal_version: number
+          work_item_id: string
+        }
+        Returns: Json
+      }
       record_host_observed_coder_evidence: {
         Args: {
           attempt_id: string
@@ -3486,6 +3495,7 @@ export type Database = {
         | "compute_preference_recorded"
         | "integration_effect_authorized"
         | "integration_completed"
+        | "host_observed_execution_context_recorded"
       work_impact_level:
         | "low"
         | "significant"
@@ -3836,6 +3846,7 @@ export const Constants = {
         "compute_preference_recorded",
         "integration_effect_authorized",
         "integration_completed",
+        "host_observed_execution_context_recorded",
       ],
       work_impact_level: [
         "low",

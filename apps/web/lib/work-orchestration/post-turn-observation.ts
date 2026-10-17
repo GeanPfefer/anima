@@ -3,6 +3,7 @@ import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { persistHostObservedGateEvidence } from './gate-evidence';
 import { persistHostObservedCoderEvidence } from './coder-evidence';
+import { persistHostObservedExecutionContext, resolveExecutionContextClaim, type ExecutionContextClaim } from './execution-context-evidence';
 import { observeAndPersistHostGitEvidence } from './host-evidence';
 import { defaultTrustedSystemWriter, type TrustedSystemWriter } from './trusted-system-writer';
 import { MANDATED_VERIFIER_TIMEOUT_MS, TIMEOUT, withTimeout, verifyAndReleaseCandidate, type MandatedVerificationOutcome } from './mandated-verification';
@@ -39,6 +40,9 @@ export interface PostTurnObservationInput {
   /** Trusted System Writer V0: única porta dos fatos de SISTEMA (evidência + parecer).
    * Default = writer do processo (env do servidor); ausente ⇒ todo sink recusa. */
   readonly systemWriter?: TrustedSystemWriter;
+  /** Declaração de modo/ator/runner (A2-0 R1). Ausente ⇒ resolvida do ambiente do servidor + RLS; `null` ⇒ sem
+   * declaração, nenhum fato é registrado. O banco decide se a declaração é sustentada pelo ledger. */
+  readonly executionContext?: ExecutionContextClaim | null;
 }
 
 /**
@@ -61,6 +65,14 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
     attemptId: result.attemptId,
     approvedProposalVersion: result.selection.approvedProposalVersion,
   };
+
+  // (-1) CONTEXTO DE EXECUÇÃO (A2-0 R1): fato de modo/ator correlacionado à attempt. Fail-open e fora do
+  // caminho do Verifier — nunca retém nem libera candidato, nunca altera o desfecho da volta.
+  {
+    const claim = input.executionContext !== undefined ? input.executionContext
+      : await resolveExecutionContextClaim(client, correlation.workItemId).catch(() => null);
+    await persistHostObservedExecutionContext(correlation, claim, writer.executionContext).catch(() => null);
+  }
 
   // (0) GATE observado pelo host — persiste INCLUSIVE em terminal de erro (um gate
   // falho é a evidência mais valiosa: contradiz um executor que minta que passou).

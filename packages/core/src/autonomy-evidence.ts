@@ -1,4 +1,5 @@
 import type { WorkEvent, WorkState } from './work-orchestration/types';
+import { EXECUTION_CONTEXT_EVENT_TYPE, readPersistedExecutionContext } from './work-orchestration/host-observed-execution-context';
 
 export const AUTONOMY_EVIDENCE_VERSION = 'autonomy-evidence-v0';
 export type AutonomyCycleClass = 'unattended_verified' | 'human_observed' | 'unknown' | 'insufficient_evidence';
@@ -52,8 +53,23 @@ const human = (event: WorkEvent) => event.author === 'user' && HUMAN_TYPES.has(e
 const userStart = (event: WorkEvent) => event.author === 'user' && event.type === 'work_started';
 const policyApproval = (event: WorkEvent) => event.type === 'work_approved' && event.author === 'system' && data(event).authority === 'autonomous_policy';
 const policyClassification = (event: WorkEvent) => event.type === 'work_intelligence_classified' && event.author === 'system' && object(object(data(event).classification).provenance).kind === 'system_assessed';
-const modeFact = (event: WorkEvent) => HOST_TYPES.has(event.type) && typeof data(event).execution_mode === 'string';
-const unattendedFact = (event: WorkEvent) => modeFact(event) && event.author === 'system' && data(event).execution_mode === 'unattended';
+// Fato de modo: qualquer evento que DECLARA execution_mode (tipos host legados ou o fato A2-0). Só o fato A2-0
+// com proveniência completa (readPersistedExecutionContext) é VÁLIDO; o resto conta como rejeitado.
+const modeFact = (event: WorkEvent) => event.type === EXECUTION_CONTEXT_EVENT_TYPE
+  || (HOST_TYPES.has(event.type) && typeof data(event).execution_mode === 'string');
+const validModeFact = (event: WorkEvent) => readPersistedExecutionContext(event) !== null;
+/** `unattended` válido para a attempt corrente do item: fato íntegro, runner automático, zero leases e zero
+ * atos humanos depois do mandato (conferidos pelo banco no registro) e attempt/versão correlacionadas. */
+function unattendedFactFor(history: readonly WorkEvent[]): boolean {
+  const started = history.filter(event => event.type === 'execution_started').at(-1);
+  if (!started) return false;
+  return history.some(event => {
+    const fact = readPersistedExecutionContext(event);
+    return fact !== null && fact.executionMode === 'unattended' && fact.actorKind === 'automated_runner'
+      && fact.authority.leasesObserved === 0 && fact.authority.humanActsAfterMandate === 0
+      && fact.attemptId === data(started).attempt_id && fact.approvedProposalVersion === started.proposalVersion;
+  });
+}
 function compare(a: WorkEvent, b: WorkEvent): number {
   if (a.seq !== undefined && b.seq !== undefined) return a.seq - b.seq;
   return a.occurredAt.getTime() - b.occurredAt.getTime();
@@ -79,7 +95,7 @@ export function computeAutonomyEvidence(input: AutonomyEvidenceInput): AutonomyE
     const verified = (item.state === 'review' || item.state === 'completed') && submitted !== undefined
       && history.some(policyApproval) && history.some(policyClassification)
       && ![...acts, ...starts].some(event => compare(event, submitted) <= 0)
-      && leases !== null && itemLeases.length === 0 && history.some(unattendedFact)
+      && leases !== null && itemLeases.length === 0 && unattendedFactFor(history)
       && !history.some(event => event.type === 'work_started' && data(event).reason === 'supervised_execution');
     const cycleClass: AutonomyCycleClass = history.length === 0 ? 'insufficient_evidence'
       : verified ? 'unattended_verified'
@@ -140,8 +156,8 @@ export function computeAutonomyEvidence(input: AutonomyEvidenceInput): AutonomyE
     verdict: leases === null || !items.length || !events.length ? 'insufficient_evidence' : unattendedVerifiedUntilReview > 0 ? 'unattended_verified' : 'unknown',
     coverage: { eventsRead: events.length, itemsRead: items.length, itemsWithoutEvents: observed.filter(entry => !entry.history.length).length,
       leasesStatus: leases === null ? 'unavailable' : 'read', executionModeFactsObserved,
-      unattendedFactsValid: events.filter(unattendedFact).length,
-      rejectedExecutionModeFacts: events.filter(event => modeFact(event) && event.author !== 'system').length,
+      unattendedFactsValid: [...byItem.values()].filter(unattendedFactFor).length,
+      rejectedExecutionModeFacts: events.filter(event => modeFact(event) && !validModeFact(event)).length,
       itemsWithoutReferenceTime: observed.filter(entry => (entry.item.state === 'completed' || entry.item.state === 'review') && !entry.reference).length },
     limitations,
   };
