@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { buildGateEnvironment } from './gate-isolation';
 import { resolve } from 'node:path';
 import { validateWorkCheckpoint } from '@anima/core';
 import type { WorkCheckpointV1, WorkEvent, WorkExecutorAdapter, WorkExecutorRequest, WorkExecutorSignal, WorkExecutorSignalInput } from '@anima/core';
@@ -134,6 +135,14 @@ const taskFor = (request: WorkExecutorRequest): string => [
   `Critérios: ${request.validationCriteria.map(item => item.label).join('; ')}.`,
 ].join('\n');
 
+/** O runner legado executa comandos do modelo: ambiente por allowlist (sem segredos do control plane); só o Ollama é repassado. */
+export function localRunnerEnvironment(source: Record<string, string | undefined>, testCommand?: string): NodeJS.ProcessEnv {
+  const fixed: Record<string, string> = { PYTHONIOENCODING: 'utf-8' };
+  for (const name of ['OLLAMA_HOST', 'OLLAMA_MODEL'] as const) { const value = source[name]; if (value) fixed[name] = value; }
+  if (testCommand) fixed.LOCAL_AGENT_TEST_COMMAND = testCommand;
+  return buildGateEnvironment(source, fixed) as NodeJS.ProcessEnv;
+}
+
 export class SpawnLocalRunnerProcess implements LocalRunnerProcess {
   run(input: LocalRunnerProcessInput): Promise<LocalRunnerProcessResult> {
     return new Promise((resolveResult, reject) => {
@@ -148,7 +157,7 @@ export class SpawnLocalRunnerProcess implements LocalRunnerProcess {
         cwd: input.runnerRoot,
         shell: false,
         windowsHide: true,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8', ...(input.testCommand ? { LOCAL_AGENT_TEST_COMMAND: input.testCommand } : {}) },
+        env: localRunnerEnvironment(process.env, input.testCommand),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       let stdout = '', stderr = '', settled = false, lineBuffer = '';

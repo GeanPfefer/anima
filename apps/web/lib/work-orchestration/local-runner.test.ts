@@ -1,5 +1,5 @@
 import { buildCoderTaskSpec, type WorkExecutorRequest } from '@anima/core';
-import { classifyPersistedAttempt, LocalRunnerAdapter, type LocalRunnerProcess } from './local-runner';
+import { classifyPersistedAttempt, LocalRunnerAdapter, localRunnerEnvironment, type LocalRunnerProcess } from './local-runner';
 
 const request: WorkExecutorRequest = {
   attemptId: 'attempt-1', workItemId: 'work-1', approvedProposalVersion: 2, capability: 'programming', objective: 'Corrija a função.',
@@ -150,4 +150,10 @@ test('reconcilia reentrega pela tentativa persistida sem heurística', () => {
   expect(classifyPersistedAttempt([event('execution_started', 'attempt-1')], 'attempt-1')).toBe('in_progress');
   expect(classifyPersistedAttempt([event('execution_started', 'attempt-1'), event('result_submitted', 'attempt-1')], 'attempt-1')).toBe('terminal');
   expect(classifyPersistedAttempt([event('result_submitted', 'outro')], 'attempt-1')).toBe('absent');
+});
+
+test('ambiente do runner legado: sem segredos do control plane; Ollama e comando de teste preservados', () => {
+  const env = localRunnerEnvironment({ PATH: 'p', OLLAMA_HOST: 'http://h:1', OLLAMA_MODEL: 'm', ANIMA_RESIDENT_PASSWORD: 'fake', SUPABASE_SERVICE_ROLE_KEY: 'fake', OPENAI_API_KEY: 'fake' }, 'npm test');
+  expect(env).toMatchObject({ PATH: 'p', OLLAMA_HOST: 'http://h:1', OLLAMA_MODEL: 'm', LOCAL_AGENT_TEST_COMMAND: 'npm test', PYTHONIOENCODING: 'utf-8' });
+  expect(Object.keys(env).filter(k => /PASSWORD|SERVICE_ROLE|API_KEY/.test(k))).toEqual([]);
 });

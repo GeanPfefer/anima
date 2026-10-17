@@ -3,6 +3,8 @@ import { lstat, mkdtemp, mkdir, open, readFile, readdir, rm, rmdir, stat, symlin
 import { tmpdir } from 'node:os';
 import { deriveGateTestReport, type GateTestReportV1, isAllowedGateCommand } from '@anima/core';
 import { delimiter, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
+import { buildGateEnvironment, planIsolatedInvocation, resolveGateSandbox } from './gate-isolation';
+import { scrubbedGitEnvironment } from './trusted-git';
 
 // ============================================================
 // Primitivas de execução em git worktree isolada (ADR-001, Opção A).
@@ -175,10 +177,57 @@ export async function captureJestReport(
 export function runGate(command: string, cwd: string, timeoutMs: number, signal?: AbortSignal, options?: GateReportOptions): Promise<CommandResult> {
   const parsed = parseGateCommand(command);
   if (!parsed) return Promise.resolve({ command, exitCode: -2, stdout: '', stderr: 'Comando de gate fora da allowlist.', durationMs: 0, timedOut: false, cancelled: false });
-  if (!options?.jestReportFile) return runProcess(parsed.file, parsed.args, { cwd, timeoutMs, signal, shell: process.platform === 'win32' });
+  if (!options?.jestReportFile) return runIsolated(parsed.file, parsed.args, { cwd, timeoutMs, signal, shell: process.platform === 'win32' });
   const args = withJestJsonReport(parsed.args, options.jestReportFile);
-  return runProcess(parsed.file, args ?? parsed.args, { cwd, timeoutMs, signal, shell: process.platform === 'win32' })
+  return runIsolated(parsed.file, args ?? parsed.args, { cwd, timeoutMs, signal, shell: process.platform === 'win32' })
     .then(result => ({ ...result, command }));
+}
+
+/**
+ * Executa CÓDIGO DO CANDIDATO (gate, comando do harness): ambiente por allowlist (sem segredos do control plane) e, quando
+ * `ANIMA_GATE_SANDBOX` está configurado, sob o sandbox do SO. Configurado e indisponível ⇒ falha fechada (exitCode -3), sem spawn.
+ * `process.env` NUNCA é herdado aqui.
+ */
+export function runIsolated(
+  file: string,
+  args: readonly string[],
+  options: { readonly cwd: string; readonly timeoutMs: number; readonly signal?: AbortSignal; readonly shell: boolean; readonly envOverrides?: Record<string, string> },
+): Promise<CommandResult> {
+  const command = [file, ...args].join(' ');
+  const sandbox = resolveGateSandbox(process.env);
+  if (sandbox.kind === 'unavailable') {
+    return Promise.resolve({ command, exitCode: -3, stdout: '', stderr: `Sandbox de gate indisponível (${sandbox.reason}); execução recusada.`, durationMs: 0, timedOut: false, cancelled: false });
+  }
+  const plan = planIsolatedInvocation({ file, args, cwd: options.cwd, shell: options.shell }, sandbox, buildGateEnvironment(process.env, options.envOverrides ?? {}));
+  return runProcess(plan.file, plan.args, { cwd: options.cwd, timeoutMs: options.timeoutMs, signal: options.signal, shell: plan.shell, env: plan.env as NodeJS.ProcessEnv })
+    .then(result => ({ ...result, command }));
+}
+
+/**
+ * Ambiente do Git sobre o candidato: construído do zero (sem segredos, sem GIT_* herdado, config GLOBAL do usuário desligada).
+ * A config de SISTEMA (gravável só por Administradores; no Git for Windows traz `core.autocrlf`/`core.symlinks`) é mantida para que
+ * o conteúdo restaurado/commitado tenha as mesmas quebras de linha com que a worktree foi criada.
+ */
+function candidateGitEnvironment(): NodeJS.ProcessEnv {
+  const { env } = scrubbedGitEnvironment(process.env);
+  delete env.GIT_CONFIG_NOSYSTEM; delete env.GIT_CONFIG_SYSTEM;
+  return env;
+}
+
+// Diretório administrativo da worktree, lido do repositório PRINCIPAL: o arquivo `gitdir` de cada entrada em `<repo>/.git/worktrees` aponta para `<worktree>/.git`.
+async function resolveWorktreeGitDir(repoRoot: string, root: string): Promise<string | null> {
+  try {
+    const mainGit = join(repoRoot, '.git');
+    if (!(await stat(mainGit)).isDirectory()) return null;
+    const norm = (p: string): string => resolve(p.trim()).replace(/\\/g, '/').toLowerCase();
+    const expected = norm(join(root, '.git'));
+    const base = join(mainGit, 'worktrees');
+    for (const name of await readdir(base)) {
+      const pointer = await readFile(join(base, name, 'gitdir'), 'utf8').catch(() => '');
+      if (pointer && norm(pointer) === expected) return join(base, name);
+    }
+  } catch { /* fail closed */ }
+  return null;
 }
 
 const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promise<CommandResult> =>
@@ -292,6 +341,25 @@ export class GitWorktree {
     throw new Error(`Falha ao criar worktree: ${lastError}`);
   }
 
+  private trustedGitDirPromise: Promise<string | null> | undefined;
+
+  /**
+   * Git do HOST sobre a worktree do CANDIDATO. O conteúdo da worktree (inclusive o arquivo `.git`, que o candidato pode apagar e
+   * recriar com `gitdir:` para um repositório próprio, com hooks/fsmonitor/config hostis) NÃO é confiável. Por isso:
+   * `--git-dir` é o diretório administrativo registrado pelo repositório PRINCIPAL (fora do alcance do candidato), `--work-tree` explícito
+   * (o `.git` da worktree nunca é lido), hooks/fsmonitor desligados, ambiente de Git construído do zero (sem segredos do Host)
+   * e processo iniciado fora da worktree. Sem diretório confiável ⇒ recusa (exitCode -4), nunca recorre ao `.git` da worktree.
+   */
+  private candidateGit(args: readonly string[], signal?: AbortSignal, timeoutMs = 60_000): Promise<CommandResult> {
+    this.trustedGitDirPromise ??= resolveWorktreeGitDir(this.repoRoot, this.root);
+    return this.trustedGitDirPromise.then(gitDir => {
+      if (!gitDir) return { command: `git ${args.join(' ')}`, exitCode: -4, stdout: '', stderr: 'Diretório Git confiável da worktree não encontrado; recusado.', durationMs: 0, timedOut: false, cancelled: false };
+      return runProcess('git', ['--no-pager', '--no-replace-objects', `--git-dir=${gitDir}`, `--work-tree=${this.root}`, '-C', this.root,
+        '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.untrackedCache=false', '-c', 'protocol.allow=never', ...args],
+      { cwd: tmpdir(), timeoutMs, signal, env: candidateGitEnvironment() });
+    });
+  }
+
   /** Resolve um caminho relativo dentro da raiz, com as guardas de segurança. */
   resolve(relPath: string): string | null { return safeJoin(this.root, relPath); }
 
@@ -338,11 +406,11 @@ export class GitWorktree {
     host?: { readonly timeoutMs?: number },
   ): Promise<{ matches: { path: string; line: number; preview: string }[]; truncated: boolean }> {
     const cap = Math.max(1, Math.min(Math.floor(input.maxResults) || 1, 200));
-    const args = ['-C', this.root, 'grep', '--no-color', '-n', '-I', input.isRegex ? '-E' : '-F', '-e', input.query];
+    const args = ['grep', '--no-color', '-n', '-I', input.isRegex ? '-E' : '-F', '-e', input.query];
     if (typeof input.pathGlob === 'string' && input.pathGlob.trim().length > 0) {
       args.push('--', `:(glob)${input.pathGlob.trim()}`);
     }
-    const result = await runProcess('git', args, { cwd: this.root, timeoutMs: lookupTimeout(host), signal });
+    const result = await this.candidateGit(args, signal, lookupTimeout(host));
     // git grep: exit 0 = houve match; 1 = nenhum; outros = erro → resultado vazio.
     if (result.exitCode !== 0 && result.exitCode !== 1) return { matches: [], truncated: false };
     const matches: { path: string; line: number; preview: string }[] = [];
@@ -377,8 +445,7 @@ export class GitWorktree {
     const file = useShell ? `${input.program}.cmd` : input.program;
     const binDir = join(this.root, 'node_modules', '.bin');
     const basePath = process.env.PATH ?? process.env.Path ?? '';
-    const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${binDir}${delimiter}${basePath}`, Path: `${binDir}${delimiter}${basePath}` };
-    return runProcess(file, [...input.args], { cwd: this.root, timeoutMs: input.timeoutMs, signal, shell: useShell, env });
+    return runIsolated(file, [...input.args], { cwd: this.root, timeoutMs: input.timeoutMs, signal, shell: useShell, envOverrides: { PATH: `${binDir}${delimiter}${basePath}`, Path: `${binDir}${delimiter}${basePath}` } });
   }
 
   /**
@@ -392,8 +459,8 @@ export class GitWorktree {
   ): Promise<{ paths: string[]; truncated: boolean }> {
     const cap = Math.max(1, Math.min(Math.floor(input.maxResults) || 1, 500));
     const pattern = input.pattern.trim();
-    const args = ['-C', this.root, 'ls-files', '--', pattern.length > 0 ? `:(glob)${pattern}` : '.'];
-    const result = await runProcess('git', args, { cwd: this.root, timeoutMs: lookupTimeout(host), signal });
+    const args = ['ls-files', '--', pattern.length > 0 ? `:(glob)${pattern}` : '.'];
+    const result = await this.candidateGit(args, signal, lookupTimeout(host));
     if (result.exitCode !== 0) return { paths: [], truncated: false };
     const paths: string[] = [];
     let truncated = false;
@@ -485,7 +552,7 @@ export class GitWorktree {
   }
 
   async stageAll(signal?: AbortSignal, observe?: (result: CommandResult) => void): Promise<void> {
-    const result = await git(this.root, ['add', '-A'], signal);
+    const result = await this.candidateGit(['add', '-A'], signal);
     observe?.(result);
   }
 
@@ -495,7 +562,7 @@ export class GitWorktree {
       let staged = false;
       await this.stageAll(signal, result => { staged = result.exitCode === 0 && !result.timedOut && !result.cancelled; });
       if (!staged) return null;
-      const tree = await git(this.root, ['write-tree'], signal);
+      const tree = await this.candidateGit(['write-tree'], signal);
       const sha = tree.stdout.trim();
       return tree.exitCode === 0 && !tree.timedOut && !tree.cancelled && /^[a-f0-9]{40}$/.test(sha) ? sha : null;
     } catch { return null; }
@@ -503,7 +570,7 @@ export class GitWorktree {
 
   async changedFiles(signal?: AbortSignal): Promise<readonly string[]> {
     await this.stageAll(signal);
-    const result = await git(this.root, ['diff', '--cached', '--name-only', this.baseSha], signal);
+    const result = await this.candidateGit(['diff', '--cached', '--name-only', this.baseSha], signal);
     return result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   }
 
@@ -513,13 +580,13 @@ export class GitWorktree {
    * nunca para esconder a proveniência B→checkpoint do handoff final. */
   async changedFilesSinceStart(signal?: AbortSignal): Promise<readonly string[]> {
     await this.stageAll(signal);
-    const result = await git(this.root, ['diff', '--cached', '--name-only', this.startSha], signal);
+    const result = await this.candidateGit(['diff', '--cached', '--name-only', this.startSha], signal);
     return result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   }
 
   async diff(signal?: AbortSignal): Promise<string> {
     await this.stageAll(signal);
-    const result = await git(this.root, ['diff', '--cached', '--no-color', this.baseSha], signal);
+    const result = await this.candidateGit(['diff', '--cached', '--no-color', this.baseSha], signal);
     return result.stdout;
   }
 
@@ -532,7 +599,7 @@ export class GitWorktree {
    */
   async changedEntriesSinceStart(signal?: AbortSignal): Promise<readonly { readonly status: string; readonly path: string; readonly oldPath?: string }[]> {
     await this.stageAll(signal);
-    const result = await git(this.root, ['diff', '--cached', '--name-status', '-M', this.startSha], signal);
+    const result = await this.candidateGit(['diff', '--cached', '--name-status', '-M', this.startSha], signal);
     const out: { status: string; path: string; oldPath?: string }[] = [];
     for (const line of result.stdout.split(/\r?\n/)) {
       const trimmed = line.trim();
@@ -559,7 +626,7 @@ export class GitWorktree {
    * intermediário já foi commitado na branch. */
   async diffNumstat(signal?: AbortSignal): Promise<readonly { readonly path: string; readonly insertions: number; readonly deletions: number }[]> {
     await this.stageAll(signal);
-    const result = await git(this.root, ['diff', '--cached', '--numstat', this.baseSha], signal);
+    const result = await this.candidateGit(['diff', '--cached', '--numstat', this.baseSha], signal);
     const out: { path: string; insertions: number; deletions: number }[] = [];
     for (const line of result.stdout.split(/\r?\n/)) {
       const trimmed = line.trim();
@@ -578,11 +645,11 @@ export class GitWorktree {
    * SHA — nunca é feito push. Devolve `null` se não há nada para commitar. */
   async commit(message: string, signal?: AbortSignal): Promise<string | null> {
     await this.stageAll(signal);
-    const staged = await git(this.root, ['diff', '--cached', '--quiet'], signal);
+    const staged = await this.candidateGit(['diff', '--cached', '--quiet'], signal);
     if (staged.exitCode === 0) return null;
-    const committed = await git(this.root, ['-c', 'user.name=anima-worktree', '-c', 'user.email=worktree@anima.local', 'commit', '--no-gpg-sign', '-m', message], signal);
+    const committed = await this.candidateGit(['-c', 'user.name=anima-worktree', '-c', 'user.email=worktree@anima.local', 'commit', '--no-gpg-sign', '-m', message], signal);
     if (committed.exitCode !== 0) return null;
-    const head = await git(this.root, ['rev-parse', 'HEAD'], signal);
+    const head = await this.candidateGit(['rev-parse', 'HEAD'], signal);
     return head.exitCode === 0 ? head.stdout.trim() : null;
   }
 
@@ -617,8 +684,8 @@ export class GitWorktree {
       // Restaura ao ESTADO INICIAL da tentativa. Numa tentativa nova isso é a
       // própria base; numa RETOMADA é o commit do checkpoint anterior — nunca a
       // base original, que descartaria o trabalho retomado que se está estendendo.
-      const reset = await git(this.root, ['reset', '--hard', this.startSha]);
-      const clean = await git(this.root, ['clean', '-fdx']);
+      const reset = await this.candidateGit(['reset', '--hard', this.startSha]);
+      const clean = await this.candidateGit(['clean', '-fdx']);
       return reset.exitCode === 0 && clean.exitCode === 0;
     } catch {
       return false;
@@ -631,8 +698,8 @@ export class GitWorktree {
   async restoreToCheckpoint(commitSha: string): Promise<boolean> {
     try {
       await this.unlinkNodeModules();
-      const reset = await git(this.root, ['reset', '--hard', commitSha]);
-      const clean = await git(this.root, ['clean', '-fdx']);
+      const reset = await this.candidateGit(['reset', '--hard', commitSha]);
+      const clean = await this.candidateGit(['clean', '-fdx']);
       return reset.exitCode === 0 && clean.exitCode === 0;
     } catch {
       return false;
