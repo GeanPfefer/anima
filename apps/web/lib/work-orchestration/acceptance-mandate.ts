@@ -143,19 +143,24 @@ export async function collectCandidateIntegrity(
   const run = async (args: readonly string[]) => runGit([NO_REPLACE, ...args]).catch(() => ({ exitCode: -1, stdout: '' }));
   const [commitObj, baseObj] = await Promise.all([run(['cat-file', '-t', input.commitSha]), run(['cat-file', '-t', input.baseSha])]);
   if (commitObj.exitCode !== 0 || commitObj.stdout.trim() !== 'commit' || baseObj.exitCode !== 0 || baseObj.stdout.trim() !== 'commit') return { ok: false, message: 'commit_not_found' };
-  const [parents, count, merges, ancestor, diff, raw] = await Promise.all([
+  const [parents, count, merges, ancestor, diff, raw, rawCommit] = await Promise.all([
     run(['rev-list', '--parents', '-n', '1', input.commitSha]),
     run(['rev-list', '--count', `${input.baseSha}..${input.commitSha}`]),
     run(['rev-list', '--merges', '--count', `${input.baseSha}..${input.commitSha}`]),
     run(['merge-base', '--is-ancestor', input.baseSha, input.commitSha]),
     run(['diff', '--name-status', '--no-renames', input.baseSha, input.commitSha]),
     run(['diff', '--raw', '--no-renames', input.baseSha, input.commitSha]),
+    run(['cat-file', 'commit', input.commitSha]),
   ]);
-  if (parents.exitCode !== 0 || count.exitCode !== 0 || merges.exitCode !== 0 || diff.exitCode !== 0 || raw.exitCode !== 0 || (ancestor.exitCode !== 0 && ancestor.exitCode !== 1)) return { ok: false, message: 'git_unavailable' };
+  if (parents.exitCode !== 0 || count.exitCode !== 0 || merges.exitCode !== 0 || diff.exitCode !== 0 || raw.exitCode !== 0 || rawCommit.exitCode !== 0 || (ancestor.exitCode !== 0 && ancestor.exitCode !== 1)) return { ok: false, message: 'git_unavailable' };
   // Só arquivos regulares: link simbólico (120000) ou submódulo (160000) com o nome certo passaria na conferência de caminho.
   const modes = lines(raw.stdout).map(l => l.split('\t')[0]?.split(/\s+/)[1] ?? '');
   if (modes.some(mode => !REGULAR_FILE_MODES.has(mode))) return { ok: false, message: 'git_unusual_file_mode' };
   const parentLine = lines(parents.stdout)[0]?.split(/\s+/) ?? [];
+  // Pais LIDOS DO PRÓPRIO OBJETO commit (imunes a shallow/enxertos/replace) precisam coincidir com os do grafo; divergência = repositório adulterado.
+  const header = rawCommit.stdout.split(/\r?\n\r?\n/)[0] ?? '';
+  const rawParents = header.split(/\r?\n/).filter(l => l.startsWith('parent ')).map(l => l.slice(7).trim());
+  if (rawParents.join(',') !== parentLine.slice(1).join(',')) return { ok: false, message: 'git_graph_inconsistent' };
   const statuses = lines(diff.stdout).map(l => { const [status, ...rest] = l.split('\t'); return { status: status ?? '', path: rest.join('\t').replace(/\\/g, '/') }; });
   const commitCount = Number(count.stdout.trim()); const mergeCount = Number(merges.stdout.trim());
   if (!Number.isInteger(commitCount) || !Number.isInteger(mergeCount) || parentLine[0] !== input.commitSha) return { ok: false, message: 'git_output_malformed' };

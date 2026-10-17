@@ -88,8 +88,10 @@ mas o ciclo continua `human_observed` (concessão e `work_started` com autor `us
   mas é capaz de forjar o aceite **humano** (`user`). A chave de serviço jamais pode estar no ambiente do runner (preexistente).
 - A classificação humana (`human_confirmed`) é gravada pela sessão residente; o mandato não a protege contra um runner malicioso, apenas exige que ela exista e seja `bounded/low`.
 - Registrar um grantor em `private.acceptance_mandate_grantors` exige o dono do banco (`postgres`): é o ato de raiz do operador, como o registro de writers.
-- Ainda não há composição de produção para `acceptUnderMandate` (leitura do ledger + `runGit` real apontando para o repositório do candidato, com `GIT_DIR`/`GIT_OBJECT_DIRECTORY`/
-  `GIT_ALTERNATE_OBJECT_DIRECTORIES` do ambiente limpos); precisa de revisão própria antes da prova viva.
+- A composição de produção existe (`cli/accept-mandated.ts` → `mandated-acceptance-run.ts` + `trusted-git.ts`) e foi provada em banco descartável com Git real, mas AINDA não
+  rodou contra o residente: o residente não tem o schema R2.
+- O leitor do ledger usa a sessão do operador (RLS de dono) porque o papel do writer não tem SELECT em tabela alguma; a leitura só alimenta a pré-checagem e a escolha do commit.
+  Quem decide é a RPC; um leitor que minta é recusado pelo banco (provado: leitor desatualizado ⇒ `mandate_revoked`).
 - Redundâncias deliberadas (defesa em profundidade): a falta de identidade do writer também seria barrada pela allowlist; "resultado mais recente" também cai em "resultado inexistente".
 
 ## Operação (futura, com autorização própria)
@@ -97,3 +99,15 @@ mas o ciclo continua `human_observed` (concessão e `work_started` com autor `us
 1. Provisionar o usuário GoTrue do grantor (`auth.users.role = anima_mandate_grantor`) e registrá-lo em `private.acceptance_mandate_grantors` (ato do operador).
 2. `node … cli/mandate.ts preview <item>` → `grant …` (antes de qualquer attempt) → attempt governada → writer chama `acceptUnderMandate`.
 3. Revogação a qualquer momento antes do consumo: `cli/mandate.ts revoke <mandato> --reason "…"`.
+4. Aceite: `node --no-warnings --experimental-transform-types --import ./scripts/ts-resolve.mjs --env-file=.env.local cli/accept-mandated.ts <item> --mandate <mandato> --repo <raiz-confiável>`
+   (ou `ANIMA_TRUSTED_REPO_ROOT`). Roda no processo do OPERADOR, nunca no do runner; recusa `ANIMA_EXECUTION_*` herdado e segredos do grantor.
+
+## Composição operacional do aceite (A2-0 R2, fechamento)
+
+`runAcceptMandatedCli`: (1) recusa se for filho do runner ou se houver segredo do grantor; (2) recusa SEM efeito se o writer estiver indisponível (antes de ler ou tocar o Git);
+(3) valida o repositório confiável (absoluto, `.git` diretório real, nunca arquivo `gitdir:`); (4) lê item, mandato e eventos (falha fechado se truncar ou divergir);
+(5) escolhe o resultado corrente; (6) `acceptUnderMandate`: pré-checagem espelhada → Git confiável → relatório de integridade → SOMENTE `writer.mandatedAcceptance`.
+
+Git confiável (`trusted-git.ts`): ambiente construído do zero (nenhuma `GIT_*` do pai; sem config de sistema/global; `GIT_NO_REPLACE_OBJECTS`), `--git-dir` explícito,
+`--no-replace-objects`, `core.fsmonitor`/`core.hooksPath` desligados, sem shell/stdin, timeout. Os pais do commit são lidos do PRÓPRIO objeto (`cat-file commit`) e precisam
+coincidir com o grafo (`rev-list`): `.git/shallow`, enxerto ou replace forjados pelo runner resultam em `git_graph_inconsistent`/recusa.

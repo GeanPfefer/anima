@@ -94,6 +94,7 @@ describe('collectCandidateIntegrity (Git do lado confiável)', () => {
     const key = args.filter(a => a !== NO_REPLACE).join(' ');
     const table: Record<string, { exitCode: number; stdout: string }> = {
       [`cat-file -t ${COMMIT}`]: { exitCode: 0, stdout: 'commit\n' }, [`cat-file -t ${BASE}`]: { exitCode: 0, stdout: 'commit\n' },
+      [`cat-file commit ${COMMIT}`]: { exitCode: 0, stdout: `tree ${'e'.repeat(40)}\nparent ${BASE}\nauthor x <x@x> 1 +0000\n\nmsg\n` },
       [`rev-list --parents -n 1 ${COMMIT}`]: { exitCode: 0, stdout: `${COMMIT} ${BASE}\n` },
       [`rev-list --count ${BASE}..${COMMIT}`]: { exitCode: 0, stdout: '1\n' }, [`rev-list --merges --count ${BASE}..${COMMIT}`]: { exitCode: 0, stdout: '0\n' },
       [`merge-base --is-ancestor ${BASE} ${COMMIT}`]: { exitCode: 0, stdout: '' },
@@ -109,6 +110,12 @@ describe('collectCandidateIntegrity (Git do lado confiável)', () => {
     const r = await collectCandidateIntegrity(git(), { baseSha: BASE, commitSha: COMMIT }, () => NOW);
     expect(r).toMatchObject({ ok: true, value: { schemaVersion: 1, commitSha: COMMIT, baseSha: BASE, parentShas: [BASE], commitCount: 1, mergeCount: 0, baseIsAncestor: true, changedFiles: FILES } });
     expect(r.ok && r.value.changeStatuses).toEqual(FILES.map(path => ({ path, status: 'A' })));
+  });
+  test('pais do OBJETO divergentes do grafo (shallow/enxerto/replace) falham fechado', async () => {
+    const forged = { [`cat-file commit ${COMMIT}`]: { exitCode: 0, stdout: `tree ${'e'.repeat(40)}\nparent ${'d'.repeat(40)}\nauthor x <x@x> 1 +0000\n\nmsg\n` } };
+    await expect(collectCandidateIntegrity(git(forged), { baseSha: BASE, commitSha: COMMIT }, () => NOW)).resolves.toEqual({ ok: false, message: 'git_graph_inconsistent' });
+    const noParents = { [`cat-file commit ${COMMIT}`]: { exitCode: 0, stdout: `tree ${'e'.repeat(40)}\nauthor x <x@x> 1 +0000\n\nmsg\n` } };
+    await expect(collectCandidateIntegrity(git(noParents), { baseSha: BASE, commitSha: COMMIT }, () => NOW)).resolves.toEqual({ ok: false, message: 'git_graph_inconsistent' });
   });
   test('TODA chamada Git roda com --no-replace-objects (refs/replace não pode reescrever o candidato)', async () => {
     calls.length = 0;
@@ -180,6 +187,7 @@ describe('acceptUnderMandate (orquestração fail-closed)', () => {
   });
   const goodGit: GitRunner = async (args) => {
     const k = args.filter(a => a !== NO_REPLACE).join(' ');
+    if (k.startsWith('cat-file commit')) return { exitCode: 0, stdout: `tree ${'e'.repeat(40)}\nparent ${BASE}\nauthor x <x@x> 1 +0000\n\nmsg\n` };
     if (k.startsWith('cat-file')) return { exitCode: 0, stdout: 'commit\n' };
     if (k.startsWith('rev-list --parents')) return { exitCode: 0, stdout: `${COMMIT} ${BASE}\n` };
     if (k.startsWith('rev-list --merges')) return { exitCode: 0, stdout: '0\n' };
