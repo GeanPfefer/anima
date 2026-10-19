@@ -5,6 +5,7 @@ import { deriveGateTestReport, type GateTestReportV1, isAllowedGateCommand } fro
 import { delimiter, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { buildGateEnvironment, planIsolatedInvocation, resolveGateSandbox } from './gate-isolation';
 import { scrubbedGitEnvironment } from './trusted-git';
+import { type AllowedWorkspaceLink, guardWorkspacePath, readGuardedFile, removeHostileWorkspaceLinks, scanWorkspaceTree, WorkspaceBoundaryError, type WorkspaceScan, writeGuardedFile } from './workspace-guard';
 
 // ============================================================
 // Primitivas de execução em git worktree isolada (ADR-001, Opção A).
@@ -243,6 +244,30 @@ const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promi
  * DETERMINÍSTICOS (SHA inválido, argumento malformado) NÃO casam aqui e sobem na hora,
  * sem re-tentar. Puro e testável — não amplia nenhuma permissão. */
 /**
+ * Valida o pai DEDICADO dos workspaces (ANIMA_WORKTREE_PARENT). Configurado e inválido ⇒ ERRO (nunca volta em silêncio ao TEMP/.worktrees,
+ * que seriam outra fronteira de segurança). Exige: caminho absoluto de unidade (sem UNC, sem `..`, sem raiz de unidade), no MESMO volume do
+ * repositório (junctions de node_modules), nunca o repositório, um ancestral dele ou algo dentro do `.git`. Os workspaces individuais são
+ * sempre `mkdtemp` dentro dele; o runner não escolhe caminho algum.
+ */
+export function validateDedicatedWorktreeParent(repoRoot: string, configured: string): string {
+  const fail = (why: string): never => { throw new Error(`ANIMA_WORKTREE_PARENT inválido (${why}).`); };
+  if (!/^[A-Za-z]:[\\/]/.test(configured) && !(process.platform !== 'win32' && configured.startsWith('/'))) fail('deve ser caminho absoluto local');
+  if (configured.startsWith('\\\\') || configured.startsWith('//')) fail('UNC recusado');
+  if (configured.split(/[\\/]+/).includes('..')) fail('segmento ".." recusado');
+  if (/[\0<>"|?*]/.test(configured)) fail('caracteres inválidos');
+  const parent = resolve(configured);
+  const repo = resolve(repoRoot);
+  const norm = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p);
+  const volume = (p: string): string => norm(parse(p).root);
+  if (norm(parent) === norm(parse(parent).root)) fail('raiz de unidade recusada');
+  if (volume(parent) !== volume(repo)) fail('precisa estar no mesmo volume do repositório');
+  const rel = relative(norm(repo), norm(parent));
+  if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel) && (rel === '.git' || rel.startsWith('.git\\') || rel.startsWith('.git/')))) fail('não pode ser o repositório nem estar em .git');
+  const up = relative(norm(parent), norm(repo));
+  if (up === '' || (!up.startsWith('..') && !isAbsolute(up))) fail('não pode ser o repositório nem um ancestral dele');
+  return parent;
+}
+/**
  * Diretório-pai das worktrees efêmeras. Por padrão o TEMP do SO; quando o TEMP está em
  * OUTRO volume que o repositório (Windows: C:\…\Temp × G:\repo), usa `<repo>/.worktrees`.
  * Junctions de node_modules entre volumes quebram a resolução de módulos de bundlers — o
@@ -250,7 +275,10 @@ const git = (repo: string, args: readonly string[], signal?: AbortSignal): Promi
  * framework falharia por ambiente, nunca pelo código. `.worktrees` já é ignorado pelas
  * leituras do coder (SECRET_SEGMENTS). Puro e testável.
  */
-export function worktreeParentDir(repoRoot: string, tempDir: string = tmpdir()): string {
+export function worktreeParentDir(repoRoot: string, tempDir: string = tmpdir(), env: Record<string, string | undefined> = process.env): string {
+  // Pai DEDICADO dos workspaces de execução (ex.: o único diretório com ACE de escrita para o sandbox, fora do checkout protegido).
+  const dedicated = env.ANIMA_WORKTREE_PARENT?.trim();
+  if (dedicated) return validateDedicatedWorktreeParent(repoRoot, dedicated);
   const volume = (path: string): string => parse(resolve(path)).root.toLowerCase();
   return volume(tempDir) === volume(repoRoot) ? tempDir : join(repoRoot, '.worktrees');
 }
@@ -286,6 +314,7 @@ const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
  * diretório temporário; o repositório e o workspace original nunca mudam. */
 export class GitWorktree {
   private nodeModulesLinks: string[] = [];
+  private readonly nodeModulesTargets = new Map<string, string>();
   private constructor(
     readonly repoRoot: string, readonly root: string, readonly branch: string,
     private readonly base: string,
@@ -321,6 +350,11 @@ export class GitWorktree {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const parent = worktreeParentDir(input.repoRoot);
       await mkdir(parent, { recursive: true });
+      if (process.env.ANIMA_WORKTREE_PARENT?.trim()) {
+        // O Host é dono do pai dedicado: ele tem de ser um diretório REAL (não link) e o workspace criado tem de ficar dentro dele.
+        const info = await lstat(parent);
+        if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('ANIMA_WORKTREE_PARENT inválido (não é diretório real).');
+      }
       const base = await mkdtemp(join(parent, 'anima-wt-'));
       const root = join(base, 'tree');
       const created = await git(input.repoRoot, ['worktree', 'add', '-b', input.branch, root, start], input.signal);
@@ -363,10 +397,18 @@ export class GitWorktree {
   /** Resolve um caminho relativo dentro da raiz, com as guardas de segurança. */
   resolve(relPath: string): string | null { return safeJoin(this.root, relPath); }
 
+  /** Links que o PRÓPRIO Host criou (node_modules) e que continuam apontando para o destino esperado. */
+  private allowedLinks(): readonly AllowedWorkspaceLink[] {
+    return [...this.nodeModulesTargets].map(([link, target]) => ({ link, target }));
+  }
+
+  /** Varre a worktree sem seguir links: symlink/junction/hardlink fora dos node_modules do Host são violações. */
+  inspectBoundary(): Promise<WorkspaceScan> { return scanWorkspaceTree(this.root, this.allowedLinks()); }
+
   async readWorkspaceFile(relPath: string): Promise<string | null> {
     const target = this.resolve(relPath);
     if (!target) return null;
-    try { return await readFile(target, 'utf8'); } catch { return null; }
+    return readGuardedFile(this.root, target, this.allowedLinks());
   }
 
   /** Classifica um path EXATO sem expandi-lo como diretório/prefixo/glob. */
@@ -374,8 +416,11 @@ export class GitWorktree {
     const target = this.resolve(relPath);
     if (!target) return 'missing';
     try {
+      const guarded = await guardWorkspacePath(this.root, target, this.allowedLinks());
+      if (!guarded.ok) return 'other';
+      if (!guarded.exists) return 'missing';
       const info = await lstat(target);
-      if (info.isFile()) return 'file';
+      if (info.isFile()) return info.nlink > 1 ? 'other' : 'file';
       if (info.isDirectory()) return 'directory';
       return 'other';
     } catch {
@@ -386,9 +431,7 @@ export class GitWorktree {
   async writeWorkspaceFile(relPath: string, content: string): Promise<boolean> {
     const target = this.resolve(relPath);
     if (target === null) return false;
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, content, { encoding: 'utf8' });
-    return true;
+    return writeGuardedFile(this.root, target, content, this.allowedLinks());
   }
 
   /**
@@ -520,6 +563,7 @@ export class GitWorktree {
         await mkdir(dirname(candidate.link), { recursive: true });
         await symlink(candidate.source, candidate.link, 'junction');
         this.nodeModulesLinks.push(candidate.link);
+        this.nodeModulesTargets.set(candidate.link, candidate.source);
       }
 
       return true;
@@ -536,6 +580,7 @@ export class GitWorktree {
   async unlinkNodeModules(): Promise<void> {
     const links = [...this.nodeModulesLinks].reverse();
     this.nodeModulesLinks = [];
+    this.nodeModulesTargets.clear();
 
     for (const link of links) {
       try {
@@ -552,6 +597,9 @@ export class GitWorktree {
   }
 
   async stageAll(signal?: AbortSignal, observe?: (result: CommandResult) => void): Promise<void> {
+    // git add -A segue junctions no Windows e indexaria conteúdo de fora da worktree: recusa antes de tocar o índice.
+    const scan = await this.inspectBoundary();
+    if (!scan.ok) throw new WorkspaceBoundaryError(scan.violations);
     const result = await this.candidateGit(['add', '-A'], signal);
     observe?.(result);
   }
@@ -681,6 +729,7 @@ export class GitWorktree {
   async restoreToBase(): Promise<boolean> {
     try {
       await this.unlinkNodeModules();
+      await removeHostileWorkspaceLinks(this.root);
       // Restaura ao ESTADO INICIAL da tentativa. Numa tentativa nova isso é a
       // própria base; numa RETOMADA é o commit do checkpoint anterior — nunca a
       // base original, que descartaria o trabalho retomado que se está estendendo.
@@ -698,6 +747,7 @@ export class GitWorktree {
   async restoreToCheckpoint(commitSha: string): Promise<boolean> {
     try {
       await this.unlinkNodeModules();
+      await removeHostileWorkspaceLinks(this.root);
       const reset = await this.candidateGit(['reset', '--hard', commitSha]);
       const clean = await this.candidateGit(['clean', '-fdx']);
       return reset.exitCode === 0 && clean.exitCode === 0;
@@ -711,6 +761,7 @@ export class GitWorktree {
    * A branch é preservada por padrão (referência revisável, nunca pushada). */
   async dispose(options: { readonly deleteBranch?: boolean } = {}): Promise<void> {
     await this.unlinkNodeModules();
+    await removeHostileWorkspaceLinks(this.root).catch(() => []);
     await git(this.repoRoot, ['worktree', 'remove', '--force', this.root]).catch(() => {});
     await git(this.repoRoot, ['worktree', 'prune']).catch(() => {});
     await rm(this.base, { recursive: true, force: true }).catch(() => {});

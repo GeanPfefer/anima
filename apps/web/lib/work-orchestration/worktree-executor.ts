@@ -596,6 +596,18 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         // Um coder que retornou DEPOIS do deadline não segue para checkpoint/gates.
         if (remainingMs() <= 0) { yield await deadlineSignal('após o coder, antes dos gates'); return; }
 
+        // Fronteira do Host: o candidato não pode ter plantado symlink/junction/hardlink. Antes de indexar (`git add -A` segue
+        // junctions), commitar ou rodar gates, a árvore inteira é varrida sem seguir links. Violação ⇒ encerra sem artefatos.
+        const boundary = await worktree.inspectBoundary();
+        if (!boundary.ok) {
+          const sample = boundary.violations.slice(0, 3).map(v => `${v.kind}:${v.path.startsWith(worktree!.root) ? v.path.slice(worktree!.root.length + 1) : v.path}`).join(', ');
+          yield attach(++seq, {
+            kind: 'error', code: 'execution_failed', retryable: false, handoffReference,
+            message: `O candidato violou a fronteira do Host (${sample}${boundary.violations.length > 3 ? ` +${boundary.violations.length - 3}` : ''}); execução encerrada sem indexar, commitar ou executar gates.`,
+          });
+          return;
+        }
+
         // `changed` preserva o diff auditável contra a base original. Enforcement
         // de escopo/no-op usa somente o delta desta attempt contra seu estado
         // inicial; numa retomada, o checkpoint herdado não é uma nova escrita.

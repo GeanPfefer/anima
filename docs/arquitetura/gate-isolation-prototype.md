@@ -35,3 +35,10 @@ Arquivos: `lib/work-orchestration/gate-isolation.ts` (+ teste), `worktree.ts` (`
 - Validado com `codex sandbox`; não foi rodado um `codex exec` completo com o ACE aplicado nem uma attempt real.
 - O lançamento do sandbox pode conceder ACEs de escrita ao grupo do sandbox na pasta de trabalho (setup refresh do Codex).
 - Só Windows/Codex. Linux/remoto: o passo 1 vale; o passo 2 precisa do equivalente local (usuário/contêiner sem montagem dos segredos).
+
+## A3 — proteção da árvore e guarda de reparse points (2026-10-19, não ativado)
+
+- `scripts/gate-isolation-acl.ps1` (simulação por padrão): DENY FullControl herdável para `CodexSandboxUsers` na raiz do checkout; ALLOW Modify explícito no pai dos workspaces; ALLOW ReadAndExecute explícito nos `node_modules`; DENY Read nos segredos. `-Verify` confere ACEs, ordem canônica e (`-ProbeCodexPath`) o acesso efetivo sob o sandbox real; `-Revert -Apply` remove só as ACEs registradas em `-StatePath` como adicionadas. Com `G:\anima` exige `-AllowProductionRepo`.
+- `workspace-guard.ts`: o Host não segue symlink/junction/hardlink do candidato (lstat por componente + realpath nativo + nlink). Usado em `readWorkspaceFile`/`writeWorkspaceFile`/`workspacePathKind`, em `stageAll` (o `git add -A` do Git for Windows indexa o conteúdo apontado por uma junction), antes dos gates no executor, e antes de `git clean -fdx`/`dispose` (links hostis são removidos como links).
+- `ANIMA_WORKTREE_PARENT` define um pai dedicado dos workspaces (ex.: `G:\anima-workspaces`). Validado e fail-closed: caminho local absoluto, sem UNC/`..`/raiz de unidade, no mesmo volume do repositório, nunca o repositório, um ancestral ou `.git`; configurado e inválido ⇒ erro (não volta ao padrão). O Host cria o pai se ausente, exige diretório real (não link) e cada workspace é `mkdtemp` descartável dentro dele. Ausente ⇒ comportamento anterior.
+- Limites: TOCTOU residual; symlinks LX do WSL não detectáveis; Codex interativo com sandbox do Windows no checkout protegido deixa de funcionar.

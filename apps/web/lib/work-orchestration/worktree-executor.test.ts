@@ -1612,6 +1612,7 @@ describe('test_binding — relatórios da mesma execução, sem git real', () =>
     jest.spyOn(tree, 'diffNumstat').mockResolvedValue([{ path: 'src/added.ts', insertions: 1, deletions: 0 }]);
     jest.spyOn(tree, 'diff').mockImplementation(async () => `diff ${edits}`);
     jest.spyOn(tree, 'commit').mockResolvedValue('a'.repeat(40));
+    jest.spyOn(tree, 'inspectBoundary').mockResolvedValue({ ok: true, violations: [], entries: 0 });
     jest.spyOn(tree, 'unlinkNodeModules').mockResolvedValue(undefined);
     jest.spyOn(tree, 'dispose').mockResolvedValue(undefined);
     jest.spyOn(tree, 'stagedTreeSha').mockResolvedValue('c'.repeat(40));
@@ -1668,6 +1669,37 @@ describe('test_binding — relatórios da mesma execução, sem git real', () =>
   });
 });
 
+describe('fronteira do Host — candidato que planta link', () => {
+  afterEach(() => jest.restoreAllMocks());
+  test('violação encerra a execução sem indexar, commitar nem rodar gates', async () => {
+    const root = join(tmpdir(), 'anima-mocked-boundary');
+    const tree = Object.create(GitWorktree.prototype) as GitWorktree;
+    Object.defineProperty(tree, 'root', { value: root });
+    jest.spyOn(GitWorktree, 'create').mockResolvedValue(tree);
+    jest.spyOn(tree, 'restoreToCheckpoint').mockResolvedValue(true);
+    jest.spyOn(tree, 'restoreToBase').mockResolvedValue(true);
+    jest.spyOn(tree, 'workspacePathKind').mockResolvedValue('file');
+    jest.spyOn(tree, 'unlinkNodeModules').mockResolvedValue(undefined);
+    jest.spyOn(tree, 'dispose').mockResolvedValue(undefined);
+    jest.spyOn(tree, 'inspectBoundary').mockResolvedValue({ ok: false, entries: 3, violations: [{ kind: 'link', path: join(root, 'jn') }] });
+    const changed = jest.spyOn(tree, 'changedFiles').mockRejectedValue(new Error('não deveria indexar'));
+    const commit = jest.spyOn(tree, 'commit').mockRejectedValue(new Error('não deveria commitar'));
+    let gatesBeforeCoder = -1;
+    const gate = jest.spyOn(worktreeModule, 'runGate');
+    const signals = await collect(new WorktreeExecutorAdapter({
+      targets: { resolve: () => ({ repoRoot: root, sha: 'a'.repeat(40) }) },
+      backend: { id: 'fixture', edit: async () => { gatesBeforeCoder = gate.mock.calls.length; return { summary: 'planta link', touchedResources: ['src/a.ts'] }; } },
+      gateRetryLimit: 0,
+    }), request({ validationCriteria: [{ label: 'tests', command: 'npm test -- src/a.ts', targetPaths: ['src/a.ts'] }] }), new AbortController().signal);
+    const last = signals.at(-1);
+    expect(last?.kind).toBe('error');
+    expect(JSON.stringify(last)).toMatch(/fronteira do Host.*link:jn/);
+    expect(changed).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(gatesBeforeCoder).toBeGreaterThanOrEqual(0);
+    expect(gate.mock.calls.length).toBe(gatesBeforeCoder); // só o baseline pré-coder; nenhum gate depois do candidato
+  });
+});
 describe('diagnóstico opcional do gate', () => {
   const result = (overrides: Partial<import('./worktree').CapturedGateResult> = {}): import('./worktree').CapturedGateResult => ({
     command: 'npm test', exitCode: 1, stdout: '', stderr: '', durationMs: 37, timedOut: false, cancelled: false, ...overrides,
