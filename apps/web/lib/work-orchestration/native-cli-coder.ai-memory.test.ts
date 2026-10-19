@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { buildCoderTaskSpec, recoveryFailureCode, type WorkExecutorRequest } from '@anima/core';
 import { renderCoderTaskSection, type CoderEditRequest, type CoderWorkspace } from './coder-backend';
 import { CLAUDE_CODE_DEFAULT_MODEL, ClaudeCodeCoderBackend, buildClaudeCodeArgs } from './claude-code-coder';
-import { CODEX_CLI_DEFAULT_MODEL, CodexCliCoderBackend, buildCodexExecArgs } from './codex-cli-coder';
+import { CODEX_CLI_DEFAULT_MODEL, CodexCliCoderBackend, buildCodexExecArgs, codexAgentIsolationArgs } from './codex-cli-coder';
 import {
   aiMemoryTurnNotes,
   buildAiMemoryRunArgs,
@@ -128,12 +128,12 @@ describe('wrap desligado: lançamento direto idêntico ao comportamento atual', 
     expect(calls[0]!.options.cwd).toBe(ROOT);
     expect(Object.keys(calls[0]!.options.env ?? {}).filter(k => k.startsWith('AI_MEMORY'))).toEqual([]);
     expect(calls[0]!.args.filter(a => a === '--json')).toEqual(['--json']);
-    expect(calls[0]!.args.slice(0, -1).filter(a => a !== '--json')).toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT]);
+    expect(calls[0]!.args.slice(0, -1).filter(a => a !== '--json')).toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT, ...codexAgentIsolationArgs({ executable: 'c', model: 'm' })]);
     expect(calls[0]!.args.at(-1)).toContain(renderCoderTaskSection(req)!);
     const withModelAndProfile = buildCodexExecArgs({ executable: 'c', model: 'm', profile: 'p' }, ROOT, 'x');
     expect(withModelAndProfile.filter(a => a === '--json')).toEqual(['--json']);
     expect(withModelAndProfile.filter(a => a !== '--json'))
-      .toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT, '--model', 'm', '--profile', 'p', 'x']);
+      .toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT, '--model', 'm', '--profile', 'p', ...codexAgentIsolationArgs({ executable: 'c', model: 'm' }), 'x']);
     expect(withModelAndProfile.at(-1)).toBe('x');
   });
 });
@@ -209,15 +209,15 @@ describe('wrap Codex', () => {
     const prefix = RUN_PREFIX('continue', CODEX_EXE, 'codex');
     expect(call.args.slice(0, prefix.length)).toEqual(prefix);
     const native = call.args.slice(prefix.length);
-    expect(native.slice(0, -1)).toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never']);
+    expect(native.slice(0, -1)).toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never', ...codexAgentIsolationArgs({ executable: 'c', model: 'default' })]);
     expect(native).not.toContain('--json');
     for (const flag of ['--sandbox', '-s', '--cd', '-C', '--profile']) expect(native).not.toContain(flag);
     expect(native).not.toContain(ROOT);
     // Simula a reescrita do ai-memory na volta ao Codex: `exec resume <id> <resto>` só com flags que o resume aceita.
     const resumed = ['exec', 'resume', 'codex-id', ...native.slice(1)];
-    const RESUME_FLAGS = new Set(['-c', '--config', '--model', '-m']);
+    const RESUME_FLAGS = new Set(['-c', '--config', '--model', '-m', '--ignore-user-config', '--ignore-rules', '--disable']);
     expect(resumed.slice(3, -1).filter(a => a.startsWith('-')).every(a => RESUME_FLAGS.has(a))).toBe(true);
-    expect(buildCodexExecArgs({ executable: 'c', model: 'gpt-x' }, ROOT, 'p', true)).toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never', '--model', 'gpt-x', 'p']);
+    expect(buildCodexExecArgs({ executable: 'c', model: 'gpt-x' }, ROOT, 'p', true)).toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never', '--model', 'gpt-x', ...codexAgentIsolationArgs({ executable: 'c', model: 'gpt-x' }), 'p']);
     expect(out.notes).toEqual(expect.arrayContaining(['ai-memory:workstream:prova-xh', 'ai-memory:mode:continue', 'ai-memory:harness:codex']));
   });
 

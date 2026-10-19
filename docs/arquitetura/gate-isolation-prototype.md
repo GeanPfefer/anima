@@ -42,3 +42,26 @@ Arquivos: `lib/work-orchestration/gate-isolation.ts` (+ teste), `worktree.ts` (`
 - `workspace-guard.ts`: o Host não segue symlink/junction/hardlink do candidato (lstat por componente + realpath nativo + nlink). Usado em `readWorkspaceFile`/`writeWorkspaceFile`/`workspacePathKind`, em `stageAll` (o `git add -A` do Git for Windows indexa o conteúdo apontado por uma junction), antes dos gates no executor, e antes de `git clean -fdx`/`dispose` (links hostis são removidos como links).
 - `ANIMA_WORKTREE_PARENT` define um pai dedicado dos workspaces (ex.: `G:\anima-workspaces`). Validado e fail-closed: caminho local absoluto, sem UNC/`..`/raiz de unidade, no mesmo volume do repositório, nunca o repositório, um ancestral ou `.git`; configurado e inválido ⇒ erro (não volta ao padrão). O Host cria o pai se ausente, exige diretório real (não link) e cada workspace é `mkdtemp` descartável dentro dele. Ausente ⇒ comportamento anterior.
 - Limites: TOCTOU residual; symlinks LX do WSL não detectáveis; Codex interativo com sandbox do Windows no checkout protegido deixa de funcionar.
+
+## E2 — fronteira do AGENTE Codex (2026-10-19, não ativado)
+
+O sandbox contém só os comandos de shell. O processo `codex` roda como o operador e suas ferramentas próprias não passam pelo sandbox. Provado em laboratório (segredos fictícios):
+
+| Achado | Prova |
+|---|---|
+| `view_image` lê arquivo fora do workspace | transcreveu uma imagem negada ao grupo do sandbox |
+| Config pessoal herdada | expôs `node_repl`, `cua_repl`, MCP `runpod` (create/delete pod, secrets), conectores da conta (`codex_apps`), plugins browser/computer-use, `notify` |
+| `.codex/config.toml` plantado no workspace | o Codex lançou o MCP do candidato como o operador (marcador criado) |
+| `auth.json` real | comandos sandboxed conseguem ABRIR o arquivo (`CodexSandboxUsers:(I)(RX)`); nenhum byte foi lido |
+
+Correção (`codexAgentIsolationArgs`, usada por `buildCodexExecArgs` e pela investigação): `--ignore-user-config --ignore-rules`, `--disable` das ferramentas nativas (`CODEX_AGENT_DISABLED_FEATURES`), `web_search="disabled"` e `windows.sandbox` explícito no Windows (`ANIMA_CODEX_WINDOWS_SANDBOX`, default `elevated`; sem ele o config ignorado derruba o sandbox para somente leitura). A autenticação continua em `CODEX_HOME`. Feature desconhecida falha alto. Efeito colateral: modelo/effort/tier do `config.toml` pessoal deixam de valer (defina `ANIMA_CODEX_CLI_MODEL`).
+
+Resíduo: `collaboration.*` (sub-agentes), `exec` (isolate JS sem fs/rede/require, só ponte `tools`), `request_user_input`, `read_mcp_resource` (sem servidores) permanecem; `auth.json` só é protegido contra o sandbox com `gate-isolation-acl.ps1 -IncludeCodexAuth`.
+
+### E2 — verificações finais (sub-agentes e superfície de ~/.codex)
+
+- Sub-agentes: `--disable multi_agent`/`multi_agent_v2` NÃO remove `collaboration.*`. Em laboratório o agente criou um sub-agente (`collab_tool_call`); ele recebeu o mesmo conjunto restrito de ferramentas (sem view_image, apps, plugins, MCP pessoal, web), comandos como `CodexSandboxOffline`, leitura do arquivo protegido negada e nenhuma ferramenta não-shell capaz de lê-lo. Conclusão: contido por herança, comprovado em uma amostra; revalidar a cada versão do Codex.
+- `~/.codex` (só metadados): o grupo do sandbox tem ACE EXPLÍCITA `ReadAndExecute` na raiz, herdada por tudo, exceto `.sandbox-secrets` (negado pelo próprio Codex). Legível pelo grupo: `auth.json`, `config.toml` (+backup), `sessions`, `archived_sessions`, `attachments`, `thread_history_1.sqlite` (~200 MB), `state_5.sqlite`, `logs_2.sqlite`, `memories_1.sqlite`, `secrets`, `cap_sid`, `plugins`, `skills`. `.sandbox` (Modify) e `.sandbox-bin` (RX) têm ACE explícita própria.
+- Menor escopo de proteção: UMA negação herdável `FullControl` para `CodexSandboxUsers` na RAIZ de `~/.codex`, mantendo as ACEs explícitas de `.sandbox` e `.sandbox-bin`. Em réplica fictícia com o sandbox real: listagem da raiz, `auth.json` (inclusive abrir o handle), config, sessões, histórico e `secrets` passaram a EPERM; `.sandbox-bin` continuou legível. Preferível a negar arquivo por arquivo (`-IncludeCodexAuth`), que deixa histórico e sessões abertos. Não aplicado em `~/.codex` real: precisa de prova supervisionada de que o Codex (e o app) seguem funcionando.
+- Aviso: `icacls /remove:d <grupo>` remove também a ACE explícita de allow do grupo; use a API .NET (como `gate-isolation-acl.ps1`) para reverter só o que foi adicionado.
+- Incompatibilidades conhecidas: validado só em codex-cli 0.163.0-alpha.10.2; `--disable` de feature inexistente falha alto (a versão do WSL pode divergir); `--ignore-user-config` descarta model/effort/tier do config pessoal, então defina `ANIMA_CODEX_CLI_MODEL`; no Windows o `windows.sandbox` passa a ser declarado pelo ANIMA.

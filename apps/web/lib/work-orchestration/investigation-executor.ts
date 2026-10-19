@@ -8,7 +8,7 @@ import {
   type InvestigationFailureV1, type InvestigationEvidenceRejectionV1, type InvestigationExecutionV1, type InvestigationResultV1, type WorkExecutorAdapter,
   type WorkExecutorRequest, type WorkExecutorSignal, type WorkExecutorSignalInput,
 } from '@anima/core';
-import { buildCodexCliEnvironment, classifyCodexLoginStatus, resolveCodexCliConfig, CODEX_CLI_DEFAULT_MODEL, CODEX_CLI_PROMPT_MAX_CHARS, type CodexCliProcessRunner } from './codex-cli-coder';
+import { buildCodexCliEnvironment, classifyCodexLoginStatus, codexAgentIsolationArgs, resolveCodexCliConfig, CODEX_CLI_DEFAULT_MODEL, CODEX_CLI_PROMPT_MAX_CHARS, type CodexCliProcessRunner } from './codex-cli-coder';
 import { buildWslCodexInvocation, buildWslLoginStatusInvocation, buildWslPathCheckInvocation, resolveInvestigationTransport, windowsPathToWsl } from './investigation-wsl-transport';
 import { runProcess } from './worktree';
 
@@ -170,7 +170,8 @@ export class InvestigationExecutorAdapter implements WorkExecutorAdapter {
         'exec', '--sandbox', 'read-only', '-c', 'approval_policy=never', '--ephemeral', '--cd', root,
         '--output-schema', schema, '-o', output,
         ...(config.value.model !== CODEX_CLI_DEFAULT_MODEL ? ['--model', config.value.model] : []),
-        ...(config.value.profile ? ['--profile', config.value.profile] : []), prompt,
+        ...(config.value.profile ? ['--profile', config.value.profile] : []),
+        ...codexAgentIsolationArgs(config.value), prompt,
       ];
       let invocation: { readonly file: string; readonly args: readonly string[] } = { file: config.value.executable, args: codexArguments(snapshot, schemaPath, outputPath) };
       if (wsl && linuxTemporary) {

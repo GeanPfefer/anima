@@ -11,6 +11,8 @@ import {
   CodexCliCoderBackend,
   buildCodexCliEnvironment,
   buildCodexExecArgs,
+  codexAgentIsolationArgs,
+  CODEX_AGENT_DISABLED_FEATURES,
   resolveCodexCliConfig,
   type CodexCliProcessRunner,
 } from './codex-cli-coder';
@@ -99,7 +101,7 @@ describe('CodexCliCoderBackend — lançamento determinístico', () => {
 
   test('modelo e perfil explícitos viram flags; config do operador recusa wrapper de shell', () => {
     expect(buildCodexExecArgs({ executable: 'codex', model: 'gpt-x', profile: 'anima' }, ROOT, 'p'))
-      .toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT, '--json', '--model', 'gpt-x', '--profile', 'anima', 'p']);
+      .toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--cd', ROOT, '--json', '--model', 'gpt-x', '--profile', 'anima', ...codexAgentIsolationArgs({ executable: 'codex', model: 'gpt-x' }), 'p']);
     expect(resolveCodexCliConfig(null, {})).toEqual({ ok: true, value: { executable: 'codex', model: CODEX_CLI_DEFAULT_MODEL } });
     expect(resolveCodexCliConfig('gpt-x', { ANIMA_CODEX_CLI_PATH: ' C:\\bin\\codex.exe ', ANIMA_CODEX_CLI_MODEL: 'ignored', ANIMA_CODEX_CLI_PROFILE: 'p' }))
       .toEqual({ ok: true, value: { executable: 'C:\\bin\\codex.exe', model: 'gpt-x', profile: 'p' } });
@@ -271,7 +273,32 @@ describe('terminal JSONL diagnostics (closed textual heuristics, no public enum)
   });
   test('wrapped args retain old protocol without json', () => {
     expect(buildCodexExecArgs({ executable: 'codex', model: 'default' }, ROOT, 'p', true))
-      .toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never', 'p']);
+      .toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never', ...codexAgentIsolationArgs({ executable: 'codex', model: 'default' }), 'p']);
+  });
+});
+
+describe('fronteira do agente Codex (E2)', () => {
+  const base = { executable: 'codex', model: 'default' } as const;
+  test('ignora config pessoal e regras, desliga as ferramentas nativas fora do sandbox e a busca web', () => {
+    const args = codexAgentIsolationArgs(base, 'linux');
+    expect(args.slice(0, 2)).toEqual(['--ignore-user-config', '--ignore-rules']);
+    for (const feature of ['view_image', 'apps', 'plugins', 'browser_use', 'computer_use', 'hooks', 'multi_agent']) {
+      const index = args.indexOf(feature);
+      expect(index).toBeGreaterThan(0);
+      expect(args[index - 1]).toBe('--disable');
+    }
+    expect(CODEX_AGENT_DISABLED_FEATURES).toContain('view_image');
+    expect(args).toEqual(expect.arrayContaining(['-c', 'web_search="disabled"']));
+    expect(args.some(arg => arg.startsWith('windows.sandbox'))).toBe(false);
+  });
+  test('no Windows nativo declara windows.sandbox (o config pessoal é ignorado); com WSL ou Linux não', () => {
+    expect(codexAgentIsolationArgs(base, 'win32')).toEqual(expect.arrayContaining(['windows.sandbox="elevated"']));
+    expect(codexAgentIsolationArgs({ ...base, windowsSandbox: 'unelevated' }, 'win32')).toEqual(expect.arrayContaining(['windows.sandbox="unelevated"']));
+    expect(codexAgentIsolationArgs({ ...base, wsl: { distro: 'd', user: 'u', wslExecutable: 'w' } as never }, 'win32').some(arg => arg.startsWith('windows.sandbox'))).toBe(false);
+  });
+  test('ANIMA_CODEX_WINDOWS_SANDBOX valida o valor (fail-closed)', () => {
+    expect(resolveCodexCliConfig(null, { ANIMA_CODEX_WINDOWS_SANDBOX: 'Unelevated' })).toMatchObject({ ok: true, value: { windowsSandbox: 'unelevated' } });
+    expect(resolveCodexCliConfig(null, { ANIMA_CODEX_WINDOWS_SANDBOX: 'off' })).toMatchObject({ ok: false });
   });
 });
 
@@ -284,7 +311,8 @@ test('wrapped Codex keeps legacy failure format and stdout protocol', async () =
   expect(error).toMatchObject({ message: 'Codex CLI (via ai-memory) terminou com exit 1: legacy diagnostic' });
   expect(error).not.toHaveProperty('nativeCliFailure');
   expect(calls[0]!.args).not.toContain('--json');
-  expect(calls[0]!.args.slice(-6, -1)).toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never']);
+  const isolation = codexAgentIsolationArgs({ executable: 'codex', model: 'default' });
+  expect(calls[0]!.args.slice(-(5 + isolation.length + 1), -1)).toEqual(['exec', '-c', 'sandbox_mode=workspace-write', '-c', 'approval_policy=never', ...isolation]);
 });
 test('exit zero ignores terminal-looking stdout and does not expose a native cause', async () => {
   const result = await backend(capturingRunner(commandResult({ stdout: JSON.stringify({ type: 'turn.failed', error: { message: "You've hit your usage limit." } }) })).run)

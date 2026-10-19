@@ -59,6 +59,33 @@ export interface CodexCliConfig {
   readonly model: string;
   /** Perfil explícito do config do Codex (`--profile`), quando fornecido. */
   readonly profile?: string;
+  /** Sandbox do Windows (`windows.sandbox`) a declarar explicitamente: o config pessoal é ignorado, então o valor não vem dele. Default `elevated`. */
+  readonly windowsSandbox?: CodexWindowsSandbox;
+}
+
+export type CodexWindowsSandbox = 'elevated' | 'unelevated';
+
+/**
+ * Fronteira do AGENTE (processo `codex` rodando como o operador, fora do sandbox). O sandbox só contém os comandos de shell; as
+ * ferramentas do próprio agente (view_image, MCP/plugins/apps do config pessoal e da conta, hooks, navegador, computer-use, web) rodam com
+ * a identidade do operador e leem/agem fora do workspace. Provado em laboratório (E1/E2): `view_image` leu arquivo protegido; o
+ * config pessoal expôs node_repl, cua_repl, MCP runpod (create_pod/delete_pod) e conectores da conta; um `.codex/config.toml` plantado
+ * no workspace fez o Codex lançar um MCP arbitrário como o operador. `--ignore-user-config` (a autenticação continua em CODEX_HOME) fecha
+ * as três últimas; `--disable` remove as ferramentas nativas. Feature desconhecida falha ALTO (versão incompatível ⇒ erro, nunca
+ * ferramenta aberta em silêncio).
+ */
+export const CODEX_AGENT_DISABLED_FEATURES: readonly string[] = [
+  'view_image', 'apps', 'plugins', 'remote_plugin', 'tool_suggest', 'browser_use', 'browser_use_external', 'computer_use',
+  'in_app_browser', 'hooks', 'multi_agent', 'multi_agent_v2', 'goals', 'image_generation', 'skill_search',
+];
+
+export function codexAgentIsolationArgs(config: CodexCliConfig, platform: NodeJS.Platform = process.platform): readonly string[] {
+  return [
+    '--ignore-user-config', '--ignore-rules',
+    ...CODEX_AGENT_DISABLED_FEATURES.flatMap(feature => ['--disable', feature]),
+    '-c', 'web_search="disabled"',
+    ...(platform === 'win32' && !config.wsl ? ['-c', `windows.sandbox="${config.windowsSandbox ?? 'elevated'}"`] : []),
+  ];
 }
 
 export type CodexCliConfigResult =
@@ -85,7 +112,11 @@ export function resolveCodexCliConfig(
   }
   const model = contractModel?.trim() || env.ANIMA_CODEX_CLI_MODEL?.trim() || CODEX_CLI_DEFAULT_MODEL;
   const profile = env.ANIMA_CODEX_CLI_PROFILE?.trim();
-  return { ok: true, value: { executable, model, ...(profile ? { profile } : {}), ...(transport.value ? { wsl: transport.value } : {}) } };
+  const windowsSandbox = env.ANIMA_CODEX_WINDOWS_SANDBOX?.trim().toLowerCase();
+  if (windowsSandbox && windowsSandbox !== 'elevated' && windowsSandbox !== 'unelevated') {
+    return { ok: false, error: 'ANIMA_CODEX_WINDOWS_SANDBOX deve ser elevated ou unelevated.' };
+  }
+  return { ok: true, value: { executable, model, ...(profile ? { profile } : {}), ...(windowsSandbox ? { windowsSandbox: windowsSandbox as CodexWindowsSandbox } : {}), ...(transport.value ? { wsl: transport.value } : {}) } };
 }
 
 /**
@@ -106,6 +137,7 @@ export function buildCodexExecArgs(config: CodexCliConfig, rootPath: string, pro
       '-c', 'sandbox_mode=workspace-write',
       '-c', 'approval_policy=never',
       ...(config.model !== CODEX_CLI_DEFAULT_MODEL ? ['--model', config.model] : []),
+      ...codexAgentIsolationArgs(config),
       prompt,
     ];
   }
@@ -117,6 +149,7 @@ export function buildCodexExecArgs(config: CodexCliConfig, rootPath: string, pro
     '--json',
     ...(config.model !== CODEX_CLI_DEFAULT_MODEL ? ['--model', config.model] : []),
     ...(config.profile ? ['--profile', config.profile] : []),
+    ...codexAgentIsolationArgs(config),
     prompt,
   ];
 }
