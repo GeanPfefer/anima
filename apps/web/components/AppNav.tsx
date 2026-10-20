@@ -6,6 +6,7 @@ import styles from './AppNav.module.css';
 const NAV_ITEMS = [
   { href: '/home',     label: 'Home' },
   { href: '/chat',     label: 'Chat' },
+  { href: '/trabalhos', label: 'Trabalhos' },
   { href: '/quests',   label: 'Quests' },
   { href: '/history',  label: 'Histórico' },
   { href: '/notes',    label: 'Notas' },
@@ -24,15 +25,19 @@ export default function AppNav() {
     <nav className={styles.nav}>
       <a href="/home" className={styles.logo}>Anima</a>
       <div className={styles.links}>
-        {NAV_ITEMS.map(item => (
-          <a
-            key={item.href}
-            href={item.href}
-            className={`${styles.link} ${pathname === item.href ? styles.active : ''}`}
-          >
-            {item.label}
-          </a>
-        ))}
+        {NAV_ITEMS.map(item => {
+          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          return (
+            <a
+              key={item.href}
+              href={item.href}
+              aria-current={active ? 'page' : undefined}
+              className={`${styles.link} ${active ? styles.active : ''}`}
+            >
+              {item.label}
+            </a>
+          );
+        })}
       </div>
     </nav>
   );
