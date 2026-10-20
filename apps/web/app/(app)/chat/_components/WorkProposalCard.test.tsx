@@ -295,4 +295,32 @@ describe('WorkProposalCard — convergência com a versão persistida', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(v2));
     expect(screen.getByText(/estado foi relido do servidor/)).toBeInTheDocument();
   });
+  test('integração EFETIVADA aparece como integrada, sem ações e sem afirmar publicação no remoto',()=>{
+    render(<WorkProposalCard presentation={presentation({item:{...item,state:'completed'},acceptedResult:result,availableActions:[],progress:{phase:'done',label:'Concluído',active:false,terminal:true},integration:{status:'integrated',acceptedResultEventId:'e1',decision:null,availableDecisions:[],publication:null,integrationEffect:{mode:'ff_only',targetRef:'refs/heads/dev',resultCommitSha:'b'.repeat(40),resultingTargetSha:'b'.repeat(40),disposition:'effected'}}})} onChange={jest.fn()}/>);
+    const section=screen.getByLabelText('Decisão de integração');
+    expect(section).toHaveTextContent('Integrado no repositório local');
+    expect(section).toHaveTextContent('Resultado integrado em refs/heads/dev (ff_only), commit bbbbbbb.');
+    expect(section).toHaveTextContent('A publicação no remoto (push) não é registrada pelo ANIMA; confirme no Git.');
+    expect(screen.queryByRole('button',{name:'Autorizar integração'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'Recusar integração'})).toBeNull();
+    expect(screen.queryByText(/Pronto para integrar/)).toBeNull();
+    expect(screen.queryByText('Integração recusada')).toBeNull();
+  });
+  test('sem correctionUnavailableReason a correção segue habilitada (comportamento do Chat inalterado)',()=>{
+    render(<WorkProposalCard presentation={presentation()} onChange={jest.fn()}/>);
+    expect(screen.getByRole('button',{name:'Pedir correção'})).toBeEnabled();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+  test('com correctionUnavailableReason a correção fica desabilitada, orienta o usuário e as demais decisões seguem',()=>{
+    render(<WorkProposalCard presentation={presentation()} onChange={jest.fn()} correctionUnavailableReason="Use o Chat para corrigir."/>);
+    const correction=screen.getByRole('button',{name:'Pedir correção'});
+    expect(correction).toBeDisabled();
+    expect(correction).toHaveAttribute('title','Use o Chat para corrigir.');
+    expect(screen.getByRole('note')).toHaveTextContent('Use o Chat para corrigir.');
+    fireEvent.click(correction);
+    expect(screen.queryByRole('button',{name:'Criar nova versão coerente'})).toBeNull();
+    expect(screen.getByRole('button',{name:'Aprovar'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'Rejeitar'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'Adiar'})).toBeEnabled();
+  });
 });

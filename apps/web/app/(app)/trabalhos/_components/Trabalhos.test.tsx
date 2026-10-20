@@ -6,8 +6,8 @@ import { TrabalhoDetalhe } from './TrabalhoDetalhe';
 import type { WorkPresentationView } from '@/app/(app)/chat/_components/WorkProposalCard';
 
 jest.mock('@/app/(app)/chat/_components/WorkProposalCard', () => ({
-  WorkProposalCard: (props: { presentation: { item: { id: string; state: string } }; focused: boolean; onFocus: () => void; onChange: (value: unknown) => void; autonomousExecutionAllowed?: boolean }) => (
-    <div data-testid="card" data-focused={String(props.focused)} data-eligible={String(props.autonomousExecutionAllowed)}>
+  WorkProposalCard: (props: { presentation: { item: { id: string; state: string } }; focused: boolean; onFocus: () => void; onChange: (value: unknown) => void; autonomousExecutionAllowed?: boolean; correctionUnavailableReason?: string | null }) => (
+    <div data-testid="card" data-focused={String(props.focused)} data-eligible={String(props.autonomousExecutionAllowed)} data-correction={props.correctionUnavailableReason ?? ''}>
       <span>{props.presentation.item.state}</span>
       <button onClick={props.onFocus}>focar</button>
       <button onClick={() => props.onChange({ ...props.presentation, item: { ...props.presentation.item, state: 'completed' } })}>mudar</button>
@@ -149,6 +149,12 @@ describe('TrabalhoDetalhe', () => {
     expect(screen.getByTestId('card')).toHaveAttribute('data-eligible', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'mudar' }));
     expect(screen.getByText(/completed · v1/)).toBeInTheDocument();
+  });
+
+  test('a correção de proposta fica indisponível no detalhe, com orientação para usar o Chat', () => {
+    render(<TrabalhoDetalhe initial={presentation()} reference="PROOF-01" title="Teto" />);
+    expect(screen.getByTestId('card').getAttribute('data-correction')).toMatch(/use o Chat/);
+    expect(screen.getByTestId('card').getAttribute('data-correction')).toMatch(/provider \(GPT ou Local\)/);
   });
 
   test('foco usa a rota existente e só marca o foco quando a rota aceita', async () => {

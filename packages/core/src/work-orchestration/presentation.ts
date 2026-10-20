@@ -4,6 +4,7 @@ import type { WorkEvent, WorkItem, WorkResultValidation, WorkResultValidationOut
 import { HUMAN_INTERRUPTION_REASONS, type AutonomousLimitKind, type HumanInterruptionReason } from './human-interruption';
 import type { WorkBudgetReason } from './work-budget';
 import { projectIntegrationBoundary, type WorkIntegrationDecision } from './integration-decision';
+import { integrationReceiptMatchesAuthorization, projectIntegrationCompleted, projectIntegrationEffectAuthorization } from './integration-effect';
 import {parseBranchPublicationReceipt,parseReviewRequestReceipt} from './protected-integration';
 import { projectWorktreeHandoff } from './worktree-handoff';
 import { projectHostObservedEvidence, type HostObservedGitEvidenceV1 } from './host-observed-evidence';
@@ -83,7 +84,7 @@ export interface WorkBudgetWaitProjection {
   readonly reachedLimit: AutonomousLimitKind;
 }
 export interface WorkIntegrationProjection {
-  readonly status:'awaiting_decision'|'authorized'|'branch_published'|'review_request_created'|'refused';
+  readonly status:'awaiting_decision'|'authorized'|'branch_published'|'review_request_created'|'refused'|'integrated';
   readonly acceptedResultEventId:string;
   readonly decision:WorkIntegrationDecision|null;
   readonly availableDecisions:readonly WorkIntegrationDecision[];
@@ -92,6 +93,10 @@ export interface WorkIntegrationProjection {
   // Só é preenchido quando o fato review_request_created existe e casa a
   // autorização; nunca afirma merge ou integração.
   readonly reviewRequest?:{readonly repositoryId:string;readonly remoteName:string;readonly reviewReference:string;readonly reviewId:string;readonly sourceBranch:string;readonly sourceCommitSha:string;readonly baseBranch:string}|null;
+  // `integrated`: efeito Git local JÁ efetivado pelo primitivo governado (integration_effect_authorized pelo usuário +
+  // integration_completed pelo sistema, com receipt que reproduz a autorização). NÃO afirma publicação no remoto (push),
+  // que o ANIMA não registra; é só o alvo local (`targetRef`) que passou ao commit do resultado.
+  readonly integrationEffect?:{readonly mode:string;readonly targetRef:string;readonly resultCommitSha:string;readonly resultingTargetSha:string;readonly disposition:'effected'|'reconciled'}|null;
 }
 export interface WorkPresentation { readonly item: WorkItem; readonly latestResult: WorkResultProjection|null; readonly acceptedResult: WorkResultProjection|null; readonly latestEventType:WorkEvent['type']|null; readonly availableActions:readonly WorkAction[]; /** Oferta read-only; a RPC autoritativa ainda valida claims e concorrência. */ readonly manualReleaseAvailable:boolean; /** Pedido admitido, ainda sem execution_started. */ readonly autonomousAdmission?:AutonomousAdmissionProjection|null; /** Fase humana projetada dos fatos (presentWorkItem sempre a preenche; opcional para não quebrar projeções/fixtures antigas). */ readonly progress?:WorkProgressPhaseProjection; readonly provenance?:WorkProvenanceProjection; readonly execution?:AutonomousExecutionProjection|null; readonly pendingDecision?:WorkDecisionProjection|null; readonly pendingBudgetWait?:WorkBudgetWaitProjection|null; readonly integration?:WorkIntegrationProjection|null; readonly verification?:WorkVerificationReport|null;
   // Histórico append-only dos pareceres do Verifier persistidos (auditoria). Só
@@ -214,6 +219,18 @@ export function projectPendingBudgetWait(item:WorkItem,events:readonly WorkEvent
   }
   return null;
 }
+// Integração EFETIVADA (protocolo de efeito ff_only/merge): só com receipt author=system que reproduz INTEGRALMENTE a
+// autorização humana (author=user) e que corresponde a ESTE item, esta versão e ESTE resultado aceito. Qualquer divergência
+// devolve null (a projeção cai no protocolo anterior; nunca promete integração sem prova).
+const projectIntegratedEffect=(item:WorkItem,events:readonly WorkEvent[],acceptedResultEventId:string):WorkIntegrationProjection['integrationEffect']=>{
+  const completed=projectIntegrationCompleted(events);
+  if(!completed)return null;
+  const authorization=projectIntegrationEffectAuthorization(events,completed.authorizationId);
+  const receipt=completed.receipt;
+  if(!authorization||!integrationReceiptMatchesAuthorization(authorization,receipt))return null;
+  if(receipt.workItemId!==item.id||receipt.proposalVersion!==item.proposalVersion||receipt.acceptedResultEventId!==acceptedResultEventId)return null;
+  return{mode:receipt.mode,targetRef:receipt.targetRef,resultCommitSha:receipt.resultCommitSha,resultingTargetSha:receipt.resultingTargetSha,disposition:receipt.disposition};
+};
 export function projectWorkIntegration(item:WorkItem,events:readonly WorkEvent[]):WorkIntegrationProjection|null{
   if(item.state!=='completed')return null;
   const effect=readEffectClass(item.intent);
@@ -223,6 +240,8 @@ export function projectWorkIntegration(item:WorkItem,events:readonly WorkEvent[]
   if(!boundary||boundary.correlation.workItemId!==item.id||boundary.correlation.approvedProposalVersion!==item.proposalVersion)return null;
   const acceptance=boundary.acceptance;
   if(!acceptance)return null;
+  const integrationEffect=projectIntegratedEffect(item,events,acceptance.acceptedResultEventId);
+  if(integrationEffect)return{status:'integrated',acceptedResultEventId:acceptance.acceptedResultEventId,decision:null,availableDecisions:[],publication:null,integrationEffect};
   if(boundary.status==='result_accepted')return{status:'awaiting_decision',acceptedResultEventId:acceptance.acceptedResultEventId,decision:null,availableDecisions:['authorize','refuse'],publication:null};
   if(boundary.status==='integration_authorized'){
     const decision=boundary.integrationDecision!;
@@ -311,7 +330,7 @@ const progressPhase=(phase:WorkProgressPhase):WorkProgressPhaseProjection=>({pha
 // para integrar. `refused` = humano recusou a integração; o trabalho está aceito
 // (concluído sem integrar) → Concluído. Demais (authorized/branch_published/
 // review_request_created) = integração em andamento → Integrando.
-const integrationProgressPhase=(integration:WorkIntegrationProjection):WorkProgressPhaseProjection=>integration.status==='awaiting_decision'?progressPhase('ready_to_integrate'):integration.status==='refused'?progressPhase('done'):progressPhase('integrating');
+const integrationProgressPhase=(integration:WorkIntegrationProjection):WorkProgressPhaseProjection=>integration.status==='awaiting_decision'?progressPhase('ready_to_integrate'):integration.status==='refused'||integration.status==='integrated'?progressPhase('done'):progressPhase('integrating');
 /**
  * Deriva a fase humana a partir dos fatos projetados. Ordem: estados terminais do
  * item (autoridade do domínio) → execução autônoma em andamento (running:

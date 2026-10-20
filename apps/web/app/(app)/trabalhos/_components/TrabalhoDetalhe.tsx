@@ -6,6 +6,10 @@ import styles from './trabalhos.module.css';
 
 // Detalhe de UM trabalho. Reutiliza o WorkProposalCard e as rotas de ação existentes; este componente só
 // hospeda o cartão fora da conversa (estado local da apresentação e foco). Nenhuma decisão nova vive aqui.
+// A correção de proposta exige escolher EXPLICITAMENTE o provider (GPT × Local), seleção que só existe no Chat Dev; a rota
+// falha fechado sem ela (nunca cai no default pago). Aqui a ação fica desabilitada, com a orientação.
+export const CORRECTION_CHAT_ONLY = 'Para pedir correção da proposta use o Chat: a correção exige escolher explicitamente o provider (GPT ou Local).';
+
 export function TrabalhoDetalhe({ initial, reference, title }: { initial: WorkPresentationView; reference: string | null; title: string }) {
   const [presentation, setPresentation] = useState(initial);
   const [focused, setFocused] = useState(false);
@@ -40,6 +44,7 @@ export function TrabalhoDetalhe({ initial, reference, title }: { initial: WorkPr
         autonomousExecutionAllowed={row?.autonomousEligible}
         autonomousBlockReason={row?.blockingDependencyIds.length ? row.readinessLabel : null}
         trackAutonomousProgress={presentation.execution?.status === 'running'}
+        correctionUnavailableReason={CORRECTION_CHAT_ONLY}
       />
     </main>
   );
