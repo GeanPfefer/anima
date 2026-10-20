@@ -197,6 +197,11 @@ export interface CoderWorkspace {
    * `summary`/`notes`/evidência — é caminho absoluto local (dado sensível).
    */
   readonly rootPath?: string;
+  /**
+   * Alvos reais (caminhos ABSOLUTOS do host) dos node_modules religados pelo Host na worktree. Um executor com perfil de
+   * leitura mínima (Codex WSL) os concede SOMENTE-LEITURA; ausente/vazio ⇒ nenhuma dependência legível. Avaliado a cada turno.
+   */
+  readonly dependencyReadRoots?: readonly string[];
 }
 
 export interface CoderEditResult {

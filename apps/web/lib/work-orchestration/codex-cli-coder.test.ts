@@ -64,6 +64,19 @@ const capturingRunner = (result: CommandResult = commandResult()): { run: CodexC
   return { calls, run: async (file, args, options) => { calls.push({ file, args, options }); return result; } };
 };
 
+/** Runner que responde ao pré-voo de isolamento WSL (versão + canário) e ao login; o resto é o turno do agente. */
+const provingRunner = (exec: CommandResult = commandResult(), over: { version?: string; canary?: Partial<CommandResult>; login?: string } = {}): { run: CodexCliProcessRunner; calls: Captured[]; execCalls: () => Captured[] } => {
+  const calls: Captured[] = [];
+  const run: CodexCliProcessRunner = async (file, args, options) => {
+    calls.push({ file, args, options });
+    if (args.includes('--version')) return commandResult({ stdout: over.version ?? 'codex-cli 0.162.0\n' });
+    if (args.includes('sandbox')) return commandResult({ stdout: 'ANIMA_PROFILE_OK\n', ...over.canary });
+    if (args.includes('status')) return commandResult({ stdout: over.login ?? 'Logged in using ChatGPT' });
+    return exec;
+  };
+  return { run, calls, execCalls: () => calls.filter(c => c.args.includes('--json')) };
+};
+
 const backend = (run: CodexCliProcessRunner, env: Record<string, string | undefined> = { PATH: '/usr/bin' }, model = CODEX_CLI_DEFAULT_MODEL) =>
   new CodexCliCoderBackend({ config: { executable: 'codex-native', model }, run, environmentSource: env });
 
@@ -327,11 +340,13 @@ describe('Codex coder WSL opt-in', () => {
   const env = { ANIMA_CODEX_CLI_TRANSPORT: 'wsl', ANIMA_CODEX_WSL_DISTRO: 'Ubuntu-24.04', ANIMA_CODEX_WSL_USER: 'geanteco', ANIMA_CODEX_WSL_CLI_PATH: '/home/geanteco/.nvm/versions/node/v22.23.3/bin/codex', SystemRoot: 'C:/Windows', OPENAI_API_KEY: 'secret', WSLENV: 'OPENAI_API_KEY/u' };
   const config = () => { const r = resolveCodexCliConfig('default', env, 'win32'); if (!r.ok) throw Error(r.error); return r.value; };
   test('translates a drive path with spaces, scrubs keys and preserves execution bounds', async () => {
-    const captured = capturingRunner(); const controller = new AbortController();
+    const captured = provingRunner(); const controller = new AbortController();
     await new CodexCliCoderBackend({ config: config(), run: captured.run, environmentSource: env }).edit(editRequest(), workspace('G:/anima/work tree'), controller.signal);
-    const call = captured.calls[0]!;
+    const call = captured.execCalls()[0]!;
     expect(call.file.toLowerCase()).toContain('wsl.exe');
-    expect(call.args).toEqual(expect.arrayContaining(['Ubuntu-24.04', 'geanteco', '/mnt/g/anima/work tree', 'workspace-write', 'approval_policy=never', '--json', '-u', 'OPENAI_API_KEY']));
+    expect(call.args).toEqual(expect.arrayContaining(['Ubuntu-24.04', 'geanteco', '/mnt/g/anima/work tree', 'approval_policy=never', '--json', '-u', 'OPENAI_API_KEY']));
+    expect(call.args).not.toContain('workspace-write');
+    expect(call.args).not.toContain('--sandbox');
     expect(call.options).toMatchObject({ cwd: 'G:/anima/work tree', signal: controller.signal });
     expect(call.options.timeoutMs).toBeGreaterThan(0);
     expect(call.options.env).not.toHaveProperty('OPENAI_API_KEY');
@@ -339,18 +354,18 @@ describe('Codex coder WSL opt-in', () => {
   });
   test('rejects UNC and traversal before launch', async () => {
     for (const root of ['//server/share/tree', 'G:/anima/../outside']) {
-      const captured = capturingRunner();
+      const captured = provingRunner();
       await expect(new CodexCliCoderBackend({ config: config(), run: captured.run }).edit(editRequest(), workspace(root), new AbortController().signal)).rejects.toThrow('traduz');
       expect(captured.calls).toHaveLength(0);
     }
   });
   test('abort before launch does not spawn; cancellation and timeout are not success', async () => {
-    const controller = new AbortController(); controller.abort(); const captured = capturingRunner();
+    const controller = new AbortController(); controller.abort(); const captured = provingRunner();
     const coder = new CodexCliCoderBackend({ config: config(), run: captured.run });
     await expect(coder.edit(editRequest(), workspace('G:/tree'), controller.signal)).rejects.toThrow('cancelad');
     expect(captured.calls).toHaveLength(0);
     for (const result of [commandResult({ cancelled: true }), commandResult({ timedOut: true })]) {
-      await expect(new CodexCliCoderBackend({ config: config(), run: capturingRunner(result).run }).edit(editRequest(), workspace('G:/tree'), new AbortController().signal)).rejects.toThrow();
+      await expect(new CodexCliCoderBackend({ config: config(), run: provingRunner(result).run }).edit(editRequest(), workspace('G:/tree'), new AbortController().signal)).rejects.toThrow();
     }
   });
   test('invalid configuration never falls back to native', () => {
@@ -374,18 +389,19 @@ test('WSL forwards an in-flight abort to the existing process runner', async () 
 
 
 describe('Single-Item exige assinatura antes de cada edit', () => {
-  const env = { ANIMA_CODEX_CLI_TRANSPORT: 'wsl', ANIMA_CODEX_WSL_DISTRO: 'Ubuntu-24.04', ANIMA_CODEX_WSL_USER: 'geanteco', ANIMA_CODEX_WSL_CLI_PATH: '/home/geanteco/bin/codex' };
+  const env = { ANIMA_CODEX_CLI_TRANSPORT: 'wsl', ANIMA_CODEX_WSL_DISTRO: 'Ubuntu-24.04', ANIMA_CODEX_WSL_USER: 'geanteco', ANIMA_CODEX_WSL_CLI_PATH: '/home/geanteco/.nvm/versions/node/v22.23.3/bin/codex' };
   const config = () => { const c = resolveCodexCliConfig('default', env, 'win32'); if (!c.ok) throw Error(c.error); return c.value; };
   test('login e coding usam mesmo WSL; aprovação never, sandbox e cancelamento preservados', async () => {
-    const calls: Captured[] = [];
-    const run: CodexCliProcessRunner = async (file, args, options) => { calls.push({file,args,options}); return commandResult({ stdout: args.includes('status') ? 'Logged in using ChatGPT' : '' }); };
+    const { run, calls, execCalls } = provingRunner();
     const coder = new CodexCliCoderBackend({ config: config(), run, requireSubscription: true });
     const signal = new AbortController().signal;
     await coder.edit(editRequest(), workspace('G:/tree'), signal);
     await coder.edit(editRequest(), workspace('G:/tree'), signal);
-    expect(calls).toHaveLength(4);
-    expect(calls[0]!.args).toContain('status'); expect(calls[2]!.args).toContain('status');
-    expect(calls[1]!.args).toEqual(expect.arrayContaining(['workspace-write', 'approval_policy=never', '/mnt/g/tree']));
+    // por turno: login, versão, canário, agente
+    expect(calls).toHaveLength(8);
+    expect(calls[0]!.args).toContain('status'); expect(calls[4]!.args).toContain('status');
+    expect(execCalls()).toHaveLength(2);
+    expect(execCalls()[0]!.args).toEqual(expect.arrayContaining(['approval_policy=never', '/mnt/g/tree']));
     expect(calls.every(c => c.options.signal === signal)).toBe(true);
   });
   test.each(['API key', 'unknown'])('recusa %s antes de coding', async stdout => {
@@ -409,7 +425,7 @@ describe('Single-Item exige assinatura antes de cada edit', () => {
 
 
 test('pré-voo de assinatura respeita o deadline da attempt e não spawna após expiração', async () => {
-  const cfg=resolveCodexCliConfig('default',{ANIMA_CODEX_CLI_TRANSPORT:'wsl',ANIMA_CODEX_WSL_DISTRO:'Ubuntu-24.04',ANIMA_CODEX_WSL_USER:'geanteco',ANIMA_CODEX_WSL_CLI_PATH:'/home/geanteco/bin/codex'},'win32');
+  const cfg=resolveCodexCliConfig('default',{ANIMA_CODEX_CLI_TRANSPORT:'wsl',ANIMA_CODEX_WSL_DISTRO:'Ubuntu-24.04',ANIMA_CODEX_WSL_USER:'geanteco',ANIMA_CODEX_WSL_CLI_PATH:'/home/geanteco/.nvm/versions/node/v22.23.3/bin/codex'},'win32');
   if(!cfg.ok)throw Error(cfg.error);
   const run=jest.fn<ReturnType<CodexCliProcessRunner>, Parameters<CodexCliProcessRunner>>(async()=>commandResult({stdout:'unknown'}));
   const coder=new CodexCliCoderBackend({config:cfg.value,run,requireSubscription:true});
@@ -417,4 +433,94 @@ test('pré-voo de assinatura respeita o deadline da attempt e não spawna após 
   expect(run).not.toHaveBeenCalled();
   await expect(coder.edit(editRequest({deadlineAtMs:Date.now()+500}),workspace('G:/tree'),new AbortController().signal)).rejects.toThrow('authentication_unproved');
   expect(run.mock.calls[0]![2].timeoutMs).toBeLessThanOrEqual(500);
+});
+
+
+describe('Codex WSL — perfil nativo de permissões (L1)', () => {
+  const CLI = '/home/geanteco/.nvm/versions/node/v22.23.3/bin/codex';
+  const wslEnv = { ANIMA_CODEX_CLI_TRANSPORT: 'wsl', ANIMA_CODEX_WSL_DISTRO: 'Ubuntu-24.04', ANIMA_CODEX_WSL_USER: 'geanteco', ANIMA_CODEX_WSL_CLI_PATH: CLI, SystemRoot: 'C:/Windows' };
+  const wslConfig = () => { const r = resolveCodexCliConfig('default', wslEnv, 'win32'); if (!r.ok) throw Error(r.error); return r.value; };
+  const ROOT_LINUX = '/mnt/g/tree';
+  const DEPS = ['/mnt/g/anima/node_modules', '/mnt/g/anima/apps/web/node_modules'];
+  const configValues = (args: readonly string[]) => args.filter((_, i) => args[i - 1] === '-c');
+  const permissionValues = (args: readonly string[]) => configValues(args).filter(value => value.includes('permissions'));
+
+  test('direto: perfil nativo por -c, sem --sandbox nem sandbox_mode; leitura só toolchain+deps, escrita só worktree, rede negada', () => {
+    const args = buildCodexExecArgs(wslConfig(), ROOT_LINUX, 'p', false, DEPS);
+    expect(args).not.toContain('--sandbox');
+    expect(args.join(' ')).not.toContain('sandbox_mode');
+    expect(args.join(' ')).not.toContain('workspace-write');
+    const values = configValues(args);
+    expect(values).toContain('default_permissions="anima_single_item"');
+    expect(values).toContain('permissions.anima_single_item.filesystem={":minimal"="read", "/home/geanteco/.nvm/versions/node/v22.23.3"="read", "/mnt/g/anima/node_modules"="read", "/mnt/g/anima/apps/web/node_modules"="read", "/mnt/g/tree"="write"}');
+    expect(values).toContain('permissions.anima_single_item.network.enabled=false');
+    expect(args).toEqual(expect.arrayContaining(['--ignore-user-config', '--ignore-rules', '--cd', ROOT_LINUX, '--json']));
+  });
+  test('resume (wrap) carrega o MESMO perfil, também só por -c', () => {
+    const direct = permissionValues(buildCodexExecArgs(wslConfig(), ROOT_LINUX, 'p', false, DEPS));
+    const wrapped = buildCodexExecArgs(wslConfig(), ROOT_LINUX, 'p', true, DEPS);
+    expect(permissionValues(wrapped)).toEqual(direct);
+    expect(direct).toHaveLength(3);
+    expect(wrapped).not.toContain('--sandbox');
+    expect(wrapped.join(' ')).not.toContain('sandbox_mode');
+    expect(wrapped).toEqual(expect.arrayContaining(['--ignore-user-config', '--disable', 'view_image']));
+  });
+  test('transportes não-WSL permanecem inalterados (sandbox legado)', () => {
+    const native = buildCodexExecArgs({ executable: 'codex', model: CODEX_CLI_DEFAULT_MODEL }, ROOT, 'p', false, DEPS);
+    expect(native).toEqual(expect.arrayContaining(['--sandbox', 'workspace-write']));
+    expect(native.join(' ')).not.toContain('default_permissions');
+  });
+  test.each([
+    ['toolchain raso', '/home/geanteco/bin/codex'],
+    ['toolchain em /mnt', '/mnt/c/tools/node/v1/bin/codex'],
+    ['toolchain no CODEX_HOME', '/home/geanteco/.codex/pkg/v1/bin/codex'],
+    ['sem /bin/codex', '/home/geanteco/.nvm/versions/node/v22/lib/codex'],
+  ])('falha fechado: %s', (_name, cli) => {
+    const cfg = { ...wslConfig(), wsl: { ...wslConfig().wsl!, cliPath: cli } };
+    expect(() => buildCodexExecArgs(cfg, ROOT_LINUX, 'p', false, [])).toThrow('toolchain_invalid');
+  });
+  test.each(['/mnt/g/a	b', '/mnt/g/a"b', '/mnt/g/a\b', '/mnt/g/a/../b', '/mnt/g/a}b={"/"="write"'])('falha fechado: dependência %j não vira TOML', dep => {
+    expect(() => buildCodexExecArgs(wslConfig(), ROOT_LINUX, 'p', false, [dep])).toThrow('path_invalid');
+  });
+  test('worktree inválida também falha fechado', () => {
+    expect(() => buildCodexExecArgs(wslConfig(), '/mnt/g/tre"e', 'p', false, [])).toThrow('path_invalid');
+  });
+
+  test('turno WSL: versão, canário (mesmo perfil, via codex sandbox), agente; deps do host viram leitura', async () => {
+    const { run, calls, execCalls } = provingRunner();
+    await new CodexCliCoderBackend({ config: wslConfig(), run }).edit(editRequest(), { ...workspace('G:/tree'), dependencyReadRoots: ['G:/anima/node_modules'] }, new AbortController().signal);
+    expect(calls).toHaveLength(3);
+    expect(calls[0]!.args).toContain('--version');
+    const canary = calls[1]!.args;
+    expect(canary).toEqual(expect.arrayContaining(['sandbox', '-P', 'anima_single_item', '-C', ROOT_LINUX]));
+    expect(canary.join(' ')).not.toContain('default_permissions');
+    expect(configValues(canary).find(value => value.includes('.filesystem='))).toContain('"/mnt/g/anima/node_modules"="read"');
+    expect(execCalls()[0]!.args.join(' ')).toContain('"/mnt/g/anima/node_modules"="read"');
+  });
+  test.each(['codex-cli 0.161.9', 'codex-cli 0.163.0', 'codex-cli 1.0.0', 'garbage', ''])('versão %j não suportada: agente não sobe', async version => {
+    const { run, execCalls } = provingRunner(commandResult(), { version });
+    await expect(new CodexCliCoderBackend({ config: wslConfig(), run }).edit(editRequest(), workspace('G:/tree'), new AbortController().signal)).rejects.toThrow('isolation_version_unsupported');
+    expect(execCalls()).toHaveLength(0);
+  });
+  test.each([
+    ['vazamento da credencial', { stdout: 'ANIMA_PROFILE_LEAK\n', exitCode: 3 }],
+    ['sandbox indisponível', { stdout: '', exitCode: 1 }],
+    ['canário sem marcador', { stdout: 'ok', exitCode: 0 }],
+    ['marcador e vazamento', { stdout: 'ANIMA_PROFILE_OK ANIMA_PROFILE_LEAK', exitCode: 0 }],
+    ['timeout', { stdout: 'ANIMA_PROFILE_OK', exitCode: 0, timedOut: true }],
+  ])('canário reprova (%s): agente não sobe', async (_name, canary) => {
+    const { run, execCalls } = provingRunner(commandResult(), { canary });
+    await expect(new CodexCliCoderBackend({ config: wslConfig(), run }).edit(editRequest(), workspace('G:/tree'), new AbortController().signal)).rejects.toThrow('isolation_unproved');
+    expect(execCalls()).toHaveLength(0);
+  });
+  test('dependência do host não traduzível para WSL: recusa antes de qualquer processo', async () => {
+    const { run, calls } = provingRunner();
+    await expect(new CodexCliCoderBackend({ config: wslConfig(), run }).edit(editRequest(), { ...workspace('G:/tree'), dependencyReadRoots: ['//server/share/node_modules'] }, new AbortController().signal)).rejects.toThrow('path_invalid');
+    expect(calls).toHaveLength(0);
+  });
+  test('prova respeita o deadline: expirado, nenhum processo', async () => {
+    const { run, calls } = provingRunner();
+    await expect(new CodexCliCoderBackend({ config: wslConfig(), run }).edit(editRequest({ deadlineAtMs: Date.now() - 1 }), workspace('G:/tree'), new AbortController().signal)).rejects.toThrow('deadline');
+    expect(calls).toHaveLength(0);
+  });
 });

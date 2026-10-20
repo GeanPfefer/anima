@@ -139,6 +139,8 @@ describe('GitWorktree — ciclo de vida', () => {
       expect(await worktree.linkNodeModules()).toBe(true);
       // A ligação enxerga o sentinela do node_modules real.
       expect(await readFile(join(worktree.root, 'node_modules', 'pkg', 'sentinel.txt'), 'utf8')).toBe('PRESERVAR');
+      // O executor isolado recebe como leitura só o alvo real que o Host religou.
+      expect(worktree.dependencyReadRoots()).toEqual([join(ctx.repo, 'node_modules')]);
     } finally {
       await worktree.dispose({ deleteBranch: true });
     }

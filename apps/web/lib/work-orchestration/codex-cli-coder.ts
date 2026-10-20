@@ -1,4 +1,4 @@
-import { buildWslCodexInvocation, buildWslLoginStatusInvocation, resolveInvestigationTransport, windowsPathToWsl, type InvestigationWslConfig } from './investigation-wsl-transport';
+import { buildWslCodexInvocation, buildWslLoginStatusInvocation, buildWslVersionInvocation, resolveInvestigationTransport, windowsPathToWsl, type InvestigationWslConfig } from './investigation-wsl-transport';
 import { runProcess } from './worktree';
 import type { NativeCliFailureV1 } from '@anima/core';
 import { coderBackendId, type CoderBackend, type CoderEditRequest, type CoderEditResult, type CoderWorkspace } from './coder-backend';
@@ -120,6 +120,46 @@ export function resolveCodexCliConfig(
 }
 
 /**
+ * Perfil NATIVO de permissões do Codex Linux (0.162) usado no transporte WSL. O `workspace-write` legado deixa o sistema de
+ * arquivos inteiro LEGÍVEL aos comandos do agente (inclui `~/.codex/auth.json`, `/mnt/c`, `.env.local`). O perfil troca isso por
+ * lista de permissão: só o sistema mínimo, a toolchain do Codex, os alvos dos node_modules (leitura) e a worktree (escrita) existem
+ * na visão de montagem do comando; o resto é invisível/negado. `.git` e `.codex` da worktree permanecem somente-leitura (provado).
+ * Rede dos comandos negada. `--sandbox`/`sandbox_mode` NÃO podem coexistir com `default_permissions` (o Codex recusa).
+ */
+export const CODEX_WSL_PROFILE_NAME = 'anima_single_item';
+/** Única linha de versão em que o perfil foi provado; outra versão ⇒ recusa (nunca "melhor esforço"). */
+export const CODEX_WSL_PROFILE_VERSION = /^codex-cli 0\.162\.\d+$/;
+const WSL_PROFILE_PATH = /^\/[A-Za-z0-9._+ \-/]{1,400}$/;
+
+/** `<prefixo>/bin/codex` ⇒ `<prefixo>` (toolchain: codex, node e libs). Prefixo raso, em /mnt ou no CODEX_HOME é recusado. */
+export function codexWslToolchainRoot(cliPath: string): string | null {
+  const match = /^(\/.+)\/bin\/codex$/.exec(cliPath);
+  const prefix = match?.[1];
+  if (!prefix || prefix.split('/').filter(Boolean).length < 3) return null;
+  if (prefix === '/mnt' || prefix.startsWith('/mnt/') || prefix.split('/').includes('.codex') || prefix.split('/').includes('..')) return null;
+  return prefix;
+}
+
+/** Lista de permissão do perfil; qualquer caminho fora do formato estrito falha (também fecha injeção no TOML inline). */
+function codexWslProfileConfigArgs(config: CodexCliConfig, linuxRoot: string, dependencyRoots: readonly string[]): readonly string[] {
+  const toolchain = config.wsl ? codexWslToolchainRoot(config.wsl.cliPath) : null;
+  if (!toolchain) throw new Error('codex_wsl_isolation_toolchain_invalid');
+  const readOnly = [toolchain, ...dependencyRoots];
+  const all = [linuxRoot, ...readOnly];
+  if (all.some(path => !WSL_PROFILE_PATH.test(path) || path.split('/').includes('..'))) throw new Error('codex_wsl_isolation_path_invalid');
+  const entries = [`":minimal"="read"`, ...readOnly.map(path => `"${path}"="read"`), `"${linuxRoot}"="write"`];
+  const name = CODEX_WSL_PROFILE_NAME;
+  return [
+    '-c', `permissions.${name}.filesystem={${entries.join(', ')}}`,
+    '-c', `permissions.${name}.network.enabled=false`,
+  ];
+}
+
+export function codexWslPermissionArgs(config: CodexCliConfig, linuxRoot: string, dependencyRoots: readonly string[]): readonly string[] {
+  return ['-c', `default_permissions="${CODEX_WSL_PROFILE_NAME}"`, ...codexWslProfileConfigArgs(config, linuxRoot, dependencyRoots)];
+}
+
+/**
  * Argumentos de `codex exec` (sem shell, sem interpolação). Determinísticos:
  * sandbox `workspace-write`, aprovação `never` (sem prompt interativo nem escalada),
  * raiz explícita, modelo/perfil só quando fornecidos, instrução como último argumento.
@@ -130,11 +170,13 @@ export function resolveCodexCliConfig(
  * raiz é o cwd do processo (a worktree). No caminho direto, `--json` habilita
  * o diagnóstico terminal; os demais argumentos permanecem iguais.
  */
-export function buildCodexExecArgs(config: CodexCliConfig, rootPath: string, prompt: string, aiMemoryWrapped = false): readonly string[] {
+export function buildCodexExecArgs(config: CodexCliConfig, rootPath: string, prompt: string, aiMemoryWrapped = false, dependencyRoots: readonly string[] = []): readonly string[] {
+  // WSL: perfil nativo (idêntico em exec e exec resume; só `-c`, que ambos aceitam). Demais transportes: sandbox legado, inalterado.
+  const permissions = config.wsl ? codexWslPermissionArgs(config, rootPath, dependencyRoots) : null;
   if (aiMemoryWrapped) {
     return [
       'exec',
-      '-c', 'sandbox_mode=workspace-write',
+      ...(permissions ?? ['-c', 'sandbox_mode=workspace-write']),
       '-c', 'approval_policy=never',
       ...(config.model !== CODEX_CLI_DEFAULT_MODEL ? ['--model', config.model] : []),
       ...codexAgentIsolationArgs(config),
@@ -143,7 +185,7 @@ export function buildCodexExecArgs(config: CodexCliConfig, rootPath: string, pro
   }
   return [
     'exec',
-    '--sandbox', 'workspace-write',
+    ...(permissions ?? ['--sandbox', 'workspace-write']),
     '-c', 'approval_policy=never',
     '--cd', rootPath,
     '--json',
@@ -234,6 +276,37 @@ export class CodexCliCoderBackend implements CoderBackend {
 
   private readonly requireSubscription: boolean;
 
+  /**
+   * Antes de CADA turno WSL: (1) a versão do Codex é a única em que o perfil foi provado; (2) o MESMO perfil, aplicado por
+   * `codex sandbox`, nega de fato a credencial do Linux e o Windows montado e enxerga a worktree. Qualquer falha ⇒ o agente não
+   * sobe (nunca cai no `workspace-write` legado nem roda sem prova).
+   */
+  private async proveWslIsolation(linuxRoot: string, dependencyRoots: readonly string[], request: CoderEditRequest, cwd: string, signal: AbortSignal, run: CodexCliProcessRunner): Promise<void> {
+    const wsl = this.config.wsl!;
+    const env = buildCodexCliEnvironment(this.environmentSource) as NodeJS.ProcessEnv;
+    const step = async (invocation: { readonly file: string; readonly args: readonly string[] }) => {
+      const remainingMs = request.deadlineAtMs === undefined ? 15_000 : request.deadlineAtMs - Date.now();
+      if (signal.aborted) throw new Error('Codex CLI: cancelado antes da prova de isolamento.');
+      if (remainingMs <= 0) throw new Error('Codex CLI: deadline excedido antes da prova de isolamento.');
+      const result = await run(invocation.file, invocation.args, { cwd, timeoutMs: Math.min(15_000, remainingMs), signal, env });
+      if (result.cancelled || signal.aborted) throw new Error('Codex CLI: cancelado durante a prova de isolamento.');
+      return result;
+    };
+    const version = await step(buildWslVersionInvocation(wsl));
+    if (version.exitCode !== 0 || version.timedOut || !CODEX_WSL_PROFILE_VERSION.test(version.stdout.trim())) throw new Error('codex_wsl_isolation_version_unsupported');
+    const probe = [
+      `for p in "/home/${wsl.user}/.codex/auth.json" "$HOME/.codex/auth.json" /mnt/c/Windows/win.ini; do`,
+      'if head -c 0 "$p" 2>/dev/null; then echo ANIMA_PROFILE_LEAK; exit 3; fi; done;',
+      'test -r . || exit 4; echo ANIMA_PROFILE_OK',
+    ].join(' ');
+    const canary = buildWslCodexInvocation(wsl, [
+      'sandbox', '-P', CODEX_WSL_PROFILE_NAME, ...codexWslProfileConfigArgs(this.config, linuxRoot, dependencyRoots),
+      '-C', linuxRoot, '--', '/usr/bin/sh', '-c', probe,
+    ], linuxRoot);
+    const proof = await step(canary);
+    if (proof.exitCode !== 0 || proof.timedOut || !proof.stdout.includes('ANIMA_PROFILE_OK') || proof.stdout.includes('ANIMA_PROFILE_LEAK')) throw new Error('codex_wsl_isolation_unproved');
+  }
+
   async edit(request: CoderEditRequest, workspace: CoderWorkspace, signal: AbortSignal): Promise<CoderEditResult> {
     const wrap = this.aiMemory;
     if (wrap && this.config.wsl) throw new Error('Codex WSL coder não suporta ai-memory wrap.');
@@ -242,6 +315,8 @@ export class CodexCliCoderBackend implements CoderBackend {
     const linuxRoot = this.config.wsl ? windowsPathToWsl(workspace.rootPath ?? '') : null;
     if (this.config.wsl && !linuxRoot) throw new Error('Worktree Windows não traduzível para WSL.');
     const run = this.run ?? runProcess;
+    const dependencyRoots = this.config.wsl ? (workspace.dependencyReadRoots ?? []).map(root => windowsPathToWsl(root)) : [];
+    if (dependencyRoots.some(root => root === null)) throw new Error('codex_wsl_isolation_path_invalid');
     if (this.requireSubscription) {
       if (!this.config.wsl || this.config.model !== 'default' || this.config.profile || wrap || !workspace.rootPath) {
         throw new Error('single_item_codex_contract_invalid');
@@ -255,12 +330,13 @@ export class CodexCliCoderBackend implements CoderBackend {
         throw new Error('single_item_codex_authentication_unproved');
       }
     }
+    if (this.config.wsl && linuxRoot) await this.proveWslIsolation(linuxRoot, dependencyRoots as string[], request, workspace.rootPath ?? '', signal, run);
     const { seconds, aiMemoryNotes } = await runNativeCliTurn({
       label: 'Codex CLI',
       ...(!wrap ? { classifyFailure: classifyCodexCliFailure } : {}),
       executable: this.config.executable,
       buildArgs: (rootPath, prompt) => {
-        const args = buildCodexExecArgs(this.config, linuxRoot ?? rootPath, prompt, Boolean(wrap));
+        const args = buildCodexExecArgs(this.config, linuxRoot ?? rootPath, prompt, Boolean(wrap), dependencyRoots as string[]);
         return this.config.wsl && linuxRoot ? buildWslCodexInvocation(this.config.wsl, args, linuxRoot).args : args;
       },
       env: buildCodexCliEnvironment(this.environmentSource),

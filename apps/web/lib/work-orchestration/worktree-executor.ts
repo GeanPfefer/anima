@@ -309,6 +309,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
         // ignoram este campo. O host segue sendo a autoridade única do git observado,
         // escopo, gates, commit e restauração — o cwd não afrouxa nada disso.
         rootPath: worktree!.root,
+        get dependencyReadRoots() { return worktree!.dependencyReadRoots(); },
       };
       // Autoridade de acesso ao workspace (V3): LER todo o workspace autorizado,
       // ESCREVER só o escopo do Work Item (`includedScope`). O host reforça a escrita

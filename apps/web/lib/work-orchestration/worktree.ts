@@ -397,6 +397,9 @@ export class GitWorktree {
   /** Resolve um caminho relativo dentro da raiz, com as guardas de segurança. */
   resolve(relPath: string): string | null { return safeJoin(this.root, relPath); }
 
+  /** Alvos REAIS dos node_modules que o Host religou (única leitura fora da worktree que um executor isolado recebe). */
+  dependencyReadRoots(): readonly string[] { return [...new Set(this.nodeModulesTargets.values())]; }
+
   /** Links que o PRÓPRIO Host criou (node_modules) e que continuam apontando para o destino esperado. */
   private allowedLinks(): readonly AllowedWorkspaceLink[] {
     return [...this.nodeModulesTargets].map(([link, target]) => ({ link, target }));
