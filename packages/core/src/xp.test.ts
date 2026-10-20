@@ -36,6 +36,32 @@ describe('calculateBonusMultiplier', () => {
   });
 });
 
+describe('fronteiras do multiplicador de bônus', () => {
+  it('limita quatro bônus repetidos exatamente a 2,5', () => {
+    expect(calculateBonusMultiplier([
+      'forgotten_pillar', 'forgotten_pillar', 'forgotten_pillar', 'forgotten_pillar',
+    ])).toBe(2.5);
+  });
+
+  it('limita uma lista longa de bônus repetidos exatamente a 2,5', () => {
+    const bonuses = Array.from({ length: 100 }, () => 'forgotten_pillar' as const);
+
+    expect(calculateBonusMultiplier(bonuses)).toBe(2.5);
+  });
+
+  it('mantém exatamente 2,5 ao atingir o teto com três bônus', () => {
+    expect(calculateBonusMultiplier([
+      'forgotten_pillar', 'forgotten_pillar', 'forgotten_pillar',
+    ])).toBe(2.5);
+  });
+
+  it('preserva a soma de 2,4 abaixo do teto', () => {
+    expect(calculateBonusMultiplier([
+      'forgotten_pillar', 'forgotten_pillar', 'active_quest',
+    ])).toBeCloseTo(2.4, 10);
+  });
+});
+
 describe('calculateActivityXP', () => {
   it('arredonda o XP base e o XP total', () => {
     const result = calculateActivityXP(7, buildPillar(1.3), ['first_of_day']);
@@ -51,6 +77,26 @@ describe('calculateActivityXP', () => {
       bonusMultiplier: 1,
       totalXP: 30,
     });
+  });
+});
+
+describe('atividades com multiplicador limitado', () => {
+  it('aplica o teto de 2,5 ao XP de dez minutos', () => {
+    expect(calculateActivityXP(10, buildPillar(1), [
+      'forgotten_pillar', 'forgotten_pillar', 'forgotten_pillar', 'forgotten_pillar',
+    ])).toEqual({ baseXP: 10, bonusMultiplier: 2.5, totalXP: 25 });
+  });
+
+  it('arredonda 17,5 para 18 após aplicar o teto de 2,5', () => {
+    expect(calculateActivityXP(7, buildPillar(1), [
+      'forgotten_pillar', 'forgotten_pillar', 'forgotten_pillar', 'forgotten_pillar',
+    ])).toEqual({ baseXP: 7, bonusMultiplier: 2.5, totalXP: 18 });
+  });
+
+  it('mantém XP zero e multiplicador de 2,5 com duração zero', () => {
+    expect(calculateActivityXP(0, buildPillar(1), [
+      'forgotten_pillar', 'forgotten_pillar', 'forgotten_pillar', 'forgotten_pillar',
+    ])).toEqual({ baseXP: 0, bonusMultiplier: 2.5, totalXP: 0 });
   });
 });
 
