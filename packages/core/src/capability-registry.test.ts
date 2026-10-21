@@ -1,3 +1,5 @@
+import { existsSync } from 'fs';
+import { join } from 'path';
 import {
   CAPABILITY_DOMAINS,
   CAPABILITY_MATURITIES,
@@ -163,10 +165,10 @@ describe('Evolution Reconciliation V2 — honestidade epistemológica do registr
     }
   });
 
-  test('"Evolução recente" desde a baseline cobre as sete capacidades V5, e nada antes da baseline', () => {
+  test('"Evolução recente" desde a baseline cobre as sete capacidades V6, e nada antes da baseline', () => {
     const recent = listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date);
     const ids = new Set(recent.map((r) => r.capabilityId));
-    for (const id of V5_CAPABILITY_IDS) expect(ids.has(id)).toBe(true);
+    for (const id of V6_CAPABILITY_IDS) expect(ids.has(id)).toBe(true);
     expect(recent.every((r) => r.entry.at >= EVOLUTION_BASELINE.date)).toBe(true);
     expect(ids.has('interaction.chat')).toBe(false);
   });
@@ -248,9 +250,9 @@ describe('Evolution Reconciliation SDC-09 — ciclo SDC-01→SDC-08', () => {
     for (const commit of ['a15698f', '5aad729', '243b740']) expect(commitRefs('agency.recovery-correction')).toContain(commit);
   });
 
-  test('a Evolução recente inclui as sete capacidades reconciliadas em V5', () => {
+  test('a Evolução recente inclui as sete capacidades reconciliadas em V6', () => {
     const ids = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date).map((r) => r.capabilityId));
-    for (const id of V5_CAPABILITY_IDS) {
+    for (const id of V6_CAPABILITY_IDS) {
       expect(ids.has(id)).toBe(true);
     }
   });
@@ -357,7 +359,7 @@ describe('Evolution Reconciliation SDC-21', () => {
     expect(get('agency.investigation-sessions').maturity).toBe('implemented');
     expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => isRealizedMaturity(c.maturity))).toHaveLength(50);
     expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => isFutureMaturity(c.maturity))).toHaveLength(17);
-    expect(EVOLUTION_BASELINE).toEqual({ commit: '6226324', date: '2026-10-07', label: 'Evolution Reconciliation V4' });
+    expect(EVOLUTION_BASELINE).toEqual({ commit: 'e2fa7a8', date: '2026-10-20', label: 'Evolution Reconciliation V6' });
     const resident = get('interaction.resident-host');
     const added = resident.history?.filter((h) => h.at === '2026-10-07') ?? [];
     expect(added).toHaveLength(1);
@@ -440,7 +442,7 @@ describe('Evolution Reconciliation SDC-21', () => {
   });
 
   test('history e proofs têm refs não vazias, datas válidas, sem duplicação; evolução inclui os nós atualizados', () => {
-    const updated = V5_CAPABILITY_IDS;
+    const updated = V6_CAPABILITY_IDS;
     const recent = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date).map((r) => r.capabilityId));
     for (const id of updated) expect(recent.has(id)).toBe(true);
     for (const c of ANIMA_CAPABILITY_REGISTRY_V0) {
@@ -460,6 +462,132 @@ describe('Evolution Reconciliation SDC-21', () => {
       if (c.id in SDC_09_MATURITIES) {
         expect(history.filter((h) => h.change === 'maturity_changed' && h.at >= '2026-10-05')).toEqual([]);
       }
+    }
+  });
+});
+
+// Universo fechado autorizado para as novas entradas V6 (kind:ref).
+const V6_ALLOWED_REFS = new Set([
+  ...['2e153ed', 'd32a902', '1d6a7bb', '901a774', 'a6ebfa6', 'eb1f3eb', '7d3cf0e', 'e2fa7a8',
+    '2888118', '921634d', '7863c01', 'd72ddf5'].map((ref) => `commit:${ref}`),
+  ...['499b6222', '38e39912'].map((ref) => `work_item:${ref}`),
+  ...['2026-10-21-evolution-reconciliation-v6', '2026-10-20-l1-codex-wsl-perfil-nativo',
+    '2026-10-15-a1-v2-prova-execucao-independente-congelada', '2026-10-17-a2-0-r1-prova-operacional-a2r1-proof',
+    '2026-10-17-a2-0-r2-composicao-operacional', '2026-10-20-ux-trabalhos-incremento-1']
+    .map((name) => `record:docs/registros/${name}.md`),
+  'doc:docs/arquitetura/gate-isolation-prototype.md',
+]);
+
+// Dependências congeladas dos sete nós V6: a reconciliação não altera relações.
+const V6_DEPENDS_ON: Record<(typeof V6_CAPABILITY_IDS)[number], string[]> = {
+  'memory.cross-harness': ['agency.external-harness', 'memory.continuity'],
+  'agency.external-harness': ['agency.produce-change', 'governance.authority'],
+  'agency.isolated-workspace': [],
+  'governance.governed-integration': ['governance.review', 'agency.supervised-self-development'],
+  'agency.supervised-self-development': ['agency.produce-change', 'agency.verify-change', 'governance.review', 'interaction.resident-host'],
+  'governance.authority': ['memory.persistence'],
+  'interaction.web-interface': ['memory.persistence'],
+};
+
+describe('Evolution Reconciliation V6', () => {
+  const get = (id: string) => {
+    const capability = ANIMA_CAPABILITY_REGISTRY_V0.find((c) => c.id === id);
+    if (!capability) throw new Error(`capacidade ausente: ${id}`);
+    return capability;
+  };
+  const frontier = (id: string) => (get(id).frontier ?? []).join(' ');
+  const v6Entries = (id: string) => (get(id).history ?? []).filter((entry) => entry.at === '2026-10-21');
+
+  test('baseline V6 é e2fa7a8 de 2026-10-20 e nenhuma entrada V6 antecede a baseline', () => {
+    expect(EVOLUTION_BASELINE).toEqual({ commit: 'e2fa7a8', date: '2026-10-20', label: 'Evolution Reconciliation V6' });
+    for (const id of V6_CAPABILITY_IDS) expect(v6Entries(id).every((entry) => entry.at >= EVOLUTION_BASELINE.date)).toBe(true);
+  });
+
+  test('maturity conservadora: nada promovido, nada autônomo, mesma distribuição e relações congeladas', () => {
+    const maturities: Record<(typeof V6_CAPABILITY_IDS)[number], string> = {
+      'memory.cross-harness': 'implemented',
+      'agency.external-harness': 'implemented',
+      'agency.isolated-workspace': 'operational',
+      'governance.governed-integration': 'implemented',
+      'agency.supervised-self-development': 'proven',
+      'governance.authority': 'proven',
+      'interaction.web-interface': 'operational',
+    };
+    for (const id of V6_CAPABILITY_IDS) {
+      expect(get(id).maturity).toBe(maturities[id]);
+      expect(get(id).dependsOn).toEqual(V6_DEPENDS_ON[id]);
+    }
+    expect(ANIMA_CAPABILITY_REGISTRY_V0).toHaveLength(67);
+    expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.maturity === 'autonomous')).toEqual([]);
+    const counts: Record<string, number> = {};
+    for (const capability of ANIMA_CAPABILITY_REGISTRY_V0) counts[capability.maturity] = (counts[capability.maturity] ?? 0) + 1;
+    expect(counts).toEqual({ operational: 15, proven: 21, projected: 14, implemented: 14, specified: 3 });
+  });
+
+  test('cada nó V6 tem uma única entrada proof_added sem transição, com refs do universo autorizado', () => {
+    for (const id of V6_CAPABILITY_IDS) {
+      const entries = v6Entries(id);
+      expect(entries).toHaveLength(1);
+      const entry = entries[0];
+      if (!entry) throw new Error(`history V6 ausente: ${id}`);
+      expect(entry.change).toBe('proof_added');
+      expect(entry.from).toBeUndefined();
+      expect(entry.to).toBeUndefined();
+      expect(entry.refs.length).toBeGreaterThan(0);
+      for (const ref of entry.refs) {
+        expect(ref.kind).not.toBe('event');
+        expect(V6_ALLOWED_REFS.has(`${ref.kind}:${ref.ref}`)).toBe(true);
+      }
+    }
+    expect(v6Entries('compute.subscription-availability')).toEqual([]);
+  });
+
+  test('registros, documentos e testes citados pelas entradas e provas V6 existem no repositório', () => {
+    const root = join(__dirname, '..', '..', '..');
+    for (const id of [...V6_CAPABILITY_IDS, 'compute.subscription-availability']) {
+      const refs = [...(get(id).proofRefs ?? []), ...v6Entries(id).flatMap((entry) => entry.refs)];
+      for (const ref of refs) {
+        if (['record', 'doc', 'test'].includes(ref.kind) && /\.(md|ts|tsx|sql|ps1)$/.test(ref.ref)) {
+          expect({ ref: ref.ref, exists: existsSync(join(root, ref.ref)) }).toEqual({ ref: ref.ref, exists: true });
+        }
+      }
+    }
+  });
+
+  test('prova de laboratório do ai-memory não promove nem afirma compatibilidade com Codex WSL/L1', () => {
+    const cross = get('memory.cross-harness');
+    expect(cross.maturity).toBe('implemented');
+    expect(cross.reuse).toMatchObject({ tool: 'ai-memory', status: 'integrated' });
+    expect(v6Entries('memory.cross-harness')[0]?.note).toMatch(/LABORATÓRIO.*Não é prova no residente.*não cobre Codex WSL\/L1.*não promove a maturity/);
+    expect(frontier('memory.cross-harness')).toMatch(/Não suportado no Codex WSL\/L1/);
+    expect(frontier('memory.cross-harness')).toMatch(/Compatibilidade com Codex WSL\/L1 não é afirmada/);
+    expect(frontier('memory.cross-harness')).toMatch(/correlacionar automaticamente/);
+    expect(cross.advancement).toMatch(/LABORATÓRIO/);
+    expect(cross.advancement).toMatch(/Sem prova no residente/);
+  });
+
+  test('provas de laboratório e do residente ficam distinguidas nos nós de autonomia e execução', () => {
+    expect(frontier('governance.authority')).toMatch(/DESCARTÁVEL/);
+    expect(frontier('governance.authority')).toContain('20261017000000/1 não estão aplicadas no residente');
+    expect(frontier('governance.authority')).toContain('ANIMA_TRUSTED_REPO_ROOT');
+    expect(frontier('governance.authority')).toMatch(/nunca vira unattended_verified/);
+    expect(v6Entries('governance.authority')[0]?.note).toMatch(/Prova de LABORATÓRIO.*não há prova no residente/);
+    expect(frontier('agency.supervised-self-development')).toMatch(/autonomia não comprovada/);
+    expect(frontier('agency.supervised-self-development')).toMatch(/unattended_verified permanece 0/);
+    expect(frontier('agency.supervised-self-development')).toMatch(/RESIDENTE/);
+    expect(frontier('agency.external-harness')).toMatch(/LABORATÓRIO/);
+    expect(frontier('agency.external-harness')).toMatch(/ai-memory não é suportado no Codex WSL\/L1/);
+    expect(frontier('agency.external-harness')).toMatch(/quota/);
+    expect(frontier('compute.subscription-availability')).toMatch(/decisão humana aberta/);
+    expect(frontier('agency.isolated-workspace')).toMatch(/não no residente/);
+  });
+
+  test('integração: um recibo versionado não vira prova canônica geral; UX I2 fica fora da baseline', () => {
+    expect(frontier('governance.governed-integration')).toMatch(/apenas UMA integração/);
+    expect(get('governance.governed-integration').proofRefs?.some((p) => p.kind === 'event')).toBe(false);
+    expect(frontier('interaction.web-interface')).toMatch(/UX I2.*NÃO integrado/);
+    for (const capability of ANIMA_CAPABILITY_REGISTRY_V0) {
+      for (const ref of capability.proofRefs ?? []) expect(ref.ref).not.toContain('34ccf85');
     }
   });
 });
@@ -544,6 +672,12 @@ const V5_CAPABILITY_IDS = [
   'interaction.resident-host',
 ] as const;
 
+const V6_CAPABILITY_IDS = [
+  'memory.cross-harness', 'agency.external-harness', 'agency.isolated-workspace',
+  'governance.governed-integration', 'agency.supervised-self-development',
+  'governance.authority', 'interaction.web-interface',
+] as const;
+
 // Universo fechado autorizado para as novas entradas V5 (kind:ref).
 const V5_ALLOWED_REFS = new Set([
   ...['1a18fc8', '1f4b052', '3c7aab8', '828f2d1', '51a7919', 'c7a5571',
@@ -600,7 +734,7 @@ describe('Evolution Reconciliation V5', () => {
   test('janela recente exclui todo nó sem history desde a baseline', () => {
     const recent = listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date);
     const ids = new Set(recent.map((entry) => entry.capabilityId));
-    for (const id of V5_CAPABILITY_IDS) expect(ids.has(id)).toBe(true);
+    for (const id of V6_CAPABILITY_IDS) expect(ids.has(id)).toBe(true);
     for (const capability of ANIMA_CAPABILITY_REGISTRY_V0) {
       if (!(capability.history ?? []).some((entry) => entry.at >= EVOLUTION_BASELINE.date)) {
         expect(ids.has(capability.id)).toBe(false);

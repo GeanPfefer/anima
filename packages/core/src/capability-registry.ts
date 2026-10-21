@@ -38,16 +38,24 @@
 // reconciliadas em sete nós existentes, com baseline V4 e fronteiras humanas.
 // Nenhuma maturity, capacidade ou relação muda; verified permanece advisory.
 
+// Evolution Reconciliation V6 (2026-10-21): provas e implementações de 2026-10-15
+// a 2026-10-20 (A1-v2, A2-0 R1/R2, A3, E2, L1, UX-Trabalhos I1) e a prova de
+// laboratório do ai-memory reconciliadas em nós existentes, com baseline
+// e2fa7a8. Nenhuma maturity, capacidade ou relação muda. Prova de laboratório e
+// prova no residente são distinguidas em cada entrada; implementado ≠ comprovado
+// ≠ autônomo. Ver docs/registros/2026-10-21-evolution-reconciliation-v6.md.
+
 import { buildCapabilityGraph, type Capability, type CapabilityGraph } from './capability-map';
 
 /** Baseline da última Evolution relevante: "Evolução recente" = mudanças desde aqui. */
 export const EVOLUTION_BASELINE = {
-  commit: '6226324',
-  date: '2026-10-07',
-  label: 'Evolution Reconciliation V4',
+  commit: 'e2fa7a8',
+  date: '2026-10-20',
+  label: 'Evolution Reconciliation V6',
 } as const;
 
 const RECONCILIATION_V2_RECORD = 'docs/registros/2026-09-27c-evolution-reconciliation-v2.md';
+const RECONCILIATION_V6_RECORD = 'docs/registros/2026-10-21-evolution-reconciliation-v6.md';
 
 export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
   // ─── COMPREENSÃO ──────────────────────────────────────────────────────────
@@ -321,15 +329,18 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     },
     meaning: '≠ memory.continuity (checkpoint interno do Anima). Não fundir: esta é continuidade técnica de harnesses externos. Na integração atual o ai-memory é OPCIONAL nos backends nativos.',
     advancement:
-      'O wrap opcional existe em código e testes (backends Codex/Claude). Sem prova de uso real verificável aqui.',
+      'O wrap opcional existe em código e testes (backends Codex/Claude). Há uma prova operacional de LABORATÓRIO (2026-10-03, ai-memory 2.4.1, Windows nativo, Codex direto, fora do residente e de attempt governada), registrada por identificadores e hashes; ela não promove a maturity. Sem prova no residente, em attempt governada ou na rota Codex WSL/L1.',
     proofRefs: [
       { kind: 'commit', ref: '2e153ed', note: 'wrap do ai-memory nos backends Claude Code e Codex CLI (opcional)' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/native-cli-coder.ai-memory.test.ts' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/executor-selection.ai-memory.test.ts' },
+      { kind: 'record', ref: RECONCILIATION_V6_RECORD, note: 'prova de laboratório Claude→Codex→Claude pelo wrap (3 legs com exit 0, 28 eventos de ledger), só ids e hashes' },
     ],
     frontier: [
       'Trabalho futuro: correlacionar automaticamente o ledger/resume do ai-memory com attempt/lineage do ANIMA (não implementado).',
-      'Opcional e sem prova viva verificável; o ledger guarda prompts e arquivos em texto claro (risco declarado).',
+      'Opcional. A única prova viva é de laboratório (Windows nativo, Codex direto com CODEX_HOME isolado, antes de E2/L1) e não valida o executor governado atual; o ledger guarda prompts e arquivos em texto claro (risco declarado).',
+      'Não suportado no Codex WSL/L1: o código recusa ai-memory no transporte WSL e o Single-Item de assinatura o proíbe; hooks, servidor local e leitura de transcritos nativos tendem a colidir com a negação de ~/.codex e a rede desligada do L1 e com o --ignore-user-config do E2 (inferência, não testada). Compatibilidade com Codex WSL/L1 não é afirmada.',
+      'Versão fixada em 2.4.1; o upstream publicou versões posteriores (relato externo, até 3.1.2 em 2026-10-20) e a compatibilidade do wrap com elas não foi testada.',
     ],
     history: [
       {
@@ -346,6 +357,15 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         to: 'implemented',
         note: 'ai-memory embrulhado, de forma opcional, nos backends nativos. Implementado ≠ comprovado.',
         refs: [{ kind: 'commit', ref: '2e153ed' }],
+      },
+      {
+        at: '2026-10-21',
+        change: 'proof_added',
+        note: 'Prova operacional de LABORATÓRIO registrada (anima-labs, 2026-10-03): o wrap 2e153ed com ai-memory 2.4.1 conduziu Claude→Codex→Claude no mesmo workstream, 3 legs com exit 0, ledger 1–28, canários ausentes dos prompts e config global intacta. Não é prova no residente nem em attempt governada, não cobre Codex WSL/L1 e não promove a maturity (implemented preservada).',
+        refs: [
+          { kind: 'record', ref: RECONCILIATION_V6_RECORD },
+          { kind: 'commit', ref: '2e153ed' },
+        ],
       },
     ],
   },
@@ -414,6 +434,26 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     proofRefs: [
       { kind: 'commit', ref: '8dc2228', note: 'worktree resiliente a falha transitória de FS' },
       { kind: 'record', ref: 'docs/registros', note: 'ADR-001 worktree executor' },
+      { kind: 'commit', ref: 'a6ebfa6', note: 'A3: varredura sem seguir links, ANIMA_WORKTREE_PARENT fail-closed, node_modules só se apontam ao destino esperado' },
+      { kind: 'commit', ref: 'eb1f3eb', note: 'gates e Git do candidato com ambiente por allowlist e --git-dir confiável' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/workspace-guard.test.ts' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/worktree-git-isolation.test.ts' },
+      { kind: 'doc', ref: 'docs/arquitetura/gate-isolation-prototype.md' },
+    ],
+    frontier: [
+      'Os guardas A3 e o isolamento de credenciais do Host existem em código e testes; segundo os commits não há ACL real aplicada, ANIMA_GATE_SANDBOX no Host nem attempt governada que exerça esse modelo. Prova em laboratório/testes, não no residente.',
+    ],
+    history: [
+      {
+        at: '2026-10-21',
+        change: 'proof_added',
+        note: 'A3 e o isolamento de credenciais do Host (2026-10-17/19) endurecem a worktree: recusa de symlink, junction e hardlink do candidato, pai dedicado dos workspaces e Git confiável sobre o candidato. Código e testes; nada ativado no residente. Operational preservada.',
+        refs: [
+          { kind: 'commit', ref: 'a6ebfa6' },
+          { kind: 'commit', ref: 'eb1f3eb' },
+          { kind: 'doc', ref: 'docs/arquitetura/gate-isolation-prototype.md' },
+        ],
+      },
     ],
   },
   {
@@ -606,12 +646,14 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'commit', ref: '52a745e', note: 'endurecimento SQL do receipt após auditoria' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/integration-effect.integration.test.ts' },
       { kind: 'test', ref: 'supabase/tests/integration_effect.test.sql' },
+      { kind: 'record', ref: 'docs/registros/2026-10-15-a1-v2-prova-execucao-independente-congelada.md', note: 'autorização humana, receipt ff_only e integration_completed de UMA integração (A1-v2) versionados com seqs e SHAs' },
+      { kind: 'record', ref: 'docs/registros/2026-10-20-ux-trabalhos-incremento-1.md', note: 'projeção de leitura integrated (e2fa7a8); o commit e o teste da projeção pertencem à interface, não ao primitive' },
     ],
     frontier: [
       'CLI/UX first-class de integração governada ainda missing: o primitive é só biblioteca; Modo W é fase posterior.',
       'Clone dedicado necessário: guarda target_checked_out impede integrar no checkout humano ativo.',
       'Sync do checkout humano é manual; push é manual e não existe push governado.',
-      'Os commits integrados em dev por ff_only são versionados; a prova de autorização e do receipt de integration_completed continua no ledger, não versionada; o caminho segue por wrappers por item fora do repositório.',
+      'Os commits integrados em dev por ff_only são versionados; a autorização e o receipt de integration_completed de apenas UMA integração (A1-v2, 86819/86820) estão versionados no registro de 2026-10-15; as demais continuam só no ledger; o caminho segue por wrappers por item fora do repositório.',
     ],
     history: [
       {
@@ -643,6 +685,17 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'commit', ref: 'af9c557' },
         ],
       },
+      {
+        at: '2026-10-21',
+        change: 'proof_added',
+        note: 'Um recibo ff_only completo está agora versionado (A1-v2: integration_effect_authorized 86819 humano; integration_completed 86820 pelo Trusted System Writer; ed586e53 → 3b8e1cbe; mergeCommitSha nulo). A projeção de leitura (e2fa7a8) separa integração efetivada de decisão; o registro UX-Trabalhos relata 22 de 53 itens completed projetados como integrated numa leitura do ledger vivo (não reproduzida nesta reconciliação). Sem CLI first-class, sem push governado; implemented preservada.',
+        refs: [
+          { kind: 'record', ref: 'docs/registros/2026-10-15-a1-v2-prova-execucao-independente-congelada.md' },
+          { kind: 'record', ref: 'docs/registros/2026-10-20-ux-trabalhos-incremento-1.md' },
+          { kind: 'commit', ref: '7d3cf0e' },
+          { kind: 'commit', ref: 'e2fa7a8' },
+        ],
+      },
     ],
   },
   {
@@ -667,8 +720,16 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'work_item', ref: '8a2515d8', note: 'work item que foi fim-a-fim até review→completed com OpenAI forte (2026-09-11)' },
       { kind: 'milestone', ref: 'docs/marcos/008-dev-local-v1-review-rework-incremental.md' },
       { kind: 'verifier', ref: 'f6c326b1/515c4d83', note: 'verified (0 violações, 0 lacunas, 13 checks) + aceite humano (result_accepted 54738)' },
+      { kind: 'work_item', ref: '499b6222', note: 'A1-v2: execução agendada após pré-mandato humano, Verifier v6 verified, A1_PASSED' },
+      { kind: 'work_item', ref: '38e39912', note: 'A2R1-PROOF: primeiro fato real de execution_mode/actor_kind (PASS 15/14); permanece em review' },
+      { kind: 'record', ref: 'docs/registros/2026-10-15-a1-v2-prova-execucao-independente-congelada.md' },
+      { kind: 'record', ref: 'docs/registros/2026-10-17-a2-0-r1-prova-operacional-a2r1-proof.md' },
+      { kind: 'commit', ref: '2888118', note: 'A2-0 R1: fato host_observed_execution_context_recorded (migrations aplicadas no residente segundo o registro)' },
     ],
-    frontier: ['autonomia não comprovada: cada item exigiu proposta, aprovação, classificação humana e aceite humano; integrações por wrappers por item fora do repositório, sem CLI first-class de integração; sync do checkout e push seguem manuais.'],
+    frontier: [
+      'autonomia não comprovada: cada item exigiu proposta, aprovação, classificação humana e aceite humano; integrações por wrappers por item fora do repositório, sem CLI first-class de integração; sync do checkout e push seguem manuais.',
+      'A1-v2 e A2R1-PROOF são provas no RESIDENTE por declaração do launcher mais ausência de eventos humanos entre o pré-mandato e o parecer; pré-mandato, aceite e integração foram atos humanos; a métrica os classifica como human_observed e unattended_verified permanece 0. O A2R1-PROOF segue em review, sem aceite (decisão D4).',
+    ],
     history: [
       {
         at: '2026-09-27',
@@ -693,6 +754,18 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'work_item', ref: 'c42ccb12' },
           { kind: 'commit', ref: 'a4f46f8' },
           { kind: 'record', ref: 'docs/registros/2026-10-13-single-item-promocao-residente.md' },
+        ],
+      },
+      {
+        at: '2026-10-21',
+        change: 'proof_added',
+        note: 'Duas provas no residente de execução agendada após pré-mandato humano: A1-v2 (A1_PASSED, Verifier v6 verified; aceite humano 86818 e integração 86819/86820 posteriores) e A2R1-PROOF (fato real de contexto de execução 86832, PASS 15/14, item em review). Ambas são human_observed: unattended_verified = 0. O ciclo permanece supervisionado; proven preservada.',
+        refs: [
+          { kind: 'work_item', ref: '499b6222' },
+          { kind: 'work_item', ref: '38e39912' },
+          { kind: 'record', ref: 'docs/registros/2026-10-15-a1-v2-prova-execucao-independente-congelada.md' },
+          { kind: 'record', ref: 'docs/registros/2026-10-17-a2-0-r1-prova-operacional-a2r1-proof.md' },
+          { kind: 'commit', ref: '2888118' },
         ],
       },
     ],
@@ -905,8 +978,15 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'commit', ref: '6eb2dee', note: 'CoderTaskSpecV1 preservada até o coder' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/codex-cli-coder.worktree.test.ts' },
       { kind: 'test', ref: 'apps/web/lib/work-orchestration/claude-code-coder.worktree.test.ts' },
+      { kind: 'commit', ref: 'd32a902', note: 'E2: Codex governado ignora config pessoal e desliga ferramentas fora do sandbox (prova em laboratório)' },
+      { kind: 'commit', ref: '1d6a7bb', note: 'script de ACL da raiz do CodexHome (simulação por padrão; réplicas fictícias)' },
+      { kind: 'commit', ref: '901a774', note: 'L1: perfil nativo de permissões do Codex WSL com pré-voo por turno (prova em laboratório descartável)' },
+      { kind: 'record', ref: 'docs/registros/2026-10-20-l1-codex-wsl-perfil-nativo.md' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/codex-cli-coder.test.ts' },
     ],
     frontier: [
+      'E2 (d32a902), ACL do CodexHome (1d6a7bb) e L1 (901a774) estão no código e foram provados em LABORATÓRIO (réplicas fictícias e lab descartável); segundo os commits, não há ACL real aplicada nem ANIMA_GATE_SANDBOX no Host, e nenhum registro lido mostra attempt governada do residente exercendo o perfil L1.',
+      'ai-memory não é suportado no Codex WSL/L1 (o código recusa o wrap no transporte WSL); ver memory.cross-harness. Sem seleção ou troca automática de agente quando a quota termina.',
       '12 itens integrados usaram coder_backend codex-cli, mas o uso real por registro do ledger não promove maturity; a classe de authority da assinatura segue decisão humana',
       'Prova de uso real reportada pelo operador não promove maturity sem registro canônico versionado.',
       'A classe de authority da quota de assinatura segue decisão humana; diagnóstico não certifica quota disponível.',
@@ -952,6 +1032,17 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'record', ref: 'docs/registros/2026-10-13-single-item-gate-integracao.md' },
           { kind: 'work_item', ref: 'd795e414' },
           { kind: 'work_item', ref: 'c42ccb12' },
+        ],
+      },
+      {
+        at: '2026-10-21',
+        change: 'proof_added',
+        note: 'Fronteira do Codex governado endurecida em 2026-10-19/20: E2 (config pessoal e ferramentas fora do sandbox), ACL da raiz do CodexHome e L1 (perfil nativo de permissões no WSL, pré-voo por turno). Provas em LABORATÓRIO; nada consta como aplicado no residente. O wrap ai-memory continua recusado no transporte WSL. Implemented preservada; a classe de authority da quota de assinatura segue decisão humana.',
+        refs: [
+          { kind: 'commit', ref: 'd32a902' },
+          { kind: 'commit', ref: '1d6a7bb' },
+          { kind: 'commit', ref: '901a774' },
+          { kind: 'record', ref: 'docs/registros/2026-10-20-l1-codex-wsl-perfil-nativo.md' },
         ],
       },
     ],
@@ -1069,6 +1160,14 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'route', ref: 'apps/web/app/api/work-orchestration/paid-compute-authorizations' },
       { kind: 'commit', ref: 'af3d215', note: 'espera por authority paga visível e ato humano de concessão' },
       { kind: 'commit', ref: 'd6968d5', note: 'espera estável (mesmo decision_id no replay)' },
+      { kind: 'commit', ref: '921634d', note: 'A2-0 R2: Acceptance Mandate V1 (grantor dedicado, mandato antecipado por item+versão+hash)' },
+      { kind: 'commit', ref: '7863c01', note: 'A2-0 R2: composição com Git confiável, ledger e Trusted System Writer' },
+      { kind: 'doc', ref: 'docs/arquitetura/acceptance-mandate-v1.md' },
+      { kind: 'record', ref: 'docs/registros/2026-10-17-a2-0-r2-composicao-operacional.md', note: 'E2E 11/11 e pgTAP 175/175 em banco descartável; nada aplicado no residente' },
+    ],
+    frontier: [
+      'Acceptance Mandate V1 (A2-0 R2) tem código, pgTAP 175/175 e E2E 11/11 em banco DESCARTÁVEL; segundo os registros até 2026-10-17 (não reverificado no banco nesta reconciliação), as migrations 20261017000000/1 não estão aplicadas no residente, o grantor e ANIMA_TRUSTED_REPO_ROOT não estão provisionados e não houve prova viva com item novo (mandato antes da attempt). O A2R1-PROOF é o caso negativo (not_anticipated).',
+      'Mandato é concessão humana antecipada: não promove autonomia por evidência, conceder/revogar conta como ato humano e um ciclo mandatado nunca vira unattended_verified.',
     ],
     history: [
       {
@@ -1079,6 +1178,16 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         refs: [
           { kind: 'commit', ref: '341564f' },
           { kind: 'record', ref: 'docs/registros/2026-09-25b-caminho-normal-ate-authority-sem-scripts.md' },
+        ],
+      },
+      {
+        at: '2026-10-21',
+        change: 'proof_added',
+        note: 'A2-0 R2 implementado e publicado em dev (921634d, 7863c01): aceite sob mandato humano antecipado, provado em banco descartável (pgTAP 175/175, E2E 11/11, 5/5 mutações). Prova de LABORATÓRIO; não há prova no residente e as migrations R2 não constam como aplicadas. Proven preservada; a authority pontual continua efêmera.',
+        refs: [
+          { kind: 'commit', ref: '921634d' },
+          { kind: 'commit', ref: '7863c01' },
+          { kind: 'record', ref: 'docs/registros/2026-10-17-a2-0-r2-composicao-operacional.md' },
         ],
       },
     ],
@@ -1447,6 +1556,9 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     },
     meaning: 'Só faz sentido quando houver harness por assinatura como opção do Router.',
     advancement: 'O harness externo já existe em código (implementado); falta um POC de auth com credencial de observador.',
+    frontier: [
+      'A autoridade sobre a quota de assinatura (autoridade nova, preferência ou orçamento local) é decisão humana aberta; nenhuma leitura real de quota foi feita e não há seleção ou troca automática de agente quando a quota termina.',
+    ],
     history: [
       {
         at: '2026-09-27',
@@ -1557,7 +1669,28 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     dependsOn: ['memory.persistence'],
     meaning: 'A camada visual que projeta o estado do Anima — inclui esta própria tela de evolução.',
     advancement: 'Operacional; esta tela /evolution é o V0 da projeção do autoconhecimento do sistema.',
-    proofRefs: [{ kind: 'route', ref: 'apps/web/app/(app)', note: 'grupo de rotas do app' }],
+    proofRefs: [
+      { kind: 'route', ref: 'apps/web/app/(app)', note: 'grupo de rotas do app' },
+      { kind: 'commit', ref: 'd72ddf5', note: 'UX-TRABALHOS I1: /trabalhos com catálogo paginado, busca global e detalhe por referência' },
+      { kind: 'commit', ref: 'e2fa7a8', note: 'correção de proposta desabilitada no detalhe; integração efetivada projetada como integrada' },
+      { kind: 'record', ref: 'docs/registros/2026-10-20-ux-trabalhos-incremento-1.md' },
+      { kind: 'test', ref: 'apps/web/lib/work-orchestration/work-catalog.test.ts' },
+    ],
+    frontier: [
+      'UX-TRABALHOS I1 é só leitura (catálogo, busca, detalhe), provado por Jest e por leitura real somente-leitura registrada. O incremento UX I2 (branch claude/ux-trabalhos-2) está preservado e NÃO integrado: não faz parte desta baseline. A busca usa ilike sem índice.',
+    ],
+    history: [
+      {
+        at: '2026-10-21',
+        change: 'proof_added',
+        note: 'Área dedicada de Trabalhos (/trabalhos, /trabalhos/[referencia]) e projeção honesta de integração efetivada, publicadas em dev em 2026-10-20. Interface de leitura; não altera autoridade nem banco. Operational preservada.',
+        refs: [
+          { kind: 'commit', ref: 'd72ddf5' },
+          { kind: 'commit', ref: 'e2fa7a8' },
+          { kind: 'record', ref: 'docs/registros/2026-10-20-ux-trabalhos-incremento-1.md' },
+        ],
+      },
+    ],
   },
   {
     id: 'interaction.resident-host',
