@@ -205,6 +205,18 @@ export function runIsolated(
 }
 
 /**
+ * Git do HOST sobre o repositório PRINCIPAL de um target EXTERNO (T1-R2). O repositório é de terceiros: hooks
+ * (`post-checkout` roda em `git worktree add`), `core.fsmonitor` e config local podem executar código no Host. Aqui o ambiente é
+ * construído do zero (sem GIT_* nem segredos, config global desligada), hooks/fsmonitor desligados por `-c` e o processo
+ * inicia fora do repositório. Só o target externo passa por aqui; o caminho do Anima segue com `git()`.
+ */
+function hardenedRepoGit(repo: string, args: readonly string[], signal?: AbortSignal): Promise<CommandResult> {
+  return runProcess('git', ['--no-pager', '--no-replace-objects', '-C', repo,
+    '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.untrackedCache=false', '-c', 'protocol.allow=never', ...args],
+  { cwd: tmpdir(), timeoutMs: 60_000, signal, env: candidateGitEnvironment() });
+}
+
+/**
  * Ambiente do Git sobre o candidato: construído do zero (sem segredos, sem GIT_* herdado, config GLOBAL do usuário desligada).
  * A config de SISTEMA (gravável só por Administradores; no Git for Windows traz `core.autocrlf`/`core.symlinks`) é mantida para que
  * o conteúdo restaurado/commitado tenha as mesmas quebras de linha com que a worktree foi criada.
@@ -322,7 +334,13 @@ export class GitWorktree {
     // mudar, medido sempre contra ela). `startSha` é o ESTADO INICIAL da árvore —
     // igual à base numa tentativa nova, ou o commit do checkpoint numa RETOMADA.
     private readonly baseSha: string, private readonly startSha: string,
+    /** Target externo: toda operação Git sobre o repositório principal usa `hardenedRepoGit`. */
+    private readonly hardenedGit: boolean = false,
   ) {}
+
+  private repoGit(args: readonly string[], signal?: AbortSignal): Promise<CommandResult> {
+    return this.hardenedGit ? hardenedRepoGit(this.repoRoot, args, signal) : git(this.repoRoot, args, signal);
+  }
 
   static async create(input: {
     readonly repoRoot: string; readonly sha: string; readonly branch: string;
@@ -330,8 +348,12 @@ export class GitWorktree {
      * ⇒ nova tentativa a partir da base (comportamento idêntico ao anterior). O
      * diff continua sendo medido contra `sha` (a base autorizada), não contra este. */
     readonly startSha?: string;
+    /** Repositório EXTERNO (de terceiros): Git do Host endurecido (sem hooks/fsmonitor, ambiente limpo). */
+    readonly hardenedGit?: boolean;
     readonly signal?: AbortSignal;
   }): Promise<GitWorktree> {
+    const repoGit = (args: readonly string[]) => input.hardenedGit === true
+      ? hardenedRepoGit(input.repoRoot, args, input.signal) : git(input.repoRoot, args, input.signal);
     const start = input.startSha ?? input.sha;
     // Checkout completo do estado inicial numa branch nova. Numa retomada, esse
     // estado é o commit do checkpoint da tentativa anterior; a nova branch parte
@@ -357,9 +379,9 @@ export class GitWorktree {
       }
       const base = await mkdtemp(join(parent, 'anima-wt-'));
       const root = join(base, 'tree');
-      const created = await git(input.repoRoot, ['worktree', 'add', '-b', input.branch, root, start], input.signal);
+      const created = await repoGit(['worktree', 'add', '-b', input.branch, root, start]);
       if (created.exitCode === 0) {
-        return new GitWorktree(input.repoRoot, root, input.branch, base, input.sha, start);
+        return new GitWorktree(input.repoRoot, root, input.branch, base, input.sha, start, input.hardenedGit === true);
       }
       lastError = created.stderr.trim() || created.stdout.trim() || String(created.exitCode);
       await rm(base, { recursive: true, force: true }).catch(() => {});
@@ -368,8 +390,8 @@ export class GitWorktree {
       // Limpa qualquer estado parcial que uma criação abortada possa ter deixado antes
       // de repetir com o MESMO nome de branch (idempotência): entrada administrativa órfã
       // (`prune`, pois o diretório TEMP já foi removido) e a branch, se chegou a existir.
-      await git(input.repoRoot, ['worktree', 'prune'], input.signal).catch(() => {});
-      await git(input.repoRoot, ['branch', '-D', input.branch], input.signal).catch(() => {});
+      await repoGit(['worktree', 'prune']).catch(() => {});
+      await repoGit(['branch', '-D', input.branch]).catch(() => {});
       await sleep(150 * attempt, input.signal);
     }
     throw new Error(`Falha ao criar worktree: ${lastError}`);
@@ -765,9 +787,9 @@ export class GitWorktree {
   async dispose(options: { readonly deleteBranch?: boolean } = {}): Promise<void> {
     await this.unlinkNodeModules();
     await removeHostileWorkspaceLinks(this.root).catch(() => []);
-    await git(this.repoRoot, ['worktree', 'remove', '--force', this.root]).catch(() => {});
-    await git(this.repoRoot, ['worktree', 'prune']).catch(() => {});
+    await this.repoGit(['worktree', 'remove', '--force', this.root]).catch(() => {});
+    await this.repoGit(['worktree', 'prune']).catch(() => {});
     await rm(this.base, { recursive: true, force: true }).catch(() => {});
-    if (options.deleteBranch) await git(this.repoRoot, ['branch', '-D', this.branch]).catch(() => {});
+    if (options.deleteBranch) await this.repoGit(['branch', '-D', this.branch]).catch(() => {});
   }
 }

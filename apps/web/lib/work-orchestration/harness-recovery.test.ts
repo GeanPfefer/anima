@@ -17,7 +17,10 @@ const git = (overrides: Partial<HarnessRecoveryGitPort> = {}): HarnessRecoveryGi
 });
 const client = (rpcResult: { data: unknown; error: unknown } = { data: { recoveryId: 'r1', successorWorkItemId: 's1', lineageId: 'l1', sourceAttemptId: 'c284f09c', replayed: false }, error: null }) => {
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
-  const c = { rpc: async (fn: string, args: Record<string, unknown>) => { calls.push({ fn, args }); return rpcResult; } } as unknown as SupabaseClient<Database>;
+  const chain: Record<string, unknown> = {};
+  for (const m of ['select', 'eq']) chain[m] = () => chain;
+  chain['single'] = async () => ({ data: { intent: { execution_spec: { target: { kind: 'project', reference: 'anima' } } } }, error: null }); // guarda de target externo (T1-R2)
+  const c = { from: () => chain, rpc: async (fn: string, args: Record<string, unknown>) => { calls.push({ fn, args }); return rpcResult; } } as unknown as SupabaseClient<Database>;
   return { c, calls };
 };
 const request = { fixCommits: ['d17dcbe'], evidenceReference: 'docs/registros/2026-09-25g-segunda-prova-paga-dev-readiness.md', reason: 'Defeito de harness corrigido: revisão de diff de arquivo novo' };

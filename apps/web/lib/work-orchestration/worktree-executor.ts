@@ -67,6 +67,8 @@ export interface WorktreeTarget {
   /** Commit do checkpoint durável a partir do qual RETOMAR. Ausente ⇒ nova
    * tentativa a partir de `sha`. O diff continua medido contra `sha` (base). */
   readonly startSha?: string;
+  /** Target EXTERNO (repositório de terceiros): o Git do Host sobre o repositório principal é endurecido. */
+  readonly hardenedGit?: boolean;
 }
 export interface WorktreeTargetResolver { resolve(reference: string): WorktreeTarget | null; }
 
@@ -283,7 +285,7 @@ export class WorktreeExecutorAdapter implements WorkExecutorAdapter {
     };
     try {
       try {
-        worktree = await GitWorktree.create({ repoRoot: target.repoRoot, sha: target.sha, startSha: target.startSha, branch, signal });
+        worktree = await GitWorktree.create({ repoRoot: target.repoRoot, sha: target.sha, startSha: target.startSha, ...(target.hardenedGit ? { hardenedGit: true } : {}), branch, signal });
       } catch (error) {
         yield attach(++seq, { kind: 'error', code: 'execution_failed', message: `Falha ao criar a worktree isolada: ${clip(error instanceof Error ? error.message : String(error))}`, retryable: true, handoffReference: 'checkpoint:worktree-create-failed' });
         return;

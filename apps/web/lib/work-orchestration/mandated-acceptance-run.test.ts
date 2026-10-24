@@ -104,6 +104,17 @@ describe('composição operacional do aceite sob mandato (Git real + ledger + wr
     expect(h.resolveReader).not.toHaveBeenCalled(); expect(h.read).not.toHaveBeenCalled(); expect(h.accept).not.toHaveBeenCalled();
   });
 
+  test('T1-R2: item com target externo é recusado pelo aceite sob mandato, sem inspecionar o Git do Anima nem chamar o sink', async () => {
+    const repo = createRepo(); const reads = world({ repo });
+    const identity = { repo_root_canonical: '/srv/shop', git_common_dir_canonical: '/srv/shop/.git', root_commit_sha: 'b'.repeat(40), base_sha: 'a'.repeat(40) };
+    const external: AcceptanceReads = { ...reads, item: { ...reads.item, intent: { execution_spec: { target: { kind: 'project', reference: 'ext:shop', identity } } } } };
+    const runGitFor = jest.fn();
+    const h = harness(external, { runGitFor });
+    expect(await runAcceptMandatedCli(args(repo), h.deps)).toBe(ACCEPT_EXIT.REFUSED);
+    expect(h.out()).toMatchObject({ ok: false, error: 'external_target_not_supported_downstream' });
+    expect(runGitFor).not.toHaveBeenCalled(); expect(h.accept).not.toHaveBeenCalled();
+  });
+
   test('writer indisponível: falha ANTES de ler ou inspecionar o Git, sem efeito e sem cair para a sessão residente', async () => {
     const repo = createRepo(); const h = harness(world({ repo }), { writer: UNAVAILABLE_TRUSTED_SYSTEM_WRITER });
     expect(await runAcceptMandatedCli(args(repo), h.deps)).toBe(ACCEPT_EXIT.REFUSED);

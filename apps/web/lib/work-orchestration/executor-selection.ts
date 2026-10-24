@@ -423,7 +423,7 @@ export function resolveExecutorRoute(
     // (o edit anterior preservado), enquanto o diff continua contra a base.
     const startSha = contract.resumeCheckpointCommitSha ?? undefined;
     const adapter = new WorktreeExecutorAdapter({
-      targets: { resolve: ref => ref === reference ? { repoRoot, sha: baseSha, ...(startSha ? { startSha } : {}) } : null },
+      targets: { resolve: ref => ref === reference ? { repoRoot, sha: baseSha, ...(startSha ? { startSha } : {}), ...(isExternal ? { hardenedGit: true } : {}) } : null },
       backend,
       emitCheckpoint: true,
       linkNodeModules: true,

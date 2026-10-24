@@ -1,6 +1,6 @@
 /** @jest-environment node */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readExternalTarget } from '@anima/core';
@@ -28,7 +28,7 @@ afterAll(() => { for (const dir of sandboxes) rmSync(dir, { recursive: true, for
 const envFor = (reference: string, repoRoot: string, rootCommitSha: string): Record<string, string | undefined> =>
   ({ [EXTERNAL_TARGET_ENV]: JSON.stringify({ reference, repoRoot, rootCommitSha }) });
 // "Anima" simulado: outro repositório descartável. Nunca o checkout real.
-const depsWithAnima = (animaRoot: string): ExternalTargetDeps => ({ ...defaultExternalTargetDeps, animaRoot: () => animaRoot });
+const depsWithAnima = (animaRoot: string): ExternalTargetDeps => ({ ...defaultExternalTargetDeps, animaRoot: () => animaRoot, isAnimaRoot: root => existsSync(join(root, '.git')) });
 const contractFor = (specTarget: Record<string, unknown>, baseSha: string) =>
   readExecutionContract({ execution_spec: { executor: 'worktree', coder_backend: 'ollama', base_sha: baseSha, target: specTarget } });
 
@@ -202,5 +202,56 @@ describe('recusas antes do claim', () => {
     const repo = makeRepo('shop'); const anima = makeRepo('fake-anima');
     expect(await inspectExternalTarget({ reference: 'ext:shop', repoRoot: repo.root, rootCommitSha: 'e'.repeat(40) }, null, depsWithAnima(anima.root)))
       .toMatchObject({ ok: false, code: 'external_target_root_commit_mismatch' });
+  });
+});
+
+describe('raiz do Anima comprovada (T1-R2 P2-2): nunca falha aberta', () => {
+  const targetCfg = (repo: { root: string; rootSha: string }) => ({ reference: 'ext:shop', repoRoot: repo.root, rootCommitSha: repo.rootSha });
+  const REFUSAL = { ok: false, code: 'external_target_anima_root_unknown' };
+
+  test('raiz do Anima inexistente, inválida, ilegível ou que lança ⇒ recusa explícita', async () => {
+    const repo = makeRepo('shop'); const gone = join(repo.root, '..', 'nao-existe');
+    const noMarkers = mkdtempSync(join(tmpdir(), 't1-nomark-')); sandboxes.push(noMarkers);
+    const real = makeRepo('fake-anima');
+    const cases: ExternalTargetDeps[] = [
+      { ...defaultExternalTargetDeps, animaRoot: () => gone, isAnimaRoot: () => true },                                          // ausente
+      { ...defaultExternalTargetDeps, animaRoot: () => noMarkers },                                                              // sem marcadores do monorepo (prova padrão)
+      { ...defaultExternalTargetDeps, animaRoot: () => real.root, isAnimaRoot: () => true,
+        realpath: path => { if (path.startsWith(real.root)) throw new Error('EACCES'); return realpathSync.native(path); } },    // ilegível
+      { ...defaultExternalTargetDeps, animaRoot: () => { throw new Error('boom'); } },                                           // projectRoot lança
+      { ...defaultExternalTargetDeps, animaRoot: () => real.root, isAnimaRoot: () => true,
+        realpath: path => { if (path.endsWith('.git') && path.startsWith(real.root)) throw new Error('ENOENT'); return realpathSync.native(path); } }, // .git do Anima ilegível
+    ];
+    for (const deps of cases) expect(await inspectExternalTarget(targetCfg(repo), null, deps)).toMatchObject(REFUSAL);
+  });
+
+  test('cwd arbitrário NÃO é prova de identidade do Anima (projectRoot cai no cwd)', async () => {
+    const repo = makeRepo('shop');
+    const arbitrary = mkdtempSync(join(tmpdir(), 't1-cwd-')); sandboxes.push(arbitrary);
+    const deps: ExternalTargetDeps = { ...defaultExternalTargetDeps, animaRoot: () => arbitrary }; // isAnimaRoot padrão = marcadores reais do monorepo
+    expect(await inspectExternalTarget(targetCfg(repo), null, deps)).toMatchObject(REFUSAL);
+  });
+
+  test('com a prova PADRÃO (marcadores do monorepo), alvo direto e via junction para o Anima são recusados como is_anima', async () => {
+    const anima = makeRepo('fake-anima');
+    mkdirSync(join(anima.root, 'apps', 'web'), { recursive: true });
+    writeFileSync(join(anima.root, 'package.json'), '{}'); writeFileSync(join(anima.root, 'apps', 'web', 'package.json'), '{}');
+    const deps: ExternalTargetDeps = { ...defaultExternalTargetDeps, animaRoot: () => anima.root };
+    expect(await inspectExternalTarget(targetCfg(anima), null, deps)).toMatchObject({ ok: false, code: 'external_target_is_anima' });
+    const via = mkdtempSync(join(tmpdir(), 't1-junc-')); sandboxes.push(via);
+    symlinkSync(anima.root, join(via, 'alias'), 'junction');
+    expect(await inspectExternalTarget({ ...targetCfg(anima), repoRoot: join(via, 'alias') }, null, deps)).toMatchObject({ ok: false, code: 'external_target_is_anima' });
+    // e um repositório legítimo e distinto continua passando com a mesma prova
+    const shop = makeRepo('shop');
+    expect(await inspectExternalTarget(targetCfg(shop), null, deps)).toMatchObject({ ok: true });
+  });
+
+  test('a verificação pré-claim (verifyExternalTargetForContract) também falha fechada sem a raiz do Anima', async () => {
+    const repo = makeRepo('shop'); const anima = makeRepo('fake-anima');
+    const env = envFor('ext:shop', repo.root, repo.rootSha);
+    const captured = await captureExternalTargetSpec(env, { deps: depsWithAnima(anima.root) });
+    if (!captured.ok) throw new Error('setup');
+    const broken: ExternalTargetDeps = { ...defaultExternalTargetDeps, animaRoot: () => join(repo.root, '..', 'nao-existe'), isAnimaRoot: () => true };
+    expect(await verifyExternalTargetForContract(contractFor(captured.specTarget, repo.headSha), env, broken)).toMatchObject(REFUSAL);
   });
 });

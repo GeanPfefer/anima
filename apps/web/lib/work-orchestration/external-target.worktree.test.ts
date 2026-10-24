@@ -52,7 +52,7 @@ test('target externo: identidade preservada da autorização ao Git observado, s
     'package.json': JSON.stringify({ name: 'shop', private: true, version: '0.0.0', scripts: { test: 'node -e "process.exit(0)"' } }),
     'src/existing.ts': 'export const one = 1;\n',
   });
-  const anima = makeRepo('fake-anima', { 'README.md': 'anima\n' });
+  const anima = makeRepo('fake-anima', { 'README.md': 'anima\n', 'package.json': '{}', 'apps/web/package.json': '{}' }); // marcadores reais do monorepo: prova PADRÃO da raiz do Anima
   const deps = { ...defaultExternalTargetDeps, animaRoot: () => anima.root };
   const env = { [EXTERNAL_TARGET_ENV]: JSON.stringify({ reference: 'ext:shop', repoRoot: ext.root, rootCommitSha: ext.rootSha }) };
 
@@ -88,7 +88,7 @@ test('target externo: identidade preservada da autorização ao Git observado, s
   expect(existsSync(join(ext.root, 'src', 'added.ts'))).toBe(false);
   expect(git(ext.root, 'branch', '--list', `anima-work/${req.attemptId}`)).toContain(req.attemptId);
   expect(git(anima.root, 'branch', '--list', 'anima-work/*')).toBe('');
-  expect(readdirSync(anima.root).filter(f => f !== '.git')).toEqual(['README.md']);
+  expect(readdirSync(anima.root).filter(f => f !== '.git').sort()).toEqual(['README.md', 'apps', 'package.json']);
 
   // 5) Git observado no MESMO repositório verificado (evidência de primeira parte)
   const recorded: Array<{ observedCommitSha: string; observedChangedFiles: readonly string[]; baseSha: string }> = [];

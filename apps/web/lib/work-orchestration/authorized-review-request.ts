@@ -2,13 +2,14 @@ import {buildProtectedIntegrationRequest,projectBranchPublicationReceipt,project
 import type{Database}from'@anima/types';import type{SupabaseClient}from'@supabase/supabase-js';
 import{createAndPersistReviewRequest,supabaseReviewReceiptPersistence}from'./review-request-operation';
 import{createWorkOrchestrationService}from'./server';
+import{EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM,externalTargetDownstreamRefusal}from'./external-target-downstream';
 
 // Precondições fail-closed sobre o estado persistido para a criação de review
 // request. Distintas de erro inesperado: código estável para o HTTP mapear como
 // 409/404, nunca 500. NUNCA carregam caminho, remote, token ou dado sensível.
 // `branch_not_published` é a ordenação do protocolo (ADR-002): review exige a
 // branch já publicada e persistida.
-export type ReviewRequestPreconditionCode='authorization_not_found'|'handoff_not_found'|'request_not_derivable'|'item_mismatch'|'branch_not_published'|'receipt_projection_conflict'|'remote_drift';
+export type ReviewRequestPreconditionCode='authorization_not_found'|'handoff_not_found'|'request_not_derivable'|'item_mismatch'|'branch_not_published'|'receipt_projection_conflict'|'remote_drift'|typeof EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM;
 export class ReviewRequestPrecondition extends Error{constructor(readonly code:ReviewRequestPreconditionCode,message:string){super(message);this.name='ReviewRequestPrecondition';}}
 
 export type ReviewRequestReader=(workItemId:string)=>Promise<readonly WorkEvent[]>;
@@ -27,5 +28,10 @@ export async function executeAuthorizedReviewRequest(input:{readonly workItemId:
 }
 
 export async function executeAuthorizedReviewRequestWithSupabase(client:SupabaseClient<Database>,input:{readonly workItemId:string;readonly target:IntegrationTarget;readonly provider:ReviewRequestProvider;readonly signal?:AbortSignal}){
-  const service=createWorkOrchestrationService(client);return executeAuthorizedReviewRequest({...input,readEvents:async id=>{const result=await service.listEvents(id);if(!result.ok)throw new Error(result.error.message);return result.value;},persist:supabaseReviewReceiptPersistence(client)});
+  const service=createWorkOrchestrationService(client);
+  // Review request deriva do repositório/branch do Anima: item externo (ou não comprovadamente interno) é recusado antes de qualquer leitura de evento ou chamada ao provider.
+  const item=await service.getItem(input.workItemId as Parameters<typeof service.getItem>[0]);
+  if(!item.ok)throw new Error(item.error.message);
+  if(externalTargetDownstreamRefusal(item.value.intent))throw new ReviewRequestPrecondition(EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM,'Target externo não é suportado pelo review request.');
+  return executeAuthorizedReviewRequest({...input,readEvents:async id=>{const result=await service.listEvents(id);if(!result.ok)throw new Error(result.error.message);return result.value;},persist:supabaseReviewReceiptPersistence(client)});
 }

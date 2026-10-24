@@ -33,7 +33,7 @@ describe('resolveExecutorRoute — target externo', () => {
   test('com o target verificado, o adapter resolve SOMENTE aquela referência para a raiz verificada, sobre o SHA-base', () => {
     const selection = resolveExecutorRoute(external, { externalTarget: { reference: 'ext:shop', repoRoot: '/srv/shop' }, repoRoot: projectRoot() });
     const targets = targetsOf(selection);
-    expect(targets.resolve('ext:shop')).toMatchObject({ repoRoot: '/srv/shop', sha: SHA });
+    expect(targets.resolve('ext:shop')).toMatchObject({ repoRoot: '/srv/shop', sha: SHA, hardenedGit: true }); // T1-R2: Git do Host endurecido
     expect(targets.resolve('anima')).toBeNull();
     expect(targets.resolve('ext:other')).toBeNull();
   });
@@ -69,6 +69,8 @@ describe('resolveExecutorRoute — target externo', () => {
 
   test('regressão: project:anima segue resolvendo a raiz do Anima', () => {
     const c = contractOf({ kind: 'project', reference: 'anima' });
-    expect(targetsOf(resolveExecutorRoute(c, { repoRoot: projectRoot() })).resolve('anima')).toMatchObject({ repoRoot: projectRoot() });
+    const resolved = targetsOf(resolveExecutorRoute(c, { repoRoot: projectRoot() })).resolve('anima');
+    expect(resolved).toMatchObject({ repoRoot: projectRoot() });
+    expect(resolved).not.toHaveProperty('hardenedGit'); // o caminho do Anima não muda
   });
 });

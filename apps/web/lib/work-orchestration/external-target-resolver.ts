@@ -4,7 +4,7 @@ import {
   canonicalPathContains, compareExternalTargetIdentity, externalTargetToSpecTarget, isAbsoluteCanonicalPath, isExternalTargetReference,
   isFullCommitSha, readExternalTarget, sameCanonicalPath, type ExternalTargetIdentityV1, type ExternalTargetV1,
 } from '@anima/core';
-import { projectRoot, type ExecutionContract } from './executor-selection';
+import { isAnimaProjectRoot, projectRoot, type ExecutionContract } from './executor-selection';
 import { createTrustedGitRunner, resolveTrustedRepository, type GitRunner, type TrustedRepository } from './trusted-git';
 
 // ============================================================
@@ -34,6 +34,8 @@ export interface ExternalTargetDeps {
   readonly resolveRepository: (repoRoot: string) => TrustedRepository;
   readonly gitFor: (gitDir: string) => GitRunner;
   readonly animaRoot: () => string;
+  /** Prova de que `animaRoot()` é mesmo a raiz do Anima (não um cwd arbitrário). */
+  readonly isAnimaRoot: (root: string) => boolean;
 }
 
 export const defaultExternalTargetDeps: ExternalTargetDeps = {
@@ -42,6 +44,7 @@ export const defaultExternalTargetDeps: ExternalTargetDeps = {
   resolveRepository: repoRoot => resolveTrustedRepository(repoRoot),
   gitFor: gitDir => createTrustedGitRunner({ gitDir }),
   animaRoot: () => projectRoot(),
+  isAnimaRoot: root => isAnimaProjectRoot(root),
 };
 
 export type ExternalTargetFailure = { readonly ok: false; readonly code: string; readonly message: string };
@@ -85,17 +88,19 @@ export async function inspectExternalTarget(
   if (deps.exists(join(gitCommonDir, 'commondir'))) return refuse('external_target_git_invalid', 'Repositório externo é um worktree vinculado (commondir).');
   if (deps.exists(join(gitCommonDir, 'objects', 'info', 'alternates'))) return refuse('external_target_git_invalid', 'Repositório externo usa objetos alternativos (alternates).');
 
-  // Disfarce de Anima: nem o mesmo repositório, nem aninhado em qualquer direção.
-  let anima: string | null = null;
-  try { anima = deps.realpath(deps.animaRoot()); } catch { /* sem raiz do Anima legível ⇒ nada a comparar */ }
-  if (anima) {
-    const animaGit = join(anima, '.git');
-    let animaGitCanonical: string | null = null;
-    try { animaGitCanonical = deps.realpath(animaGit); } catch { /* ignora */ }
-    if (canonicalPathContains(anima, repoRoot) || canonicalPathContains(repoRoot, anima)
-      || (animaGitCanonical !== null && sameCanonicalPath(animaGitCanonical, gitCommonDir))) {
-      return refuse('external_target_is_anima', 'O target externo coincide com, ou se sobrepõe a, o repositório do Anima.');
-    }
+  // Disfarce de Anima: nem o mesmo repositório, nem aninhado em qualquer direção. A raiz do Anima precisa ser COMPROVADA
+  // (marcadores do monorepo) e legível; sem isso a checagem não existiria, então a recusa é explícita (nunca falha aberta).
+  const animaUnknown = refuse('external_target_anima_root_unknown', 'A raiz do Anima não pôde ser comprovada; o target externo não pode ser distinguido dele.');
+  let anima: string;
+  let animaGitCanonical: string;
+  try {
+    const animaRaw = deps.animaRoot();
+    if (!deps.isAnimaRoot(animaRaw)) return animaUnknown;
+    anima = deps.realpath(animaRaw);
+    animaGitCanonical = deps.realpath(join(anima, '.git'));
+  } catch { return animaUnknown; }
+  if (canonicalPathContains(anima, repoRoot) || canonicalPathContains(repoRoot, anima) || sameCanonicalPath(animaGitCanonical, gitCommonDir)) {
+    return refuse('external_target_is_anima', 'O target externo coincide com, ou se sobrepõe a, o repositório do Anima.');
   }
 
   const git = deps.gitFor(repo.gitDir);

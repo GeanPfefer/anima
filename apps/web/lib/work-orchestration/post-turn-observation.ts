@@ -5,6 +5,7 @@ import { persistHostObservedGateEvidence } from './gate-evidence';
 import { persistHostObservedCoderEvidence } from './coder-evidence';
 import { persistHostObservedExecutionContext, resolveExecutionContextClaim, type ExecutionContextClaim } from './execution-context-evidence';
 import { observeAndPersistHostGitEvidence } from './host-evidence';
+import { createTrustedGitRunner, type GitRunner } from './trusted-git';
 import { defaultTrustedSystemWriter, type TrustedSystemWriter } from './trusted-system-writer';
 import { MANDATED_VERIFIER_TIMEOUT_MS, TIMEOUT, withTimeout, verifyAndReleaseCandidate, type MandatedVerificationOutcome } from './mandated-verification';
 import { projectRoot, type ExecutionContract } from './executor-selection';
@@ -60,7 +61,9 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // humana/residente (`client`), só pelo writer de sistema. `client` segue lendo estado.
   const writer = input.systemWriter ?? defaultTrustedSystemWriter();
 
-  const strict = input.singleItem === true && result.terminalKind === 'result';
+  // Target externo é estrito em QUALQUER lane: sem evidência independente do repositório reverificado o candidato
+  // é retido (nunca um `verified` apoiado só na atestação do executor).
+  const strict = (input.singleItem === true || contract?.targetSpec !== undefined) && result.terminalKind === 'result';
   const held = (): MandatedVerificationOutcome => ({ status: 'held', reason: 'persist_failed' });
   if (strict && (!gateObservations.length || !coderObservations.length || contract?.executor !== 'worktree' || !contract.baseSha)) return held();
   const correlation = {
@@ -104,20 +107,23 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
     // Target externo: o Git observado é o do repositório VERIFICADO (identidade autorizada ×
     // vivo), nunca o do Anima. Divergência ⇒ nenhuma evidência é fabricada e o candidato é retido.
     let observedRoot: string | null = contract.targetSpec ? null : projectRoot();
+    // Externo: Git de ambiente limpo, `--git-dir` verificado, hooks/fsmonitor desligados (repositório de terceiros).
+    let externalGit: GitRunner | undefined;
     if (contract.targetSpec) {
       const verified = await (input.verifyExternalTarget ?? verifyExternalTargetForContract)(contract).catch(() => null);
       observedRoot = verified?.ok ? verified.repoRoot : null;
+      if (verified?.ok) externalGit = createTrustedGitRunner({ gitDir: verified.identity.gitCommonDirCanonical });
     }
-    const persisted = observedRoot === null ? null : await observeAndPersistHostGitEvidence(
-      {
-        repoRoot: observedRoot,
-        baseSha: contract.baseSha,
-        startSha: contract.resumeCheckpointCommitSha ?? contract.baseSha,
-        branch: worktreeBranchFor(result.attemptId),
-        ...correlation,
-      },
-      writer.hostEvidence,
-    ).catch(() => null);
+    const observation = observedRoot === null ? null : {
+      repoRoot: observedRoot,
+      baseSha: contract.baseSha,
+      startSha: contract.resumeCheckpointCommitSha ?? contract.baseSha,
+      branch: worktreeBranchFor(result.attemptId),
+      ...correlation,
+    };
+    const persisted = observation === null ? null : await (externalGit
+      ? observeAndPersistHostGitEvidence(observation, writer.hostEvidence, externalGit)
+      : observeAndPersistHostGitEvidence(observation, writer.hostEvidence)).catch(() => null);
     if (strict && !persisted?.ok) return held();
   }
 

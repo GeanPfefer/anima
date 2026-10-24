@@ -21,6 +21,7 @@ import {
 import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { projectRoot } from './executor-selection';
+import { EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM, externalTargetDownstreamRefusal } from './external-target-downstream';
 import { createWorkOrchestrationService } from './server';
 import { runProcess, type CommandResult } from './worktree';
 
@@ -159,7 +160,7 @@ export class GitIntegrationEffectProvider {
 
 export type IntegrationEffectOutcome =
   | { readonly status: 'integrated'; readonly disposition: 'effected' | 'reconciled' | 'already_persisted'; readonly receipt: IntegrationEffectReceiptV1; readonly cleanup: 'none' | 'done' | 'failed' }
-  | { readonly status: 'denied'; readonly reason: IntegrationEffectPlanDefect | 'repository_mismatch' | 'result_not_descendant_of_base' | 'unexpected_merge_parents' | 'ff_not_possible' }
+  | { readonly status: 'denied'; readonly reason: IntegrationEffectPlanDefect | typeof EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM | 'repository_mismatch' | 'result_not_descendant_of_base' | 'unexpected_merge_parents' | 'ff_not_possible' }
   | { readonly status: 'human_required'; readonly reason: 'authorization_stale' | 'ambiguous_target' | 'merge_conflict' | 'result_commit_missing' | 'target_checked_out' }
   | { readonly status: 'retryable'; readonly reason: string }
   | { readonly status: 'reconciliation_required'; readonly reason: string; readonly receipt?: IntegrationEffectReceiptV1 }
@@ -190,6 +191,7 @@ export async function executeAuthorizedIntegration(
 ): Promise<IntegrationEffectOutcome> {
   const [item, events] = await Promise.all([deps.getItem(input.workItemId), deps.listEvents(input.workItemId)]);
   if (!item.ok || !events.ok) return { status: 'retryable', reason: 'persisted_state_unreadable' };
+  if (externalTargetDownstreamRefusal(item.value.intent)) return { status: 'denied', reason: EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM };
 
   const planned = planIntegrationEffect({
     item: item.value, events: events.value, authorizationId: input.integrationAuthorizationId,
@@ -358,6 +360,7 @@ export async function authorizeIntegrationEffect(
 ): Promise<AuthorizeIntegrationEffectOutcome> {
   const [item, events] = await Promise.all([deps.getItem(input.workItemId), deps.listEvents(input.workItemId)]);
   if (!item.ok || !events.ok) return { ok: false, reason: 'persisted_state_unreadable' };
+  if (externalTargetDownstreamRefusal(item.value.intent)) return { ok: false, reason: EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM };
   if (item.value.state !== 'completed') return { ok: false, reason: 'item_not_completed' };
   let accepted: string | null = null;
   for (const event of events.value) {

@@ -2,13 +2,14 @@ import {buildProtectedIntegrationRequest,projectBranchPublicationReceipt,project
 import type{Database}from'@anima/types';import type{SupabaseClient}from'@supabase/supabase-js';
 import{publishAndPersistAuthorizedBranch,supabaseBranchReceiptPersistence}from'./branch-publication-operation';
 import{createWorkOrchestrationService}from'./server';
+import{EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM,externalTargetDownstreamRefusal}from'./external-target-downstream';
 
 // Precondições fail-closed sobre o estado persistido: a publicação não pôde ser
 // derivada/reconciliada porque um fato exigido está ausente, divergente ou já
 // não vale. São distintas de um erro inesperado (bug/infra): carregam um código
 // estável para o mapeamento HTTP tratá-las como 409, nunca como 500. Nunca
 // carregam caminho, remote, stderr ou qualquer dado sensível.
-export type BranchPublicationPreconditionCode='authorization_not_found'|'handoff_not_found'|'request_not_derivable'|'item_mismatch'|'receipt_projection_conflict'|'remote_drift';
+export type BranchPublicationPreconditionCode='authorization_not_found'|'handoff_not_found'|'request_not_derivable'|'item_mismatch'|'receipt_projection_conflict'|'remote_drift'|typeof EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM;
 export class BranchPublicationPrecondition extends Error{constructor(readonly code:BranchPublicationPreconditionCode,message:string){super(message);this.name='BranchPublicationPrecondition';}}
 
 export type BranchPublicationReader=(workItemId:string)=>Promise<readonly WorkEvent[]>;
@@ -24,5 +25,10 @@ export async function executeAuthorizedBranchPublication(input:{readonly workIte
 }
 
 export async function executeAuthorizedBranchPublicationWithSupabase(client:SupabaseClient<Database>,input:{readonly workItemId:string;readonly target:IntegrationTarget;readonly provider:ProtectedIntegrationProvider;readonly signal?:AbortSignal}){
-  const service=createWorkOrchestrationService(client);return executeAuthorizedBranchPublication({...input,readEvents:async id=>{const result=await service.listEvents(id);if(!result.ok)throw new Error(result.error.message);return result.value;},persist:supabaseBranchReceiptPersistence(client)});
+  const service=createWorkOrchestrationService(client);
+  // Publicação opera sobre o repositório do Anima: item externo (ou não comprovadamente interno) é recusado antes de qualquer leitura de evento ou push.
+  const item=await service.getItem(input.workItemId as Parameters<typeof service.getItem>[0]);
+  if(!item.ok)throw new Error(item.error.message);
+  if(externalTargetDownstreamRefusal(item.value.intent))throw new BranchPublicationPrecondition(EXTERNAL_TARGET_NOT_SUPPORTED_DOWNSTREAM,'Target externo não é suportado pela publicação de branch.');
+  return executeAuthorizedBranchPublication({...input,readEvents:async id=>{const result=await service.listEvents(id);if(!result.ok)throw new Error(result.error.message);return result.value;},persist:supabaseBranchReceiptPersistence(client)});
 }

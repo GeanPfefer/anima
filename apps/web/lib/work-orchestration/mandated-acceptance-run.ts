@@ -9,6 +9,7 @@ import {
   type GitRunner,
   type SinkResult,
 } from './acceptance-mandate';
+import { externalTargetDownstreamRefusal } from './external-target-downstream';
 import { createTrustedGitRunner, resolveTrustedRepository, type TrustedRepository } from './trusted-git';
 import type { TrustedSystemWriter } from './trusted-system-writer';
 
@@ -116,6 +117,9 @@ export async function runAcceptMandatedCli(argv: readonly string[], deps: Accept
 
   const first = await reader.read(itemId, mandateId).catch((e: unknown) => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) }));
   if (!first.ok) { out({ ok: false, stage: 'read', reason: first.message }); return ACCEPT_EXIT.FAILED; }
+  // O repositório confiável do aceite é o do Anima: item externo nunca é aceito aqui (antes de qualquer inspeção Git ou efeito).
+  const external = externalTargetDownstreamRefusal(first.value.item.intent);
+  if (external) { out({ ok: false, error: external }); return ACCEPT_EXIT.REFUSED; }
   const resultId = requestedResult ?? latestResultEventId(first.value.events);
   if (!resultId) { out({ ok: false, stage: 'precheck', reason: 'no_submitted_result' }); return ACCEPT_EXIT.REFUSED; }
 

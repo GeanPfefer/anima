@@ -19,7 +19,7 @@ const identity = { repo_root_canonical: '/srv/shop', git_common_dir_canonical: '
 const contractFor = (target: Record<string, unknown>) =>
   readExecutionContract({ execution_spec: { executor: 'worktree', coder_backend: 'codex-cli', model: 'default', base_sha: SHA, target } });
 
-const verifyOk = jest.fn(async () => ({ ok: true as const, reference: 'ext:shop', repoRoot: '/srv/shop-verified', identity: {} as never }));
+const verifyOk = jest.fn(async () => ({ ok: true as const, reference: 'ext:shop', repoRoot: '/srv/shop-verified', identity: { gitCommonDirCanonical: '/srv/shop/.git' } as never }));
 const verifyBad = jest.fn(async () => ({ ok: false as const, code: 'external_target_identity_changed', message: 'mudou' }));
 function input(contract: PostTurnObservationInput['contract'], verify?: typeof verifyExternalTargetForContract): PostTurnObservationInput {
   return {
@@ -43,7 +43,7 @@ describe('observação Git pós-volta × identidade do target', () => {
   test('externo: o Git observado é o do repositório VERIFICADO, nunca o do Anima', async () => {
     await persistPostTurnHostObservations(input(contractFor({ kind: 'project', reference: 'ext:shop', identity }), verifyOk));
     expect(verifyOk).toHaveBeenCalledTimes(1);
-    expect(observeAndPersistHostGitEvidence).toHaveBeenCalledWith(expect.objectContaining({ repoRoot: '/srv/shop-verified', baseSha: SHA }), expect.anything());
+    expect(observeAndPersistHostGitEvidence).toHaveBeenCalledWith(expect.objectContaining({ repoRoot: '/srv/shop-verified', baseSha: SHA }), expect.anything(), expect.any(Function));
     expect(observeAndPersistHostGitEvidence).not.toHaveBeenCalledWith(expect.objectContaining({ repoRoot: projectRoot() }), expect.anything());
   });
 
@@ -58,6 +58,43 @@ describe('observação Git pós-volta × identidade do target', () => {
     const throwing = jest.fn(async () => { throw new Error('git sumiu'); });
     await persistPostTurnHostObservations(input(contractFor({ kind: 'project', reference: 'ext:shop', identity }), throwing as never));
     expect(observeAndPersistHostGitEvidence).not.toHaveBeenCalled();
+  });
+
+  // T1-R2 P2-1: fora do Single-Item (resident host / backlog-cycle) o externo também é estrito.
+  describe('lane NÃO Single-Item', () => {
+    test('identidade alterada: candidato retido, nenhum Git fabricado, Verifier nunca roda ⇒ nenhum `verified`', async () => {
+      const outcome = await persistPostTurnHostObservations(input(contractFor({ kind: 'project', reference: 'ext:shop', identity }), verifyBad));
+      expect(outcome).toEqual({ status: 'held', reason: 'persist_failed' });
+      expect(observeAndPersistHostGitEvidence).not.toHaveBeenCalled();
+      expect(verifyAndReleaseCandidate).not.toHaveBeenCalled();
+    });
+
+    test('reverificação que LANÇA também retém', async () => {
+      const throwing = jest.fn(async () => { throw new Error('git sumiu'); });
+      const outcome = await persistPostTurnHostObservations(input(contractFor({ kind: 'project', reference: 'ext:shop', identity }), throwing as never));
+      expect(outcome).toEqual({ status: 'held', reason: 'persist_failed' });
+      expect(verifyAndReleaseCandidate).not.toHaveBeenCalled();
+    });
+
+    test('evidência Git recusada pelo sink também retém (sem parecer apoiado em atestação)', async () => {
+      (observeAndPersistHostGitEvidence as jest.Mock).mockResolvedValue({ ok: false });
+      const outcome = await persistPostTurnHostObservations(input(contractFor({ kind: 'project', reference: 'ext:shop', identity }), verifyOk));
+      expect(outcome).toEqual({ status: 'held', reason: 'persist_failed' });
+      expect(verifyAndReleaseCandidate).not.toHaveBeenCalled();
+    });
+
+    test('identidade íntegra: observa com Git confiável do common-dir verificado e o Verifier roda', async () => {
+      const outcome = await persistPostTurnHostObservations(input(contractFor({ kind: 'project', reference: 'ext:shop', identity }), verifyOk));
+      expect(outcome).toMatchObject({ status: 'released', verdict: 'verified' });
+      expect(observeAndPersistHostGitEvidence).toHaveBeenCalledWith(expect.objectContaining({ repoRoot: '/srv/shop-verified' }), expect.anything(), expect.any(Function));
+    });
+
+    test('regressão ANIMA: a lane não-Single-Item segue fail-open (evidência recusada não retém)', async () => {
+      (observeAndPersistHostGitEvidence as jest.Mock).mockResolvedValue({ ok: false });
+      const outcome = await persistPostTurnHostObservations(input(contractFor({ kind: 'project', reference: 'anima' })));
+      expect(outcome).toMatchObject({ status: 'released' });
+      expect(verifyAndReleaseCandidate).toHaveBeenCalledTimes(1);
+    });
   });
 
   test('regressão: project:anima continua observando o repositório do Anima, sem consultar o resolver externo', async () => {

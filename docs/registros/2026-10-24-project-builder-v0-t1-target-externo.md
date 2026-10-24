@@ -29,3 +29,13 @@ Append-only. Tipo: **implementação** (código + testes, sem prova viva). Forma
 5. Substituir o repositório por outro com a mesma história, no mesmo caminho, é indistinguível (mesma identidade).
 6. `commit-graph` local corrompido no checkout principal (objeto `ce0e8cb…` ilegível) — não tratado.
 7. Root único obrigatório: repositórios com históricos não relacionados mesclados são recusados.
+
+## T1-R2 — hardening dos quatro achados P2 da revisão T1-R1 (candidato fab1895)
+
+Branch `claude/t1-external-target-r2`, base `fab18958380d4539433d2732cc3ad159ba660b42`. Não publicado, não integrado.
+
+- **P2-1** `post-turn-observation.ts`: `strict` passa a valer para qualquer contrato com `targetSpec` (não só Single-Item). Reverificação pós-volta falha/lança, ou evidência Git recusada ⇒ candidato retido (`held`), nenhum Git fabricado, Verifier não roda. Git do externo observado por `createTrustedGitRunner` sobre o `git-common-dir` verificado.
+- **P2-2** `external-target-resolver.ts`: a raiz do Anima precisa ser comprovada (`isAnimaProjectRoot`: `.git` + `package.json` + `apps/web/package.json`) e legível, junto com seu `.git`; senão `external_target_anima_root_unknown`. Não há mais `catch` que pula a checagem; cwd arbitrário não é prova.
+- **P2-3** `worktree.ts`: `GitWorktree.create({ hardenedGit })` (propagado por `WorktreeTarget.hardenedGit` só para `ext:*`): `worktree add/prune/remove` e `branch -D` no repositório principal com ambiente limpo (`scrubbedGitEnvironment`), `core.hooksPath=/dev/null`, `core.fsmonitor=false`, `core.untrackedCache=false`, `protocol.allow=never`. `/dev/null` é o mesmo valor já usado e provado em `candidateGit`/`trusted-git` (Git for Windows o aceita). O commit já usava `candidateGit` endurecido. O caminho do Anima não muda.
+- **P2-4** `external-target-downstream.ts`: `external_target_not_supported_downstream` (e `external_target_state_unreadable` quando não se prova que o item é interno) antes de qualquer efeito em `integration-effect` (execução e autorização), `authorized-branch-publication`, `authorized-review-request`, `candidate-recovery`, `harness-recovery` e `mandated-acceptance-run`. `integration-target.ts` só resolve configuração de ambiente, sem item: é coberto pelos executores que o consomem. Sem fallback para `projectRoot()`.
+- Testes novos: hook `post-checkout` hostil (com controle que prova que o hook dispara sem o endurecimento), lane não-Single-Item, raiz do Anima ausente/inválida/ilegível/junction, e as guardas a jusante.

@@ -5,6 +5,7 @@ import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runProcess } from './worktree';
 import { projectRoot } from './executor-selection';
+import { itemExternalTargetRefusal } from './external-target-downstream';
 import { uuidFromSeed } from './decomposition-orchestration';
 import { readWorkRetryReadiness } from './retry-readiness';
 
@@ -58,6 +59,9 @@ export async function recoverFromHarnessDefect(
   request: HarnessRecoveryRequest,
   git: HarnessRecoveryGitPort = gitRecoveryPort(),
 ): Promise<HarnessRecoveryResult> {
+  // O HEAD/commits verificados são os do Anima: item externo (ou não comprovadamente interno) é recusado antes de qualquer leitura.
+  const external = await itemExternalTargetRefusal(client, workItemId);
+  if (external) return fail(external, 'A recuperação de harness não suporta target externo (o Git consultado seria o do Anima).', true);
   const readiness = await readWorkRetryReadiness(client, workItemId);
   if (readiness.reason === 'read_failed') return fail('read_failed', 'Não foi possível ler o estado de retry do item.', false);
   // Com tentativas restantes o caminho canônico é `work retry`, não uma recuperação.
