@@ -6,6 +6,7 @@ import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { readExecutionContract, resolveExecutorRoute, type ExecutionContract } from './executor-selection';
+import { verifyExternalTargetForContract } from './external-target-resolver';
 import { finalizeSingleItemTurn, persistPostTurnHostObservations } from './post-turn-observation';
 import { loadProviderPricingCatalog, providerApiSettlementStoreFor, settleProviderApiAttemptCost } from './provider-api-settlement';
 import { readAutonomousBacklogCandidates } from './autonomous-backlog-read';
@@ -227,6 +228,8 @@ export function buildProjectBacklogCycleDeps(
     /** Modo do laço do coder local. Ausente ⇒ `autonomous` (Resident Host/rota HTTP).
      * `supervised` só por declaração explícita de um invocador acompanhado por humano. */
     readonly singleItem?: SingleItemExecution;
+    /** Injeção de teste da verificação de identidade do target externo (default: resolver real). */
+    readonly verifyExternalTarget?: typeof verifyExternalTargetForContract;
     readonly coderRuntimeMode?: AgenticRuntimeMode;
     /**
      * Preflight opcional do node CLOUD já pronto (endpoint/túnel/modelo), executado DEPOIS da
@@ -309,6 +312,14 @@ export function buildProjectBacklogCycleDeps(
         }
       }
       let contract = readExecutionContract(item.data.intent);
+      // Target externo (Project Builder V0 — T1): identidade autorizada × repositório vivo, ANTES de
+      // qualquer claim, lease ou compute. Sem verificação não há raiz presumida (nunca `projectRoot()`).
+      let externalTarget: { reference: string; repoRoot: string } | undefined;
+      if (contract.targetSpec) {
+        const verified = await (options.verifyExternalTarget ?? verifyExternalTargetForContract)(contract);
+        if (!verified.ok) return notExecutable(entry, verified.code, verified.message);
+        externalTarget = { reference: verified.reference, repoRoot: verified.repoRoot };
+      }
       const history = await client.from('work_events').select('event_type,payload')
         .eq('work_item_id', entry.workItemId).order('seq', { ascending: false }).limit(40);
       if (options.singleItem) {
@@ -414,6 +425,7 @@ export function buildProjectBacklogCycleDeps(
       const coderObservations: ObservedCoderInput[] = [];
       let changeAuthorization: ChangeAuthorizationFactsV1 | undefined;
       const selection = resolveExecutorRoute(contract, {
+        ...(externalTarget ? { externalTarget } : {}),
         codexSubscriptionOnly: options.singleItem !== undefined,
         ...(contract.coderBackend === null || contract.coderBackend === 'ollama' ? { ollamaRuntimeOverride } : {}),
         gateObserver: outcome => gateObservations.push(outcome),
@@ -448,9 +460,11 @@ export function buildProjectBacklogCycleDeps(
       // Verifier) — a MESMA da rota supervisor-turn. Fail-open: nunca altera o desfecho.
       if (options.singleItem) {
         return finalizeSingleItemTurn({ client, result: turn, contract, gateObservations, coderObservations,
+          ...(options.verifyExternalTarget ? { verifyExternalTarget: options.verifyExternalTarget } : {}),
           ...(changeAuthorization ? { changeAuthorization } : {}) });
       }
-      await persistPostTurnHostObservations({ client, result: turn, contract, gateObservations, coderObservations, ...(changeAuthorization ? { changeAuthorization } : {}) });
+      await persistPostTurnHostObservations({ client, result: turn, contract, gateObservations, coderObservations,
+        ...(options.verifyExternalTarget ? { verifyExternalTarget: options.verifyExternalTarget } : {}), ...(changeAuthorization ? { changeAuthorization } : {}) });
       // B1: settlement pós-attempt da reserva `provider_api` — em QUALQUER desfecho (o provider
       // cobra tokens, não resultado). Só liquida com usage completa + preço versionado vigente;
       // senão a reserva segue aberta (`cost_unknown`). Fail-open: nunca altera o turno.

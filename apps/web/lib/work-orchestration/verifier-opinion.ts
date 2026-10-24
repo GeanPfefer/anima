@@ -62,6 +62,7 @@ async function investigationOpinion(item: WorkItem, event: WorkEvent, data: Reco
   const contract = readExecutionContract(item.intent);
   if (!effect.ok || effect.value !== 'read_only' || readVerifierRequirement(item.intent) !== 'advisory'
     || contract.executor !== 'investigation-v1' || !contract.baseSha || !contract.targetReference
+    || contract.targetSpec !== undefined // investigação é só project:anima; target externo nunca resolve para o repo do Anima
     || event.workItemId !== item.id || event.proposalVersion !== item.proposalVersion
     || data.work_item_id !== item.id || data.approved_proposal_version !== item.proposalVersion
     || typeof data.attempt_id !== 'string' || data.attempt_id.trim().length === 0

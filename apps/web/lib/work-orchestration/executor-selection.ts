@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import type { AgenticRuntimeMode, ChangeAuthorizationFactsV1, CoderModelSelectionEvidenceV1, ObservedCoderInput, ObservedGateInput, WorkExecutorRequest, WorkRoutingCandidateV1 } from '@anima/core';
-import { isInvestigationCommit, readEffectClass, validateEffectClassCoherence, resolveAgenticRuntimePolicy, selectGovernedCoderModel } from '@anima/core';
+import { isExternalTargetReference, isInvestigationCommit, readEffectClass, validateEffectClassCoherence, resolveAgenticRuntimePolicy, selectGovernedCoderModel } from '@anima/core';
 import { Constants } from '@anima/types';
 import { InvestigationExecutorAdapter } from './investigation-executor';
 import type { CoderBackend } from './coder-backend';
@@ -48,6 +48,9 @@ export interface ExecutionContract {
   /** Proveniência do `coderBackend`. `runtime_default` = carimbado pelo planner a partir do
    * env de deploy (capacidade do runtime, NÃO decisão da unidade). Ausente ⇒ contrato legado. */
   readonly coderBackendSource?: string | null;
+  /** `execution_spec.target` CRU, presente só quando o alvo é externo (`ext:*`) ou carrega
+   * `identity`. A identidade autorizada é validada por `readExternalTarget`, nunca aqui. */
+  readonly targetSpec?: Record<string, unknown>;
 }
 
 export type ExecutorSelection =
@@ -113,6 +116,7 @@ export function readExecutionContract(intent: unknown): ExecutionContract {
     baseSha: str(spec['base_sha']),
     targetKind: str(target['kind']),
     targetReference: str(target['reference']),
+    ...(isExternalTargetReference(target['reference']) || 'identity' in target ? { targetSpec: target } : {}),
     // Só um SHA bem-formado habilita a retomada; qualquer coisa fora disso é
     // ignorada (parte da base, sempre seguro) — nunca um commit arbitrário.
     resumeCheckpointCommitSha: resumeCommit && SHA.test(resumeCommit) ? resumeCommit : null,
@@ -351,6 +355,9 @@ export function resolveExecutorRoute(
     /** Runtime escolhido pelo placement host-side. Só troca a inferência; worktree e efeitos continuam locais. */
     readonly ollamaRuntimeOverride?: OllamaCoderRuntimeConfig;
     readonly repoRoot?: string;
+    /** Target externo JÁ verificado pelo host (identidade autorizada × repositório vivo, antes do
+     * claim). Único meio de executar um `ext:*`; nunca há fallback para `projectRoot()`. */
+    readonly externalTarget?: { readonly reference: string; readonly repoRoot: string };
     /** Observador host-side dos gates, injetado pela rota para captar a evidência
      * observada de gate. Só o executor de worktree (host in-process) o usa. */
     readonly gateObserver?: (outcome: ObservedGateInput) => void;
@@ -372,6 +379,10 @@ export function resolveExecutorRoute(
 ): ExecutorSelection {
   const err = (code: string, message: string): ExecutorSelection => ({ ok: false, error: { code, message } });
   const isAnima = contract.targetKind === 'project' && contract.targetReference === 'anima';
+  const isExternal = contract.targetKind === 'project' && isExternalTargetReference(contract.targetReference);
+  if (!isExternal && contract.targetSpec && 'identity' in contract.targetSpec) {
+    return err('external_identity_on_non_external_target', 'Identidade de target externo só é válida em referência ext:<slug>.');
+  }
 
   const coherence = validateEffectClassCoherence(contract.effectClass, contract.permissions ?? [], contract.executor ?? '');
   if (coherence) return err(coherence, 'Classe de efeito, permissões e executor incompatíveis.');
@@ -398,8 +409,12 @@ export function resolveExecutorRoute(
   if (contract.executor === 'worktree') {
     if (contract.targetKind !== 'project' || !contract.targetReference) return err('worktree_target_invalid', 'O executor de worktree exige um alvo de projeto com referência.');
     if (!contract.baseSha || !SHA.test(contract.baseSha)) return err('worktree_base_sha_missing', 'O SHA-base autorizado não foi persistido ou é inválido.');
-    const repoRoot = options.repoRoot ?? projectRoot();
-    if (!isAnimaProjectRoot(repoRoot)) return err('project_root_invalid', 'A raiz do projeto Anima não é um repositório válido.');
+    if (!isAnima && !isExternal) return err('worktree_target_unknown', 'O alvo do contrato não é project:anima nem um target externo autorizado.');
+    if (isExternal && options.externalTarget?.reference !== contract.targetReference) {
+      return err('external_target_unverified', 'O target externo não foi verificado pelo host; nenhuma raiz é presumida.');
+    }
+    const repoRoot = isExternal ? options.externalTarget!.repoRoot : options.repoRoot ?? projectRoot();
+    if (!isExternal && !isAnimaProjectRoot(repoRoot)) return err('project_root_invalid', 'A raiz do projeto Anima não é um repositório válido.');
     const backend = backendFor(contract, repoRoot, options.backendOverride, options.ollamaRuntimeOverride, options.openAIAdmission, options.coderRuntimeMode, options.codexSubscriptionOnly);
     if ('error' in backend) return err('coder_backend_invalid', backend.error);
     const reference = contract.targetReference;
@@ -420,6 +435,8 @@ export function resolveExecutorRoute(
     });
     return { ok: true, route: { adapter, candidate: worktreeCandidate(adapter.id, backend.id) } };
   }
+
+  if (isExternal) return err('external_requires_worktree', 'Um target externo exige o executor de worktree; nenhum outro é permitido.');
 
   // project:anima NUNCA cai no runner Python (o runner não constrói TS): exige worktree explícito.
   if (isAnima) return err('anima_requires_worktree', 'O alvo project:anima exige o executor de worktree; nenhum outro é permitido.');

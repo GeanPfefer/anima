@@ -8,6 +8,7 @@ import { observeAndPersistHostGitEvidence } from './host-evidence';
 import { defaultTrustedSystemWriter, type TrustedSystemWriter } from './trusted-system-writer';
 import { MANDATED_VERIFIER_TIMEOUT_MS, TIMEOUT, withTimeout, verifyAndReleaseCandidate, type MandatedVerificationOutcome } from './mandated-verification';
 import { projectRoot, type ExecutionContract } from './executor-selection';
+import { verifyExternalTargetForContract } from './external-target-resolver';
 import { createWorkOrchestrationService } from './server';
 import type { SupervisorTurnResult } from './supervisor';
 import { worktreeBranchFor } from './worktree-executor';
@@ -43,6 +44,8 @@ export interface PostTurnObservationInput {
   /** Declaração de modo/ator/runner (A2-0 R1). Ausente ⇒ resolvida do ambiente do servidor + RLS; `null` ⇒ sem
    * declaração, nenhum fato é registrado. O banco decide se a declaração é sustentada pelo ledger. */
   readonly executionContext?: ExecutionContextClaim | null;
+  /** Injeção de teste da verificação de identidade do target externo (default: resolver real). */
+  readonly verifyExternalTarget?: typeof verifyExternalTargetForContract;
 }
 
 /**
@@ -98,9 +101,16 @@ export async function persistPostTurnHostObservations(input: PostTurnObservation
   // nada é gravado —, então um erro sem edit efetivo não fabrica evidência.
   if ((result.terminalKind === 'result' || result.terminalKind === 'error')
       && contract?.executor === 'worktree' && contract.baseSha) {
-    const persisted = await observeAndPersistHostGitEvidence(
+    // Target externo: o Git observado é o do repositório VERIFICADO (identidade autorizada ×
+    // vivo), nunca o do Anima. Divergência ⇒ nenhuma evidência é fabricada e o candidato é retido.
+    let observedRoot: string | null = contract.targetSpec ? null : projectRoot();
+    if (contract.targetSpec) {
+      const verified = await (input.verifyExternalTarget ?? verifyExternalTargetForContract)(contract).catch(() => null);
+      observedRoot = verified?.ok ? verified.repoRoot : null;
+    }
+    const persisted = observedRoot === null ? null : await observeAndPersistHostGitEvidence(
       {
-        repoRoot: projectRoot(),
+        repoRoot: observedRoot,
         baseSha: contract.baseSha,
         startSha: contract.resumeCheckpointCommitSha ?? contract.baseSha,
         branch: worktreeBranchFor(result.attemptId),

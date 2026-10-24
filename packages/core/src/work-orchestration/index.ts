@@ -96,6 +96,7 @@ export * from './investigation-result';
 export * from './investigation-review';
 
 export * from './single-item-execution';
+export * from './external-target';
 
 export * from './acceptance-contract-lint';
 
