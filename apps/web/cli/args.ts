@@ -1,4 +1,5 @@
 import { validateInvestigationInput } from '@/lib/work-orchestration/investigation-preparation';
+import { validateExternalWorkInput, workComplexities, workPlanClarities, workReversibilities, workRisks, workUrgencies } from '@anima/core';
 // Parser PURO de argumentos da CLI: `argv` (já sem node+script) → um comando
 // tipado, ou uma recusa de USO. Sem I/O, sem process.exit, sem env — só a decisão
 // estrutural do que o usuário pediu. Isolado para ser provado à exaustão e para
@@ -9,6 +10,8 @@ import { parseComputePreference, type ComputePreferenceV1 } from '@anima/core';
 export type ParsedCommand =
   | { readonly kind: 'work-execute-one'; readonly id: string; readonly expectedProposalVersion: number; readonly json: boolean }
   | { readonly kind: 'work-propose-investigation'; readonly question: string; readonly baseSha: string; readonly capability: string; readonly json: boolean }
+  | { readonly kind: 'work-external-propose'; readonly reference: string; readonly objective: string; readonly scope: readonly string[]; readonly excluded: readonly string[]; readonly acceptance: readonly string[]; readonly gates: readonly string[]; readonly backend: string; readonly model?: string; readonly baseSha?: string; readonly maxAttempts: number; readonly maxMinutes: number; readonly json: boolean }
+  | { readonly kind: 'work-external-classify'; readonly id: string; readonly expectedProposalVersion: number; readonly axes: { readonly complexity: string; readonly risk: string; readonly reversibility: string; readonly planClarity: string; readonly urgency: string }; readonly json: boolean }
   | { readonly kind: 'help' }
   | { readonly kind: 'status'; readonly json: boolean }
   | { readonly kind: 'recovery-config-check'; readonly json: boolean }
@@ -140,6 +143,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     const error=validateInvestigationInput(input);
     return error ? {ok:false,error} : {ok:true,command:{kind:'work-propose-investigation',...input,json}};
   }
+
+  if (argv[0] === 'work' && argv[1] === 'external') return parseWorkExternal(argv.slice(2));
 
   const { positionals, json, reason, diagnosisPath, planPath, limits, compute, fixes, evidence, requiredGates, reworkPaths, help, unknownFlag } = extract(argv);
 
@@ -306,6 +311,63 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   return { ok: false, error: `Comando desconhecido: ${group}` };
 }
 
+const EXTERNAL_PROPOSE_USAGE = 'Uso: anima work external propose --target ext:<slug> --objective "<texto>" --scope <caminho> [--scope ...] --exclude <caminho> [--exclude ...] --accept "<critério>" [--accept ...] --gate "<npm ...>" [--gate ...] --backend ollama|codex-cli [--model M] [--base-sha SHA] [--max-attempts N] [--max-minutes M] [--json]';
+const EXTERNAL_CLASSIFY_USAGE = 'Uso: anima work external classify <UUID> --version N --complexity X --risk X --reversibility X --plan-clarity X --urgency X [--json]';
+
+/** `anima work external propose|classify` — parser PURO; repetíveis só onde declarado; qualquer flag fora da lista é recusa de uso. */
+function parseWorkExternal(argv: readonly string[]): ParseResult {
+  const sub = argv[0];
+  if (argv.includes('--help') || argv.includes('-h')) return { ok: true, command: { kind: 'help' } };
+  if (sub === 'propose') {
+    const repeatable = new Set(['--scope', '--exclude', '--accept', '--gate']);
+    const single = new Set(['--target', '--objective', '--backend', '--model', '--base-sha', '--max-attempts', '--max-minutes']);
+    const lists: Record<string, string[]> = { '--scope': [], '--exclude': [], '--accept': [], '--gate': [] };
+    const values: Record<string, string> = {};
+    let json = false;
+    for (let i = 1; i < argv.length; i++) {
+      const flag = argv[i]!;
+      if (flag === '--json') { if (json) return { ok: false, error: '--json duplicado.' }; json = true; continue; }
+      const value = argv[i + 1];
+      if ((!repeatable.has(flag) && !single.has(flag)) || value === undefined || value.startsWith('--')
+        || (single.has(flag) && values[flag] !== undefined)) return { ok: false, error: EXTERNAL_PROPOSE_USAGE };
+      i++;
+      if (repeatable.has(flag)) lists[flag]!.push(value); else values[flag] = value;
+    }
+    const int = (raw: string | undefined, fallback: number): number => raw === undefined ? fallback : /^[1-9]\d{0,3}$/.test(raw) ? Number(raw) : Number.NaN;
+    const input = {
+      reference: values['--target'] ?? '', objective: values['--objective'] ?? '', scope: lists['--scope']!, excluded: lists['--exclude']!,
+      acceptance: lists['--accept']!, gates: lists['--gate']!, backend: values['--backend'] ?? '', ...(values['--model'] !== undefined ? { model: values['--model'] } : {}),
+      maxAttempts: int(values['--max-attempts'], 1), maxMinutes: int(values['--max-minutes'], 30),
+    };
+    if (values['--base-sha'] !== undefined && !/^[0-9a-f]{40}$/.test(values['--base-sha'])) return { ok: false, error: 'base_sha_invalid' };
+    const error = validateExternalWorkInput(input);
+    if (error) return { ok: false, error: `${error}. ${EXTERNAL_PROPOSE_USAGE}` };
+    return { ok: true, command: { kind: 'work-external-propose', ...input, ...(values['--base-sha'] ? { baseSha: values['--base-sha'] } : {}), json } };
+  }
+  if (sub === 'classify') {
+    const id = argv[1];
+    if (!id || id.startsWith('--') || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { ok: false, error: EXTERNAL_CLASSIFY_USAGE };
+    const flags: Record<string, string> = {}; let json = false;
+    for (let i = 2; i < argv.length; i++) {
+      const flag = argv[i]!;
+      if (flag === '--json') { if (json) return { ok: false, error: '--json duplicado.' }; json = true; continue; }
+      const value = argv[i + 1];
+      if (!['--version', '--complexity', '--risk', '--reversibility', '--plan-clarity', '--urgency'].includes(flag)
+        || value === undefined || value.startsWith('--') || flags[flag] !== undefined) return { ok: false, error: EXTERNAL_CLASSIFY_USAGE };
+      flags[flag] = value; i++;
+    }
+    const version = flags['--version'];
+    const axes = { complexity: flags['--complexity'], risk: flags['--risk'], reversibility: flags['--reversibility'], planClarity: flags['--plan-clarity'], urgency: flags['--urgency'] };
+    if (!version || !/^[1-9]\d*$/.test(version) || Object.values(axes).some(v => v === undefined)) {
+      return { ok: false, error: `Todos os cinco eixos e a versão são explícitos (sem padrão). ${EXTERNAL_CLASSIFY_USAGE}` };
+    }
+    const allowed: Record<string, readonly string[]> = { complexity: workComplexities, risk: workRisks, reversibility: workReversibilities, planClarity: workPlanClarities, urgency: workUrgencies };
+    for (const [axis, value] of Object.entries(axes)) if (!allowed[axis]!.includes(value!)) return { ok: false, error: `Eixo ${axis} inválido: ${value}. Valores: ${allowed[axis]!.join('|')}.` };
+    return { ok: true, command: { kind: 'work-external-classify', id, expectedProposalVersion: Number(version), axes: axes as { complexity: string; risk: string; reversibility: string; planClarity: string; urgency: string }, json } };
+  }
+  return { ok: false, error: `${EXTERNAL_PROPOSE_USAGE}\n${EXTERNAL_CLASSIFY_USAGE}` };
+}
+
 export const USAGE = `anima — CLI operacional do Anima (adapter sobre os mesmos application services da web)
 
 Uso:
@@ -316,6 +378,10 @@ Uso:
   anima work execute-one <UUID> --version N [--json]  Uma volta isolada; exige aprovação/classificação prévias
   anima work propose-investigation --question T --base-sha SHA [--capability research] [--json]
                                                Cria investiga\u00e7\u00e3o proposed; aprova\u00e7\u00e3o humana posterior
+  anima work external propose --target ext:<slug> --objective T --scope P --exclude X --accept A --gate G --backend ollama|codex-cli [--model M] [--json]
+                                               Cria trabalho EXTERNO proposed (identidade do repositório autorizado, sem LLM); aprovação e classificação são atos humanos
+  anima work external classify <UUID> --version N --complexity C --risk R --reversibility V --plan-clarity P --urgency U
+                                               Classificação HUMANA explícita (human_confirmed) de trabalho externo já aprovado
   anima work list                             Lista os trabalhos não terminais (retomáveis)
   anima work show <id|REF>                        Estado, versão, tentativa, Verifier e cobertura
   anima work investigation <id|REF> [--json]      Relatório persistido de investigação

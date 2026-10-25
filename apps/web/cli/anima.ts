@@ -21,7 +21,7 @@ import { readWorkRetryReadiness } from '@/lib/work-orchestration/retry-readiness
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
 import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/lib/work-orchestration/paid-compute-authorization-store';
-import { runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
+import { runWorkExternalClassify, runWorkExternalPropose, runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
 import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recovery';
 import { recoverFromFailedCandidate } from '@/lib/work-orchestration/candidate-recovery';
 import { runWorkRecoverCandidate } from './app';
@@ -29,6 +29,7 @@ import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/pla
 import { runWorkInvestigation, runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkExecutors, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { createNodeExecutorReadinessDeps, probeAllExecutors } from '@/lib/work-orchestration/executor-readiness';
 import { renderHuman } from './render';
+import { createExternalClassificationPort, createExternalWorkPrepareDeps, type ExternalClassificationPort, type ExternalWorkPrepareDeps } from '@/lib/work-orchestration/external-work-materializer';
 import { EXIT, type ExitCode } from './exit-codes';
 import { checkRecoveryConfig, renderRecoveryConfigReport } from '@/lib/recovery-config/check';
 import { loadMobileEnv, loadSupabaseEnv, pathExists } from '@/lib/recovery-config/node-env';
@@ -58,6 +59,8 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
   readonly resolveIdentity?: () => Promise<IdentityResult>;
   readonly service?: WorkOrchestrationService;
   readonly investigationDeps?: InvestigationPreparationDeps;
+  readonly externalWorkDeps?: ExternalWorkPrepareDeps;
+  readonly externalClassificationPort?: ExternalClassificationPort;
 } = {}): Promise<CommandResult> {
   if (command.kind === 'help') return { exitCode: EXIT.OK, payload: { ok: true, kind: 'help', usage: USAGE } };
 
@@ -82,6 +85,13 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
         }));
       } finally { process.off('SIGINT', abort); process.off('SIGTERM', abort); }
     }
+    case 'work-external-propose': {
+      const { kind: _kind, json: _json, ...request } = command;
+      return runWorkExternalPropose(request, injection.externalWorkDeps ?? createExternalWorkPrepareDeps(client, userId, service));
+    }
+    case 'work-external-classify':
+      return runWorkExternalClassify(injection.externalClassificationPort ?? createExternalClassificationPort(client),
+        { workItemId: command.id, expectedProposalVersion: command.expectedProposalVersion, axes: command.axes });
     case 'work-propose-investigation':
       return runWorkProposeInvestigation(command, injection.investigationDeps ?? createInvestigationPreparationDeps(client, userId, service));
     case 'status': return runStatus(service, userId, process.env);

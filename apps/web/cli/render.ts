@@ -64,6 +64,10 @@ export function renderHuman(payload: CliPayload): string {
       return [...workHeading(payload.id, payload.reference, payload.title, payload.state),
         `Pergunta: ${payload.question}`, `Proposta vigente: v${payload.proposalVersion}`,
         ...investigationLines(payload.review, true)].join('\n');
+    case 'work-external-propose':
+      return `${payload.reference} \u2014 ${payload.title}\nTrabalho: ${payload.workItemId}\nEstado: ${payload.state}\nBase: ${payload.baseSha}\nBackend: ${payload.backend}\nAprova\u00e7\u00e3o humana, classifica\u00e7\u00e3o humana (work external classify) e execu\u00e7\u00e3o s\u00e3o atos posteriores; nada foi aprovado nem iniciado.`;
+    case 'work-external-classify':
+      return `${payload.workItemId} \u00b7 proposta v${payload.proposalVersion} \u00b7 classifica\u00e7\u00e3o humana ${payload.replayed ? 'j\u00e1 vigente (replay)' : 'registrada'}.\nA execu\u00e7\u00e3o continua um ato separado (work execute-one).`;
     case 'work-propose-investigation':
       return `${payload.reference} \u2014 ${payload.title}\nEstado: ${payload.state}\nCapability: ${payload.capability}\nAprova\u00e7\u00e3o humana e prepara\u00e7\u00e3o aut\u00f4noma s\u00e3o atos posteriores.`;
     case 'help':

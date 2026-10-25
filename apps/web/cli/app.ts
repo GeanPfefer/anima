@@ -1,5 +1,6 @@
 import type { BacklogHostTurnResult } from '@/lib/work-orchestration/autonomous-backlog-host-turn';
 import { prepareInvestigation, type InvestigationInput, type InvestigationPreparationDeps, type InvestigationPreparationResult } from '@/lib/work-orchestration/investigation-preparation';
+import { classifyExternalWork, prepareExternalWork, type ExternalClassificationAxes, type ExternalClassificationPort, type ExternalClassificationResult, type ExternalWorkPrepareDeps, type ExternalWorkPrepareResult, type ExternalWorkRequest } from '@/lib/work-orchestration/external-work-materializer';
 import type { ParsedCommand } from './args';
 import { readWorkHumanReference, type WorkReferenceResult, type WorkReferenceAmbiguousCandidate } from '@/lib/work-orchestration/work-reference';
 import {
@@ -324,6 +325,8 @@ export interface HelpPayload {
 export type CliPayload =
   | { readonly ok: true; readonly kind: 'work-execute-one'; readonly workItemId: string; readonly proposalVersion: number; readonly result: BacklogHostTurnResult }
   | (Extract<InvestigationPreparationResult, {ok:true}> & {readonly kind:'work-propose-investigation'})
+  | (Extract<ExternalWorkPrepareResult, {ok:true}> & {readonly kind:'work-external-propose'})
+  | (Extract<ExternalClassificationResult, {ok:true}> & {readonly kind:'work-external-classify'})
   | WorkInvestigationPayload | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkRecoverCandidatePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
@@ -345,6 +348,23 @@ export async function runWorkProposeInvestigation(input: InvestigationInput, dep
   const rejected = ['question_invalid', 'base_sha_invalid', 'base_sha_not_found', 'capability_invalid',
     'investigation_reference_collision', 'investigation_references_exhausted'].includes(result.code);
   return {exitCode:rejected ? EXIT.REJECTED : EXIT.ERROR,payload:{ok:false,kind:'error',code:result.code,error:result.message}};
+}
+
+/** `work external propose`: SÓ propõe (estado proposed). Aprovação, classificação e execução são atos humanos posteriores. */
+export async function runWorkExternalPropose(input: ExternalWorkRequest, deps: ExternalWorkPrepareDeps): Promise<CommandResult> {
+  const result = await prepareExternalWork(input, deps);
+  if (result.ok) return { exitCode: EXIT.OK, payload: { ...result, kind: 'work-external-propose' } };
+  return { exitCode: result.rejected ? EXIT.REJECTED : EXIT.ERROR, payload: { ok: false, kind: 'error', code: result.code, error: result.message } };
+}
+
+/** `work external classify`: classificação HUMANA explícita (`human_confirmed`) de trabalho externo já aprovado. Não executa. */
+export async function runWorkExternalClassify(
+  port: ExternalClassificationPort,
+  input: { readonly workItemId: string; readonly expectedProposalVersion: number; readonly axes: ExternalClassificationAxes },
+): Promise<CommandResult> {
+  const result = await classifyExternalWork(port, input);
+  if (result.ok) return { exitCode: EXIT.OK, payload: { ...result, kind: 'work-external-classify' } };
+  return { exitCode: result.rejected ? EXIT.REJECTED : EXIT.ERROR, payload: { ok: false, kind: 'error', code: result.code, error: result.message } };
 }
 
 export async function runWorkReplan(capability: () => Promise<ReplanResult>): Promise<CommandResult> {
