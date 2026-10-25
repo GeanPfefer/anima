@@ -98,6 +98,7 @@ export * from './investigation-review';
 export * from './single-item-execution';
 export * from './external-target';
 export * from './external-work-proposal';
+export * from './external-candidate-review';
 
 export * from './acceptance-contract-lint';
 

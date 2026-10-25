@@ -1,5 +1,6 @@
 import type { BacklogHostTurnResult } from '@/lib/work-orchestration/autonomous-backlog-host-turn';
 import { prepareInvestigation, type InvestigationInput, type InvestigationPreparationDeps, type InvestigationPreparationResult } from '@/lib/work-orchestration/investigation-preparation';
+import { inspectExternalCandidate, recordExternalCriterionReview, type ExternalReviewDeps } from '@/lib/work-orchestration/external-candidate-review';
 import { classifyExternalWork, prepareExternalWork, type ExternalClassificationAxes, type ExternalClassificationPort, type ExternalClassificationResult, type ExternalWorkPrepareDeps, type ExternalWorkPrepareResult, type ExternalWorkRequest } from '@/lib/work-orchestration/external-work-materializer';
 import type { ParsedCommand } from './args';
 import { readWorkHumanReference, type WorkReferenceResult, type WorkReferenceAmbiguousCandidate } from '@/lib/work-orchestration/work-reference';
@@ -327,6 +328,7 @@ export type CliPayload =
   | (Extract<InvestigationPreparationResult, {ok:true}> & {readonly kind:'work-propose-investigation'})
   | (Extract<ExternalWorkPrepareResult, {ok:true}> & {readonly kind:'work-external-propose'})
   | (Extract<ExternalClassificationResult, {ok:true}> & {readonly kind:'work-external-classify'})
+  | WorkExternalReviewPayload
   | WorkInvestigationPayload | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkRecoverCandidatePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
@@ -351,6 +353,37 @@ export async function runWorkProposeInvestigation(input: InvestigationInput, dep
 }
 
 /** `work external propose`: SÓ propõe (estado proposed). Aprovação, classificação e execução são atos humanos posteriores. */
+export type WorkExternalReviewPayload =
+  | { readonly ok: true; readonly kind: 'work-external-review'; readonly mode: 'inspect'; readonly workItemId: string; readonly reference: string; readonly attemptId: string;
+      readonly candidateCommitSha: string; readonly baseSha: string; readonly branch: string; readonly diffSha256: string; readonly files: readonly string[];
+      readonly diff: string; readonly diffTruncated: boolean; readonly criteria: readonly { readonly position: number; readonly text: string; readonly status: string }[];
+      readonly retainedConflicts: readonly { readonly workItemId: string; readonly reference: string }[] }
+  | { readonly ok: true; readonly kind: 'work-external-review'; readonly mode: 'decided'; readonly workItemId: string; readonly criterion: string; readonly decision: 'accept' | 'reject';
+      readonly candidateCommitSha: string; readonly remaining: readonly string[] };
+
+/** `work external review`: sem decisão, SÓ lê (identidade, Verifier, Git real, diff e digest); com decisão, registra UM critério `human_review`. Não aceita o resultado. */
+export async function runWorkExternalReview(
+  deps: ExternalReviewDeps,
+  input: { readonly workItemId: string; readonly expectedProposalVersion: number; readonly decision: { readonly position: number; readonly decision: 'accept' | 'reject'; readonly diffDigest: string; readonly reason?: string } | null },
+): Promise<CommandResult> {
+  const err = (r: { code: string; message: string; rejected: boolean }): CommandResult => ({ exitCode: r.rejected ? EXIT.REJECTED : EXIT.ERROR, payload: { ok: false, kind: 'error', code: r.code, error: r.message } });
+  const inspected = await inspectExternalCandidate(input.workItemId, deps);
+  if (!inspected.ok) return err(inspected);
+  if (inspected.item.proposalVersion !== input.expectedProposalVersion) {
+    return err({ code: 'proposal_version_changed', message: `A versão vigente é v${inspected.item.proposalVersion}, não v${input.expectedProposalVersion}.`, rejected: true });
+  }
+  if (input.decision === null) {
+    return { exitCode: EXIT.OK, payload: { ok: true, kind: 'work-external-review', mode: 'inspect', workItemId: input.workItemId, reference: inspected.facts.reference, attemptId: inspected.facts.attemptId,
+      candidateCommitSha: inspected.facts.candidateCommitSha, baseSha: inspected.facts.baseSha, branch: inspected.facts.branch, diffSha256: inspected.diff.sha256, files: inspected.diff.files,
+      diff: inspected.diff.text, diffTruncated: inspected.diff.truncated, criteria: inspected.criteria,
+      retainedConflicts: inspected.retainedConflicts.map(c => ({ workItemId: c.workItemId, reference: c.reference })) } };
+  }
+  const recorded = await recordExternalCriterionReview(input.workItemId, input.decision, deps);
+  if (!recorded.ok) return err(recorded);
+  return { exitCode: EXIT.OK, payload: { ok: true, kind: 'work-external-review', mode: 'decided', workItemId: input.workItemId, criterion: recorded.criterion, decision: recorded.decision,
+    candidateCommitSha: recorded.facts.candidateCommitSha, remaining: recorded.remaining } };
+}
+
 export async function runWorkExternalPropose(input: ExternalWorkRequest, deps: ExternalWorkPrepareDeps): Promise<CommandResult> {
   const result = await prepareExternalWork(input, deps);
   if (result.ok) return { exitCode: EXIT.OK, payload: { ...result, kind: 'work-external-propose' } };
@@ -938,10 +971,16 @@ export async function runWorkReview(
   service: WorkOrchestrationPort,
   id: string,
   decision: ResultReviewDecision,
+  /** Gate adicional do aceite (trabalho externo com critério human_review). Ausente ⇒ comportamento anterior. */
+  acceptanceGate?: (workItemId: string) => Promise<{ readonly code: string; readonly message: string } | null>,
 ): Promise<CommandResult> {
   const loaded = await loadPresentation(service, id);
   if (!loaded.ok) return loaded.result;
   const { item, events } = loaded;
+  if (decision.type === 'accept' && acceptanceGate) {
+    const refusal = await acceptanceGate(item.id);
+    if (refusal) return errorResult(refusal.message, refusal.code, EXIT.REJECTED);
+  }
   const plan = planResultReview(item, events, decision);
   if (!plan.ok) {
     const message =

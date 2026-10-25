@@ -66,6 +66,32 @@ describe('parseArgs — work external propose (acceptance_contract v2)', () => {
   });
 });
 
+const DIGEST = 'a'.repeat(64);
+describe('parseArgs — work external review (T4)', () => {
+  const base = ['work', 'external', 'review', ID, '--version', '1'];
+  test('sem decisão: leitura do candidato (não registra nada)', () => {
+    expect(parseArgs([...base, '--json'])).toEqual({ ok: true, command: { kind: 'work-external-review', id: ID, expectedProposalVersion: 1, decision: null, json: true } });
+  });
+  test('com decisão: critério (N ou A<N>), accept|reject e digest do diff exibido', () => {
+    expect(parseArgs([...base, '--criterion', 'A4', '--decision', 'accept', '--diff-digest', DIGEST])).toEqual({ ok: true, command: { kind: 'work-external-review', id: ID, expectedProposalVersion: 1,
+      decision: { position: 4, decision: 'accept', diffDigest: DIGEST }, json: false } });
+    expect(parseArgs([...base, '--criterion', '4', '--decision', 'reject', '--diff-digest', DIGEST, '--reason', 'enfraqueceu'])).toMatchObject({ ok: true, command: { decision: { position: 4, decision: 'reject', reason: 'enfraqueceu' } } });
+  });
+  test.each([
+    ['sem versão', ['work', 'external', 'review', ID]],
+    ['id inválido', ['work', 'external', 'review', 'A4', '--version', '1']],
+    ['decisão sem digest', [...base, '--criterion', '4', '--decision', 'accept']],
+    ['digest curto', [...base, '--criterion', '4', '--decision', 'accept', '--diff-digest', 'abc']],
+    ['decisão inválida', [...base, '--criterion', '4', '--decision', 'talvez', '--diff-digest', DIGEST]],
+    ['critério inválido', [...base, '--criterion', 'zero', '--decision', 'accept', '--diff-digest', DIGEST]],
+    ['rejeição sem motivo', [...base, '--criterion', '4', '--decision', 'reject', '--diff-digest', DIGEST]],
+    ['só --reason', [...base, '--reason', 'x']],
+    ['flag desconhecida', [...base, '--force']],
+    ['flag repetida', [...base, '--version', '2']],
+  ])('recusa: %s', (_n, argv) => expect(parseArgs(argv)).toMatchObject({ ok: false }));
+  test('a ajuda documenta o comando', () => { expect(USAGE).toContain('anima work external review'); });
+});
+
 describe('parseArgs — work external classify', () => {
   test('cinco eixos e versão explícitos', () => {
     expect(parseArgs(classify)).toEqual({ ok: true, command: { kind: 'work-external-classify', id: ID, expectedProposalVersion: 1,

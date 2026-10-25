@@ -12,6 +12,7 @@ export type ParsedCommand =
   | { readonly kind: 'work-propose-investigation'; readonly question: string; readonly baseSha: string; readonly capability: string; readonly json: boolean }
   | { readonly kind: 'work-external-propose'; readonly reference: string; readonly objective: string; readonly scope: readonly string[]; readonly excluded: readonly string[]; readonly acceptance: readonly { readonly id: string; readonly text: string }[]; readonly gates: readonly { readonly command: string; readonly covers?: readonly string[] }[]; readonly bindings: readonly { readonly covers: readonly string[]; readonly file: string; readonly minNewTests: number; readonly boundTests: readonly string[] }[]; readonly reviews: readonly string[]; readonly backend: string; readonly model?: string; readonly baseSha?: string; readonly maxAttempts: number; readonly maxMinutes: number; readonly json: boolean }
   | { readonly kind: 'work-external-classify'; readonly id: string; readonly expectedProposalVersion: number; readonly axes: { readonly complexity: string; readonly risk: string; readonly reversibility: string; readonly planClarity: string; readonly urgency: string }; readonly json: boolean }
+  | { readonly kind: 'work-external-review'; readonly id: string; readonly expectedProposalVersion: number; readonly decision: { readonly position: number; readonly decision: 'accept' | 'reject'; readonly diffDigest: string; readonly reason?: string } | null; readonly json: boolean }
   | { readonly kind: 'help' }
   | { readonly kind: 'status'; readonly json: boolean }
   | { readonly kind: 'recovery-config-check'; readonly json: boolean }
@@ -312,6 +313,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
 }
 
 const EXTERNAL_PROPOSE_USAGE = 'Uso: anima work external propose --target ext:<slug> --objective "<texto>" --scope <caminho> [--scope ...] --exclude <caminho> [--exclude ...] --accept A1="<critério>" [--accept A2=...] (cada critério precisa de UMA prova: --gate-covers "A3=npm test" | --bind \'{"covers":["A1"],"file":"src/x.test.js","bound_tests":["nome completo"]}\' | --review A4) [--gate "<npm ...>" gate sem cobertura] --backend ollama|codex-cli [--model M] [--base-sha SHA] [--max-attempts N] [--max-minutes M] [--json]';
+const EXTERNAL_REVIEW_USAGE = 'Uso: anima work external review <UUID> --version N [--criterion N --decision accept|reject --diff-digest <sha256> [--reason "..."]] [--json] (sem --decision: só lê o candidato, mostra o diff real e o digest)';
 const EXTERNAL_CLASSIFY_USAGE = 'Uso: anima work external classify <UUID> --version N --complexity X --risk X --reversibility X --plan-clarity X --urgency X [--json]';
 
 /** `anima work external propose|classify` — parser PURO; repetíveis só onde declarado; qualquer flag fora da lista é recusa de uso. */
@@ -379,6 +381,33 @@ function parseWorkExternal(argv: readonly string[]): ParseResult {
     if (error) return { ok: false, error: `${error}. ${EXTERNAL_PROPOSE_USAGE}` };
     return { ok: true, command: { kind: 'work-external-propose', ...input, ...(values['--base-sha'] ? { baseSha: values['--base-sha'] } : {}), json } };
   }
+  if (sub === 'review') {
+    const id = argv[1];
+    if (!id || id.startsWith('--') || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { ok: false, error: EXTERNAL_REVIEW_USAGE };
+    const flags: Record<string, string> = {}; let json = false;
+    for (let i = 2; i < argv.length; i++) {
+      const flag = argv[i]!;
+      if (flag === '--json') { if (json) return { ok: false, error: '--json duplicado.' }; json = true; continue; }
+      const value = argv[i + 1];
+      if (!['--version', '--criterion', '--decision', '--diff-digest', '--reason'].includes(flag) || value === undefined || value.startsWith('--') || flags[flag] !== undefined) return { ok: false, error: EXTERNAL_REVIEW_USAGE };
+      flags[flag] = value; i++;
+    }
+    const version = flags['--version'];
+    if (!version || !/^[1-9]\d*$/.test(version)) return { ok: false, error: `A versão é explícita. ${EXTERNAL_REVIEW_USAGE}` };
+    const decisionFlags = ['--criterion', '--decision', '--diff-digest'].filter(f => flags[f] !== undefined);
+    if (decisionFlags.length === 0 && flags['--reason'] === undefined) {
+      return { ok: true, command: { kind: 'work-external-review', id, expectedProposalVersion: Number(version), decision: null, json } };
+    }
+    const criterion = /^A?([1-9]\d?)$/.exec(flags['--criterion'] ?? '');
+    const decision = flags['--decision'];
+    const digest = flags['--diff-digest'];
+    if (!criterion || (decision !== 'accept' && decision !== 'reject') || !digest || !/^[0-9a-f]{64}$/.test(digest)) {
+      return { ok: false, error: `Para decidir informe --criterion, --decision accept|reject e --diff-digest (sha256 exibido pela leitura). ${EXTERNAL_REVIEW_USAGE}` };
+    }
+    if (decision === 'reject' && !flags['--reason']) return { ok: false, error: `A rejeição exige --reason. ${EXTERNAL_REVIEW_USAGE}` };
+    return { ok: true, command: { kind: 'work-external-review', id, expectedProposalVersion: Number(version),
+      decision: { position: Number(criterion[1]), decision, diffDigest: digest, ...(flags['--reason'] ? { reason: flags['--reason'] } : {}) }, json } };
+  }
   if (sub === 'classify') {
     const id = argv[1];
     if (!id || id.startsWith('--') || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { ok: false, error: EXTERNAL_CLASSIFY_USAGE };
@@ -400,7 +429,7 @@ function parseWorkExternal(argv: readonly string[]): ParseResult {
     for (const [axis, value] of Object.entries(axes)) if (!allowed[axis]!.includes(value!)) return { ok: false, error: `Eixo ${axis} inválido: ${value}. Valores: ${allowed[axis]!.join('|')}.` };
     return { ok: true, command: { kind: 'work-external-classify', id, expectedProposalVersion: Number(version), axes: axes as { complexity: string; risk: string; reversibility: string; planClarity: string; urgency: string }, json } };
   }
-  return { ok: false, error: `${EXTERNAL_PROPOSE_USAGE}\n${EXTERNAL_CLASSIFY_USAGE}` };
+  return { ok: false, error: `${EXTERNAL_PROPOSE_USAGE}\n${EXTERNAL_REVIEW_USAGE}\n${EXTERNAL_CLASSIFY_USAGE}` };
 }
 
 export const USAGE = `anima — CLI operacional do Anima (adapter sobre os mesmos application services da web)
@@ -415,6 +444,8 @@ Uso:
                                                Cria investiga\u00e7\u00e3o proposed; aprova\u00e7\u00e3o humana posterior
   anima work external propose --target ext:<slug> --objective T --scope P --exclude X --accept A1=T [--accept A2=T] --gate-covers "A1=CMD" | --bind JSON | --review A2 --backend ollama|codex-cli [--model M] [--json]
                                                Cria trabalho EXTERNO proposed (identidade do repositório autorizado, sem LLM); aprovação e classificação são atos humanos
+  anima work external review <UUID> --version N [--criterion N --decision accept|reject --diff-digest SHA256 [--reason T]]
+                                               Revisão HUMANA do candidato externo: lê o diff real e o digest; com --decision registra a decisão de um critério human_review
   anima work external classify <UUID> --version N --complexity C --risk R --reversibility V --plan-clarity P --urgency U
                                                Classificação HUMANA explícita (human_confirmed) de trabalho externo já aprovado
   anima work list                             Lista os trabalhos não terminais (retomáveis)

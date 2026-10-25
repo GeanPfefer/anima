@@ -66,6 +66,14 @@ export function renderHuman(payload: CliPayload): string {
         ...investigationLines(payload.review, true)].join('\n');
     case 'work-external-propose':
       return `${payload.reference} \u2014 ${payload.title}\nTrabalho: ${payload.workItemId}\nEstado: ${payload.state}\nBase: ${payload.baseSha}\nBackend: ${payload.backend}\nAprova\u00e7\u00e3o humana, classifica\u00e7\u00e3o humana (work external classify) e execu\u00e7\u00e3o s\u00e3o atos posteriores; nada foi aprovado nem iniciado.`;
+    case 'work-external-review':
+      return payload.mode === 'decided'
+        ? `${payload.workItemId} \u00b7 crit\u00e9rio "${payload.criterion}" \u00b7 decis\u00e3o ${payload.decision} registrada para o candidato ${payload.candidateCommitSha.slice(0, 12)}.\n${payload.remaining.length ? `Pendentes/bloqueantes: ${payload.remaining.join(' | ')}` : 'Todos os crit\u00e9rios de revis\u00e3o humana foram aceitos; o aceite do resultado (work accept) continua um ato separado.'}`
+        : [`${payload.reference} \u00b7 ${payload.workItemId} \u00b7 attempt ${payload.attemptId}`, `Candidato ${payload.candidateCommitSha} sobre a base ${payload.baseSha} (${payload.branch})`,
+          `Arquivos: ${payload.files.join(', ')}`, `Digest do diff (sha256): ${payload.diffSha256}`,
+          ...(payload.retainedConflicts.length ? [`Aviso: itens retidos no mesmo reposit\u00f3rio f\u00edsico: ${payload.retainedConflicts.map(c => `${c.reference}:${c.workItemId}`).join(', ')}`] : []),
+          'Crit\u00e9rios de revis\u00e3o humana:', ...payload.criteria.map(c => `  ${c.position}. [${c.status}] ${c.text}`),
+          payload.diffTruncated ? 'Diff (truncado):' : 'Diff:', payload.diff].join('\n');
     case 'work-external-classify':
       return `${payload.workItemId} \u00b7 proposta v${payload.proposalVersion} \u00b7 classifica\u00e7\u00e3o humana ${payload.replayed ? 'j\u00e1 vigente (replay)' : 'registrada'}.\nA execu\u00e7\u00e3o continua um ato separado (work execute-one).`;
     case 'work-propose-investigation':

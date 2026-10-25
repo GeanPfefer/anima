@@ -21,7 +21,8 @@ import { readWorkRetryReadiness } from '@/lib/work-orchestration/retry-readiness
 import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
 import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/lib/work-orchestration/paid-compute-authorization-store';
-import { runWorkExternalClassify, runWorkExternalPropose, runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
+import { createExternalReviewDeps, externalAcceptanceRefusal, type ExternalReviewDeps } from '@/lib/work-orchestration/external-candidate-review';
+import { runWorkExternalReview, runWorkExternalClassify, runWorkExternalPropose, runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
 import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recovery';
 import { recoverFromFailedCandidate } from '@/lib/work-orchestration/candidate-recovery';
 import { runWorkRecoverCandidate } from './app';
@@ -60,6 +61,7 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
   readonly service?: WorkOrchestrationService;
   readonly investigationDeps?: InvestigationPreparationDeps;
   readonly externalWorkDeps?: ExternalWorkPrepareDeps;
+  readonly externalReviewDeps?: ExternalReviewDeps;
   readonly externalClassificationPort?: ExternalClassificationPort;
 } = {}): Promise<CommandResult> {
   if (command.kind === 'help') return { exitCode: EXIT.OK, payload: { ok: true, kind: 'help', usage: USAGE } };
@@ -148,8 +150,14 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
       return runWorkUnsupervise(async()=>{const r=await client.rpc('revoke_work_supervision',{p_work_item_id:command.id});if(r.error)return {ok:false,code:r.error.code??null,message:r.error.message};const v=r.data as {replayed:boolean};return {ok:true,replayed:v.replayed};},command.id);
     case 'work-approve':
       return runWorkApprove(service, command.id);
-    case 'work-accept':
-      return runWorkReview(service, command.id, { type: 'accept' });
+    case 'work-accept': {
+      // Trabalho EXTERNO com critério human_review: o aceite exige a revisão humana registrada para ESTE candidato.
+      const reviewDeps = injection.externalReviewDeps ?? createExternalReviewDeps(client, userId, service);
+      return runWorkReview(service, command.id, { type: 'accept' }, id => externalAcceptanceRefusal(id, reviewDeps));
+    }
+    case 'work-external-review':
+      return runWorkExternalReview(injection.externalReviewDeps ?? createExternalReviewDeps(client, userId, service),
+        { workItemId: command.id, expectedProposalVersion: command.expectedProposalVersion, decision: command.decision });
     case 'work-withdraw':
       return runWorkWithdraw(service, command.id, command.reason);
     case 'work-resolve-pending':
