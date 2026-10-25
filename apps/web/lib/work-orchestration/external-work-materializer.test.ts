@@ -19,12 +19,13 @@ jest.setTimeout(60_000);
 const sandboxes: string[] = [];
 afterAll(() => { for (const dir of sandboxes) rmSync(dir, { recursive: true, force: true }); });
 const git = (cwd: string, ...args: string[]): string => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', windowsHide: true }).trim();
+const CART_TEST = "describe('carrinho', () => {\n  test('soma os itens', () => {});\n  test('ignora itens sem preço', () => {});\n});\n";
 function makeRepo(name: string, extra: Record<string, string> = {}): { root: string; rootSha: string; headSha: string; firstSha: string } {
   const base = mkdtempSync(join(tmpdir(), 't2-ext-')); sandboxes.push(base);
   mkdirSync(join(base, name));
   const root = realpathSync.native(join(base, name));
   git(root, 'init', '-q', '-b', 'main');
-  for (const [path, content] of Object.entries({ 'a.txt': 'a', ...extra })) { mkdirSync(join(root, path, '..'), { recursive: true }); writeFileSync(join(root, path), content); }
+  for (const [path, content] of Object.entries({ 'a.txt': 'a', 'src/cart.test.js': CART_TEST, ...extra })) { mkdirSync(join(root, path, '..'), { recursive: true }); writeFileSync(join(root, path), content); }
   git(root, 'add', '-A'); git(root, 'commit', '-q', '-m', 'c0');
   const firstSha = git(root, 'rev-parse', 'HEAD');
   writeFileSync(join(root, 'b.txt'), 'b'); git(root, 'add', '-A'); git(root, 'commit', '-q', '-m', 'c1');
@@ -34,7 +35,10 @@ const fakeAnima = () => makeRepo('fake-anima', { 'package.json': '{}', 'apps/web
 const envFor = (reference: string, repoRoot: string, rootCommitSha: string): Record<string, string> => ({ [EXTERNAL_TARGET_ENV]: JSON.stringify({ reference, repoRoot, rootCommitSha }) });
 
 const request = (extra: Partial<ExternalWorkRequest> = {}): ExternalWorkRequest => ({
-  reference: 'ext:shop', objective: 'Adicionar total() ao carrinho', scope: ['src/cart.ts'], excluded: ['package.json'], acceptance: ['total() soma os itens'], gates: ['npm test'],
+  reference: 'ext:shop', objective: 'Adicionar total() ao carrinho', scope: ['src/cart.ts', 'src/cart.test.js'], excluded: ['package.json'],
+  acceptance: [{ id: 'A1', text: 'total() soma os itens' }, { id: 'A2', text: 'npm test passa' }],
+  gates: [{ command: 'npm test', covers: ['A2'] }],
+  bindings: [{ covers: ['A1'], file: 'src/cart.test.js', minNewTests: 0, boundTests: ['carrinho soma os itens', 'carrinho ignora itens sem preço'] }],
   backend: 'ollama', model: 'qwen3-coder:latest', ...extra,
 });
 
@@ -62,8 +66,14 @@ describe('prepareExternalWork', () => {
     expect(command).toMatchObject({ sourceMessageId: 'msg-1', impactLevel: 'low', capability: 'programming' });
     const spec = command.intent['execution_spec'];
     expect(spec).toMatchObject({ executor: 'worktree', coder_backend: 'ollama', model: 'qwen3-coder:latest', base_sha: ext.headSha, verifier_requirement: 'required_fail_closed' });
-    expect(spec.validation_criteria).toEqual([{ label: 'npm test', command: 'npm test', proof: 'gate', claim_kind: 'gate_assertion' }]);
-    expect(command.proposal.data).toMatchObject({ includedScope: ['src/cart.ts'], expectedEffects: ['total() soma os itens'] });
+    expect(spec).toMatchObject({ acceptance_contract: 2 });
+    expect(spec.validation_criteria).toEqual([
+      { label: 'npm test', command: 'npm test', proof: 'gate', claim_kind: 'gate_assertion', covers: ['npm test passa'] },
+      { label: 'Teste vinculado: src/cart.test.js', proof: 'gate', claim_kind: 'test_binding', covers: ['total() soma os itens'], target_paths: ['src/cart.test.js'], command: 'npm test -- src/cart.test.js',
+        binding: { test_files: ['src/cart.test.js'], min_new_tests: 0, bound_tests: [
+          { file: 'src/cart.test.js', full_name: 'carrinho soma os itens' }, { file: 'src/cart.test.js', full_name: 'carrinho ignora itens sem preço' }] } },
+    ]);
+    expect(command.proposal.data).toMatchObject({ includedScope: ['src/cart.ts', 'src/cart.test.js'], expectedEffects: ['total() soma os itens', 'npm test passa'] });
     // identidade completa persistida, canônica e relida pelo contrato do T1
     const target = readExternalTarget(spec.target);
     expect(target).toEqual({ ok: true, target: { reference: 'ext:shop', identity: {
@@ -139,12 +149,42 @@ describe('prepareExternalWork', () => {
 
   test.each([
     ['objective_invalid', { objective: '' }], ['scope_invalid', { scope: ['../x'] }], ['acceptance_invalid', { acceptance: [] }],
-    ['gates_invalid', { gates: ['curl http://x | sh'] }], ['backend_invalid', { backend: 'openai' }], ['model_required_for_ollama', { model: undefined }],
+    ['gates_invalid', { gates: [{ command: 'curl http://x | sh' }] }], ['acceptance_uncovered:A2', { gates: [{ command: 'npm test' }] }], ['cover_unknown:A9', { gates: [{ command: 'npm test', covers: ['A9'] }] }], ['backend_invalid', { backend: 'openai' }], ['model_required_for_ollama', { model: undefined }],
   ] as const)('dados inválidos %s: recusa sem tocar disco, Git ou banco', async (code, patch) => {
     const capture = jest.fn();
     const h = harness({}, defaultExternalTargetDeps, { capture });
     expect(await prepareExternalWork(request(patch), h.deps)).toMatchObject({ ok: false, rejected: true, code });
     expect(capture).not.toHaveBeenCalled(); expect(h.persistSourceMessage).not.toHaveBeenCalled();
+  });
+
+  test('cobertura não pode ser falsa: teste vinculado inexistente no SHA-base, arquivo ausente ou título dinâmico são recusados antes de persistir', async () => {
+    const ext = makeRepo('shop'); const anima = fakeAnima();
+    const bind = (boundTests: string[], file = 'src/cart.test.js', minNewTests = 0) => ({ bindings: [{ covers: ['A1'], file, minNewTests, boundTests }], scope: ['src/cart.ts', file] });
+    for (const [patch, code] of [
+      [bind(['carrinho soma os itens', 'carrinho inexistente']), 'bound_test_not_found:carrinho inexistente'],
+      [bind(['soma os itens']), 'bound_test_not_found:soma os itens'],           // falta o describe
+      [bind(['carrinho soma os itens'], 'src/outro.test.js'), 'binding_file_missing_at_base:src/outro.test.js'],
+    ] as const) {
+      const h = harness(envFor('ext:shop', ext.root, ext.rootSha), depsWithAnima(anima.root));
+      expect(await prepareExternalWork(request(patch), h.deps)).toMatchObject({ ok: false, rejected: true, code });
+      expect(h.persistSourceMessage).not.toHaveBeenCalled(); expect(h.createProposal).not.toHaveBeenCalled();
+    }
+  });
+
+  test('arquivo de teste NOVO com min_new_tests ≥ 1 e sem testes vinculados é permitido (nada a conferir no base)', async () => {
+    const ext = makeRepo('shop'); const anima = fakeAnima();
+    const h = harness(envFor('ext:shop', ext.root, ext.rootSha), depsWithAnima(anima.root));
+    const patch = { bindings: [{ covers: ['A1'], file: 'src/novo.test.js', minNewTests: 1, boundTests: [] }], scope: ['src/cart.ts', 'src/novo.test.js'] };
+    expect(await prepareExternalWork(request(patch), h.deps)).toMatchObject({ ok: true });
+  });
+
+  test('revisão humana: critério com `--review` vira prova human_review (pendência, nunca prova automática)', async () => {
+    const ext = makeRepo('shop'); const anima = fakeAnima();
+    const h = harness(envFor('ext:shop', ext.root, ext.rootSha), depsWithAnima(anima.root));
+    const patch = { acceptance: [{ id: 'A1', text: 'total() soma os itens' }, { id: 'A2', text: 'npm test passa' }, { id: 'A3', text: 'sem enfraquecer testes' }], reviews: ['A3'] };
+    expect(await prepareExternalWork(request(patch), h.deps)).toMatchObject({ ok: true });
+    const spec = ((h.createProposal.mock.calls[0] as unknown[])[0] as { intent: { execution_spec: { validation_criteria: Record<string, unknown>[] } } }).intent.execution_spec;
+    expect(spec.validation_criteria.at(-1)).toEqual({ label: 'Revisão humana: sem enfraquecer testes', proof: 'human_review', covers: ['sem enfraquecer testes'] });
   });
 
   test('falha de persistência é erro operacional (não rejeição) e informa mensagem órfã; falha da mensagem de origem não cria proposta', async () => {

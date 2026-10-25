@@ -10,7 +10,7 @@ import { parseComputePreference, type ComputePreferenceV1 } from '@anima/core';
 export type ParsedCommand =
   | { readonly kind: 'work-execute-one'; readonly id: string; readonly expectedProposalVersion: number; readonly json: boolean }
   | { readonly kind: 'work-propose-investigation'; readonly question: string; readonly baseSha: string; readonly capability: string; readonly json: boolean }
-  | { readonly kind: 'work-external-propose'; readonly reference: string; readonly objective: string; readonly scope: readonly string[]; readonly excluded: readonly string[]; readonly acceptance: readonly string[]; readonly gates: readonly string[]; readonly backend: string; readonly model?: string; readonly baseSha?: string; readonly maxAttempts: number; readonly maxMinutes: number; readonly json: boolean }
+  | { readonly kind: 'work-external-propose'; readonly reference: string; readonly objective: string; readonly scope: readonly string[]; readonly excluded: readonly string[]; readonly acceptance: readonly { readonly id: string; readonly text: string }[]; readonly gates: readonly { readonly command: string; readonly covers?: readonly string[] }[]; readonly bindings: readonly { readonly covers: readonly string[]; readonly file: string; readonly minNewTests: number; readonly boundTests: readonly string[] }[]; readonly reviews: readonly string[]; readonly backend: string; readonly model?: string; readonly baseSha?: string; readonly maxAttempts: number; readonly maxMinutes: number; readonly json: boolean }
   | { readonly kind: 'work-external-classify'; readonly id: string; readonly expectedProposalVersion: number; readonly axes: { readonly complexity: string; readonly risk: string; readonly reversibility: string; readonly planClarity: string; readonly urgency: string }; readonly json: boolean }
   | { readonly kind: 'help' }
   | { readonly kind: 'status'; readonly json: boolean }
@@ -311,7 +311,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   return { ok: false, error: `Comando desconhecido: ${group}` };
 }
 
-const EXTERNAL_PROPOSE_USAGE = 'Uso: anima work external propose --target ext:<slug> --objective "<texto>" --scope <caminho> [--scope ...] --exclude <caminho> [--exclude ...] --accept "<critério>" [--accept ...] --gate "<npm ...>" [--gate ...] --backend ollama|codex-cli [--model M] [--base-sha SHA] [--max-attempts N] [--max-minutes M] [--json]';
+const EXTERNAL_PROPOSE_USAGE = 'Uso: anima work external propose --target ext:<slug> --objective "<texto>" --scope <caminho> [--scope ...] --exclude <caminho> [--exclude ...] --accept A1="<critério>" [--accept A2=...] (cada critério precisa de UMA prova: --gate-covers "A3=npm test" | --bind \'{"covers":["A1"],"file":"src/x.test.js","bound_tests":["nome completo"]}\' | --review A4) [--gate "<npm ...>" gate sem cobertura] --backend ollama|codex-cli [--model M] [--base-sha SHA] [--max-attempts N] [--max-minutes M] [--json]';
 const EXTERNAL_CLASSIFY_USAGE = 'Uso: anima work external classify <UUID> --version N --complexity X --risk X --reversibility X --plan-clarity X --urgency X [--json]';
 
 /** `anima work external propose|classify` — parser PURO; repetíveis só onde declarado; qualquer flag fora da lista é recusa de uso. */
@@ -319,9 +319,9 @@ function parseWorkExternal(argv: readonly string[]): ParseResult {
   const sub = argv[0];
   if (argv.includes('--help') || argv.includes('-h')) return { ok: true, command: { kind: 'help' } };
   if (sub === 'propose') {
-    const repeatable = new Set(['--scope', '--exclude', '--accept', '--gate']);
+    const repeatable = new Set(['--scope', '--exclude', '--accept', '--gate', '--gate-covers', '--bind', '--review']);
     const single = new Set(['--target', '--objective', '--backend', '--model', '--base-sha', '--max-attempts', '--max-minutes']);
-    const lists: Record<string, string[]> = { '--scope': [], '--exclude': [], '--accept': [], '--gate': [] };
+    const lists: Record<string, string[]> = { '--scope': [], '--exclude': [], '--accept': [], '--gate': [], '--gate-covers': [], '--bind': [], '--review': [] };
     const values: Record<string, string> = {};
     let json = false;
     for (let i = 1; i < argv.length; i++) {
@@ -334,9 +334,44 @@ function parseWorkExternal(argv: readonly string[]): ParseResult {
       if (repeatable.has(flag)) lists[flag]!.push(value); else values[flag] = value;
     }
     const int = (raw: string | undefined, fallback: number): number => raw === undefined ? fallback : /^[1-9]\d{0,3}$/.test(raw) ? Number(raw) : Number.NaN;
+    const idList = (raw: string): string[] | null => /^A[1-9]\d?(?:,A[1-9]\d?)*$/.test(raw) ? raw.split(',') : null;
+
+    const acceptance: { id: string; text: string }[] = [];
+    for (const raw of lists['--accept']!) {
+      const m = /^(A[1-9]\d?)=([\s\S]+)$/.exec(raw);
+      if (!m) return { ok: false, error: `acceptance_invalid: use --accept A<n>="texto" (identificação estável). ${EXTERNAL_PROPOSE_USAGE}` };
+      acceptance.push({ id: m[1]!, text: m[2]! });
+    }
+    const gates: { command: string; covers?: string[] }[] = lists['--gate']!.map(command => ({ command }));
+    for (const raw of lists['--gate-covers']!) {
+      const eq = raw.indexOf('=');
+      const covers = eq > 0 ? idList(raw.slice(0, eq)) : null;
+      if (!covers) return { ok: false, error: `gate_covers_invalid: use --gate-covers "A3[,A4]=npm test". ${EXTERNAL_PROPOSE_USAGE}` };
+      gates.push({ command: raw.slice(eq + 1), covers });
+    }
+    const bindings: { covers: string[]; file: string; minNewTests: number; boundTests: string[] }[] = [];
+    for (const raw of lists['--bind']!) {
+      let parsed: unknown;
+      try { parsed = JSON.parse(raw); } catch { return { ok: false, error: `binding_invalid: --bind exige JSON. ${EXTERNAL_PROPOSE_USAGE}` }; }
+      const b = parsed as Record<string, unknown> | null;
+      const keys = b && typeof b === 'object' && !Array.isArray(b) ? Object.keys(b) : [];
+      const covers = Array.isArray(b?.['covers']) && b['covers'].every((x: unknown) => typeof x === 'string') ? b['covers'] as string[] : null;
+      const bound = b?.['bound_tests'] === undefined ? [] : Array.isArray(b['bound_tests']) && b['bound_tests'].every((x: unknown) => typeof x === 'string') ? b['bound_tests'] as string[] : null;
+      const min = b?.['min_new_tests'] === undefined ? 0 : b['min_new_tests'];
+      if (!b || keys.some(k => !['covers', 'file', 'min_new_tests', 'bound_tests'].includes(k)) || !covers || bound === null
+        || typeof b['file'] !== 'string' || typeof min !== 'number') {
+        return { ok: false, error: `binding_invalid: campos permitidos covers[], file, min_new_tests, bound_tests[]. ${EXTERNAL_PROPOSE_USAGE}` };
+      }
+      bindings.push({ covers, file: b['file'], minNewTests: min, boundTests: bound });
+    }
+    const reviews: string[] = [];
+    for (const raw of lists['--review']!) {
+      if (!/^A[1-9]\d?$/.test(raw)) return { ok: false, error: `review_invalid: use --review A<n>. ${EXTERNAL_PROPOSE_USAGE}` };
+      reviews.push(raw);
+    }
     const input = {
       reference: values['--target'] ?? '', objective: values['--objective'] ?? '', scope: lists['--scope']!, excluded: lists['--exclude']!,
-      acceptance: lists['--accept']!, gates: lists['--gate']!, backend: values['--backend'] ?? '', ...(values['--model'] !== undefined ? { model: values['--model'] } : {}),
+      acceptance, gates, bindings, reviews, backend: values['--backend'] ?? '', ...(values['--model'] !== undefined ? { model: values['--model'] } : {}),
       maxAttempts: int(values['--max-attempts'], 1), maxMinutes: int(values['--max-minutes'], 30),
     };
     if (values['--base-sha'] !== undefined && !/^[0-9a-f]{40}$/.test(values['--base-sha'])) return { ok: false, error: 'base_sha_invalid' };
@@ -378,7 +413,7 @@ Uso:
   anima work execute-one <UUID> --version N [--json]  Uma volta isolada; exige aprovação/classificação prévias
   anima work propose-investigation --question T --base-sha SHA [--capability research] [--json]
                                                Cria investiga\u00e7\u00e3o proposed; aprova\u00e7\u00e3o humana posterior
-  anima work external propose --target ext:<slug> --objective T --scope P --exclude X --accept A --gate G --backend ollama|codex-cli [--model M] [--json]
+  anima work external propose --target ext:<slug> --objective T --scope P --exclude X --accept A1=T [--accept A2=T] --gate-covers "A1=CMD" | --bind JSON | --review A2 --backend ollama|codex-cli [--model M] [--json]
                                                Cria trabalho EXTERNO proposed (identidade do repositório autorizado, sem LLM); aprovação e classificação são atos humanos
   anima work external classify <UUID> --version N --complexity C --risk R --reversibility V --plan-clarity P --urgency U
                                                Classificação HUMANA explícita (human_confirmed) de trabalho externo já aprovado

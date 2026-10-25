@@ -1,5 +1,5 @@
 import {
-  buildExternalWorkProposal, isExternalWorkEnvelope, validateExternalWorkInput, validateWorkIntelligenceClassification,
+  buildExternalWorkProposal, isExternalWorkEnvelope, listStaticJestTestNames, validateExternalWorkInput, validateWorkIntelligenceClassification,
   workComplexities, workPlanClarities, workReversibilities, workRisks, workUrgencies,
   type ExternalWorkInput, type WorkIntelligenceClassificationV1, type WorkOrchestrationService,
 } from '@anima/core';
@@ -7,6 +7,7 @@ import type { Database } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readExecutionContract } from './executor-selection';
 import { captureExternalTargetSpec, verifyExternalTargetForContract, type ExternalTargetDeps } from './external-target-resolver';
+import { createTrustedGitRunner } from './trusted-git';
 
 // ============================================================
 // Materializador de WORK ITEM EXTERNO (Project Builder V0 — T2) + classificação HUMANA explícita.
@@ -25,6 +26,8 @@ export interface ExternalWorkPrepareDeps {
   readonly capture: (baseSha: string | undefined) => ReturnType<typeof captureExternalTargetSpec>;
   /** Reverificação da identidade autorizada × repositório vivo sobre o contrato JÁ montado (T1). */
   readonly verify: typeof verifyExternalTargetForContract;
+  /** Conteúdo de um arquivo no SHA-base autorizado do target (Git confiável); `null` se não existir. Sem executar nada do alvo. */
+  readonly readFileAtBase: (identity: { readonly gitCommonDirCanonical: string; readonly baseSha: string }, path: string) => Promise<string | null>;
   readonly persistSourceMessage: (content: string) => Promise<string | null>;
   readonly service: Pick<WorkOrchestrationService, 'createProposal'>;
   readonly now?: () => Date;
@@ -47,6 +50,19 @@ export async function prepareExternalWork(input: ExternalWorkRequest, deps: Exte
     if (!captured.ok) return reject(captured.code, captured.message);
     if (captured.target.reference !== input.reference) {
       return reject('external_target_unknown', `A referência ${input.reference} não é o target autorizado neste host.`);
+    }
+
+    // Cobertura não pode ser falsa: cada vínculo de teste precisa apontar um arquivo que existe no SHA-base autorizado e conter
+    // (estaticamente) os testes nomeados; senão o Verifier jamais poderia satisfazê-lo (inconclusive estrutural).
+    for (const binding of input.bindings ?? []) {
+      const source = await deps.readFileAtBase(captured.target.identity, binding.file);
+      if (source === null) {
+        if (binding.boundTests.length > 0 || binding.minNewTests < 1) return reject(`binding_file_missing_at_base:${binding.file}`, `O arquivo de teste ${binding.file} não existe no SHA-base autorizado.`);
+        continue; // arquivo NOVO com min_new_tests ≥ 1 e sem testes vinculados: nada a conferir no base
+      }
+      const known = listStaticJestTestNames(source);
+      const missing = binding.boundTests.find(name => !known.has(name));
+      if (missing !== undefined) return reject(`bound_test_not_found:${missing}`, `O teste "${missing}" não foi encontrado de forma estática em ${binding.file} no SHA-base (títulos dinâmicos não são vinculáveis).`);
     }
 
     const built = buildExternalWorkProposal(input, captured.specTarget, (deps.now ?? (() => new Date()))().toISOString());
@@ -81,6 +97,10 @@ export function createExternalWorkPrepareDeps(
     service,
     capture: baseSha => captureExternalTargetSpec(env, { ...(baseSha ? { baseSha } : {}), ...(options.targetDeps ? { deps: options.targetDeps } : {}) }),
     verify: contract => verifyExternalTargetForContract(contract, env, options.targetDeps),
+    readFileAtBase: async (identity, path) => {
+      const result = await createTrustedGitRunner({ gitDir: identity.gitCommonDirCanonical })(['show', `${identity.baseSha}:${path}`]);
+      return result.exitCode === 0 ? result.stdout : null;
+    },
     persistSourceMessage: async content => {
       const { data, error } = await client.from('ai_conversations').insert({ user_id: userId, role: 'user', content }).select('id').single();
       if (error || !data) throw new Error(error?.message ?? 'source_message_persist_failed');
