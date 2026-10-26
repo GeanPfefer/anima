@@ -43,7 +43,30 @@ export function isAllowedIntegrationTargetRef(ref: unknown): ref is typeof INTEG
   return ref === INTEGRATION_EFFECT_TARGET_REF;
 }
 
+/** Project Builder V0 T5: destino LOCAL de repositório externo (`refs/heads/<nome>`), espelho de
+ * `authorize_external_integration_effect` (SQL). Nunca o namespace de attempts; só ff_only. */
+export function isAllowedExternalIntegrationTargetRef(ref: unknown): ref is string {
+  if (typeof ref !== 'string' || !/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(ref)) return false;
+  if (ref.includes('..') || ref.includes('//') || ref.endsWith('/') || ref.startsWith('refs/heads/anima-work/')) return false;
+  return !ref.split('/').some((part) => part.endsWith('.lock'));
+}
+
+/** Identidade física CONGELADA na autorização externa (`payload.data.external`). */
+export interface ExternalIntegrationIdentityV1 {
+  readonly reference: string;
+  readonly repoRootCanonical: string;
+  readonly gitCommonDirCanonical: string;
+  readonly rootCommitSha: string;
+  readonly baseSha: string;
+}
+
+export function externalIntegrationRepositoryId(reference: string): string {
+  return `external:${reference}`;
+}
+
 export interface IntegrationEffectAuthorizationV1 {
+  /** Presente ⇒ autorização EXTERNA (T5): identidade canônica congelada; destino e repositório seguem a política externa. */
+  readonly external?: ExternalIntegrationIdentityV1;
   readonly eventId: string;
   readonly authorizationId: string;
   readonly operationKey: string;
@@ -114,7 +137,10 @@ export function projectIntegrationEffectAuthorization(
       || !str(d.accepted_result_event_id) || !str(d.result_commit_sha) || !SHA.test(d.result_commit_sha)
       || !str(d.repository_id) || !str(d.target_ref) || !str(d.expected_target_sha) || !SHA.test(d.expected_target_sha)
       || !str(d.mode)) return null;
+    const ext = parseExternalIdentity(d.external);
+    if (d.external !== undefined && !ext) return null;
     return {
+      ...(ext ? { external: ext } : {}),
       eventId: event.id, authorizationId, operationKey: d.operation_key, workItemId: d.work_item_id,
       proposalVersion: d.approved_proposal_version, attemptId: d.attempt_id, acceptedResultEventId: d.accepted_result_event_id,
       resultCommitSha: d.result_commit_sha, repositoryId: d.repository_id, targetRef: d.target_ref,
@@ -122,6 +148,23 @@ export function projectIntegrationEffectAuthorization(
     };
   }
   return null;
+}
+
+function parseExternalIdentity(value: Json | undefined): ExternalIntegrationIdentityV1 | null {
+  const e = object(value);
+  if (!e || !str(e.reference) || !str(e.repo_root_canonical) || !str(e.git_common_dir_canonical)
+    || !str(e.root_commit_sha) || !SHA.test(e.root_commit_sha) || !str(e.base_sha) || !SHA.test(e.base_sha)) return null;
+  return { reference: e.reference, repoRootCanonical: e.repo_root_canonical, gitCommonDirCanonical: e.git_common_dir_canonical,
+    rootCommitSha: e.root_commit_sha, baseSha: e.base_sha };
+}
+
+/** Política de destino/repositório/modo por TIPO de autorização (interna ⇒ só `dev`; externa ⇒ ref local segura + ff_only). */
+function integrationScopeAllows(authorization: IntegrationEffectAuthorizationV1, targetRef: string): boolean {
+  const ext = authorization.external;
+  if (!ext) return isAllowedIntegrationTargetRef(targetRef);
+  return isAllowedExternalIntegrationTargetRef(targetRef)
+    && authorization.mode === INTEGRATION_EFFECT_MODE_FF_ONLY
+    && authorization.repositoryId === externalIntegrationRepositoryId(ext.reference);
 }
 
 const isReceipt = (value: Json | undefined): value is Json => {
@@ -161,7 +204,7 @@ export function integrationReceiptMatchesAuthorization(
     && receipt.resultCommitSha === authorization.resultCommitSha
     && receipt.repositoryId === authorization.repositoryId
     && receipt.targetRef === authorization.targetRef
-    && isAllowedIntegrationTargetRef(receipt.targetRef)
+    && integrationScopeAllows(authorization, receipt.targetRef)
     && receipt.mode === authorization.mode
     && receipt.previousTargetSha === authorization.expectedTargetSha
     && receipt.observed === true
@@ -236,6 +279,8 @@ export function planIntegrationEffect(input: {
   readonly authorizationId: string;
   /** Repositório configurado no servidor (nunca do payload). */
   readonly trustedRepositoryId: string;
+  /** `external` (T5): exige autorização externa e aplica a política externa. Default `internal` (inalterado). */
+  readonly scope?: 'internal' | 'external';
 }): IntegrationEffectPlanResult {
   const deny = (defect: IntegrationEffectPlanDefect): IntegrationEffectPlanResult => ({ ok: false, defect });
   const { item, events } = input;
@@ -244,7 +289,8 @@ export function planIntegrationEffect(input: {
   if (auth.workItemId !== item.id) return deny('item_mismatch');
   if (item.state !== 'completed') return deny('item_not_completed');
   if (auth.proposalVersion !== item.proposalVersion) return deny('proposal_version_changed');
-  if (!isAllowedIntegrationTargetRef(auth.targetRef)) return deny('target_not_allowed');
+  if ((input.scope === 'external') !== (auth.external !== undefined)) return deny('target_not_allowed');
+  if (!integrationScopeAllows(auth, auth.targetRef)) return deny('target_not_allowed');
   if (!isAllowedIntegrationMode(auth.mode)) return deny('mode_not_allowed');
   if (auth.repositoryId !== input.trustedRepositoryId) return deny('repository_mismatch');
 

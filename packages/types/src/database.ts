@@ -2388,6 +2388,32 @@ export type Database = {
         }
         Returns: Json
       }
+      acquire_external_repo_lease: {
+        Args: {
+          lease_seconds: number
+          owner_instance_id: string
+          work_item_id: string
+        }
+        Returns: Json
+      }
+      authorize_external_integration_effect: {
+        Args: {
+          accepted_result_event_id: string
+          authorization_id: string
+          expected_proposal_version: number
+          expected_target_sha: string
+          target_ref: string
+          work_item_id: string
+        }
+        Returns: Json
+      }
+      release_external_repo_lease: {
+        Args: {
+          lease_id: string
+          reason?: string
+        }
+        Returns: Json
+      }
       authorize_integration_effect: {
         Args: {
           accepted_result_event_id: string
