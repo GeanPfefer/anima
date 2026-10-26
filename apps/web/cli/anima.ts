@@ -30,6 +30,7 @@ import { runWorkRecoverCandidate } from './app';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
 import { runWorkInvestigation, runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkExecutors, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { createNodeExecutorReadinessDeps, probeAllExecutors } from '@/lib/work-orchestration/executor-readiness';
+import { diagnoseCodexExecutor } from '@/lib/work-orchestration/codex-executor-diagnostics';
 import { renderHuman } from './render';
 import { createExternalIntegrationRuntime, type ExternalIntegrationRuntime } from '@/lib/work-orchestration/external-integration-service';
 import { createExternalClassificationPort, createExternalWorkPrepareDeps, type ExternalClassificationPort, type ExternalWorkPrepareDeps } from '@/lib/work-orchestration/external-work-materializer';
@@ -115,7 +116,10 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
     case 'work-investigation': return runWorkInvestigation(service, command.id);
     case 'work-show': return runWorkShow(service, command.id);
     case 'work-evidence': return runWorkEvidence(service, command.id);
-    case 'work-executors': return runWorkExecutors(service, () => probeAllExecutors(createNodeExecutorReadinessDeps()), command.id);
+    case 'work-executors': {
+      const readiness = createNodeExecutorReadinessDeps();
+      return runWorkExecutors(service, () => probeAllExecutors(readiness), command.id, undefined, observation => diagnoseCodexExecutor(readiness, observation));
+    }
     case 'work-request-changes': {
       const decision: ResultReviewDecision = { type: 'request_changes', requestedChanges: command.reason };
       return runWorkReview(service, command.id, decision);

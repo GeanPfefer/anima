@@ -223,6 +223,14 @@ export function renderHuman(payload: CliPayload): string {
         for (const c of payload.noRecommendation?.candidates ?? []) lines.push(`  ${c.provider}: ${c.reason}`);
         lines.push('A recomendação reflete apenas readiness, elegibilidade e custo; não afirma adequação do modelo à tarefa.');
       }
+      if (payload.codex) {
+        const c = payload.codex;
+        lines.push(`Codex CLI: transporte ${c.transport}${c.transport === 'wsl' ? ` (${c.configSource})` : ''} ${DOT} ${c.availability}${c.reason ? ` [${c.reason}]` : ''}`);
+        if (c.distro || c.user) lines.push(`  distribuição: ${c.distro ?? '—'} ${DOT} usuário: ${c.user ?? '—'}`);
+        lines.push(`  binário: ${c.binary ?? '—'} ${DOT} versão: ${c.version ?? '—'}${c.profileCompatible === false ? ' (fora da linha 0.162.x do perfil Single-Item)' : ''}`);
+        if (c.cause && c.cause !== c.reason) lines.push(`  causa: ${c.cause}`);
+        if (c.hint) lines.push(`  ${c.hint}`);
+      }
       lines.push('Somente leitura: nada foi persistido, escolhido ou iniciado.');
       return lines.join('\n');
     }

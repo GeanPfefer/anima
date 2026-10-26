@@ -34,6 +34,7 @@ import { parseAutonomyFlag } from '@/lib/resident-host/ports';
 import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
 import { EXIT, type ExitCode } from './exit-codes';
 import { readExecutionContract } from '@/lib/work-orchestration/executor-selection';
+import type { CodexExecutorDiagnostic } from '@/lib/work-orchestration/codex-executor-diagnostics';
 import { projectExecutorCandidates, recommendExecutor, type ExecutorCandidate, type ExecutorObservation, type ExecutorRecommendation, type NoExecutorRecommendation } from '@/lib/work-orchestration/executor-discovery';
 import type { ReplanResult } from '@/lib/work-orchestration/replan-orchestration';
 import type { AuthorizeResumeResult } from '@/lib/work-orchestration/authorize-resume';
@@ -176,6 +177,8 @@ export interface WorkExecutorsPayload {
   readonly recommendation: ExecutorRecommendation | null;
   /** Presente quando não há recomendação: `no_ready_candidate` + motivo por candidato. */
   readonly noRecommendation: NoExecutorRecommendation | null;
+  /** Diagnóstico read-only do Codex CLI (transporte efetivo, distro/usuário/binário/versão e causa específica); null se não coletado. */
+  readonly codex: CodexExecutorDiagnostic | null;
 }
 export interface StatusPayload {
   readonly ok: true;
@@ -972,11 +975,14 @@ export async function runWorkExecutors(
   probe: () => Promise<readonly ExecutorObservation[]>,
   id: string,
   now: () => Date = () => new Date(),
+  diagnoseCodex?: (observation: ExecutorObservation) => Promise<CodexExecutorDiagnostic>,
 ): Promise<CommandResult> {
   const item = await service.getItem(id);
   if (!item.ok) return errorResult(item.error.message, item.error.code, exitCodeForError(item.error.code));
   const contract = readExecutionContract(item.value.intent);
   const observations = await probe();
+  const codexObservation = observations.find(o => o.provider === 'codex-cli');
+  const codex = diagnoseCodex && codexObservation ? await diagnoseCodex(codexObservation).catch(() => null) : null;
   const candidates = projectExecutorCandidates({ contract, observations });
   const outcome = recommendExecutor(candidates, contract);
   return {
@@ -984,7 +990,7 @@ export async function runWorkExecutors(
     payload: {
       ok: true, kind: 'work-executors', ...humanReferenceFields(item.value.intent), workItemId: item.value.id, state: item.value.state, proposalVersion: item.value.proposalVersion,
       contractBackend: contract.coderBackend, observedAt: now().toISOString(), candidates,
-      recommendation: outcome.recommendation, noRecommendation: outcome.noRecommendation,
+      recommendation: outcome.recommendation, noRecommendation: outcome.noRecommendation, codex,
     },
   };
 }

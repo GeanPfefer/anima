@@ -9,7 +9,7 @@
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "local-host": "node --experimental-transform-types --import ./scripts/ts-resolve.mjs --env-file-if-exists=.env.local scripts/resident-host.ts",
-    "anima": "node --no-warnings --experimental-transform-types --import ./scripts/ts-resolve.mjs --env-file-if-exists=.env.local cli/anima.ts"
+    "anima": "node --no-warnings --experimental-transform-types --import ./scripts/ts-resolve.mjs --env-file-if-exists=.env.local --env-file-if-exists=.env.codex-wsl.local cli/anima.ts"
   },
   "dependencies": {
     "@anima/core": "*",

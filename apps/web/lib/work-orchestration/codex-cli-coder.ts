@@ -106,6 +106,11 @@ export function resolveCodexCliConfig(
 ): CodexCliConfigResult {
   const transport = resolveInvestigationTransport({ ...env, ANIMA_INVESTIGATION_CODEX_TRANSPORT: env.ANIMA_CODEX_CLI_TRANSPORT }, platform);
   if (!transport.ok) return transport;
+  // Configurações conflitantes falham fechadas: com o transporte WSL o executável é o Codex Linux (ANIMA_CODEX_WSL_CLI_PATH); um
+  // ANIMA_CODEX_CLI_PATH nativo seria ignorado em silêncio.
+  if (transport.value && env.ANIMA_CODEX_CLI_PATH?.trim()) {
+    return { ok: false, error: 'ANIMA_CODEX_CLI_PATH não pode coexistir com ANIMA_CODEX_CLI_TRANSPORT=wsl; remova um dos dois.' };
+  }
   const executable = transport.value?.wslExecutable ?? (env.ANIMA_CODEX_CLI_PATH?.trim() || 'codex');
   if (isShellWrapperPath(executable)) {
     return { ok: false, error: 'ANIMA_CODEX_CLI_PATH aponta para um wrapper de shell (.cmd/.bat/.ps1); configure o executável nativo do Codex.' };

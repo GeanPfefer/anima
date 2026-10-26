@@ -50,7 +50,7 @@ describe('render humano da CLI', () => {
       observations: [{ provider: 'claude-code', availability: 'ready', reasonUnavailable: null }, { provider: 'codex-cli', availability: 'unavailable', reasonUnavailable: 'codex_not_logged_in' }],
     });
     const outcome = recommendExecutor(candidates, { coderBackend: 'claude-code', model: null });
-    const payload: CliPayload = { ok: true, kind: 'work-executors', reference: null, title: null, workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: 'claude-code', observedAt: '2026-10-03T00:00:00.000Z', candidates, ...outcome };
+    const payload: CliPayload = { ok: true, kind: 'work-executors', reference: null, title: null, workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: 'claude-code', observedAt: '2026-10-03T00:00:00.000Z', candidates, codex: null, ...outcome };
     const out = renderHuman(payload);
     expect(out).toContain('Backend do contrato: claude-code');
     expect(out).toContain('Recomendado: claude-code:default (regra contract_declared)');
@@ -63,7 +63,7 @@ describe('render humano da CLI', () => {
   test('work-executors sem recomendação lista os motivos', () => {
     const contract = { coderBackend: null, model: null };
     const candidates = projectExecutorCandidates({ contract, observations: [] });
-    const out = renderHuman({ ok: true, kind: 'work-executors', reference: null, title: null, workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: null, observedAt: 't', candidates, ...recommendExecutor(candidates, contract) });
+    const out = renderHuman({ ok: true, kind: 'work-executors', reference: null, title: null, workItemId: 'i', state: 'approved', proposalVersion: 1, contractBackend: null, observedAt: 't', candidates, codex: null, ...recommendExecutor(candidates, contract) });
     expect(out).toContain('Sem recomendação: no_ready_candidate');
     expect(out).toContain('ollama: readiness_not_probed');
     expect(out).toContain('(não declarado)');

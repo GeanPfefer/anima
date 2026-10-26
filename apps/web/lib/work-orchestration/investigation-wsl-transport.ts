@@ -91,3 +91,28 @@ export const buildWslPathCheckInvocation = (config: InvestigationWslConfig, snap
   file: config.wslExecutable,
   args: [...base(config), '--exec', '/usr/bin/test', '-d', snapshot, '-a', '-f', schema, '-a', '-d', outputDir, '-a', '-w', outputDir],
 });
+
+/** Resultado mínimo de um processo de sondagem (estrutural; sem dependência de quem o executou). */
+export interface WslProbeOutcome {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly timedOut: boolean;
+}
+
+/**
+ * Causa ESPECÍFICA de uma sondagem WSL que falhou (read-only; só códigos estáveis, nunca o texto do processo). `wsl.exe` escreve a
+ * mensagem de erro em STDOUT, em UTF-16 (o decode UTF-8 intercala NUL) e localizada, com exit code -1/0xFFFFFFFF; por isso a decisão vem
+ * primeiro dos códigos de erro estáveis do WSL (`WSL_E_DISTRO_NOT_FOUND`, `WSL_E_USER_NOT_FOUND`), depois de padrões amplos, e só então
+ * do exit code. Não casou ⇒ `wsl_version_check_failed`.
+ */
+export function classifyWslProbeFailure(result: WslProbeOutcome): string {
+  if (result.timedOut) return 'wsl_version_probe_timeout';
+  const text = [result.stdout, result.stderr].join(' ').replace(/\u0000/g, '');
+  if (/WSL_E_DISTRO_NOT_FOUND|distribution|distribui[cç]/i.test(text)) return 'wsl_distro_not_found';
+  if (/WSL_E_USER_NOT_FOUND|getpwnam|\buser\b|usu[aá]rio/i.test(text)) return 'wsl_user_not_found';
+  if (result.exitCode === 127 || /no such file or directory|not found|n[aã]o encontrad/i.test(text)) return 'codex_binary_not_found';
+  // exit -1 sem nenhuma mensagem ⇒ o processo nem foi lançado (wsl.exe ausente/inacessível).
+  if (result.exitCode === -1 && text.trim() === '') return 'wsl_launcher_unavailable';
+  return 'wsl_version_check_failed';
+}

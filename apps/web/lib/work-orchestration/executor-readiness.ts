@@ -3,7 +3,7 @@ import { win32 } from 'node:path';
 import { WORKTREE_CODER_BACKENDS, type CoderProvider } from './coder-backend';
 import { buildClaudeCodeEnvironment, resolveClaudeCodeConfig } from './claude-code-coder';
 import { buildCodexCliEnvironment, classifyCodexLoginStatus, resolveCodexCliConfig } from './codex-cli-coder';
-import { buildWslLoginStatusInvocation, buildWslVersionInvocation, resolveInvestigationTransport } from './investigation-wsl-transport';
+import { buildWslLoginStatusInvocation, buildWslVersionInvocation, classifyWslProbeFailure, resolveInvestigationTransport } from './investigation-wsl-transport';
 import type { ExecutorObservation } from './executor-discovery';
 import { resolveOllamaCoderRuntimeConfig } from './ollama-coder-config';
 import { runProcess } from './worktree';
@@ -77,8 +77,7 @@ async function probeCodexViaWsl(deps: ExecutorReadinessDeps, wsl: Parameters<typ
   const env = buildCodexCliEnvironment(deps.env);
   const version = buildWslVersionInvocation(wsl);
   const versionResult = await deps.run(version.file, version.args, { cwd: deps.cwd, timeoutMs: READINESS_VERSION_TIMEOUT_MS, env });
-  if (versionResult.timedOut) return unavailable('codex-cli', 'wsl_version_probe_timeout');
-  if (versionResult.exitCode !== 0) return unavailable('codex-cli', 'wsl_version_check_failed');
+  if (versionResult.timedOut || versionResult.exitCode !== 0) return unavailable('codex-cli', classifyWslProbeFailure(versionResult));
   const login = buildWslLoginStatusInvocation(wsl);
   switch (classifyCodexLoginStatus(await deps.run(login.file, login.args, { cwd: deps.cwd, timeoutMs: READINESS_AUTH_TIMEOUT_MS, env }))) {
     case 'subscription': return ready('codex-cli');

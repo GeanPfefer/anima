@@ -360,6 +360,41 @@ describe('work executors (discovery read-only)', () => {
     expect(result.payload).toMatchObject({ ok: true, recommendation: null, noRecommendation: { reason: 'no_ready_candidate' } });
   });
 
+  test('diagnóstico do Codex (V1-04): entra no payload, é renderizado e não vaza segredo; nada é escrito', async () => {
+    const diag = { transport: 'wsl', configSource: 'ANIMA_CODEX_CLI_TRANSPORT', distro: 'Ubuntu-24.04', user: 'geanteco', binary: '/home/geanteco/.nvm/versions/node/v22.23.3/bin/codex',
+      version: 'codex-cli 0.162.0', profileCompatible: true, availability: 'ready', reason: null, cause: null, hint: null } as const;
+    const diagnose = jest.fn(async () => diag);
+    const result = await runWorkExecutors(fakePort({ getItem: async () => ok(claudeItem) }), async () => observations, 'i', at, diagnose);
+    expect(diagnose).toHaveBeenCalledTimes(1);
+    expect(diagnose).toHaveBeenCalledWith({ provider: 'codex-cli', availability: 'ready', reasonUnavailable: null });
+    expect(result.payload).toMatchObject({ ok: true, kind: 'work-executors', codex: diag });
+    const text = renderHuman(result.payload);
+    expect(text).toContain('Codex CLI: transporte wsl (ANIMA_CODEX_CLI_TRANSPORT)');
+    expect(text).toContain('distribuição: Ubuntu-24.04');
+    expect(text).toContain('usuário: geanteco');
+    expect(text).toContain('versão: codex-cli 0.162.0');
+    expect(text).toContain('Somente leitura: nada foi persistido, escolhido ou iniciado.');
+    expect(JSON.stringify(result.payload) + text).not.toContain(SECRET);
+  });
+
+  test('Codex indisponível: causa específica e orientação aparecem; falha do diagnóstico não derruba o comando', async () => {
+    const unavailable = [{ provider: 'codex-cli', availability: 'unavailable', reasonUnavailable: 'wsl_distro_not_found' }] as const;
+    const diag = { transport: 'wsl', configSource: 'ANIMA_CODEX_CLI_TRANSPORT', distro: 'Debian', user: 'geanteco', binary: '/home/geanteco/bin/codex', version: null, profileCompatible: null,
+      availability: 'unavailable', reason: 'wsl_distro_not_found', cause: 'wsl_distro_not_found', hint: 'A distribuição configurada em ANIMA_CODEX_WSL_DISTRO não existe (use "wsl -l -q").' } as const;
+    const text = renderHuman((await runWorkExecutors(fakePort({ getItem: async () => ok(claudeItem) }), async () => unavailable, 'i', at, async () => diag)).payload);
+    expect(text).toContain('[wsl_distro_not_found]');
+    expect(text).toContain('ANIMA_CODEX_WSL_DISTRO');
+    expect(text).toContain('versão: —');
+    const broken = await runWorkExecutors(fakePort({ getItem: async () => ok(claudeItem) }), async () => unavailable, 'i', at, async () => { throw new Error('boom'); });
+    expect(broken.exitCode).toBe(EXIT.OK);
+    expect(broken.payload).toMatchObject({ ok: true, codex: null });
+  });
+
+  test('sem diagnóstico injetado o payload mantém codex = null (compatível)', async () => {
+    const result = await runWorkExecutors(fakePort({ getItem: async () => ok(claudeItem) }), async () => observations, 'i', at);
+    expect(result.payload).toMatchObject({ ok: true, codex: null });
+  });
+
   test('item inexistente segue o erro operacional e não sonda', async () => {
     const probe = jest.fn(async () => observations);
     const result = await runWorkExecutors(fakePort({ getItem: async () => notFound() }), probe, 'zzz', at);
@@ -547,8 +582,8 @@ describe('entrypoint nativo da CLI', () => {
       });
       expect(child.error).toBeUndefined();
       expect(child.status).toBe(EXIT.OK);
-      // Node 24 may report the optional env file missing in a clean worktree.
-      const residualStderr = child.stderr.replace(/^\.env\.local not found\. Continuing without it\.(?:\r?\n|$)/gm, '');
+      // Node 24 may report the optional env files (.env.local, .env.codex-wsl.local) missing in a clean worktree.
+      const residualStderr = child.stderr.replace(/^\.env(?:\.codex-wsl)?\.local not found\. Continuing without it\.(?:\r?\n|$)/gm, '');
       expect(residualStderr).toBe('');
       expect(child.stdout).toBe(`${renderHuman({ ok: true, kind: 'help', usage: USAGE })}\n`);
     }
