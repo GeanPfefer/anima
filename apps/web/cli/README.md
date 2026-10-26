@@ -54,6 +54,7 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work accept <id>` | Aceita o RESULTADO em review (`review → completed`) via `reviewResult` |
 | `anima work withdraw <id> --reason "..."` | Retira um plano APROVADO não iniciado (`approved → cancelled`) via `withdraw_approved_work` |
 | `anima work resolve-pending <id> request-changes --reason "..."` / `... cancel [--reason "..."]` | Encerra um resultado CANDIDATO retido pelo Verifier obrigatório (`in_progress → changes_requested`/`cancelled`) via `resolve_pending_verification`; nunca verifica, nunca libera review |
+| `anima work external targets [--json]` | Lista (somente leitura) os targets externos configurados neste host — arquivo de registro e legado — e o estado de cada um (identidade, conflito, alias, destino de integração) |
 | `anima work external integrate inspect <UUID>` | Lê o que será autorizado/executado na integração Git EXTERNA: repositório, destino, SHAs, aceite, Verifier, revisão humana, `ff`, checkout, autorizações e bloqueios (somente leitura) |
 | `anima work external integrate authorize <UUID>` | Ato humano: registra a autorização `ff_only` (id novo e único) via `authorize_external_integration_effect`; NÃO executa |
 | `anima work external integrate execute <UUID> --auth-id <id>` | Ato humano separado: executa SOMENTE a autorização informada (identidade física, lease físico, fast-forward com CAS, recibo pelo Trusted System Writer); recusa antes do Git se o writer não autentica |
@@ -123,6 +124,22 @@ de governança do pipeline do Verifier v2 antes de aprovar.
 
 `--json` em qualquer comando de leitura/decisão emite a interface estável para
 automação e self-dev. O modo humano é derivado do mesmo payload.
+
+## Targets externos (V1-02)
+
+Vários repositórios externos por host, escolhidos pela **referência** do work item (`ext:<slug>`), nunca por serem o único disponível.
+
+- **Registro** (recomendado): arquivo JSON local, FORA do controle de versão, em caminho absoluto explícito `ANIMA_EXTERNAL_TARGETS_FILE`
+  (não existe caminho padrão; não guarda credenciais):
+  `{"version":1,"targets":[{"reference":"ext:<slug>","repoRoot":"<abs>","rootCommitSha":"<40 hex>","integration":{"targetRef":"refs/heads/<nome>"}}]}`.
+  Recusa chaves desconhecidas (nenhum campo de comando), versão ≠ 1, referência duplicada, caminho relativo ou com `..`, SHA inválido e
+  destino fora de `refs/heads/<nome>` (nunca `anima-work/*`).
+- **Legado** (transição): `ANIMA_EXTERNAL_TARGET` (um target) e `ANIMA_EXTERNAL_INTEGRATION` (um destino) continuam válidos para a SUA referência.
+- **Precedência: nenhuma.** A mesma referência em duas fontes é conflito e falha fechado (`external_target_config_conflict` /
+  `external_integration_config_conflict`); referência ausente ⇒ `external_target_unknown`; duas referências no mesmo git-common-dir (alias,
+  junction, grafia) ⇒ `external_target_alias_conflict`. Com registro configurado, `work external propose` exige a referência.
+- A identidade física (raiz, git-common-dir, commit raiz, base) continua comprovada na captura e revalidada antes de qualquer efeito (T1/T5);
+  a exclusividade física por git-common-dir continua no banco (lease).
 
 ## Códigos de saída
 

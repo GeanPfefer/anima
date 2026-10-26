@@ -61,14 +61,14 @@ export function leasePort(state: LeaseState, keyOf: (itemId: string) => string):
   };
 }
 
-export async function world(over: { localConfig?: Record<string, string>; workTreeOptions?: readonly string[]; reference?: string; lab?: Lab; owner?: string; leaseState?: LeaseState; gitWrap?: (run: GitRunner, args: readonly string[]) => Promise<ReturnType<GitRunner> extends Promise<infer R> ? R : never> } = {}): Promise<World> {
+export async function world(over: { env?: (lab: Lab) => Record<string, string>; localConfig?: Record<string, string>; workTreeOptions?: readonly string[]; reference?: string; lab?: Lab; owner?: string; leaseState?: LeaseState; gitWrap?: (run: GitRunner, args: readonly string[]) => Promise<ReturnType<GitRunner> extends Promise<infer R> ? R : never> } = {}): Promise<World> {
   const lab = over.lab ?? makeLab('shop', over.localConfig); const animaBase = sandbox(); mkdirSync(join(animaBase, 'apps/web'), { recursive: true });
   writeFileSync(join(animaBase, 'apps/web/package.json'), '{}'); writeFileSync(join(animaBase, 'package.json'), '{}'); git(animaBase, 'init', '-q', '-b', 'main'); writeFileSync(join(animaBase, 'a'), '1'); git(animaBase, 'add', '-A'); git(animaBase, 'commit', '-q', '-m', 'a');
   const anima = realpathSync.native(animaBase);
   const reference = over.reference ?? 'ext:shop';
-  const env = { [EXTERNAL_TARGET_ENV]: JSON.stringify({ reference, repoRoot: lab.root, rootCommitSha: lab.rootSha }) };
+  const env = over.env ? over.env(lab) : { [EXTERNAL_TARGET_ENV]: JSON.stringify({ reference, repoRoot: lab.root, rootCommitSha: lab.rootSha }) };
   const targetDeps: ExternalTargetDeps = { ...defaultExternalTargetDeps, animaRoot: () => anima };
-  const captured = await captureExternalTargetSpec(env, { deps: targetDeps });
+  const captured = await captureExternalTargetSpec(env, { deps: targetDeps, reference });
   if (!captured.ok) throw new Error(captured.code);
   const input: ExternalWorkInput = {
     reference, objective: 'Corrigir clamp quando excede max', scope: ['src/clamp.js'], excluded: ['package.json'],

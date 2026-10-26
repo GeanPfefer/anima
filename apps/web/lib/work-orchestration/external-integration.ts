@@ -22,6 +22,7 @@ import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readExecutionContract } from './executor-selection';
 import type { PersistIntegrationReceipt } from './integration-effect';
+import { loadConfiguredExternalTargets, type ExternalTargetDeps } from './external-target-resolver';
 import type { VerifiedExternalTarget } from './external-target-resolver';
 import type { GitRunner } from './trusted-git';
 
@@ -58,6 +59,30 @@ export function parseExternalIntegrationConfig(raw: string | undefined): Externa
     return bad('external_integration_config_invalid', 'A configuração exige exatamente reference (ext:<slug>) e targetRef (refs/heads/<nome> fora de anima-work/).');
   }
   return { ok: true, config: { reference: o['reference'], targetRef: o['targetRef'] } };
+}
+
+/**
+ * Destino de integração do target `reference` (V1-02). Fontes: o `integration.targetRef` do registro de targets e o legado
+ * `ANIMA_EXTERNAL_INTEGRATION` (só vale para a SUA referência). Definido nas duas ⇒ conflito (fail-closed); em nenhuma ⇒ não configurado.
+ */
+export function resolveExternalIntegrationConfig(
+  env: Readonly<Record<string, string | undefined>>, reference: string, deps: Pick<ExternalTargetDeps, 'readFile'> = {},
+): ExternalIntegrationConfigResult {
+  const targets = loadConfiguredExternalTargets(env, deps);
+  if (!targets.ok) return { ok: false, code: targets.code, message: targets.message };
+  const candidates: ExternalIntegrationConfig[] = targets.targets
+    .filter(t => t.reference === reference && t.integrationTargetRef !== undefined)
+    .map(t => ({ reference, targetRef: t.integrationTargetRef! }));
+  const legacyRaw = env[EXTERNAL_INTEGRATION_ENV];
+  if (legacyRaw !== undefined && legacyRaw.trim() !== '') {
+    const legacy = parseExternalIntegrationConfig(legacyRaw);
+    if (!legacy.ok) return legacy;
+    if (legacy.config.reference === reference) candidates.push(legacy.config);
+  }
+  if (candidates.length > 1) return { ok: false, code: 'external_integration_config_conflict', message: `O destino de integração de ${reference} está definido em mais de uma fonte; remova uma delas.` };
+  const only = candidates[0];
+  if (!only) return { ok: false, code: 'external_integration_not_configured', message: `Nenhum destino de integração foi autorizado pelo operador para ${reference}.` };
+  return { ok: true, config: only };
 }
 
 // ─── Provider Git (somente repositório VERIFICADO; Git confiável) ───────────────────────────

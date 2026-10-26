@@ -3,6 +3,7 @@ import { prepareInvestigation, type InvestigationInput, type InvestigationPrepar
 import { inspectExternalCandidate, recordExternalCriterionReview, type ExternalReviewDeps } from '@/lib/work-orchestration/external-candidate-review';
 import { classifyExternalWork, prepareExternalWork, type ExternalClassificationAxes, type ExternalClassificationPort, type ExternalClassificationResult, type ExternalWorkPrepareDeps, type ExternalWorkPrepareResult, type ExternalWorkRequest } from '@/lib/work-orchestration/external-work-materializer';
 import type { ParsedCommand } from './args';
+import { listExternalTargets, type ExternalTargetListing } from '@/lib/work-orchestration/external-target-resolver';
 import { authorizeExternalIntegration, executeExternalIntegration, inspectExternalIntegration, type ExternalIntegrationInspection, type ExternalIntegrationRuntime } from '@/lib/work-orchestration/external-integration-service';
 import { readWorkHumanReference, type WorkReferenceResult, type WorkReferenceAmbiguousCandidate } from '@/lib/work-orchestration/work-reference';
 import {
@@ -325,6 +326,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
+  | WorkExternalTargetsPayload
   | WorkExternalIntegratePayload
   | { readonly ok: true; readonly kind: 'work-execute-one'; readonly workItemId: string; readonly proposalVersion: number; readonly result: BacklogHostTurnResult }
   | (Extract<InvestigationPreparationResult, {ok:true}> & {readonly kind:'work-propose-investigation'})
@@ -390,6 +392,15 @@ export async function runWorkExternalPropose(input: ExternalWorkRequest, deps: E
   const result = await prepareExternalWork(input, deps);
   if (result.ok) return { exitCode: EXIT.OK, payload: { ...result, kind: 'work-external-propose' } };
   return { exitCode: result.rejected ? EXIT.REJECTED : EXIT.ERROR, payload: { ok: false, kind: 'error', code: result.code, error: result.message } };
+}
+
+export type WorkExternalTargetsPayload = { readonly ok: true; readonly kind: 'work-external-targets'; readonly configured: boolean; readonly targets: readonly ExternalTargetListing[] };
+
+/** `work external targets`: lista (somente leitura) os targets configurados e seu estado. Não escreve em banco, Git nem arquivo. */
+export async function runWorkExternalTargets(list: () => ReturnType<typeof listExternalTargets>): Promise<CommandResult> {
+  const result = await list();
+  if (!result.ok) return { exitCode: EXIT.REJECTED, payload: { ok: false, kind: 'error', code: result.code, error: result.message } };
+  return { exitCode: EXIT.OK, payload: { ok: true, kind: 'work-external-targets', configured: result.configured, targets: result.targets } };
 }
 
 export type WorkExternalIntegratePayload =

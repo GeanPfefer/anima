@@ -74,6 +74,11 @@ export function renderHuman(payload: CliPayload): string {
           ...(payload.retainedConflicts.length ? [`Aviso: itens retidos no mesmo reposit\u00f3rio f\u00edsico: ${payload.retainedConflicts.map(c => `${c.reference}:${c.workItemId}`).join(', ')}`] : []),
           'Crit\u00e9rios de revis\u00e3o humana:', ...payload.criteria.map(c => `  ${c.position}. [${c.status}] ${c.text}`),
           payload.diffTruncated ? 'Diff (truncado):' : 'Diff:', payload.diff].join('\n');
+    case 'work-external-targets':
+      return payload.targets.length === 0
+        ? (payload.configured ? 'Registro de targets configurado, mas vazio.' : 'Nenhum target externo configurado neste host (ANIMA_EXTERNAL_TARGETS_FILE / ANIMA_EXTERNAL_TARGET).')
+        : payload.targets.map(t => [`${t.reference} · ${t.status === 'ok' ? YES : NO} ${t.status} · fonte ${t.source}`, `  repositório: ${t.repoRoot}`, `  commit raiz: ${t.rootCommitSha}`,
+            `  git-common-dir: ${t.gitCommonDir ?? '—'} · HEAD ${t.headSha ?? '—'}`, `  destino de integração: ${t.integrationTargetRef ?? '(não configurado)'}`].join('\n')).join('\n');
     case 'work-external-integrate':
       if (payload.mode === 'authorize') {
         return [`${payload.workItemId} · autorização ff_only ${payload.action === 'recorded' ? 'registrada' : 'já existente (replay)'}.`, `authId: ${payload.authorizationId}`,

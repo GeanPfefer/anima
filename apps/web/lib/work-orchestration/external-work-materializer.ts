@@ -23,7 +23,7 @@ export type ExternalWorkRequest = ExternalWorkInput & { readonly baseSha?: strin
 
 export interface ExternalWorkPrepareDeps {
   /** Captura a identidade canônica do target configurado pelo operador (T1). */
-  readonly capture: (baseSha: string | undefined) => ReturnType<typeof captureExternalTargetSpec>;
+  readonly capture: (baseSha: string | undefined, reference: string) => ReturnType<typeof captureExternalTargetSpec>;
   /** Reverificação da identidade autorizada × repositório vivo sobre o contrato JÁ montado (T1). */
   readonly verify: typeof verifyExternalTargetForContract;
   /** Conteúdo de um arquivo no SHA-base autorizado do target (Git confiável); `null` se não existir. Sem executar nada do alvo. */
@@ -46,7 +46,7 @@ export async function prepareExternalWork(input: ExternalWorkRequest, deps: Exte
     if (invalid) return reject(invalid);
     if (input.baseSha !== undefined && !/^[0-9a-f]{40}$/.test(input.baseSha)) return reject('base_sha_invalid');
 
-    const captured = await deps.capture(input.baseSha);
+    const captured = await deps.capture(input.baseSha, input.reference);
     if (!captured.ok) return reject(captured.code, captured.message);
     if (captured.target.reference !== input.reference) {
       return reject('external_target_unknown', `A referência ${input.reference} não é o target autorizado neste host.`);
@@ -95,7 +95,7 @@ export function createExternalWorkPrepareDeps(
   const env = options.env ?? process.env;
   return {
     service,
-    capture: baseSha => captureExternalTargetSpec(env, { ...(baseSha ? { baseSha } : {}), ...(options.targetDeps ? { deps: options.targetDeps } : {}) }),
+    capture: (baseSha, reference) => captureExternalTargetSpec(env, { reference, ...(baseSha ? { baseSha } : {}), ...(options.targetDeps ? { deps: options.targetDeps } : {}) }),
     verify: contract => verifyExternalTargetForContract(contract, env, options.targetDeps),
     readFileAtBase: async (identity, path) => {
       const result = await createTrustedGitRunner({ gitDir: identity.gitCommonDirCanonical })(['show', `${identity.baseSha}:${path}`]);

@@ -10,8 +10,8 @@ import type { Database, Json } from '@anima/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createExternalReviewDeps, externalAcceptanceRefusal } from './external-candidate-review';
 import {
-  authorizeExternalIntegrationEffect, EXTERNAL_INTEGRATION_ENV, executeAuthorizedExternalIntegration, ExternalGitIntegrationProvider, operatorWorkTreeOptions,
-  parseExternalIntegrationConfig, supabaseExternalLeasePort, type AuthorizeExternalIntegrationOutcome, type ExecuteExternalIntegrationDeps,
+  authorizeExternalIntegrationEffect, executeAuthorizedExternalIntegration, ExternalGitIntegrationProvider, operatorWorkTreeOptions,
+  resolveExternalIntegrationConfig, supabaseExternalLeasePort, type AuthorizeExternalIntegrationOutcome, type ExecuteExternalIntegrationDeps,
   type ExternalIntegrationConfigResult, type ExternalIntegrationOutcome, type ExternalLeasePort,
 } from './external-integration';
 import { readExecutionContract } from './executor-selection';
@@ -32,7 +32,9 @@ import { checkTrustedSystemWriterReady, trustedSystemWriterFromEnvironment } fro
 type Env = Readonly<Record<string, string | undefined>>;
 
 export interface ExternalIntegrationRuntime {
+  /** Config de um único target (legado/testes). Com `configFor` presente, ele manda: o destino é resolvido pela REFERÊNCIA do item. */
   readonly config: ExternalIntegrationConfigResult;
+  readonly configFor?: (reference: string) => ExternalIntegrationConfigResult;
   readonly common: Pick<ExecuteExternalIntegrationDeps, 'getItem' | 'listEvents' | 'verifyTarget' | 'gitFor' | 'exists'>;
   readonly rpc: (args: Database['public']['Functions']['authorize_external_integration_effect']['Args']) => Promise<{ readonly data: Json | null; readonly error: { readonly message: string } | null }>;
   readonly lease: ExternalLeasePort;
@@ -57,7 +59,8 @@ export function createExternalIntegrationRuntime(
   const env = options.env ?? process.env;
   const reviewDeps = createExternalReviewDeps(client, userId, service, { env });
   return {
-    config: parseExternalIntegrationConfig(env[EXTERNAL_INTEGRATION_ENV]),
+    config: { ok: false, code: 'external_integration_reference_required', message: 'O destino é resolvido pela referência do item.' },
+    configFor: reference => resolveExternalIntegrationConfig(env, reference),
     common: {
       getItem: id => service.getItem(id as never), listEvents: id => service.listEvents(id as never),
       verifyTarget: contract => verifyExternalTargetForContract(contract, env),
@@ -74,6 +77,12 @@ export function createExternalIntegrationRuntime(
   };
 }
 
+const configOf = (rt: ExternalIntegrationRuntime, reference: string): ExternalIntegrationConfigResult => rt.configFor ? rt.configFor(reference) : rt.config;
+const referenceOf = (item: WorkItem): string | null => {
+  const t = readExternalTarget(((item.intent as Record<string, unknown> | null)?.['execution_spec'] as Record<string, unknown> | undefined)?.['target']);
+  return t.ok ? t.target.reference : null;
+};
+
 // ─── authorize ───────────────────────────────────────────────────────────────────────
 
 export type AuthorizeExternalIntegrationResult =
@@ -85,14 +94,15 @@ export const isValidAuthorizationId = (value: unknown): value is string => typeo
 
 /** Ato HUMANO: registra a autorização `ff_only` (NÃO executa). `authorizationId` ausente ⇒ identificador novo e único. */
 export async function authorizeExternalIntegration(workItemId: string, rt: ExternalIntegrationRuntime, authorizationId?: string): Promise<AuthorizeExternalIntegrationResult> {
-  if (!rt.config.ok) return { ok: false, code: rt.config.code, message: rt.config.message, rejected: true };
   const item = await rt.common.getItem(workItemId);
   if (!item.ok) return { ok: false, code: 'work_item_unavailable', message: item.error.message, rejected: false };
   const target = readExternalTarget(((item.value.intent as Record<string, unknown> | null)?.['execution_spec'] as Record<string, unknown> | undefined)?.['target']);
   if (!target.ok) return { ok: false, code: 'not_external_work', message: 'O item não é trabalho externo materializado.', rejected: true };
+  const config = configOf(rt, target.target.reference);
+  if (!config.ok) return { ok: false, code: config.code, message: config.message, rejected: true };
   const id = authorizationId ?? rt.newAuthorizationId(target.target.reference);
   if (!isValidAuthorizationId(id)) return { ok: false, code: 'authorization_id_invalid', message: 'Identificador de autorização inválido.', rejected: true };
-  const outcome: AuthorizeExternalIntegrationOutcome = await authorizeExternalIntegrationEffect({ workItemId, authorizationId: id }, { ...rt.common, config: rt.config.config, rpc: rt.rpc });
+  const outcome: AuthorizeExternalIntegrationOutcome = await authorizeExternalIntegrationEffect({ workItemId, authorizationId: id }, { ...rt.common, config: config.config, rpc: rt.rpc });
   if (!outcome.ok) return { ok: false, code: outcome.reason, message: `Autorização recusada: ${outcome.reason}.`, rejected: !/unreadable|ambiguous|ancestry/.test(outcome.reason) };
   return { ok: true, authorizationId: id, action: outcome.action, operationKey: outcome.operationKey, expectedTargetSha: outcome.expectedTargetSha, targetRef: outcome.targetRef };
 }
@@ -101,8 +111,13 @@ export async function authorizeExternalIntegration(workItemId: string, rt: Exter
 
 /** Executa EXATAMENTE o efeito autorizado. Falha fechado antes do Git se o writer (recibo) ou a configuração não estiverem prontos. */
 export async function executeExternalIntegration(workItemId: string, authorizationId: string, rt: ExternalIntegrationRuntime): Promise<ExternalIntegrationOutcome> {
-  if (!rt.config.ok) return { status: 'denied', reason: rt.config.code };
   if (!isValidAuthorizationId(authorizationId)) return { status: 'denied', reason: 'authorization_id_invalid' };
+  const item = await rt.common.getItem(workItemId);
+  if (!item.ok) return { status: 'retryable', reason: 'persisted_state_unreadable' };
+  const reference = referenceOf(item.value);
+  if (reference === null) return { status: 'denied', reason: 'not_external_work' };
+  const config = configOf(rt, reference);
+  if (!config.ok) return { status: 'denied', reason: config.code };
   if (!(await rt.writerReady())) return { status: 'denied', reason: 'trusted_system_writer_unavailable' };
   const events = await rt.common.listEvents(workItemId);
   if (events.ok) {
@@ -110,7 +125,7 @@ export async function executeExternalIntegration(workItemId: string, authorizati
     if (done && done.authorizationId !== authorizationId) return { status: 'denied', reason: 'already_integrated_by_another_authorization' };
   }
   return executeAuthorizedExternalIntegration({ workItemId, integrationAuthorizationId: authorizationId }, {
-    ...rt.common, config: rt.config.config, lease: rt.lease, humanReviewRefusal: rt.humanReviewRefusal, persist: rt.persist,
+    ...rt.common, config: config.config, lease: rt.lease, humanReviewRefusal: rt.humanReviewRefusal, persist: rt.persist,
     workTreeOptions: rt.workTreeOptions, ownerInstanceId: rt.ownerInstanceId(),
   });
 }
@@ -154,9 +169,10 @@ export async function inspectExternalIntegration(workItemId: string, rt: Externa
   const target = readExternalTarget(((it.intent as Record<string, unknown> | null)?.['execution_spec'] as Record<string, unknown> | undefined)?.['target']);
   if (!target.ok) return { ok: false, code: 'not_external_work', message: 'O item não é trabalho externo materializado.' };
 
-  if (!rt.config.ok) blockers.push(rt.config.code);
-  else if (rt.config.config.reference !== target.target.reference) blockers.push('reference_not_configured');
-  const destination = rt.config.ok ? rt.config.config.targetRef : null;
+  const config = configOf(rt, target.target.reference);
+  if (!config.ok) blockers.push(config.code);
+  else if (config.config.reference !== target.target.reference) blockers.push('reference_not_configured');
+  const destination = config.ok ? config.config.targetRef : null;
 
   const latest = projectLatestWorkResult(events.value);
   const acceptedEvent = [...events.value].reverse().find(e => e.type === 'result_accepted');

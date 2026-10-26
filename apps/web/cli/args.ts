@@ -13,6 +13,7 @@ export type ParsedCommand =
   | { readonly kind: 'work-external-propose'; readonly reference: string; readonly objective: string; readonly scope: readonly string[]; readonly excluded: readonly string[]; readonly acceptance: readonly { readonly id: string; readonly text: string }[]; readonly gates: readonly { readonly command: string; readonly covers?: readonly string[] }[]; readonly bindings: readonly { readonly covers: readonly string[]; readonly file: string; readonly minNewTests: number; readonly boundTests: readonly string[] }[]; readonly reviews: readonly string[]; readonly backend: string; readonly model?: string; readonly baseSha?: string; readonly maxAttempts: number; readonly maxMinutes: number; readonly json: boolean }
   | { readonly kind: 'work-external-classify'; readonly id: string; readonly expectedProposalVersion: number; readonly axes: { readonly complexity: string; readonly risk: string; readonly reversibility: string; readonly planClarity: string; readonly urgency: string }; readonly json: boolean }
   | { readonly kind: 'work-external-review'; readonly id: string; readonly expectedProposalVersion: number; readonly decision: { readonly position: number; readonly decision: 'accept' | 'reject'; readonly diffDigest: string; readonly reason?: string } | null; readonly json: boolean }
+  | { readonly kind: 'work-external-targets'; readonly json: boolean }
   | { readonly kind: 'work-external-integrate'; readonly id: string; readonly action: 'inspect' | 'authorize' | 'execute'; readonly authorizationId?: string; readonly json: boolean }
   | { readonly kind: 'help' }
   | { readonly kind: 'status'; readonly json: boolean }
@@ -316,6 +317,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
 const EXTERNAL_PROPOSE_USAGE = 'Uso: anima work external propose --target ext:<slug> --objective "<texto>" --scope <caminho> [--scope ...] --exclude <caminho> [--exclude ...] --accept A1="<critério>" [--accept A2=...] (cada critério precisa de UMA prova: --gate-covers "A3=npm test" | --bind \'{"covers":["A1"],"file":"src/x.test.js","bound_tests":["nome completo"]}\' | --review A4) [--gate "<npm ...>" gate sem cobertura] --backend ollama|codex-cli [--model M] [--base-sha SHA] [--max-attempts N] [--max-minutes M] [--json]';
 const EXTERNAL_REVIEW_USAGE = 'Uso: anima work external review <UUID> --version N [--criterion N --decision accept|reject --diff-digest <sha256> [--reason "..."]] [--json] (sem --decision: só lê o candidato, mostra o diff real e o digest)';
 const EXTERNAL_INTEGRATE_USAGE = 'Uso: anima work external integrate inspect <UUID> [--json] | authorize <UUID> [--json] | execute <UUID> --auth-id <id> [--json] (inspect só lê; authorize só registra a autorização ff_only; execute só executa a autorização informada)';
+const EXTERNAL_TARGETS_USAGE = 'Uso: anima work external targets [--json] (lista, somente leitura, os targets externos configurados neste host e o estado de cada um)';
 const EXTERNAL_CLASSIFY_USAGE = 'Uso: anima work external classify <UUID> --version N --complexity X --risk X --reversibility X --plan-clarity X --urgency X [--json]';
 
 /** `anima work external propose|classify` — parser PURO; repetíveis só onde declarado; qualquer flag fora da lista é recusa de uso. */
@@ -431,6 +433,10 @@ function parseWorkExternal(argv: readonly string[]): ParseResult {
     for (const [axis, value] of Object.entries(axes)) if (!allowed[axis]!.includes(value!)) return { ok: false, error: `Eixo ${axis} inválido: ${value}. Valores: ${allowed[axis]!.join('|')}.` };
     return { ok: true, command: { kind: 'work-external-classify', id, expectedProposalVersion: Number(version), axes: axes as { complexity: string; risk: string; reversibility: string; planClarity: string; urgency: string }, json } };
   }
+  if (sub === 'targets') {
+    if (argv.length > 2 || (argv.length === 2 && argv[1] !== '--json')) return { ok: false, error: EXTERNAL_TARGETS_USAGE };
+    return { ok: true, command: { kind: 'work-external-targets', json: argv[1] === '--json' } };
+  }
   if (sub === 'integrate') {
     const action = argv[1];
     const id = argv[2];
@@ -450,7 +456,7 @@ function parseWorkExternal(argv: readonly string[]): ParseResult {
     }
     return { ok: true, command: { kind: 'work-external-integrate', id, action, ...(authId !== undefined ? { authorizationId: authId } : {}), json } };
   }
-  return { ok: false, error: `${EXTERNAL_PROPOSE_USAGE}\n${EXTERNAL_REVIEW_USAGE}\n${EXTERNAL_CLASSIFY_USAGE}\n${EXTERNAL_INTEGRATE_USAGE}` };
+  return { ok: false, error: `${EXTERNAL_PROPOSE_USAGE}\n${EXTERNAL_REVIEW_USAGE}\n${EXTERNAL_CLASSIFY_USAGE}\n${EXTERNAL_INTEGRATE_USAGE}\n${EXTERNAL_TARGETS_USAGE}` };
 }
 
 export const USAGE = `anima — CLI operacional do Anima (adapter sobre os mesmos application services da web)
@@ -471,6 +477,8 @@ Uso:
                                                Classificação HUMANA explícita (human_confirmed) de trabalho externo já aprovado
   anima work external integrate inspect|authorize <UUID> | execute <UUID> --auth-id ID
                                                Integração Git EXTERNA governada (ff_only): inspect lê; authorize e execute são atos humanos separados
+  anima work external targets [--json]
+                                               Lista os targets externos configurados neste host (arquivo de registro + legado) e o estado de cada um (somente leitura)
   anima work list                             Lista os trabalhos não terminais (retomáveis)
   anima work show <id|REF>                        Estado, versão, tentativa, Verifier e cobertura
   anima work investigation <id|REF> [--json]      Relatório persistido de investigação

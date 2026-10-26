@@ -22,7 +22,8 @@ import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
 import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/lib/work-orchestration/paid-compute-authorization-store';
 import { createExternalReviewDeps, externalAcceptanceRefusal, type ExternalReviewDeps } from '@/lib/work-orchestration/external-candidate-review';
-import { runWorkExternalIntegrate, runWorkExternalReview, runWorkExternalClassify, runWorkExternalPropose, runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
+import { listExternalTargets } from '@/lib/work-orchestration/external-target-resolver';
+import { runWorkExternalIntegrate, runWorkExternalTargets, runWorkExternalReview, runWorkExternalClassify, runWorkExternalPropose, runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
 import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recovery';
 import { recoverFromFailedCandidate } from '@/lib/work-orchestration/candidate-recovery';
 import { runWorkRecoverCandidate } from './app';
@@ -93,6 +94,8 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
       const { kind: _kind, json: _json, ...request } = command;
       return runWorkExternalPropose(request, injection.externalWorkDeps ?? createExternalWorkPrepareDeps(client, userId, service));
     }
+    case 'work-external-targets':
+      return runWorkExternalTargets(() => listExternalTargets(process.env));
     case 'work-external-integrate':
       return runWorkExternalIntegrate(injection.externalIntegrationRuntime ?? createExternalIntegrationRuntime(client, userId, service),
         { workItemId: command.id, action: command.action, ...(command.authorizationId !== undefined ? { authorizationId: command.authorizationId } : {}) });
