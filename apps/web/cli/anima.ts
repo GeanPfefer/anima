@@ -22,7 +22,7 @@ import { parseArgs, USAGE, type ParsedCommand } from './args';
 import { resolveCliIdentity } from './identity';
 import { grantPaidComputeAuthorization, listPaidComputeAuthorizations } from '@/lib/work-orchestration/paid-compute-authorization-store';
 import { createExternalReviewDeps, externalAcceptanceRefusal, type ExternalReviewDeps } from '@/lib/work-orchestration/external-candidate-review';
-import { runWorkExternalReview, runWorkExternalClassify, runWorkExternalPropose, runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
+import { runWorkExternalIntegrate, runWorkExternalReview, runWorkExternalClassify, runWorkExternalPropose, runWorkAuthorizeCompute, runWorkPrepareAutonomous, runWorkRecoverHarness, runWorkSetCompute } from './app';
 import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recovery';
 import { recoverFromFailedCandidate } from '@/lib/work-orchestration/candidate-recovery';
 import { runWorkRecoverCandidate } from './app';
@@ -30,6 +30,7 @@ import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/pla
 import { runWorkInvestigation, runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkExecutors, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { createNodeExecutorReadinessDeps, probeAllExecutors } from '@/lib/work-orchestration/executor-readiness';
 import { renderHuman } from './render';
+import { createExternalIntegrationRuntime, type ExternalIntegrationRuntime } from '@/lib/work-orchestration/external-integration-service';
 import { createExternalClassificationPort, createExternalWorkPrepareDeps, type ExternalClassificationPort, type ExternalWorkPrepareDeps } from '@/lib/work-orchestration/external-work-materializer';
 import { EXIT, type ExitCode } from './exit-codes';
 import { checkRecoveryConfig, renderRecoveryConfigReport } from '@/lib/recovery-config/check';
@@ -63,6 +64,7 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
   readonly externalWorkDeps?: ExternalWorkPrepareDeps;
   readonly externalReviewDeps?: ExternalReviewDeps;
   readonly externalClassificationPort?: ExternalClassificationPort;
+  readonly externalIntegrationRuntime?: ExternalIntegrationRuntime;
 } = {}): Promise<CommandResult> {
   if (command.kind === 'help') return { exitCode: EXIT.OK, payload: { ok: true, kind: 'help', usage: USAGE } };
 
@@ -91,6 +93,9 @@ export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery
       const { kind: _kind, json: _json, ...request } = command;
       return runWorkExternalPropose(request, injection.externalWorkDeps ?? createExternalWorkPrepareDeps(client, userId, service));
     }
+    case 'work-external-integrate':
+      return runWorkExternalIntegrate(injection.externalIntegrationRuntime ?? createExternalIntegrationRuntime(client, userId, service),
+        { workItemId: command.id, action: command.action, ...(command.authorizationId !== undefined ? { authorizationId: command.authorizationId } : {}) });
     case 'work-external-classify':
       return runWorkExternalClassify(injection.externalClassificationPort ?? createExternalClassificationPort(client),
         { workItemId: command.id, expectedProposalVersion: command.expectedProposalVersion, axes: command.axes });

@@ -3,6 +3,7 @@ import { prepareInvestigation, type InvestigationInput, type InvestigationPrepar
 import { inspectExternalCandidate, recordExternalCriterionReview, type ExternalReviewDeps } from '@/lib/work-orchestration/external-candidate-review';
 import { classifyExternalWork, prepareExternalWork, type ExternalClassificationAxes, type ExternalClassificationPort, type ExternalClassificationResult, type ExternalWorkPrepareDeps, type ExternalWorkPrepareResult, type ExternalWorkRequest } from '@/lib/work-orchestration/external-work-materializer';
 import type { ParsedCommand } from './args';
+import { authorizeExternalIntegration, executeExternalIntegration, inspectExternalIntegration, type ExternalIntegrationInspection, type ExternalIntegrationRuntime } from '@/lib/work-orchestration/external-integration-service';
 import { readWorkHumanReference, type WorkReferenceResult, type WorkReferenceAmbiguousCandidate } from '@/lib/work-orchestration/work-reference';
 import {
   projectInvestigationReview,
@@ -324,6 +325,7 @@ export interface HelpPayload {
 }
 
 export type CliPayload =
+  | WorkExternalIntegratePayload
   | { readonly ok: true; readonly kind: 'work-execute-one'; readonly workItemId: string; readonly proposalVersion: number; readonly result: BacklogHostTurnResult }
   | (Extract<InvestigationPreparationResult, {ok:true}> & {readonly kind:'work-propose-investigation'})
   | (Extract<ExternalWorkPrepareResult, {ok:true}> & {readonly kind:'work-external-propose'})
@@ -388,6 +390,45 @@ export async function runWorkExternalPropose(input: ExternalWorkRequest, deps: E
   const result = await prepareExternalWork(input, deps);
   if (result.ok) return { exitCode: EXIT.OK, payload: { ...result, kind: 'work-external-propose' } };
   return { exitCode: result.rejected ? EXIT.REJECTED : EXIT.ERROR, payload: { ok: false, kind: 'error', code: result.code, error: result.message } };
+}
+
+export type WorkExternalIntegratePayload =
+  | ({ readonly ok: true; readonly kind: 'work-external-integrate'; readonly mode: 'inspect' } & ExternalIntegrationInspection)
+  | { readonly ok: true; readonly kind: 'work-external-integrate'; readonly mode: 'authorize'; readonly workItemId: string; readonly authorizationId: string; readonly action: 'recorded' | 'replayed';
+      readonly operationKey: string; readonly expectedTargetSha: string; readonly targetRef: string }
+  | { readonly ok: true; readonly kind: 'work-external-integrate'; readonly mode: 'execute'; readonly workItemId: string; readonly authorizationId: string; readonly disposition: 'effected' | 'reconciled' | 'already_persisted';
+      readonly targetRef: string; readonly previousTargetSha: string; readonly resultingTargetSha: string };
+
+/**
+ * `work external integrate`: três atos SEPARADOS sobre o mecanismo T5. `inspect` só lê; `authorize` só registra a autorização ff_only
+ * (não executa); `execute` só executa a autorização informada. Nunca encadeia um ato no outro.
+ */
+export async function runWorkExternalIntegrate(
+  rt: ExternalIntegrationRuntime,
+  input: { readonly workItemId: string; readonly action: 'inspect' | 'authorize' | 'execute'; readonly authorizationId?: string },
+): Promise<CommandResult> {
+  const fail = (code: string, error: string, exitCode: ExitCode): CommandResult => ({ exitCode, payload: { ok: false, kind: 'error', code, error } });
+  if (input.action === 'inspect') {
+    const result = await inspectExternalIntegration(input.workItemId, rt);
+    if (!result.ok) return fail(result.code, result.message, result.code === 'not_external_work' ? EXIT.REJECTED : EXIT.ERROR);
+    return { exitCode: EXIT.OK, payload: { ok: true, kind: 'work-external-integrate', mode: 'inspect', ...result.inspection } };
+  }
+  if (input.action === 'authorize') {
+    const result = await authorizeExternalIntegration(input.workItemId, rt);
+    if (!result.ok) return fail(result.code, result.message, result.rejected ? EXIT.REJECTED : EXIT.ERROR);
+    return { exitCode: EXIT.OK, payload: { ok: true, kind: 'work-external-integrate', mode: 'authorize', workItemId: input.workItemId, authorizationId: result.authorizationId,
+      action: result.action, operationKey: result.operationKey, expectedTargetSha: result.expectedTargetSha, targetRef: result.targetRef } };
+  }
+  const outcome = await executeExternalIntegration(input.workItemId, input.authorizationId ?? '', rt);
+  if (outcome.status === 'integrated') {
+    return { exitCode: EXIT.OK, payload: { ok: true, kind: 'work-external-integrate', mode: 'execute', workItemId: input.workItemId, authorizationId: outcome.receipt.authorizationId,
+      disposition: outcome.disposition, targetRef: outcome.receipt.targetRef, previousTargetSha: outcome.receipt.previousTargetSha, resultingTargetSha: outcome.receipt.resultingTargetSha } };
+  }
+  const code = `${outcome.status}:${outcome.reason}`;
+  const message = outcome.status === 'reconciliation_required'
+    ? `O Git pode ter avançado sem recibo (${outcome.reason}). NÃO repita às cegas: rode "work external integrate inspect" e reexecute o mesmo --auth-id (reconcilia sem repetir o efeito).`
+    : `Integração não executada (${outcome.status}): ${outcome.reason}.`;
+  return fail(code, message, outcome.status === 'retryable' || outcome.status === 'reconciliation_required' ? EXIT.ERROR : EXIT.REJECTED);
 }
 
 /** `work external classify`: classificação HUMANA explícita (`human_confirmed`) de trabalho externo já aprovado. Não executa. */

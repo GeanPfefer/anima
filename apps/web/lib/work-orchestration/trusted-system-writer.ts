@@ -71,6 +71,21 @@ export function createTrustedSystemWriter(
   };
 }
 
+/**
+ * Prontidão REAL do writer (V1-01): variáveis completas, identidade distinta da residente e login GoTrue efetivo. Só aqui a credencial é
+ * lida (o teste de vazamento exige isso). Devolve apenas um booleano; nenhum segredo sai deste módulo.
+ */
+export async function checkTrustedSystemWriterReady(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  const email = env.ANIMA_SYSTEM_WRITER_EMAIL?.trim();
+  const password = env.ANIMA_SYSTEM_WRITER_PASSWORD;
+  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!email || !password || !supabaseUrl || !anonKey) return false;
+  if (email.toLowerCase() === env.ANIMA_RESIDENT_EMAIL?.trim().toLowerCase()) return false;
+  const session = await createGoTrueIdentityProvider({ supabaseUrl, anonKey, email, password })().catch(() => null);
+  return session !== null;
+}
+
 /** Writer ausente: todo sink recusa. Nunca cai para a sessão humana. */
 export const UNAVAILABLE_TRUSTED_SYSTEM_WRITER: TrustedSystemWriter = {
   ...createTrustedSystemWriter(async () => null),

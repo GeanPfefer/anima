@@ -54,6 +54,9 @@ e o Supabase local no ar (`54321`). **Não** requer o Next.
 | `anima work accept <id>` | Aceita o RESULTADO em review (`review → completed`) via `reviewResult` |
 | `anima work withdraw <id> --reason "..."` | Retira um plano APROVADO não iniciado (`approved → cancelled`) via `withdraw_approved_work` |
 | `anima work resolve-pending <id> request-changes --reason "..."` / `... cancel [--reason "..."]` | Encerra um resultado CANDIDATO retido pelo Verifier obrigatório (`in_progress → changes_requested`/`cancelled`) via `resolve_pending_verification`; nunca verifica, nunca libera review |
+| `anima work external integrate inspect <UUID>` | Lê o que será autorizado/executado na integração Git EXTERNA: repositório, destino, SHAs, aceite, Verifier, revisão humana, `ff`, checkout, autorizações e bloqueios (somente leitura) |
+| `anima work external integrate authorize <UUID>` | Ato humano: registra a autorização `ff_only` (id novo e único) via `authorize_external_integration_effect`; NÃO executa |
+| `anima work external integrate execute <UUID> --auth-id <id>` | Ato humano separado: executa SOMENTE a autorização informada (identidade física, lease físico, fast-forward com CAS, recibo pelo Trusted System Writer); recusa antes do Git se o writer não autentica |
 | `anima work retry <id>` | Solicita o retry governado (ato humano) de um item `failed`/RETRY_READY via `request_work_retry` |
 | `anima work authorize-resume <id> [--plan f]` | Autoridade humana de +1: recovery antigo de `failed` cria successor; bloqueio pré-attempt por orçamento readmite o mesmo item |
 | `anima work prepare-autonomous <id>` | Paridade com o botão da UI "Preparar elegibilidade autônoma": classifica a versão aprovada vigente (sem executar) |

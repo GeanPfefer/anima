@@ -74,6 +74,22 @@ export function renderHuman(payload: CliPayload): string {
           ...(payload.retainedConflicts.length ? [`Aviso: itens retidos no mesmo reposit\u00f3rio f\u00edsico: ${payload.retainedConflicts.map(c => `${c.reference}:${c.workItemId}`).join(', ')}`] : []),
           'Crit\u00e9rios de revis\u00e3o humana:', ...payload.criteria.map(c => `  ${c.position}. [${c.status}] ${c.text}`),
           payload.diffTruncated ? 'Diff (truncado):' : 'Diff:', payload.diff].join('\n');
+    case 'work-external-integrate':
+      if (payload.mode === 'authorize') {
+        return [`${payload.workItemId} · autorização ff_only ${payload.action === 'recorded' ? 'registrada' : 'já existente (replay)'}.`, `authId: ${payload.authorizationId}`,
+          `Destino ${payload.targetRef} · SHA esperado ${payload.expectedTargetSha}`, `Nada foi executado. Para integrar: work external integrate execute ${payload.workItemId} --auth-id ${payload.authorizationId}`].join('\n');
+      }
+      if (payload.mode === 'execute') {
+        return `${payload.workItemId} · integração ${payload.disposition === 'effected' ? 'efetuada' : payload.disposition === 'reconciled' ? 'reconciliada (efeito já presente no Git)' : 'já concluída (idempotente)'}.\n${payload.targetRef}: ${payload.previousTargetSha.slice(0, 12)} → ${payload.resultingTargetSha.slice(0, 12)} (fast-forward, recibo persistido).`;
+      }
+      return [`${payload.reference ?? payload.workItemId} · ${payload.workItemId} · estado ${payload.state} (v${payload.proposalVersion})`,
+        `Repositório: ${payload.repoRoot ?? '(não resolvido)'}`, `Destino: ${payload.destination ?? '(não configurado)'} · SHA atual ${payload.currentDestinationSha ?? '—'}`,
+        `Candidato: ${payload.candidateCommitSha ?? '—'} (attempt ${payload.attemptId ?? '—'}, base ${payload.baseSha ?? '—'})`,
+        `Aceite: ${payload.accepted ? YES : NO} · Verifier: ${payload.verifier} · Revisão humana: ${payload.humanReview} · fast-forward: ${payload.fastForwardPossible === null ? '—' : payload.fastForwardPossible ? YES : NO}`,
+        `Checkout do destino: ${payload.checkout ?? '—'} · árvore: ${payload.workingTree ?? '—'} · Trusted writer: ${payload.writerReady ? YES : NO}`,
+        `Integração: ${payload.integration}`,
+        ...(payload.authorizations.length ? ['Autorizações:', ...payload.authorizations.map(a => `  ${a.authorizationId} · ${a.targetRef} · esperado ${a.expectedTargetSha.slice(0, 12)} · ${a.current ? 'vigente' : 'defasada'}`)] : ['Autorizações: nenhuma']),
+        payload.blockers.length ? `Bloqueios: ${payload.blockers.join(' | ')}` : 'Sem bloqueios conhecidos: pronto para authorize/execute.'].join('\n');
     case 'work-external-classify':
       return `${payload.workItemId} \u00b7 proposta v${payload.proposalVersion} \u00b7 classifica\u00e7\u00e3o humana ${payload.replayed ? 'j\u00e1 vigente (replay)' : 'registrada'}.\nA execu\u00e7\u00e3o continua um ato separado (work execute-one).`;
     case 'work-propose-investigation':
