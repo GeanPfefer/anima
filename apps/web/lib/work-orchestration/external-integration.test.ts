@@ -27,10 +27,11 @@ const NOW = new Date('2026-10-26T12:00:00.000Z');
 const TARGET_REF = 'refs/heads/main';
 
 interface Lab { root: string; rootSha: string; baseSha: string }
-function makeLab(name: string): Lab {
+function makeLab(name: string, localConfig: Record<string, string> = {}): Lab {
   const base = sandbox(); mkdirSync(join(base, name));
   const root = realpathSync.native(join(base, name));
   git(root, 'init', '-q', '-b', 'main');
+  for (const [key, value] of Object.entries(localConfig)) git(root, 'config', '--local', key, value);
   for (const [p, c] of Object.entries({ 'src/clamp.js': CLAMP, 'package.json': '{}', 'apps/web/package.json': '{}' })) { mkdirSync(join(root, p, '..'), { recursive: true }); writeFileSync(join(root, p), c); }
   git(root, 'add', '-A'); git(root, 'commit', '-q', '-m', 'base');
   return { root, rootSha: git(root, 'rev-list', '--max-parents=0', 'HEAD'), baseSha: git(root, 'rev-parse', 'HEAD') };
@@ -65,8 +66,8 @@ function leasePort(state: LeaseState, keyOf: (itemId: string) => string): Extern
   };
 }
 
-async function world(over: { reference?: string; lab?: Lab; owner?: string; leaseState?: LeaseState; gitWrap?: (run: GitRunner, args: readonly string[]) => Promise<ReturnType<GitRunner> extends Promise<infer R> ? R : never> } = {}): Promise<World> {
-  const lab = over.lab ?? makeLab('shop'); const animaBase = sandbox(); mkdirSync(join(animaBase, 'apps/web'), { recursive: true });
+async function world(over: { localConfig?: Record<string, string>; workTreeOptions?: readonly string[]; reference?: string; lab?: Lab; owner?: string; leaseState?: LeaseState; gitWrap?: (run: GitRunner, args: readonly string[]) => Promise<ReturnType<GitRunner> extends Promise<infer R> ? R : never> } = {}): Promise<World> {
+  const lab = over.lab ?? makeLab('shop', over.localConfig); const animaBase = sandbox(); mkdirSync(join(animaBase, 'apps/web'), { recursive: true });
   writeFileSync(join(animaBase, 'apps/web/package.json'), '{}'); writeFileSync(join(animaBase, 'package.json'), '{}'); git(animaBase, 'init', '-q', '-b', 'main'); writeFileSync(join(animaBase, 'a'), '1'); git(animaBase, 'add', '-A'); git(animaBase, 'commit', '-q', '-m', 'a');
   const anima = realpathSync.native(animaBase);
   const reference = over.reference ?? 'ext:shop';
@@ -105,7 +106,7 @@ async function world(over: { reference?: string; lab?: Lab; owner?: string; leas
     verifyTarget: contract => verifyExternalTargetForContract(contract, env, targetDeps),
     gitFor: gitDir => { const real = createTrustedGitRunner({ gitDir }); return over.gitWrap ? (args => over.gitWrap!(real, args)) : real; },
     exists: existsSync,
-    workTreeOptions: operatorWorkTreeOptions(args => { try { return execFileSync('git', [...args], { encoding: 'utf8', windowsHide: true }).trim(); } catch { return null; } }),
+    workTreeOptions: over.workTreeOptions ?? operatorWorkTreeOptions(args => { try { return execFileSync('git', [...args], { encoding: 'utf8', windowsHide: true }).trim(); } catch { return null; } }),
     lease: leasePort(leaseState, () => lab.root.toLowerCase()),
     humanReviewRefusal: async () => humanRefusal.value,
     persist: async (auth, receipt) => {
@@ -421,5 +422,58 @@ describe('autorização humana (cliente)', () => {
     git(w.lab.root, 'update-ref', TARGET_REF, git(w.lab.root, 'rev-parse', 'HEAD')); // main agora diverge do candidato
     expect(await authorizeExternalIntegrationEffect({ workItemId: 'w1', authorizationId: 'auth-10' }, base)).toEqual({ ok: false, reason: 'ff_not_possible' });
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('core.autocrlf — precedência (T5-R1)', () => {
+  const operatorTrue = ['-c', 'core.autocrlf=true'] as const;
+  const operatorFalse = ['-c', 'core.autocrlf=false'] as const;
+  const CR = String.fromCharCode(13);
+  const plainStatus = (root: string): string => git(root, 'status', '--porcelain', '--untracked-files=all');
+  const physical = (root: string): string => readFileSync(join(root, 'src/clamp.js'), 'utf8');
+
+  test('local=false e operador=true: a escolha LOCAL vence (arquivo em LF, árvore limpa) — o defeito observado na PROOF-EXT-02', async () => {
+    const w = await world({ localConfig: { 'core.autocrlf': 'false' }, workTreeOptions: operatorTrue });
+    authorize(w);
+    expect(await run(w)).toMatchObject({ status: 'integrated', disposition: 'effected' });
+    expect(main(w)).toBe(w.commit);
+    expect(physical(w.lab.root)).toBe(CLAMP_FIXED);
+    expect(physical(w.lab.root).includes(CR)).toBe(false);
+    expect(plainStatus(w.lab.root)).toBe('');
+    expect(git(w.lab.root, 'hash-object', 'src/clamp.js')).toBe(git(w.lab.root, 'rev-parse', 'HEAD:src/clamp.js'));
+    expect(count(w)).toBe(2);
+  });
+
+  test('local=true e operador=false: a escolha LOCAL vence (arquivo em CRLF, árvore limpa)', async () => {
+    const w = await world({ localConfig: { 'core.autocrlf': 'true' }, workTreeOptions: operatorFalse });
+    authorize(w);
+    expect(await run(w)).toMatchObject({ status: 'integrated', disposition: 'effected' });
+    expect(physical(w.lab.root).includes(CR)).toBe(true);
+    expect(plainStatus(w.lab.root)).toBe('');
+    expect(main(w)).toBe(w.commit);
+  });
+
+  test('sem config local: vale o padrão do operador (true ⇒ CRLF), árvore limpa', async () => {
+    const w = await world({ workTreeOptions: operatorTrue });
+    authorize(w);
+    expect(await run(w)).toMatchObject({ status: 'integrated', disposition: 'effected' });
+    expect(physical(w.lab.root).includes(CR)).toBe(true);
+    expect(plainStatus(w.lab.root)).toBe('');
+  });
+
+  test('o status do pré-requisito também respeita o local: árvore em LF com local=false não é "suja" sob operador=true', async () => {
+    const w = await world({ localConfig: { 'core.autocrlf': 'false' }, workTreeOptions: operatorTrue });
+    authorize(w);
+    const out = await run(w);
+    expect(out.status).toBe('integrated'); // com o defeito antigo: human_required target_checked_out:working_tree_dirty ou CRLF residual
+  });
+
+  test('hooks e filtros continuam bloqueados com o autocrlf do operador (filtro local ⇒ recusa)', async () => {
+    const w = await world({ localConfig: { 'core.autocrlf': 'false' }, workTreeOptions: operatorTrue });
+    git(w.lab.root, 'config', 'filter.evil.smudge', 'sh -c "echo pwned > pwned.txt"');
+    authorize(w);
+    expect(await run(w)).toMatchObject({ status: 'human_required', reason: 'target_checked_out:unsafe_repository_config' });
+    expect(existsSync(join(w.lab.root, 'pwned.txt'))).toBe(false);
+    expect(main(w)).toBe(w.lab.baseSha);
   });
 });

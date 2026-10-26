@@ -82,9 +82,19 @@ export class ExternalGitIntegrationProvider {
     private readonly repoRoot: string,
     private readonly gitDir: string,
     private readonly exists: (path: string) => boolean,
-    /** `-c` do OPERADOR para operações que tocam a árvore (ex.: `core.autocrlf` global, que o Git confiável não lê). */
+    /** `-c` do OPERADOR para operações que tocam a árvore (ex.: `core.autocrlf` global/sistema, que o Git confiável não lê). */
     private readonly workTreeOptions: readonly string[] = [],
   ) {}
+
+  /**
+   * Precedência do Git: `-c` vence a config do repositório. Por isso o padrão do operador só vale quando o repositório NÃO define
+   * `core.autocrlf` localmente; uma escolha local explícita (ex.: `false`) é a configuração efetiva e nunca é sobrescrita.
+   */
+  private async treeOptions(): Promise<readonly string[]> {
+    if (this.workTreeOptions.length === 0) return [];
+    const local = await this.git(['config', '--local', '--no-includes', '--get', 'core.autocrlf']);
+    return local.exitCode === 1 ? this.workTreeOptions : []; // 1 = chave ausente; 0 = definida localmente; >1 = erro ⇒ fail-safe (não sobrescreve)
+  }
 
   private async ok(args: readonly string[], code: string): Promise<string> {
     const r = await this.git(args);
@@ -136,7 +146,7 @@ export class ExternalGitIntegrationProvider {
     const head = await this.git(['symbolic-ref', '-q', 'HEAD']);
     if (head.exitCode !== 0 || head.stdout.trim() !== targetRef) return 'head_not_on_target';
     if ((await this.resolve('HEAD')) !== expectedSha) return 'head_not_at_expected';
-    const status = await this.git([...this.workTreeOptions, `--work-tree=${this.repoRoot}`, 'status', '--porcelain=v1', '--untracked-files=all', '--ignore-submodules=none']);
+    const status = await this.git([...(await this.treeOptions()), `--work-tree=${this.repoRoot}`, 'status', '--porcelain=v1', '--untracked-files=all', '--ignore-submodules=none']);
     if (status.exitCode !== 0) return 'status_unreadable';
     return status.stdout.trim() === '' ? null : 'working_tree_dirty';
   }
@@ -148,7 +158,7 @@ export class ExternalGitIntegrationProvider {
 
   /** Destino em checkout (limpo, HEAD no esperado): `merge --ff-only` (Git atualiza ref+índice+árvore; sem merge commit). */
   async mergeFastForward(candidate: string): Promise<boolean> {
-    const r = await this.git([...this.workTreeOptions, `--work-tree=${this.repoRoot}`, '-c', 'core.logAllRefUpdates=always', 'merge', '--ff-only', '--no-stat', '--no-verify-signatures', candidate]);
+    const r = await this.git([...(await this.treeOptions()), `--work-tree=${this.repoRoot}`, '-c', 'core.logAllRefUpdates=always', 'merge', '--ff-only', '--no-stat', '--no-verify-signatures', candidate]);
     return r.exitCode === 0;
   }
 
