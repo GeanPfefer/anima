@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import {
+  ANIMA_PRODUCT_DIRECTION_V1,
   computeAutonomyEvidence,
   ANIMA_CAPABILITY_REGISTRY_V0,
   EVOLUTION_BASELINE,
@@ -827,5 +828,46 @@ describe('Perfil de evidência (AUDIT-02)', () => {
     const section = screen.getByTestId('evidence-profile');
     expect(section).toHaveTextContent('Não avaliado nesta revisão');
     expect(within(section).queryByTestId('evidence-level-planned')).not.toBeInTheDocument();
+  });
+});
+
+describe('Direção atual (editorial)', () => {
+  const withDirection = () => render(<EvolutionClient {...buildProps()} productDirection={ANIMA_PRODUCT_DIRECTION_V1} />);
+
+  test('mostra foco, próximo, experimental e estacionado, nessa ordem, com o aviso de que não é conclusão', () => {
+    withDirection();
+    const panel = screen.getByTestId('product-direction');
+    expect(within(panel).getByTestId('product-direction-notice')).toHaveTextContent(/Não representa conclusão, prova, prontidão, maturidade nem autonomia/);
+    const groups = within(panel).getAllByTestId(/^direction-group-/).map((el) => el.getAttribute('data-testid'));
+    expect(groups).toEqual(['direction-group-current_focus', 'direction-group-next', 'direction-group-experimental', 'direction-group-parked']);
+    expect(within(within(panel).getByTestId('direction-group-current_focus')).getByTestId('direction-item-value-01')).toHaveTextContent(/VALUE-01/);
+    expect(within(within(panel).getByTestId('direction-group-next')).getByTestId('direction-item-reduce-human-interventions')).toBeInTheDocument();
+    for (const id of ['a2-uac', 'wsl-isolation', 'advanced-mandate-governance']) {
+      expect(within(within(panel).getByTestId('direction-group-experimental')).getByTestId(`direction-item-${id}`)).toBeInTheDocument();
+    }
+    for (const id of ['ollama-local', 'dsh', 'runpod']) {
+      expect(within(within(panel).getByTestId('direction-group-parked')).getByTestId(`direction-item-${id}`)).toBeInTheDocument();
+    }
+  });
+
+  test('cada item mostra sua referência e a VALUE-01 declara que ainda não há medição', () => {
+    withDirection();
+    const value = screen.getByTestId('direction-item-value-01');
+    expect(value).toHaveTextContent('docs/registros/2026-11-03-evolution-ux-i1-resgate-e-direcao.md');
+    expect(value).toHaveTextContent(/ainda não tem plano nem medição/);
+  });
+
+  test('vínculo de navegação seleciona a capacidade sem alterar maturidade nem perfil de evidência', () => {
+    const { container } = withDirection();
+    fireEvent.click(within(screen.getByTestId('direction-item-ollama-local')).getAllByRole('button')[0]!);
+    expect(stateOf(container, 'compute.local-execution')).toBe('selected');
+    expect(screen.getByTestId('product-direction')).toBeInTheDocument();
+    expect(screen.getByTestId('evidence-overview-coverage')).toHaveTextContent(/de.*68.*capacidades têm perfil verificado/);
+  });
+
+  test('sem a prop o painel não aparece e o restante da tela é o mesmo', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    expect(screen.queryByTestId('product-direction')).not.toBeInTheDocument();
+    expect(screen.getByTestId('evidence-overview')).toBeInTheDocument();
   });
 });

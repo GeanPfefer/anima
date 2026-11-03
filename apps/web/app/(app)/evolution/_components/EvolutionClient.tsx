@@ -29,6 +29,7 @@ import type {
   CapabilityMaturity,
   CapabilityProofRef,
   DomainMaturitySummary,
+  ProductDirection,
   RecentEvolutionEntry,
   TargetProgress,
 } from '@anima/core';
@@ -42,7 +43,15 @@ import type {
   CapabilityProofEvaluation,
   CapabilityProofStatus,
 } from '@anima/core';
-import { EVIDENCE_LEVELS, EVIDENCE_LEVEL_LABEL_PT, EVIDENCE_STATUS_LABEL_PT, explainCapabilityAssessment } from '@anima/core';
+import {
+  EVIDENCE_LEVELS,
+  EVIDENCE_LEVEL_LABEL_PT,
+  EVIDENCE_STATUS_LABEL_PT,
+  PRODUCT_DIRECTION_LABEL_PT,
+  PRODUCT_DIRECTION_NOTICE,
+  explainCapabilityAssessment,
+  groupProductDirection,
+} from '@anima/core';
 import type { AutonomyEvidenceReadState } from '@/lib/evolution/capability-assessment-read';
 import styles from './EvolutionClient.module.css';
 
@@ -362,6 +371,8 @@ export interface EvolutionClientProps {
   /** Mudanças registradas no registry desde a baseline (nunca inferidas). */
   recentEvolution: RecentEvolutionEntry[];
   evolutionBaseline: EvolutionBaseline;
+  /** Direção editorial do produto (foco, próximo, experimental, estacionado). Opcional; ausente = sem painel. */
+  productDirection?: ProductDirection;
 }
 
 interface View {
@@ -381,6 +392,7 @@ export default function EvolutionClient({
   autonomyEvidence,
   recentEvolution,
   evolutionBaseline,
+  productDirection,
 }: EvolutionClientProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [domainFilter, setDomainFilter] = useState<CapabilityDomain | null>(null);
@@ -831,6 +843,7 @@ export default function EvolutionClient({
         </div>
 
         <aside className={styles.panel} aria-live="polite">
+          {productDirection && <ProductDirectionPanel direction={productDirection} nameById={nameById} onSelect={selectCapability} />}
           {autonomyEvidence && <AutonomyEvidencePanel evidence={autonomyEvidence} />}
           <EvidenceProfileOverview nodes={nodes} baseline={evolutionBaseline} />
           {selectedNode ? (
@@ -1509,6 +1522,50 @@ function ReuseSummary({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; onSel
         <ul className={styles.reuseList}>{candidates.map(item)}</ul>
       </section>
     </div>
+  );
+}
+
+function ProductDirectionPanel({
+  direction,
+  nameById,
+  onSelect,
+}: {
+  direction: ProductDirection;
+  nameById: Map<string, string>;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <section className={styles.autonomyEvidence} data-testid="product-direction">
+      <h3 className={styles.detailLabel}>Direção atual</h3>
+      <p className={styles.directionNotice} data-testid="product-direction-notice">{PRODUCT_DIRECTION_NOTICE}</p>
+      <p className={styles.detailHint}>Decidida por {direction.decidedBy} em {direction.decidedAt}.</p>
+      {groupProductDirection(direction).map((group) => (
+        <div key={group.status} className={styles.directionGroup} data-testid={`direction-group-${group.status}`}>
+          <h4 className={styles.directionGroupTitle} data-status={group.status}>{PRODUCT_DIRECTION_LABEL_PT[group.status]}</h4>
+          <ul className={styles.directionList}>
+            {group.items.map((item) => (
+              <li key={item.id} className={styles.directionItem} data-testid={`direction-item-${item.id}`}>
+                <strong>{item.title}</strong>
+                <span>{item.rationale}</span>
+                <small>
+                  {item.refs.map((ref) => ref.ref).join(' · ')}
+                </small>
+                {(item.relatedCapabilityIds?.length ?? 0) > 0 && (
+                  <span className={styles.directionLinks}>
+                    Ver no mapa:{' '}
+                    {item.relatedCapabilityIds!.map((id) => (
+                      <button key={id} type="button" className={styles.pathStep} onClick={() => onSelect(id)}>
+                        {nameById.get(id) ?? id}
+                      </button>
+                    ))}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
   );
 }
 

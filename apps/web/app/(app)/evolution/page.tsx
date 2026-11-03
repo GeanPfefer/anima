@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { readCapabilityEvolution } from '@/lib/evolution/capability-assessment-read';
 import {
   ANIMA_CAPABILITY_REGISTRY_V0,
+  ANIMA_PRODUCT_DIRECTION_V1,
   EVOLUTION_BASELINE,
   getAnimaCapabilityGraph,
   listRecentEvolution,
@@ -76,6 +77,7 @@ export default async function EvolutionPage() {
       autonomyEvidence={evolutionRead.autonomyEvidence}
       recentEvolution={listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date)}
       evolutionBaseline={{ ...EVOLUTION_BASELINE }}
+      productDirection={ANIMA_PRODUCT_DIRECTION_V1}
     />
   );
 }

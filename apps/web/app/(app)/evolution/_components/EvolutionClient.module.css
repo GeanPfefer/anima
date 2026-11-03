@@ -769,3 +769,51 @@
   font-weight: 600;
   text-align: right;
 }
+
+/* ─── Direção do produto (editorial; não é maturidade nem prova) ─── */
+
+.directionNotice {
+  padding: 6px 8px;
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.directionGroup {
+  margin-top: 10px;
+}
+
+.directionGroupTitle {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.directionList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.directionItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.directionItem small {
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+.directionLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
