@@ -152,6 +152,16 @@ function Test-CoverRule($existing, $p) {
 function Find-Planned($p) {
  if ($p.Cover) { (Get-Acl -LiteralPath $p.Path).Access | Where-Object { Test-CoverRule $_ $p } | Select-Object -First 1 } else { Find-Rule $p.Path $p }
 }
+# Escrita SOMENTE da DACL (secao Access): Set-Acl comum tenta gravar tambem SACL/owner e falha com SeSecurityPrivilege em alguns objetos.
+function Get-AclAccess($path) {
+ $i = Get-Item -LiteralPath $path -Force
+ if ($i.PSIsContainer) { [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.DirectoryInfo]$i, [System.Security.AccessControl.AccessControlSections]::Access) }
+ else { [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.FileInfo]$i, [System.Security.AccessControl.AccessControlSections]::Access) }
+}
+function Set-AclAccess($path, $sec) {
+ $i = Get-Item -LiteralPath $path -Force
+ if ($i.PSIsContainer) { [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.DirectoryInfo]$i, $sec) } else { [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.FileInfo]$i, $sec) }
+}
 function Assert-NotReparse($path) { if ((Test-Path -LiteralPath $path) -and (Test-IsReparse $path)) { throw "Recusado: '$path' e um reparse point; o script nao segue links." } }
 function Read-State { if (Test-Path -LiteralPath $StatePath) { @(Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json) } else { @() } }
 function Write-State($entries) {
@@ -246,15 +256,20 @@ if ($Verify) {
    $lines += "console.log(JSON.stringify(o));"
    Set-Content -LiteralPath $js -Value $lines -Encoding ASCII
    $out = Join-Path $canary 'probe.out'
+   # cwd do processo = canario: o Codex concede ACE de leitura ao grupo no diretorio de trabalho de quem o lanca; nao queremos isso em outro lugar.
+   Push-Location -LiteralPath $canary
    cmd /c ('"{0}" sandbox -P :workspace -C "{1}" -- "{2}" "{3}" > "{4}" 2>&1' -f $ProbeCodexPath, $canary, $ProbeNodePath, $js, $out)
+   Pop-Location
    $json = (Get-Content -LiteralPath $out | Select-Object -Last 1)
    try { $r = $json | ConvertFrom-Json } catch { throw "Sonda sem resultado JSON: $json" }
    if ($CodexHome -and $ProbeSandboxBinExe) {
     # Executar um binario do carve-out sob a negacao da raiz (o runner do Codex mora ali): --version deve sair com 0.
     $exe = Join-Path (Join-Path $CodexHome '.sandbox-bin') $ProbeSandboxBinExe
     $out2 = Join-Path $canary 'exec.out'
+    Push-Location -LiteralPath $canary
     cmd /c ('"{0}" sandbox -P :workspace -C "{1}" -- "{2}" --version > "{3}" 2>&1' -f $ProbeCodexPath, $canary, $exe, $out2)
     $execOk = ($LASTEXITCODE -eq 0)
+    Pop-Location
     $r | Add-Member -NotePropertyName exec_sandbox_bin -NotePropertyValue $(if ($execOk) { 'ALLOWED' } else { 'DENIED' }) -Force
     $expect['exec_sandbox_bin'] = 'ALLOWED'
    }
@@ -278,9 +293,9 @@ if ($Revert) {
   if (-not $Apply) { Write-Output ("[simulacao] removeria: {0}" -f (Describe $p)); [void]$keep.Add($e); continue }
   if ((Test-Path -LiteralPath $e.Path) -and (Test-IsReparse $e.Path)) { Write-Output ("[NAO REVERTIDO: o caminho agora e um reparse point; o script nao segue links] {0}" -f (Describe $p)); [void]$keep.Add($e); continue }
   if (Test-Path -LiteralPath $e.Path) {
-   $acl = Get-Acl -LiteralPath $e.Path
+   $acl = Get-AclAccess $e.Path
    $match = $acl.Access | Where-Object { Test-SameRule $_ $p } | Select-Object -First 1
-   if ($match) { [void]$acl.RemoveAccessRuleSpecific($match); Set-Acl -LiteralPath $e.Path -AclObject $acl }
+   if ($match) { [void]$acl.RemoveAccessRuleSpecific($match); Set-AclAccess $e.Path $acl }
    if ($match -and -not (Find-Rule $e.Path $p)) { Write-Output ("revertido: {0}" -f (Describe $p)); continue }
   }
   Write-Output ("[NAO REVERTIDO: regra nao encontrada/ainda presente] {0}" -f (Describe $p)); [void]$keep.Add($e)
@@ -303,10 +318,11 @@ foreach ($p in $planned) {
   if (-not $recorded) { [void]$state.Add([pscustomobject]@{ Path = $p.Path; Kind = $p.Kind; Rights = [int]$p.Rights; Inherit = [int]$p.Inherit; Type = [int]$p.Type; Added = $false; SddlBefore = (Get-Acl -LiteralPath $p.Path).Sddl }); Write-State $state }
   Write-Output ("ja existia{0}: {1}" -f $(if ($p.Cover) { ' (carve-out coberto)' } else { '' }), (Describe $p)); continue
  }
- $acl = Get-Acl -LiteralPath $p.Path; $before = $acl.Sddl
- $acl.AddAccessRule((New-Rule $p)); Set-Acl -LiteralPath $p.Path -AclObject $acl
+ $before = (Get-Acl -LiteralPath $p.Path).Sddl; $acl = Get-AclAccess $p.Path
+ $acl.AddAccessRule((New-Rule $p)); Set-AclAccess $p.Path $acl
  if (-not (Find-Planned $p)) { throw ("Falha ao gravar a ACE (nao encontrada apos Set-Acl): " + (Describe $p)) }
  [void]$state.Add([pscustomobject]@{ Path = $p.Path; Kind = $p.Kind; Rights = [int]$p.Rights; Inherit = [int]$p.Inherit; Type = [int]$p.Type; Added = $true; SddlBefore = $before })
  Write-State $state   # grava a cada ACE: uma interrupcao deixa o registro fiel ao que foi feito
  Write-Output ("aplicado: {0}" -f (Describe $p))
 }
+exit 0
