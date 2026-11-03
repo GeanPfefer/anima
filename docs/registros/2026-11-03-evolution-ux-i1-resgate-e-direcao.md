@@ -39,3 +39,10 @@ Fora de escopo e não feitos: merge da branch antiga, `achievement`, `deliveryEv
 ## Fronteiras
 
 Nenhuma maturidade mudou. Autonomia desassistida continua não comprovada. Sem push; sem alteração de `origin/dev`/`main`.
+
+## Validação (executada em 2026-11-03)
+
+- `packages/core`: 131 suítes / 3.272 testes passando; `tsc --noEmit` limpo. Testes novos de direção: 7 (valores permitidos, referências existentes, ausência de afirmações de conclusão, vínculos só de navegação, registry sem campo `direction`).
+- `apps/web`: suítes de `evolution`, `lib/evolution` e `auto-approval` (6 suítes / 125 testes) passando; `tsc --noEmit` limpo. Testes novos de tela: 4 (ordem dos grupos, aviso, referências, navegação sem alterar perfil de evidência, ausência da prop).
+- Invariantes do registry (maturidades, 68 nós, nenhum `autonomous`, perfis de evidência da AUDIT-02): inalterados e verdes.
+- **Não executados, por limite de ambiente**: `next build` (as worktrees usam junctions de `node_modules` e o Next não resolve fora da raiz do projeto; falha já observada nesta máquina em duas worktrees) e inspeção visual (a `/evolution` exige sessão autenticada, que o ANIMA não abre por Claude). A tela foi verificada por testes de DOM.
