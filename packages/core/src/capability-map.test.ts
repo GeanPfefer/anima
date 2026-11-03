@@ -257,3 +257,36 @@ describe('listRecentEvolution', () => {
     expect(recent.map((r) => `${r.capabilityId}:${r.entry.note}`)).toEqual(['b:nova', 'a:meio']);
   });
 });
+
+describe('evidenceProfile (AUDIT-02)', () => {
+  const levels = { planned: 'yes', implemented: 'yes', tested: 'yes', proven_real: 'no', operational_supervised: 'no', operational_unsupervised: 'no' } as const;
+  const profile = (over: Partial<NonNullable<Capability['evidenceProfile']>> = {}): NonNullable<Capability['evidenceProfile']> => ({
+    validatedAt: '2026-11-03', levels: { ...levels }, supervision: 'humano decide', latestEvidence: { at: '2026-10-26', ref: { kind: 'commit', ref: 'abc1234' } }, ...over,
+  });
+  const issues = (c: Capability) => validateCapabilityRegistry([c]).filter((i) => i.code === 'invalid_evidence_profile');
+
+  test('perfil coerente não gera problema; ausência também não', () => {
+    expect(issues(cap({ id: 'a', evidenceProfile: profile() }))).toEqual([]);
+    expect(issues(cap({ id: 'a' }))).toEqual([]);
+  });
+
+  test('recusa nível acima da maturidade declarada', () => {
+    expect(issues(cap({ id: 'a', maturity: 'implemented', evidenceProfile: profile({ levels: { ...levels, proven_real: 'yes' } }) }))).toHaveLength(1);
+    expect(issues(cap({ id: 'a', maturity: 'projected', evidenceProfile: profile({ levels: { ...levels, implemented: 'yes' } }) }))).not.toEqual([]);
+  });
+
+  test('sem supervisão só com maturidade autonomous', () => {
+    const l = { ...levels, proven_real: 'yes', operational_supervised: 'yes', operational_unsupervised: 'yes' } as const;
+    expect(issues(cap({ id: 'a', maturity: 'operational', proofRefs: [{ kind: 'commit', ref: 'x' }], evidenceProfile: profile({ levels: l }) })).length).toBeGreaterThan(0);
+  });
+
+  test('monotonia: nível sim não convive com nível inferior não', () => {
+    expect(issues(cap({ id: 'a', maturity: 'proven', proofRefs: [{ kind: 'commit', ref: 'x' }], evidenceProfile: profile({ levels: { ...levels, tested: 'no', proven_real: 'yes' } }) }))).toHaveLength(1);
+  });
+
+  test('data inválida, evidência sem ref e supervisão vazia são recusadas', () => {
+    expect(issues(cap({ id: 'a', evidenceProfile: profile({ validatedAt: '03/11/2026' }) }))).toHaveLength(1);
+    expect(issues(cap({ id: 'a', evidenceProfile: profile({ latestEvidence: { at: '2026-10-26', ref: { kind: 'commit', ref: ' ' } } }) }))).toHaveLength(1);
+    expect(issues(cap({ id: 'a', evidenceProfile: profile({ supervision: ' ' }) }))).toHaveLength(1);
+  });
+});

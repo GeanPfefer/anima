@@ -744,3 +744,28 @@
   gap: 5px;
   margin-bottom: 12px;
 }
+
+/* ─── Perfil de evidência (AUDIT-02) ────────────────────── */
+
+.evidenceList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+  padding: 0;
+}
+
+.evidenceRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.evidenceRow strong {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: right;
+}

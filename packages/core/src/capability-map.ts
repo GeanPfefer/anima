@@ -181,6 +181,60 @@ export interface CapabilityHistoryEntry {
   refs: CapabilityProofRef[];
 }
 
+// ─── Perfil de evidência (AUDIT-02) ──────────────────────────────────────────
+
+// Seis níveis DISTINTOS e não ordenados por promoção automática: o perfil NÃO
+// altera `maturity` (que mantém sua semântica) — apenas a qualifica com o que
+// foi de fato verificado. Declarado à mão, com revisão; ausente = "não avaliado".
+export type EvidenceLevel =
+  | 'planned' //                    planejado/especificado
+  | 'implemented' //                código existe
+  | 'tested' //                     testes automatizados cobrem o comportamento
+  | 'proven_real' //                comprovado em execução real (residente/ledger)
+  | 'operational_supervised' //     operacional repetidamente, com humano nos atos de decisão
+  | 'operational_unsupervised'; //  operacional sem supervisão humana
+
+export const EVIDENCE_LEVELS: readonly EvidenceLevel[] = [
+  'planned',
+  'implemented',
+  'tested',
+  'proven_real',
+  'operational_supervised',
+  'operational_unsupervised',
+] as const;
+
+export const EVIDENCE_LEVEL_LABEL_PT: Record<EvidenceLevel, string> = {
+  planned: 'Planejado',
+  implemented: 'Implementado',
+  tested: 'Testado',
+  proven_real: 'Comprovado em execução real',
+  operational_supervised: 'Operacional sob supervisão',
+  operational_unsupervised: 'Operacional sem supervisão',
+};
+
+/** yes = verificado; partial = só parte do escopo; lab_only = só em laboratório/descartável; no = não; unknown = sem como afirmar. */
+export type EvidenceLevelStatus = 'yes' | 'partial' | 'lab_only' | 'no' | 'unknown';
+
+export const EVIDENCE_STATUS_LABEL_PT: Record<EvidenceLevelStatus, string> = {
+  yes: 'Sim',
+  partial: 'Parcial',
+  lab_only: 'Só laboratório',
+  no: 'Não',
+  unknown: 'Sem como afirmar',
+};
+
+export interface CapabilityEvidenceProfile {
+  /** Data (YYYY-MM-DD) em que o perfil foi verificado contra as fontes. */
+  validatedAt: string;
+  levels: Record<EvidenceLevel, EvidenceLevelStatus>;
+  /** Quem decide/atua hoje (texto curto, factual). */
+  supervision: string;
+  /** Evidência mais recente que sustenta o perfil. */
+  latestEvidence: { at: string; ref: CapabilityProofRef };
+  /** Limites conhecidos, um por item. */
+  limitations?: string[];
+}
+
 // ─── Capacidade ──────────────────────────────────────────────────────────────
 
 export interface CapabilityTarget {
@@ -234,6 +288,9 @@ export interface Capability {
    * uma promoção para esconder a lacuna.
    */
   frontier?: string[];
+
+  /** Perfil de evidência por nível (AUDIT-02). Não altera `maturity`; ausente = não avaliado. */
+  evidenceProfile?: CapabilityEvidenceProfile;
 }
 
 // ─── Validação do registro ──────────────────────────────────────────────────
@@ -253,6 +310,7 @@ export type CapabilityRegistryIssueCode =
   | 'strong_maturity_without_proof' // proven/operational/autonomous sem proofRefs
   | 'external_candidate_realized' //  candidata externa marcada como já existente no Anima
   | 'invalid_history' //              data inválida ou maturity_changed incompleto/sem refs
+  | 'invalid_evidence_profile' //     perfil de evidência incoerente com a maturidade ou sem base
   | 'history_maturity_mismatch'; //   último `to` (introduced/maturity_changed) ≠ maturidade atual
 
 export interface CapabilityRegistryIssue {
@@ -366,6 +424,7 @@ export function validateCapabilityRegistry(
       });
     }
     issues.push(...validateHistory(cap));
+    issues.push(...validateEvidenceProfile(cap));
   }
 
   for (const cycle of findDependencyCycles(capabilities)) {
@@ -419,6 +478,47 @@ export function findDependencyCycles(capabilities: readonly Capability[]): strin
     if (state.get(cap.id) === undefined) visit(cap.id);
   }
   return cycles;
+}
+
+const MATURITY_RANK_FOR_PROFILE: Record<CapabilityMaturity, number> = {
+  projected: 0, specified: 1, implemented: 2, proven: 3, operational: 4, autonomous: 5, degraded: 2,
+};
+
+/**
+ * Regras do perfil de evidência: nunca vai além do que a maturidade declarada
+ * sustenta, é monotônico (um nível "sim" não convive com nível inferior "não") e
+ * "sem supervisão" só vale para `autonomous`.
+ */
+function validateEvidenceProfile(cap: Capability): CapabilityRegistryIssue[] {
+  const profile = cap.evidenceProfile;
+  if (!profile) return [];
+  const issues: CapabilityRegistryIssue[] = [];
+  const bad = (message: string) =>
+    issues.push({ code: 'invalid_evidence_profile', capabilityId: cap.id, message: `${cap.id}: ${message}` });
+  const valid = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && Number.isFinite(Date.parse(d));
+  if (!valid(profile.validatedAt)) bad(`validatedAt inválido (${profile.validatedAt})`);
+  if (!valid(profile.latestEvidence.at) || profile.latestEvidence.ref.ref.trim() === '') bad('latestEvidence sem data válida ou sem ref');
+  if (profile.supervision.trim() === '') bad('supervision vazio');
+  const rank = MATURITY_RANK_FOR_PROFILE[cap.maturity];
+  const L = profile.levels;
+  for (const level of EVIDENCE_LEVELS) {
+    if (L[level] === undefined) bad(`nível ausente: ${level}`);
+  }
+  const positive = (st: EvidenceLevelStatus) => st === 'yes';
+  if (positive(L.implemented) && rank < 2) bad(`implemented=yes com maturidade ${cap.maturity}`);
+  if (positive(L.proven_real) && rank < 3) bad(`proven_real=yes com maturidade ${cap.maturity}`);
+  if (positive(L.operational_supervised) && rank < 4) bad(`operational_supervised=yes com maturidade ${cap.maturity}`);
+  if (positive(L.operational_unsupervised) && cap.maturity !== 'autonomous') {
+    bad('operational_unsupervised=yes exige maturidade autonomous');
+  }
+  const order: EvidenceLevel[] = ['planned', 'implemented', 'tested', 'proven_real', 'operational_supervised', 'operational_unsupervised'];
+  order.forEach((level, i) => {
+    if (!positive(L[level])) return;
+    for (const lower of order.slice(0, i)) {
+      if (L[lower] === 'no') bad(`${level}=yes mas ${lower}=no`);
+    }
+  });
+  return issues;
 }
 
 // ─── Grafo ───────────────────────────────────────────────────────────────────

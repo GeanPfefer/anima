@@ -528,13 +528,15 @@ describe('EvolutionClient (Evolution V2 — reconciliação)', () => {
     const { container } = render(<EvolutionClient {...buildProps()} />);
     fireEvent.click(screen.getByRole('button', { name: /Evolução recente/ }));
     expect(stateOf(container, 'agency.external-harness')).toBe('strong');
-    expect(stateOf(container, 'governance.authority')).toBe('strong');
+    expect(stateOf(container, 'agency.external-project-builder')).toBe('strong');
+    // governance.authority só teve entrada até a baseline anterior (V6, 2026-10-20): fora da janela atual
+    expect(stateOf(container, 'governance.authority')).toBe('dim');
     expect(stateOf(container, 'interaction.chat')).toBe('dim');
-    const panel = screen.getByText(/Desde Evolution Reconciliation V6/).closest('div') as HTMLElement;
-    expect(within(panel).getByText(/Baseline e2fa7a8/)).toBeInTheDocument();
+    const panel = screen.getByText(/Desde Evolution Refresh V1 \(AUDIT-02\)/).closest('div') as HTMLElement;
+    expect(within(panel).getByText(/Baseline 21b2af9/)).toBeInTheDocument();
     // clicar numa entrada seleciona a capacidade
-    fireEvent.click(within(panel).getAllByRole('button', { name: 'Authority (mandato)' })[0]!);
-    expect(stateOf(container, 'governance.authority')).toBe('selected');
+    fireEvent.click(within(panel).getAllByRole('button', { name: 'Harness externo (Claude Code / Codex)' })[0]!);
+    expect(stateOf(container, 'agency.external-harness')).toBe('selected');
   });
 
   test('lente Reuso externo separa temos × integrado × candidatas', () => {
@@ -794,5 +796,36 @@ describe('EvolutionClient — evidência de supervisão', () => {
   test('omite bloco quando prop não é passada', () => {
     render(<EvolutionClient {...buildProps()} />);
     expect(screen.queryByTestId('autonomy-evidence')).not.toBeInTheDocument();
+  });
+});
+
+describe('Perfil de evidência (AUDIT-02)', () => {
+  test('visão geral mostra cobertura, recusa afirmar autonomia e a baseline do registro', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    const overview = screen.getByTestId('evidence-overview');
+    expect(within(overview).getByTestId('evidence-overview-coverage')).toHaveTextContent(/10.*de.*68.*capacidades têm perfil verificado/);
+    expect(within(overview).getByTestId('evidence-overview-unsupervised')).toHaveTextContent('nenhuma capacidade comprovada');
+    expect(within(overview).getByTestId('evidence-overview-baseline')).toHaveTextContent(/21b2af9 em 2026-10-26/);
+  });
+
+  test('capacidade com perfil mostra os seis níveis, supervisão, evidência mais recente e limites', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Project Builder em repositório externo — / }));
+    const section = screen.getByTestId('evidence-profile');
+    expect(within(section).getByTestId('evidence-level-planned')).toHaveAttribute('data-status', 'yes');
+    expect(within(section).getByTestId('evidence-level-proven_real')).toHaveAttribute('data-status', 'lab_only');
+    expect(within(section).getByTestId('evidence-level-proven_real')).toHaveTextContent('Só laboratório');
+    expect(within(section).getByTestId('evidence-level-operational_unsupervised')).toHaveAttribute('data-status', 'no');
+    expect(within(section).getByTestId('evidence-supervision')).toHaveTextContent(/Humano decide todos os atos/);
+    expect(within(section).getByTestId('evidence-latest')).toHaveTextContent(/2026-10-26/);
+    expect(within(section).getByTestId('evidence-limitations')).toHaveTextContent(/PROOF-EXT-04 inexistente/);
+  });
+
+  test('capacidade sem perfil diz que não foi avaliada, sem inventar níveis', () => {
+    render(<EvolutionClient {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Chat — / }));
+    const section = screen.getByTestId('evidence-profile');
+    expect(section).toHaveTextContent('Não avaliado nesta revisão');
+    expect(within(section).queryByTestId('evidence-level-planned')).not.toBeInTheDocument();
   });
 });

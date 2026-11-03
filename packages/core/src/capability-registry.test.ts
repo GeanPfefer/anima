@@ -13,6 +13,9 @@ import {
 } from './capability-map';
 import { ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE, getAnimaCapabilityGraph } from './capability-registry';
 
+// Baseline fixada pelas reconciliações V2–V6; a baseline corrente (AUDIT-02) é testada à parte.
+const V6_BASELINE = { commit: 'e2fa7a8', date: '2026-10-20', label: 'Evolution Reconciliation V6' } as const;
+
 describe('Capability Registry V0 (Anima)', () => {
   const graph = getAnimaCapabilityGraph();
 
@@ -166,10 +169,10 @@ describe('Evolution Reconciliation V2 — honestidade epistemológica do registr
   });
 
   test('"Evolução recente" desde a baseline cobre as sete capacidades V6, e nada antes da baseline', () => {
-    const recent = listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date);
+    const recent = listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, V6_BASELINE.date);
     const ids = new Set(recent.map((r) => r.capabilityId));
     for (const id of V6_CAPABILITY_IDS) expect(ids.has(id)).toBe(true);
-    expect(recent.every((r) => r.entry.at >= EVOLUTION_BASELINE.date)).toBe(true);
+    expect(recent.every((r) => r.entry.at >= V6_BASELINE.date)).toBe(true);
     expect(ids.has('interaction.chat')).toBe(false);
   });
 });
@@ -251,7 +254,7 @@ describe('Evolution Reconciliation SDC-09 — ciclo SDC-01→SDC-08', () => {
   });
 
   test('a Evolução recente inclui as sete capacidades reconciliadas em V6', () => {
-    const ids = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date).map((r) => r.capabilityId));
+    const ids = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, V6_BASELINE.date).map((r) => r.capabilityId));
     for (const id of V6_CAPABILITY_IDS) {
       expect(ids.has(id)).toBe(true);
     }
@@ -277,9 +280,9 @@ describe('Evolution Reconciliation SDC-21', () => {
     }
     expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.maturity === 'autonomous')).toEqual([]);
     const added = ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => !(c.id in SDC_09_MATURITIES));
-    expect(added.map((c) => c.id)).toEqual(['agency.investigation-sessions']);
-    expect(added[0]).toMatchObject({ domain: 'agency', maturity: 'implemented' });
-    expect(ANIMA_CAPABILITY_REGISTRY_V0).toHaveLength(67);
+    expect(added.map((c) => c.id).sort()).toEqual(['agency.external-project-builder', 'agency.investigation-sessions']);
+    expect(added.find((c) => c.id === 'agency.investigation-sessions')).toMatchObject({ domain: 'agency', maturity: 'implemented' });
+    expect(ANIMA_CAPABILITY_REGISTRY_V0).toHaveLength(68);
     expect(validateCapabilityRegistry(ANIMA_CAPABILITY_REGISTRY_V0)).toEqual([]);
   });
 
@@ -357,9 +360,9 @@ describe('Evolution Reconciliation SDC-21', () => {
     }
     expect(get('agency.continuous-self-development').maturity).toBe('projected');
     expect(get('agency.investigation-sessions').maturity).toBe('implemented');
-    expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => isRealizedMaturity(c.maturity))).toHaveLength(50);
+    expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => isRealizedMaturity(c.maturity))).toHaveLength(51);
     expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => isFutureMaturity(c.maturity))).toHaveLength(17);
-    expect(EVOLUTION_BASELINE).toEqual({ commit: 'e2fa7a8', date: '2026-10-20', label: 'Evolution Reconciliation V6' });
+    expect(V6_BASELINE).toEqual({ commit: 'e2fa7a8', date: '2026-10-20', label: 'Evolution Reconciliation V6' });
     const resident = get('interaction.resident-host');
     const added = resident.history?.filter((h) => h.at === '2026-10-07') ?? [];
     expect(added).toHaveLength(1);
@@ -443,7 +446,7 @@ describe('Evolution Reconciliation SDC-21', () => {
 
   test('history e proofs têm refs não vazias, datas válidas, sem duplicação; evolução inclui os nós atualizados', () => {
     const updated = V6_CAPABILITY_IDS;
-    const recent = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date).map((r) => r.capabilityId));
+    const recent = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, V6_BASELINE.date).map((r) => r.capabilityId));
     for (const id of updated) expect(recent.has(id)).toBe(true);
     for (const c of ANIMA_CAPABILITY_REGISTRY_V0) {
       const refs = (c.proofRefs ?? []).map((p) => `${p.kind}:${p.ref}`);
@@ -499,8 +502,8 @@ describe('Evolution Reconciliation V6', () => {
   const v6Entries = (id: string) => (get(id).history ?? []).filter((entry) => entry.at === '2026-10-21');
 
   test('baseline V6 é e2fa7a8 de 2026-10-20 e nenhuma entrada V6 antecede a baseline', () => {
-    expect(EVOLUTION_BASELINE).toEqual({ commit: 'e2fa7a8', date: '2026-10-20', label: 'Evolution Reconciliation V6' });
-    for (const id of V6_CAPABILITY_IDS) expect(v6Entries(id).every((entry) => entry.at >= EVOLUTION_BASELINE.date)).toBe(true);
+    expect(V6_BASELINE).toEqual({ commit: 'e2fa7a8', date: '2026-10-20', label: 'Evolution Reconciliation V6' });
+    for (const id of V6_CAPABILITY_IDS) expect(v6Entries(id).every((entry) => entry.at >= V6_BASELINE.date)).toBe(true);
   });
 
   test('maturity conservadora: nada promovido, nada autônomo, mesma distribuição e relações congeladas', () => {
@@ -517,11 +520,11 @@ describe('Evolution Reconciliation V6', () => {
       expect(get(id).maturity).toBe(maturities[id]);
       expect(get(id).dependsOn).toEqual(V6_DEPENDS_ON[id]);
     }
-    expect(ANIMA_CAPABILITY_REGISTRY_V0).toHaveLength(67);
+    expect(ANIMA_CAPABILITY_REGISTRY_V0).toHaveLength(68);
     expect(ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.maturity === 'autonomous')).toEqual([]);
     const counts: Record<string, number> = {};
     for (const capability of ANIMA_CAPABILITY_REGISTRY_V0) counts[capability.maturity] = (counts[capability.maturity] ?? 0) + 1;
-    expect(counts).toEqual({ operational: 15, proven: 21, projected: 14, implemented: 14, specified: 3 });
+    expect(counts).toEqual({ operational: 15, proven: 22, projected: 14, implemented: 14, specified: 3 });
   });
 
   test('cada nó V6 tem uma única entrada proof_added sem transição, com refs do universo autorizado', () => {
@@ -701,17 +704,17 @@ describe('Evolution Reconciliation V5', () => {
     return capability;
   };
 
-  test('congela maturities, distribuição e todos os 67 ids', () => {
+  test('congela maturities, distribuição e todos os 68 ids', () => {
     const maturities = ['proven', 'proven', 'proven', 'implemented', 'operational', 'implemented', 'operational'];
     V5_CAPABILITY_IDS.forEach((id, index) => expect(get(id).maturity).toBe(maturities[index]));
-    expect(ANIMA_CAPABILITY_REGISTRY_V0).toHaveLength(67);
+    expect(ANIMA_CAPABILITY_REGISTRY_V0).toHaveLength(68);
     expect(ANIMA_CAPABILITY_REGISTRY_V0.map((c) => c.id).sort())
-      .toEqual([...Object.keys(SDC_09_MATURITIES), 'agency.investigation-sessions'].sort());
+      .toEqual([...Object.keys(SDC_09_MATURITIES), 'agency.investigation-sessions', 'agency.external-project-builder'].sort());
     const counts: Record<string, number> = {};
     for (const capability of ANIMA_CAPABILITY_REGISTRY_V0) {
       counts[capability.maturity] = (counts[capability.maturity] ?? 0) + 1;
     }
-    expect(counts).toEqual({ operational: 15, proven: 21, projected: 14, implemented: 14, specified: 3 });
+    expect(counts).toEqual({ operational: 15, proven: 22, projected: 14, implemented: 14, specified: 3 });
   });
 
   test('cada capacidade tem uma entrada proof_added V5 com refs do universo autorizado', () => {
@@ -732,20 +735,82 @@ describe('Evolution Reconciliation V5', () => {
   });
 
   test('janela recente exclui todo nó sem history desde a baseline', () => {
-    const recent = listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, EVOLUTION_BASELINE.date);
+    const recent = listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, V6_BASELINE.date);
     const ids = new Set(recent.map((entry) => entry.capabilityId));
     for (const id of V6_CAPABILITY_IDS) expect(ids.has(id)).toBe(true);
     for (const capability of ANIMA_CAPABILITY_REGISTRY_V0) {
-      if (!(capability.history ?? []).some((entry) => entry.at >= EVOLUTION_BASELINE.date)) {
+      if (!(capability.history ?? []).some((entry) => entry.at >= V6_BASELINE.date)) {
         expect(ids.has(capability.id)).toBe(false);
       }
     }
     expect(ids.has('interaction.chat')).toBe(false);
-    expect(recent.every((entry) => entry.entry.at >= EVOLUTION_BASELINE.date)).toBe(true);
+    expect(recent.every((entry) => entry.entry.at >= V6_BASELINE.date)).toBe(true);
   });
 
   test('integração não usa event como proofRef e self-development explicita limite de autonomia', () => {
     expect(get('governance.governed-integration').proofRefs?.some((ref) => ref.kind === 'event')).toBe(false);
     expect(get('agency.supervised-self-development').frontier?.join(' ')).toContain('autonomia não comprovada');
+  });
+});
+
+describe('Evolution Refresh V1 (AUDIT-02)', () => {
+  const get = (id: string) => {
+    const capability = ANIMA_CAPABILITY_REGISTRY_V0.find((c) => c.id === id);
+    if (!capability) throw new Error(`capacidade ausente: ${id}`);
+    return capability;
+  };
+  const PROFILED = [
+    'agency.external-project-builder', 'agency.external-harness', 'agency.executor-discovery',
+    'memory.cross-harness', 'agency.investigation-sessions', 'agency.supervised-self-development',
+    'agency.continuous-self-development', 'governance.governed-integration', 'agency.produce-change',
+    'governance.progressive-autonomy',
+  ];
+
+  test('baseline reconciliada até 21b2af9 (2026-10-26) e registro íntegro', () => {
+    expect(EVOLUTION_BASELINE).toEqual({ commit: '21b2af9', date: '2026-10-26', label: 'Evolution Refresh V1 (AUDIT-02)' });
+    expect(validateCapabilityRegistry(ANIMA_CAPABILITY_REGISTRY_V0)).toEqual([]);
+  });
+
+  test('só os dez nós revisados têm perfil de evidência, validado em 2026-11-03', () => {
+    const withProfile = ANIMA_CAPABILITY_REGISTRY_V0.filter((c) => c.evidenceProfile).map((c) => c.id).sort();
+    expect(withProfile).toEqual([...PROFILED].sort());
+    for (const id of PROFILED) expect(get(id).evidenceProfile?.validatedAt).toBe('2026-11-03');
+  });
+
+  test('autonomia desassistida não é declarada comprovada em nenhum nó e nada é autonomous', () => {
+    for (const capability of ANIMA_CAPABILITY_REGISTRY_V0) {
+      expect(capability.maturity).not.toBe('autonomous');
+      expect(capability.evidenceProfile?.levels.operational_unsupervised ?? 'no').not.toBe('yes');
+    }
+  });
+
+  test('Project Builder externo: proven (não operational), só laboratório, sem PROOF-EXT-04 afirmada', () => {
+    const builder = get('agency.external-project-builder');
+    expect(builder.maturity).toBe('proven');
+    expect(builder.evidenceProfile?.levels).toEqual({
+      planned: 'yes', implemented: 'yes', tested: 'yes', proven_real: 'lab_only',
+      operational_supervised: 'partial', operational_unsupervised: 'no',
+    });
+    expect(builder.dependsOn.sort()).toEqual(['agency.external-harness', 'governance.governed-integration', 'governance.review', 'governance.verifier']);
+    expect(builder.frontier?.join(' ')).toContain('PROOF-EXT-04 não consta');
+    expect(builder.proofRefs?.filter((r) => r.kind === 'work_item').map((r) => r.ref).sort()).toEqual(['2cf13fc8', 'af70498b', 'd313cd8a']);
+  });
+
+  test('o perfil não altera maturidades: as dez maturidades prévias seguem as reconciliações anteriores', () => {
+    const expected: Record<string, string> = {
+      'agency.external-harness': 'implemented', 'agency.executor-discovery': 'implemented',
+      'memory.cross-harness': 'implemented', 'agency.investigation-sessions': 'implemented',
+      'agency.supervised-self-development': 'proven', 'agency.continuous-self-development': 'projected',
+      'governance.governed-integration': 'implemented', 'agency.produce-change': 'proven',
+      'governance.progressive-autonomy': 'specified',
+    };
+    for (const [id, maturity] of Object.entries(expected)) expect(get(id).maturity).toBe(maturity);
+  });
+
+  test('janela recente desde a baseline anterior (V6) inclui as entradas de 2026-10-23 a 2026-10-26', () => {
+    const ids = new Set(listRecentEvolution(ANIMA_CAPABILITY_REGISTRY_V0, '2026-10-21').map((r) => r.capabilityId));
+    for (const id of ['agency.external-project-builder', 'agency.external-harness', 'agency.executor-discovery', 'memory.cross-harness', 'governance.governed-integration']) {
+      expect(ids.has(id)).toBe(true);
+    }
   });
 });

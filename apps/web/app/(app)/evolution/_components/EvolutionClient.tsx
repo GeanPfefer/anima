@@ -42,7 +42,7 @@ import type {
   CapabilityProofEvaluation,
   CapabilityProofStatus,
 } from '@anima/core';
-import { explainCapabilityAssessment } from '@anima/core';
+import { EVIDENCE_LEVELS, EVIDENCE_LEVEL_LABEL_PT, EVIDENCE_STATUS_LABEL_PT, explainCapabilityAssessment } from '@anima/core';
 import type { AutonomyEvidenceReadState } from '@/lib/evolution/capability-assessment-read';
 import styles from './EvolutionClient.module.css';
 
@@ -832,6 +832,7 @@ export default function EvolutionClient({
 
         <aside className={styles.panel} aria-live="polite">
           {autonomyEvidence && <AutonomyEvidencePanel evidence={autonomyEvidence} />}
+          <EvidenceProfileOverview nodes={nodes} baseline={evolutionBaseline} />
           {selectedNode ? (
             <CapabilityDetail
               capabilityAssessment={capabilityAssessment}
@@ -1260,6 +1261,8 @@ function CapabilityDetail({
         </section>
       )}
 
+      <EvidenceProfileSection profile={cap.evidenceProfile} />
+
       {(cap.frontier?.length ?? 0) > 0 && (
         <section className={styles.detailSection}>
           <h3 className={styles.detailLabel}>Fronteira e dependência humana</h3>
@@ -1506,6 +1509,77 @@ function ReuseSummary({ nodes, onSelect }: { nodes: CapabilityGraphNode[]; onSel
         <ul className={styles.reuseList}>{candidates.map(item)}</ul>
       </section>
     </div>
+  );
+}
+
+function EvidenceProfileSection({ profile }: { profile: Capability['evidenceProfile'] }) {
+  if (!profile) {
+    return (
+      <section className={styles.detailSection} data-testid="evidence-profile">
+        <h3 className={styles.detailLabel}>Perfil de evidência</h3>
+        <p className={styles.detailText}>Não avaliado nesta revisão: a maturidade acima é a única afirmação disponível.</p>
+      </section>
+    );
+  }
+  const ref = profile.latestEvidence.ref;
+  return (
+    <section className={styles.detailSection} data-testid="evidence-profile">
+      <h3 className={styles.detailLabel}>Perfil de evidência</h3>
+      <ul className={styles.evidenceList}>
+        {EVIDENCE_LEVELS.map((level) => (
+          <li key={level} className={styles.evidenceRow} data-testid={`evidence-level-${level}`} data-status={profile.levels[level]}>
+            <span>{EVIDENCE_LEVEL_LABEL_PT[level]}</span>
+            <strong>{EVIDENCE_STATUS_LABEL_PT[profile.levels[level]]}</strong>
+          </li>
+        ))}
+      </ul>
+      <p className={styles.detailText} data-testid="evidence-supervision"><strong>Supervisão:</strong> {profile.supervision}</p>
+      <p className={styles.detailText} data-testid="evidence-latest">
+        <strong>Evidência mais recente:</strong> {profile.latestEvidence.at} · {PROOF_KIND_LABEL[ref.kind]} {ref.ref}
+        {ref.note ? ` — ${ref.note}` : ''}. Validado em {profile.validatedAt}.
+      </p>
+      {(profile.limitations?.length ?? 0) > 0 && (
+        <ul className={styles.frontierList} data-testid="evidence-limitations">
+          {profile.limitations!.map((item, i) => (
+            <li key={i} className={styles.detailText}>{item}</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function EvidenceProfileOverview({ nodes, baseline }: { nodes: CapabilityGraphNode[]; baseline: EvolutionBaseline }) {
+  const profiled = nodes.map((n) => n.capability).filter((c) => c.evidenceProfile);
+  const count = (level: (typeof EVIDENCE_LEVELS)[number], status: string) =>
+    profiled.filter((c) => c.evidenceProfile!.levels[level] === status).length;
+  const unsupervised = count('operational_unsupervised', 'yes');
+  return (
+    <section className={styles.autonomyEvidence} data-testid="evidence-overview">
+      <h3 className={styles.detailLabel}>Perfil de evidência</h3>
+      <p data-testid="evidence-overview-coverage">
+        <strong>{formatPtBr(profiled.length)}</strong> de <strong>{formatPtBr(nodes.length)}</strong> capacidades têm perfil verificado; as demais estão <em>não avaliadas</em>, não negadas.
+      </p>
+      <p data-testid="evidence-overview-unsupervised">
+        Operacional sem supervisão: {unsupervised === 0 ? 'nenhuma capacidade comprovada.' : <strong>{formatPtBr(unsupervised)}</strong>}
+      </p>
+      <details className={styles.autonomyDetails}>
+        <summary>Ver por nível</summary>
+        <ul className={styles.evidenceList} data-testid="evidence-overview-levels">
+          {EVIDENCE_LEVELS.map((level) => (
+            <li key={level} className={styles.evidenceRow}>
+              <span>{EVIDENCE_LEVEL_LABEL_PT[level]}</span>
+              <span>
+                sim {count(level, 'yes')} · parcial {count(level, 'partial')} · lab {count(level, 'lab_only')} · não {count(level, 'no')} · ? {count(level, 'unknown')}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </details>
+      <p data-testid="evidence-overview-baseline">
+        Registro reconciliado até {baseline.commit} em {baseline.date} ({baseline.label}). O que aconteceu depois não está refletido aqui.
+      </p>
+    </section>
   );
 }
 

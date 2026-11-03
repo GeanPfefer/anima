@@ -45,13 +45,18 @@
 // prova no residente são distinguidas em cada entrada; implementado ≠ comprovado
 // ≠ autônomo. Ver docs/registros/2026-10-21-evolution-reconciliation-v6.md.
 
+// Evolution Refresh V1 (AUDIT-02, 2026-11-03): registry reconciliado até 21b2af9 (2026-10-26). Novo nó
+// agency.external-project-builder (proven, só laboratório descartável) e `evidenceProfile` em dez nós:
+// seis níveis de evidência que NÃO alteram `maturity`. Autonomia desassistida não comprovada em nenhum nó.
+// Ver docs/registros/2026-11-03-audit-02-evolution-refresh-v1.md.
+
 import { buildCapabilityGraph, type Capability, type CapabilityGraph } from './capability-map';
 
 /** Baseline da última Evolution relevante: "Evolução recente" = mudanças desde aqui. */
 export const EVOLUTION_BASELINE = {
-  commit: 'e2fa7a8',
-  date: '2026-10-20',
-  label: 'Evolution Reconciliation V6',
+  commit: '21b2af9',
+  date: '2026-10-26',
+  label: 'Evolution Refresh V1 (AUDIT-02)',
 } as const;
 
 const RECONCILIATION_V2_RECORD = 'docs/registros/2026-09-27c-evolution-reconciliation-v2.md';
@@ -342,6 +347,24 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'Não suportado no Codex WSL/L1: o código recusa ai-memory no transporte WSL e o Single-Item de assinatura o proíbe; hooks, servidor local e leitura de transcritos nativos tendem a colidir com a negação de ~/.codex e a rede desligada do L1 e com o --ignore-user-config do E2 (inferência, não testada). Compatibilidade com Codex WSL/L1 não é afirmada.',
       'Versão fixada em 2.4.1; o upstream publicou versões posteriores (relato externo, até 3.1.2 em 2026-10-20) e a compatibilidade do wrap com elas não foi testada.',
     ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'yes',
+        tested: 'unknown',
+        proven_real: 'lab_only',
+        operational_supervised: 'no',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Ferramenta do operador em sessões interativas; fora do executor governado.',
+      latestEvidence: { at: '2026-10-23', ref: { kind: 'record', ref: 'docs/registros/2026-10-23-ai-memory-s1-continuidade-interativa.md' } },
+      limitations: [
+        'Memória interativa ≠ ledger governado.',
+        'Recusado no transporte Codex WSL e no Single-Item de assinatura.',
+        'Hook Stop do Codex não confiado; versão 2.4.1 fixada, 3.x não testada.',
+      ],
+    },
     history: [
       {
         at: '2026-09-27',
@@ -365,6 +388,14 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         refs: [
           { kind: 'record', ref: RECONCILIATION_V6_RECORD },
           { kind: 'commit', ref: '2e153ed' },
+        ],
+      },
+      {
+        at: '2026-10-23',
+        change: 'proof_added',
+        note: 'ai-memory S1: continuidade interativa Claude↔Codex provada em laboratório (prova 1 FAIL preservada; prova 2 PASS) e registrada como ferramenta do operador. Nenhuma promoção de maturity.',
+        refs: [
+          { kind: 'record', ref: 'docs/registros/2026-10-23-ai-memory-s1-continuidade-interativa.md' },
         ],
       },
     ],
@@ -470,6 +501,23 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'commit', ref: '87a3ad8', note: 'PIN-02 provado ao vivo pelo self-dev' },
       { kind: 'commit', ref: 'fbf0baa', note: 'fallback governado de coder por capacidade' },
     ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'yes',
+        tested: 'yes',
+        proven_real: 'yes',
+        operational_supervised: 'partial',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Executa sob gates e Verifier; revisão e aceite humanos.',
+      latestEvidence: { at: '2026-10-26', ref: { kind: 'work_item', ref: 'd313cd8a', note: 'mudança externa verified e integrada' } },
+      limitations: [
+        'verified não substitui revisão humana.',
+        'Gates sequenciais podem mascarar defeitos.',
+      ],
+    },
   },
   {
     id: 'agency.verify-change',
@@ -650,11 +698,28 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       { kind: 'record', ref: 'docs/registros/2026-10-20-ux-trabalhos-incremento-1.md', note: 'projeção de leitura integrated (e2fa7a8); o commit e o teste da projeção pertencem à interface, não ao primitive' },
     ],
     frontier: [
-      'CLI/UX first-class de integração governada ainda missing: o primitive é só biblioteca; Modo W é fase posterior.',
+      'CLI/UX first-class de integração governada: existe desde 2026-10-26 para integração EXTERNA (V1-01); para o repositório do próprio ANIMA o primitive segue só biblioteca; Modo W é fase posterior.',
       'Clone dedicado necessário: guarda target_checked_out impede integrar no checkout humano ativo.',
       'Sync do checkout humano é manual; push é manual e não existe push governado.',
       'Os commits integrados em dev por ff_only são versionados; a autorização e o receipt de integration_completed de apenas UMA integração (A1-v2, 86819/86820) estão versionados no registro de 2026-10-15; as demais continuam só no ledger; o caminho segue por wrappers por item fora do repositório.',
     ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'yes',
+        tested: 'yes',
+        proven_real: 'partial',
+        operational_supervised: 'partial',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Autorização de integração é ato humano; execução ff_only e recibo pelo sistema.',
+      latestEvidence: { at: '2026-10-26', ref: { kind: 'commit', ref: '836540c', note: 'V1-01: CLI first-class para integração externa' } },
+      limitations: [
+        'A CLI first-class cobre a integração EXTERNA; o primitive para o repositório do próprio ANIMA segue sem CLI first-class.',
+        'Push manual; não existe push governado.',
+      ],
+    },
     history: [
       {
         at: '2026-10-03',
@@ -696,6 +761,17 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'commit', ref: 'e2fa7a8' },
         ],
       },
+      {
+        at: '2026-10-26',
+        change: 'proof_added',
+        note: 'Integração externa ff_only: T5/T5-R1 e CLI first-class (V1-01) provadas em PROOF-EXT-02/03 em laboratório descartável. Implemented preservada.',
+        refs: [
+          { kind: 'commit', ref: '7ef6ae7' },
+          { kind: 'commit', ref: '836540c' },
+          { kind: 'work_item', ref: '2cf13fc8' },
+          { kind: 'work_item', ref: 'd313cd8a' },
+        ],
+      },
     ],
   },
   {
@@ -730,6 +806,23 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'autonomia não comprovada: cada item exigiu proposta, aprovação, classificação humana e aceite humano; integrações por wrappers por item fora do repositório, sem CLI first-class de integração; sync do checkout e push seguem manuais.',
       'A1-v2 e A2R1-PROOF são provas no RESIDENTE por declaração do launcher mais ausência de eventos humanos entre o pré-mandato e o parecer; pré-mandato, aceite e integração foram atos humanos; a métrica os classifica como human_observed e unattended_verified permanece 0. O A2R1-PROOF segue em review, sem aceite (decisão D4).',
     ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'yes',
+        tested: 'yes',
+        proven_real: 'yes',
+        operational_supervised: 'partial',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Cada item exigiu proposta, aprovação, classificação humana e aceite humano; unattended_verified permanece 0.',
+      latestEvidence: { at: '2026-10-17', ref: { kind: 'record', ref: 'docs/registros/2026-10-17-a2-0-r1-prova-operacional-a2r1-proof.md' } },
+      limitations: [
+        'Autonomia não comprovada.',
+        'Integração por wrappers fora do repositório; push manual.',
+      ],
+    },
     history: [
       {
         at: '2026-09-27',
@@ -880,6 +973,22 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'Migration e deploy continuam atos humanos.',
       'A seleção final de executor ainda pode exigir decisão humana.',
     ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'no',
+        tested: 'no',
+        proven_real: 'no',
+        operational_supervised: 'no',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Operador bootstrap humano em todo o ciclo.',
+      latestEvidence: { at: '2026-10-26', ref: { kind: 'record', ref: 'docs/registros/2026-10-26-project-builder-v0-fechamento.md' } },
+      limitations: [
+        'Nenhuma execução desassistida comprovada.',
+      ],
+    },
     history: [
       {
         at: '2026-09-27',
@@ -992,6 +1101,24 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'A classe de authority da quota de assinatura segue decisão humana; diagnóstico não certifica quota disponível.',
       'Descoberta durável do executável Codex é missing: ANIMA_CODEX_CLI_PATH de deploy do operador ou codex no PATH; readiness só faz probes de versão/login.',
     ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'yes',
+        tested: 'yes',
+        proven_real: 'partial',
+        operational_supervised: 'partial',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Codex/Claude Code executam; aprovação, classificação, aceite e integração seguem humanos.',
+      latestEvidence: { at: '2026-10-26', ref: { kind: 'commit', ref: '21b2af9', note: 'V1-04: Codex WSL com configuração persistente' } },
+      limitations: [
+        '12 itens codex-cli integrados segundo o ledger, mas a maturidade permanece implemented por decisão do registro.',
+        'Classe de authority da quota de assinatura segue decisão humana.',
+        'O resident host não carrega .env.codex-wsl.local (só a CLI).',
+      ],
+    },
     history: [
       {
         at: '2026-09-27',
@@ -1045,6 +1172,82 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
           { kind: 'record', ref: 'docs/registros/2026-10-20-l1-codex-wsl-perfil-nativo.md' },
         ],
       },
+      {
+        at: '2026-10-26',
+        change: 'proof_added',
+        note: 'V1-04: Codex via WSL passa a ter configuração persistente (arquivo local ignorado pelo Git) e diagnóstico com causas específicas, com 35 testes novos. Implemented preservada; o resident host não carrega o arquivo.',
+        refs: [
+          { kind: 'commit', ref: '21b2af9' },
+          { kind: 'record', ref: 'docs/registros/2026-10-26-project-builder-v1-04-codex-wsl-configuracao-persistente.md' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'agency.external-project-builder',
+    name: 'Project Builder em repositório externo',
+    description: 'Conduzir, sob governança humana, uma mudança de código num repositório Git externo ao ANIMA, do pedido até a integração local ff_only.',
+    domain: 'agency',
+    maturity: 'proven',
+    dependsOn: ['agency.external-harness', 'governance.governed-integration', 'governance.review', 'governance.verifier'],
+    meaning:
+      'Target externo com identidade física congelada (T1), materializador e classificação humana (T2), Acceptance Contract v2 com prova explícita por critério (T3), revisão humana de critérios e gate de aceite (T4), integração Git ff_only com lease físico, CAS e recibo do Trusted System Writer (T5/T5-R1), CLI first-class de integração (V1-01), registro de múltiplos targets por host (V1-02) e configuração persistente do Codex WSL (V1-04). Destino único: refs/heads/main LOCAL de um laboratório descartável; nenhum push ou PR.',
+    advancement:
+      'Comprovada em laboratório descartável com ciclo completo repetido (PROOF-EXT-02 e PROOF-EXT-03 completed/integradas; PROOF-EXT-01 cancelada por humano após Verifier inconclusive). Para operational: repetições independentes em repositórios reais e uma comprovação fora de laboratório. Autonomia desassistida NÃO está comprovada: cada decisão foi ato humano.',
+    proofRefs: [
+      { kind: 'record', ref: 'docs/registros/2026-10-26-project-builder-v0-fechamento.md' },
+      { kind: 'record', ref: 'docs/registros/2026-10-26-project-builder-v0-t5-integracao-git-externa-governada.md' },
+      { kind: 'commit', ref: 'fab1895', note: 'T1: contrato e resolver de target externo' },
+      { kind: 'commit', ref: '39849f7', note: 'T2: materializador de work item externo' },
+      { kind: 'commit', ref: 'c2911bd', note: 'T3: acceptance_contract v2' },
+      { kind: 'commit', ref: 'c7be388', note: 'T4: revisão humana de critérios e gate de aceite' },
+      { kind: 'commit', ref: '7ef6ae7', note: 'T5: integração Git governada com exclusividade física' },
+      { kind: 'commit', ref: '2e12edf', note: 'T5-R1: core.autocrlf local respeitado' },
+      { kind: 'commit', ref: '836540c', note: 'V1-01: integração externa na CLI oficial' },
+      { kind: 'commit', ref: 'e649044', note: 'V1-02: registro de targets externos' },
+      { kind: 'work_item', ref: '2cf13fc8', note: 'PROOF-EXT-02: verified (evento 86887), aceito e integrado (86893)' },
+      { kind: 'work_item', ref: 'd313cd8a', note: 'PROOF-EXT-03: verified (12 checagens, 0 lacunas, evento 86908), aceito e integrado (86913); sem registro versionado, lido do ledger em 2026-11-03' },
+      { kind: 'work_item', ref: 'af70498b', note: 'PROOF-EXT-01: gate verde, Verifier inconclusive, cancelada por humano (evento 86891)' },
+      { kind: 'test', ref: 'apps/web/cli/external-integrate.test.ts' },
+      { kind: 'test', ref: 'apps/web/cli/external-work.test.ts' },
+    ],
+    frontier: [
+      'Toda decisão foi ato humano: aprovar, classificar, iniciar, revisar critérios A4, aceitar e autorizar a integração. Autonomia desassistida não comprovada.',
+      'Só laboratórios descartáveis; nenhum repositório real de terceiros, nenhum projeto de múltiplos arquivos/etapas, nenhum push/PR.',
+      'O registro de targets (V1-02) permite vários targets por host, mas execução simultânea de vários trabalhos externos não foi provada; o destino de integração é único por host (ANIMA_EXTERNAL_INTEGRATION).',
+      'PROOF-EXT-04 não consta no ledger nem em registro versionado em 2026-11-03: nada é afirmado sobre ela.',
+      'O banco não lê mensagens do operador nem o Git: revisão humana e identidade física são verificadas pelo executor. Ações Git humanas fora do ANIMA não passam pelo lease.',
+    ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'yes',
+        tested: 'yes',
+        proven_real: 'lab_only',
+        operational_supervised: 'partial',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Humano decide todos os atos (aprovar, classificar, iniciar, aceitar, autorizar integração); executor Codex via WSL, Verifier e Trusted System Writer atuam sob essas decisões.',
+      latestEvidence: { at: '2026-10-26', ref: { kind: 'work_item', ref: 'd313cd8a', note: 'PROOF-EXT-03 integrada em laboratório descartável' } },
+      limitations: [
+        'Só laboratório descartável; duas integrações concluídas (EXT-02, EXT-03).',
+        'Autonomia desassistida não comprovada.',
+        'PROOF-EXT-04 inexistente no ledger e nos registros.',
+      ],
+    },
+    history: [
+      {
+        at: '2026-10-26',
+        change: 'introduced',
+        to: 'proven',
+        note: 'Project Builder V0 (T1–T5, T5-R1) fechado e prolongado por V1-01/02/04. Ciclo governado completo provado em laboratório descartável em PROOF-EXT-02 e PROOF-EXT-03 (eventos do ledger lidos em 2026-11-03); PROOF-EXT-01 terminou cancelada por humano após Verifier inconclusive. Nada aqui é autonomia desassistida.',
+        refs: [
+          { kind: 'record', ref: 'docs/registros/2026-10-26-project-builder-v0-fechamento.md' },
+          { kind: 'work_item', ref: '2cf13fc8' },
+          { kind: 'work_item', ref: 'd313cd8a' },
+        ],
+      },
     ],
   },
   {
@@ -1071,6 +1274,22 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'Seleção final do executor continua ato humano; descoberta só recomenda.',
       'Descoberta durável do executável Codex é missing: ANIMA_CODEX_CLI_PATH de deploy do operador ou codex no PATH; readiness apenas probes de versão/login.',
     ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'yes',
+        tested: 'yes',
+        proven_real: 'partial',
+        operational_supervised: 'unknown',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Descoberta só recomenda; seleção final do executor é ato humano.',
+      latestEvidence: { at: '2026-10-26', ref: { kind: 'commit', ref: '21b2af9', note: 'V1-04: diagnóstico com causas específicas' } },
+      limitations: [
+        'A validação real da V1-04 foi read-only fora do banco; `work executors` contra o item no banco não foi exercitado após a pausa.',
+      ],
+    },
     history: [
       {
         at: '2026-10-03',
@@ -1086,6 +1305,15 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
         refs: [
           { kind: 'commit', ref: '3bfa619' },
           { kind: 'commit', ref: '2d8546f' },
+        ],
+      },
+      {
+        at: '2026-10-26',
+        change: 'proof_added',
+        note: 'V1-04 adiciona o bloco Codex CLI em `work executors` (transporte, distro, binário, versão, causa específica de falha). Implemented preservada.',
+        refs: [
+          { kind: 'commit', ref: '21b2af9' },
+          { kind: 'record', ref: 'docs/registros/2026-10-26-project-builder-v1-04-codex-wsl-configuracao-persistente.md' },
         ],
       },
     ],
@@ -1121,6 +1349,23 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
       'Falhas duras de commit/path ausente, objeto não-blob, conteúdo inválido ou Git indisponível derrubam resultado inteiro. Diagnósticos estruturados transport/structure/evidence/post_rejection não são novas capacidades; evidence_file_too_large permanece no enum por compatibilidade.',
       'INV-08 só relatou mitigação de origem: anima-prd.md (~198 KB), lines=null aceito sem rejeição; não exerceu ao vivo o ramo range_not_validated_file_too_large.',
     ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'yes',
+        tested: 'yes',
+        proven_real: 'partial',
+        operational_supervised: 'partial',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Read-only; o resultado é conhecimento a ser revisado por humano.',
+      latestEvidence: { at: '2026-10-06', ref: { kind: 'commit', ref: '349a35e', note: 'SDC-20' } },
+      limitations: [
+        'Retry/recovery genérico de falha de Investigation é missing.',
+        'Read_only não garante confinamento de leituras.',
+      ],
+    },
     history: [
       {
         at: '2026-10-05', change: 'introduced', to: 'implemented',
@@ -1439,6 +1684,19 @@ export const ANIMA_CAPABILITY_REGISTRY_V0: Capability[] = [
     frontier: [
       'Hoje a autoridade sobre integração, push, migration, deploy e seleção final de executor é exercida por humano; nenhum desses atos é promovido por evidência.',
     ],
+    evidenceProfile: {
+      validatedAt: '2026-11-03',
+      levels: {
+        planned: 'yes',
+        implemented: 'no',
+        tested: 'no',
+        proven_real: 'no',
+        operational_supervised: 'no',
+        operational_unsupervised: 'no',
+      },
+      supervision: 'Autoridade sobre integração, push, migration, deploy e seleção de executor é humana.',
+      latestEvidence: { at: '2026-09-19', ref: { kind: 'milestone', ref: 'docs/marcos/005-autonomia-progressiva-e-identidade-una.md' } },
+    },
     history: [
       {
         at: '2026-09-19',
