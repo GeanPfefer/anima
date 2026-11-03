@@ -30,3 +30,4 @@ export * from './self-deficiency';
 export * from './self-improvement';
 export * from './research-web';
 export * from './autonomy-evidence';
+export * from './product-direction';
