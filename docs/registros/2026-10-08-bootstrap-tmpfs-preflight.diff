@@ -1,0 +1,261 @@
+--- /dev/null
++++ b/supabase/tests/bootstrap_tmpfs_preflight.py
+@@ -0,0 +1,93 @@
++"""Evidência kernel estrita para os tmpfs da prova; sem Docker/SQL."""
++PGDATA = '/var/lib/postgresql/data'
++SOCKET = '/var/run/postgresql'
++TMPFS = {
++    PGDATA: 'rw,nosuid,nodev,noexec,size=536870912,uid=105,gid=106,mode=0700',
++    SOCKET: 'rw,nosuid,nodev,noexec,size=16777216,uid=105,gid=106,mode=0770',
++}
++EXPECTED = {
++    PGDATA: ('size=524288k', 'mode=700'),
++    '/run/postgresql': ('size=16384k', 'mode=770'),
++}
++
++
++def parse_mountinfo(text):
++    records = {}
++    ids = set()
++    for line in text.splitlines():
++        fields = line.split()
++        try:
++            separator = fields.index('-')
++            if separator < 6 or len(fields) != separator + 4:
++                raise ValueError('mountinfo fields')
++            mount_id = int(fields[0]); int(fields[1])
++            path = fields[4]
++            if not path.startswith('/') or '\\' in path or '/..' in path:
++                raise ValueError('mountinfo path')
++            if path in records or mount_id in ids:
++                raise ValueError('duplicate mountinfo identity/path')
++            ids.add(mount_id)
++            records[path] = dict(root=fields[3], options=set(fields[5].split(',')),
++                                 type=fields[separator+1], source=fields[separator+2],
++                                 superOptions=set(fields[separator+3].split(',')))
++        except (ValueError, IndexError) as error:
++            raise ValueError('invalid mountinfo') from error
++    if not records:
++        raise ValueError('empty kernel mount evidence')
++    return records
++
++
++def validate_effective_tmpfs(metadata, text, resolved_paths, ownership):
++    host = metadata['HostConfig']
++    if host.get('Tmpfs') != TMPFS or host.get('Mounts') or host.get('Binds') or host.get('VolumesFrom'):
++        raise ValueError('exact tmpfs declaration without shared mounts required')
++    if resolved_paths != {PGDATA: PGDATA, SOCKET: '/run/postgresql'}:
++        raise ValueError('unexpected canonical data/socket paths')
++    if ownership != {PGDATA: '700:105:106', SOCKET: '770:105:106'}:
++        raise ValueError('effective data/socket permissions mismatch')
++    declared = metadata.get('Mounts', [])
++    if declared:
++        if len(declared) != 2 or {m.get('Destination') for m in declared} != set(TMPFS) \
++                or any(m.get('Type') != 'tmpfs' or m.get('Name') or m.get('Source') not in (None, '', 'tmpfs')
++                       or m.get('RW') is not True for m in declared):
++            raise ValueError('Docker effective mounts are not the exclusive tmpfs')
++    mounts = parse_mountinfo(text)
++    for path, (size, mode) in EXPECTED.items():
++        item = mounts.get(path)
++        if not item or item['root'] != '/' or item['type'] != 'tmpfs' or item['source'] != 'tmpfs' \
++                or item['options'] != {'rw', 'nosuid', 'nodev', 'noexec', 'relatime'} \
++                or item['superOptions'] != {'rw', size, mode, 'uid=105', 'gid=106'}:
++            raise ValueError('kernel tmpfs missing/divergent: ' + path)
++    root = mounts.get('/')
++    if not root or root['root'] != '/' or root['type'] != 'overlay' or root['source'] != 'overlay' \
++            or root['options'] != {'ro', 'relatime'}:
++        raise ValueError('root filesystem must be read-only overlay')
++    # Exact runtime system mounts; writable mounts outside this set fail closed.
++    system = {'/proc': ('proc', 'proc', '/'), '/dev': ('tmpfs', 'tmpfs', '/'),
++              '/dev/pts': ('devpts', 'devpts', '/'), '/dev/mqueue': ('mqueue', 'mqueue', '/'),
++              '/dev/shm': ('tmpfs', 'shm', '/')}
++    readonly_system = {'/sys': ('sysfs', 'sysfs'), '/sys/fs/cgroup': ('cgroup2', 'cgroup'),
++                       '/proc/bus': ('proc', 'proc'), '/proc/fs': ('proc', 'proc'),
++                       '/proc/irq': ('proc', 'proc'), '/proc/sys': ('proc', 'proc'),
++                       '/proc/sysrq-trigger': ('proc', 'proc'), '/proc/acpi': ('tmpfs', 'tmpfs'),
++                       '/proc/scsi': ('tmpfs', 'tmpfs'), '/sys/firmware': ('tmpfs', 'tmpfs')}
++    masked = {'/proc/interrupts', '/proc/kcore', '/proc/keys', '/proc/timer_list'}
++    for path, item in mounts.items():
++        if path in EXPECTED or path == '/':
++            continue
++        signature = (item['type'], item['source'], item['root'])
++        if path in system and signature == system[path]:
++            continue
++        if path in readonly_system and (item['type'], item['source']) == readonly_system[path] \
++                and 'ro' in item['options'] and 'rw' not in item['options']:
++            continue
++        if path in masked and signature == ('tmpfs', 'tmpfs', '/null'):
++            continue
++        if path in {'/etc/hosts', '/etc/hostname', '/etc/resolv.conf'} \
++                and item['root'] == '/data/docker/containers/' + metadata['Id'] + '/' + path.rsplit('/', 1)[-1] \
++                and item['type'] == 'ext4' and item['source'] == '/dev/sde' \
++                and item['options'] == {'ro', 'relatime'}:
++            continue
++        raise ValueError('unexpected kernel mount: ' + path)
++    # Derived only after both declarations AND kernel evidence have passed.
++    return [dict(Type='tmpfs', Destination=path, Source='tmpfs', RW=True) for path in TMPFS]
+--- /dev/null
++++ b/supabase/tests/bootstrap_tmpfs_preflight_test.py
+@@ -0,0 +1,76 @@
++"""Mount evidence offline; no subprocess, Docker or SQL."""
++import copy
++from pathlib import Path
++import unittest
++from bootstrap_tmpfs_preflight import TMPFS, PGDATA, SOCKET, validate_effective_tmpfs
++
++CID = '8d76d3358c55a155f5824c7a65d2c28ab8afad600ddd8baa1d430896ae600402'
++# Minimal legitimate kernel set plus exact Docker declarations, no real environment access.
++EVIDENCE = '''1 0 0:1 / / ro,relatime - overlay overlay rw
++2 1 0:2 / /var/lib/postgresql/data rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=524288k,mode=700,uid=105,gid=106
++3 1 0:3 / /run/postgresql rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=16384k,mode=770,uid=105,gid=106
++'''
++
++
++class EffectiveTmpfs(unittest.TestCase):
++    def sample(self):
++        return {'Id': CID, 'HostConfig': {'Tmpfs': dict(TMPFS), 'Mounts': [], 'Binds': None,
++                                         'VolumesFrom': None}, 'Mounts': []}
++
++    def check(self, metadata=None, evidence=EVIDENCE, resolved=None, ownership=None):
++        return validate_effective_tmpfs(metadata or self.sample(), evidence,
++                                       resolved or {PGDATA: PGDATA, SOCKET: '/run/postgresql'},
++                                       ownership or {PGDATA: '700:105:106', SOCKET: '770:105:106'})
++
++    def test_exact_tmpfs_with_and_without_docker_mount_entries(self):
++        normalized = self.check()
++        self.assertEqual({m['Destination'] for m in normalized}, set(TMPFS))
++        metadata = self.sample(); metadata['Mounts'] = normalized
++        self.assertEqual(self.check(metadata), normalized)
++
++    def test_missing_and_changed_kernel_mounts_refused(self):
++        for evidence in ['', EVIDENCE.splitlines()[0], EVIDENCE.replace('tmpfs tmpfs', 'ext4 /dev/sda'),
++                         EVIDENCE.replace('size=524288k', 'size=524284k'),
++                         EVIDENCE.replace('mode=700', 'mode=777'), EVIDENCE.replace('uid=105', 'uid=0'),
++                         EVIDENCE.replace('rw,nosuid,nodev,noexec', 'rw,nosuid,nodev'),
++                         EVIDENCE.replace('/run/postgresql', '/unexpected'),
++                         EVIDENCE.replace('/ /var/lib/postgresql/data', '/resident /var/lib/postgresql/data'),
++                         EVIDENCE.replace('ro,relatime - overlay', 'rw,relatime - overlay'),
++                         EVIDENCE + EVIDENCE.splitlines()[1] + '\n']:
++            with self.subTest(evidence=evidence), self.assertRaises(ValueError):
++                self.check(evidence=evidence)
++
++    def test_declared_persistent_shared_unknown_mounts_refused(self):
++        for key, value in [('Tmpfs', {}), ('Mounts', [{'Type': 'bind'}]),
++                           ('Binds', ['/resident:/data']), ('VolumesFrom', ['resident'])]:
++            metadata = self.sample(); metadata['HostConfig'][key] = value
++            with self.assertRaises(ValueError):
++                self.check(metadata)
++        for entry in [{'Type': 'volume', 'Destination': PGDATA},
++                      {'Type': 'bind', 'Destination': PGDATA},
++                      {'Type': 'tmpfs', 'Destination': '/unexpected'}]:
++            metadata = self.sample(); metadata['Mounts'] = [entry]
++            with self.assertRaises(ValueError):
++                self.check(metadata)
++
++    def test_additional_kernel_mounts_and_resident_paths_refused(self):
++        for line in ['4 1 8:1 /resident /extra rw,relatime - ext4 /dev/sda rw',
++                     '4 1 0:4 / /extra rw,nosuid,nodev - tmpfs tmpfs rw',
++                     '4 1 8:1 /resident /etc/hosts rw,relatime - ext4 /dev/sde rw',
++                     '4 1 8:1 /resident /etc/hosts ro,relatime - ext4 /dev/sde rw',
++                     '4 1 0:4 / /sys rw,relatime - sysfs sysfs rw']:
++            with self.assertRaises(ValueError):
++                self.check(evidence=EVIDENCE + line + '\n')
++
++    def test_canonical_paths_permissions_and_config_options_refused(self):
++        with self.assertRaises(ValueError):
++            self.check(resolved={PGDATA: '/resident', SOCKET: '/run/postgresql'})
++        with self.assertRaises(ValueError):
++            self.check(ownership={PGDATA: '777:105:106', SOCKET: '770:105:106'})
++        metadata = self.sample(); metadata['HostConfig']['Tmpfs'][PGDATA] += ',exec'
++        with self.assertRaises(ValueError):
++            self.check(metadata)
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- executor-recovery.py
++++ executor-tmpfs.py
+@@ -4,7 +4,7 @@
+ import os,sys,json,subprocess,hashlib,re,datetime,time
+ from pathlib import Path
+ ROOT=Path('/mnt/g/anima');RUN='396f38b1036a47ba92d51890cdf252ba'
+-RECORD=Path('/mnt/g/anima-provas/bootstrap-'+RUN+'-recovery')
++RECORD=Path('/mnt/g/anima-provas/bootstrap-'+RUN+'-tmpfs')
+ DOCKER='/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe';CONTEXT='desktop-linux'
+ IMAGE_ID='sha256:af083ef64d0408c8f098ee6f5c364a59b26f36fbc0f3a334a62c5c1d57362e9b'
+ IMAGE='public.ecr.aws/supabase/postgres@'+IMAGE_ID
+@@ -17,6 +17,7 @@
+ sys.path.insert(0,str(ROOT/'supabase/tests'))
+ from single_item_proof_preflight import validate, validate_image_environment, expected_container_environment, PINNED_IMAGE_ENV
+ from bootstrap_plan import reconcile
++from bootstrap_tmpfs_preflight import validate_effective_tmpfs
+ 
+ def stamp():return datetime.datetime.now(datetime.timezone.utc).isoformat()
+ def sha(b):return hashlib.sha256(b).hexdigest()
+@@ -40,7 +41,7 @@
+     # Mutations and process execution are structurally restricted to our new full ID.
+     if args[0] in ('create','rm','remove'):
+         raise RuntimeError('creation/removal forbidden in recovery mandate')
+-    elif args[0] in ('start','exec','logs'):
++    elif args[0] in ('exec','logs'):
+         candidate=args[-1] if args[0] in ('start','logs') else next((a for a in args[1:] if re.fullmatch('[a-f0-9]{64}',a)),None)
+         if not CID or candidate!=CID or CID in {OLD,RESIDENT}:raise RuntimeError('non-authorized container operation')
+     elif args[0] not in {'info','context','image','ps','inspect','volume','network','stats'}:
+@@ -67,7 +68,6 @@
+ def metadata(require_running=True):
+     if d(['info','--format','{{.ID}}']).strip()!=DAEMON:raise RuntimeError('daemon identity changed')
+     c=json.loads(d(['inspect',CID]))[0]
+-    validate(MANIFEST,c,IMAGE_META,created=not require_running)
+     expected_tmpfs={PGDATA:'rw,nosuid,nodev,noexec,size=536870912,uid=105,gid=106,mode=0700',SOCKET:'rw,nosuid,nodev,noexec,size=16777216,uid=105,gid=106,mode=0770'}
+     if c['HostConfig'].get('Tmpfs')!=expected_tmpfs:raise RuntimeError('tmpfs options/limits mismatch')
+     h=c['HostConfig']
+@@ -78,6 +78,11 @@
+        or h.get('CgroupnsMode')!='private' or h.get('CapDrop')!=['ALL'] \
+        or 'no-new-privileges:true' not in h.get('SecurityOpt',[]):
+         raise RuntimeError('effective limits/privilege isolation mismatch')
++    mountinfo=os_checked(['cat','/proc/self/mountinfo'])
++    resolved={path:os_checked(['readlink','-f',path]).strip() for path in (PGDATA,SOCKET)}
++    ownership={path:os_checked(['stat','-c','%a:%u:%g',path]).strip() for path in (PGDATA,SOCKET)}
++    normalized=validate_effective_tmpfs(c,mountinfo,resolved,ownership)
++    validate(MANIFEST,dict(c,Mounts=normalized),IMAGE_META)
+     return c
+ 
+ def process(args,input=None,timeout=45):
+@@ -133,7 +138,7 @@
+ def ledger(label):return json.loads(sql(LEDGER_QUERY,label))
+ 
+ RECORD.mkdir(parents=True,exist_ok=False)
+-write('authorization.json',{'utc':stamp(),'runId':RUN,'scope':'only the authorized existing never-started container; no creation/removal; original 272 payloads; stop on first failure',
++write('authorization.json',{'utc':stamp(),'runId':RUN,'scope':'only the authorized running container without initdb; no creation/removal; original 272 payloads; stop on first failure',
+                           'forbiddenOld':OLD,'imageRef':IMAGE,'maxMemoryBytes':1024**3,'maxCpu':1,'maxPids':64,
+                           'behavioralTestsAuthorized':False,'canonicalPayloadChangesAuthorized':False})
+ try:
+@@ -178,18 +183,19 @@
+     write('memory-preflight.json',dict(mem,dockerTotalBytes=info['MemTotal'],dockerUsedEstimateBytes=usage))
+     event({'stage':'preflight','status':'PASS','556Hashes':True,'272Payloads':True,'imageEnvironment':'exact'})
+     print('PREFLIGHT PASS',flush=True)
+-    STAGE='recover-created'
++    STAGE='preflight-running'
+     MANIFEST={'containerId':CID,'imageId':IMAGE_ID,'database':DATABASE,'nonce':RUN,'dockerContext':CONTEXT,'daemonId':DAEMON}
+     write('identity-manifest.json',MANIFEST)
+-    current=metadata(False)
+-    baseline=json.loads(Path('/mnt/g/anima-provas/bootstrap-'+RUN+'-exec/created-inspect-diagnostic.json').read_text())
++    current=metadata()
++    baseline=json.loads(Path('/mnt/g/anima-provas/bootstrap-'+RUN+'-recovery/metadata-after-stop.json').read_text())
+     for key in ('Id','Name','Created','Image','Config','HostConfig','Mounts','State','RestartCount'):
+-        if current[key]!=baseline[key]:raise RuntimeError('created container drift: '+key)
+-    write('created-metadata-verified.json',current)
+-    event({'stage':'recover-created','status':'PASS','existingContainer':CID,'imageLabelsComparedByDigest':True})
+-    print('EXISTING CONTAINER PREFLIGHT PASS',CID,flush=True)
+-    d(['start',CID]);STAGE='initdb'
+-    write('running-metadata-before-sql.json',metadata())
++        if current[key]!=baseline[key]:raise RuntimeError('running container drift: '+key)
++    os_checked(['/bin/bash','--noprofile','--norc','-c','test ! -e /var/lib/postgresql/data/pgdata && test ! -e /var/lib/postgresql/data/.proof_ready'],'initialization-absent')
++    write('running-metadata-before-sql.json',current)
++    write('mountinfo-before-sql.txt',os_checked(['cat','/proc/self/mountinfo']).encode())
++    event({'stage':'preflight-running','status':'PASS','effectiveTmpfs':'kernel + exact Docker declaration'})
++    print('RUNNING CONTAINER FULL PREFLIGHT PASS',CID,flush=True)
++    STAGE='initdb'
+     os_checked(['id'],'os-identity');uid=os_checked(['id','-u']).strip();gid=os_checked(['id','-g']).strip()
+     if uid!='105' or gid!='106':raise RuntimeError('unexpected postgres OS identity')
+     version=os_checked(['postgres','--version'],'postgres-version')

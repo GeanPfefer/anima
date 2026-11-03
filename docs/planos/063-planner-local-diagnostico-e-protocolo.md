@@ -1,0 +1,32 @@
+# 063 — Planner local: diagnóstico estruturado (P2b) e protocolo de geração (P2c) (PROPOSTA; nada executado)
+
+Status: planejamento (2026-10-14). Base: `dev` = `origin/dev` = `af9c5577` (P1+P2 integrados; Verifier `work-verifier-v6`). Continuação do [plano 062](062-planner-test-binding-automatico.md) após as sondas reais (registro `2026-10-14-planner-p2-aceite-integracao-publicacao-e-sondas-p3.md`).
+
+## 1. Origem exata da perda de diagnóstico
+Caminho: modelo local → `submit_project_work_proposal` → `coercePlannerArrayFields` → `validatePlannerProposal` (+ `includedScopeAnchoredInProject`) → rejeição estruturada `{code, message, details{field, rule}}` → devolvida AO MODELO como mensagem `role:'tool'` → próxima rodada → … → esgotamento do `for (turn < maxTurns=16)` → `return { ok:false, message:'O planejamento local não chegou a uma proposta terminal.' }` (`project-work-planner-local.ts:396`).
+Onde se perde:
+1. A `rejection` é uma variável local do corpo do laço (l.~308–326): é empilhada em `messages` e descartada; nenhum acumulador a retém.
+2. `PlannerProposalResult = { ok:true; rawArguments } | { ok:false; message }` (shared.ts:82) não tem campo estruturado: só `message`.
+3. Todos os retornos de falha do adaptador (transporte, timeout de rodada, recusa nativa, sem resposta, `noProgress>2`, limite de consultas, fim de turnos) devolvem texto fixo sem turnos, contagem de submits, nem causa.
+4. `AdmissionGatedOpenAIPlanner` (project-work-planner.ts:79) repassa o resultado inteiro (um campo novo opcional atravessa sem mudança); `planExecutableProjectWork` reconstrói `{ ok:false, message: proposed.message }` descartando qualquer campo extra; `ProjectWorkPlanningResult` não tem campo de diagnóstico. Consumidores: `app/api/ai/chat/route.ts:872` e `proposal-corrections/route.ts:52` usam só `.message` (compatível com campo aditivo).
+Não há identificador de execução: usar `planner.id` + modelo (ambos não sensíveis) e o tempo decorrido.
+
+## 2. P2b — desenho (observabilidade; nenhuma regra de aceitação muda)
+Tipo (shared.ts): `PlannerFailureDiagnostics = { reason: 'turns_exhausted' | 'no_progress' | 'round_timeout' | 'transport_failure' | 'model_refused' | 'unusable_response' | 'tool_call_limit' | 'host_validation'; turns: number; submitAttempts: number; elapsedMs: number; plannerId: string; model?: string; lastRejection?: { code; field; rule; message (sanitizado, ≤200 chars) }; rejectionsByRule?: Record<string, number> (≤8 chaves) }`. `PlannerProposalResult` falho ganha `diagnostics?` OPCIONAL; `ProjectWorkPlanningResult` falho idem; `planExecutableProjectWork` repassa `proposed.diagnostics` e, nas rejeições do host, produz `reason:'host_validation'` com `lastRejection` (campo/regra do `validatePlannerProposal`).
+Adaptador local: acumula contagens por `rule`, a ÚLTIMA rejeição e o número de submits; TODOS os retornos de falha anexam `diagnostics`; só o `message` do fim de turnos ganha sufixo curto e determinístico quando há rejeição (`… Última rejeição: <field>/<rule>.`); os demais textos permanecem idênticos. Sanitização: apenas valores estáticos do host (códigos, nomes de campo, regras e mensagens fixas); nunca conteúdo do modelo (argumentos, prompts, respostas), segredos ou caminhos fornecidos pelo modelo (o `included_scope_not_anchored` registra só a regra e o NÚMERO de caminhos); campos truncados e sem caracteres de controle. Nada é persistido neste item (retorno em memória; log opcional futuro).
+Compatibilidade: sucesso inalterado; mensagens de falha iguais exceto o sufixo do fim de turnos; adaptador OpenAI intocado (diagnostics é opcional); sem migration.
+
+## 3. P2c — especificação (NÃO criar ainda)
+Objetivo: aumentar a taxa de propostas válidas e de propostas com `test_binding` dos modelos locais viáveis (qwen2.5:14b, qwen2.5-coder:14b; llama3.1:8b falhou), SEM afrouxar o host.
+1. **Exemplo completo (few-shot) de submit válido** com `test_bindings` preenchido e `human_review_effects: []` (um exemplo só, curto, em PLANNER_SYSTEM_INSTRUCTIONS; arquivo/efeitos fictícios claramente marcados como exemplo).
+2. **Regra de cópia literal**: `covers` e `validation_covers` = cópias LITERAIS de itens de `expected_effects` (causa observada: `unknown_criterion`).
+3. **`excluded_scope` obrigatório e não vazio** (causa observada: `required_text_list`).
+4. **Gates com caminhos restritos**: instrução para `validation_command` ser `npm run typecheck` ou `npm test -- <arquivo exato>` (o host já escopa o workspace); proibir `npm test` global como gate de comportamento.
+5. **`human_review_effects`** quando não houver prova automatizada; **`gate_assertion` apenas** para "o gate passa"; comportamento ⇒ `test_bindings` ou `human_review_effects`.
+6. **Feedback estruturado de reparo**: a mensagem `role:'tool'` já traz `{field, rule}`; acrescentar `fix` determinístico por regra (tabela estática: `required_text_list` ⇒ "preencha o campo com ao menos um texto"; `unknown_criterion` ⇒ "copie literalmente de expected_effects"; `test_file_outside_scope` ⇒ "inclua o arquivo no included_scope"; …), sem conteúdo do modelo.
+7. **Sem fabricação**: nenhum preenchimento automático de caminhos, testes, covers ou resultados; a coerção continua restrita a forma (escalar⇒lista).
+8. **Host intacto**: toda a validação P1/P2 permanece a autoridade (fail-closed).
+Avaliação comparável (offline, sem custo): harness `scripts/_session`-like fora do repositório (ou teste com `fetchImpl` gravado) que roda N=3 repetições por modelo com o MESMO pedido (o objetivo `MAX_JEST_REPORT_BYTES` usado nas sondas) e mede por execução: proposta válida (host), proposta com `test_binding`, turnos, nº de submits/rejeições por regra, latência, `reason` terminal. Métrica de sucesso P2c: ≥2/3 válidas e ≥1/3 com `test_binding` em pelo menos um modelo local; zero regressão do legado. Linha de base já medida (1 execução cada): válidas 2/3 modelos, com `test_binding` 0/3; com pedido explícito 0/2 válidas (rejeições `required_text_list` e `unknown_criterion`).
+
+## 4. Riscos
+Diagnóstico não pode vazar conteúdo do modelo/segredos (testes adversariais com strings hostis); mudança aditiva de tipos em `ProjectWorkPlanningResult` (consumidores só leem `.message`); P2c mexe em prompt (variância entre modelos; avaliar antes de integrar); a latência local (60–600 s) torna a avaliação demorada; qwen3-coder 30B continua inviável (RAM). Alternativa para a prova do planner: OpenAI (custo, autoridade humana, strict-schema real a confirmar).

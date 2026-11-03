@@ -1,0 +1,9 @@
+# Proposta WSL — aprovação e bloqueio de classificação
+
+2026-10-10. b5f8178a-27d6-440f-9680-776f75a1a26f: proposta/intent integrais comparados com snapshot de criação, iguais; três arquivos, objetivo, checkpoint1c8b419d0f7d218bad3228879cb3572d65fb3f7d, worktree/codex-cli/default e limites3/30 conferidos. b34 cancelled, lineage vazia e zero claims/in_progress. Readiness real com ANIMA_CODEX_CLI_TRANSPORT=wsl sondou Codex Linux por assinatura e retornou ready/eligible, sem depender do binário Windows.
+
+work approve exit0: approved v1. work prepare-autonomous exit3: classification_policy_not_applicable. Origem human_explicit_independent_proposal não reconhecida por sourceForClassification; sem proveniência canônica, investigação ou lineage, classificationSource=null. Esse campo foi escolhido pelo Codex ao materializar a proposta independente; a compatibilidade com preparação deveria ter sido verificada antes. Não substituir por planner falso nem inventar lineage.
+
+Estado final approved v1, nenhum work_intelligence_classified, fora da fila projetada; único evento novo work_approved. Intent/proposal permanecem iguais, b34 e recovery OpenAI5895b59c-0568-483a-9731-2abd45fb4b90 com rows/eventos iguais antes/depois. Claims=[] e in_progress=[]. Sem attempt/Host/supervisor/gate/migration/código/API paga. Git dev/6bc4aadef9414d655600c2ea37c6be436b3628c8, índice vazio,46worktrees; nenhum Git mutante.
+
+GO aprovação; NO-GO preparação/execução. Próximo passo humano: definir classificação legítima para origem manual pelo mecanismo governado aplicável, preservando origem real; não contornar a recusa de prepare-autonomous nem criar novas propostas automaticamente. [Proposta completa](2026-10-10-selfdev-proposta-independente-evidencias/created.json), [snapshots](2026-10-10-selfdev-wsl-aprovacao-evidencias/).

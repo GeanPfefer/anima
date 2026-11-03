@@ -1,0 +1,556 @@
+--- a/supabase/migrations/20260714000001_protect_work_orchestration.sql
++++ b/supabase/migrations/20260714000001_protect_work_orchestration.sql
+@@ -124,6 +124,7 @@
+     RAISE EXCEPTION 'invalid proposal envelope' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   INSERT INTO public.work_items (
+     user_id, source_message_id, state, impact_level, capability,
+     original_request, intent, proposal, proposal_version
+--- a/supabase/migrations/20260715000002_remediate_work_contracts.sql
++++ b/supabase/migrations/20260715000002_remediate_work_contracts.sql
+@@ -50,6 +50,7 @@
+   IF v_user_id IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
+   IF expected_proposal_version IS NULL OR expected_proposal_version<=0 OR requested_changes IS NULL OR length(btrim(requested_changes))=0 OR jsonb_typeof(intent) IS DISTINCT FROM 'object' OR private.is_valid_work_proposal(proposal) IS DISTINCT FROM true THEN RAISE EXCEPTION 'invalid proposal revision input' USING ERRCODE='22023'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items item WHERE item.id=work_item_id AND item.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   IF v_item.state<>'proposed' OR v_item.proposal_version<>expected_proposal_version THEN RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000'; END IF;
+@@ -113,6 +114,7 @@
+ BEGIN
+   IF v_user_id IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items item WHERE item.id=work_item_id AND item.user_id=v_user_id;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   IF v_item.state IN('completed','failed','rejected','cancelled') THEN RAISE EXCEPTION 'terminal work item cannot receive focus' USING ERRCODE='22023'; END IF;
+@@ -211,6 +213,7 @@
+     RAISE EXCEPTION 'invalid proposal envelope' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items AS item
+   WHERE item.id = work_item_id
+@@ -300,6 +303,7 @@
+     RAISE EXCEPTION 'defer reason is required' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items AS item
+   WHERE item.id = work_item_id
+@@ -398,6 +402,7 @@
+     RAISE EXCEPTION 'invalid expected proposal version' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items AS item
+   WHERE item.id = work_item_id
+--- a/supabase/migrations/20260715000003_result_evidence_shape.sql
++++ b/supabase/migrations/20260715000003_result_evidence_shape.sql
+@@ -78,6 +78,7 @@
+     END IF;
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items AS item
+   WHERE item.id = work_item_id
+--- a/supabase/migrations/20260715000000_complete_work_review.sql
++++ b/supabase/migrations/20260715000000_complete_work_review.sql
+@@ -44,6 +44,7 @@
+     RAISE EXCEPTION 'requested_changes is required' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items AS item
+   WHERE item.id = work_item_id
+--- a/supabase/migrations/20260715000001_context_and_conversation_archive.sql
++++ b/supabase/migrations/20260715000001_context_and_conversation_archive.sql
+@@ -171,6 +171,7 @@
+     RAISE EXCEPTION 'invalid context references' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items AS item
+   WHERE item.id = work_item_id AND item.user_id = v_user_id
+   FOR UPDATE;
+--- a/supabase/migrations/20260928000000_mandated_verifier_review_gate.sql
++++ b/supabase/migrations/20260928000000_mandated_verifier_review_gate.sql
+@@ -137,6 +137,7 @@
+   SELECT t.to_state INTO v_target FROM private.work_state_transitions t
+   WHERE t.from_state = 'in_progress' AND t.event_type = 'verifier_opinion_recorded';
+   IF NOT FOUND THEN RAISE EXCEPTION 'transition not allowed' USING ERRCODE='22023'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||p_item.user_id::text,0));
+   UPDATE public.work_items SET state = v_target, updated_at = now() WHERE id = p_item.id;
+   RETURN true;
+ END;
+@@ -215,6 +216,7 @@
+     RAISE EXCEPTION 'terminal sequence must be a positive integer' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   IF NOT EXISTS (SELECT 1 FROM public.work_events e WHERE e.work_item_id=v_item.id AND e.event_type='execution_started'
+@@ -420,6 +422,7 @@
+ DECLARE v_user_id uuid:=auth.uid();v_item public.work_items;v_latest_result_id uuid;
+ BEGIN
+   IF v_user_id IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items item WHERE item.id=work_item_id AND item.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   IF v_item.state<>'review' OR v_item.proposal_version<>expected_proposal_version THEN RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000'; END IF;
+--- a/supabase/migrations/20260715000004_persist_work_executions.sql
++++ b/supabase/migrations/20260715000004_persist_work_executions.sql
+@@ -36,6 +36,7 @@
+     RAISE EXCEPTION 'invalid execution input' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items AS item
+   WHERE item.id = work_item_id
+--- a/supabase/migrations/20260812000000_executor_cancelled_provenance.sql
++++ b/supabase/migrations/20260812000000_executor_cancelled_provenance.sql
+@@ -209,6 +209,7 @@
+     RAISE EXCEPTION 'invalid execution outcome' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items AS item
+   WHERE item.id = work_item_id
+--- a/supabase/migrations/20260721000005_commanded_target_exclusivity.sql
++++ b/supabase/migrations/20260721000005_commanded_target_exclusivity.sql
+@@ -46,6 +46,7 @@
+   v_target text;
+   v_claim jsonb := CASE WHEN p_claim_id IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('claim_id', p_claim_id) END;
+ BEGIN
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||p_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+   WHERE i.id = p_work_item_id AND i.user_id = p_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260721000004_target_exclusivity.sql
++++ b/supabase/migrations/20260721000004_target_exclusivity.sql
+@@ -79,6 +79,7 @@
+   END IF;
+ 
+   -- Lock do item: dois supervisores disputando o MESMO item são serializados aqui.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+   WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260721000001_work_claims.sql
++++ b/supabase/migrations/20260721000001_work_claims.sql
+@@ -271,6 +271,7 @@
+     RAISE EXCEPTION 'invalid claimed attempt input' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_claim FROM public.work_claims c
+   WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
+@@ -324,6 +325,7 @@
+     RAISE EXCEPTION 'invalid claim release' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_claim FROM public.work_claims c
+   WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260928000004_pending_verification_human_recovery.sql
++++ b/supabase/migrations/20260928000004_pending_verification_human_recovery.sql
+@@ -170,6 +170,7 @@
+   END IF;
+ 
+   -- Mesmo lock de `record_verifier_opinion`/terminal/review: uma transição vence.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+ 
+@@ -293,6 +294,7 @@
+     RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   PERFORM pg_advisory_xact_lock(hashtextextended('work_reconciliation:'||v_user_id::text, 0));
+ 
+   FOR v_candidate IN
+--- a/supabase/migrations/20260726000001_record_work_checkpoint.sql
++++ b/supabase/migrations/20260726000001_record_work_checkpoint.sql
+@@ -160,6 +160,7 @@
+   END IF;
+ 
+   -- Fronteira de concorrência: bloqueia o item e serializa registros do item.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+ 
+--- a/supabase/migrations/20260728000011_allow_adjustment_before_resumption.sql
++++ b/supabase/migrations/20260728000011_allow_adjustment_before_resumption.sql
+@@ -21,6 +21,7 @@
+      OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid resumption request' USING ERRCODE='22023'; END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+    WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260728000001_work_intelligence_classification.sql
++++ b/supabase/migrations/20260728000001_work_intelligence_classification.sql
+@@ -110,6 +110,7 @@
+     RAISE EXCEPTION 'invalid work intelligence classification' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items i
+   WHERE i.id=p_work_item_id AND i.user_id=v_user_id
+--- a/supabase/migrations/20260728000004_work_routing_decision.sql
++++ b/supabase/migrations/20260728000004_work_routing_decision.sql
+@@ -166,6 +166,7 @@
+     OR p_attempt_id IS NULL
+   THEN RAISE EXCEPTION 'invalid work routing decision' USING ERRCODE='22023'; END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items i
+   WHERE i.id=p_work_item_id AND i.user_id=v_user_id
+--- a/supabase/migrations/20260728000008_work_routing_adjustment.sql
++++ b/supabase/migrations/20260728000008_work_routing_adjustment.sql
+@@ -159,6 +159,7 @@
+   IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid)
+     THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
+   IF p_attempt_id IS NULL THEN RAISE EXCEPTION 'invalid work routing adjustment' USING ERRCODE='22023'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+    WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260728000018_work_control.sql
++++ b/supabase/migrations/20260728000018_work_control.sql
+@@ -67,6 +67,7 @@
+     RAISE EXCEPTION 'invalid work control request' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+    WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+@@ -146,6 +147,7 @@
+     RAISE EXCEPTION 'invalid work control application' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+    WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260729000003_decision_resumption.sql
++++ b/supabase/migrations/20260729000003_decision_resumption.sql
+@@ -41,6 +41,7 @@
+     RAISE EXCEPTION 'invalid decision alternatives' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   SELECT * INTO v_previous FROM public.work_events e WHERE e.work_item_id=v_item.id
+@@ -155,6 +156,7 @@
+   IF input_requested_event_id IS NULL OR input_provided_event_id IS NULL OR claim_id IS NULL OR attempt_id IS NULL
+     OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid decision resumption request' USING ERRCODE='22023'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id AND e.event_type='execution_started'
+--- a/supabase/migrations/20260729000002_work_decisions.sql
++++ b/supabase/migrations/20260729000002_work_decisions.sql
+@@ -145,6 +145,7 @@
+      OR p_input_requested_event_id IS NULL OR length(btrim(p_option_id))=0 THEN
+     RAISE EXCEPTION 'invalid decision response' USING ERRCODE='22023';
+   END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+    WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260809000001_integration_decision.sql
++++ b/supabase/migrations/20260809000001_integration_decision.sql
+@@ -71,6 +71,7 @@
+   END IF;
+ 
+   -- Fronteira de concorrência: bloqueia o item e serializa decisões do item.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+ 
+--- a/supabase/migrations/20260809000005_branch_publication_recovery.sql
++++ b/supabase/migrations/20260809000005_branch_publication_recovery.sql
+@@ -12,6 +12,7 @@
+  IF v_user IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+  IF NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user) THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
+  IF expected_proposal_version IS NULL OR expected_proposal_version<1 OR length(btrim(coalesce(authorization_decision_id,'')))=0 OR jsonb_typeof(receipt)<>'object' THEN RAISE EXCEPTION 'invalid branch publication input' USING ERRCODE='22023'; END IF;
++ PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user::text,0));
+  SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+  IF v_item.state<>'completed' OR v_item.proposal_version<>expected_proposal_version THEN RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000'; END IF;
+--- a/supabase/migrations/20260813000001_review_request.sql
++++ b/supabase/migrations/20260813000001_review_request.sql
+@@ -16,6 +16,7 @@
+  IF v_user IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+  IF NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user) THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
+  IF expected_proposal_version<1 OR length(btrim(coalesce(authorization_decision_id,'')))=0 OR jsonb_typeof(receipt)<>'object' THEN RAISE EXCEPTION 'invalid review request input' USING ERRCODE='22023'; END IF;
++ PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user::text,0));
+  SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+  IF v_item.state<>'completed' OR v_item.proposal_version<>expected_proposal_version THEN RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000'; END IF;
+--- a/supabase/migrations/20260928000003_trusted_system_writer.sql
++++ b/supabase/migrations/20260928000003_trusted_system_writer.sql
+@@ -101,6 +101,7 @@
+     RAISE EXCEPTION 'host observed evidence correlation mismatch' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   IF NOT EXISTS (SELECT 1 FROM public.work_events e
+@@ -172,6 +173,7 @@
+     RAISE EXCEPTION 'host gate evidence correlation mismatch' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+ 
+@@ -246,6 +248,7 @@
+     RAISE EXCEPTION 'host coder evidence correlation mismatch' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+ 
+@@ -327,6 +330,7 @@
+   v_observed_id := opinion #>> '{evidenceBasis,observedEventId}';
+   v_gate_id     := opinion #>> '{evidenceBasis,observedGateEventId}';
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+ 
+--- a/supabase/migrations/20260821000000_budget_block_honest_and_readmission.sql
++++ b/supabase/migrations/20260821000000_budget_block_honest_and_readmission.sql
+@@ -124,6 +124,7 @@
+   v_attempt text;
+   v_decision jsonb;
+ BEGIN
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||p_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+    WHERE i.id=p_work_item_id AND i.user_id=p_user_id FOR UPDATE;
+   IF NOT FOUND THEN RETURN jsonb_build_object('readmitted',false,'reason','not_found'); END IF;
+--- a/supabase/migrations/20260821000001_budget_interruption_resumption.sql
++++ b/supabase/migrations/20260821000001_budget_interruption_resumption.sql
+@@ -37,6 +37,7 @@
+   v_item public.work_items; v_block public.work_events; v_reason text;
+   v_attempt text; v_cp_seq bigint; v_decision jsonb;
+ BEGIN
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||p_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+    WHERE i.id=p_work_item_id AND i.user_id=p_user_id FOR UPDATE;
+   IF NOT FOUND THEN RETURN jsonb_build_object('readmitted',false,'reason','not_found'); END IF;
+@@ -193,6 +194,7 @@
+     OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid budget resumption request' USING ERRCODE='22023'; END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id
+--- a/supabase/migrations/20260823000001_autonomous_authorization.sql
++++ b/supabase/migrations/20260823000001_autonomous_authorization.sql
+@@ -56,6 +56,7 @@
+     RAISE EXCEPTION 'invalid autonomous authorization input' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items i
+   WHERE i.id = work_item_id AND i.user_id = v_user
+--- a/supabase/migrations/20260824000004_project_backlog_materialization_replay.sql
++++ b/supabase/migrations/20260824000004_project_backlog_materialization_replay.sql
+@@ -11,6 +11,7 @@
+    END IF;
+    RAISE EXCEPTION 'materialization idempotency conflict' USING ERRCODE='55000';
+  END IF;
++ PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||u::text,0));
+  SELECT * INTO p FROM public.project_backlog_proposals x WHERE x.id=proposal_id AND x.user_id=u FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'backlog proposal not found' USING ERRCODE='P0002'; END IF;
+  IF p.version<>expected_version OR EXISTS(SELECT 1 FROM public.project_backlog_events x WHERE x.proposal_id=p.id AND x.event_type IN ('changes_requested','materialization_confirmed')) THEN RAISE EXCEPTION 'backlog proposal is not current' USING ERRCODE='55000'; END IF;
+--- a/supabase/migrations/20260825000000_governed_retry.sql
++++ b/supabase/migrations/20260825000000_governed_retry.sql
+@@ -75,6 +75,7 @@
+ BEGIN
+   IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF p_retry_request_id IS NULL OR p_failure_event_id IS NULL THEN RAISE EXCEPTION 'invalid retry request' USING ERRCODE='22023'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id
+@@ -106,6 +107,7 @@
+ DECLARE v_uid uuid:=auth.uid(); v_item public.work_items; v_existing public.work_events; v_event public.work_events;
+ BEGIN
+   IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id AND e.event_type='work_approved'
+--- a/supabase/migrations/20260829000000_recovery_successor_from_review_correction.sql
++++ b/supabase/migrations/20260829000000_recovery_successor_from_review_correction.sql
+@@ -29,6 +29,7 @@
+     RAISE EXCEPTION 'invalid recovery successor input' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||p_user_id::text,0));
+   PERFORM pg_advisory_xact_lock(hashtextextended(
+     'work_recovery_successor:' || p_user_id::text || ':' || p_idempotency_key::text, 0));
+ 
+--- a/supabase/migrations/20260826000003_manual_work_release.sql
++++ b/supabase/migrations/20260826000003_manual_work_release.sql
+@@ -41,6 +41,7 @@
+     RAISE EXCEPTION 'invalid expected proposal version' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT *
+   INTO v_item
+   FROM public.work_items i
+--- a/supabase/migrations/20260830000007_add_node_lifecycle_lease_correlation.sql
++++ b/supabase/migrations/20260830000007_add_node_lifecycle_lease_correlation.sql
+@@ -40,6 +40,7 @@
+   IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
+   IF expected_proposal_version IS NULL OR expected_proposal_version<1 OR NOT private.is_valid_node_lifecycle_evidence(evidence) THEN RAISE EXCEPTION 'invalid node lifecycle evidence' USING ERRCODE='22023'; END IF;
+   IF evidence->>'workItemId' IS DISTINCT FROM work_item_id::text THEN RAISE EXCEPTION 'node lifecycle evidence correlation mismatch' USING ERRCODE='22023'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   IF v_item.proposal_version IS DISTINCT FROM expected_proposal_version THEN RAISE EXCEPTION 'proposal version mismatch' USING ERRCODE='40001'; END IF;
+--- a/supabase/migrations/20260902000000_withdraw_approved_work.sql
++++ b/supabase/migrations/20260902000000_withdraw_approved_work.sql
+@@ -62,6 +62,7 @@
+     RAISE EXCEPTION 'invalid withdrawal input' USING ERRCODE = '22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item
+   FROM public.work_items AS item
+   WHERE item.id = work_item_id
+--- a/supabase/migrations/20260902000001_minimal_unit_replan.sql
++++ b/supabase/migrations/20260902000001_minimal_unit_replan.sql
+@@ -79,6 +79,7 @@
+   IF u IS NULL OR NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist WHERE user_id=u) THEN
+     RAISE EXCEPTION 'authentication_or_allowlist_required' USING ERRCODE='42501';
+   END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||u::text,0));
+   SELECT * INTO i FROM public.work_items WHERE id=p_work_item_id AND user_id=u FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work_item_not_found' USING ERRCODE='P0002'; END IF;
+   strategy := private.replan_strategy(p_diagnosis);
+--- a/supabase/migrations/20260903000000_human_recovery_authority.sql
++++ b/supabase/migrations/20260903000000_human_recovery_authority.sql
+@@ -58,6 +58,7 @@
+ BEGIN
+  IF u IS NULL OR NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist WHERE user_id=u) THEN RAISE EXCEPTION 'authentication_or_allowlist_required' USING ERRCODE='42501'; END IF;
+  PERFORM private.validate_resume_authorization(p_authorization);
++ PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||u::text,0));
+  SELECT * INTO i FROM public.work_items WHERE id=p_work_item_id AND user_id=u FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'work_item_not_found' USING ERRCODE='P0002'; END IF;
+  SELECT * INTO old FROM public.work_resume_authorizations WHERE predecessor_id=i.id OR (user_id=u AND request_id=(p_authorization->>'requestId')::uuid);
+--- a/supabase/migrations/20260905000004_human_supervised_work.sql
++++ b/supabase/migrations/20260905000004_human_supervised_work.sql
+@@ -64,6 +64,7 @@
+ BEGIN
+   IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF p_request_id IS NULL OR p_ttl_seconds<60 OR p_ttl_seconds>3600 THEN RAISE EXCEPTION 'invalid supervision lease' USING ERRCODE='22023'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items WHERE id=p_work_item_id AND user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   IF v_item.proposal_version<>p_expected_proposal_version THEN RAISE EXCEPTION 'proposal version conflict' USING ERRCODE='40001'; END IF;
+@@ -85,6 +86,7 @@
+ DECLARE v_uid uuid:=auth.uid(); v_count integer;
+ BEGIN
+   IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   UPDATE public.work_supervision_leases SET revoked_at=now()
+    WHERE user_id=v_uid AND work_item_id=p_work_item_id AND revoked_at IS NULL AND expires_at>now();
+   GET DIAGNOSTICS v_count=ROW_COUNT;
+--- a/supabase/migrations/20260910000000_paid_compute_capability_scope.sql
++++ b/supabase/migrations/20260910000000_paid_compute_capability_scope.sql
+@@ -80,6 +80,7 @@
+     OR (v_provider IS DISTINCT FROM 'openai' AND v_authorization IS NOT NULL)
+   THEN RAISE EXCEPTION 'invalid compute routing authority correlation' USING ERRCODE='22023'; END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+     WHERE i.id=p_work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260925000001_record_compute_preference.sql
++++ b/supabase/migrations/20260925000001_record_compute_preference.sql
+@@ -58,6 +58,7 @@
+     RAISE EXCEPTION 'invalid compute preference' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+     WHERE i.id=p_work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260926000000_harness_recovery_descendants.sql
++++ b/supabase/migrations/20260926000000_harness_recovery_descendants.sql
+@@ -25,6 +25,7 @@
+     THEN RAISE EXCEPTION 'authentication_or_allowlist_required' USING ERRCODE = '42501'; END IF;
+   PERFORM private.validate_harness_recovery_authorization(p_authorization);
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||u::text,0));
+   SELECT * INTO i FROM public.work_items WHERE id = p_work_item_id AND user_id = u FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work_item_not_found' USING ERRCODE = 'P0002'; END IF;
+ 
+--- a/supabase/migrations/20261003000000_integration_effect_ff_only.sql
++++ b/supabase/migrations/20261003000000_integration_effect_ff_only.sql
+@@ -44,6 +44,7 @@
+     RAISE EXCEPTION 'integration mode not allowed' USING ERRCODE='22023';
+   END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   IF v_item.state<>'completed' OR v_item.proposal_version<>expected_proposal_version THEN
+@@ -118,6 +119,7 @@
+      OR jsonb_typeof(receipt) IS DISTINCT FROM 'object' THEN
+     RAISE EXCEPTION 'invalid integration receipt' USING ERRCODE='22023';
+   END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   IF v_item.state<>'completed' OR v_item.proposal_version<>expected_proposal_version THEN
+--- a/supabase/migrations/20261005000000_checkpoint_relative_candidate_recovery.sql
++++ b/supabase/migrations/20261005000000_checkpoint_relative_candidate_recovery.sql
+@@ -30,6 +30,7 @@
+     THEN RAISE EXCEPTION 'authentication_or_allowlist_required' USING ERRCODE = '42501'; END IF;
+   PERFORM private.validate_candidate_recovery_authorization(p_authorization);
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||u::text,0));
+   SELECT * INTO i FROM public.work_items WHERE id = p_work_item_id AND user_id = u FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work_item_not_found' USING ERRCODE = 'P0002'; END IF;
+ 
+--- a/supabase/migrations/20261008000000_single_item_work_claim.sql
++++ b/supabase/migrations/20261008000000_single_item_work_claim.sql
+@@ -31,6 +31,7 @@
+ 
+   -- Mesma ordem item -> alvo da aquisição canônica. O início sob claim
+   -- bloqueia primeiro o claim; sua ordem distinta ainda requer prova real.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+     WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;

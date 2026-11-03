@@ -92,3 +92,5 @@ npm run build
 - Plano do Modo Construção: `docs/planos/001-modo-construcao-mvp.md`
 - Plano do Modo Autônomo V0: `docs/planos/002-modo-autonomo-v0.md` (backlog em `docs/planos/002-modo-autonomo-v0-backlog.md`)
 - Histórico de visão: `docs/marcos/README.md`
+
+- Codex interativo nesta máquina: [runbook Windows/WSL](docs/operacao/codex-wsl.md).

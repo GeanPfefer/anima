@@ -1,0 +1,772 @@
+--- a/supabase/migrations/20260905000001_fix_budget_resume_request_correlation.sql
++++ b/supabase/migrations/20260905000001_fix_budget_resume_request_correlation.sql
+@@ -9,7 +9,7 @@
+   -- Hash do corpo INTEGRAL da 246 (LF), com e sem a substituição abaixo.
+   -- Não basta reconhecer um fragmento: alterações em owner/versão/authority
+   -- ou em qualquer outra guarda devem recusar, inclusive no caminho no-op.
+-  SELECT p.prosrc INTO body FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang
++  SELECT p.prosrc INTO body FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_language l ON l.oid=p.prolang
+    WHERE p.oid='public.authorize_work_resume(uuid,integer,jsonb)'::regprocedure
+      AND l.lanname='plpgsql' AND p.prokind='f' AND p.prosecdef
+      AND p.provolatile='v' AND NOT p.proisstrict AND NOT p.proleakproof
+@@ -17,24 +17,32 @@
+      AND p.prorettype='jsonb'::regtype AND p.pronargdefaults=0
+      AND p.proargmodes IS NULL AND p.provariadic=0 AND p.prosupport=0
+      AND p.procost=100 AND p.prorows=0
++     AND p.proowner='postgres'::regrole
++     AND pg_catalog.has_function_privilege('authenticated',p.oid,'EXECUTE')
++     AND NOT pg_catalog.has_function_privilege('anon',p.oid,'EXECUTE')
++     AND NOT EXISTS (
++       SELECT 1 FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a
++       WHERE a.grantee NOT IN ('postgres'::regrole,'authenticated'::regrole,'service_role'::regrole)
++         OR a.grantor<>p.proowner OR (a.is_grantable AND a.grantee<>p.proowner)
++     )
+      AND p.proargnames=ARRAY['p_work_item_id','p_expected_proposal_version','p_authorization']::text[]
+      AND p.proconfig=ARRAY['search_path=pg_catalog']::text[];
+-  body_hash:=encode(sha256(convert_to(body,'UTF8')),'hex');
++  body_hash:=pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(body,'UTF8')),'hex');
+   IF body_hash IS NULL OR body_hash NOT IN (old_hash,corrected_hash) THEN
+     RAISE EXCEPTION 'budget_resume_request_correlation_definition_unknown';
+   END IF;
+   IF body_hash=corrected_hash THEN RETURN; END IF;
+-  definition:=pg_get_functiondef('public.authorize_work_resume(uuid,integer,jsonb)'::regprocedure);
+-  fixed:=replace(definition,
+-    'SELECT * INTO old FROM public.work_budget_resume_authorizations'||chr(10)||
++  definition:=pg_catalog.pg_get_functiondef('public.authorize_work_resume(uuid,integer,jsonb)'::regprocedure);
++  fixed:=pg_catalog.replace(definition,
++    'SELECT * INTO old FROM public.work_budget_resume_authorizations'||pg_catalog.chr(10)||
+     '   WHERE work_item_id=i.id OR (user_id=u AND request_id=request_id);',
+-    'SELECT * INTO old FROM public.work_budget_resume_authorizations a'||chr(10)||
++    'SELECT * INTO old FROM public.work_budget_resume_authorizations a'||pg_catalog.chr(10)||
+     '   WHERE a.work_item_id=i.id OR (a.user_id=u AND a.request_id=(p_authorization->>''requestId'')::uuid);');
+   IF fixed=definition THEN RAISE EXCEPTION 'budget_resume_request_correlation_patch_not_applied'; END IF;
+   EXECUTE fixed;
+-  SELECT prosrc INTO body FROM pg_proc
++  SELECT prosrc INTO body FROM pg_catalog.pg_proc
+    WHERE oid='public.authorize_work_resume(uuid,integer,jsonb)'::regprocedure;
+-  IF encode(sha256(convert_to(body,'UTF8')),'hex') IS DISTINCT FROM corrected_hash THEN
++  IF pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(body,'UTF8')),'hex') IS DISTINCT FROM corrected_hash THEN
+     RAISE EXCEPTION 'budget_resume_request_correlation_postcondition_failed';
+   END IF;
+ END $$;
+--- a/supabase/migrations/20260905000002_require_current_budget_block_for_human_resume.sql
++++ b/supabase/migrations/20260905000002_require_current_budget_block_for_human_resume.sql
+@@ -1,17 +1,49 @@
+ -- A concessão não pode sobreviver como token latente se a janela já se recuperou.
+ DO $$
+-DECLARE definition text; fixed text;
++DECLARE
++  definition text; fixed text; body text; body_hash text;
++  old_hash constant text := 'c25faccff543acf47738ee13cd9ad5cd037f0d86e13dace01ecc5472124e2f9d';
++  corrected_hash constant text := 'ea9cb3ee3d1e88191c954317412d62016decd26dd74aa0837b0b977a485353a0';
+ BEGIN
+-  definition:=pg_get_functiondef('public.authorize_work_resume(uuid,integer,jsonb)'::regprocedure);
+-  fixed:=replace(definition,'reason text; request_id uuid; active_attempt boolean;',
++  -- Corpo integral sem guarda (antigo) ou exatamente a definição atual da 246.
++  SELECT p.prosrc INTO body FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_language l ON l.oid=p.prolang
++   WHERE p.oid='public.authorize_work_resume(uuid,integer,jsonb)'::regprocedure
++     AND l.lanname='plpgsql' AND p.prokind='f' AND p.prosecdef
++     AND p.provolatile='v' AND NOT p.proisstrict AND NOT p.proleakproof
++     AND p.proparallel='u' AND NOT p.proretset
++     AND p.prorettype='jsonb'::regtype AND p.pronargdefaults=0
++     AND p.proargmodes IS NULL AND p.provariadic=0 AND p.prosupport=0
++     AND p.procost=100 AND p.prorows=0
++     AND p.proowner='postgres'::regrole
++     AND pg_catalog.has_function_privilege('authenticated',p.oid,'EXECUTE')
++     AND NOT pg_catalog.has_function_privilege('anon',p.oid,'EXECUTE')
++     AND NOT EXISTS (
++       SELECT 1 FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a
++       WHERE a.grantee NOT IN ('postgres'::regrole,'authenticated'::regrole,'service_role'::regrole)
++         OR a.grantor<>p.proowner OR (a.is_grantable AND a.grantee<>p.proowner)
++     )
++     AND p.proargnames=ARRAY['p_work_item_id','p_expected_proposal_version','p_authorization']::text[]
++     AND p.proconfig=ARRAY['search_path=pg_catalog']::text[];
++  body_hash:=pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(body,'UTF8')),'hex');
++  IF body_hash IS NULL OR body_hash NOT IN (old_hash,corrected_hash) THEN
++    RAISE EXCEPTION 'current_budget_block_definition_unknown';
++  END IF;
++  IF body_hash=corrected_hash THEN RETURN; END IF;
++  definition:=pg_catalog.pg_get_functiondef('public.authorize_work_resume(uuid,integer,jsonb)'::regprocedure);
++  fixed:=pg_catalog.replace(definition,'reason text; request_id uuid; active_attempt boolean;',
+     'reason text; request_id uuid; active_attempt boolean; budget_decision jsonb;');
+-  fixed:=replace(fixed,
++  fixed:=pg_catalog.replace(fixed,
+     '  INSERT INTO public.work_budget_resume_authorizations(id,user_id,work_item_id,request_id,proposal_version,blocked_event_id,budget_reason,authority)',
+-    '  budget_decision:=private.autonomous_work_budget_decision(u,i.id,now());'||chr(10)||
+-    '  IF coalesce((budget_decision->>''admitted'')::boolean,false)'||chr(10)||
+-    '    OR budget_decision->>''reason'' IS DISTINCT FROM reason'||chr(10)||
+-    '    THEN RAISE EXCEPTION ''budget_block_no_longer_current'' USING ERRCODE=''55000''; END IF;'||chr(10)||chr(10)||
++    '  budget_decision:=private.autonomous_work_budget_decision(u,i.id,now());'||pg_catalog.chr(10)||
++    '  IF coalesce((budget_decision->>''admitted'')::boolean,false)'||pg_catalog.chr(10)||
++    '    OR budget_decision->>''reason'' IS DISTINCT FROM reason'||pg_catalog.chr(10)||
++    '    THEN RAISE EXCEPTION ''budget_block_no_longer_current'' USING ERRCODE=''55000''; END IF;'||pg_catalog.chr(10)||pg_catalog.chr(10)||
+     '  INSERT INTO public.work_budget_resume_authorizations(id,user_id,work_item_id,request_id,proposal_version,blocked_event_id,budget_reason,authority)');
+   IF fixed=definition THEN RAISE EXCEPTION 'current_budget_block_patch_not_applied'; END IF;
+   EXECUTE fixed;
++  SELECT prosrc INTO body FROM pg_catalog.pg_proc
++   WHERE oid='public.authorize_work_resume(uuid,integer,jsonb)'::regprocedure;
++  IF pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(body,'UTF8')),'hex') IS DISTINCT FROM corrected_hash THEN
++    RAISE EXCEPTION 'current_budget_block_postcondition_failed';
++  END IF;
+ END $$;
+--- a/supabase/tests/bootstrap_plan.py
++++ b/supabase/tests/bootstrap_plan.py
+@@ -1,7 +1,8 @@
+-"""Planejamento offline de bootstrap. Não possui execução SQL, Docker ou rede.
+-
+-A ordem/roles vêm de uma especificação revisada, nunca de glob implícito.
+-O operador futuro deve executar payloads imutáveis e reconciliar o ledger SQL.
++"""Composição offline: não possui execução SQL, Docker ou rede.
++
++Fontes originais, renderização e payload têm hashes separados. A ordem/roles
++vêm do spec revisado; o executor futuro deve conferir o ledger na mesma instância.
++O scanner é conservador, não um parser nem uma prova de transação PostgreSQL.
+ """
+ import argparse
+ import hashlib
+@@ -11,27 +12,33 @@
+ import re
+ 
+ 
++PHASES = {'bootstrap', 'image-init', 'image-migration', 'auth-v2.189.0', 'anima-migration', 'test'}
++ROLES = {'postgres', 'supabase_admin', 'supabase_auth_admin'}
++
++
+ def digest(data):
+     return hashlib.sha256(data).hexdigest()
+ 
+ 
+-def terminate_sql(source):
+-    """Scanner conservador: recusa transações/metacomandos e léxico aberto.
+-
+-    Sem parser PostgreSQL: strings E/backslash são recusadas, não adivinhadas.
+-    Comentários e corpos dollar-quoted não são instruções de topo.
+-    """
+-    text = source.decode('utf-8-sig')
++def scan_sql(text, check_controls=True):
++    """Léxico sob standard_conforming_strings=on; retorna marcadores de topo."""
+     if '\x00' in text:
+         raise ValueError('NUL forbidden')
+-    i, tokens, last = 0, [], None
++    i, tokens, last, markers = 0, [], None, []
+     while i < len(text):
+         if text[i].isspace():
+             i += 1
+             continue
+         if text.startswith('--', i):
+             end = text.find('\n', i)
+-            i = len(text) if end < 0 else end + 1
++            end = len(text) if end < 0 else end
++            comment = text[i:end].strip()
++            if comment in ('-- migrate:up', '-- migrate:down'):
++                line_start = text.rfind('\n', 0, i) + 1
++                if text[line_start:i].strip():
++                    raise ValueError('inline migration marker forbidden')
++                markers.append((i, comment))
++            i = end
+             continue
+         if text.startswith('/*', i):
+             depth, i = 1, i + 2
+@@ -55,10 +62,17 @@
+             i, last = end + len(tag[0]), 'body'
+             continue
+         if text[i] in "'\"":
+-            quote, i = text[i], i + 1
++            quote = text[i]
++            if i >= 2 and text[i-2:i].upper() == 'U&':
++                raise ValueError('Unicode escape quoting requires review')
++            escape = quote == "'" and i > 0 and text[i-1] in 'eE' and (i < 2 or not (text[i-2].isalnum() or text[i-2] == '_'))
++            i += 1
+             while i < len(text):
+-                if text[i] == '\\':
+-                    raise ValueError('backslash quoting requires manual review')
++                if escape and text[i] == '\\':
++                    if i + 1 == len(text):
++                        raise ValueError('open escape quote')
++                    i += 2
++                    continue
+                 if text[i] == quote:
+                     if i + 1 < len(text) and text[i+1] == quote:
+                         i += 2
+@@ -76,64 +90,105 @@
+             i, last = i + len(word[0]), 'word'
+             continue
+         if text[i] == ';':
+-            check_statement(tokens)
++            if check_controls:
++                check_statement(tokens)
+             tokens, last = [], ';'
+         else:
+             last = text[i]
+         i += 1
+-    check_statement(tokens)
++    if check_controls:
++        check_statement(tokens)
++    return last, markers
++
++
++def check_statement(tokens):
++    if not tokens:
++        return
++    if tokens[0] in {'BEGIN', 'COMMIT', 'END', 'ROLLBACK', 'ABORT', 'SAVEPOINT', 'RELEASE', 'RESET', 'DISCARD'} \
++            or tokens[:2] in (['START', 'TRANSACTION'], ['PREPARE', 'TRANSACTION']) \
++            or (tokens[0] == 'SET' and any(t in {'ROLE', 'AUTHORIZATION', 'STANDARD_CONFORMING_STRINGS', 'TRANSACTION', 'CHARACTERISTICS'} for t in tokens[1:4])):
++        raise ValueError('transaction/role/config control requires manual review')
++    if tokens[0] in {'VACUUM', 'REINDEX'} or tokens[:2] in (['CREATE', 'DATABASE'], ['DROP', 'DATABASE'], ['ALTER', 'SYSTEM']) \
++            or (tokens[0] in {'CREATE', 'DROP'} and 'INDEX' in tokens[:3] and 'CONCURRENTLY' in tokens[:4]):
++        raise ValueError('nontransactional SQL requires manual review')
++
++
++def render_source(source, phase):
++    text = source.decode('utf-8-sig')
++    if phase == 'auth-v2.189.0':
++        text = re.sub(r'{{\s*index .Options "Namespace"\s*}}', 'auth', text)
++    if '{{' in text:
++        raise ValueError('unknown source template')
++    _, markers = scan_sql(text, check_controls=False)
++    if markers and phase not in {'image-init', 'image-migration'}:
++        raise ValueError('migration sections not authorized for phase')
++    downs = [position for position, marker in markers if marker == '-- migrate:down']
++    ups = [position for position, marker in markers if marker == '-- migrate:up']
++    if len(downs) > 1 or len(ups) > 1 or (downs and ups and ups[0] > downs[0]):
++        raise ValueError('migration section order unknown')
++    if downs:
++        text = text[:downs[0]]
++    return text.encode('utf-8')
++
++
++def terminate_sql(source):
++    text = source.decode('utf-8-sig')
++    last, markers = scan_sql(text)
++    if markers and any(marker == '-- migrate:down' for _, marker in markers):
++        raise ValueError('unrendered down section')
+     if last is None:
+         raise ValueError('empty SQL')
+     # Newline BEFORE ; prevents a trailing -- comment swallowing the terminator.
+     return (text + ('\n' if last == ';' else '\n;\n')).encode('utf-8')
+ 
+ 
+-def check_statement(tokens):
+-    if not tokens:
+-        return
+-    if tokens[0] in {'BEGIN', 'COMMIT', 'END', 'ROLLBACK', 'ABORT', 'SAVEPOINT', 'RELEASE'} \
+-            or tokens[:2] in (['START', 'TRANSACTION'], ['PREPARE', 'TRANSACTION']) \
+-            or tokens[:2] in (['SET', 'ROLE'], ['RESET', 'ROLE']) \
+-            or tokens[:3] == ['SET', 'LOCAL', 'ROLE']:
+-        raise ValueError('transaction/role control requires manual review')
+-    if tokens[:3] == ['CREATE', 'INDEX', 'CONCURRENTLY'] or tokens[0] in {'VACUUM', 'REINDEX'}:
+-        raise ValueError('nontransactional SQL requires manual review')
+-
+-
+ def literal(value):
+     return "'" + value.replace("'", "''") + "'"
+ 
+ 
+ def compose(source, run_id, order, phase, name, role):
+-    if not re.fullmatch('[a-z0-9]{16,40}', run_id) or type(order) is not int or order < 1:
++    if not isinstance(run_id, str) or not re.fullmatch('[a-z0-9]{16,40}', run_id) or type(order) is not int or order < 1:
+         raise ValueError('run/order invalid')
+-    if role not in {'postgres', 'supabase_admin', 'supabase_auth_admin'}:
+-        raise ValueError('role not allowlisted')
+-    if not phase or not name:
+-        raise ValueError('source identity required')
+-    body = terminate_sql(source)
+-    source_hash, body_hash = digest(source), digest(body)
++    if role not in ROLES or phase not in PHASES:
++        raise ValueError('role/phase not allowlisted')
++    if not isinstance(name, str) or not re.fullmatch('[A-Za-z0-9_.-]+', name):
++        raise ValueError('source identity invalid')
++    rendered = render_source(source, phase)
++    body = terminate_sql(rendered)
++    source_hash, rendered_hash, body_hash = digest(source), digest(rendered), digest(body)
+     values = ','.join([literal(run_id), str(order), literal(phase), literal(name),
+-                       literal(role), literal(source_hash), literal(body_hash)])
+-    # Ledger is created by the approved prerequisite, before application steps.
+-    # RESET ROLE restores the session login; future executor MUST login postgres.
+-    payload = (f'BEGIN;\nSET LOCAL ROLE {role};\n'.encode() + body +
++                       literal(role), literal(source_hash), literal(rendered_hash), literal(body_hash)])
++    # Session login is postgres. RESET ROLE returns to that login, not to the
++    # named execution role, even after the role bridge revocation step.
++    header = f'BEGIN;\nSET LOCAL standard_conforming_strings=on;\nSET LOCAL ROLE {role};\n'
++    auth_ledger = ''
++    if phase == 'auth-v2.189.0':
++        version = name.split('_', 1)[0]
++        if not re.fullmatch('[0-9]{2}|[0-9]{14}', version):
++            raise ValueError('auth migration version invalid')
++        # Bootstrap image seeds legacy 2017/2018 versions only. Every official
++        # file in this plan must add its version once; conflict is an error.
++        auth_ledger = f'INSERT INTO auth.schema_migrations(version) VALUES ({literal(version)})'
++        auth_ledger += ';\n'
++    payload = (header.encode() + body + auth_ledger.encode() +
+                (f'RESET ROLE;\nINSERT INTO bootstrap_audit.steps '
+-                f'(run_id,step_order,phase,name,role_name,source_sha256,body_sha256) '
++                f'(run_id,step_order,phase,name,role_name,source_sha256,rendered_sha256,body_sha256) '
+                 f'VALUES ({values});\nCOMMIT;\n').encode())
+     return payload, dict(order=order, phase=phase, name=name, role=role,
+-                         sourceSha256=source_hash, bodySha256=body_hash,
+-                         payloadSha256=digest(payload))
++                         sourceSha256=source_hash, renderedSha256=rendered_hash,
++                         bodySha256=body_hash, payloadSha256=digest(payload))
+ 
+ 
+ def reconcile(plan, database_rows, run_id):
+-    """Somente prefixo exato confirmado permite diagnóstico de próximo passo.
+-
+-    As linhas são fatos coletados futuramente no DB descartável, não status local.
+-    Não executa nem autoriza retry. Drift, lacuna/duplicação/row extra recusam.
++    """Diagnóstico de prefixo do mesmo run; não executa nem autoriza retry.
++
++    Identidade da instância, coleta SQL e resultado de commit são obrigações
++    futuras. Chamador não deve misturar rows de outra instância com o mesmo runId.
+     """
+-    if not re.fullmatch('[a-z0-9]{16,40}', run_id):
++    if not isinstance(run_id, str) or not re.fullmatch('[a-z0-9]{16,40}', run_id):
+         raise ValueError('run identity invalid')
++    if not plan or [e['order'] for e in plan] != list(range(1, len(plan)+1)):
++        raise ValueError('plan order invalid')
+     if len(database_rows) > len(plan):
+         raise ValueError('ledger extra rows')
+     for expected, actual in zip(plan, database_rows):
+@@ -151,7 +206,7 @@
+ 
+ 
+ def prepare(spec, out):
+-    if set(spec) != {'runId', 'steps'} or not spec['steps']:
++    if set(spec) != {'runId', 'steps'} or not isinstance(spec['steps'], list) or not spec['steps']:
+         raise ValueError('exact specification required')
+     prepared, identities = [], set()
+     for order, step in enumerate(spec['steps'], 1):
+@@ -164,8 +219,7 @@
+         source = Path(step['source']).read_bytes()
+         if digest(source) != step['sourceSha256']:
+             raise ValueError('reviewed source hash mismatch')
+-        payload, entry = compose(source, spec['runId'], order,
+-                                 step['phase'], step['name'], step['role'])
++        payload, entry = compose(source, spec['runId'], order, step['phase'], step['name'], step['role'])
+         prepared.append((payload, entry))
+     # Validate everything before creating output. Never overwrite a previous run.
+     out = Path(out)
+@@ -176,6 +230,17 @@
+             stream.flush()
+             os.fsync(stream.fileno())
+         append_event(out / 'plan.jsonl', dict(runId=spec['runId'], status='prepared', **entry))
++    # Flush directory entries and parent BEFORE writing the completeness marker.
++    # Unsupported directory fsync must refuse, never claim a durable complete plan.
++    for directory in (out, out.parent):
++        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
++        try:
++            os.fsync(descriptor)
++        finally:
++            os.close(descriptor)
++    append_event(out / 'plan.jsonl', dict(runId=spec['runId'], status='plan_complete',
++                                        count=len(prepared),
++                                        planSha256=digest(json.dumps([e for _, e in prepared], sort_keys=True).encode())))
+     return [entry for _, entry in prepared]
+ 
+ 
+--- a/supabase/tests/bootstrap_ledger.sql
++++ b/supabase/tests/bootstrap_ledger.sql
+@@ -10,11 +10,13 @@
+   name text NOT NULL CHECK (length(name) > 0),
+   role_name text NOT NULL CHECK (role_name IN ('postgres','supabase_admin','supabase_auth_admin')),
+   source_sha256 text NOT NULL CHECK (source_sha256 ~ '^[a-f0-9]{64}$'),
++  rendered_sha256 text NOT NULL CHECK (rendered_sha256 ~ '^[a-f0-9]{64}$'),
+   body_sha256 text NOT NULL CHECK (body_sha256 ~ '^[a-f0-9]{64}$'),
+   applied_at timestamptz NOT NULL DEFAULT now(),
+   PRIMARY KEY (run_id,step_order),
+   UNIQUE (run_id,phase,name)
+ );
+-REVOKE ALL ON bootstrap_audit.steps FROM PUBLIC,anon,authenticated,service_role,
+-  supabase_admin,supabase_auth_admin;
++REVOKE ALL ON bootstrap_audit.steps FROM PUBLIC;
++-- Antes do init: os roles anon/authenticated/service_role ainda não existem.
++-- O schema fechado impede seu acesso; nenhuma concessão será adicionada aqui.
+ COMMIT;
+--- a/supabase/tests/bootstrap_compatibility_test.py
++++ b/supabase/tests/bootstrap_compatibility_test.py
+@@ -1,15 +1,26 @@
+ """Provas determinísticas de texto/contrato. NÃO executam PL/pgSQL."""
+ import hashlib
++import json
++import sys
+ from pathlib import Path
+ import re
+ import tempfile
+ import unittest
+ 
+-from bootstrap_plan import compose, prepare, reconcile, terminate_sql
++from bootstrap_plan import compose, prepare, reconcile, render_source, terminate_sql
+ 
+ MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
+ BASE = MIGRATIONS / '20260905000000_budget_blocked_human_resume.sql'
+ PATCH = MIGRATIONS / '20260905000001_fix_budget_resume_request_correlation.sql'
++BOOTSTRAP = MIGRATIONS.parent / 'bootstrap'
++sys.path.insert(0, str(BOOTSTRAP))
++from verify_sources import verify, verify_prepared
++
++PATCH_248 = MIGRATIONS / '20260905000002_require_current_budget_block_for_human_resume.sql'
++GUARD = ("  budget_decision:=private.autonomous_work_budget_decision(u,i.id,now());\n"
++         "  IF coalesce((budget_decision->>'admitted')::boolean,false)\n"
++         "    OR budget_decision->>'reason' IS DISTINCT FROM reason\n"
++         "    THEN RAISE EXCEPTION 'budget_block_no_longer_current' USING ERRCODE='55000'; END IF;\n\n")
+ OLD = ('SELECT * INTO old FROM public.work_budget_resume_authorizations\n'
+        '   WHERE work_item_id=i.id OR (user_id=u AND request_id=request_id);')
+ NEW = ('SELECT * INTO old FROM public.work_budget_resume_authorizations a\n'
+@@ -21,19 +32,41 @@
+                      BASE.read_text(), re.S)[1]
+ 
+ 
+-def text_contract(body):
++def sql_text_expression(expression):
++    # Only literals, concatenation and chr(10): never eval or execute SQL.
++    token = r"'(?:''|[^'])*'|pg_catalog\.chr\(10\)|\|\||\s+"
++    parts = re.findall(token, expression)
++    if ''.join(parts) != expression:
++        raise ValueError('unknown patch expression')
++    return ''.join(p[1:-1].replace("''", "'") if p.startswith("'") else '\n'
++                   if p == 'pg_catalog.chr(10)' else '' for p in parts)
++
++
++def patch_operations(sql):
++    expression = r"(?:'(?:''|[^'])*'|pg_catalog\.chr\(10\)|\|\||\s+)+"
++    pattern = r'fixed:=pg_catalog\.replace\((definition|fixed),(' + expression + '),(' + expression + r')\);'
++    return [(source, sql_text_expression(old), sql_text_expression(new))
++            for source, old, new in re.findall(pattern, sql)]
++
++
++def text_contract(body, patch=PATCH):
+     """Modelo offline limitado aos hashes/replace e ordem dos guards da migration.
+ 
+     A suíte verifica a ligação ao SQL real; não interpreta nem prova o catálogo PG.
+     """
+-    sql = PATCH.read_text()
++    sql = patch.read_text()
+     hashes = dict(re.findall(r"(old|corrected)_hash constant text := '([a-f0-9]{64})'", sql))
+     value = hashlib.sha256(body.encode()).hexdigest()
+     if value not in hashes.values():
+         raise ValueError('definition_unknown')
+     if value == hashes['corrected']:
+         return body, 0
+-    fixed = body.replace(OLD, NEW)
++    fixed = body
++    operations = patch_operations(sql)
++    if not operations:
++        raise ValueError('patch operations missing')
++    for source, old, new in operations:
++        fixed = (body if source == 'definition' else fixed).replace(old, new)
+     if hashlib.sha256(fixed.encode()).hexdigest() != hashes['corrected']:
+         raise ValueError('postcondition_failed')
+     return fixed, 1
+@@ -76,9 +109,9 @@
+                          "p.prorettype='jsonb'::regtype", 'p.pronargdefaults=0'):
+             self.assertIn(metadata, sql)
+         # Actual replacement strings must correspond to the model, not just hashes.
+-        self.assertIn("'SELECT * INTO old FROM public.work_budget_resume_authorizations'||chr(10)", sql)
++        self.assertIn("'SELECT * INTO old FROM public.work_budget_resume_authorizations'||pg_catalog.chr(10)", sql)
+         self.assertIn("'   WHERE work_item_id=i.id OR (user_id=u AND request_id=request_id);'", sql)
+-        self.assertIn("'SELECT * INTO old FROM public.work_budget_resume_authorizations a'||chr(10)", sql)
++        self.assertIn("'SELECT * INTO old FROM public.work_budget_resume_authorizations a'||pg_catalog.chr(10)", sql)
+         self.assertIn("a.request_id=(p_authorization->>''requestId'')::uuid", sql)
+         self.assertEqual(sql.count('EXECUTE fixed;'), 1)
+ 
+@@ -92,22 +125,57 @@
+                       'i.proposal_version IS DISTINCT FROM p_expected_proposal_version'):
+             self.assertIn(guard, body)
+ 
+-    def test_248_still_duplicates_existing_guard_requires_review(self):
+-        sql = (MIGRATIONS / '20260905000002_require_current_budget_block_for_human_resume.sql').read_text()
++    def test_248_old_canonical_adds_only_guard(self):
++        corrected = source_body()
++        old = corrected.replace('; budget_decision jsonb;', ';').replace(GUARD, '')
++        self.assertEqual(text_contract(old, PATCH_248), (corrected, 1))
++        self.assertEqual(len(patch_operations(PATCH_248.read_text())), 2)
++        self.assertIn(NEW, old)
++
++    def test_248_corrected_from_246_is_noop_replay(self):
+         body = source_body()
+-        self.assertIn('budget_decision jsonb;', body)
+-        self.assertEqual(body.count('budget_decision:=private.autonomous_work_budget_decision'), 1)
+-        self.assertIn("fixed:=replace(fixed,", sql)
+-        self.assertIn('budget_decision:=private.autonomous_work_budget_decision', sql)
+-        # The INSERT needle is still present, so 248 inserts a second guard.
+-        self.assertIn('  INSERT INTO public.work_budget_resume_authorizations(id,user_id,work_item_id,request_id,proposal_version,blocked_event_id,budget_reason,authority)', body)
++        self.assertEqual(text_contract(body, PATCH_248), (body, 0))
++        self.assertEqual(body.count(GUARD), 1)
++        self.assertEqual(text_contract(text_contract(body)[0], PATCH_248), (body, 0))
++
++    def test_248_partial_duplicate_ambiguous_and_unknown_refused(self):
++        body = source_body()
++        for unknown in (body.replace(GUARD, ''), body.replace('; budget_decision jsonb;', ';'),
++                        body.replace(GUARD, GUARD + GUARD), body.replace(NEW, OLD),
++                        body.replace('reason text;', 'reason varchar;'), body + '-- unknown'):
++            with self.subTest(unknown=unknown[:70]), self.assertRaisesRegex(ValueError, 'definition_unknown'):
++                text_contract(unknown, PATCH_248)
++
++    def test_both_patches_preserve_signature_acl_and_fail_closed_order(self):
++        for path in (PATCH, PATCH_248):
++            sql = path.read_text()
++            with self.subTest(path=path.name):
++                self.assertLess(sql.index('body_hash NOT IN'), sql.index('THEN RETURN'))
++                self.assertLess(sql.index('THEN RETURN'), sql.index('EXECUTE fixed'))
++                for clause in ("p.proowner='postgres'::regrole", 'pg_catalog.aclexplode(',
++                               "pg_catalog.has_function_privilege('authenticated',p.oid,'EXECUTE')",
++                               "NOT pg_catalog.has_function_privilege('anon',p.oid,'EXECUTE')",
++                               'a.grantor<>p.proowner', 'a.is_grantable AND a.grantee<>p.proowner',
++                               'IS DISTINCT FROM corrected_hash',
++                               "'public.authorize_work_resume(uuid,integer,jsonb)'::regprocedure",
++                               'FROM pg_catalog.pg_proc'):
++                    self.assertIn(clause, sql)
++                self.assertNotRegex(sql, r'(?im)^\s*(GRANT|REVOKE|DROP|ALTER)\b')
++                self.assertEqual(sql.count('EXECUTE fixed;'), 1)
++
++    def test_actual_sql_patch_operations_match_the_intended_correction(self):
++        self.assertEqual(patch_operations(PATCH.read_text()), [('definition', OLD, NEW)])
++        operations = patch_operations(PATCH_248.read_text())
++        self.assertEqual(operations[0], ('definition', 'reason text; request_id uuid; active_attempt boolean;',
++                                       'reason text; request_id uuid; active_attempt boolean; budget_decision jsonb;'))
++        self.assertEqual(operations[1][2], GUARD + operations[1][1])
+ 
+ 
+ class BootstrapComposition(unittest.TestCase):
+     def test_missing_terminator_and_trailing_comment(self):
+         for source in (b'SELECT 1', b'SELECT 1 -- tail', b'SELECT 1; -- tail'):
+             with self.subTest(source=source):
+-                payload, hashes = compose(source, 'a'*16, 1, 'auth', 'one', 'postgres')
++                payload, hashes = compose(source, 'a'*16, 1, 'test', 'one', 'postgres')
+                 self.assertIn(b'\nRESET ROLE;\nINSERT INTO bootstrap_audit.steps', payload)
+                 self.assertEqual(hashes['payloadSha256'], hashlib.sha256(payload).hexdigest())
+                 self.assertEqual(hashes['sourceSha256'], hashlib.sha256(source).hexdigest())
+@@ -118,8 +186,11 @@
+     def test_lexical_unknown_and_transaction_control_refused(self):
+         for source in (b"SELECT 'open", b'DO $$ BEGIN', b'/* open', b'BEGIN; SELECT 1; COMMIT;',
+                        b'START TRANSACTION;', b'\\i file.sql', b'SET ROLE postgres;',
+-                       b'SET LOCAL ROLE postgres;', b'CREATE INDEX CONCURRENTLY x ON t(x);',
+-                       b'SELECT 1\x00', b"SELECT E'\\n';"):
++                       b'SET LOCAL ROLE postgres;', b'SET SESSION ROLE postgres;',
++                       b'SET SESSION AUTHORIZATION postgres;', b'RESET ALL;',
++                       b'SET standard_conforming_strings=off;', b'CREATE UNIQUE INDEX CONCURRENTLY x ON t(x);',
++                       b'CREATE DATABASE foreign;', b'ALTER SYSTEM SET work_mem=1;', b'CREATE INDEX CONCURRENTLY x ON t(x);',
++                       b'SELECT 1\x00', b"SELECT E'\\';"):
+             with self.subTest(source=source), self.assertRaises(ValueError):
+                 terminate_sql(source)
+ 
+@@ -127,6 +198,7 @@
+         source = b"DO $fn$ BEGIN RAISE NOTICE 'COMMIT'; END $fn$; /* outer /* inner */ end */"
+         self.assertEqual(terminate_sql(source), source + b'\n')
+         terminate_sql(b"SELECT 'BEGIN; -- ''quoted''', \"COMMIT\";")
++        terminate_sql(b"SELECT E'\\n', \"\\$user\";")
+ 
+     def test_all_repo_migrations_lexically_composable(self):
+         for path in sorted(MIGRATIONS.glob('*.sql')):
+@@ -134,7 +206,7 @@
+                 terminate_sql(path.read_bytes())
+ 
+     def test_resume_exact_prefix_only(self):
+-        plan = [compose(b'SELECT 1;', 'b'*16, n, 'anima', str(n), 'postgres')[1] for n in (1, 2)]
++        plan = [compose(b'SELECT 1;', 'b'*16, n, 'anima-migration', str(n), 'postgres')[1] for n in (1, 2)]
+         rows = [dict(runId='b'*16, **{k: v for k, v in e.items() if k != 'payloadSha256'}) for e in plan]
+         self.assertEqual(reconcile(plan, [], 'b'*16), 1)
+         self.assertEqual(reconcile(plan, rows[:1], 'b'*16), 2)
+@@ -155,6 +227,7 @@
+             entries = prepare(spec, out)
+             self.assertEqual(len(entries), 1)
+             self.assertIn('prepared', (out / 'plan.jsonl').read_text())
++            self.assertIn('plan_complete', (out / 'plan.jsonl').read_text())
+             with self.assertRaises(FileExistsError):
+                 prepare(spec, out)
+             source.write_bytes(b'SELECT 2;')
+@@ -168,5 +241,85 @@
+             self.assertFalse((root / 'refused').exists())
+ 
+ 
++class RecoveredBootstrap(unittest.TestCase):
++    def test_272_exact_sources_order_roles_and_only_two_intentional_changes(self):
++        entries = verify()
++        self.assertEqual(len(entries), 272)
++        self.assertEqual(sum(e['phase'] == 'auth-v2.189.0' for e in entries), 69)
++        changed = [e['order'] for e in entries if e['sourceSha256'] != e['historicalSourceSha256']]
++        self.assertEqual(changed, [247, 248])
++
++    def test_source_and_order_drift_fail_closed(self):
++        doc = json.loads((BOOTSTRAP/'manifest.json').read_text())
++        with tempfile.TemporaryDirectory() as temporary:
++            path = Path(temporary)/'manifest.json'
++            for field, value in [('sourceSha256', 'a'*64), ('order', 2), ('role', 'supabase_admin')]:
++                candidate = json.loads(json.dumps(doc))
++                candidate['entries'][0][field] = value
++                path.write_text(json.dumps(candidate))
++                with self.subTest(field=field), self.assertRaises(ValueError):
++                    verify(path)
++
++    def test_original_prerequisites_exact_historical_hashes(self):
++        expected = {'roles-initial-prerequisite.sql': '9c680c9fbc0511b5f7160a495613bfa92b89de5cb8f7a14c276a7a78ffe062b3',
++                    'auth-transport-and-required-extensions.sql': 'aab8bcc424732115761beba90ae58be69e1ee03faaccf41c585f3a4cb44dd54e',
++                    'revoke-temporary-role-bridges.sql': 'b948c82f118665a3659515fbbc1f31014590d25eb7e1f03d42129d794ca6f4ce'}
++        for name, digest in expected.items():
++            self.assertEqual(hashlib.sha256((BOOTSTRAP/'sources/prerequisites'/name).read_bytes()).hexdigest(), digest)
++
++    def test_official_auth_pinned_commit_and_license(self):
++        provenance = json.loads((BOOTSTRAP/'sources/auth-v2.189.0/provenance.json').read_text())
++        self.assertEqual(provenance['commit'], '4fa66ba71d8c55b5c95cd5635766ed8bbae6d96a')
++        self.assertEqual(provenance['archiveSha256'], '5a6bcb0367aa3adf57e6fced02e43f94997b2828916f5ff133a81ee9861410a1')
++        self.assertEqual(provenance['files'], 69)
++        self.assertIn('MIT License', (BOOTSTRAP/'sources/auth-v2.189.0/LICENSE').read_text())
++
++    def test_render_up_only_no_marker_matching_inside_quotes(self):
++        source = b"-- migrate:up\nSELECT 1;\n-- migrate:down\nDROP TABLE t;"
++        self.assertEqual(render_source(source, 'image-init'), b"-- migrate:up\nSELECT 1;\n")
++        quoted = b"DO $$ BEGIN RAISE NOTICE '-- migrate:down'; END $$;"
++        self.assertEqual(render_source(quoted, 'image-init'), quoted)
++        for unknown in (b"-- migrate:down\nSELECT 1;\n-- migrate:up\nSELECT 2;", b"-- migrate:up\n-- migrate:up\nSELECT 1;"):
++            with self.assertRaises(ValueError):
++                render_source(unknown, 'image-init')
++
++    def test_namespace_is_exact_and_unknown_template_refused(self):
++        source = b'SELECT 1 FROM {{ index .Options "Namespace" }}.users;'
++        self.assertEqual(render_source(source, 'auth-v2.189.0'), b'SELECT 1 FROM auth.users;')
++        for phase in ('image-init', 'anima-migration'):
++            with self.assertRaisesRegex(ValueError, 'template'):
++                render_source(source, phase)
++        with self.assertRaisesRegex(ValueError, 'template'):
++            render_source(b'SELECT {{ unknown }};', 'auth-v2.189.0')
++
++    def test_real_95_has_terminator_and_both_ledgers_before_commit(self):
++        payload = (BOOTSTRAP/'prepared/095.sql').read_bytes()
++        self.assertIn(b'\n;\nINSERT INTO auth.schema_migrations', payload)
++        auth = payload.index(b'INSERT INTO auth.schema_migrations')
++        audit = payload.index(b'INSERT INTO bootstrap_audit.steps')
++        self.assertLess(auth, audit)
++        self.assertLess(audit, payload.index(b'COMMIT;'))
++        self.assertNotIn(b'ON CONFLICT', payload)
++        self.assertIn(b'SET LOCAL standard_conforming_strings=on;', payload)
++
++    def test_all_272_prepared_payloads_match_current_composer(self):
++        spec = json.loads((BOOTSTRAP/'spec.json').read_text())
++        for order, step in enumerate(spec['steps'], 1):
++            path = MIGRATIONS.parents[1]/step['source']
++            with self.subTest(order=order):
++                payload, _ = compose(path.read_bytes(), spec['runId'], order, step['phase'], step['name'], step['role'])
++                self.assertEqual(payload, (BOOTSTRAP/'prepared'/f"{order:03}.sql").read_bytes())
++        self.assertEqual(len(verify_prepared()), 64)
++
++    def test_ledger_bootstrap_has_no_dependency_on_uncreated_roles(self):
++        sql = (MIGRATIONS.parent/'tests/bootstrap_ledger.sql').read_text()
++        self.assertIn('CREATE SCHEMA bootstrap_audit AUTHORIZATION postgres;', sql)
++        self.assertIn('REVOKE ALL ON SCHEMA bootstrap_audit FROM PUBLIC;', sql)
++        self.assertIn('rendered_sha256 text NOT NULL', sql)
++        self.assertIn('PRIMARY KEY (run_id,step_order)', sql)
++        self.assertNotRegex(sql, r'FROM PUBLIC,')
++        self.assertNotIn('ON CONFLICT', sql)
++
++
+ if __name__ == '__main__':
+     unittest.main()
+--- /dev/null
++++ b/supabase/bootstrap/verify_sources.py
+@@ -0,0 +1,106 @@
++"""Verifica somente arquivos/hashes/ordem do bootstrap. Sem rede, SQL ou Docker."""
++import hashlib
++import json
++from pathlib import Path
++import re
++
++ROOT = Path(__file__).resolve().parents[2]
++BOOTSTRAP = Path(__file__).resolve().parent
++MANIFEST = BOOTSTRAP / 'manifest.json'
++PHASE_ROLES = {'image-init': 'postgres', 'image-migration': 'supabase_admin',
++               'auth-v2.189.0': 'supabase_auth_admin', 'anima-migration': 'postgres'}
++PREREQUISITES = {1: ('roles-initial-prerequisite', 'postgres'),
++                 48: ('auth-transport-and-required-extensions', 'supabase_admin'),
++                 118: ('revoke-temporary-role-bridges', 'supabase_admin')}
++PATCHES = {'20260905000001_fix_budget_resume_request_correlation.sql',
++           '20260905000002_require_current_budget_block_for_human_resume.sql'}
++
++
++def sha256(data):
++    return hashlib.sha256(data).hexdigest()
++
++
++def verify(manifest_path=MANIFEST):
++    document = json.loads(Path(manifest_path).read_text())
++    history_path = ROOT / 'docs/registros/2026-10-08-bootstrap-247-inventory.json'
++    if sha256(history_path.read_bytes()) != document['historicalInventorySha256']:
++        raise ValueError('historical inventory drift')
++    for name, field in [('supabase/tests/bootstrap_plan.py', 'composerSha256'),
++                        ('supabase/tests/bootstrap_ledger.sql', 'ledgerSha256')]:
++        if sha256((ROOT/name).read_bytes()) != document[field]:
++            raise ValueError('prepared tool/ledger drift')
++    historical = json.loads(history_path.read_text())['entries']
++    entries = document['entries']
++    if len(entries) != 272 or [e['order'] for e in entries] != list(range(1, 273)):
++        raise ValueError('272 consecutive orders required')
++    if len({(e['phase'], e['name']) for e in entries}) != 272:
++        raise ValueError('duplicate identity')
++    phases = (['bootstrap'] + ['image-init']*5 + ['image-migration']*41 + ['bootstrap'] +
++              ['auth-v2.189.0']*69 + ['bootstrap'] + ['anima-migration']*154)
++    if [e['phase'] for e in entries] != phases:
++        raise ValueError('phase boundaries drift')
++    for entry, old in zip(entries, historical):
++        if any(entry[k] != old[k] for k in ('order', 'name', 'phase', 'role')):
++            raise ValueError('historical order/role identity drift')
++        if entry['historicalSourceSha256'] != old['sourceSha256']:
++            raise ValueError('historical hash drift')
++        if entry['phase'] == 'bootstrap':
++            if (entry['name'], entry['role']) != PREREQUISITES[entry['order']]:
++                raise ValueError('prerequisite order/role drift')
++        elif entry['role'] != PHASE_ROLES[entry['phase']]:
++            raise ValueError('phase role drift')
++        if not re.fullmatch('[a-f0-9]{64}', entry['sourceSha256']):
++            raise ValueError('source hash invalid')
++        path = ROOT / entry['source']
++        if not path.resolve().is_relative_to((BOOTSTRAP / 'sources').resolve()) or path.is_symlink():
++            raise ValueError('source must be frozen inside bootstrap')
++        if sha256(path.read_bytes()) != entry['sourceSha256']:
++            raise ValueError('source bytes/hash drift: ' + entry['name'])
++        if entry['sourceSha256'] != old['sourceSha256'] and entry['name'] not in PATCHES:
++            raise ValueError('unreviewed historical source difference')
++        if entry['phase'] == 'anima-migration' and sha256((ROOT/'supabase/migrations'/entry['name']).read_bytes()) != entry['sourceSha256']:
++            raise ValueError('local migration drift: ' + entry['name'])
++    for phase in PHASE_ROLES:
++        names = [e['name'] for e in entries if e['phase'] == phase]
++        if names != sorted(names):
++            raise ValueError('phase ordering not lexical')
++    provenance = json.loads((BOOTSTRAP/'sources/auth-v2.189.0/provenance.json').read_text())
++    if provenance['commit'] != document['authCommit'] or provenance['tag'] != 'v2.189.0' or provenance['files'] != 69:
++        raise ValueError('official auth provenance drift')
++    return entries
++
++
++def specification(run_id):
++    return dict(runId=run_id, steps=[{k: e[k] for k in ('source', 'phase', 'name', 'role', 'sourceSha256')} for e in verify()])
++
++
++def verify_prepared():
++    entries = verify()
++    spec = json.loads((BOOTSTRAP/'spec.json').read_text())
++    if spec != specification(spec['runId']):
++        raise ValueError('spec does not match frozen manifest')
++    rows = [json.loads(line) for line in (BOOTSTRAP/'prepared/plan.jsonl').read_text().splitlines()]
++    if len(rows) != 273 or any(r['status'] != 'prepared' or r['runId'] != spec['runId'] for r in rows[:-1]):
++        raise ValueError('prepared plan incomplete')
++    projected = []
++    for entry, row in zip(entries, rows[:-1]):
++        for key in ('order', 'phase', 'name', 'role', 'sourceSha256'):
++            if row[key] != entry[key]:
++                raise ValueError('prepared plan order/hash drift')
++        path = BOOTSTRAP/'prepared'/f"{entry['order']:03}.sql"
++        if sha256(path.read_bytes()) != row['payloadSha256']:
++            raise ValueError('payload bytes/hash drift')
++        projected.append({k: v for k, v in row.items() if k not in {'runId', 'status'}})
++    expected = dict(runId=spec['runId'], status='plan_complete', count=272,
++                    planSha256=sha256(json.dumps(projected, sort_keys=True).encode()))
++    if rows[-1] != expected:
++        raise ValueError('completeness marker mismatch')
++    return rows[-1]['planSha256']
++
++
++if __name__ == '__main__':
++    entries = verify()
++    plan_hash = verify_prepared()
++    print('PASS 272/272 source hashes and historical order; only 247/248 differ intentionally.')
++    print('Payload plan SHA-256:', plan_hash)
++    print('Static proof only; no PostgreSQL, Docker, ACL or isolation observed.')

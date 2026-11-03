@@ -1,0 +1,15 @@
+# Codex WSL no coder governado
+
+2026-10-10. Implementação autorizada no adapter existente, sem execução de self-dev. Git Windows dev, HEAD inicial/final 6bc4aadef9414d655600c2ea37c6be436b3628c8, índice vazio, 46 worktrees; nenhum commit. WIPs anteriores preservados.
+
+CodexCliConfig ganhou seleção WSL opcional por ANIMA_CODEX_CLI_TRANSPORT; reaproveita investigation-wsl-transport para validação e tradução. CodexCliCoderBackend passa wsl.exe/distro/user, env sem OPENAI_API_KEY/CODEX_API_KEY e PATH do NVM, --cd traduzido e argumentos exec originais. Ambiente Windows continua allowlisted (WSLENV não repassado); credenciais Linux vêm da assinatura já autenticada. ai-memory+WSL recusado. Execução nativa padrão preservada. Readiness prioriza seleção explícita do coder Linux e preserva o comportamento anterior na ausência da flag.
+
+Arquivos de código: codex-cli-coder.ts/.test.ts e executor-readiness.ts/.test.ts. Sem alterações em runProcess, worktree, migrations, propostas, banco ou gates. Configuração descrita no runbook codex-wsl, não ativada persistentemente.
+
+Cinco suítes focais: 105 testes PASS (coder, worktree, executor-selection, readiness e transporte existente). Cobrem paths com espaços, UNC/traversal, args, remoção de chaves/WSLENV, sinal/deadline, abort anterior ao spawn, timeout/cancelamento e retorno nativo. Teste adicional em voo encaminha AbortSignal ao runner existente. Typecheck web permanece bloqueado pelos scripts históricos scripts/_session; nenhum erro fora deles após correção focal. Nenhum build amplo necessário para transporte sem UI.
+
+Prova única isolada pelo CodexCliCoderBackend real: Windows wsl.exe → Ubuntu-24.04/geanteco → /home/geanteco/.nvm/versions/node/v22.23.3/bin/codex, versão 0.162.0, login ChatGPT. Ferramenta Bash executou cat e sha256sum com exit 0/status completed; SHA esperado/observado 822a4bf3a97205510082daf9b6a68f7c579a75b7f7d94f2950d2f1d6789f06f4. Processo CLI exit 0, 10737ms, sem timeout/cancelamento ou erro de sandbox. Arquivo intacto. Limpeza inicial pelo Node Windows retornou EPERM; remoção exclusivamente do próprio diretório pelo Linux terminou exit 0 e ausência comprovada. Não houve segunda prova. [Evidências](2026-10-10-codex-wsl-coder-evidencias/) preservam stdout/stderr e typecheck com hashes.
+
+Limite: cancelamento reutiliza runProcess/taskkill da árvore Windows e foi testado por simulação no coder; a prova real foi somente leitura, não demonstrou teardown Linux de descendentes em todas as situações. Não declarar segurança global do cancelamento cross-OS. Teste real adicional de cancelamento exige autorização própria antes de considerar esse aspecto comprovado.
+
+Nenhum Host, attempt, fila, INV-11, APIs pagas, integração, staging/commit/push/reset/clean/prune. Nenhuma chamada ao banco ou work items; recovery OpenAI intocado. Próximo passo: revisão humana do delta e limites de cancelamento, depois recuperação governada do item failed (sem repetir ou aprovar automaticamente) e novo preflight antes de autorizar uma única execução.

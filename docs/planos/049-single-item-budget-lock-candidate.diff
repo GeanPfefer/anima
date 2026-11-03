@@ -1,0 +1,412 @@
+--- effective-claim-item-baseline.sql
++++ 20261009000001_budget_item_lock_order_candidate.sql
+@@ -9,28 +9,60 @@
+ SET search_path = pg_catalog
+ AS $$
+ DECLARE
+   v_user_id uuid := auth.uid();
+   v_claim public.work_claims;
+   v_discovered_item uuid;
++  v_preview public.work_claims;
++  v_item public.work_items;
++  v_started public.work_events;
++  v_replay_observed boolean;
++  v_target text;
+ BEGIN
+   IF v_user_id IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN
+     RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
+   END IF;
+   IF claim_id IS NULL OR attempt_id IS NULL OR executor_id IS NULL OR length(btrim(executor_id))=0 THEN
+     RAISE EXCEPTION 'invalid claimed attempt input' USING ERRCODE='22023';
+   END IF;
+ 
+   -- Descoberta sem lock: serve somente para localizar o item próprio.
+-  SELECT c.work_item_id INTO v_discovered_item FROM public.work_claims c
++  SELECT * INTO v_preview FROM public.work_claims c
+   WHERE c.id=claim_id AND c.user_id=v_user_id;
+   IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
++  v_discovered_item:=v_preview.work_item_id;
++
++  PERFORM 1 FROM public.work_items i
++  WHERE i.id=v_discovered_item AND i.user_id=v_user_id;
++  IF NOT FOUND THEN RAISE EXCEPTION 'claim item not found' USING ERRCODE='P0002'; END IF;
++
++  -- Recusas sem admissão: não tomar orçamento para claim já incompatível.
++  IF v_preview.attempt_id IS NOT NULL THEN
++    IF v_preview.attempt_id <> attempt_id THEN
++      RAISE EXCEPTION 'claim already started another attempt' USING ERRCODE='55000';
++    END IF;
++  ELSE
++    IF v_preview.released_at IS NOT NULL THEN
++      RAISE EXCEPTION 'claim already released' USING ERRCODE='55000';
++    END IF;
++    IF now() >= v_preview.expires_at THEN
++      RAISE EXCEPTION 'claim expired' USING ERRCODE='55000';
++    END IF;
++  END IF;
++
++  SELECT EXISTS (SELECT 1 FROM public.work_events e
++    WHERE e.work_item_id=v_discovered_item AND e.event_type='execution_started'
++      AND e.payload->'data'->>'attempt_id'=attempt_id::text) INTO v_replay_observed;
++  -- Somente possível admissão entra em B antes de I/C/T. Replay não espera B.
++  IF NOT v_replay_observed THEN
++    PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
++  END IF;
+ 
+   -- Ordem localizada: item próprio antes do claim, inclusive no replay.
+-  PERFORM 1 FROM public.work_items i
++  SELECT * INTO v_item FROM public.work_items i
+   WHERE i.id=v_discovered_item AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'claim item not found' USING ERRCODE='P0002'; END IF;
+ 
+   SELECT * INTO v_claim FROM public.work_claims c
+   WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
+@@ -44,12 +76,21 @@
+   -- Revalidar autoridade após a espera, sem acrescentar locks de allowlist.
+   IF auth.uid() IS DISTINCT FROM v_user_id THEN
+     RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
+   END IF;
+   IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN
+     RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
++
++  -- Reler após I/C. Um replay desaparecido nunca vira admissão com B tardio.
++  SELECT * INTO v_started FROM public.work_events e
++  WHERE e.work_item_id=v_item.id AND e.event_type='execution_started'
++    AND e.payload->'data'->>'attempt_id'=attempt_id::text
++  ORDER BY e.seq DESC LIMIT 1;
++  IF v_replay_observed AND NOT FOUND THEN
++    RAISE EXCEPTION 'attempt correlation changed while acquiring locks' USING ERRCODE='55000';
+   END IF;
+ 
+   IF v_claim.attempt_id IS NOT NULL THEN
+     IF v_claim.attempt_id <> attempt_id THEN
+       RAISE EXCEPTION 'claim already started another attempt' USING ERRCODE='55000';
+     END IF;
+@@ -63,15 +104,55 @@
+     END IF;
+     -- Qualificado pelo nome da função: `attempt_id` também é coluna.
+     UPDATE public.work_claims c SET attempt_id=start_claimed_work_attempt.attempt_id
+     WHERE c.id=v_claim.id RETURNING c.* INTO v_claim;
+   END IF;
+ 
+-  RETURN private.begin_work_attempt(
++  -- Mesma regra de replay de private.begin_work_attempt; sem T/B nem novo evento.
++  IF v_started.id IS NOT NULL THEN
++    IF v_started.proposal_version = v_claim.approved_proposal_version
++       AND v_started.payload->'data'->>'executor_id' = btrim(executor_id)
++       AND v_started.payload->'data'->>'work_item_id' = v_item.id::text THEN RETURN v_item; END IF;
++    RAISE EXCEPTION 'attempt correlation conflict' USING ERRCODE='55000';
++  END IF;
++
++  IF v_item.state <> 'approved' OR v_item.proposal_version <> v_claim.approved_proposal_version THEN
++    RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000';
++  END IF;
++  IF jsonb_typeof(v_item.intent->'execution_spec') IS DISTINCT FROM 'object' THEN
++    RAISE EXCEPTION 'execution specification missing' USING ERRCODE='22023';
++  END IF;
++
++
++  v_target := btrim(v_item.intent #>> '{execution_spec,target,reference}');
++  IF v_target IS NULL OR length(v_target) = 0
++     OR jsonb_typeof(v_item.intent #> '{execution_spec,target,reference}') IS DISTINCT FROM 'string' THEN
++    RAISE EXCEPTION 'execution target missing' USING ERRCODE='22023';
++  END IF;
++
++  PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_user_id::text||':'||v_target, 0));
++
++  -- T já adquirido: revalidar autoridade após essa espera antes de delegar.
++  IF auth.uid() IS DISTINCT FROM v_user_id THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
++
++  v_item:=private.begin_work_attempt(
+     v_user_id, v_claim.work_item_id, v_claim.approved_proposal_version,
+     attempt_id, executor_id, 'supervised_execution', v_claim.id);
++  -- Inclui esperas implícitas do INSERT/UPDATE: revogação aborta tudo.
++  IF auth.uid() IS DISTINCT FROM v_user_id THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
++  RETURN v_item;
+ END;
+ $$;
+ 
+ CREATE OR REPLACE FUNCTION public.begin_resumed_work_attempt(
+   work_item_id uuid, expected_proposal_version integer,
+   source_attempt_id uuid, checkpoint_event_seq bigint, abandonment_event_seq bigint,
+@@ -80,33 +161,54 @@
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog
+ AS $$
+ DECLARE
+   v_uid uuid:=auth.uid(); v_item public.work_items; v_cp public.work_events; v_ab public.work_events;
+   v_existing public.work_events; v_target text; v_now timestamptz:=now(); v_claim public.work_claims;
+   v_signal_sequence integer;
++  v_replay_observed boolean;
+ BEGIN
+   IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid)
+     THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
+   IF claim_id IS NULL OR attempt_id IS NULL OR source_attempt_id IS NULL
+      OR checkpoint_event_seq IS NULL OR abandonment_event_seq IS NULL
+      OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid resumption request' USING ERRCODE='22023'; END IF;
+ 
++  -- Pré-leitura própria sem locks: P0002 e replay não precisam de B.
++  PERFORM 1 FROM public.work_items i WHERE i.id=begin_resumed_work_attempt.work_item_id AND i.user_id=v_uid;
++  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
++  SELECT EXISTS (SELECT 1 FROM public.work_events e
++    WHERE e.work_item_id=begin_resumed_work_attempt.work_item_id AND e.event_type='execution_started'
++      AND e.payload->'data'->>'attempt_id'=attempt_id::text) INTO v_replay_observed;
++  IF NOT v_replay_observed THEN
++    PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
++  END IF;
++
+   SELECT * INTO v_item FROM public.work_items i
+    WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
++
++  IF auth.uid() IS DISTINCT FROM v_uid THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
+ 
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id
+     AND e.event_type='execution_started' AND e.payload->'data'->>'attempt_id'=attempt_id::text;
+   IF FOUND THEN
+     IF v_existing.payload->'data'->>'reason'='resumed_execution'
+        AND v_existing.payload->'data'->>'resumed_from_attempt_id'=source_attempt_id::text
+        AND (v_existing.payload->'data'->>'resumed_from_checkpoint_event_seq')::bigint=checkpoint_event_seq
+       THEN RETURN v_item; END IF;
+     RAISE EXCEPTION 'attempt correlation conflict' USING ERRCODE='55000';
++  END IF;
++  IF v_replay_observed THEN
++    RAISE EXCEPTION 'attempt correlation changed while acquiring locks' USING ERRCODE='55000';
+   END IF;
+   IF EXISTS (SELECT 1 FROM public.work_claims c WHERE c.id=claim_id)
+     THEN RAISE EXCEPTION 'claim identity conflict' USING ERRCODE='55000'; END IF;
+   IF EXISTS (
+     SELECT 1 FROM public.work_events e
+      WHERE e.payload->'data'->>'attempt_id'=attempt_id::text
+@@ -135,12 +237,19 @@
+     AND (newer.payload->'data'->>'signal_sequence')::integer>v_signal_sequence)
+     THEN RAISE EXCEPTION 'checkpoint is obsolete' USING ERRCODE='55000'; END IF;
+ 
+   v_target:=btrim(v_item.intent#>>'{execution_spec,target,reference}');
+   IF v_target IS NULL OR length(v_target)=0 THEN RAISE EXCEPTION 'execution target missing' USING ERRCODE='22023'; END IF;
+   PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_uid::text||':'||v_target,0));
++  -- Autoridade relida depois da espera por T.
++  IF auth.uid() IS DISTINCT FROM v_uid THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
+   IF EXISTS (SELECT 1 FROM public.work_claims c WHERE c.user_id=v_uid AND c.released_at IS NULL
+     AND c.expires_at>v_now AND (c.work_item_id=v_item.id OR c.target_reference=v_target))
+     THEN RAISE EXCEPTION 'work target is held by an active claim' USING ERRCODE='55000'; END IF;
+   IF EXISTS (SELECT 1 FROM public.work_items i WHERE i.user_id=v_uid AND i.id<>v_item.id
+     AND i.state='in_progress' AND btrim(i.intent#>>'{execution_spec,target,reference}')=v_target)
+     THEN RAISE EXCEPTION 'work target is busy with a running attempt' USING ERRCODE='55000'; END IF;
+@@ -160,38 +269,66 @@
+         'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'abandonment_event_seq',abandonment_event_seq))),
+     (v_item.id,'execution_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',
+       jsonb_build_object('work_item_id',v_item.id,'attempt_id',attempt_id,'approved_proposal_version',expected_proposal_version,
+         'origin','anima','executor_id',btrim(executor_id),'claim_id',claim_id,'reason','resumed_execution',
+         'resumed_from_attempt_id',source_attempt_id,'resumed_from_checkpoint_sequence',v_signal_sequence,
+         'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'abandonment_event_seq',abandonment_event_seq)));
++  -- Revogação durante locks implícitos aborta todos os efeitos.
++  IF auth.uid() IS DISTINCT FROM v_uid THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
+   RETURN v_item;
+ END $$;
+ 
+ CREATE OR REPLACE FUNCTION public.begin_human_decision_resumed_attempt(
+   work_item_id uuid,expected_proposal_version integer,input_requested_event_id uuid,input_provided_event_id uuid,
+   claim_id uuid,attempt_id uuid,owner_instance_id text,lease_seconds integer,executor_id text)
+ RETURNS public.work_items LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog
+ AS $$
+ DECLARE
+   v_uid uuid:=auth.uid(); v_now timestamptz:=now(); v_item public.work_items;
+   v_request public.work_events; v_answer public.work_events; v_existing public.work_events;
+   v_cp public.work_events; v_claim public.work_claims; v_target text; v_source_attempt uuid; v_cp_seq integer;
++  v_replay_observed boolean;
+ BEGIN
+   IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid)
+     THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
+   IF input_requested_event_id IS NULL OR input_provided_event_id IS NULL OR claim_id IS NULL OR attempt_id IS NULL
+     OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid decision resumption request' USING ERRCODE='22023'; END IF;
++  -- Pré-leitura própria sem locks: P0002 e replay não precisam de B.
++  PERFORM 1 FROM public.work_items i WHERE i.id=begin_human_decision_resumed_attempt.work_item_id AND i.user_id=v_uid;
++  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
++  SELECT EXISTS (SELECT 1 FROM public.work_events e
++    WHERE e.work_item_id=begin_human_decision_resumed_attempt.work_item_id AND e.event_type='execution_started'
++      AND e.payload->'data'->>'attempt_id'=attempt_id::text) INTO v_replay_observed;
++  IF NOT v_replay_observed THEN
++    PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
++  END IF;
++
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
++  IF auth.uid() IS DISTINCT FROM v_uid THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
++
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id AND e.event_type='execution_started'
+     AND e.payload->'data'->>'attempt_id'=attempt_id::text;
+   IF FOUND THEN
+     IF v_existing.payload->'data'->>'resumed_from_input_provided_event_id'=input_provided_event_id::text THEN RETURN v_item; END IF;
+     RAISE EXCEPTION 'attempt correlation conflict' USING ERRCODE='55000';
++  END IF;
++  IF v_replay_observed THEN
++    RAISE EXCEPTION 'attempt correlation changed while acquiring locks' USING ERRCODE='55000';
+   END IF;
+   IF v_item.state<>'approved' OR v_item.proposal_version<>expected_proposal_version
+     THEN RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000'; END IF;
+   SELECT * INTO v_answer FROM public.work_events e WHERE e.id=input_provided_event_id AND e.work_item_id=v_item.id
+     AND e.event_type='input_provided' AND e.proposal_version=expected_proposal_version
+     AND e.payload->'data'->>'input_requested_event_id'=input_requested_event_id::text
+@@ -214,12 +351,19 @@
+   IF EXISTS(SELECT 1 FROM public.work_claims c WHERE c.id=claim_id)
+     OR EXISTS(SELECT 1 FROM public.work_events e WHERE e.payload->'data'->>'attempt_id'=attempt_id::text
+       AND e.event_type NOT IN ('work_routing_adjusted','work_routing_decided'))
+     THEN RAISE EXCEPTION 'resumption identity reused' USING ERRCODE='55000'; END IF;
+   v_target:=btrim(v_item.intent#>>'{execution_spec,target,reference}');
+   PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_uid::text||':'||v_target,0));
++  -- Autoridade relida depois da espera por T.
++  IF auth.uid() IS DISTINCT FROM v_uid THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
+   IF EXISTS(SELECT 1 FROM public.work_claims c WHERE c.user_id=v_uid AND c.released_at IS NULL
+     AND c.expires_at>v_now AND (c.work_item_id=v_item.id OR c.target_reference=v_target))
+     THEN RAISE EXCEPTION 'work target is held by an active claim' USING ERRCODE='55000'; END IF;
+   INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,owner_instance_id,
+     acquired_at,expires_at,attempt_id,target_reference)
+   VALUES(claim_id,v_item.id,v_uid,expected_proposal_version,btrim(owner_instance_id),v_now,
+@@ -237,41 +381,69 @@
+     (v_item.id,'execution_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',
+       jsonb_build_object('work_item_id',v_item.id,'attempt_id',attempt_id,'approved_proposal_version',expected_proposal_version,
+         'origin','anima','executor_id',btrim(executor_id),'claim_id',claim_id,'reason','human_decision_resumed',
+         'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,
+         'resumed_from_checkpoint_event_seq',v_cp.seq,'resumed_from_input_requested_event_id',v_request.id,
+         'resumed_from_input_provided_event_id',v_answer.id)));
++  -- Revogação durante locks implícitos aborta todos os efeitos.
++  IF auth.uid() IS DISTINCT FROM v_uid THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
+   RETURN v_item;
+ END $$;
+ 
+ CREATE OR REPLACE FUNCTION public.begin_budget_interruption_resumed_attempt(
+   work_item_id uuid, expected_proposal_version integer, interruption_event_seq bigint,
+   checkpoint_event_seq bigint, claim_id uuid, attempt_id uuid, owner_instance_id text,
+   lease_seconds integer, executor_id text)
+ RETURNS public.work_items LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+ DECLARE
+   v_uid uuid:=auth.uid(); v_now timestamptz:=now(); v_item public.work_items;
+   v_block public.work_events; v_existing public.work_events; v_cp public.work_events;
+   v_claim public.work_claims; v_target text; v_source_attempt uuid; v_cp_seq integer;
++  v_replay_observed boolean;
+ BEGIN
+   IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
+     RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
+   END IF;
+   IF interruption_event_seq IS NULL OR checkpoint_event_seq IS NULL OR claim_id IS NULL OR attempt_id IS NULL
+     OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid budget resumption request' USING ERRCODE='22023'; END IF;
+ 
++  -- Pré-leitura própria sem locks: P0002 e replay não precisam de B.
++  PERFORM 1 FROM public.work_items i WHERE i.id=begin_budget_interruption_resumed_attempt.work_item_id AND i.user_id=v_uid;
++  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
++  SELECT EXISTS (SELECT 1 FROM public.work_events e
++    WHERE e.work_item_id=begin_budget_interruption_resumed_attempt.work_item_id AND e.event_type='execution_started'
++      AND e.payload->'data'->>'attempt_id'=attempt_id::text) INTO v_replay_observed;
++  IF NOT v_replay_observed THEN
++    PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
++  END IF;
++
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
++  IF auth.uid() IS DISTINCT FROM v_uid THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
++
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id
+     AND e.event_type='execution_started' AND e.payload->'data'->>'attempt_id'=attempt_id::text;
+   IF FOUND THEN
+     IF (v_existing.payload->'data'->>'resumed_from_interruption_event_seq')::bigint=interruption_event_seq
+       THEN RETURN v_item; END IF;
+     RAISE EXCEPTION 'attempt correlation conflict' USING ERRCODE='55000';
++  END IF;
++  IF v_replay_observed THEN
++    RAISE EXCEPTION 'attempt correlation changed while acquiring locks' USING ERRCODE='55000';
+   END IF;
+   IF v_item.state<>'approved' OR v_item.proposal_version<>expected_proposal_version
+     THEN RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000'; END IF;
+ 
+   SELECT * INTO v_block FROM public.work_events e WHERE e.seq=interruption_event_seq
+     AND e.work_item_id=v_item.id AND e.event_type='work_blocked'
+@@ -302,12 +474,19 @@
+       AND e.event_type NOT IN ('work_routing_adjusted','work_routing_decided'))
+     THEN RAISE EXCEPTION 'resumption identity reused' USING ERRCODE='55000'; END IF;
+ 
+   v_target:=btrim(v_item.intent#>>'{execution_spec,target,reference}');
+   IF v_target IS NULL OR length(v_target)=0 THEN RAISE EXCEPTION 'execution target missing' USING ERRCODE='22023'; END IF;
+   PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_uid::text||':'||v_target,0));
++  -- Autoridade relida depois da espera por T.
++  IF auth.uid() IS DISTINCT FROM v_uid THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
+   IF EXISTS(SELECT 1 FROM public.work_claims c WHERE c.user_id=v_uid AND c.released_at IS NULL
+     AND c.expires_at>v_now AND (c.work_item_id=v_item.id OR c.target_reference=v_target))
+     THEN RAISE EXCEPTION 'work target is held by an active claim' USING ERRCODE='55000'; END IF;
+   IF EXISTS(SELECT 1 FROM public.work_items i WHERE i.user_id=v_uid AND i.id<>v_item.id
+     AND i.state='in_progress' AND btrim(i.intent#>>'{execution_spec,target,reference}')=v_target)
+     THEN RAISE EXCEPTION 'work target is busy with a running attempt' USING ERRCODE='55000'; END IF;
+@@ -329,8 +508,15 @@
+         'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'resumed_from_interruption_event_seq',interruption_event_seq))),
+     (v_item.id,'execution_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',
+       jsonb_build_object('work_item_id',v_item.id,'attempt_id',attempt_id,'approved_proposal_version',expected_proposal_version,
+         'origin','anima','executor_id',btrim(executor_id),'claim_id',claim_id,'reason','budget_resumed',
+         'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,
+         'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'resumed_from_interruption_event_seq',interruption_event_seq)));
++  -- Revogação durante locks implícitos aborta todos os efeitos.
++  IF auth.uid() IS DISTINCT FROM v_uid THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
+   RETURN v_item;
+ END; $$;

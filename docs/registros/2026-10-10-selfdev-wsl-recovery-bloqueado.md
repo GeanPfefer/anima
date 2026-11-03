@@ -1,0 +1,9 @@
+# Recovery self-dev WSL — bloqueio governado
+
+2026-10-10. Autorização limitada a preparar sucessor de ab9cae0f-55f0-44ec-a648-ebf81a025ef2 mantendo objetivo, três arquivos, checkpoint, limites e backend. Git Windows dev, HEAD 6bc4aadef9414d655600c2ea37c6be436b3628c8, índice vazio, 46worktrees preservadas.
+
+ReadWorkRecoveryAssessment real: failed v2, attempt de2095d6-698e-4655-9208-c326399e01c3, failureEvent74f455e7-df4b-4cbb-bc3d-78366ca593db, consumo1/3, decision unknown/human_required/failure_not_classified. ValidateRecoverySuccessor com intent/proposal exatamente preservados retornou valid=false: decomposition_not_recommended e scope_not_strictly_smaller. Esse mecanismo só aceita decomposição recomendada com escopo reduzido; não é recuperação geral de infraestrutura. A recomendação anterior foi incompleta. Não forjar assessment, retryable ou estado; não chamar diretamente a RPC para contornar validação.
+
+Nenhum successor criado; nenhuma aprovação/classificação/attempt/Host/RPC de mutação. Claims ativos=[] e itens in_progress=[]. Recovery OpenAI5895b59c-0568-483a-9731-2abd45fb4b90 e lista de eventos idênticos ao snapshot anterior. Configuração WSL exclusivamente no processo da consulta; nenhuma chave persistida. Produto/migrations/gates inalterados nesta sessão; WIPs mantidos.
+
+NO-GO governado. Checkpoint1c8b419d0f7d218bad3228879cb3572d65fb3f7d e escopo seguem somente no item original, sem nova proposta. Próxima decisão humana: autorizar separadamente proposta de tratamento governado para falha comprovada de runtime com preservação integral do contrato. Não existe comando comprovado que materialize o pedido atual por proposeRecoverySuccessor; não reduzir escopo ou reclassificar falha silenciosamente. Referência: registro codex-wsl-cancelamento e contrato packages/core/src/work-orchestration/recovery-successor.ts.

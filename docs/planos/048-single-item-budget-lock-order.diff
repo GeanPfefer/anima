@@ -1,0 +1,66 @@
+--- effective-baseline-claim-item.sql
++++ proposed-budget-order.sql
+@@ -22,12 +22,15 @@
+   END IF;
+ 
+   -- Descoberta sem lock: serve somente para localizar o item próprio.
+   SELECT c.work_item_id INTO v_discovered_item FROM public.work_claims c
+   WHERE c.id=claim_id AND c.user_id=v_user_id;
+   IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
++
++  -- Orçamento existente antes de item/claim/alvo; não decide nem consome aqui.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+ 
+   -- Ordem localizada: item próprio antes do claim, inclusive no replay.
+   PERFORM 1 FROM public.work_items i
+   WHERE i.id=v_discovered_item AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'claim item not found' USING ERRCODE='P0002'; END IF;
+ 
+@@ -88,12 +91,15 @@
+   IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid)
+     THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
+   IF claim_id IS NULL OR attempt_id IS NULL OR source_attempt_id IS NULL
+      OR checkpoint_event_seq IS NULL OR abandonment_event_seq IS NULL
+      OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid resumption request' USING ERRCODE='22023'; END IF;
++
++  -- Orçamento existente antes de item/claim/alvo; não decide nem consome aqui.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+ 
+   SELECT * INTO v_item FROM public.work_items i
+    WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+ 
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id
+@@ -179,12 +185,15 @@
+   IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid)
+     THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;
+   IF input_requested_event_id IS NULL OR input_provided_event_id IS NULL OR claim_id IS NULL OR attempt_id IS NULL
+     OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid decision resumption request' USING ERRCODE='22023'; END IF;
++  -- Orçamento existente antes de item/claim/alvo; não decide nem consome aqui.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
++
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id AND e.event_type='execution_started'
+     AND e.payload->'data'->>'attempt_id'=attempt_id::text;
+   IF FOUND THEN
+     IF v_existing.payload->'data'->>'resumed_from_input_provided_event_id'=input_provided_event_id::text THEN RETURN v_item; END IF;
+@@ -258,12 +267,15 @@
+     RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
+   END IF;
+   IF interruption_event_seq IS NULL OR checkpoint_event_seq IS NULL OR claim_id IS NULL OR attempt_id IS NULL
+     OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid budget resumption request' USING ERRCODE='22023'; END IF;
+ 
++  -- Orçamento existente antes de item/claim/alvo; não decide nem consome aqui.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
++
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id
+     AND e.event_type='execution_started' AND e.payload->'data'->>'attempt_id'=attempt_id::text;
+   IF FOUND THEN
+     IF (v_existing.payload->'data'->>'resumed_from_interruption_event_seq')::bigint=interruption_event_seq

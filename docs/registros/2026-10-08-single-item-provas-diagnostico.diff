@@ -1,0 +1,29 @@
+--- single-item-original-expanded.sql
++++ single-item-diagnostic-only.sql
+@@ -2,6 +2,8 @@
+ -- AUTO-02 — asserções preparadas; prova PostgreSQL ainda pendente.
+ BEGIN;
+ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
++SELECT 'private.begin_work_attempt(uuid,uuid,integer,uuid,text,text,uuid)'::regprocedure::oid AS proof_private_begin_oid \gset
++
+ -- Helper de regressão: testes anteriores ao INTEL-02 declaram explicitamente
+ -- a rota da tentativa que estão preparando. Não adiciona asserções.
+ CREATE FUNCTION pg_temp.record_test_route(
+@@ -155,7 +157,7 @@
+ SELECT throws_ok($$SELECT public.acquire_single_item_work_claim((SELECT id FROM item),1,'a2000000-0000-0000-0000-0000000000b1','other-user',300)$$,'P0002','work item not found','outro usuário não adquire item alheio');
+ SELECT is((SELECT count(*) FROM public.work_claims WHERE id='a1000000-0000-0000-0000-0000000000b1'),0::bigint,'RLS esconde claim alheio');
+ SELECT ok(NOT has_function_privilege('anon','public.acquire_single_item_work_claim(uuid,integer,uuid,text,integer)','EXECUTE'),'anon não executa RPC');
+-SELECT ok(NOT has_function_privilege('authenticated','private.begin_work_attempt(uuid,uuid,integer,uuid,text,text,uuid)','EXECUTE'),'cliente não acessa início privado');
++SELECT ok(NOT has_function_privilege('authenticated',:'proof_private_begin_oid'::oid,'EXECUTE'),'cliente não acessa início privado');
+ 
+ RESET ROLE;
+ SELECT ok(NOT has_function_privilege('service_role','public.acquire_single_item_work_claim(uuid,integer,uuid,text,integer)','EXECUTE'),'service_role não herda EXECUTE da ACL default');
+@@ -231,7 +233,7 @@
+ -- Não é autorização de retomada do produto: o Supervisor continua recusando histórico.
+ SET LOCAL ROLE authenticated;
+ SELECT set_config('request.jwt.claim.sub','a1000000-0000-0000-0000-000000000000',true);
+-SELECT public.release_work_claim('a1000000-0000-0000-0000-0000000000b2','attempt_finished');
++SELECT public.release_work_claim('a1000000-0000-0000-0000-0000000000b2','released_without_attempt');
+ RESET ROLE;
+ UPDATE public.work_items SET state='in_progress' WHERE id=(SELECT id FROM item);
+ SET LOCAL ROLE authenticated;

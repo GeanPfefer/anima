@@ -1,0 +1,102 @@
+--- a/supabase/migrations/20260721000001_work_claims.sql
++++ b/supabase/migrations/20260721000001_work_claims.sql
+@@ -262,6 +262,8 @@
+ DECLARE
+   v_user_id uuid := auth.uid();
+   v_claim public.work_claims;
++  v_item public.work_items;
++  v_target text;
+ BEGIN
+   IF v_user_id IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN
+@@ -270,6 +272,21 @@
+   IF claim_id IS NULL OR attempt_id IS NULL OR executor_id IS NULL OR length(btrim(executor_id))=0 THEN
+     RAISE EXCEPTION 'invalid claimed attempt input' USING ERRCODE='22023';
+   END IF;
++
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
++  -- Lookup sem lock somente para localizar o item; revalidar claim sob lock abaixo.
++  SELECT * INTO v_claim FROM public.work_claims c
++  WHERE c.id=claim_id AND c.user_id=v_user_id;
++  IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
++  SELECT * INTO v_item FROM public.work_items i
++  WHERE i.id=v_claim.work_item_id AND i.user_id=v_user_id FOR UPDATE;
++  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
++  v_target := btrim(v_item.intent #>> '{execution_spec,target,reference}');
++  IF v_target IS NULL OR length(v_target)=0
++     OR jsonb_typeof(v_item.intent #> '{execution_spec,target,reference}') IS DISTINCT FROM 'string' THEN
++    RAISE EXCEPTION 'execution target missing' USING ERRCODE='22023';
++  END IF;
++  PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_user_id::text||':'||v_target,0));
+ 
+   SELECT * INTO v_claim FROM public.work_claims c
+   WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;
+@@ -314,6 +331,7 @@
+ DECLARE
+   v_user_id uuid := auth.uid();
+   v_claim public.work_claims;
++  v_item public.work_items;
+   v_now timestamptz := now();
+ BEGIN
+   IF v_user_id IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+@@ -323,6 +341,15 @@
+   IF claim_id IS NULL OR reason IS NULL OR reason NOT IN ('attempt_finished','released_without_attempt','expired') THEN
+     RAISE EXCEPTION 'invalid claim release' USING ERRCODE='22023';
+   END IF;
++
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
++  -- Lookup sem lock somente para localizar o item; revalidar claim sob lock abaixo.
++  SELECT * INTO v_claim FROM public.work_claims c
++  WHERE c.id=claim_id AND c.user_id=v_user_id;
++  IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
++  SELECT * INTO v_item FROM public.work_items i
++  WHERE i.id=v_claim.work_item_id AND i.user_id=v_user_id FOR UPDATE;
++  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+ 
+   SELECT * INTO v_claim FROM public.work_claims c
+   WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;
+--- a/supabase/migrations/20260721000004_target_exclusivity.sql
++++ b/supabase/migrations/20260721000004_target_exclusivity.sql
+@@ -77,6 +77,8 @@
+      OR lease_seconds IS NULL OR lease_seconds <= 0 THEN
+     RAISE EXCEPTION 'invalid claim request' USING ERRCODE='22023';
+   END IF;
++
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
+ 
+   -- Lock do item: dois supervisores disputando o MESMO item são serializados aqui.
+   SELECT * INTO v_item FROM public.work_items i
+--- a/supabase/migrations/20261008000000_single_item_work_claim.sql
++++ b/supabase/migrations/20261008000000_single_item_work_claim.sql
+@@ -29,8 +29,9 @@
+     RAISE EXCEPTION 'invalid claim request' USING ERRCODE='22023';
+   END IF;
+ 
+-  -- Mesma ordem item -> alvo da aquisição canônica. O início sob claim
+-  -- bloqueia primeiro o claim; sua ordem distinta ainda requer prova real.
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));
++
++  -- Ordem proposta: orçamento do owner -> item -> alvo -> claim.
+   SELECT * INTO v_item FROM public.work_items i
+     WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260721000005_commanded_target_exclusivity.sql
++++ b/supabase/migrations/20260721000005_commanded_target_exclusivity.sql
+@@ -46,6 +46,7 @@
+   v_target text;
+   v_claim jsonb := CASE WHEN p_claim_id IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('claim_id', p_claim_id) END;
+ BEGIN
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||p_user_id::text,0));
+   SELECT * INTO v_item FROM public.work_items i
+   WHERE i.id = p_work_item_id AND i.user_id = p_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+--- a/supabase/migrations/20260821000001_budget_interruption_resumption.sql
++++ b/supabase/migrations/20260821000001_budget_interruption_resumption.sql
+@@ -193,6 +193,7 @@
+     OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0
+     THEN RAISE EXCEPTION 'invalid budget resumption request' USING ERRCODE='22023'; END IF;
+ 
++  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));
+   SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;
+   SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id

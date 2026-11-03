@@ -1,0 +1,10 @@
+# Verifier v4/I2b — sucessor independente `46b23286` (REVIEW, verified) — 2026-10-14
+
+Append-only. Sequência de `2026-10-13-verifier-i2b-publicacao-i2c-e-attempt-d50d8744.md`.
+
+- Mecanismo: o Single-Item V1 recusa `resume_from_checkpoint` (`single_item_resumption_unproved`), então `recover-candidate` não é compatível. Criado sucessor INDEPENDENTE (base `51a79198`, sem resume); candidato `389b7696` do `e5d8730a` (failed) é só referência de leitura em `historical_references`. Contrato: mesmos 4 arquivos e gates do I2b + requisito explícito de compilar sob `noUncheckedIndexedAccess` (causa da falha: TS2532 em worktree-executor.test.ts).
+- Item `46b23286-15af-4a16-b54e-a3c5625d282c` v1: work_proposed 86519, context_attached 86520, work_approved 86521, classificação humana 86522 (bounded/low/reversible/clear/normal). Lint `[]`, elegibilidade sem lacunas, readiness Codex/WSL `null`, RAM permit; única recusa `user_attempt_budget_exhausted`.
+- Lease E0 `141172d5-18e7-4633-886a-fc267a039cd7` (00:05:34Z→00:35:34Z, item+v1; `human_supervised`), revogado após a attempt (0 vigentes).
+- Attempt `ef2b4b9b-05a6-44de-8adb-5d50c0decca8` 00:05:41Z→00:13:59Z (eventos 86523–86534): checkpoint 86528, result_submitted 86529 (`d7f46fc5-c90e-4c3b-a7c8-753fa60adc67`), gates (focado 75,7 s; typecheck web 3,4 s) passed, Verifier `verified` 86533 (md5 `bfba9abe0f7c222bd8bb2dd5c6297ab8`; 12 checagens, 0 lacunas, 0 violações), claim liberada. Checkpoint `c7a55716e2212a99d3cb8f14c3e200f2a9b727bb` (1 commit sobre 51a79198, 0 merges, 4 arquivos +213/−14, CRLF consistente, `diff --check` limpo). Item em `review` v1.
+- Revisão independente (worktree descartável removida): focados 150/150 PASS, tsc web 0 erros; Jest real: relatório normalizado com exit/duração/comando original preservados; skip→pending, todo, retry (invocations 2, retried true), falha (exit 1, relatório presente); ausente/corrompido/vazio/{}/>8 MB/timeout/cancelamento ⇒ sem relatório, exit preservado, 0 tmp remanescente; runner que lança propaga o erro (igual ao runGate) e limpa tmp.
+- Não realizado: aceite/integração/publicação do I2b-r, migrations, retries, limpeza de WIPs.

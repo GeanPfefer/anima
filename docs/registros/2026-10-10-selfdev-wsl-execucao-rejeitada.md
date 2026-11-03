@@ -1,0 +1,7 @@
+# Self-dev WSL — chamada bloqueada antes da execução
+
+2026-10-10. Autorização limitada a uma única volta b5f8178a-27d6-440f-9680-776f75a1a26f, sem efeitos globais em terceiros. Pré-checagens readonly: approved v1, human_confirmed revisão1, Codex WSL ready, orçamento admitted (0/3 no item,1/6 usuário), DB/Auth healthy. Git dev/6bc4aadef9414d655600c2ea37c6be436b3628c8, índice vazio,46worktrees. Host ~2,8GiB livres; WSL ~5,1GiB disponíveis, swap0 e PSI memory0.
+
+A revisão automática de aprovação rejeitou o comando que invocaria runProjectBacklogHostTurn: sem modo singleItem, o supervisor legado pode reconciliar/readmitir terceiros, contrariando restrição explícita. Snapshot sem candidatos e monitoramento posterior não garantem exclusão de concorrência entre preflight e mutação. Nenhuma tentativa de bypass, nenhum modo Single-Item/gate alterado. Snippet temporário de invocação não executado; nenhum novo harness de produto.
+
+Consulta após rejeição: approved v1; eventos permanecem exatamente work_proposed86374,context_attached86375,work_approved86376,work_intelligence_classified86377. Zero execution_started,claims ativos=[] e candidatos in_progress/blocked=[]. Sem attempt, gate/Verifier/resultado ou integração. Não chamar novamente o fluxo rejeitado. NO-GO operacional pela fronteira de manutenção global; não por runtime ou RAM. Necessária revisão humana da fronteira antes de nova execução.

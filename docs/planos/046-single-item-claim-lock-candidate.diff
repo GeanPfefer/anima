@@ -1,0 +1,102 @@
+--- 20260721000001_work_claims.sql::public.start_claimed_work_attempt(uuid,uuid,text)
++++ 20261009000000_claim_item_lock_order_candidate.sql::public.start_claimed_work_attempt(uuid,uuid,text)
+@@ -1,5 +1,5 @@
+ 
+-CREATE FUNCTION public.start_claimed_work_attempt(
++CREATE OR REPLACE FUNCTION public.start_claimed_work_attempt(
+   claim_id uuid,
+   attempt_id uuid,
+   executor_id text
+@@ -12,6 +12,7 @@
+ DECLARE
+   v_user_id uuid := auth.uid();
+   v_claim public.work_claims;
++  v_discovered_item uuid;
+ BEGIN
+   IF v_user_id IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+   IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN
+@@ -21,9 +22,33 @@
+     RAISE EXCEPTION 'invalid claimed attempt input' USING ERRCODE='22023';
+   END IF;
+ 
++  -- Descoberta sem lock: serve somente para localizar o item próprio.
++  SELECT c.work_item_id INTO v_discovered_item FROM public.work_claims c
++  WHERE c.id=claim_id AND c.user_id=v_user_id;
++  IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
++
++  -- Ordem localizada: item próprio antes do claim, inclusive no replay.
++  PERFORM 1 FROM public.work_items i
++  WHERE i.id=v_discovered_item AND i.user_id=v_user_id FOR UPDATE;
++  IF NOT FOUND THEN RAISE EXCEPTION 'claim item not found' USING ERRCODE='P0002'; END IF;
++
+   SELECT * INTO v_claim FROM public.work_claims c
+   WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
++
++  -- Não seguir um claim redirecionado enquanto esperávamos o item.
++  IF v_claim.id IS DISTINCT FROM claim_id
++     OR v_claim.user_id IS DISTINCT FROM v_user_id
++     OR v_claim.work_item_id IS DISTINCT FROM v_discovered_item THEN
++    RAISE EXCEPTION 'claim identity changed while acquiring locks' USING ERRCODE='55000';
++  END IF;
++  -- Revalidar autoridade após a espera, sem acrescentar locks de allowlist.
++  IF auth.uid() IS DISTINCT FROM v_user_id THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
+ 
+   IF v_claim.attempt_id IS NOT NULL THEN
+     IF v_claim.attempt_id <> attempt_id THEN
+--- 20260721000001_work_claims.sql::public.release_work_claim(uuid,text)
++++ 20261009000000_claim_item_lock_order_candidate.sql::public.release_work_claim(uuid,text)
+@@ -1,5 +1,5 @@
+ 
+-CREATE FUNCTION public.release_work_claim(
++CREATE OR REPLACE FUNCTION public.release_work_claim(
+   claim_id uuid,
+   reason text
+ )
+@@ -11,6 +11,7 @@
+ DECLARE
+   v_user_id uuid := auth.uid();
+   v_claim public.work_claims;
++  v_discovered_item uuid;
+   v_now timestamptz := now();
+ BEGIN
+   IF v_user_id IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;
+@@ -21,9 +22,33 @@
+     RAISE EXCEPTION 'invalid claim release' USING ERRCODE='22023';
+   END IF;
+ 
++  -- Descoberta sem lock: serve somente para localizar o item próprio.
++  SELECT c.work_item_id INTO v_discovered_item FROM public.work_claims c
++  WHERE c.id=claim_id AND c.user_id=v_user_id;
++  IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
++
++  -- Ordem localizada: item próprio antes do claim, inclusive no replay.
++  PERFORM 1 FROM public.work_items i
++  WHERE i.id=v_discovered_item AND i.user_id=v_user_id FOR UPDATE;
++  IF NOT FOUND THEN RAISE EXCEPTION 'claim item not found' USING ERRCODE='P0002'; END IF;
++
+   SELECT * INTO v_claim FROM public.work_claims c
+   WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;
++
++  -- Não seguir um claim redirecionado enquanto esperávamos o item.
++  IF v_claim.id IS DISTINCT FROM claim_id
++     OR v_claim.user_id IS DISTINCT FROM v_user_id
++     OR v_claim.work_item_id IS DISTINCT FROM v_discovered_item THEN
++    RAISE EXCEPTION 'claim identity changed while acquiring locks' USING ERRCODE='55000';
++  END IF;
++  -- Revalidar autoridade após a espera, sem acrescentar locks de allowlist.
++  IF auth.uid() IS DISTINCT FROM v_user_id THEN
++    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN
++    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';
++  END IF;
+ 
+   IF v_claim.released_at IS NOT NULL THEN
+     IF v_claim.release_reason = reason THEN RETURN v_claim; END IF;

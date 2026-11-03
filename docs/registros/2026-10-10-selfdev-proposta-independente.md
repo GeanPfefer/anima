@@ -1,0 +1,13 @@
+# Self-dev — retirada e nova proposta independente
+
+2026-10-10. Autorização humana explícita, sem aprovação ou execução. Git dev, HEAD inicial/final6bc4aadef9414d655600c2ea37c6be436b3628c8, índice vazio,46worktrees preservadas; nenhum commit. Preflight b34 approved v1, zero attempts, claims ativos=[] e itens in_progress=[].
+
+work withdraw b34d4561-3884-47b5-b0ba-35a8a62d2555 executado exit0 com motivo autorizado. Estado cancelled; evento work_cancelled confirma withdrawn_from_state=approved e withdrawn_before_execution=true. Só após confirmação foi criada a nova unidade.
+
+Mensagem humana5c91aa06-2f19-492f-8abf-758d7791e108 persistida pela porta persistSourceMessage existente (RLS), reproduzindo mandato autorizado. Serviço createProposal/validações normais criou **b5f8178a-27d6-440f-9680-776f75a1a26f**, **proposed v1**. Referência humana descritiva: Concluir centralização do modelo local do Project Work Planner; não inventada REF canônica. Eventos somente work_proposed/context_attached; prontidão técnica de aprovação eligible=true. Nenhuma classificação/approval/attempt.
+
+Escopo: apps/web/lib/ai/project-work-planner.ts, apps/web/lib/ai/project-work-planner-local.ts, apps/web/lib/ai/project-work-planner-selectable.test.ts. Objective centraliza resolução local no diagnóstico/construtor preservando precedência, fallback e ausência de segredos. Checkpoint1c8b419d0f7d218bad3228879cb3572d65fb3f7d; base4ab99acf80ec69156f7155e203da1bd46dd96529; branch de checkpoint anima-work/fcff0570-5bb5-467a-86eb-1fa3790611f8. Executorworktree, codex-cli/default,3attempts/30min sujeitos à política vigente. Critérios: testes focados e contenção de escopo. Nova unidade independente, referências históricas ab9/de2095 preservadas no objective/intent, sem lineage de recovery (consulta retorna=[]). WSL só no processo; seleção de transporte continua configuração operacional, não nova autoridade do contrato.
+
+Snapshots finais comprovam ab9 failed v2 e recovery OpenAI5895b59c-0568-483a-9731-2abd45fb4b90 com rows/eventos integralmente iguais antes/depois. Nenhum claim ativo/in_progress. Efeitos externos somente retirada autorizada, mensagem humana e createProposal. Nenhum código/migration/gate ou estado histórico reescrito; sem Host/supervisor/INV-11/paid APIs/staging/commit/push/reset/clean/prune.
+
+[Evidências](2026-10-10-selfdev-proposta-independente-evidencias/) com hashes. Próximo ponto: revisão humana da proposta v1; somente após nova autorização work approve b5f8178a-27d6-440f-9680-776f75a1a26f e work prepare-autonomous. Execução separada exige preflight integral, opt-in WSL e bound de uma volta. GO criação, execução não autorizada.

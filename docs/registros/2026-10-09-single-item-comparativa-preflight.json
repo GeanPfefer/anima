@@ -1,0 +1,85 @@
+{
+  "observedAtUtc": "2026-10-09T07:13:28.500502+00:00",
+  "status": "NO-GO_RUNTIME_PREFLIGHT",
+  "gitInitial": {
+    "branch": "dev",
+    "head": "6bc4aadef9414d655600c2ea37c6be436b3628c8",
+    "trackedModified": 24,
+    "untrackedEntries": 116,
+    "index": 0,
+    "worktrees": 46
+  },
+  "windowsMemoryKiB": {
+    "total": 16643156,
+    "free": 10343888
+  },
+  "wslMemoryKiB": {
+    "total": 8065624,
+    "available": 7356440
+  },
+  "docker": {
+    "clientVersion": "29.8.2",
+    "context": "desktop-linux",
+    "server": null,
+    "desktopProcessesFound": 0,
+    "endpoint": "npipe:////./pipe/dockerDesktopLinuxEngine",
+    "error": "open //./pipe/dockerDesktopLinuxEngine: O sistema não pode encontrar o arquivo especificado.",
+    "versionExitCode": 1,
+    "containerListingExitCode": 1,
+    "startedByAgent": false
+  },
+  "resident": {
+    "health": "unverified-daemon-unavailable",
+    "modifiedByAgent": false
+  },
+  "priorContainers": {
+    "inventory": "unverified-daemon-unavailable",
+    "knownPreviousFullId": "8d76d3358c55a155f5824c7a65d2c28ab8afad600ddd8baa1d430896ae600402",
+    "startedReusedRemovedByAgent": false
+  },
+  "bootstrap": {
+    "stepsVerifiedOffline": 272,
+    "hashesVerified": 556,
+    "hashMismatches": [],
+    "baseline154MigrationsEqualFrozenBootstrap": true,
+    "payloadPlanSha256": "6ffde5c0bd689c4473c9c1186c97853fb07c5c5d9dcaa8d254d41a0f5596ee13",
+    "expectedImageId": "sha256:af083ef64d0408c8f098ee6f5c364a59b26f36fbc0f3a334a62c5c1d57362e9b",
+    "localImageAvailability": "unverified",
+    "historicalResourceLimits": {
+      "cpus": 1,
+      "ramMiB": 1024,
+      "pids": 64,
+      "pgdataTmpfsMiB": 512,
+      "socketTmpfsMiB": 16
+    }
+  },
+  "candidate": {
+    "migration": "20261009000000_claim_item_lock_order_candidate.sql",
+    "sha256": "0fdb36b28c7bacfb534a943bea2bbb5a812938295ad5c185cb7faadbe0df8b72",
+    "changedFunctionCount": 2,
+    "applied": false
+  },
+  "offlineTests": {
+    "singleItem": {
+      "count": 84,
+      "result": "PASS",
+      "seconds": 6.758
+    },
+    "bootstrapCompatibility": {
+      "count": 25,
+      "result": "PASS",
+      "seconds": 15.919
+    }
+  },
+  "realProof": {
+    "containersCreated": 0,
+    "baselineBootstrapSteps": 0,
+    "candidateBootstrapSteps": 0,
+    "sqlTestsExecuted": 0,
+    "pgTapAssertionsEmitted": 0,
+    "deadlockControlsExecuted": 0,
+    "sqlStatesCollected": [],
+    "performanceMeasurements": null
+  },
+  "singleItemGate": "preserved"
+}

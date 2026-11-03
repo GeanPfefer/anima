@@ -1,0 +1,177 @@
+--- a/supabase/tests/single_item_proof_preflight.py
++++ b/supabase/tests/single_item_proof_preflight.py
+@@ -70,15 +70,33 @@
+     return nonce
+ 
+ 
+-def validate(manifest, metadata):
++PINNED_IMAGE_LABELS = {
++    'org.opencontainers.image.ref.name': 'ubuntu',
++    'org.opencontainers.image.version': '20.04',
++}
++
++
++def validate_labels(manifest, labels, image_metadata=None):
++    proof = {'anima.proof': 'single-item-v1', 'anima.proof.nonce': manifest['nonce']}
++    if image_metadata is None:
++        if labels != proof:
++            raise ValueError('proof labels mismatch; image metadata required for inherited OCI labels')
++        return
++    if image_metadata.get('Id') != manifest['imageId'] \
++            or image_metadata.get('Config', {}).get('Labels') != PINNED_IMAGE_LABELS:
++        raise ValueError('pinned image labels/identity mismatch')
++    if labels != dict(PINNED_IMAGE_LABELS, **proof):
++        raise ValueError('proof/inherited image labels mismatch')
++
++
++def validate(manifest, metadata, image_metadata=None, *, created=False):
+     nonce = validate_manifest(manifest)
+     if metadata['Id'] != manifest['containerId'] or metadata['Image'] != manifest['imageId']:
+         raise ValueError('container/image identity mismatch')
+     if metadata['Name'] != '/anima-single-item-proof-' + nonce:
+         raise ValueError('container name mismatch')
+     config, host = metadata['Config'], metadata['HostConfig']
+-    if config.get('Labels') != {'anima.proof': 'single-item-v1', 'anima.proof.nonce': nonce}:
+-        raise ValueError('proof labels mismatch')
++    validate_labels(manifest, config.get('Labels'), image_metadata)
+     if host.get('NetworkMode') != 'none' or host.get('PortBindings') or host.get('PublishAllPorts'):
+         raise ValueError('networks/host ports forbidden')
+     for key in ('Binds', 'VolumesFrom', 'Devices', 'CapAdd', 'Privileged'):
+@@ -87,11 +105,14 @@
+     if host.get('PidMode', '') not in ('', 'private') or host.get('IpcMode') != 'private':
+         raise ValueError('shared PID/IPC forbidden')
+     mounts = metadata.get('Mounts', [])
+-    if not mounts or any(m.get('Type') != 'tmpfs' for m in mounts):
++    if created and mounts:
++        raise ValueError('created container unexpectedly has effective mounts')
++    if not created and (not mounts or any(m.get('Type') != 'tmpfs' for m in mounts)):
+         raise ValueError('tmpfs only, including PGDATA, required')
+-    if {m['Destination'] for m in mounts} != {'/var/lib/postgresql/data', '/var/run/postgresql'}:
++    destinations = set(host.get('Tmpfs', {})) if created else {m['Destination'] for m in mounts}
++    if destinations != {'/var/lib/postgresql/data', '/var/run/postgresql'}:
+         raise ValueError('exact independent storage destinations required')
+-    if set(config.get('Volumes', {})) - {'/var/lib/postgresql/data', '/var/run/postgresql'}:
++    if set(config.get('Volumes') or {}) - {'/var/lib/postgresql/data', '/var/run/postgresql'}:
+         raise ValueError('uncovered image volumes forbidden')
+     validate_container_environment(config.get('Env', []), manifest)
+     if metadata.get('NetworkSettings', {}).get('Ports') or metadata.get('NetworkSettings', {}).get('Networks'):
+@@ -100,7 +121,13 @@
+         if metadata.get('NetworkSettings', {}).get('Ports') or set(networks) != {'none'} \
+                 or any(networks['none'].get(k) for k in ('IPAddress', 'GlobalIPv6Address', 'Gateway')):
+             raise ValueError('network endpoints forbidden')
+-    if metadata.get('State', {}).get('Running') is not True:
++    state = metadata.get('State', {})
++    if created:
++        if state.get('Status') != 'created' or state.get('Running') is not False \
++                or state.get('Pid') != 0 or state.get('StartedAt') != '0001-01-01T00:00:00Z' \
++                or metadata.get('RestartCount') != 0:
++            raise ValueError('container is not created and never started')
++    elif state.get('Running') is not True:
+         raise ValueError('declared environment must be running for subsequent inspection')
+     return manifest['containerId']
+ 
+--- /dev/null
++++ b/supabase/tests/bootstrap_event_log.py
+@@ -0,0 +1,13 @@
++"""Ledger host append-only; independente de Docker e PostgreSQL."""
++import datetime
++import json
++import os
++
++
++def append_event(record, data, clock=None):
++    utc = clock() if clock else datetime.datetime.now(datetime.timezone.utc).isoformat()
++    item = dict(data, utc=utc)
++    with (record / 'events.jsonl').open('a', encoding='utf8') as stream:
++        stream.write(json.dumps(item, sort_keys=True) + '\n')
++        stream.flush()
++        os.fsync(stream.fileno())
+--- /dev/null
++++ b/supabase/tests/single_item_recovery_preflight_test.py
+@@ -0,0 +1,86 @@
++"""Contrato de recuperação offline; não executa Docker/SQL."""
++import copy
++import json
++from pathlib import Path
++import tempfile
++import unittest
++from single_item_proof_preflight import validate, PINNED_IMAGE_LABELS
++import single_item_concurrency_test as existing
++from bootstrap_event_log import append_event
++
++
++class RecoveryBoundary(unittest.TestCase):
++    def sample(self):
++        manifest, metadata = existing.ProofBoundaryTest().environment()
++        image = {'Id': manifest['imageId'], 'Config': {'Labels': dict(PINNED_IMAGE_LABELS)}}
++        metadata['Config']['Labels'].update(PINNED_IMAGE_LABELS)
++        metadata['Config']['Volumes'] = None
++        return manifest, metadata, image
++
++    def test_exact_inherited_labels_require_exact_image_identity(self):
++        manifest, metadata, image = self.sample()
++        self.assertEqual(validate(manifest, metadata, image), manifest['containerId'])
++        with self.assertRaises(ValueError):
++            validate(manifest, metadata)
++        image['Id'] = 'sha256:' + 'f' * 64
++        with self.assertRaises(ValueError):
++            validate(manifest, metadata, image)
++
++    def test_unknown_missing_or_changed_labels_refused(self):
++        manifest, metadata, image = self.sample()
++        for target in ('container', 'image'):
++            labels = metadata['Config']['Labels'] if target == 'container' else image['Config']['Labels']
++            for key in list(labels) + ['arbitrary']:
++                for mutation in ('remove', 'change'):
++                    with self.subTest(target=target, key=key, mutation=mutation):
++                        c, i = copy.deepcopy(metadata), copy.deepcopy(image)
++                        changed = c['Config']['Labels'] if target == 'container' else i['Config']['Labels']
++                        if mutation == 'remove':
++                            changed.pop(key, None)
++                            if key == 'arbitrary':
++                                continue
++                        else:
++                            changed[key] = 'unexpected'
++                        with self.assertRaises(ValueError):
++                            validate(manifest, c, i)
++
++    def test_created_contract_and_running_mounts_are_distinct(self):
++        manifest, metadata, image = self.sample()
++        metadata.update(State={'Status': 'created', 'Running': False, 'Pid': 0,
++                               'StartedAt': '0001-01-01T00:00:00Z'}, RestartCount=0)
++        metadata['HostConfig']['Tmpfs'] = {m['Destination']: 'rw' for m in metadata['Mounts']}
++        metadata['Mounts'] = []
++        self.assertEqual(validate(manifest, metadata, image, created=True), manifest['containerId'])
++        with self.assertRaises(ValueError):
++            validate(manifest, metadata, image)
++        for key, value in [('Status', 'exited'), ('Running', True), ('Pid', 1),
++                           ('StartedAt', '2026-10-08T22:00:00Z')]:
++            c = copy.deepcopy(metadata); c['State'][key] = value
++            with self.assertRaises(ValueError):
++                validate(manifest, c, image, created=True)
++        for mutation in ('restart', 'mount', 'tmpfs'):
++            c = copy.deepcopy(metadata)
++            if mutation == 'restart':
++                c['RestartCount'] = 1
++            elif mutation == 'mount':
++                c['Mounts'] = [{'Type': 'volume', 'Destination': '/var/lib/postgresql/data'}]
++            else:
++                c['HostConfig']['Tmpfs']['/shared'] = 'rw'
++            with self.assertRaises(ValueError):
++                validate(manifest, c, image, created=True)
++
++    def test_executor_event_reserved_timestamp_and_first_failure(self):
++        with tempfile.TemporaryDirectory() as folder:
++            record = Path(folder)
++            failure = {'utc': 'source-time', 'status': 'failed-stop', 'error': 'first failure'}
++            append_event(record, failure, clock=lambda: 'host-time')
++            append_event(record, {'utc': 'other-time', 'status': 'diagnostic'}, clock=lambda: 'host-time')
++            rows = [json.loads(x) for x in (Path(folder) / 'events.jsonl').read_text().splitlines()]
++            self.assertEqual(rows[0], dict(failure, utc='host-time'))
++            self.assertEqual(rows[0]['error'], 'first failure')
++            self.assertEqual(failure['utc'], 'source-time')
++            self.assertEqual(len(rows), 2)
++
++
++if __name__ == '__main__':
++    unittest.main()

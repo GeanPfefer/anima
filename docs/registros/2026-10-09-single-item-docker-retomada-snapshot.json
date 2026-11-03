@@ -1,0 +1,753 @@
+{
+    "utc":  "2026-10-09T07:17:50.1829521Z",
+    "daemon":  {
+                   "id":  "18caadf3-1887-45ef-857e-4e71fcef77e9",
+                   "version":  "29.8.2",
+                   "cpuCount":  16,
+                   "memoryBytes":  8259198976,
+                   "memoryLimit":  true,
+                   "cpuQuota":  true,
+                   "pidsLimit":  true
+               },
+    "windowsMemory":  {
+                          "totalKiB":  16643156,
+                          "freeKiB":  5570200
+                      },
+    "containers":  [
+                       {
+                           "id":  "8d76d3358c55a155f5824c7a65d2c28ab8afad600ddd8baa1d430896ae600402",
+                           "name":  "/anima-single-item-proof-396f38b1036a47ba92d51890cdf252ba",
+                           "image":  "sha256:af083ef64d0408c8f098ee6f5c364a59b26f36fbc0f3a334a62c5c1d57362e9b",
+                           "status":  "exited",
+                           "running":  false,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-08T22:39:10.665668093Z",
+                           "finished":  "2026-10-09T04:21:59.182429367Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  null,
+                           "healthChecks":  [
+
+                                            ],
+                           "network":  "none",
+                           "ports":  {
+
+                                     },
+                           "binds":  null,
+                           "tmpfs":  {
+                                         "/var/lib/postgresql/data":  "rw,nosuid,nodev,noexec,size=536870912,uid=105,gid=106,mode=0700",
+                                         "/var/run/postgresql":  "rw,nosuid,nodev,noexec,size=16777216,uid=105,gid=106,mode=0770"
+                                     },
+                           "memory":  1073741824,
+                           "nanoCpus":  1000000000,
+                           "restartPolicy":  {
+                                                 "Name":  "no",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "750bde88fb3bb87ed9e1892e9c6323974a42ab0526f95ef12954c988694b134e",
+                           "name":  "/anima-single-item-proof-fe43af694c7a418a9c95e66055ec50ee",
+                           "image":  "sha256:af083ef64d0408c8f098ee6f5c364a59b26f36fbc0f3a334a62c5c1d57362e9b",
+                           "status":  "exited",
+                           "running":  false,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-08T09:45:06.509958051Z",
+                           "finished":  "2026-10-08T21:26:39.150828063Z",
+                           "exitCode":  255,
+                           "oom":  false,
+                           "health":  null,
+                           "healthChecks":  [
+
+                                            ],
+                           "network":  "none",
+                           "ports":  {
+
+                                     },
+                           "binds":  null,
+                           "tmpfs":  {
+                                         "/var/lib/postgresql/data":  "rw,noexec,nosuid,nodev,size=536870912,mode=1777",
+                                         "/var/run/postgresql":  "rw,noexec,nosuid,nodev,size=16777216,mode=1777"
+                                     },
+                           "memory":  1073741824,
+                           "nanoCpus":  1000000000,
+                           "restartPolicy":  {
+                                                 "Name":  "no",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "b28e5ed0709183d310752f4b2308367a9652f28d0bbdad317b6cc7e8d15465f5",
+                           "name":  "/supabase_studio_anima",
+                           "image":  "sha256:202bef35951293fb97d658f4cc849552a70915fe89d0426a8a5e63846a6506f2",
+                           "status":  "running",
+                           "running":  true,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-09T07:15:38.070917463Z",
+                           "finished":  "2026-10-09T04:21:59.037368297Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  "healthy",
+                           "healthChecks":  [
+                                                {
+                                                    "Start":  "2026-10-09T07:17:01.95088406Z",
+                                                    "End":  "2026-10-09T07:17:02.020636158Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:12.800500884Z",
+                                                    "End":  "2026-10-09T07:17:12.8722261Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:22.873561574Z",
+                                                    "End":  "2026-10-09T07:17:22.944931732Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:32.945707863Z",
+                                                    "End":  "2026-10-09T07:17:33.012700896Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:43.791010856Z",
+                                                    "End":  "2026-10-09T07:17:43.859088644Z",
+                                                    "ExitCode":  0
+                                                }
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+                                         "3000/tcp":  [
+                                                          {
+                                                              "HostIp":  "",
+                                                              "HostPort":  "54323"
+                                                          }
+                                                      ]
+                                     },
+                           "binds":  [
+                                         "G:\\anima\\supabase\\snippets:/anima/supabase/snippets:rw"
+                                     ],
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "unless-stopped",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+                                          {
+                                              "Type":  "bind",
+                                              "Source":  "G:\\anima\\supabase\\snippets",
+                                              "Destination":  "/anima/supabase/snippets",
+                                              "Mode":  "rw",
+                                              "RW":  true,
+                                              "Propagation":  "rprivate"
+                                          }
+                                      ]
+                       },
+                       {
+                           "id":  "54dd8d1c9101730d21a2389aaba0eadcaa322e2bdd2cda55671021bbcc2adf3f",
+                           "name":  "/supabase_pg_meta_anima",
+                           "image":  "sha256:a84cc713585eea7b401e4a2561ec4a1e48c87083d1c7ecb4502f204bb4391300",
+                           "status":  "running",
+                           "running":  true,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-09T07:15:38.059050613Z",
+                           "finished":  "2026-10-09T04:22:01.861937113Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  "healthy",
+                           "healthChecks":  [
+                                                {
+                                                    "Start":  "2026-10-09T07:17:00.822188356Z",
+                                                    "End":  "2026-10-09T07:17:00.937577764Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:11.717708768Z",
+                                                    "End":  "2026-10-09T07:17:11.834442338Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:21.835176845Z",
+                                                    "End":  "2026-10-09T07:17:21.955953377Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:31.956970431Z",
+                                                    "End":  "2026-10-09T07:17:32.083263268Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:42.860655476Z",
+                                                    "End":  "2026-10-09T07:17:42.997518803Z",
+                                                    "ExitCode":  0
+                                                }
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+
+                                     },
+                           "binds":  null,
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "unless-stopped",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "d37b381c21a7055c2aa2dcfe8272392b695f2c0aad6dd74ec992f560bb225df3",
+                           "name":  "/supabase_edge_runtime_anima",
+                           "image":  "sha256:2781daf92394db91f7e94129cc3d04ec474ad16a8fe64b3fbeef6e7d557ab120",
+                           "status":  "exited",
+                           "running":  false,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-03T17:20:37.887205434Z",
+                           "finished":  "2026-10-04T07:07:46.4315276Z",
+                           "exitCode":  255,
+                           "oom":  false,
+                           "health":  null,
+                           "healthChecks":  [
+
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+
+                                     },
+                           "binds":  null,
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "no",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "443ef023946a4bc982c5363219d3a52fd8260d374010eba94fd8b434ebd1f345",
+                           "name":  "/supabase_rest_anima",
+                           "image":  "sha256:54000f24847d01a2c2302e0041cf0618b875c57fb48507d743cfa9aaa50bf43c",
+                           "status":  "running",
+                           "running":  true,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-09T07:15:37.778700033Z",
+                           "finished":  "2026-10-09T04:21:59.094517234Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  null,
+                           "healthChecks":  [
+
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+
+                                     },
+                           "binds":  null,
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "unless-stopped",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "c1092e0063159f4857e183f7b6255d3a861b81a872d7949c3ce2b7ceef75f9b0",
+                           "name":  "/supabase_realtime_anima",
+                           "image":  "sha256:74c603ce5990088d5ea91b991eb748653df0f809d6ce7f4a0d207c8d1a927e29",
+                           "status":  "running",
+                           "running":  true,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-09T07:15:37.98999648Z",
+                           "finished":  "2026-10-09T04:22:00.81606697Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  "healthy",
+                           "healthChecks":  [
+                                                {
+                                                    "Start":  "2026-10-09T07:17:00.225356405Z",
+                                                    "End":  "2026-10-09T07:17:00.255590399Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:11.03564835Z",
+                                                    "End":  "2026-10-09T07:17:11.063586367Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:21.064591613Z",
+                                                    "End":  "2026-10-09T07:17:21.092731791Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:31.093678604Z",
+                                                    "End":  "2026-10-09T07:17:31.123825989Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:41.901763338Z",
+                                                    "End":  "2026-10-09T07:17:41.931611649Z",
+                                                    "ExitCode":  0
+                                                }
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+
+                                     },
+                           "binds":  null,
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "unless-stopped",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "da89a8a90368b5d3cc8d00fad9d6ee13322893af1a168c368365daaea9ceeee9",
+                           "name":  "/supabase_auth_anima",
+                           "image":  "sha256:385184459f57569c54c25209f51f3b2be99ddd7c4ce9e3555b5d3eea8447b7cf",
+                           "status":  "running",
+                           "running":  true,
+                           "restarting":  false,
+                           "restartCount":  7,
+                           "started":  "2026-10-09T07:15:54.949521598Z",
+                           "finished":  "2026-10-09T07:15:48.480296538Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  "healthy",
+                           "healthChecks":  [
+                                                {
+                                                    "Start":  "2026-10-09T07:17:06.801103804Z",
+                                                    "End":  "2026-10-09T07:17:06.827035905Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:17.607136231Z",
+                                                    "End":  "2026-10-09T07:17:17.632322532Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:27.633199902Z",
+                                                    "End":  "2026-10-09T07:17:27.657844955Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:37.658745903Z",
+                                                    "End":  "2026-10-09T07:17:37.685271084Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:48.463255196Z",
+                                                    "End":  "2026-10-09T07:17:48.490067434Z",
+                                                    "ExitCode":  0
+                                                }
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+
+                                     },
+                           "binds":  null,
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "unless-stopped",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "ead9442fb502bd751d855926123e74a29255c7510b483344e7ed517ed6d05eaa",
+                           "name":  "/supabase_kong_anima",
+                           "image":  "sha256:1b53405d8680a09d6f44494b7990bf7da2ea43f84a258c59717d4539abf09f6d",
+                           "status":  "running",
+                           "running":  true,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-09T07:15:37.888991851Z",
+                           "finished":  "2026-10-09T04:22:01.806354499Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  "healthy",
+                           "healthChecks":  [
+                                                {
+                                                    "Start":  "2026-10-09T07:17:00.277810007Z",
+                                                    "End":  "2026-10-09T07:17:00.351051625Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:11.131740713Z",
+                                                    "End":  "2026-10-09T07:17:11.205616133Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:21.207105705Z",
+                                                    "End":  "2026-10-09T07:17:21.276061511Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:31.277818294Z",
+                                                    "End":  "2026-10-09T07:17:31.34826836Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:42.126564386Z",
+                                                    "End":  "2026-10-09T07:17:42.196303214Z",
+                                                    "ExitCode":  0
+                                                }
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+                                         "8000/tcp":  [
+                                                          {
+                                                              "HostIp":  "",
+                                                              "HostPort":  "54321"
+                                                          }
+                                                      ]
+                                     },
+                           "binds":  [
+
+                                     ],
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "unless-stopped",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "aa6e4d0e23ea67ee9681f9e95b87d7f79454f2bcfa38f4a605761f55f1a91c89",
+                           "name":  "/supabase_vector_anima",
+                           "image":  "sha256:ca92d617e905953c3f852e7e88061f7039460e733522e3f0c21bc6ae946b2558",
+                           "status":  "restarting",
+                           "running":  true,
+                           "restarting":  true,
+                           "restartCount":  11,
+                           "started":  "2026-10-09T07:17:42.798469243Z",
+                           "finished":  "2026-10-09T07:17:43.051688669Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  "unhealthy",
+                           "healthChecks":  [
+                                                {
+                                                    "Start":  "2026-10-08T02:43:32.816563677Z",
+                                                    "End":  "2026-10-08T02:43:34.404273195Z",
+                                                    "ExitCode":  1
+                                                },
+                                                {
+                                                    "Start":  "2026-10-08T09:10:08.169953282Z",
+                                                    "End":  "2026-10-08T09:10:08.20012471Z",
+                                                    "ExitCode":  1
+                                                },
+                                                {
+                                                    "Start":  "2026-10-08T21:26:51.416773388Z",
+                                                    "End":  "2026-10-08T21:26:51.445836946Z",
+                                                    "ExitCode":  1
+                                                },
+                                                {
+                                                    "Start":  "2026-10-08T21:27:01.446526112Z",
+                                                    "End":  "2026-10-08T21:27:01.493292746Z",
+                                                    "ExitCode":  1
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:15:48.181075535Z",
+                                                    "End":  "2026-10-09T07:15:48.206580451Z",
+                                                    "ExitCode":  1
+                                                }
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+
+                                     },
+                           "binds":  null,
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "unless-stopped",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "8a3c06b0de1e1b3872e3b7967434f27225a098e52cbb40390c352d87589ba315",
+                           "name":  "/supabase_analytics_anima",
+                           "image":  "sha256:d0574bb84417bea5b25e91cb806535f37c4fec4e03eb29601e645fb3ae233521",
+                           "status":  "running",
+                           "running":  true,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-09T07:15:38.097061319Z",
+                           "finished":  "2026-10-09T04:22:02.120454836Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  "healthy",
+                           "healthChecks":  [
+                                                {
+                                                    "Start":  "2026-10-09T07:16:59.899009165Z",
+                                                    "End":  "2026-10-09T07:16:59.936145113Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:10.716104185Z",
+                                                    "End":  "2026-10-09T07:17:10.755275772Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:20.756053229Z",
+                                                    "End":  "2026-10-09T07:17:20.794043108Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:30.794672064Z",
+                                                    "End":  "2026-10-09T07:17:30.832724672Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:41.610019458Z",
+                                                    "End":  "2026-10-09T07:17:41.64770403Z",
+                                                    "ExitCode":  0
+                                                }
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+                                         "4000/tcp":  [
+                                                          {
+                                                              "HostIp":  "",
+                                                              "HostPort":  "54327"
+                                                          }
+                                                      ]
+                                     },
+                           "binds":  [
+
+                                     ],
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "unless-stopped",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "252bbef3411ce4ea9eb9d62e8a7de00ce1a5289b693dc08f14ed9d2015857e6f",
+                           "name":  "/supabase_db_anima",
+                           "image":  "sha256:af083ef64d0408c8f098ee6f5c364a59b26f36fbc0f3a334a62c5c1d57362e9b",
+                           "status":  "running",
+                           "running":  true,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-10-09T07:15:38.129897697Z",
+                           "finished":  "2026-10-09T04:22:01.810636547Z",
+                           "exitCode":  0,
+                           "oom":  false,
+                           "health":  "healthy",
+                           "healthChecks":  [
+                                                {
+                                                    "Start":  "2026-10-09T07:17:00.351277717Z",
+                                                    "End":  "2026-10-09T07:17:00.377440394Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:11.157716638Z",
+                                                    "End":  "2026-10-09T07:17:11.185109916Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:21.186576881Z",
+                                                    "End":  "2026-10-09T07:17:21.214664209Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:31.21587488Z",
+                                                    "End":  "2026-10-09T07:17:31.244079876Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-10-09T07:17:42.021566628Z",
+                                                    "End":  "2026-10-09T07:17:42.048567455Z",
+                                                    "ExitCode":  0
+                                                }
+                                            ],
+                           "network":  "supabase_network_anima",
+                           "ports":  {
+                                         "5432/tcp":  [
+                                                          {
+                                                              "HostIp":  "",
+                                                              "HostPort":  "54322"
+                                                          }
+                                                      ]
+                                     },
+                           "binds":  [
+                                         "supabase_db_anima:/var/lib/postgresql/data"
+                                     ],
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "unless-stopped",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+                                          {
+                                              "Type":  "volume",
+                                              "Name":  "supabase_db_anima",
+                                              "Source":  "/var/lib/docker/volumes/supabase_db_anima/_data",
+                                              "Destination":  "/var/lib/postgresql/data",
+                                              "Driver":  "local",
+                                              "Mode":  "z",
+                                              "RW":  true,
+                                              "Propagation":  ""
+                                          }
+                                      ]
+                       },
+                       {
+                           "id":  "c294fe968ffcfeb734f999ba3984e9f400cd851fb7c9b2f6b4abac99304b7553",
+                           "name":  "/whisper",
+                           "image":  "sha256:0b64050ad0b9244745746b652473ee42a8d5454d501877a252c3e65f631ffc99",
+                           "status":  "exited",
+                           "running":  false,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-06-08T16:41:16.081179805Z",
+                           "finished":  "2026-06-09T22:45:15.9364848Z",
+                           "exitCode":  255,
+                           "oom":  false,
+                           "health":  null,
+                           "healthChecks":  [
+
+                                            ],
+                           "network":  "bridge",
+                           "ports":  {
+                                         "8000/tcp":  [
+                                                          {
+                                                              "HostIp":  "",
+                                                              "HostPort":  "9000"
+                                                          }
+                                                      ]
+                                     },
+                           "binds":  null,
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "no",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+
+                                      ]
+                       },
+                       {
+                           "id":  "8a7ad3c5219a846f1f5ff24d2e0f6d790c97046b7b872b95bd4d0513d65718b8",
+                           "name":  "/open-webui",
+                           "image":  "sha256:74093dadc9c6aabc23987a74fd8c2fb8d995b1a5b22e83b0036fb9d6af590e8c",
+                           "status":  "exited",
+                           "running":  false,
+                           "restarting":  false,
+                           "restartCount":  0,
+                           "started":  "2026-05-26T20:24:09.201692406Z",
+                           "finished":  "2026-06-08T16:10:41.7081672Z",
+                           "exitCode":  255,
+                           "oom":  false,
+                           "health":  "starting",
+                           "healthChecks":  [
+                                                {
+                                                    "Start":  "2026-05-23T20:48:40.00653538Z",
+                                                    "End":  "2026-05-23T20:48:40.071053837Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-05-23T20:49:10.0717126Z",
+                                                    "End":  "2026-05-23T20:49:10.146362195Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-05-23T20:49:40.146592417Z",
+                                                    "End":  "2026-05-23T20:49:40.211001949Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-05-23T20:50:10.21115075Z",
+                                                    "End":  "2026-05-23T20:50:10.278267902Z",
+                                                    "ExitCode":  0
+                                                },
+                                                {
+                                                    "Start":  "2026-05-23T20:50:40.27778641Z",
+                                                    "End":  "2026-05-23T20:50:40.41542788Z",
+                                                    "ExitCode":  0
+                                                }
+                                            ],
+                           "network":  "bridge",
+                           "ports":  {
+                                         "8080/tcp":  [
+                                                          {
+                                                              "HostIp":  "",
+                                                              "HostPort":  "3000"
+                                                          }
+                                                      ]
+                                     },
+                           "binds":  [
+                                         "open-webui:/app/backend/data"
+                                     ],
+                           "tmpfs":  null,
+                           "memory":  0,
+                           "nanoCpus":  0,
+                           "restartPolicy":  {
+                                                 "Name":  "no",
+                                                 "MaximumRetryCount":  0
+                                             },
+                           "mounts":  [
+                                          {
+                                              "Type":  "volume",
+                                              "Name":  "open-webui",
+                                              "Source":  "/var/lib/docker/volumes/open-webui/_data",
+                                              "Destination":  "/app/backend/data",
+                                              "Driver":  "local",
+                                              "Mode":  "z",
+                                              "RW":  true,
+                                              "Propagation":  ""
+                                          }
+                                      ]
+                       }
+                   ]
+}

@@ -1,0 +1,2238 @@
+{
+  "status": "PROPOSED_OFFLINE_NOT_APPLIED",
+  "modelLimit": "Finite exclusive-resource examples only; not universal absence of PostgreSQL deadlocks.",
+  "effectiveDefinitionCount": 161,
+  "migrationHashes": {
+    "20260528000000_schema.sql": "afb7267c63ef76cda5036d97f189fe8975f69095053f303d8e29092e83942ecf",
+    "20260528000001_functions_triggers.sql": "6bb26a64510d422261aae63ab366c8739918fc4a339cb9eeb385f03e813da2a5",
+    "20260528000002_rls.sql": "838a0f3c22fa359cd601cbd4dc34c74907b4b40246b339c99401f100ca231fce",
+    "20260528000003_seed.sql": "b25f1b4737add17f9dfe1545397fb2c7bdc7a9537844e55e8233702e11abcd22",
+    "20260601000000_ai_conversations.sql": "014e8a4850d1b1ae0b175b56b114522f1420a1620b431558778037db3ff3ee58",
+    "20260601000001_pillar_context.sql": "a0ff0a2e92232d8ab217e0ade93475966ede97bebc960b28b9a056213296d0ba",
+    "20260601000002_profile_archetype.sql": "1d6b23017f2649715f35edea93c11d42e83b6e9b88ed9712ab66d062b31cc179",
+    "20260601000003_pillar_relationships.sql": "b38890a47e5cc13492841462ed3868d1732c0b33c8245fe2ed34e1d071c1c796",
+    "20260606000000_activity_date.sql": "8dd7f2ddd0c4056ef2148129e607fe273a9f2dd2bfecec8f2f6eb9589d94e7c4",
+    "20260606000001_semantic_entities.sql": "b327cbce42fcaec488dfa28b3c01b5f6afc603f21a81039f10281af8354b9663",
+    "20260606000002_embeddings.sql": "cf74e55a89318e40c8f9a2abfb7199d92504f10dfcde51c3ff7dd3202358a567",
+    "20260607000000_pulso_and_insights.sql": "1d89166e7204085e8c335fc13b2fdb4f75f0666e78eafdc6fc70d92702c1dfa2",
+    "20260607000001_pillar_delete_rls.sql": "1b7cf7d9a9afeee3e1ab7ade3509ad0d53ec3f707219ce8e258e978cab05ec65",
+    "20260609000000_free_pillars.sql": "12125ff48f7fa8b540ab4f8def9ec06f15dbdd8d967d42d345caa98dde064571",
+    "20260609000001_notes.sql": "eb98315dbab5bf32aaa49c16c3eb8b27ac7e6ed8466dd82027c83e6077b28dee",
+    "20260609000002_pending_pillars.sql": "c9d0e39eab1cc7bac61e4531f04b247d68d976ca534f44fa82ec0a17de2ba340",
+    "20260609000003_display_mode.sql": "e04a8d9c1a8eb73056ecb42258b1442d37210bfa811d8ac6a42da99266791dfa",
+    "20260611000000_fix_default_name.sql": "ca9a838dd2087861d7282e964088c6ea49753d3c9ed5ada16f6d792a4b940014",
+    "20260611000001_relax_xp_constraints.sql": "fd3b9c2826fee88563c6f3983febdfa663eb1cbe96282303451ba783579fec92",
+    "20260611000002_entity_pillars.sql": "30319e66ea0a409d2aad03f161d0c192f662f6d63d4a42aca181b442731f0a3f",
+    "20260612000001_notes_interest_type.sql": "6e5144a97db1adb84d9bbf25f331ab4ad91ff42cfb3629abc5a775f124f9b0f9",
+    "20260617000000_pillar_name_unique.sql": "6b7d8a4cd6ee24aa249666ee92e03cf3ddcee449b73de0097046250938386c1c",
+    "20260617000001_identity_emergent.sql": "209d5e11f24dacf9deab025614a03ba6160453c5f688d0fe8d810c97f70b7ab8",
+    "20260620000000_grant_default_privileges.sql": "7e83ab165186ffb4a0954144fff0fd4e21ad8d8ab53ef49870ec51cbe9971766",
+    "20260714000000_work_orchestration_contracts.sql": "eaad971f8cecf0afa05467e361d5fb71a887b20e4c0fc8c5dd6bd199aa5f38fa",
+    "20260714000001_protect_work_orchestration.sql": "d9f4c45202d601bbdf485012f9c45eede10be2ec83be10624a9c6979c9721067",
+    "20260715000000_complete_work_review.sql": "0b63805a9d765174f9956e134a8a340fe949dcd7fc2603d792309745f9286034",
+    "20260715000001_context_and_conversation_archive.sql": "d55b637d2bd839509624dbf93fb780347897e7a482519b90062aca2ca3a6683e",
+    "20260715000002_remediate_work_contracts.sql": "2ed2d9979b3890054eda9ffb5bffea918b9adcf1ac0aa3307372035d841a9412",
+    "20260715000003_result_evidence_shape.sql": "da02c723fe31ba12f178b25e7568d9dec7ed3dae8fdd492710be592f5a50bb77",
+    "20260715000004_persist_work_executions.sql": "450d242b2b8cc311db75119643641afc3eea5de8349e249937ed3305b90f31d1",
+    "20260718000000_reopen_conversation.sql": "613bac07b21ee2ae148c2db51c21afede4d0d07464ae7065af11102502e502c9",
+    "20260720000000_first_commanded_execution.sql": "0605cfcab9add5113651e032dc15c6d062fe3957751ff480c33e28005b7d2ec8",
+    "20260721000000_work_claim_vocabulary.sql": "daa196ae028008a87c6425545155e8ff856c9ae6f93f011b97a0978d120b139b",
+    "20260721000001_work_claims.sql": "15ebbf5e3e59dfa11bbdc9616967c3207ff1199a5d5da6e20f495bbf88b9902f",
+    "20260721000002_autonomous_work_queue.sql": "f2b8c208da3aca516d62390a2d0646d5d0c10b252d5748e9711d4368f4004d9a",
+    "20260721000003_next_autonomous_work.sql": "b88019bfbef3872113853e2968ce571158a8a9397d205c4ec9a87afbe130aba8",
+    "20260721000004_target_exclusivity.sql": "4a5a1fc90d91fbc991da40b7ceac3c61e15c972735c396a44286ceadaf5078e8",
+    "20260721000005_commanded_target_exclusivity.sql": "2f243b3029424e1b47042315fd10d9edde98fbb5bd4372541d493a04cdb3feea",
+    "20260721000006_reconciliation_vocabulary.sql": "5a4368fd171f76b774ed95c08ceedf5e02996dd7a0f6103c0c68b178a6dcb2c8",
+    "20260721000007_supervisor_reconciliation.sql": "11eaa5a41c931d0cbbd539851d28fd4b9d586a87ac553b47f651ea96418f71d6",
+    "20260726000000_checkpoint_vocabulary.sql": "198ae21a1e68ab8758249c2932e3176c93687a0715c9c43b621511e119b22277",
+    "20260726000001_record_work_checkpoint.sql": "ffc6b1ccff700fbec3a163de77df9d4cefdc71b7d8f5d648598842a0cdaa5d8a",
+    "20260726000002_checkpoint_latest_allowlist.sql": "415fb9f7f373e1d8d2577cfbb38865adaaa690a1d2636811e2518be8f59f3ab9",
+    "20260726000003_terminal_sequence_after_checkpoints.sql": "d309f5ecdfa56f6fb980d32e630e5c41e2b61893400dc8772a9f043ed4cc98d6",
+    "20260727000000_begin_resumed_work_attempt.sql": "81084272c71c8e08f4c13fc75f5a78f4d35ca4457e1a8468ae6ed4be1ef48244",
+    "20260728000000_work_intelligence_vocabulary.sql": "ca6841a4a06d6076db6e54e969dbf5a5b023001eb15b265ef367f8f6bbfb1570",
+    "20260728000001_work_intelligence_classification.sql": "e35a2b74ee61a57b4d3ef4a4f0789d9fc7c77f38eedd2eb7348b75e7af4ad469",
+    "20260728000002_autonomous_intelligence_gate.sql": "65a1f88dd2d297b1f7231e76ef31c89266e34aa5e07a832220195075f0d73051",
+    "20260728000003_work_routing_vocabulary.sql": "74aa9b51d8bab8503af44d31a9e15c7a8f2f41e2c82adef7f429927f5cc0b8f1",
+    "20260728000004_work_routing_decision.sql": "fa2414f9db7d22d08058dfa68c137a52d4935f725eb01dba65064185c687bd42",
+    "20260728000005_enforce_work_routing.sql": "c2b3de58a0b5fed5aa43f247be8d818adf92148f048fc72bae9a63b327ac0abc",
+    "20260728000006_allow_routing_before_resumption.sql": "091cc446ab359e9e04cf1057b24bd9fa335b84eff47ff6359f70ae594de166b4",
+    "20260728000007_work_routing_adjustment_vocabulary.sql": "91adb2ee68d1e5b4be22850d0bf286d244ee9f3cc6387c0839b002bff2cdb244",
+    "20260728000008_work_routing_adjustment.sql": "c77dcd92da84245444196c17ebac87993387790c8c05884ec628c4e88c265911",
+    "20260728000009_enforce_work_routing_adjustment.sql": "5d5014e1a795e10c19962f1bde4d8f5ae110ee376b4cee719199bb246848e112",
+    "20260728000010_validate_adjusted_routing_decision.sql": "91099f44b89ee6ac74bd920825e92a3597be1d9c760a0aad3e15b73bb14fa28e",
+    "20260728000011_allow_adjustment_before_resumption.sql": "9672c36a7bad1b16c3f5f86a8afdc281cb569dd872b6d4539dd1f3c7120ffa74",
+    "20260728000012_exclude_commanded_routing_history.sql": "85851238e2cd3c1d578d91f0e70d5dbb1d67718865fc3bb7c2bc6b76fb927b84",
+    "20260728000013_autonomous_work_budget.sql": "6844d05c6839e639bff4e8bd70e05ae87e2b828f27bb7ff67a1d2831566f31b4",
+    "20260728000014_interrupt_on_work_budget.sql": "30842196f3db3cc7b687dadd3e670d6c8d9cc6f562cee98beb67c1b0c9554071",
+    "20260728000015_block_work_on_budget_admission.sql": "bbd7cdb3259629e9bf2d4646c0cc67e315b8b828c8b7ab51ca6da113652ef21a",
+    "20260728000016_count_long_running_budget.sql": "5721a4d89a303be3accb0d6d7e2f6ce9fc93a0179290eb9e13a113eb3431ceac",
+    "20260728000017_work_control_vocabulary.sql": "6e33713dce7388a9f38e856672b5dac7056f7571f2e8419f123c0d22953a7374",
+    "20260728000018_work_control.sql": "73ca51f43ccdf8eac334ab8cad6a9c7e2502b11ad45f0059e8586b0e99bdb627",
+    "20260728000019_count_paused_runtime.sql": "c19f5e06550ff9f6ffbede22ee9bd8fd77d773c2b1db8781c8f2cea9513a11c6",
+    "20260729000001_select_autonomous_work.sql": "c77a3148d3a0f70b8c468fc7ebfc384d74bbd6cee556cbf89d6792591ba848a8",
+    "20260729000002_work_decisions.sql": "694782c78a9ce3575cb9d4dfe0c660e9ab4aef010f9ecae09f253eff643ad455",
+    "20260729000003_decision_resumption.sql": "ddc8474f3276ece3ceb2eb26593836cd4dfd88b3f5259817456a7610cfd70d6d",
+    "20260809000000_integration_decision_vocabulary.sql": "bacecf8ca73c46421ba03d1ddec0021f090025aa3ff277daa8dff3025d27ba90",
+    "20260809000001_integration_decision.sql": "35597c93fe6efa67fd2b0b0be29febc8c45b9c098cd30a248c2220da4a682305",
+    "20260809000002_branch_publication_vocabulary.sql": "425073f8d65f7db70e294e715b09dcc886e1247e797bc09c632c4ff002b3db1c",
+    "20260809000003_branch_publication.sql": "8f3dc4dab971987935df8b07be6a01480c5d033013d75725a3d194364a96c6ca",
+    "20260809000004_branch_publication_receipt_identity.sql": "71132c1d198125aa9729398299f18ad73fe6bfe8d57de74bb602217b228e4978",
+    "20260809000005_branch_publication_recovery.sql": "568021ef2275d130139dba72043285878f04ee0cc73bbb0f323ffa3fa71a5fd8",
+    "20260812000000_executor_cancelled_provenance.sql": "a3410c7788f4189e36ebfbf913c32b9b7fc8506ed1678a0891bfd1608597b731",
+    "20260813000000_review_request_vocabulary.sql": "8148569db63334c256c14cf0e1895ca3644cf9d53db52bc2a773809db3776501",
+    "20260813000001_review_request.sql": "228f419cd497692dbdd35d8907de78a579cc8ec5c09cdc024d23324db1e6a10a",
+    "20260815000000_host_observed_evidence_vocabulary.sql": "1f881b470465875b873c4ff21ff80ab25f2559bb740188f6bb135a99bdb93d1a",
+    "20260815000001_host_observed_evidence.sql": "e0801cccda1572ebd83de0fecfe42cb5b85eeda8139f9ae6e433d1992963ad6d",
+    "20260816000000_verifier_opinion_vocabulary.sql": "ae2e086e628528748602a30807d29750cd001300cffacfe57233557c875d2832",
+    "20260816000001_verifier_opinion.sql": "97b53f847c46c27d0c90113d7f8db6db20515c308cbd0452c7a89b9acc965b84",
+    "20260816000002_host_observed_gate_evidence_vocabulary.sql": "bffbeec2fcf9c1ce0f79edc4ad137f57eb9e76037ec9131bb19d5f613ceb5c1b",
+    "20260816000003_host_observed_gate_evidence.sql": "eeaaa41e8428709e17d03d01321f33f2964f884a96a5f5a3a328eae35755fb1e",
+    "20260816000004_verifier_opinion_gate_basis.sql": "dee2d22e04b1b608451dfb62e7332a12cf59d389c1817475ae26ddeb3bc10b77",
+    "20260817000000_host_observed_coder_evidence_vocabulary.sql": "bea4782264c7e2a9086426feaa41396edd3c8e2dc08d0d8977c6107af402ac9f",
+    "20260817000001_host_observed_coder_evidence.sql": "7e42516d0827f00df32b28955f15fed0edfa322e8bf4df8f61819f21737d3529",
+    "20260821000000_budget_block_honest_and_readmission.sql": "8ee2330544882b1ee7d007afb2d461a1596f8ab114f833507b2e23aab7e0bcdd",
+    "20260821000001_budget_interruption_resumption.sql": "601c99939869b69592919bff72eac3ba218f6e4ded26d5090d4397a90e5e811e",
+    "20260821000002_local_vs_external_work_budget.sql": "a30427ae41f3b0b89c1ef2bb4d283081a02abc624d2d2ad9acfcf34aa0399e46",
+    "20260823000000_work_events_realtime.sql": "5609f8555f4577f0066ff4281a3514e23783d15ebcfd48b98a5ce0e6d3b639f4",
+    "20260823000001_autonomous_authorization.sql": "0db9ac2f7749485a4fb9a3a6ba56db643c6ee5f2afcb2528119b7cb61a9e28b6",
+    "20260824000000_project_conversation_governance_v0.sql": "6d634edde745741a01324ef86d1c694d9857347426b67bd38433524ee54bbc55",
+    "20260824000001_project_conversation_governance_variable_conflict.sql": "2660d465ab5ec8c2e7197844ab2dc515216d43231a88194434532bb35ffd0c77",
+    "20260824000002_project_backlog_proposal_v0.sql": "16dbe979088a2047b08952327cbbda35bb7b97392b0e8dd6748d5438dd98f804",
+    "20260824000003_project_backlog_proposal_state.sql": "79164de4840676be4518cd39b8be1555a4f3b055435317bceeadf27c0e40f013",
+    "20260824000004_project_backlog_materialization_replay.sql": "80353eaad989d6b1c9fe86f8a43ec0bba4b8d3aae2212d822d2874a6dc14440a",
+    "20260824000005_project_backlog_slice_validation.sql": "50c8d35fcc7e78a54d0e22430e952d01ed4ec3970dca7cab86adf0bd08675dfe",
+    "20260824000006_autonomous_work_dependencies.sql": "260bb79c63958f731e111d2c9767c5f374eb6c6cfd66ad4938d76f3be0dcad71",
+    "20260825000000_governed_retry.sql": "e4db2e7242aaa9c48a2770c0e29cb399c85cf0dcd296968d98c0ac10eb8ab59a",
+    "20260826000000_work_recovery_lineage.sql": "8ec61c5ffc6fe52d2a547e7442e3a1a2e3c6851267068ea6cc85067eef93a8eb",
+    "20260826000001_restore_paused_runtime_terminal.sql": "f69ba8f894d7d217c46e5a60cdc5d468c97dab328ce13e15e77451663b62e824",
+    "20260826000002_manual_work_release_vocabulary.sql": "8f780da8a249103b9be84ab2ba00b4809dc8c701ebeb3e99832da171d22c73f0",
+    "20260826000003_manual_work_release.sql": "d6419e44683239eee44ee1ddc9a310b054fe6eab19b6fb68d9d958206379baf9",
+    "20260826000004_recovery_lineage_strict_idempotency.sql": "ff02756044e12b06e511ae6dd21c2996c00d26bb972555618f17dd8836bd8532",
+    "20260829000000_recovery_successor_from_review_correction.sql": "ffc6fdecff231cd0b029610316f970547aa62d9ad12ad24a3573db1f1851a3ae",
+    "20260830000000_host_observed_attempt_delta.sql": "c7bb1d6021457fe1e143a83c2515852c5dcf4e21a01912ced32b2387bd2bf841",
+    "20260830000001_host_observed_evidence_reobservation.sql": "fcd976afd370a88df5bac25ef73539c3f2c6f8184d7ded32772bb0934141605a",
+    "20260830000002_coder_placement_evidence.sql": "fb4ad6bd012ec25b6c41ae8f1239d00e897eb354582b9a96dae080d8931801a6",
+    "20260830000003_node_lifecycle_evidence_vocabulary.sql": "602bb643674710513dd5331078ba97a0713915bccb8852ead653de00b1487525",
+    "20260830000004_node_lifecycle_evidence.sql": "5d9d8477c79161d962cc1e4627a10b328d9b88247ded44350edfc6f5ec790bb2",
+    "20260830000005_paid_compute_authorizations.sql": "c2e3f404f13fdb1e36cd6d3ae766fcb43f5d60948b2956504978116c2eca2b9b",
+    "20260830000006_fix_nullable_node_lifecycle_evidence.sql": "47de71e7542796011a5111f7ab612ff89580ac77db6698306a6cc9f7b2dcaa22",
+    "20260830000007_add_node_lifecycle_lease_correlation.sql": "d30aa50fc97c8ef20c18d29ec41ef6a7e75cc7aa90af7e53c04e4f39baf3025e",
+    "20260831000000_node_lifecycle_evidence_provider_ref.sql": "ef4fa1c23a22631b0396f9f675602e3540bc7beebe6615eda40a9fed07cfa8f5",
+    "20260831000001_paid_compute_aggregate_budget.sql": "666a3ad5825d4158792e8306c811ad404bf301aeeff7c6b363ba29d3fd157d6c",
+    "20260831000002_require_aggregate_paid_compute_ceiling.sql": "0d7ace91e84172365ac073af5a7a20c1891a35c61301add6f5f65b75ff4a3520",
+    "20260831000003_recompile_paid_compute_budget_functions.sql": "8a0fe0de233fccace5c73f8fcaa53621e92db8e3574d7a520465378c0936d1f2",
+    "20260831000004_harden_paid_compute_budget_replay.sql": "1d04edd2a7c29c235f6060189bd8245bcc0e2c3406bac836851220f27249db79",
+    "20260831000005_provider_identity_lifecycle.sql": "455365659f6f447cfb9201f8444203e9a3940a67fdc5c225f1873a684e482af1",
+    "20260831000006_harden_provider_ref_validation.sql": "821e27a6a8e0a6719bf75bba47ab648c84c939619e31d5f88be85d70fbe940e5",
+    "20260902000000_withdraw_approved_work.sql": "1be36ecc40f66cb9d54eb30facecc89e0b35559f1c8543075da32f14effa90f1",
+    "20260902000001_minimal_unit_replan.sql": "5c113bc47ee1b4fc91fdb1324c751f48e80607cafd205f052abc781d83a0786b",
+    "20260903000000_human_recovery_authority.sql": "8b53db0fcda8a411828228a115e8289e3abd0077e02408bfc3a6c25d14b36b29",
+    "20260903000001_paid_compute_robust_jwt_role.sql": "9ee1b862be453718a5723f51745bb5b4e343ed2d1cb72668d5d29f66f57ef205",
+    "20260904000000_paid_compute_provider_api_correlation.sql": "0a4a3fcd48ecdb9b7ace12d142abcd36c0b2160c835b1e8b5f4683bace3fa35a",
+    "20260904000001_compute_routing_decision.sql": "34895d66af37bfd852b0dfef83252b65a90d0b0078181c882bebb1615241d340",
+    "20260905000000_budget_blocked_human_resume.sql": "6e8e6527fdfb8cf251f000904776a7a27fe5464d7cd7feffc1b91a6ddf7af2ee",
+    "20260905000001_fix_budget_resume_request_correlation.sql": "7902b120e07f71bb9500bc6e2b270d19921a79e537f3691d7a2b99aaa86c650e",
+    "20260905000002_require_current_budget_block_for_human_resume.sql": "3438443f90d26bdc9ddf9686f47ee3cd003d7e63dad23acd398f0736aedebd34",
+    "20260905000003_autonomous_budget_observability.sql": "1115cd19ba37316153efd84ad700cf52eb3520a6fc538dbbbe4f5200644f9c39",
+    "20260905000004_human_supervised_work.sql": "ec921e2087c49fd43f027e78eb2c1f0a7305547cfd0a29bcf0c8a46255219276",
+    "20260910000000_paid_compute_capability_scope.sql": "ce1a54e0d31335de42a701d8d9c9b255a2b17d83afceb25a421d7791b931a044",
+    "20260910000001_paid_compute_budget_settlement.sql": "fa1ec6fd49c9e38fe28366ab4f3cfa50183b5f440fd7d6a3204e04941dd9559e",
+    "20260910000002_paid_compute_hourly_limit_amendment.sql": "5ef8a4bbfa8404f88ae591364f8fd8b4854612191de20132eff3da3bb66172bc",
+    "20260910000003_fix_settlement_jwt_role_robust.sql": "9a44a5b00546236425371201e80bb9079331ecebaa73307e893301f150943f7f",
+    "20260917000000_canonical_resident_contract_stamp.sql": "d4dd5a598104d5b9f2e978b6b46aebfd8135a50f33541c20baf7ff2afc77ec1c",
+    "20260925000000_compute_preference_event_type.sql": "c2344528117550fc95beb9750f4767501b01d1cf17c45ed0038d64b887cb7a8b",
+    "20260925000001_record_compute_preference.sql": "da66a1e8a59573d74140fe6889fb1970cfdd984c2faccecab5c524d7d9d17f76",
+    "20260925000002_harness_defect_recovery.sql": "53063ad2279029ae163a3ae020be47c6b1068fa1ec48a44d09b97dfc321b54d9",
+    "20260926000000_harness_recovery_descendants.sql": "e7ac1d9e3b887b67ddd8123379b18a5dd880fdbd3472d50706e7153c8a88c8ea",
+    "20260927000000_provider_api_usage_priced_settlement.sql": "4a5552c20fd44553060c82e6c15d2c987c476eea18bb54d0ce0b7ea1bf20c688",
+    "20260927000001_restore_provider_api_reservation_correlation.sql": "b04f0502892192557b43af6142ba72ef9a4a93d6eb6e7efc1367362d50e0ce3e",
+    "20260928000000_mandated_verifier_review_gate.sql": "b811933f45d47238a7153015a31ad95674f1b6370276c51b18c7f08ded1439bc",
+    "20260928000001_integration_effect_vocabulary.sql": "56d6e648e43fc02a859f7e7fc93a41a282e7a12f5854cc632d9aeb00cfeba1f1",
+    "20260928000002_integration_effect.sql": "5fc4522c4e9b444a8ecc60ce74774eeaccb1568249dccdbb3cbb11f3b5aba131",
+    "20260928000003_trusted_system_writer.sql": "ec8102b8eacbe1b0190a8ef7c43fb760a20f65203dca62aece8c08816d52929e",
+    "20260928000004_pending_verification_human_recovery.sql": "f02c25c0eeff5a8e54ab33324e22dc6ec98353a6c203aba4ecaab36bec75ceb3",
+    "20260929000000_trusted_system_evidence_boundary.sql": "d4aa7631933e80f79af92c34735c184042bddb2a47fe4ccd0584915519d6983d",
+    "20260929000001_verifier_requirement_monotonic.sql": "68ff21a5fec66a99a07f9413013dc1f3c50f773614cc5aae7c568dd733387cfd",
+    "20261003000000_integration_effect_ff_only.sql": "36b7dc75dd394dc1c73536059d4bb50686814bcf42a0dc2cd0e75e33c894e49a",
+    "20261004000000_candidate_recovery.sql": "30554fb2f9c526616119973e0d07183b564139acc471eefb5e2639770995a10e",
+    "20261005000000_checkpoint_relative_candidate_recovery.sql": "0275e09d1c8fd853a0fcef0795732952f638eec41a44c8b8e0d2a69296eb54af",
+    "20261008000000_single_item_work_claim.sql": "08fc05c35574188c6fcb495c330a44392f3367fcf53f50c980c6968fdcf08541",
+    "20261009000000_claim_item_lock_order_candidate.sql": "0fdb36b28c7bacfb534a943bea2bbb5a812938295ad5c185cb7faadbe0df8b72"
+  },
+  "functions": [
+    {
+      "signature": "public.start_claimed_work_attempt(uuid,uuid,text)",
+      "source": "20261009000000_claim_item_lock_order_candidate.sql",
+      "line": 3,
+      "originalDefinitionSha256": "33494cde45828e5a81ec0263228d8364897d74d56eb80b44f4d94eafccb0cf40",
+      "oldCreateOrReplace": "CREATE OR REPLACE FUNCTION public.start_claimed_work_attempt(\n  claim_id uuid,\n  attempt_id uuid,\n  executor_id text\n)\nRETURNS public.work_items\nLANGUAGE plpgsql\nSECURITY DEFINER\nSET search_path = pg_catalog\nAS $$\nDECLARE\n  v_user_id uuid := auth.uid();\n  v_claim public.work_claims;\n  v_discovered_item uuid;\nBEGIN\n  IF v_user_id IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;\n  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN\n    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';\n  END IF;\n  IF claim_id IS NULL OR attempt_id IS NULL OR executor_id IS NULL OR length(btrim(executor_id))=0 THEN\n    RAISE EXCEPTION 'invalid claimed attempt input' USING ERRCODE='22023';\n  END IF;\n\n  -- Descoberta sem lock: serve somente para localizar o item próprio.\n  SELECT c.work_item_id INTO v_discovered_item FROM public.work_claims c\n  WHERE c.id=claim_id AND c.user_id=v_user_id;\n  IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;\n\n  -- Ordem localizada: item próprio antes do claim, inclusive no replay.\n  PERFORM 1 FROM public.work_items i\n  WHERE i.id=v_discovered_item AND i.user_id=v_user_id FOR UPDATE;\n  IF NOT FOUND THEN RAISE EXCEPTION 'claim item not found' USING ERRCODE='P0002'; END IF;\n\n  SELECT * INTO v_claim FROM public.work_claims c\n  WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;\n  IF NOT FOUND THEN RAISE EXCEPTION 'claim not found' USING ERRCODE='P0002'; END IF;\n\n  -- Não seguir um claim redirecionado enquanto esperávamos o item.\n  IF v_claim.id IS DISTINCT FROM claim_id\n     OR v_claim.user_id IS DISTINCT FROM v_user_id\n     OR v_claim.work_item_id IS DISTINCT FROM v_discovered_item THEN\n    RAISE EXCEPTION 'claim identity changed while acquiring locks' USING ERRCODE='55000';\n  END IF;\n  -- Revalidar autoridade após a espera, sem acrescentar locks de allowlist.\n  IF auth.uid() IS DISTINCT FROM v_user_id THEN\n    RAISE EXCEPTION 'authentication changed while acquiring locks' USING ERRCODE='42501';\n  END IF;\n  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_user_id) THEN\n    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';\n  END IF;\n\n  IF v_claim.attempt_id IS NOT NULL THEN\n    IF v_claim.attempt_id <> attempt_id THEN\n      RAISE EXCEPTION 'claim already started another attempt' USING ERRCODE='55000';\n    END IF;\n    -- Replay: begin_work_attempt reconhece a tentativa já iniciada.\n  ELSE\n    IF v_claim.released_at IS NOT NULL THEN\n      RAISE EXCEPTION 'claim already released' USING ERRCODE='55000';\n    END IF;\n    IF now() >= v_claim.expires_at THEN\n      RAISE EXCEPTION 'claim expired' USING ERRCODE='55000';\n    END IF;\n    -- Qualificado pelo nome da função: `attempt_id` também é coluna.\n    UPDATE public.work_claims c SET attempt_id=start_claimed_work_attempt.attempt_id\n    WHERE c.id=v_claim.id RETURNING c.* INTO v_claim;\n  END IF;\n\n  RETURN private.begin_work_attempt(\n    v_user_id, v_claim.work_item_id, v_claim.approved_proposal_version,\n    attempt_id, executor_id, 'supervised_execution', v_claim.id);\nEND;\n$$;",
+      "insertionAnchor": "  -- Ordem localizada: item próprio antes do claim, inclusive no replay.\n",
+      "insertion": "  -- Orçamento existente antes de item/claim/alvo; não decide nem consome aqui.\n  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_user_id::text,0));\n\n",
+      "candidateDefinitionSha256": "da0c0f290508982139cb9d18a882a1a3096befc728b250d6153d2865e98334e9"
+    },
+    {
+      "signature": "public.begin_resumed_work_attempt(uuid,integer,uuid,bigint,bigint,uuid,uuid,text,integer,text)",
+      "source": "20260728000011_allow_adjustment_before_resumption.sql",
+      "line": 3,
+      "originalDefinitionSha256": "85d1e959d69cee7af3b234203cf04469736928e0aebf2fbf0272595b93698781",
+      "oldCreateOrReplace": "CREATE OR REPLACE FUNCTION public.begin_resumed_work_attempt(\n  work_item_id uuid, expected_proposal_version integer,\n  source_attempt_id uuid, checkpoint_event_seq bigint, abandonment_event_seq bigint,\n  claim_id uuid, attempt_id uuid, owner_instance_id text, lease_seconds integer, executor_id text)\nRETURNS public.work_items\nLANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog\nAS $$\nDECLARE\n  v_uid uuid:=auth.uid(); v_item public.work_items; v_cp public.work_events; v_ab public.work_events;\n  v_existing public.work_events; v_target text; v_now timestamptz:=now(); v_claim public.work_claims;\n  v_signal_sequence integer;\nBEGIN\n  IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;\n  IF NOT EXISTS (SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid)\n    THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;\n  IF claim_id IS NULL OR attempt_id IS NULL OR source_attempt_id IS NULL\n     OR checkpoint_event_seq IS NULL OR abandonment_event_seq IS NULL\n     OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0\n    THEN RAISE EXCEPTION 'invalid resumption request' USING ERRCODE='22023'; END IF;\n\n  SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;\n  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;\n\n  SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id\n    AND e.event_type='execution_started' AND e.payload->'data'->>'attempt_id'=attempt_id::text;\n  IF FOUND THEN\n    IF v_existing.payload->'data'->>'reason'='resumed_execution'\n       AND v_existing.payload->'data'->>'resumed_from_attempt_id'=source_attempt_id::text\n       AND (v_existing.payload->'data'->>'resumed_from_checkpoint_event_seq')::bigint=checkpoint_event_seq\n      THEN RETURN v_item; END IF;\n    RAISE EXCEPTION 'attempt correlation conflict' USING ERRCODE='55000';\n  END IF;\n  IF EXISTS (SELECT 1 FROM public.work_claims c WHERE c.id=claim_id)\n    THEN RAISE EXCEPTION 'claim identity conflict' USING ERRCODE='55000'; END IF;\n  IF EXISTS (\n    SELECT 1 FROM public.work_events e\n     WHERE e.payload->'data'->>'attempt_id'=attempt_id::text\n       AND e.event_type NOT IN ('work_routing_adjusted','work_routing_decided')\n  ) THEN RAISE EXCEPTION 'attempt identifier reused' USING ERRCODE='55000'; END IF;\n  IF v_item.state<>'approved' OR v_item.proposal_version<>expected_proposal_version\n    THEN RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000'; END IF;\n\n  SELECT * INTO v_ab FROM public.work_events e WHERE e.seq=abandonment_event_seq\n    AND e.work_item_id=v_item.id AND e.event_type='attempt_abandoned'\n    AND e.proposal_version=expected_proposal_version\n    AND e.payload->'data'->>'attempt_id'=source_attempt_id::text;\n  IF NOT FOUND OR v_ab.payload->'data'->>'reason' NOT IN ('lease_expired','duration_limit_exceeded','declared_bounds_exceeded')\n    THEN RAISE EXCEPTION 'abandoned attempt not found' USING ERRCODE='55000'; END IF;\n\n  SELECT * INTO v_cp FROM public.work_events e WHERE e.seq=checkpoint_event_seq\n    AND e.work_item_id=v_item.id AND e.event_type='checkpoint_recorded'\n    AND e.seq<v_ab.seq AND e.proposal_version=expected_proposal_version\n    AND e.payload->'data'->>'attempt_id'=source_attempt_id::text;\n  IF NOT FOUND THEN RAISE EXCEPTION 'valid checkpoint not found' USING ERRCODE='55000'; END IF;\n  v_signal_sequence:=(v_cp.payload->'data'->>'signal_sequence')::integer;\n  IF EXISTS (SELECT 1 FROM public.work_events newer WHERE newer.work_item_id=v_item.id\n    AND newer.event_type='checkpoint_recorded' AND newer.seq<v_ab.seq\n    AND newer.proposal_version=expected_proposal_version\n    AND newer.payload->'data'->>'attempt_id'=source_attempt_id::text\n    AND (newer.payload->'data'->>'signal_sequence')::integer>v_signal_sequence)\n    THEN RAISE EXCEPTION 'checkpoint is obsolete' USING ERRCODE='55000'; END IF;\n\n  v_target:=btrim(v_item.intent#>>'{execution_spec,target,reference}');\n  IF v_target IS NULL OR length(v_target)=0 THEN RAISE EXCEPTION 'execution target missing' USING ERRCODE='22023'; END IF;\n  PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_uid::text||':'||v_target,0));\n  IF EXISTS (SELECT 1 FROM public.work_claims c WHERE c.user_id=v_uid AND c.released_at IS NULL\n    AND c.expires_at>v_now AND (c.work_item_id=v_item.id OR c.target_reference=v_target))\n    THEN RAISE EXCEPTION 'work target is held by an active claim' USING ERRCODE='55000'; END IF;\n  IF EXISTS (SELECT 1 FROM public.work_items i WHERE i.user_id=v_uid AND i.id<>v_item.id\n    AND i.state='in_progress' AND btrim(i.intent#>>'{execution_spec,target,reference}')=v_target)\n    THEN RAISE EXCEPTION 'work target is busy with a running attempt' USING ERRCODE='55000'; END IF;\n\n  INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,owner_instance_id,\n    acquired_at,expires_at,attempt_id,target_reference)\n  VALUES(claim_id,v_item.id,v_uid,expected_proposal_version,btrim(owner_instance_id),v_now,\n    v_now+make_interval(secs=>lease_seconds),attempt_id,v_target) RETURNING * INTO v_claim;\n  UPDATE public.work_items SET state='in_progress',updated_at=v_now WHERE id=v_item.id RETURNING * INTO v_item;\n  INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n    (v_item.id,'work_claimed','system',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('claim_id',claim_id,'work_item_id',v_item.id,'approved_proposal_version',expected_proposal_version,\n        'owner_instance_id',btrim(owner_instance_id),'acquired_at',v_now,'expires_at',v_claim.expires_at,'target_reference',v_target))),\n    (v_item.id,'work_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('reason','resumed_execution','attempt_id',attempt_id,'claim_id',claim_id,\n        'resumed_from_attempt_id',source_attempt_id,'resumed_from_checkpoint_sequence',v_signal_sequence,\n        'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'abandonment_event_seq',abandonment_event_seq))),\n    (v_item.id,'execution_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('work_item_id',v_item.id,'attempt_id',attempt_id,'approved_proposal_version',expected_proposal_version,\n        'origin','anima','executor_id',btrim(executor_id),'claim_id',claim_id,'reason','resumed_execution',\n        'resumed_from_attempt_id',source_attempt_id,'resumed_from_checkpoint_sequence',v_signal_sequence,\n        'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'abandonment_event_seq',abandonment_event_seq)));\n  RETURN v_item;\nEND $$;",
+      "insertionAnchor": "  SELECT * INTO v_item FROM public.work_items i",
+      "insertion": "  -- Orçamento existente antes de item/claim/alvo; não decide nem consome aqui.\n  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));\n\n",
+      "candidateDefinitionSha256": "2e88c8fbaed7122e889949c2231da9d1cd7088b6ec13d436e3508c4db7d6401b"
+    },
+    {
+      "signature": "public.begin_human_decision_resumed_attempt(uuid,integer,uuid,uuid,uuid,uuid,text,integer,text)",
+      "source": "20260729000003_decision_resumption.sql",
+      "line": 140,
+      "originalDefinitionSha256": "9f8c72cde1aef2bc12d471c24984f09210b670f9aab4b70cc684541073a6a5ff",
+      "oldCreateOrReplace": "CREATE OR REPLACE FUNCTION public.begin_human_decision_resumed_attempt(\n  work_item_id uuid,expected_proposal_version integer,input_requested_event_id uuid,input_provided_event_id uuid,\n  claim_id uuid,attempt_id uuid,owner_instance_id text,lease_seconds integer,executor_id text)\nRETURNS public.work_items LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog\nAS $$\nDECLARE\n  v_uid uuid:=auth.uid(); v_now timestamptz:=now(); v_item public.work_items;\n  v_request public.work_events; v_answer public.work_events; v_existing public.work_events;\n  v_cp public.work_events; v_claim public.work_claims; v_target text; v_source_attempt uuid; v_cp_seq integer;\nBEGIN\n  IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;\n  IF NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid)\n    THEN RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501'; END IF;\n  IF input_requested_event_id IS NULL OR input_provided_event_id IS NULL OR claim_id IS NULL OR attempt_id IS NULL\n    OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0\n    THEN RAISE EXCEPTION 'invalid decision resumption request' USING ERRCODE='22023'; END IF;\n  SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;\n  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;\n  SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id AND e.event_type='execution_started'\n    AND e.payload->'data'->>'attempt_id'=attempt_id::text;\n  IF FOUND THEN\n    IF v_existing.payload->'data'->>'resumed_from_input_provided_event_id'=input_provided_event_id::text THEN RETURN v_item; END IF;\n    RAISE EXCEPTION 'attempt correlation conflict' USING ERRCODE='55000';\n  END IF;\n  IF v_item.state<>'approved' OR v_item.proposal_version<>expected_proposal_version\n    THEN RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000'; END IF;\n  SELECT * INTO v_answer FROM public.work_events e WHERE e.id=input_provided_event_id AND e.work_item_id=v_item.id\n    AND e.event_type='input_provided' AND e.proposal_version=expected_proposal_version\n    AND e.payload->'data'->>'input_requested_event_id'=input_requested_event_id::text\n    AND e.payload->'data'->>'effect'='resume';\n  IF NOT FOUND THEN RAISE EXCEPTION 'resume decision not found' USING ERRCODE='55000'; END IF;\n  SELECT * INTO v_request FROM public.work_events e WHERE e.id=input_requested_event_id AND e.work_item_id=v_item.id\n    AND e.event_type='input_requested' AND e.proposal_version=expected_proposal_version\n    AND e.payload->'data'->'handoff' IS NOT NULL;\n  IF NOT FOUND THEN RAISE EXCEPTION 'decision checkpoint handoff not found' USING ERRCODE='55000'; END IF;\n  v_source_attempt:=(v_request.payload->'data'->>'attempt_id')::uuid;\n  SELECT * INTO v_cp FROM public.work_events e WHERE e.seq=(v_request.payload->'data'->>'checkpoint_event_seq')::bigint\n    AND e.work_item_id=v_item.id AND e.event_type='checkpoint_recorded'\n    AND e.payload->'data'->>'attempt_id'=v_source_attempt::text;\n  IF NOT FOUND THEN RAISE EXCEPTION 'valid checkpoint not found' USING ERRCODE='55000'; END IF;\n  v_cp_seq:=(v_cp.payload->'data'->>'signal_sequence')::integer;\n  IF EXISTS(SELECT 1 FROM public.work_events e WHERE e.work_item_id=v_item.id AND e.event_type='checkpoint_recorded'\n    AND e.payload->'data'->>'attempt_id'=v_source_attempt::text\n    AND (e.payload->'data'->>'signal_sequence')::integer>v_cp_seq)\n    THEN RAISE EXCEPTION 'checkpoint is obsolete' USING ERRCODE='55000'; END IF;\n  IF EXISTS(SELECT 1 FROM public.work_claims c WHERE c.id=claim_id)\n    OR EXISTS(SELECT 1 FROM public.work_events e WHERE e.payload->'data'->>'attempt_id'=attempt_id::text\n      AND e.event_type NOT IN ('work_routing_adjusted','work_routing_decided'))\n    THEN RAISE EXCEPTION 'resumption identity reused' USING ERRCODE='55000'; END IF;\n  v_target:=btrim(v_item.intent#>>'{execution_spec,target,reference}');\n  PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_uid::text||':'||v_target,0));\n  IF EXISTS(SELECT 1 FROM public.work_claims c WHERE c.user_id=v_uid AND c.released_at IS NULL\n    AND c.expires_at>v_now AND (c.work_item_id=v_item.id OR c.target_reference=v_target))\n    THEN RAISE EXCEPTION 'work target is held by an active claim' USING ERRCODE='55000'; END IF;\n  INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,owner_instance_id,\n    acquired_at,expires_at,attempt_id,target_reference)\n  VALUES(claim_id,v_item.id,v_uid,expected_proposal_version,btrim(owner_instance_id),v_now,\n    v_now+make_interval(secs=>lease_seconds),attempt_id,v_target) RETURNING * INTO v_claim;\n  UPDATE public.work_items SET state='in_progress',updated_at=v_now WHERE id=v_item.id RETURNING * INTO v_item;\n  INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n    (v_item.id,'work_claimed','system',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('claim_id',claim_id,'work_item_id',v_item.id,'approved_proposal_version',expected_proposal_version,\n        'owner_instance_id',btrim(owner_instance_id),'acquired_at',v_now,'expires_at',v_claim.expires_at,'target_reference',v_target))),\n    (v_item.id,'work_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('reason','human_decision_resumed','attempt_id',attempt_id,'claim_id',claim_id,\n        'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,\n        'resumed_from_checkpoint_event_seq',v_cp.seq,'resumed_from_input_requested_event_id',v_request.id,\n        'resumed_from_input_provided_event_id',v_answer.id))),\n    (v_item.id,'execution_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('work_item_id',v_item.id,'attempt_id',attempt_id,'approved_proposal_version',expected_proposal_version,\n        'origin','anima','executor_id',btrim(executor_id),'claim_id',claim_id,'reason','human_decision_resumed',\n        'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,\n        'resumed_from_checkpoint_event_seq',v_cp.seq,'resumed_from_input_requested_event_id',v_request.id,\n        'resumed_from_input_provided_event_id',v_answer.id)));\n  RETURN v_item;\nEND $$;",
+      "insertionAnchor": "  SELECT * INTO v_item FROM public.work_items i",
+      "insertion": "  -- Orçamento existente antes de item/claim/alvo; não decide nem consome aqui.\n  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));\n\n",
+      "candidateDefinitionSha256": "880bfee887b359a0757e4d7b6b279fb6ea2c2af2ac5d912cf87e6cb1b4825672"
+    },
+    {
+      "signature": "public.begin_budget_interruption_resumed_attempt(uuid,integer,bigint,bigint,uuid,uuid,text,integer,text)",
+      "source": "20260821000001_budget_interruption_resumption.sql",
+      "line": 178,
+      "originalDefinitionSha256": "54f53fcd943309830b40882bf883803d711c4269d35e0fbb79d884a12452be5c",
+      "oldCreateOrReplace": "CREATE OR REPLACE FUNCTION public.begin_budget_interruption_resumed_attempt(\n  work_item_id uuid, expected_proposal_version integer, interruption_event_seq bigint,\n  checkpoint_event_seq bigint, claim_id uuid, attempt_id uuid, owner_instance_id text,\n  lease_seconds integer, executor_id text)\nRETURNS public.work_items LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$\nDECLARE\n  v_uid uuid:=auth.uid(); v_now timestamptz:=now(); v_item public.work_items;\n  v_block public.work_events; v_existing public.work_events; v_cp public.work_events;\n  v_claim public.work_claims; v_target text; v_source_attempt uuid; v_cp_seq integer;\nBEGIN\n  IF v_uid IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE='42501'; END IF;\n  IF NOT EXISTS(SELECT 1 FROM private.work_orchestration_allowlist a WHERE a.user_id=v_uid) THEN\n    RAISE EXCEPTION 'work orchestration is not enabled' USING ERRCODE='42501';\n  END IF;\n  IF interruption_event_seq IS NULL OR checkpoint_event_seq IS NULL OR claim_id IS NULL OR attempt_id IS NULL\n    OR length(btrim(owner_instance_id))=0 OR length(btrim(executor_id))=0 OR lease_seconds<=0\n    THEN RAISE EXCEPTION 'invalid budget resumption request' USING ERRCODE='22023'; END IF;\n\n  SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;\n  IF NOT FOUND THEN RAISE EXCEPTION 'work item not found' USING ERRCODE='P0002'; END IF;\n  SELECT * INTO v_existing FROM public.work_events e WHERE e.work_item_id=v_item.id\n    AND e.event_type='execution_started' AND e.payload->'data'->>'attempt_id'=attempt_id::text;\n  IF FOUND THEN\n    IF (v_existing.payload->'data'->>'resumed_from_interruption_event_seq')::bigint=interruption_event_seq\n      THEN RETURN v_item; END IF;\n    RAISE EXCEPTION 'attempt correlation conflict' USING ERRCODE='55000';\n  END IF;\n  IF v_item.state<>'approved' OR v_item.proposal_version<>expected_proposal_version\n    THEN RAISE EXCEPTION 'work item state or proposal version changed' USING ERRCODE='55000'; END IF;\n\n  SELECT * INTO v_block FROM public.work_events e WHERE e.seq=interruption_event_seq\n    AND e.work_item_id=v_item.id AND e.event_type='work_blocked'\n    AND e.proposal_version=expected_proposal_version;\n  IF NOT FOUND OR NOT private.is_budget_block_reason(v_block.payload->'data'->>'reason')\n    OR v_block.payload->'data'->>'attempt_id' IS NULL\n    OR (v_block.payload->'data'->>'checkpoint_event_seq')::bigint IS DISTINCT FROM checkpoint_event_seq\n    THEN RAISE EXCEPTION 'budget interruption not found' USING ERRCODE='55000'; END IF;\n  v_source_attempt:=(v_block.payload->'data'->>'attempt_id')::uuid;\n  -- A interrupção não pode já ter sido retomada nem superada por tentativa posterior.\n  IF EXISTS(SELECT 1 FROM public.work_events e WHERE e.work_item_id=v_item.id\n    AND e.event_type='execution_started' AND e.seq>interruption_event_seq)\n    THEN RAISE EXCEPTION 'budget interruption already resumed' USING ERRCODE='55000'; END IF;\n\n  SELECT * INTO v_cp FROM public.work_events e WHERE e.seq=checkpoint_event_seq\n    AND e.work_item_id=v_item.id AND e.event_type='checkpoint_recorded'\n    AND e.proposal_version=expected_proposal_version\n    AND e.payload->'data'->>'attempt_id'=v_source_attempt::text;\n  IF NOT FOUND THEN RAISE EXCEPTION 'valid checkpoint not found' USING ERRCODE='55000'; END IF;\n  v_cp_seq:=(v_cp.payload->'data'->>'signal_sequence')::integer;\n  IF EXISTS(SELECT 1 FROM public.work_events e WHERE e.work_item_id=v_item.id AND e.event_type='checkpoint_recorded'\n    AND e.payload->'data'->>'attempt_id'=v_source_attempt::text\n    AND (e.payload->'data'->>'signal_sequence')::integer>v_cp_seq)\n    THEN RAISE EXCEPTION 'checkpoint is obsolete' USING ERRCODE='55000'; END IF;\n\n  IF EXISTS(SELECT 1 FROM public.work_claims c WHERE c.id=claim_id)\n    OR EXISTS(SELECT 1 FROM public.work_events e WHERE e.payload->'data'->>'attempt_id'=attempt_id::text\n      AND e.event_type NOT IN ('work_routing_adjusted','work_routing_decided'))\n    THEN RAISE EXCEPTION 'resumption identity reused' USING ERRCODE='55000'; END IF;\n\n  v_target:=btrim(v_item.intent#>>'{execution_spec,target,reference}');\n  IF v_target IS NULL OR length(v_target)=0 THEN RAISE EXCEPTION 'execution target missing' USING ERRCODE='22023'; END IF;\n  PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_uid::text||':'||v_target,0));\n  IF EXISTS(SELECT 1 FROM public.work_claims c WHERE c.user_id=v_uid AND c.released_at IS NULL\n    AND c.expires_at>v_now AND (c.work_item_id=v_item.id OR c.target_reference=v_target))\n    THEN RAISE EXCEPTION 'work target is held by an active claim' USING ERRCODE='55000'; END IF;\n  IF EXISTS(SELECT 1 FROM public.work_items i WHERE i.user_id=v_uid AND i.id<>v_item.id\n    AND i.state='in_progress' AND btrim(i.intent#>>'{execution_spec,target,reference}')=v_target)\n    THEN RAISE EXCEPTION 'work target is busy with a running attempt' USING ERRCODE='55000'; END IF;\n\n  -- A guarda enforce_autonomous_work_budget_before_start revalida o orçamento no\n  -- INSERT de execution_started abaixo: se a janela esgotou de novo, falha fechado.\n  INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,owner_instance_id,\n    acquired_at,expires_at,attempt_id,target_reference)\n  VALUES(claim_id,v_item.id,v_uid,expected_proposal_version,btrim(owner_instance_id),v_now,\n    v_now+make_interval(secs=>lease_seconds),attempt_id,v_target) RETURNING * INTO v_claim;\n  UPDATE public.work_items SET state='in_progress',updated_at=v_now WHERE id=v_item.id RETURNING * INTO v_item;\n  INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n    (v_item.id,'work_claimed','system',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('claim_id',claim_id,'work_item_id',v_item.id,'approved_proposal_version',expected_proposal_version,\n        'owner_instance_id',btrim(owner_instance_id),'acquired_at',v_now,'expires_at',v_claim.expires_at,'target_reference',v_target))),\n    (v_item.id,'work_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('reason','budget_resumed','attempt_id',attempt_id,'claim_id',claim_id,\n        'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,\n        'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'resumed_from_interruption_event_seq',interruption_event_seq))),\n    (v_item.id,'execution_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('work_item_id',v_item.id,'attempt_id',attempt_id,'approved_proposal_version',expected_proposal_version,\n        'origin','anima','executor_id',btrim(executor_id),'claim_id',claim_id,'reason','budget_resumed',\n        'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,\n        'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'resumed_from_interruption_event_seq',interruption_event_seq)));\n  RETURN v_item;\nEND; $$;",
+      "insertionAnchor": "  SELECT * INTO v_item FROM public.work_items i",
+      "insertion": "  -- Orçamento existente antes de item/claim/alvo; não decide nem consome aqui.\n  PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));\n\n",
+      "candidateDefinitionSha256": "581294b50b265a407d0ed70f28376f3015b9f9292eb051b041b943b4c5217bf5"
+    }
+  ],
+  "proposedSqlSha256": "aac14113bfe39d40a3ac7ef618fd76f336e54f25053aa502b942552156c384e8",
+  "diffSha256": "d659961c56eda39a3173167ea008d3d5f3cb3a91988a7a4c19af51500133253e",
+  "historicalFailures": {
+    "baseline": {
+      "suite": "work_budget_local_vs_external",
+      "planned": 12,
+      "passed": 8,
+      "failed": 4,
+      "emitted": 12,
+      "status": "FAIL",
+      "exitCode": 0,
+      "sqlstates": [],
+      "failedAssertions": [
+        "not ok 1 - LOCAL com 6 tentativas locais em 24h continua admitido (sem quota de custo)",
+        "not ok 2 - LOCAL não recebe user_attempt_budget_exhausted",
+        "not ok 6 - item EXTERNO admitido quando o usuário não gastou quota externa (as 6 foram locais)",
+        "not ok 10 - item LOCAL admitido apesar de 6 tentativas externas do mesmo usuário"
+      ],
+      "sourceSha256": "871828f8286185f002e69d36a9dd7ae0e9fe58cafcf9b5b0b95852273ae768a5"
+    },
+    "candidate": {
+      "suite": "work_budget_local_vs_external",
+      "planned": 12,
+      "passed": 8,
+      "failed": 4,
+      "emitted": 12,
+      "status": "FAIL",
+      "exitCode": 0,
+      "sqlstates": [],
+      "failedAssertions": [
+        "not ok 1 - LOCAL com 6 tentativas locais em 24h continua admitido (sem quota de custo)",
+        "not ok 2 - LOCAL não recebe user_attempt_budget_exhausted",
+        "not ok 6 - item EXTERNO admitido quando o usuário não gastou quota externa (as 6 foram locais)",
+        "not ok 10 - item LOCAL admitido apesar de 6 tentativas externas do mesmo usuário"
+      ],
+      "sourceSha256": "871828f8286185f002e69d36a9dd7ae0e9fe58cafcf9b5b0b95852273ae768a5"
+    }
+  },
+  "evidenceHashes": {
+    "docs/registros/2026-10-09-single-item-comparativa-evidencias/baseline/budget-item-residual/budget_item_residual-result.json": "7b139f734d35d25bfee2d7e898749decd9eabaed475e27f3ecb7499327e1520a",
+    "docs/registros/2026-10-09-single-item-comparativa-evidencias/baseline/budget-item-residual/budget_item_residual-locks-before.json": "9291b3a2394a5873e0193e0450e4f68606deb92221ac2f720d07db3616f77e5d",
+    "docs/registros/2026-10-09-single-item-comparativa-evidencias/candidate/lock-pairs/budget_item_residual-result.json": "f7d2b69acbe5de1ad10b5018dba4259e9e350c88b60cc2ebef46f47b0e641130",
+    "docs/registros/2026-10-09-single-item-comparativa-evidencias/candidate/lock-pairs/budget_item_residual-locks-before.json": "8037ffd3d9199a5e18fe06d04778d38a682869cef70eaed2254cf3f12025322b",
+    "docs/registros/2026-10-09-single-item-comparativa-evidencias/lock_pairs.py": "3874905878444d72f3a386987e0aee50eb363b2ff70b4eb2fc99918894610306",
+    "docs/registros/2026-10-09-single-item-comparativa-evidencias/comparison-results.json": "722cc387e359ec4550785b1e386008e80c54d67d4d2945caa4fdfb11e5005c2e"
+  },
+  "inventory": [
+    {
+      "signature": "public.set_updated_at()",
+      "source": "20260528000001_functions_triggers.sql",
+      "line": 6,
+      "bodySha256": "e074d3db8073b75d3d30dc88b1bfccd78344fdb695a013054e0d6944708c2882",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.handle_new_user()",
+      "source": "20260611000000_fix_default_name.sql",
+      "line": 10,
+      "bodySha256": "30efc579e1840791b0fa4b8bcc5a1b2e0c7c1b2e0ebee29ef75aee7e227da9f4",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.lifegame_get_level_from_xp(integer)",
+      "source": "20260528000001_functions_triggers.sql",
+      "line": 56,
+      "bodySha256": "944e52238849856c65859710afad8f946d766eed246fdb6829f614af26271183",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.trigger_xp_record_insert()",
+      "source": "20260601000003_pillar_relationships.sql",
+      "line": 33,
+      "bodySha256": "73c64a66efe8fe89357d92a42e9fd7c3727b57dbd4c0e4acfff7235ed6ea647e",
+      "callees": [
+        "public.lifegame_get_level_from_xp"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.trigger_life_event_insert()",
+      "source": "20260601000003_pillar_relationships.sql",
+      "line": 71,
+      "bodySha256": "ede8e841b8ba0b0a2e6f1c3faf9d87306241045e95d18e61f7be922e2c95340a",
+      "callees": [
+        "public.lifegame_get_level_from_xp"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.trigger_check_quest_completion()",
+      "source": "20260528000001_functions_triggers.sql",
+      "line": 122,
+      "bodySha256": "5ba208b2da63b2c673239a24141ee7b7623041caad37e6f794e56255136d23bc",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "match_entries(vector(768),float,int)",
+      "source": "20260606000002_embeddings.sql",
+      "line": 50,
+      "bodySha256": "235f1c4e494c6235b09fe712c70ee1d9378bc736c93203b78e17ebc34939c693",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_work_proposal(jsonb)",
+      "source": "20260714000001_protect_work_orchestration.sql",
+      "line": 38,
+      "bodySha256": "e08a83379981f2e8a9ebfa64a8826100623d2531d2b8644e1d3d40aa805f0c9b",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.create_work_proposal(uuid,work_impact_level,work_capability,jsonb,jsonb)",
+      "source": "20260714000001_protect_work_orchestration.sql",
+      "line": 78,
+      "bodySha256": "5e322bf78de8ffee6ac03615318d385e84d04f05554dfcdb6cd031b8f283da2b",
+      "callees": [
+        "private.is_valid_work_proposal"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.revise_work_proposal(uuid,integer,jsonb,jsonb)",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 175,
+      "bodySha256": "324f0c292472cfbd8a451e382e6bf9caa3aae788bc1f61abe77f6b5055d6ca09",
+      "callees": [
+        "private.is_valid_work_proposal"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.resolve_approval(uuid,integer,work_approval_decision,jsonb)",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 251,
+      "bodySha256": "c67c61ccc63211c87cee27f6dc94ae5dc6dfcba34449e9bcc99a65c06373ed81",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.start_work(uuid,integer)",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 370,
+      "bodySha256": "5523401f39236bda0ad6032d98fb702bcf5f1844f32bc4ebe0a632491735301a",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.submit_work_result(uuid,integer,jsonb)",
+      "source": "20260715000003_result_evidence_shape.sql",
+      "line": 4,
+      "bodySha256": "6e786679a1c11d27fe69162cf4e70a60b31ddfa5bf448dc01cdd89a2963bad1b",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.review_work_result(uuid,integer,work_review_decision,jsonb)",
+      "source": "20260715000000_complete_work_review.sql",
+      "line": 2,
+      "bodySha256": "c14d0a3b15d7f294c6fb6e4d2650b993d67827e4f15c13dc78371641932a5163",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.assign_active_conversation_session()",
+      "source": "20260715000001_context_and_conversation_archive.sql",
+      "line": 39,
+      "bodySha256": "306d1244b5003ff4b3779c49dcdb2eec6765086ca7a7b71d8173c5ad852e4eeb",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.archive_current_conversation()",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 146,
+      "bodySha256": "becff49db52f89db24d432ced96a05772436b9822828986beeec2f25ba073097",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.attach_work_context(uuid,integer,jsonb)",
+      "source": "20260715000001_context_and_conversation_archive.sql",
+      "line": 136,
+      "bodySha256": "597e2f0f39d60c8d6194208d7ce8a6797202365cc0c735ee13d03ea6813833eb",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.attach_initial_work_context()",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 6,
+      "bodySha256": "d606f4d4e4a447a2bd5204379a2ec15698e2a9dff2b492c5c9a53796e5a32af7",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.request_work_proposal_revision(uuid,integer,text,jsonb,jsonb)",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 31,
+      "bodySha256": "e4772d7649e90e5361a061749c9b67eec7e389d4d78016a1a35c81d4e72f0b23",
+      "callees": [
+        "private.is_valid_work_proposal"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.review_work_result_versioned(uuid,integer,uuid,work_review_decision,jsonb)",
+      "source": "20260928000000_mandated_verifier_review_gate.sql",
+      "line": 406,
+      "bodySha256": "855b345c81b939bab011f159e5195935d6a4271c9f507b07af54724b9be80cc8",
+      "callees": [
+        "private.mandated_result_verdict",
+        "private.work_item_requires_verifier",
+        "public.review_work_result"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.set_work_focus(uuid)",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 104,
+      "bodySha256": "905ad4e14f130b5503838abe9505b9e81286d8acacde7cd5225bff89e533949f",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.clear_terminal_work_focus()",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 124,
+      "bodySha256": "ba9d8405a45ad6783c59fda5498543d30d05d26fc75eefb8495ef2bd48ff186f",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.track_conversation_turn()",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 136,
+      "bodySha256": "e6fe1b51cf19b143fb9de6b29973119d48b7d4bd18c5e8b6b25b9c1b8de6c82c",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.abandon_current_conversation_turn()",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "line": 160,
+      "bodySha256": "9a147c84a4df26639d00eed08ddacf7d12bcd86630f0b18fb3bec4d8ba57b199",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.start_work_execution(uuid,integer,uuid,text)",
+      "source": "20260715000004_persist_work_executions.sql",
+      "line": 6,
+      "bodySha256": "1983a363f9e0f4544733c4353a6cd2ec676d226c79d391de1730356d3abb9a61",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.finish_work_execution(uuid,integer,uuid,jsonb)",
+      "source": "20260812000000_executor_cancelled_provenance.sql",
+      "line": 137,
+      "bodySha256": "a6f0a1ae8a36903db31dd840501f9f74677e4f8bfdfa44da8a4e5ceb2f5a20bd",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.reopen_latest_conversation()",
+      "source": "20260718000000_reopen_conversation.sql",
+      "line": 2,
+      "bodySha256": "be0106501c9716f9482c2827e66d37f47143a9bea7c869e51dc53ffed04c714b",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.start_commanded_work_attempt(uuid,integer,uuid,text)",
+      "source": "20260721000001_work_claims.sql",
+      "line": 118,
+      "bodySha256": "4efd0e6e99718f6c3d0df49351a227134575a5fd6e0350bf60c362269f3a7c80",
+      "callees": [
+        "private.begin_work_attempt"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_commanded_work_terminal(uuid,integer,uuid,jsonb)",
+      "source": "20260928000000_mandated_verifier_review_gate.sql",
+      "line": 173,
+      "bodySha256": "98d56fa42a1fba4834898a951e9f3af8464de7eb4234c8cb325aa0bc9a9d6ab7",
+      "callees": [
+        "private.work_item_requires_verifier"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.begin_work_attempt(uuid,uuid,integer,uuid,text,text,uuid)",
+      "source": "20260721000005_commanded_target_exclusivity.sql",
+      "line": 29,
+      "bodySha256": "bcbfcbc7366406c1e5f09d55c9be6390b4d60e0ca0b6e9819b9d6bf86cb3e0cb",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.acquire_work_claim(uuid,integer,uuid,text,integer)",
+      "source": "20260721000004_target_exclusivity.sql",
+      "line": 47,
+      "bodySha256": "76b8e3d93dc97b677edec239c5863020cff4000ddd5a145c259bf2c17f890632",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.start_claimed_work_attempt(uuid,uuid,text)",
+      "source": "20261009000000_claim_item_lock_order_candidate.sql",
+      "line": 3,
+      "bodySha256": "3efc5ce7fac54a293a3a4e64e89b7c5e572ecdb09abb3a0c01a3701a558021f3",
+      "callees": [
+        "private.begin_work_attempt"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.release_work_claim(uuid,text)",
+      "source": "20261009000000_claim_item_lock_order_candidate.sql",
+      "line": 77,
+      "bodySha256": "cccea09ead61b16889b5e977a551d0832602f170653c182181290f4414b98731",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.jsonb_is_nonblank_string(jsonb)",
+      "source": "20260721000002_autonomous_work_queue.sql",
+      "line": 16,
+      "bodySha256": "4e1ac8acb8001d268bde8b5548fdeb22240a6c67c7710b6f46f05990528d6dec",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.jsonb_is_positive_integer(jsonb)",
+      "source": "20260721000002_autonomous_work_queue.sql",
+      "line": 20,
+      "bodySha256": "bf05626bc61d41f5381ec5ebb583440585970ee5ea974008060d7c091f8137e5",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.jsonb_is_nonblank_string_array(jsonb,integer)",
+      "source": "20260721000002_autonomous_work_queue.sql",
+      "line": 25,
+      "bodySha256": "3a271838823c127a7db20f6bacf88ae821f3132b836b194a0cabd05a0f416bbf",
+      "callees": [
+        "private.jsonb_is_nonblank_string"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_validation_criteria(jsonb)",
+      "source": "20260721000002_autonomous_work_queue.sql",
+      "line": 41,
+      "bodySha256": "a2979359a2e9d9604de49220d86b6a000c5a875e189b3a2d6e7fbcb922ff496d",
+      "callees": [
+        "private.jsonb_is_nonblank_string"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_execution_limits(jsonb)",
+      "source": "20260721000002_autonomous_work_queue.sql",
+      "line": 56,
+      "bodySha256": "000efa03b7d55d2a0e743be6c4eb40d9cf7bebf1ed967eeee9d11921ac275ef6",
+      "callees": [
+        "private.jsonb_is_positive_integer"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_execution_spec(jsonb)",
+      "source": "20260721000002_autonomous_work_queue.sql",
+      "line": 74,
+      "bodySha256": "f9f5bf7b2155ba91903a4e157fdcb66a7dd655219dac85e7a054808cd79f9a3a",
+      "callees": [
+        "private.is_valid_execution_limits",
+        "private.is_valid_validation_criteria",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_nonblank_string_array"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_autonomously_eligible(work_state,jsonb,jsonb)",
+      "source": "20260721000002_autonomous_work_queue.sql",
+      "line": 91,
+      "bodySha256": "642b8ec1f00d4d58e75f214c96bb651ece0d7434582b93d84a9941594d5319c3",
+      "callees": [
+        "private.is_valid_execution_spec",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_nonblank_string_array"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.autonomous_work_queue()",
+      "source": "20260824000006_autonomous_work_dependencies.sql",
+      "line": 29,
+      "bodySha256": "5e32103d4e31e313234fe64e47e707d4ecc73e9d15a47e61e3f62a4901e217a5",
+      "callees": [
+        "private.autonomous_intelligence_eligibility",
+        "private.autonomous_work_dependencies_satisfied",
+        "private.is_autonomously_eligible"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.next_autonomous_work()",
+      "source": "20260721000004_target_exclusivity.sql",
+      "line": 272,
+      "bodySha256": "c42d66223d263092bbf02aa17a78460581075123401fb7e9b9990ddd5050cdbd",
+      "callees": [
+        "public.autonomous_work_queue"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.reconcile_supervised_work()",
+      "source": "20260928000004_pending_verification_human_recovery.sql",
+      "line": 256,
+      "bodySha256": "13e25045fce1c493b09482ec9e118459c6a0b087c7715ab0744934da92b67b30",
+      "callees": [
+        "private.latest_result_event_id",
+        "private.mandated_result_verdict",
+        "private.work_item_requires_verifier"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.is_valid_checkpoint_validations(jsonb)",
+      "source": "20260726000001_record_work_checkpoint.sql",
+      "line": 57,
+      "bodySha256": "cc8a14781c2910efd3ad956cc91422c45b3e353e31a3ccf5a6edfd4067702c17",
+      "callees": [
+        "private.jsonb_is_nonblank_string"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_work_checkpoint(jsonb)",
+      "source": "20260726000001_record_work_checkpoint.sql",
+      "line": 69,
+      "bodySha256": "f455391abb1b82ecaad3ab8f9b8e58988a049cf25ec5e3dd80c7c4a9e73d6b72",
+      "callees": [
+        "private.is_valid_checkpoint_validations",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_nonblank_string_array"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_work_checkpoint(uuid,integer,uuid,jsonb)",
+      "source": "20260726000001_record_work_checkpoint.sql",
+      "line": 105,
+      "bodySha256": "c5c5d1fd3d270160f9d1741c92243d7793fd386c94f448bf034cb779915c17ea",
+      "callees": [
+        "private.is_valid_work_checkpoint"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.latest_work_checkpoint(uuid,uuid)",
+      "source": "20260726000002_checkpoint_latest_allowlist.sql",
+      "line": 9,
+      "bodySha256": "cf7fe139336463b7d690dd1ece43fec7cc8e71177659e3a6b7f73414401088df",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.abandoned_work_resumption_source(uuid)",
+      "source": "20260727000000_begin_resumed_work_attempt.sql",
+      "line": 4,
+      "bodySha256": "006f0b5ee0fbd54b79d364d4d622fade974523681fb75dd79f640dfc78a07ce4",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.begin_resumed_work_attempt(uuid,integer,uuid,bigint,bigint,uuid,uuid,text,integer,text)",
+      "source": "20260728000011_allow_adjustment_before_resumption.sql",
+      "line": 3,
+      "bodySha256": "fa4257cfa67c6d692e32f6c5b772aa265c461aa1db8b6c856bdf2bd2c8b8069d",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.is_valid_work_intelligence_classification(jsonb)",
+      "source": "20260728000001_work_intelligence_classification.sql",
+      "line": 6,
+      "bodySha256": "1927b973c47122c21a1fd73f97a7035c03c927f2ee5308f2bf1fc1941a7e5986",
+      "callees": [
+        "private.jsonb_is_nonblank_string"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_work_intelligence_classification(uuid,integer,integer,jsonb)",
+      "source": "20260728000001_work_intelligence_classification.sql",
+      "line": 73,
+      "bodySha256": "893a28e6ca41bf70c8f8a2e530875cb290f7bba54fbf98899b7a5f916ef3b71d",
+      "callees": [
+        "private.is_valid_work_intelligence_classification"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.current_work_intelligence_classification(uuid)",
+      "source": "20260728000001_work_intelligence_classification.sql",
+      "line": 223,
+      "bodySha256": "afeb02b7e7345595c7138571cc37da1cfb29eb331607fdc113fdeebdca9b6016",
+      "callees": [
+        "private.is_valid_work_intelligence_classification"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.autonomous_intelligence_eligibility(uuid,integer)",
+      "source": "20260728000002_autonomous_intelligence_gate.sql",
+      "line": 10,
+      "bodySha256": "274dfc74203fdaaa8b87cce3143914bd04076965d6ae91ccdff533e1737f1acc",
+      "callees": [
+        "private.is_valid_work_intelligence_classification"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.enforce_autonomous_intelligence_on_claim()",
+      "source": "20260728000002_autonomous_intelligence_gate.sql",
+      "line": 79,
+      "bodySha256": "6e9566ad552ec1c7b7ab9688ef428fd5bc7c08df97bddfa16b606fa09b12f4fa",
+      "callees": [
+        "private.autonomous_intelligence_eligibility"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.enforce_autonomous_intelligence_on_attempt()",
+      "source": "20260728000002_autonomous_intelligence_gate.sql",
+      "line": 101,
+      "bodySha256": "44469484afdd93203c419e8d382f29144a17b09a27cf9f9a4c8f5fe80fca3514",
+      "callees": [
+        "private.autonomous_intelligence_eligibility"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.required_work_effort(jsonb)",
+      "source": "20260728000004_work_routing_decision.sql",
+      "line": 2,
+      "bodySha256": "45f926088820b06cfc094e93662c72fb5708c377709c08ee033a245074798bbf",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_work_routing_decision(uuid,integer,uuid,jsonb)",
+      "source": "20260728000004_work_routing_decision.sql",
+      "line": 136,
+      "bodySha256": "23becf7a736196faf18842f76df9eadc625ec46f08e9c87b0aa67625ac692433",
+      "callees": [
+        "private.autonomous_intelligence_eligibility",
+        "private.is_valid_work_intelligence_classification",
+        "private.is_valid_work_routing_decision"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.work_routing_decision(uuid)",
+      "source": "20260728000004_work_routing_decision.sql",
+      "line": 242,
+      "bodySha256": "343d7418154a95894ee88f73a2c43a690628ee349550f955c30f301a23279af5",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.enforce_autonomous_routing_on_attempt()",
+      "source": "20260728000009_enforce_work_routing_adjustment.sql",
+      "line": 28,
+      "bodySha256": "109eb74cd38ea952d396866e45fea0b64bd068db12a7b70f7f29066633ef5a16",
+      "callees": [
+        "private.is_valid_work_intelligence_classification"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.work_routing_adjustment_context(uuid,integer)",
+      "source": "20260728000012_exclude_commanded_routing_history.sql",
+      "line": 2,
+      "bodySha256": "7af5382a99514ba937bd75c8742044f3a8df21bdcab8b84c0ab5491e57d06fc6",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.expected_work_routing_adjustment(uuid,integer,text)",
+      "source": "20260728000008_work_routing_adjustment.sql",
+      "line": 73,
+      "bodySha256": "3e306c9791cf8f51e6d14eea03164a3635c1f30ccd5d8507f11d2a0d604fdb57",
+      "callees": [
+        "private.work_routing_adjustment_context"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.work_routing_adjustment_context(uuid)",
+      "source": "20260728000008_work_routing_adjustment.sql",
+      "line": 124,
+      "bodySha256": "640386b387bb1ea702ca4326f1636e19901cb0fb4da113fbfe15d66fe5aaa414",
+      "callees": [
+        "private.work_routing_adjustment_context"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_work_routing_adjustment(uuid,integer,uuid,jsonb)",
+      "source": "20260728000008_work_routing_adjustment.sql",
+      "line": 145,
+      "bodySha256": "0fd483c071b8b70e46981dbf63acae96ba84f65ec3bfad0d9a031c55d1917d93",
+      "callees": [
+        "private.expected_work_routing_adjustment",
+        "private.is_valid_work_intelligence_classification",
+        "private.required_work_effort"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_work_routing_decision_v1_baseline(jsonb,work_capability,jsonb)",
+      "source": "20260728000004_work_routing_decision.sql",
+      "line": 26,
+      "bodySha256": "e83d2e87ca3e268a323680be523c57789ef0e499c564677630c144ec11bb8b59",
+      "callees": [
+        "private.jsonb_is_nonblank_string",
+        "private.required_work_effort"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_work_routing_decision(jsonb,work_capability,jsonb)",
+      "source": "20260728000009_enforce_work_routing_adjustment.sql",
+      "line": 4,
+      "bodySha256": "952dd7797c3363e32f1aa507e3444da82e6db91ccc1ba13f41cf05aaae13bc5f",
+      "callees": [
+        "private.required_work_effort"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.enforce_adjustment_on_routing_decision()",
+      "source": "20260728000010_validate_adjusted_routing_decision.sql",
+      "line": 2,
+      "bodySha256": "1f3c989331629ce589061b18ee8abe689db448ce4caf95c7f6ae958e4f1f6e45",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.autonomous_work_budget_usage(uuid,uuid,timestamptz)",
+      "source": "20260826000001_restore_paused_runtime_terminal.sql",
+      "line": 13,
+      "bodySha256": "41907a0deb8bc141ad56e119dfde07efb0fe21842fd48ccc448e1ebacab06cfe",
+      "callees": [
+        "private.work_item_cost_class"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.autonomous_work_budget_status(uuid)",
+      "source": "20260905000003_autonomous_budget_observability.sql",
+      "line": 5,
+      "bodySha256": "31d0a0fcc0e345a591f8edc04ef0e4281f594af0fd41f1c8c8d0ba5570f6d2c0",
+      "callees": [
+        "private.autonomous_work_budget_decision",
+        "private.work_item_cost_class"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.enforce_autonomous_work_budget()",
+      "source": "20260905000000_budget_blocked_human_resume.sql",
+      "line": 137,
+      "bodySha256": "5c022a4cce6e712d550f6db81ad1ec14070421b0fcb9b88263c1af590608f995",
+      "callees": [
+        "private.autonomous_work_budget_decision"
+      ],
+      "budgetAdvisoryExplicit": true,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.interrupt_work_on_budget(uuid,integer,uuid)",
+      "source": "20260728000014_interrupt_on_work_budget.sql",
+      "line": 3,
+      "bodySha256": "c4e2721bb49fe16d6f529345c9a4a57c40c3f337deecb15351999c230714f981",
+      "callees": [
+        "private.autonomous_work_budget_decision"
+      ],
+      "budgetAdvisoryExplicit": true,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.block_work_on_budget(uuid)",
+      "source": "20260821000000_budget_block_honest_and_readmission.sql",
+      "line": 25,
+      "bodySha256": "171d2dbfc40cba5ff3cde2361d1945bf6fb2ca99f4bc3373fa70356e2bc4198b",
+      "callees": [
+        "private.autonomous_work_budget_decision"
+      ],
+      "budgetAdvisoryExplicit": true,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.request_work_control(uuid,integer,uuid,text)",
+      "source": "20260728000018_work_control.sql",
+      "line": 45,
+      "bodySha256": "71525668941257f9063e7eaf54bc128bddc7c86578a48a179b0ee230efbcd9b2",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.apply_work_control_at_checkpoint(uuid,integer,uuid)",
+      "source": "20260728000018_work_control.sql",
+      "line": 126,
+      "bodySha256": "48a4a6bce0a89763e85134a054ed10ae484a5f1d6ebbc472a4ff045a6978d66a",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.select_autonomous_work(uuid,integer)",
+      "source": "20260729000001_select_autonomous_work.sql",
+      "line": 4,
+      "bodySha256": "a5ea9bc92ecabe1adf832a2bc8273ab06cd74dec73f13846745b277e422c9fc3",
+      "callees": [
+        "public.autonomous_work_queue"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_work_decision_required(uuid,integer,uuid,jsonb)",
+      "source": "20260729000003_decision_resumption.sql",
+      "line": 3,
+      "bodySha256": "88f004b7134d14c3b30a5200b6e16c16eaa8940cb7c9f986bc3141474648d7b6",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.respond_to_work_decision(uuid,integer,uuid,text)",
+      "source": "20260729000002_work_decisions.sql",
+      "line": 124,
+      "bodySha256": "5f622a134dabd628a25255d3a1ca321c08c1b0b409ac10dbf1b847fcea862a00",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.human_decision_resumption_source(uuid)",
+      "source": "20260729000003_decision_resumption.sql",
+      "line": 112,
+      "bodySha256": "f059d2b781cfd0a0849f3d3415ff9187507a0f2ec41a3c3659bcee8969b379be",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.begin_human_decision_resumed_attempt(uuid,integer,uuid,uuid,uuid,uuid,text,integer,text)",
+      "source": "20260729000003_decision_resumption.sql",
+      "line": 140,
+      "bodySha256": "3455c4410aebe6e35faca9614b32bc1f9d8fed10809ba5b4e3182544e6113ec6",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.decide_integration(uuid,integer,uuid,work_integration_decision,text)",
+      "source": "20260809000001_integration_decision.sql",
+      "line": 41,
+      "bodySha256": "3aa814f9a0833779e46201903ccf0f67fdf2631288c3afab654dff77ab602ca9",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_branch_published(uuid,integer,text,jsonb)",
+      "source": "20260809000005_branch_publication_recovery.sql",
+      "line": 6,
+      "bodySha256": "96e5c3c93b14e4a4157a63485feb6ca4403d92433271366445c7c317f36490bb",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_review_request_created(uuid,integer,text,jsonb)",
+      "source": "20260813000001_review_request.sql",
+      "line": 10,
+      "bodySha256": "4885ac99fef7fd9101586cbeabe12075de11b36ede16c554db25b6f30172a289",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_host_git_diff_files(jsonb)",
+      "source": "20260815000001_host_observed_evidence.sql",
+      "line": 45,
+      "bodySha256": "17503e32bbf7e9e941860108cf9b4d1060794ffc66cc3712067f9490ab4bbe35",
+      "callees": [
+        "private.jsonb_is_nonblank_string"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_host_observed_evidence(jsonb)",
+      "source": "20260830000000_host_observed_attempt_delta.sql",
+      "line": 4,
+      "bodySha256": "0ff818617f76e650077a353202b3cb6e63cf9829218afd3e3af8729bed623f83",
+      "callees": [
+        "private.is_valid_host_git_diff_files",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_nonblank_string_array",
+        "private.jsonb_is_positive_integer"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_host_observed_evidence(uuid,integer,uuid,jsonb)",
+      "source": "20260928000003_trusted_system_writer.sql",
+      "line": 68,
+      "bodySha256": "55c30ef0c4fbc076e0f940b77c7fac5cd19a05dc24465da3fdb9c171d9b396e6",
+      "callees": [
+        "private.is_valid_host_observed_evidence",
+        "private.trusted_system_writer_owner"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.is_valid_opinion_summary(jsonb)",
+      "source": "20260816000001_verifier_opinion.sql",
+      "line": 42,
+      "bodySha256": "1ef461d715b939f224b4cddc014a961696c3caf53f066969f16df3a1e3fca622",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_opinion_findings(jsonb)",
+      "source": "20260816000001_verifier_opinion.sql",
+      "line": 54,
+      "bodySha256": "927eee37e53399b4d964d8313054d50bec9a4828614d1d7de239a53e8532ec4b",
+      "callees": [
+        "private.jsonb_is_nonblank_string"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_verifier_opinion(jsonb)",
+      "source": "20260816000004_verifier_opinion_gate_basis.sql",
+      "line": 10,
+      "bodySha256": "fb303cb753372d1d7268a4d0ed277a5825a91f767fd106c3bf4891238daf9df6",
+      "callees": [
+        "private.is_valid_opinion_findings",
+        "private.is_valid_opinion_summary",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_positive_integer"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_verifier_opinion(uuid,integer,uuid,jsonb)",
+      "source": "20260928000003_trusted_system_writer.sql",
+      "line": 284,
+      "bodySha256": "ab7fd32b35b0975a755fbe10be7ac0607d4f6ea51b822728974d547ba16c97b3",
+      "callees": [
+        "private.is_valid_verifier_opinion",
+        "private.release_mandated_result",
+        "private.trusted_system_writer_owner"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.is_valid_host_gate_outcomes(jsonb)",
+      "source": "20260816000003_host_observed_gate_evidence.sql",
+      "line": 27,
+      "bodySha256": "77ef2675f5bc31660516f7e4e260fef17481eb21c94d4d2434d23a5671ebf52f",
+      "callees": [
+        "private.jsonb_is_nonblank_string"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_host_gate_evidence(jsonb)",
+      "source": "20260816000003_host_observed_gate_evidence.sql",
+      "line": 51,
+      "bodySha256": "b5b52d1af1885cf3ab2d06c58f7fe2eb386f62d83ff1841ecfc925c1e97ff8b2",
+      "callees": [
+        "private.is_valid_host_gate_outcomes",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_positive_integer"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_host_observed_gate_evidence(uuid,integer,uuid,jsonb)",
+      "source": "20260928000003_trusted_system_writer.sql",
+      "line": 137,
+      "bodySha256": "eb68f94d07c8d93c93abff12322a08e99d4f8b68742848b6b413fd1eb308ed39",
+      "callees": [
+        "private.is_valid_host_gate_evidence",
+        "private.trusted_system_writer_owner"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.is_valid_host_coder_evidence(jsonb)",
+      "source": "20260830000002_coder_placement_evidence.sql",
+      "line": 3,
+      "bodySha256": "407e924cf9dec124cc6b9066c5708c5038f80a7f7330d126d8b239b453a3af98",
+      "callees": [
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_positive_integer"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_host_observed_coder_evidence(uuid,integer,uuid,jsonb)",
+      "source": "20260928000003_trusted_system_writer.sql",
+      "line": 211,
+      "bodySha256": "2600f18f75e255cacebd4ef5f6b4f6eb58cb52c6c0255b1dad78f21a096dd6ce",
+      "callees": [
+        "private.is_valid_host_coder_evidence",
+        "private.trusted_system_writer_owner"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.readmit_budget_blocked_item(uuid,uuid,timestamptz)",
+      "source": "20260821000000_budget_block_honest_and_readmission.sql",
+      "line": 111,
+      "bodySha256": "f58bcbd164bf2479af09cf039226e124b009e9ef2315e7d75174f6824ce35ed9",
+      "callees": [
+        "private.autonomous_work_budget_decision"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.readmit_budget_blocked_work()",
+      "source": "20260821000000_budget_block_honest_and_readmission.sql",
+      "line": 178,
+      "bodySha256": "b4cdccb56789a20f66de38ae9188e15ff298970e2a03dd4782eafd00d3767751",
+      "callees": [
+        "private.readmit_budget_blocked_item"
+      ],
+      "budgetAdvisoryExplicit": true,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_budget_block_reason(text)",
+      "source": "20260821000001_budget_interruption_resumption.sql",
+      "line": 22,
+      "bodySha256": "ca7b1aaa0c0443e083b3fb40ca6d2b46a78c4174bdfbed0c1f7204644c8a7989",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.readmit_budget_interrupted_item(uuid,uuid,timestamptz)",
+      "source": "20260821000001_budget_interruption_resumption.sql",
+      "line": 33,
+      "bodySha256": "9a9e5accb3f1bba606190a628831c431cc27d33f5ba771dedeb61c263890a3b2",
+      "callees": [
+        "private.autonomous_work_budget_decision",
+        "private.is_budget_block_reason"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.readmit_budget_interrupted_work()",
+      "source": "20260821000001_budget_interruption_resumption.sql",
+      "line": 80,
+      "bodySha256": "72888a8cd46c8e727fdf25add02fb44473dfdfd24e2217d2150002733bdbcc0d",
+      "callees": [
+        "private.readmit_budget_interrupted_item"
+      ],
+      "budgetAdvisoryExplicit": true,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.budget_interruption_resumption_source(uuid)",
+      "source": "20260821000001_budget_interruption_resumption.sql",
+      "line": 112,
+      "bodySha256": "18d2be8c61539bb2c1fa65bcd2093b89a85b77a972c64eba9af6bbbbab5e145c",
+      "callees": [
+        "private.is_budget_block_reason"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.begin_budget_interruption_resumed_attempt(uuid,integer,bigint,bigint,uuid,uuid,text,integer,text)",
+      "source": "20260821000001_budget_interruption_resumption.sql",
+      "line": 178,
+      "bodySha256": "f90eb2f6a6579da212f788e9cd942914209dcea5bd934a721985be146f577373",
+      "callees": [
+        "private.is_budget_block_reason"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": true,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.work_item_cost_class(jsonb)",
+      "source": "20260821000002_local_vs_external_work_budget.sql",
+      "line": 28,
+      "bodySha256": "a329f7e5709cfbbcb267477c9cd04bd7da1426d28d0833021aaf0a1f7a686c9e",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.auto_approve_autonomous_work(uuid,integer,jsonb)",
+      "source": "20260823000001_autonomous_authorization.sql",
+      "line": 24,
+      "bodySha256": "87579b70ae6c56d1d46b1ffba93698e69723782f4e2c8cea29bc03d1ae3cc089",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.create_project_decision_proposal(text,text,jsonb,jsonb,jsonb,jsonb,jsonb,text,uuid)",
+      "source": "20260824000001_project_conversation_governance_variable_conflict.sql",
+      "line": 2,
+      "bodySha256": "9b4e946c7beea88c596ee865fa1029ccaa07e6e120d95100e6484ae41ec43abf",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.resolve_project_decision_proposal(uuid,integer,project_decision_event_type,text,jsonb)",
+      "source": "20260824000000_project_conversation_governance_v0.sql",
+      "line": 73,
+      "bodySha256": "bbfa9ca17a7e4d14f37cbb35d7e70da03d86d92257f65f7a4883512473ea2500",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.create_project_backlog_proposal(uuid,integer,text,jsonb,text,jsonb,jsonb,jsonb,text,uuid)",
+      "source": "20260824000002_project_backlog_proposal_v0.sql",
+      "line": 40,
+      "bodySha256": "39cb9edb4c258999e23f15bb93eedaee4fb1879d7f970574b398270fb4a3893f",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.request_project_backlog_proposal_changes(uuid,integer,uuid,text,text)",
+      "source": "20260824000002_project_backlog_proposal_v0.sql",
+      "line": 58,
+      "bodySha256": "d4e017764a6795b56a92419e87d20fa40519b2022ee1d51aa2f49755bce7fce2",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.materialize_project_backlog_proposal(uuid,integer,uuid,text,jsonb)",
+      "source": "20260824000004_project_backlog_materialization_replay.sql",
+      "line": 1,
+      "bodySha256": "895443f5ef5f68800de3f5d8af9e220c56e173dbb6491ba13fa7e61741c94523",
+      "callees": [
+        "private.is_valid_work_proposal"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_valid_project_backlog_slices(jsonb)",
+      "source": "20260824000005_project_backlog_slice_validation.sql",
+      "line": 1,
+      "bodySha256": "6e279138ff8e78a89ab55754670ad3cb14bae8b4058562ef9f245faa7b24b008",
+      "callees": [
+        "private.is_valid_execution_spec",
+        "private.is_valid_work_proposal"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.autonomous_work_dependencies_satisfied(uuid,uuid,jsonb)",
+      "source": "20260824000006_autonomous_work_dependencies.sql",
+      "line": 4,
+      "bodySha256": "a3bff09157a021d908b148368eded585fc41d57a7ffc69c5f319dd56c0e5107a",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.work_retry_readiness(uuid,uuid)",
+      "source": "20260825000000_governed_retry.sql",
+      "line": 7,
+      "bodySha256": "50cfd577650fc91853651f18e5ae3bb8bbe2e047fb04197b6ef72ba342978b51",
+      "callees": [
+        "private.autonomous_intelligence_eligibility",
+        "private.autonomous_work_dependencies_satisfied",
+        "private.is_autonomously_eligible"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.current_work_retry_readiness(uuid)",
+      "source": "20260825000000_governed_retry.sql",
+      "line": 56,
+      "bodySha256": "7970f12ea7736a95328585c02d12f34ecede3a53b8d8a5860d9dea874577458c",
+      "callees": [
+        "private.work_retry_readiness"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.request_work_retry(uuid,integer,uuid,uuid)",
+      "source": "20260825000000_governed_retry.sql",
+      "line": 68,
+      "bodySha256": "7e326516aa2467b1d53a2c5a05cff4cf0082db050b8da6afeb0d54f64fd95c7f",
+      "callees": [
+        "private.work_retry_readiness"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.request_autonomous_execution(uuid,integer,uuid)",
+      "source": "20260825000000_governed_retry.sql",
+      "line": 101,
+      "bodySha256": "6e71737d20d9615b8c7bd2bd88c7c750fb08f2600591523b6f1710f25091b8d4",
+      "callees": [
+        "public.autonomous_work_queue"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.record_recovery_successor(uuid,uuid,integer,work_impact_level,work_capability,jsonb,jsonb,text,uuid)",
+      "source": "20260829000000_recovery_successor_from_review_correction.sql",
+      "line": 17,
+      "bodySha256": "d029d0e4cc919b157abd5e7952b629c135e51371cebade76e90a3b550b52e746",
+      "callees": [
+        "private.is_valid_work_proposal"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.propose_recovery_successor(uuid,integer,work_impact_level,work_capability,jsonb,jsonb,text,uuid)",
+      "source": "20260826000000_work_recovery_lineage.sql",
+      "line": 91,
+      "bodySha256": "a13d065942be4c78de4e00fd6763170f4da9a35d4f096bdc57fca4f855565b82",
+      "callees": [
+        "private.record_recovery_successor"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.release_manual_work(uuid,integer)",
+      "source": "20260826000003_manual_work_release.sql",
+      "line": 12,
+      "bodySha256": "d5d7993ae692c0366a56ca7660f6effa4a68787d6412f2b6ec9e1c751d96d943",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.is_valid_node_lifecycle_evidence(jsonb)",
+      "source": "20260831000006_harden_provider_ref_validation.sql",
+      "line": 4,
+      "bodySha256": "01ecc1088896d1f609a2e2dc32b8632735d4a19ab5ef7c439da87facd5d75735",
+      "callees": [
+        "private.jsonb_is_nonblank_string"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_host_observed_node_lifecycle(uuid,integer,jsonb)",
+      "source": "20260830000007_add_node_lifecycle_lease_correlation.sql",
+      "line": 33,
+      "bodySha256": "3df3f5ff4c1ae2482dd3b5cf7e4a5889d20d90e27e8a5d3ee9570f5d21b20062",
+      "callees": [
+        "private.is_valid_node_lifecycle_evidence"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.revoke_paid_compute_authorization(uuid)",
+      "source": "20260903000001_paid_compute_robust_jwt_role.sql",
+      "line": 47,
+      "bodySha256": "f2bbb90ec397a12cad448054194db665743d19a53d96691cecce65f6872bf169",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.reserve_paid_compute_budget(uuid,text,text,text,text,uuid,text,text,text,numeric)",
+      "source": "20260927000001_restore_provider_api_reservation_correlation.sql",
+      "line": 21,
+      "bodySha256": "8605bacde308285f26b3b3bcc6a8cade4ed3fb900101e12c2ffcb6b6c365526f",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.void_paid_compute_budget_reservation(uuid,text)",
+      "source": "20260910000003_fix_settlement_jwt_role_robust.sql",
+      "line": 77,
+      "bodySha256": "41d32d1d79ffad698c6fdf614f24f21232a450a1a76e5e30b7eb4b5261d1a61f",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.withdraw_approved_work(uuid,integer,text)",
+      "source": "20260902000000_withdraw_approved_work.sql",
+      "line": 33,
+      "bodySha256": "139bbddab1592eb92441bc7d89ea4e94602e3f0142ff66439c1d5a192732c831",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.replan_strategy(jsonb)",
+      "source": "20260902000001_minimal_unit_replan.sql",
+      "line": 25,
+      "bodySha256": "b29cf9fe4b3893a7eeb79ca0bf04f273293e0fd7d5cc63c8decba95bce85c94f",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.replan_failed_work(uuid,integer,uuid,jsonb)",
+      "source": "20260902000001_minimal_unit_replan.sql",
+      "line": 67,
+      "bodySha256": "faedf633abc4e98fcf994d33f58415905dbe7b321185094fba28386c8c80bc15",
+      "callees": [
+        "private.record_recovery_successor",
+        "private.replan_strategy"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.validate_resume_authorization(jsonb)",
+      "source": "20260903000000_human_recovery_authority.sql",
+      "line": 25,
+      "bodySha256": "f11a8fd23eeac1c068d40229997fe2a0004760d5f386bf98ca3d9f3db2a5aab9",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.authorize_work_resume(uuid,integer,uuid,jsonb)",
+      "source": "20260903000000_human_recovery_authority.sql",
+      "line": 51,
+      "bodySha256": "e1cbe33d01be49c1f7d0954de1df0fbec7e40c2af152aaeba67f84a58051daa0",
+      "callees": [
+        "private.record_recovery_successor",
+        "private.validate_resume_authorization"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.block_resume_authority_descendants()",
+      "source": "20260903000000_human_recovery_authority.sql",
+      "line": 116,
+      "bodySha256": "ed0dd7a53089b4d3608a6f9fa8319330eb56fabdc70b9200f0b4cd63cdb818dd",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.validate_budget_blocked_resume_authorization(jsonb)",
+      "source": "20260905000000_budget_blocked_human_resume.sql",
+      "line": 23,
+      "bodySha256": "3faa7e7c5b35b8c5f6268688e421ef5c97a6fe3f0fceae1998922c1c605bb911",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.authorize_work_resume(uuid,integer,jsonb)",
+      "source": "20260905000000_budget_blocked_human_resume.sql",
+      "line": 43,
+      "bodySha256": "ea9cb3ee3d1e88191c954317412d62016decd26dd74aa0837b0b977a485353a0",
+      "callees": [
+        "private.autonomous_work_budget_decision",
+        "private.validate_budget_blocked_resume_authorization"
+      ],
+      "budgetAdvisoryExplicit": true,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.active_work_supervision(uuid,uuid,timestamptz)",
+      "source": "20260905000004_human_supervised_work.sql",
+      "line": 21,
+      "bodySha256": "c394730a18b680d14c5afadd5b3837ceaf009f81d5bb733d9d7f6f5728d4adc3",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.unattended_work_budget_decision(uuid,uuid,timestamptz)",
+      "source": "20260905000000_budget_blocked_human_resume.sql",
+      "line": 110,
+      "bodySha256": "37c0e5c82b51db8816baf24be60da68002b6c07e8508892299a147d613b95e59",
+      "callees": [
+        "private.autonomous_work_budget_usage"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.autonomous_work_budget_decision(uuid,uuid,timestamptz)",
+      "source": "20260905000004_human_supervised_work.sql",
+      "line": 37,
+      "bodySha256": "c2402463fe00376c72eadb0b56624bcf915e859384d02f4ea2af297fd83af6ea",
+      "callees": [
+        "private.active_work_supervision",
+        "private.unattended_work_budget_decision"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.grant_work_supervision(uuid,integer,uuid,integer)",
+      "source": "20260905000004_human_supervised_work.sql",
+      "line": 59,
+      "bodySha256": "a9aedcd7ae1313a1f0aa920dafc57e1c558d8694638d75e6b0054a6c7ea1dd73",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.revoke_work_supervision(uuid)",
+      "source": "20260905000004_human_supervised_work.sql",
+      "line": 81,
+      "bodySha256": "d7c5bb3764d94ddb7d2264dec1f740b28b3f3fef0350db61e0107d5374301722",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_compute_routing_decision(uuid,integer,uuid,jsonb,uuid)",
+      "source": "20260910000000_paid_compute_capability_scope.sql",
+      "line": 33,
+      "bodySha256": "3b774cd8692b25ceb0cf5e7d145cc80f079de3fed889d4d5deb4b3b4f716067a",
+      "callees": [
+        "private.jsonb_is_nonblank_string"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.grant_paid_compute_authorization(text,text,text,uuid,bigint,text,numeric,timestamptz,timestamptz,jsonb)",
+      "source": "20260910000000_paid_compute_capability_scope.sql",
+      "line": 141,
+      "bodySha256": "6980e22b78643ff061e32999eff6656007423d1e8aea5f13d7bd1ad61461000e",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.settle_paid_compute_budget_reservation(uuid,text,numeric,text)",
+      "source": "20260910000003_fix_settlement_jwt_role_robust.sql",
+      "line": 114,
+      "bodySha256": "a73c0456ddb42a3b1deba9e8b65693231943a83967b780c2b4fa8d12734636ff",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.raise_paid_compute_hourly_limit_to_usd_1(uuid)",
+      "source": "20260910000002_paid_compute_hourly_limit_amendment.sql",
+      "line": 16,
+      "bodySha256": "26802cec728f3ee0935b858c82aaafd4f26d2382edf67d568a48f9be67297632",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.stamp_canonical_resident_contract()",
+      "source": "20260917000000_canonical_resident_contract_stamp.sql",
+      "line": 39,
+      "bodySha256": "d134015d82c7abb1fe3a5277f24f5850235edf11942cc5d9d2258ceacf78ffc8",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_compute_preference(uuid,integer,jsonb)",
+      "source": "20260925000001_record_compute_preference.sql",
+      "line": 17,
+      "bodySha256": "f3731918e0487e2f2ac710e8a7861249a260e64a65e4a9143de79f572f57e428",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.validate_harness_recovery_authorization(jsonb)",
+      "source": "20260925000002_harness_defect_recovery.sql",
+      "line": 35,
+      "bodySha256": "52b2371efbc7364819d8d22ddaa70111aa3ffd51076b046a5fc33bb4f7a7e611",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.authorize_harness_fix_recovery(uuid,integer,uuid,jsonb)",
+      "source": "20260926000000_harness_recovery_descendants.sql",
+      "line": 3,
+      "bodySha256": "402d3aa7513dcd526eeeb986db854de90807b3b2b1d61dadb1ce78c26e40b367",
+      "callees": [
+        "private.record_recovery_successor",
+        "private.validate_harness_recovery_authorization"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.settle_paid_compute_usage_priced_reservation(uuid,text,numeric,jsonb)",
+      "source": "20260927000000_provider_api_usage_priced_settlement.sql",
+      "line": 38,
+      "bodySha256": "2453f6fb517c88ad0cfe6a2dada8afe2cedb21f637252d7ce71382e312c8b3a2",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.work_item_requires_verifier(jsonb)",
+      "source": "20260928000000_mandated_verifier_review_gate.sql",
+      "line": 31,
+      "bodySha256": "1f6aba3203b39a2c0070df91fde0c8f167e33794e1edaced07fafbf0fda51d8b",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.latest_result_event_id(uuid)",
+      "source": "20260928000000_mandated_verifier_review_gate.sql",
+      "line": 38,
+      "bodySha256": "035d095e77fd81813aa48c94335739e16d68027f9a8bb7f24d151cf58afd32b1",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.mandated_result_verdict(uuid,integer,uuid)",
+      "source": "20260928000004_pending_verification_human_recovery.sql",
+      "line": 56,
+      "bodySha256": "123e3be8e73df88300defcc881aa9e91e76d52c473b94d9c6c94debe51a6cc6c",
+      "callees": [
+        "private.latest_result_event_id",
+        "private.pending_verification_resolution"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.release_mandated_result(work_items)",
+      "source": "20260928000000_mandated_verifier_review_gate.sql",
+      "line": 125,
+      "bodySha256": "6558bcf94f22e03e5bba975efaaf8116a8790956250b6374c79f890fa26cf63f",
+      "callees": [
+        "private.latest_result_event_id",
+        "private.mandated_result_verdict",
+        "private.work_item_requires_verifier"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.guard_mandated_review_release()",
+      "source": "20260928000000_mandated_verifier_review_gate.sql",
+      "line": 151,
+      "bodySha256": "fd842784c0e4e7f00ee23a89669764f6a0a9785dcb56531a273e6c62a5bc8e68",
+      "callees": [
+        "private.latest_result_event_id",
+        "private.mandated_result_verdict",
+        "private.work_item_requires_verifier"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.is_sha1_hex(text)",
+      "source": "20260928000002_integration_effect.sql",
+      "line": 22,
+      "bodySha256": "01e530119e85ddd40e1af0767db4c6784caaddb7379ac8c4260a6786827c0025",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.authorize_integration_effect(uuid,integer,uuid,text,text,text,text,text)",
+      "source": "20261003000000_integration_effect_ff_only.sql",
+      "line": 14,
+      "bodySha256": "17c0d8b90d31551dca62327b2d34470b39ffbb84a41f327ec0df4cdfeabb7c79",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.record_integration_completed(uuid,integer,text,jsonb)",
+      "source": "20261003000000_integration_effect_ff_only.sql",
+      "line": 100,
+      "bodySha256": "38887b005332a639eda08e5de6e0f4470e57d11683eeadd726b47adb76f1bdbd",
+      "callees": [
+        "private.trusted_system_writer_owner"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.trusted_system_writer_owner()",
+      "source": "20260928000003_trusted_system_writer.sql",
+      "line": 52,
+      "bodySha256": "d665be7831ee44b8de8bf5c23af95913561a01d03e71db23b84be28fff5583e2",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.pending_verification_resolution(uuid,uuid)",
+      "source": "20260928000004_pending_verification_human_recovery.sql",
+      "line": 42,
+      "bodySha256": "f6c1c8e2d7bb02a6781c54212686746a3dea794a13b4bc38ca8a49807a1a92e0",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.resolve_pending_verification(uuid,uuid,text,jsonb)",
+      "source": "20260928000004_pending_verification_human_recovery.sql",
+      "line": 124,
+      "bodySha256": "ecea3af1c9120df4df089abeb9e2768869e55a4ac3fc18d4677ba3cd4f7e4c37",
+      "callees": [
+        "private.latest_result_event_id",
+        "private.mandated_result_verdict",
+        "private.pending_verification_resolution",
+        "private.work_item_requires_verifier"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "private.guard_trusted_system_fact()",
+      "source": "20260929000000_trusted_system_evidence_boundary.sql",
+      "line": 48,
+      "bodySha256": "1c61204f34480d2db7c12560f9ff66ca3e5185823de0a0bf2f9a85b8ed1d199f",
+      "callees": [
+        "private.trusted_system_writer_owner"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.stamp_trusted_system_writer()",
+      "source": "20260929000000_trusted_system_evidence_boundary.sql",
+      "line": 90,
+      "bodySha256": "477ccb7be9a16b57db6275654e9aacfb8a32ec3b975a48862f0676324748d018",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.trusted_system_evidence_since()",
+      "source": "20260929000000_trusted_system_evidence_boundary.sql",
+      "line": 111,
+      "bodySha256": "072ba30c0d6dc7ef54f7398c6679cc64fc64e86c411692e82f4b4676a499e3c9",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.guard_verifier_requirement_monotonic()",
+      "source": "20260929000001_verifier_requirement_monotonic.sql",
+      "line": 12,
+      "bodySha256": "2fd6f071b700afe4f26e554eb81d2d1d798b6fabe5c8aed60377eb6b948abeba",
+      "callees": [
+        "private.work_item_requires_verifier"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "private.validate_candidate_recovery_authorization(jsonb)",
+      "source": "20261004000000_candidate_recovery.sql",
+      "line": 35,
+      "bodySha256": "beb8351f96d700838aae3f62e4ca8f5b368a95ac6238762e43cc394743bc54d2",
+      "callees": [],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": false,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    },
+    {
+      "signature": "public.authorize_candidate_recovery(uuid,integer,uuid,jsonb)",
+      "source": "20261005000000_checkpoint_relative_candidate_recovery.sql",
+      "line": 1,
+      "bodySha256": "204b8fc4e39836b1976342b4b6bf0bbec375c87a28cfb98eb27809b98412a243",
+      "callees": [
+        "private.record_recovery_successor",
+        "private.validate_candidate_recovery_authorization"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": true
+    },
+    {
+      "signature": "public.acquire_single_item_work_claim(uuid,integer,uuid,text,integer)",
+      "source": "20261008000000_single_item_work_claim.sql",
+      "line": 3,
+      "bodySha256": "9ebad7ff52309bf9da3a1877fd454313856aec542b0ea17b30d68a6d5f8bf8d4",
+      "callees": [
+        "public.acquire_work_claim"
+      ],
+      "budgetAdvisoryExplicit": false,
+      "rowLockExplicit": true,
+      "writesClaims": false,
+      "executionStartedLiteral": false
+    }
+  ]
+}

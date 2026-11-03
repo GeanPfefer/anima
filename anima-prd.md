@@ -1,4 +1,20 @@
 # Anima — Product Requirements Document
+> Akita Baseline V1 (2026-10-02): direção de código = Codex CLI como primeiro executor externo
+> (`CodexCliCoderBackend`, `coder_backend: 'codex-cli'`), harness nativo adotado; o ANIMA mantém
+> worktree, git observado, escopo, gates, handoff e Verifier. Ollama/DSH/RunPod coder ficam
+> experimentais/estacionados. Incremento 1 só com executável falso; default segue `ollama`;
+> nenhuma execução real do Codex. [Arquitetura](docs/arquitetura/codex-cli-coder-backend.md).
+> TPC-01 prova local do successor (2026-10-01): `11a4ec12` aprovado e executado uma única vez;
+> attempt `ddc6e410` terminou failed por ollama_read_round_limit em 123 s, sem edit/diff/commit,
+> sem gate final ou Verifier. Oito chamadas qwen3-coder:latest HTTP 200; runner flash_attn=disabled.
+> Predecessor intacto, claim liberada, sem retry/successor adicional/pago. HEAD e origin/dev 90cd081;
+> origin/main 99bec54. Registro `docs/registros/2026-10-01-tpc01-attempt-local-flash-off-failed.md`.
+> TPC-01 recovery operacional (2026-10-01): predecessor `25c2c047` preservado em failed
+> com uma attempt; successor canônico `11a4ec12` em proposed v1, zero attempts, intent/proposal
+> idênticos (ollama/qwen3-coder:latest, dois arquivos, gate focal, required_fail_closed, 1/30).
+> Ollama retomado com OLLAMA_FLASH_ATTENTION=0; sem inferência ou compute pago nesta sessão.
+> Próxima etapa: aprovação separada do successor e execução local única até review/terminal.
+> Registro `docs/registros/2026-10-01-tpc01-recovery-operacional-flash-off.md`.
 > Ollama Coder Error Observability V1 (2026-09-30): respostas não-2xx do Ollama no caminho do
 > coder preservam `httpStatus` e `providerError` (erro do próprio Ollama, redigido, ≤300 chars)
 > em `OllamaProtocolError`, sem ler nada do request. O transcript host-observed v1 não mudou
@@ -2136,3 +2152,391 @@ Sem prova viva desta correção, acesso ao banco, Resident Host, API paga, migra
 staging, commit ou push. Referência dev/a9b95aa; WIPs preservados.
 [Plano 042](docs/planos/042-fase-completed-read-only.md) ·
 [Registro](docs/registros/2026-10-08-fase-completed-read-only.md).
+
+
+## Estado local — Single-Item Governed Execution V0 (2026-10-08)
+
+Preparação local: `work execute-one <UUID> --version N` reutiliza Host Turn/
+Supervisor, exige item aprovado/classificado e versão explícita, limita uma volta
+e omite manutenção global. Execução real permanece bloqueada por
+`single_item_atomic_claim_unavailable`: acquire_work_claim pode liberar claim
+alheio vencido, enquanto início comandado fica fora do orçamento atômico sob claim.
+Sem migration autorizada, nenhuma alternativa insegura foi conectada. Objetivo
+operacional não concluído. Sem banco, aprovação/attempt INV-11, Resident Host,
+API paga, commit ou push. WIPs/worktrees preservados.
+[Plano 043](docs/planos/043-single-item-governed-execution-v0.md) ·
+[Contrato](docs/arquitetura/single-item-governed-execution-v0.md).
+
+
+## Estado local — Single-Item Governed Execution V1 / fronteira SQL (2026-10-08)
+
+Migration aditiva proposta `20261008000000_single_item_work_claim.sql`: RPC scoped
+compõe locks de item/alvo e recusa claim alheio aberto inclusive vencido antes de
+chamar aquisição canônica na mesma transação. Fluxo global e início sob claim/
+classificação/orçamento preservados. Integração preparada no Supervisor/Host Turn,
+com recusas de retomada, compute pago/remoto e cancelamento pré-attempt.
+**Produção continua recusando `single_item_atomic_claim_unavailable`**, sem bypass:
+SQL real/concorrência ainda não executados. Suíte pgTAP e runner descartável preparados;
+isolamento de uma instância real não comprovado. Assinatura de types provisória,
+regeneração factual pendente. Gates locais: 339 web/14 suítes, 16 core e 7 Python;
+typechecks core/types/Supabase e web sem scratch verdes. Sem migration aplicada,
+banco, INV-11, Resident Host, provider pago, staging/commit/push ou limpeza de WIPs.
+[Plano 043](docs/planos/043-single-item-governed-execution-v0.md) ·
+[Registro V1](docs/registros/2026-10-08-single-item-governed-execution-v1-sql.md).
+
+
+### Single-Item V1 — hardening das provas SQL (08/10/2026)
+
+Instrumentos reforçados sem banco ou Docker: pgTAP preparado com 55 asserções e
+lock exclusivo da nova RPC; runner com relações/fixtures verificadas, locks e
+recusas específicas, controls em ROLLBACK, snapshots incluindo autorização,
+deadlines e cleanup fail-closed; preflight inicialmente offline, sem efeitos.
+Migration proposta também revoga ACL default service_role. Supervisor agora
+recusa qualquer histórico de starts por consulta dedicada, antes de orçamento;
+Codex sem prova de assinatura/auth recusa explicitamente em ambos os caminhos.
+Global, quotas e WIPs anteriores preservados. Divergência local/externa de orçamento
+registrada separadamente, sem correção de política nesta tarefa.
+
+Gates determinísticos: 343 web/14 suítes, 16 core, 25 Python offline; typechecks
+core/types/supabase e web sem scratch scripts/_session verdes. Não houve prova
+PostgreSQL, Docker, ambiente criado, migrations aplicadas, Host, INV-11 ou commit.
+Gate `single_item_atomic_claim_unavailable` continua incondicional, sem bypass.
+Tipos gerados permanecem provisórios; atomicidade, RLS/ACL efetiva, isolamento,
+concorrência, deadlocks e cleanup SQL real aguardam prova específica autorizada.
+Revisão humana é o próximo passo, pelo [registro de hardening](docs/registros/2026-10-08-single-item-v1-hardening-provas-sql.md)
+e [protocolo vigente](supabase/tests/single_item_concurrency.md).
+
+
+## Recuperação bootstrap V1 — compatibilidade 247 (2026-10-08)
+
+Migration 247 reconhece dois corpos completos conhecidos por SHA-256 e atributos
+de catálogo: antiga aplica apenas correlação; corrigida valida/no-op; terceira
+forma recusa. Migration 246 e políticas de orçamento intactas. Prova offline:
+12 testes novos + 25 existentes verdes; sem execução PL/pgSQL, banco ou Docker.
+Inventário histórico de 272 etapas recuperado; 72 fontes não disponíveis nesta
+sessão. Etapa 248 duplica guarda já presente na 246 e exige revisão antes do
+rebuild. Compositor offline preparado, sem executor SQL conectado.
+`single_item_atomic_claim_unavailable` permanece incondicional; INV-11/Host/pago
+não executados. Sem staging/commit/push ou limpeza; WIPs preservados.
+[Procedimento](supabase/tests/bootstrap_reconstruction.md) ·
+[Registro](docs/registros/2026-10-08-bootstrap-247-compatibilidade.md).
+
+
+## Pré-requisitos bootstrap reproduzível fechados offline (2026-10-08)
+
+272/272 fontes congeladas/verificadas em supabase/bootstrap: 69 Auth oficiais
+v2.189.0 @ 4fa66ba71d8c55b5c95cd5635766ed8bbae6d96a e três pré-requisitos
+originais recuperados por hash, sem stubs. Somente 247/248 diferem do manifesto
+histórico: hashes integrais e owner/ACL/assinatura, no-op corrigido, terceira
+forma recusada; 248 deixa de duplicar guarda. 246 e políticas intactas.
+272 payloads gerados offline, namespace/up/terminadores e ambos os ledgers
+transacionais preparados; não executados. 50 testes determinísticos verdes
+(25 bootstrap + 25 existentes); nenhuma prova PostgreSQL, Docker, ACL real,
+concorrência, types factual ou isolamento. GO técnico condicionado à revisão
+humana/autorização/preflight factual de NOVA instância; execução nesta sessão
+NO-GO. Gate Single-Item mantido; residente/INV-11/Host/pago intactos.
+[Pacote](supabase/bootstrap/README.md) ·
+[Registro](docs/registros/2026-10-08-bootstrap-prerequisitos.md).
+
+
+## Bootstrap real — ambiente corrigido, parada de identidade (2026-10-08)
+
+Allowlist agora exige nomes/valores exatos da imagem pinada e overrides de identidade;
+POSTGRES_HOST exclusivamente socket local. 57 testes offline PASS e pacote íntegro
+(272 fontes/payloads, 556 hashes). Preflight passou e foi criado exatamente um container
+`8d76d3358c55a155f5824c7a65d2c28ab8afad600ddd8baa1d430896ae600402`,
+nunca iniciado: guarda de identidade recusou dois labels OCI herdados da imagem.
+NO-GO; sem cluster, SQL ou ledger; 0/272 etapas, inspeção estrutural pendente.
+Residente saudável e recursos existentes sem mudanças. Gate Single-Item mantido.
+Retomada depende de revisão humana dos labels/executor e do container criado.
+[Registro e evidências](docs/registros/2026-10-08-bootstrap-preflight-parada-identidade.md).
+
+
+## Bootstrap — recuperação autorizada e parada de mounts (2026-10-08)
+
+Labels OCI herdados validados exatamente contra imagem por digest; logging
+append-only/fsync corrigido. 61 testes offline PASS; 272 payloads/556 hashes íntegros.
+Container exclusivo `8d76d3358c55a155f5824c7a65d2c28ab8afad600ddd8baa1d430896ae600402`
+passou pré-start e foi iniciado. NO-GO pós-start: inspect retorna Mounts=[] para
+os tmpfs; diagnóstico OS confirmou mounts isolados, mas guarda não foi relaxada.
+Sem initdb/cluster/SQL/ledgers: 0/272. Container running aguardando marcador.
+Residente saudável e inalterado; antigo intocado, gate Single-Item preservado.
+Revisão humana antes de corrigir coleta de mounts ou retomar.
+[Registro, diff e retomada](docs/registros/2026-10-08-bootstrap-recuperacao-parada-mounts.md).
+
+
+## Bootstrap — tmpfs efetivos e prova SQL (2026-10-08)
+
+GO somente para bootstrap/inspeção estrutural: coleta kernel tmpfs estrita corrigida; 66 testes offline PASS.
+Container exclusivo 8d76d3358c55a155f5824c7a65d2c28ab8afad600ddd8baa1d430896ae600402, cluster 7694431622913864120.
+272/272 etapas confirmadas; 0 falhada(s), 0 pendentes.
+Audit ledger prefixo/hashes exatos; Auth 69 oficiais + 7 legadas exatas.
+Residente healthy/inalterado; antigo intocado; pacote 556 hashes preservados.
+Sem fixtures/pgTAP/concorrência/INV-11/Host ou liberação do gate Single-Item.
+Revisão humana antes de qualquer próximo efeito ou teste comportamental.
+[Registro e evidências](docs/registros/2026-10-08-bootstrap-tmpfs-execucao-real.md).
+
+
+## Single-Item V1 — provas reais bloqueadas no preflight de destino (2026-10-08)
+
+Autorizadas fixtures/pgTAP/concorrência no cluster 7694431622913864120,
+mas banco explícito postgres não contém ledger/RPC/schema migrado. Bootstrap
+reside em anima_single_item_proof_396f38b1036a47ba92d51890cdf252ba. NO-GO antes
+de testes; esclarecimento de destino pendente, sem troca implícita/rebootstrap.
+Identidade/isolamento/556 hashes e residente healthy confirmados; nenhum SQL
+de escrita. 334 asserções e quatro cenários concorrentes não executados.
+Atomicidade/orçamento/rollback/deadlocks comportamentais ainda não provados;
+gate Single-Item, INV-11 e Host preservados.
+[Registro e retomada](docs/registros/2026-10-08-single-item-provas-preflight-destino.md).
+
+
+## Single-Item V1 — provas SQL/concorrência reais, NO-GO (2026-10-08)
+
+Cluster/container nonce anterior confirmado; 272 ledgers/556 hashes íntegros.
+Sete suítes canônicas PASS; Single-Item original 27 ok e erro 42501 de introspecção.
+Diagnóstico OID: 47 ok/22023 de release; fixture temporária corrigida: 55/55 ok.
+Canonical não alterado; 123 asserções de cinco regressões guardas-unsafe não executadas.
+Quatro disputas demonstraram espera, A único commit/B recusada, inclusive P0001
+user_attempt_budget_exhausted; três resultados formais FAIL por cleanup EPIPE.
+Primeira passagem quatro FAIL de parser t/f; todas as falhas preservadas.
+Prova negativa de ordens item→claim/claim→item causou deadlock 40P01 com rollback,
+sem retry. Gate ainda bloqueado: corrigir/revisar fixtures/runner, regressões com
+guardas ativas e ordem de locks/cobertura adicional. Fixtures removidas, baseline
+restaurado; residente healthy/intocado. Sem INV-11/Host/pago/commit/push.
+[Relatório, falhas e evidências](docs/registros/2026-10-08-single-item-provas-reais.md).
+
+
+## Single-Item V1 — correções offline pós-prova (2026-10-09)
+
+Corrigidas duas fixtures (ACL privada por OID e release sem attempt) e dois bugs
+do runner (psql t/f e EPIPE de stdin após saída). 42 testes Python offline PASS,
+31 do runner; 55 asserções canônicas mantidas. Evidências históricas intactas,
+sem nova prova SQL, Docker, banco residente, INV-11, Host ou compute pago.
+Produção/migrations/políticas/gate não alterados; tipos continuam provisórios.
+Proposta orçamento-owner→item→alvo→claim→autorização documentada em diff separado,
+com impacto de serialização e auditoria pendente dos outros caminhos. Cinco
+regressões (123 expectativas) ainda precisam fixtures com guardas ativas; divergência
+local/externo não corrigida por política nem por alteração de expectativas. NO-GO
+permanece. [Análise e matriz](docs/planos/044-single-item-lock-order-proposta.md) ·
+[Registro](docs/registros/2026-10-09-single-item-correcoes-offline.md).
+
+
+## Single-Item V1 — revisão de locks e cobertura preparada (2026-10-09)
+
+Cinco fixtures históricas reformuladas sem DISABLE TRIGGER: classificação/routing/
+claims/executor correlacionados, histórico 3+3 em autorização de orçamento e retry
+de reconciliação dentro do contrato de duas attempts. 123 propriedades canônicas
+preservadas, mais as 55 Single-Item intactas. Divergência V2 local/externo versus
+V1-supervision continua explícita, sem mudança de política ou expected-failure.
+Inventário textual: 139 definições/12 triggers. Proposta de 59 prefixos B de owner
+antes dos recursos substitui a reordenação anterior; hipóteses/ciclos residuais, FK,
+serialização/lease e matriz PostgreSQL no [Plano 045](docs/planos/045-single-item-lock-review.md).
+Nenhum SQL/Docker/produção/Host/INV-11/compute pago ou mudança do gate nesta sessão.
+Cobertura **preparada offline**, não PASS PostgreSQL; produção segue NO-GO.
+[Registro](docs/registros/2026-10-09-single-item-lock-review-cobertura.md).
+
+## Single-Item V1 — decisão de locks proposta para revisão (2026-10-09)
+
+O prefixo transversal por owner de 59 corpos do Plano 045 não está aprovado.
+A [decisão arquitetural](docs/arquitetura/single-item-lock-strategy-decision.md)
+recomenda candidato localizado em start_claimed_work_attempt e release_work_claim:
+item próprio antes do claim, com releitura e correlação. Start isolado criaria
+ciclo com a liberação antiga; os dois corpos fecham esse domínio no modelo.
+Alvo/claim entre itens, budget/item, foco, recovery, FKs e composição multiowner
+continuam riscos explícitos. Não há garantia global ou GO de produto.
+O [Plano 046](docs/planos/046-single-item-lock-strategy-proof.md) separa controle
+negativo com pré-locks, chamadas naturais, contratos, performance e provas residuais
+em baseline/candidato isolados. As 123 propriedades históricas e 55 Single-Item
+seguem preservadas offline; divergência de orçamento permanece decisão distinta.
+Somente documentação e modelo determinístico nesta sessão; migrations/execução
+governada/fixtures anteriores intocadas; gate ativo. Próximo passo: revisão humana
+do escopo e da matriz, antes de elaborar/aplicar qualquer migration candidata.
+
+## Single-Item V1 — candidato localizado implementado offline (2026-10-09)
+
+Migration nova 20261009000000_claim_item_lock_order_candidate.sql escrita, não
+aplicada: somente start_claimed_work_attempt/release_work_claim usam item próprio
+antes do claim, releitura/correlação e revalidação de autoridade após espera.
+Signatures/retornos/atributos e regras originais preservados; migrations históricas,
+acquire scoped/global, orçamento e gate intocados. 84 testes offline PASS; isso
+não prova compilação/ACL/concorrência PostgreSQL. Pacotes baseline/candidato offline
+com fontes/harness/bootstrap comuns e uma migration adicional preparados; isolamento
+e receita bootstrap ainda precisam validação/autorização factual.
+[Plano 047](docs/planos/047-single-item-claim-lock-candidate.md) contém diff, riscos
+residuais e roteiro; [Plano 046](docs/planos/046-single-item-lock-strategy-proof.md)
+mantém matriz/limites. 123 propriedades históricas/55 Single-Item preservadas,
+divergência orçamento separada. Próximo passo: revisão humana do candidato antes
+de qualquer SQL. Produção NO-GO; sem Docker/residente/Host/INV-11/compute pago.
+
+## Single-Item V1 — comparação real parada no preflight (2026-10-09)
+
+Autorização condicional de criar/provar baseline/candidato recebida; preflight
+não passou porque Docker Desktop/backend estão ausentes e o endpoint do daemon
+não existe. Nenhum ambiente criado ou SQL executado. Saúde residente e estados
+dos descartáveis anteriores não verificáveis nesta sessão; recursos intocados.
+272 etapas/556 hashes íntegros; baseline de 154 migrations coincide exatamente
+com o bootstrap congelado. Candidato de dois corpos pinado; 84 testes Single-Item
+e 25 bootstrap offline PASS. Não houve pgTAP, lock/deadlock ou medida de desempenho.
+[Registro de parada](docs/registros/2026-10-09-single-item-comparativa-preflight.md).
+Retomar pela Fase 1 com Docker disponível e recursos/residente/isolamento verificados;
+autorização de comparação já existe, mas seu pré-requisito operacional não passou.
+Gate ativo, produção NO-GO; nenhuma mudança em migrations ou orçamento.
+
+## Single-Item V1 — Docker retomado, residente degradado (2026-10-09)
+
+Docker Desktop iniciado com autorização explícita; daemon disponível e imagem pinada
+local confirmada. Banco e Auth residentes healthy; Vector persiste unhealthy/restarting
+(contador 9→11), healthchecks falham desde antes da prova. Edge runtime já encerrado.
+Nenhum restart individual/SQL/manutenção residente; Desktop acionou policies automáticas.
+Preflight completo não aprovado, nenhum descartável criado ou prova SQL executada.
+272 etapas/556 hashes e baseline conferidos, 84 testes offline PASS.
+[Registro/snapshot](docs/registros/2026-10-09-single-item-docker-retomada.md).
+Retomar após resolver/revisar degradação do residente ou decisão humana explícita
+sobre sua admissibilidade nesta prova; autorização comparativa já existe. Gate ativo.
+
+## Single-Item V1 — comparação PostgreSQL real concluída, NO-GO (2026-10-09)
+
+Vector admitido por exceção explícita: falha TCP da fonte docker_logs, loop preexistente,
+sem mounts/credenciais/redes de prova compartilhados, DB/Auth/daemon estáveis. Dois
+clusters novos/sequenciais 7694565793221283969 e 7694570259207483520, 272/272 etapas
+cada, candidata aplicada uma vez somente no segundo. Catálogos iguais antes; após,
+só dois prosrc mudaram, ACL/owner/assinaturas/RLS/policies/triggers preservados.
+Ambos pgTAP 330/334, 55/55 Single-Item, históricas 119/123: quatro FAIL idênticos
+de orçamento local/externo, mantidos. Quatro disputas originais PASS por ambiente.
+Nos quatro pares item/claim controlados, baseline 40P01 e candidato sem deadlock.
+Controle com pré-locks inversos e ciclo item/budget continuam 40P01 nos dois: ausência
+global não demonstrada. Revogação durante espera: baseline admite, candidato 42501
+sem efeito parcial em start/release. Microbenchmark replay p95 0,051→0,066 ms (+29,4%),
+limites propostos não atingidos nesse recorte; não mede admissões independentes.
+[Relatório completo](docs/registros/2026-10-09-single-item-comparativa-vector-prova.md)
+preserva falhas/recuperações dos adaptadores sem reclassificação, dados/locks/SQLSTATE
+e limites de cobertura. Ambos novos encerrados/sem remoção, tmpfs perdido previsto;
+antigos intactos, residente metadata igual e saudável exceto Vector persistente.
+Gate mantido, sem SQL residente/Host/INV-11/pago/commit/push. NO-GO para promoção:
+revisão humana do ciclo budget/item e campanha/performance com harness congelado;
+divergência histórica de política separada, sem aprovação dos 59 prefixos.
+
+
+### Single-Item V1 — proposta offline item/orçamento (2026-10-09)
+
+Ciclo residual 40P01 confirmado nas evidências anteriores: início I→C→T→B no trigger versus block B→I; harness incluía pré-lock manual I. [Plano 048](docs/planos/048-single-item-budget-lock-order.md) propõe antecipar o lock de orçamento existente em quatro admissões (start_claimed e três retomadas), mantendo item→claim, release/acquire e políticas. Diff/SQL ficam somente em docs, sem migration criada/aplicada. 13 testes novos e 97 Single-Item offline PASS; modelo finito não prova ausência universal. Quatro FAIL históricos local/externo permanecem separados. Exige revisão humana do escopo, controle positivo com RPCs naturais, revogação/rollback/ACL/RLS e contenção em nova comparação real; pré-locks/composição mesma transação e ciclos entre itens seguem fora da garantia. Gate ativo, promoção NO-GO, nenhum Docker/SQL/residente usado nesta sessão. [Registro de retomada](docs/registros/2026-10-09-single-item-budget-lock-order.md).
+
+
+### Single-Item V1 — candidata incremental item/orçamento (2026-10-09)
+
+Criada migration 20261009000001 somente com quatro corpos autorizados. [Plano 049](docs/planos/049-single-item-budget-lock-candidate.md)/diff: admissão B→I, replay visível sem B/T, releitura/correlação e autorização após esperas; quota/trigger/política e candidata item→claim 20261009000000 intactos. 112 testes Single-Item (15 novos) e 30 bootstrap offline PASS; 272 etapas/556 hashes preservados. Três pacotes independentes preparados (original, item/claim, combinado), identidades live nulas; nenhum SQL/Docker/residente usado. Quatro FAIL históricos local/externo continuam visíveis. Exige revisão humana e autorização separada para aplicar apenas nos novos descartáveis/provar RPCs naturais, adversariais, revogação/ACL/RLS/rollback/cleanup e contenção. Não promove gate: NO-GO aplicação/produto. [Registro](docs/registros/2026-10-09-single-item-budget-lock-candidato.md).
+
+
+### Single-Item V1 — prova combinada interrompida no catálogo (2026-10-09)
+
+[Registro](docs/registros/2026-10-09-single-item-combinada-prova.md): 2.469 hashes dos três pacotes e 556 bootstrap conferidos; GO operacional com Vector preexistente independente. Um baseline novo concluiu 272/272, mas o gate de catálogo falhou: identidade textual de tipos/typmod não canônica e 53 expectedProsrcSha256 calculados com LF versus prosrc real CRLF. Diagnóstico read-only resolveu 161 OIDs e derivou todos os 53 raw corpos das fontes congeladas; nenhuma divergência sem explicação, sem mudar expectativas para PASS. NO-GO de harness/manifests: 0/334 pgTAP, nenhuma concorrência ou performance, demais variantes não criadas, nenhuma candidata aplicada. Baseline 2073d5af…/cluster7694595591914635392 encerrado sem remover, dados/backends sintéticos vazios; DB/Auth/residente/redes/volumes preservados. Próximo passo: revisão da correção offline do compositor/identidade e novos pacotes com raw hashes; não alterar migrations ou asserções. Correção combinada continua indeterminada; gate ativo.
+
+
+## Checkpoint Single-Item — continuidade e catálogo (2026-10-09)
+
+Launcher humano e histórico: [runbook WSL](docs/operacao/codex-wsl.md). CLI local confirmado 0.162.0; nenhuma atualização nesta sessão. Correção offline do scanner/compositor preserva prosrc raw e separa source/payload/catalog; comparação por OIDs e tipos canônicos. [Plano 050](docs/planos/050-single-item-catalog-comparator.md) registra revisão independente dos pacotes e a retomada. SQL combinado continua sem prova funcional; gate ativo, 334 propriedades e quatro FAIL históricos preservados. Nenhum Docker/SQL/serviço residente usado.
+
+
+Retomada PostgreSQL 2026-10-09: **NO-GO antes de criar ambientes** por ausência de integração efetiva do comparador 050 ao executor live. Compositor/testes usam a interface; adapter histórico permanece textual. [Registro/checkpoint](docs/registros/2026-10-09-single-item-retomada-bloqueio-executor.md). Nenhum Docker/SQL/334 pgTAP executado nesta retomada, residente não consultado ou alterado. Próximo passo: executor live integrado e testado offline, seguido de preflight integral; gate ativo.
+
+
+## Single-Item — executor de catálogo integrado offline (2026-10-09)
+
+[Plano051](docs/planos/051-single-item-executor-catalog-integration.md) e [registro](docs/registros/2026-10-09-single-item-executor-integrado.md): adapter corrente reutiliza transporte validado e chama comparador por OIDs/tipos. Pins separados do overlay preservam pacotes050; gates obrigatórios de bodies/signatures/owner/ACL/RLS/policies/triggers e diferenças2/4. 144 testes Single-Item e30 bootstrap PASS; nenhum SQL/Docker. Revisão humana, preflight integral e prova PostgreSQL ainda necessários; GO offline do harness não promove candidatas nem retira gate.
+
+
+## Single-Item — nova parada instrumental antes da campanha (2026-10-09)
+
+[Registro](docs/registros/2026-10-09-single-item-executor-campanha.md): catálogo arquivado tem279 funções public/private versus161 do manifesto; adapter051 exige igualdade e recusa118 legítimas adicionais. Replay anterior filtrava essas funções. 144 testes offline PASS não cobrem o inventário completo. Preflight Docker/DB/Auth/recursos favorável, Vector independente preexistente; **nenhum ambiente criado ou SQL executado**. Próximo passo: correção offline do inventário completo/proveniência mantendo guardas, revisão/pins e novo preflight. Gate ativo; combinado continua indeterminado.
+
+
+## Single-Item — contrato integral de catálogo (2026-10-09)
+
+[Plano052](docs/planos/052-single-item-full-catalog-contract.md)/[registro](docs/registros/2026-10-09-single-item-catalogo-completo.md): todas279 funções protegidas,161 source-backed e118 adicionais com membership vector exigida por evidência real futura; membership não arquivada. Mesmo comparador, guardas/proveniência ampliadas e replay sem filtragem. 153 testes Single-Item e30 bootstrap PASS; ensaio modelado três GO de catálogo e10 negativos NO-GO,334asserções preservadas. Pacotes052r2 novos, antigos intactos; nenhum Docker/SQL. Revisão/preflight e prova real ainda necessários, gate ativo.
+
+
+## Single-Item052 — isolamento kernel interrompeu antes de PG (2026-10-09)
+
+[Registro](docs/registros/2026-10-09-single-item-052-prova.md): preflight/pins2484/156/556 e153 testes offline PASS; único baseline novo criado, guard rejeitou mount hostname por source/dev/sdd versus/dev/sde literal. Parou antes de initdb/SQL/272etapas/279catálogo/334pgTAP. Novo26d5e1d5599d1baee3dda2b8777240b499118a449f3d08ee4f4e0af909407e10 encerrado, sem remoção, cluster inexistente; adicionar à denylist histórica. DB/Auth saudáveis/inalterados, Vector preexistente independente. NO-GO; próximo passo correção offline pinada do guard mantendo isolamento, sem mexer no comparador/produto. Gate ativo.
+
+
+## Single-Item — guard Docker revisado offline (2026-10-09)
+
+[Registro](docs/registros/2026-10-09-single-item-guard-docker.md): guard remove pin literal /dev/sde, exige três arquivos Docker pelo CID completo reconciliados entre inspect/kernel, backing device consistente e flags RO; replay arquivado aprovado. Pacotes052r2/migrations/bootstrap intactos. Nenhum Docker/SQL nesta sessão; revisão humana e preflight integral antes de novo baseline, catálogo279/membership118 e matriz funcional. Gate ativo; candidatas continuam indeterminadas.
+
+
+## Single-Item — guard e catálogo confirmados, bloqueio natural (2026-10-09)
+
+[Prova real](docs/registros/2026-10-09-single-item-guard-prova.md): baseline e item/claim272/272, catálogo279GO com118memberships vector reais;330/334PASS cada (quatroFAIL históricos). Controles item/claim com pré-lock eliminados no candidato, orçamento natural continua40P01. Dois cenários naturais item/claim bloquearam por Broken pipe após55000; B terminada sem resultado completo, FAIL interno retorna exit0. NO-GO comparativo; combinado não criado. Dois novos encerrados, DB/Auth e históricos preservados; gate ativo. Próximo passo correção offline do ciclo de vida de sessões/propagação de FAIL e revisão, sem alterar SQL.
+
+
+## Single-Item — sessões naturais corrigidas offline (2026-10-09)
+
+[Plano053](docs/planos/053-single-item-natural-session-results.md)/[registro](docs/registros/2026-10-09-single-item-runner-sessoes.md): coleta A/B independente, EOF/55000 esperado sem write ao cliente encerrado, timeout/signal/completude explícitos, cleanup e FAIL interno propagados.170Single-Item e33bootstrap PASS; replay simulado reproduz Broken pipe, evidências reais antigas intactas/indeterminadas. Pacotes052r2/156migrations/556bootstrap preservados. Novo overlay pinado para apenas dois cenários; nenhum Docker/SQL. Revisão e autorização posterior antes de novos clusters e prova mínima baseline/itemclaim/combinado. Gate ativo, combinado ainda não provado.
+
+
+## Single-Item — runner053 real, combinado bloqueado por23514 (2026-10-09)
+
+[Registro](docs/registros/2026-10-09-single-item-053-prova.md): dois novos clusters272/272 e catálogo279GO; itemclaim naturais2PASS completos (A55000/B0), concorrência4PASS, revogação2×42501, orçamento residual40P01. Combinado330/334PASS com4FAIL históricos; primeiro naturalFAIL23514(updated_at<created_at), A/B/S completos e dispatcherexit1 bloqueou sequência. GO runner053, NO-GO combinado/promoção. Timestamps sugerem investigação temporal host/daemon, causa produto versus infra não atribuída. Ambos encerrados, DB/Auth/históricos preservados; gate ativo. Próximo passo offline/revisão antes de nova prova focada, sem ajustar SQL para verde.
+
+
+## Single-Item — investigação temporal offline (2026-10-09)
+
+[Registro](docs/registros/2026-10-09-single-item-temporal.md):23514 decorre de updated_at=now() histórico inferior ao created_at. Fixture confirmada antes de B impede explicar a campanha apenas por espera e relógio monotônico; causa permanece indeterminada, sem atribuição à migration combinada ou ao host. Contraexemplo geral de transação antiga modelado offline,11 testes PASS. Correção proposta e prova mínima discriminante exigem revisão/autorização; combinado permanece NO-GO, gate ativo, nenhum Docker/SQL nesta sessão.
+
+
+## Single-Item — prova temporal discriminante real (2026-10-09)
+
+[Registro](docs/registros/2026-10-09-single-item-temporal-prova.md): original23514 reproduzido em único novo cluster combinado,272/272 e catálogo279GO; relógio UTC de WSL/PostgreSQL recuou enquanto monotonic_ns avançou. Controle de transação antiga confirmou fragilidade de now() no helper histórico. Origem do ajuste de relógio não identificada; não há regressão exclusiva das migrations demonstrada. Proposta mínima de timestamp de mutação limitada pela linha aguardando revisão, sem implementação. DB/Auth/históricos preservados, novo container encerrado não removido; gate ativo e promoção NO-GO.
+
+
+## Retomada supervisionada: checkpoint operacional (2026-10-09)
+
+[Registro curto](docs/registros/2026-10-09-selfdev-retomada-operacional.md): Docker/DB/Auth/CLI operacionais, fila executável vazia. Codex nativo instalado ficou ready com apontador temporário atualizado; nenhum trabalho iniciado. Pequeno diagnóstico do Planner aprovado tem backend DeepSeek estacionado e classificação ausente; conferir resultado relacionado em review antes de repropor. Fluxo legado não garante ausência de efeitos globais em claims/recovery; Single-Item permanece bloqueado. NO-GO para partida até decisão humana/contrato válido; temporal e migrations congelados.
+
+
+## Self-dev — successor preparado (2026-10-10)
+
+[Registro](docs/registros/2026-10-10-selfdev-sucessor-preparado.md): original cde9684e em changes_requested; successor ab9cae0f-55f0-44ec-a648-ebf81a025ef2 proposed v2, codex-cli/default, checkpoint1c8b419 e três arquivos preservados. Request-changes/correct/revisão governados executados; nenhuma aprovação/attempt/Host. Codex ready, elegibilidade bloqueada por decisão humana; recovery OpenAI5895b59c intacto. Revisão humana antes de aprovação/classificação e autorização separada antes de única volta legada.
+
+
+Checkpoint 2026-10-10: successor ab9cae0f-55f0-44ec-a648-ebf81a025ef2 approved v2, preparado e elegivel; nenhuma execucao iniciada. [Registro](docs/registros/2026-10-10-selfdev-sucessor-aprovado.md).
+
+
+Checkpoint 2026-10-10: única volta autorizada do successor ab9 resultou em failed, attempt de2095d6-698e-4655-9208-c326399e01c3, sem delta novo e sem Verifier. Claim liberada; terceiros/recovery preservados. Nenhuma integração ou segunda attempt. [Registro](docs/registros/2026-10-10-selfdev-volta-supervisionada.md).
+
+
+Checkpoint 2026-10-10: coder worktree ganhou opt-in Codex WSL, reaproveitando transporte existente; prova isolada de leitura PASS, sem attempt ou mudanças de governança. Cancelamento real entre Windows/WSL ainda requer validação específica. [Registro](docs/registros/2026-10-10-codex-wsl-coder.md).
+
+
+Checkpoint 2026-10-10: revisão/cancelamento real focal WSL PASS, pai e filho Linux ausentes após abort. Item ab9 ainda failed, retry direto bloqueado por retryable=false; próxima autorização deve abranger preparação governada de recovery, sem alterar fatos históricos. [Registro](docs/registros/2026-10-10-codex-wsl-cancelamento.md).
+
+
+Checkpoint 2026-10-10: preparação de recovery WSL bloqueada pela validação existente: human_required e exigência de escopo estritamente menor. Nenhum successor criado, nenhum fato histórico alterado. [Registro](docs/registros/2026-10-10-selfdev-wsl-recovery-bloqueado.md).
+
+
+Checkpoint 2026-10-10: proposta antiga b34 retirada governadamente (cancelled); nova unidade independente b5f8178a-27d6-440f-9680-776f75a1a26f proposed v1, Codex CLI/default, checkpoint 1c8b419 e três arquivos preservados. Sem aprovação/classificação/execução; ab9 e recovery OpenAI inalterados. [Registro](docs/registros/2026-10-10-selfdev-proposta-independente.md).
+
+
+Checkpoint 2026-10-10: b5f8178a aprovado v1, Codex WSL ready; prepare-autonomous recusou origem manual não reconhecida (classification_policy_not_applicable). Sem classificação/fila/attempt. [Registro](docs/registros/2026-10-10-selfdev-wsl-aprovacao.md).
+
+
+Checkpoint 2026-10-10: b5f8178a approved v1 com classificação human_confirmed revisão1, evento author=user; elegibilidade SQL positiva e Codex WSL ready. Origem preservada, sem attempt. [Registro](docs/registros/2026-10-10-selfdev-classificacao-humana.md).
+
+
+Checkpoint 2026-10-10: tentativa de chamada única WSL bloqueada pelo auto-review antes de execução: fluxo legado não garante ausência de mutações globais em terceiros. b5 continua approved v1/classificação humana revisão1, zero attempts/claims. [Registro](docs/registros/2026-10-10-selfdev-wsl-execucao-rejeitada.md).
+
+
+## Fechamento SQL mínimo Single-Item — 2026-10-10
+
+Migration candidata incremental limitada a release_work_claim, start_claimed_work_attempt e private.begin_work_attempt, sem acquire ou RPCs de retomada. Um novo PostgreSQL descartável: bootstrap272/272, catálogo279 GO com exatamente3 corpos;113 offline PASS;138 pgTAP (134PASS/4FAIL históricos);15 cenários focais completos, incluindo2deadlocks adversariais40P01 residuais. Temporais23514 corrigidos nos controles testados, revogação/terceiros preservados. GO para revisão humana localizada, nenhuma promoção/execução/gate liberado. Novo container encerrado sem remoção; residente/históricos preservados. [Plano054](docs/planos/054-single-item-first-attempt-sql.md) e [checkpoint](docs/registros/2026-10-10-single-item-fechamento-sql.md).
+
+
+## Single-Item / Codex WSL — integração focal offline (2026-10-10)
+
+[Plano055](docs/planos/055-single-item-codex-wsl-integration.md) e [checkpoint](docs/registros/2026-10-10-single-item-integracao-wsl.md): candidata temporal separada para terminal/mandated release; admissão estrita worktree/codex-cli/default/WSL/ChatGPT, sem fallback; sucesso isolado exige evidências e Verifier persistidos antes da liberação correlacionada. Defaults globais e orçamento preservados. Validação offline, sem Docker/SQL/attempt. Gate permanece fechado; NO-GO para promoção/execução até prova SQL focal e revisão dos caminhos temporais excluídos. Nenhuma proposta, recovery ou residente alterado.
+
+
+## Single-Item — terminal validado em PostgreSQL descartável (2026-10-10)
+
+[Registro focal](docs/registros/2026-10-10-single-item-terminal-prova.md)/[plano055](docs/planos/055-single-item-codex-wsl-integration.md): bootstrap272/272 e duas candidatas mínimas; catálogo279 com exatamente cinco corpos, atributos protegidos preservados; oito cenários focais PASS para piso temporal, replay, Verifier/claim, autorização e terceiros. Orçamento local/externo mantém 8PASS/4FAIL históricos. Cleanup confirmado e novo container encerrado sem remoção; residente/históricos preservados. GO para revisão humana focal de promoção, sem instalação ou gate liberado; nenhuma execução real. Limites de concorrência, outros caminhos temporais e Verifier/Codex real permanecem explicitados no checkpoint.

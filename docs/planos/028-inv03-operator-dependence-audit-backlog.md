@@ -1,0 +1,20 @@
+# Backlog dedicado — INV-03 — Operator Dependence Audit
+
+Documento de backlog canônico com UM único candidato. INV-03 NÃO é um SDC e NÃO é programação: é a terceira INVESTIGAÇÃO real
+(effect_class `read_only`, executor `investigation-v1`, backend `codex-cli`) conduzida pelo control-plane após o aceite do INV-02 em `a173f40`.
+O materializer canônico lê só o documento apontado; este arquivo não altera os documentos 009–027.
+
+## INV — Investigations
+
+### INV-03 — Operator Dependence Audit
+
+- **Status:** not_started
+- **Objetivo:** Responder, a partir EXCLUSIVAMENTE do snapshot do repositório no commit a173f40e2d0fce78d674e89103f2854c84d3ac9f (somente leitura; sem web, sem browser, sem banco, sem event log vivo, sem logs scratch, sem arquivos untracked, sem EXEC com efeito colateral), a pergunta: "No estado atual do ANIMA, quais ações ainda exigem que um operador externo como Claude Desktop prepare scripts, comandos ou decisões para executar uma Investigation Session, quais dessas dependências já possuem primitives internos reutilizáveis no repositório, e qual é o menor próximo passo que mais reduz essa dependência sem ampliar autonomia prematuramente?". Cubra com evidência as subquestões: (A) materialização (interpretar objetivo, materializar proposal, effect_class, capability, execution_spec, criar work item: primitive existente x wrapper/glue x ausência real); (B) executor discovery (descobrir, validar backend, recomendar codex-cli, explicar inelegibilidade, impedir fallback silencioso); (C) approval e classification (incluindo prepare-autonomous e a relação approve x classification: decisão humana por política x comando mecânico automatizável sem ampliar autoridade x limitação estrutural); (D) routing e start (o que já ocorre no control-plane; existe primitive que leve approved a classificado/routed/ready sem decisão nova; não confundir automação mecânica com auto-approval); (E) ANIMA_CODEX_CLI_PATH (resolução, configuração durável, dependência do ambiente do processo); (F) budget e supervisão (user_attempt_budget_exhausted, o que work supervise faz, se é decisão deliberada ou workaround; NÃO propor remover budget); (G) execução pelo Resident Host depois de admitido; (H) review e accept (preservar review humano; NÃO recomendar auto-accept); (I) por que INV-01/02 dependeram de scripts de materialização, de execute-one-turn, de wrapper advisory e de ambiente manual, e se há primitive reutilizável para cada categoria; (J) UMA recomendação principal: o menor próximo passo que mais reduz a dependência sem ampliar autonomia prematuramente, sustentada por evidência. Distinga HUMAN AUTHORITY (deve continuar humana), OPERATOR MECHANICS (mecânica sem nova decisão de autoridade) e MISSING CAPABILITY (o ANIMA não sabe representar/executar); nem toda intervenção humana é dependência ruim. Produza um InvestigationResultV1 honesto: cada finding com statement, status epistêmico (established | inferred | undetermined) e evidência rastreável (file_at_commit ou commit); declare gaps e o outcome (conclusive | partial | inconclusive). Cite lines apenas quando o intervalo exato foi confirmado lendo o arquivo; na dúvida use lines null. NÃO altere nenhum arquivo, NÃO crie branch, commit ou diff, NÃO implemente nada e NÃO crie work item; NÃO afirme como established o que depende de fontes fora do snapshot.
+- **Dependências:** (nenhuma)
+- **Escopo incluído:** (somente leitura do snapshot do repositório em a173f40; nenhuma escrita)
+- **Fora de escopo:** qualquer escrita, web, browser, banco de dados, event log vivo, logs scratch, arquivos untracked, execução com efeito colateral.
+- **Critério de validação:** revisão humana do InvestigationResultV1 e do parecer advisory
+- **Tentativas:** max_attempts = 1; max_duration_minutes = 30
+- **Verifier:** verifier_requirement = advisory
+- **Aceite:** O resultado é um InvestigationResultV1 válido cujos findings referenciam evidências que resolvem no snapshot a173f40.
+- **Aceite:** Nenhuma branch, commit, diff ou handoff de candidate é produzido.

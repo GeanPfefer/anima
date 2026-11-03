@@ -1,0 +1,15 @@
+# Self-dev — única volta supervisionada
+
+2026-10-10. Autorização humana para uma única runProjectBacklogHostTurn sobre ab9cae0f-55f0-44ec-a648-ebf81a025ef2, approved v2. Contexto: [preparação](2026-10-10-selfdev-sucessor-aprovado.md).
+
+Preflight: Git Windows dev/6bc4aadef9414d655600c2ea37c6be436b3628c8, índice vazio, 46 worktrees. DB/Auth running/healthy; Codex nativo autenticado por ChatGPT, CLI/default ready; orçamento admitted=true, item 0/3, usuário/externo 0/6. Writer autenticado com papel anima_system_writer. Nenhum item blocked/in_progress ou claim aberto: zero candidatos às rotinas globais de reconciliação/readmissão. Recovery OpenAI 5895b59c-0568-483a-9731-2abd45fb4b90 aprovado v2, não selecionado. Seleção filtrada ao sucessor; configuração restrita ao processo, Router/cloud/ai-memory desabilitados e chaves de API removidas do processo; fetch restrito ao Supabase local.
+
+Invocação única: requestedWorkItemId=ab9cae0f-55f0-44ec-a648-ebf81a025ef2, maxTurnsPerCycle=1, maxCycles=1, coderRuntimeMode=supervised, AbortController conectado a SIGINT/SIGTERM. Não foi usado Single-Item nem removido seu gate. Rotinas globais existentes foram chamadas sem candidatos; comparação final não encontrou eventos ou mudanças em terceiros.
+
+**NO-GO resultado funcional**: 1 ciclo, 1 volta, 1 item; lastOutcome=execution_failed, stopReason=max_cycles_reached. Attempt de2095d6-698e-4655-9208-c326399e01c3; claim 48015d5d-fde0-4456-a33c-015e6cdc1b40. Approved → in_progress → failed. execution_started às 08:27:19 UTC; claim liberada attempt_finished às 08:27:44 UTC. Erro persistido: “O backend não produziu nenhuma alteração para revisão.” Host registrou coder codex-cli:default outcome=succeeded, durationMs=23393: sucesso do processo não significa sucesso funcional. Delta desta attempt vazio; checkpoint herdado não conta como nova escrita. Causa da ausência de edits não demonstrada pelos eventos disponíveis. Nenhum gate ou Verifier registrado; não há resultado para aceitar/integrar. Nenhuma segunda tentativa chamada.
+
+Executor existente executa dispose(deleteBranch:false) no finally: nova worktree temporária deixou de estar registrada; 46 worktrees anteriores mantidas. Estado Git final HEAD igual, índice vazio; nenhum staging/commit/push/reset/clean/prune no repositório principal. Nenhuma alteração de produto ou migration pelo supervisor, nenhuma integração automática. Proposta/intent/checkpoint/versão preservados. Claims ativos=[] e itens in_progress=[]; todos os demais items completos e eventos conferidos sem alteração, incluindo recovery OpenAI. DB/Auth permanecem healthy.
+
+[Evidências](2026-10-10-selfdev-volta-supervisionada-evidencias/): snapshots integrais antes/depois, eventos 86365–86372 e resultado do host-turn, com SHA256SUMS. Mudanças documentais desta sessão: registro, evidências e checkpoint PRD. Single-Item, temporal, orçamento, INV-11 e Resident Host contínuo não acionados.
+
+Próximo passo mínimo, sob nova autorização: examinar a saída/sessão nativa do Codex desta attempt para explicar o no-op e decidir recuperação governada do item failed; não repetir a execução nem mudar o estado automaticamente.

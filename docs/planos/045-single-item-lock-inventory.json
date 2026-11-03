@@ -1,0 +1,2081 @@
+{
+  "schemaVersion": 1,
+  "kind": "offline-textual-not-catalog",
+  "functionCount": 139,
+  "triggers": [
+    {
+      "name": "attach_initial_work_context",
+      "table": "public.work_events",
+      "callback": "private.attach_initial_work_context",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "definition": "CREATE TRIGGER attach_initial_work_context\nAFTER INSERT ON public.work_events\nFOR EACH ROW EXECUTE FUNCTION private.attach_initial_work_context();"
+    },
+    {
+      "name": "clear_terminal_work_focus",
+      "table": "public.work_items",
+      "callback": "private.clear_terminal_work_focus",
+      "source": "20260715000002_remediate_work_contracts.sql",
+      "definition": "CREATE TRIGGER clear_terminal_work_focus AFTER UPDATE OF state ON public.work_items FOR EACH ROW EXECUTE FUNCTION private.clear_terminal_work_focus();"
+    },
+    {
+      "name": "enforce_autonomous_intelligence_on_claim",
+      "table": "public.work_claims",
+      "callback": "private.enforce_autonomous_intelligence_on_claim",
+      "source": "20260728000002_autonomous_intelligence_gate.sql",
+      "definition": "CREATE TRIGGER enforce_autonomous_intelligence_on_claim\nBEFORE INSERT ON public.work_claims\nFOR EACH ROW EXECUTE FUNCTION private.enforce_autonomous_intelligence_on_claim();"
+    },
+    {
+      "name": "enforce_autonomous_intelligence_on_attempt",
+      "table": "public.work_events",
+      "callback": "private.enforce_autonomous_intelligence_on_attempt",
+      "source": "20260728000002_autonomous_intelligence_gate.sql",
+      "definition": "CREATE TRIGGER enforce_autonomous_intelligence_on_attempt\nBEFORE INSERT ON public.work_events\nFOR EACH ROW EXECUTE FUNCTION private.enforce_autonomous_intelligence_on_attempt();"
+    },
+    {
+      "name": "enforce_autonomous_routing_on_attempt",
+      "table": "public.work_events",
+      "callback": "private.enforce_autonomous_routing_on_attempt",
+      "source": "20260728000005_enforce_work_routing.sql",
+      "definition": "CREATE TRIGGER enforce_autonomous_routing_on_attempt\nBEFORE INSERT ON public.work_events\nFOR EACH ROW EXECUTE FUNCTION private.enforce_autonomous_routing_on_attempt();"
+    },
+    {
+      "name": "enforce_adjustment_on_routing_decision",
+      "table": "public.work_events",
+      "callback": "private.enforce_adjustment_on_routing_decision",
+      "source": "20260728000010_validate_adjusted_routing_decision.sql",
+      "definition": "CREATE TRIGGER enforce_adjustment_on_routing_decision\nBEFORE INSERT ON public.work_events\nFOR EACH ROW EXECUTE FUNCTION private.enforce_adjustment_on_routing_decision();"
+    },
+    {
+      "name": "enforce_autonomous_work_budget_before_start",
+      "table": "public.work_events",
+      "callback": "private.enforce_autonomous_work_budget",
+      "source": "20260728000013_autonomous_work_budget.sql",
+      "definition": "CREATE TRIGGER enforce_autonomous_work_budget_before_start\nBEFORE INSERT ON public.work_events\nFOR EACH ROW EXECUTE FUNCTION private.enforce_autonomous_work_budget();"
+    },
+    {
+      "name": "no_resume_authority_descendants",
+      "table": "public.work_recovery_lineage",
+      "callback": "private.block_resume_authority_descendants",
+      "source": "20260903000000_human_recovery_authority.sql",
+      "definition": "CREATE TRIGGER no_resume_authority_descendants BEFORE INSERT ON public.work_recovery_lineage FOR EACH ROW EXECUTE FUNCTION private.block_resume_authority_descendants();"
+    },
+    {
+      "name": "stamp_canonical_resident_contract_before_insert",
+      "table": "public.work_events",
+      "callback": "private.stamp_canonical_resident_contract",
+      "source": "20260917000000_canonical_resident_contract_stamp.sql",
+      "definition": "CREATE TRIGGER stamp_canonical_resident_contract_before_insert\n  BEFORE INSERT ON public.work_events\n  FOR EACH ROW\n  EXECUTE FUNCTION private.stamp_canonical_resident_contract();"
+    },
+    {
+      "name": "guard_mandated_review_release",
+      "table": "public.work_items",
+      "callback": "private.guard_mandated_review_release",
+      "source": "20260928000000_mandated_verifier_review_gate.sql",
+      "definition": "CREATE TRIGGER guard_mandated_review_release\n  BEFORE UPDATE OF state ON public.work_items\n  FOR EACH ROW EXECUTE FUNCTION private.guard_mandated_review_release();"
+    },
+    {
+      "name": "guard_trusted_system_fact",
+      "table": "public.work_events",
+      "callback": "private.guard_trusted_system_fact",
+      "source": "20260929000000_trusted_system_evidence_boundary.sql",
+      "definition": "CREATE TRIGGER guard_trusted_system_fact\n  BEFORE INSERT OR UPDATE ON public.work_events\n  FOR EACH ROW EXECUTE FUNCTION private.guard_trusted_system_fact();"
+    },
+    {
+      "name": "work_items_verifier_requirement_monotonic",
+      "table": "public.work_items",
+      "callback": "private.guard_verifier_requirement_monotonic",
+      "source": "20260929000001_verifier_requirement_monotonic.sql",
+      "definition": "CREATE TRIGGER work_items_verifier_requirement_monotonic\n  BEFORE UPDATE OF intent ON public.work_items\n  FOR EACH ROW EXECUTE FUNCTION private.guard_verifier_requirement_monotonic();"
+    }
+  ],
+  "functions": [
+    {
+      "signature": "private.is_valid_work_proposal(jsonb)",
+      "source": "supabase/migrations/20260714000001_protect_work_orchestration.sql",
+      "line": 38,
+      "definitionSha256": "7a18b65e9c66415e1002ee4f8cf41edb5db26f697576326b222d6e438ff86de3",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.create_work_proposal(uuid,work_impact_level,work_capability,jsonb,jsonb)",
+      "source": "supabase/migrations/20260714000001_protect_work_orchestration.sql",
+      "line": 78,
+      "definitionSha256": "fc138f3988e2f7431cbb213722c9f889fae4ca7b2dbe3e13bae9beb8afdec625",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "INSERT INTO public.work_items (\n    user_id, source_message_id, state, impact_level, capability,\n    original_request, intent, proposal, proposal_version\n  ) VALUES (\n    v_user_id, source_message_id, 'proposed', impact_level, capability,\n    v_original_request, intent, proposal, 1\n  )\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events (\n    work_item_id, event_type, author, proposal_version, payload\n  ) VALUES (\n    v_item.id,\n    'work_proposed',\n    'anima',\n    v_item.proposal_version,\n    jsonb_build_object(\n      'schema_version', 1,\n      'data', jsonb_build_object('proposal', proposal)\n    )\n  );"
+      ],
+      "calls": [
+        "private.is_valid_work_proposal",
+        "public.work_events",
+        "public.work_items"
+      ]
+    },
+    {
+      "signature": "public.revise_work_proposal(uuid,integer,jsonb,jsonb)",
+      "source": "supabase/migrations/20260715000002_remediate_work_contracts.sql",
+      "line": 175,
+      "definitionSha256": "3dd36668bd9396fa3cee6018b92ad965d49b473d6399524b4562db5101a72639",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items AS item\n  WHERE item.id = work_item_id\n    AND item.user_id = v_user_id\n  FOR UPDATE;",
+        "UPDATE public.work_items AS item\n  SET intent = revise_work_proposal.intent,\n      proposal = revise_work_proposal.proposal,\n      proposal_version = item.proposal_version + 1,\n      updated_at = now()\n  WHERE item.id = v_item.id\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events (\n    work_item_id, event_type, author, proposal_version, payload\n  ) VALUES (\n    v_item.id,\n    'proposal_revised',\n    'anima',\n    v_item.proposal_version,\n    jsonb_build_object(\n      'schema_version', 1,\n      'data', jsonb_build_object('proposal', proposal)\n    )\n  );"
+      ],
+      "calls": [
+        "private.is_valid_work_proposal",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.resolve_approval(uuid,integer,work_approval_decision,jsonb)",
+      "source": "supabase/migrations/20260715000002_remediate_work_contracts.sql",
+      "line": 251,
+      "definitionSha256": "4b9403c84d9efec99fbc7fd5d6336421836274b5c8ca421cb679e238a016398f",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items AS item\n  WHERE item.id = work_item_id\n    AND item.user_id = v_user_id\n  FOR UPDATE;",
+        "UPDATE public.work_items AS item\n  SET state = v_target_state,\n      updated_at = now()\n  WHERE item.id = v_item.id\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events (\n    work_item_id, event_type, author, proposal_version, payload\n  ) VALUES (\n    v_item.id,\n    v_event,\n    'user',\n    v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data',\n      CASE decision\n        WHEN 'approve' THEN jsonb_build_object(\n          'decision', decision,\n          'decided_proposal_version', v_item.proposal_version\n        )\n        WHEN 'reject' THEN jsonb_build_object(\n          'decision', decision,\n          'decided_proposal_version', v_item.proposal_version\n        )\n        WHEN 'request_changes' THEN jsonb_build_object(\n          'requested_changes', decision_context ->> 'requested_changes',\n          'reviewed_proposal_version', v_item.proposal_version\n        )\n        WHEN 'defer' THEN jsonb_build_object(\n          'reason', decision_context ->> 'reason',\n          'reviewed_proposal_version', v_item.proposal_version\n        )\n      END\n    )\n  );"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.start_work(uuid,integer)",
+      "source": "supabase/migrations/20260715000002_remediate_work_contracts.sql",
+      "line": 370,
+      "definitionSha256": "b78847e0c2b08584bcdba5bb3d772a0036089a3c4ecf50c7470cf6a0f0eac016",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items AS item\n  WHERE item.id = work_item_id\n    AND item.user_id = v_user_id\n  FOR UPDATE;",
+        "UPDATE public.work_items AS item\n  SET state = v_target_state,\n      updated_at = now()\n  WHERE item.id = v_item.id\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events (\n    work_item_id, event_type, author, proposal_version, payload\n  ) VALUES (\n    v_item.id,\n    'work_started',\n    'user',\n    v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object())\n  );"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.submit_work_result(uuid,integer,jsonb)",
+      "source": "supabase/migrations/20260715000003_result_evidence_shape.sql",
+      "line": 4,
+      "definitionSha256": "71251a1ab930e747035873883c6cabee500e68471089c17045d7d16fcc0785d5",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items AS item\n  WHERE item.id = work_item_id\n    AND item.user_id = v_user_id\n  FOR UPDATE;",
+        "UPDATE public.work_items AS item\n  SET state = v_target_state,\n      updated_at = now()\n  WHERE item.id = v_item.id\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events (\n    work_item_id, event_type, author, proposal_version, payload\n  ) VALUES (\n    v_item.id,\n    'result_submitted',\n    'user',\n    v_item.proposal_version,\n    jsonb_build_object(\n      'schema_version', 1,\n      'data', result\n    )\n  );"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.review_work_result(uuid,integer,work_review_decision,jsonb)",
+      "source": "supabase/migrations/20260715000000_complete_work_review.sql",
+      "line": 2,
+      "definitionSha256": "6c01425c8a3134f071835b27698fecb99a8bde7f141a430b3dd9e1fe60eaa30c",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items AS item\n  WHERE item.id = work_item_id\n    AND item.user_id = v_user_id\n  FOR UPDATE;",
+        "UPDATE public.work_items AS item\n  SET state = v_target_state,\n      updated_at = now()\n  WHERE item.id = v_item.id\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events (\n    work_item_id, event_type, author, proposal_version, payload\n  ) VALUES (\n    v_item.id,\n    v_event,\n    'user',\n    v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data',\n      CASE decision\n        WHEN 'accept' THEN jsonb_build_object(\n          'accepted_result_event_id', v_result_event_id\n        )\n        WHEN 'request_changes' THEN jsonb_build_object(\n          'requested_changes', decision_context ->> 'requested_changes',\n          'reviewed_proposal_version', v_item.proposal_version,\n          'reviewed_result_event_id', v_result_event_id\n        )\n      END\n    )\n  );"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.attach_work_context(uuid,integer,jsonb)",
+      "source": "supabase/migrations/20260715000001_context_and_conversation_archive.sql",
+      "line": 136,
+      "definitionSha256": "ffbfcf3a445846a8fc6ea745ec1b8329322f435d0fb850fd455d63d3a576adf3",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items AS item\n  WHERE item.id = work_item_id AND item.user_id = v_user_id\n  FOR UPDATE;",
+        "INSERT INTO public.work_contexts (work_item_id, version, context_references)\n  VALUES (v_item.id, v_version, context_references)\n  RETURNING * INTO v_context;",
+        "INSERT INTO public.work_events (work_item_id, event_type, author, proposal_version, payload)\n  VALUES (v_item.id, 'context_attached', 'anima', v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'context_id', v_context.id,\n      'context_version', v_context.version,\n      'context_references', v_context.context_references\n    )));"
+      ],
+      "calls": [
+        "public.work_contexts",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.attach_initial_work_context()",
+      "source": "supabase/migrations/20260715000002_remediate_work_contracts.sql",
+      "line": 6,
+      "definitionSha256": "00211b2fe6ada60635502db8010df0d8f34989ec425485996a99d592dc3d45b8",
+      "disposition": "trigger_inherits_caller_prefix_no_late_lock",
+      "identity": null,
+      "explicitStatements": [
+        "INSERT INTO public.work_contexts(work_item_id,version,context_references)\n  VALUES(v_item.id,1,jsonb_build_array(jsonb_build_object('kind','message','id',v_item.source_message_id::text)))\n  RETURNING * INTO v_context;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'context_attached','anima',v_item.proposal_version,jsonb_build_object('schema_version',1,'data',jsonb_build_object('context_id',v_context.id,'context_version',1,'context_references',v_context.context_references)));"
+      ],
+      "calls": [
+        "public.work_contexts",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.request_work_proposal_revision(uuid,integer,text,jsonb,jsonb)",
+      "source": "supabase/migrations/20260715000002_remediate_work_contracts.sql",
+      "line": 31,
+      "definitionSha256": "1d4694fc8b010b0b97dcf2c7434829b9bf16afa16486cdee49b70163dc83abc3",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items item WHERE item.id=work_item_id AND item.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'proposal_changes_requested','user',v_previous_version,jsonb_build_object('schema_version',1,'data',jsonb_build_object('requested_changes',btrim(requested_changes),'reviewed_proposal_version',v_previous_version)));",
+        "UPDATE public.work_items item SET intent=request_work_proposal_revision.intent,proposal=request_work_proposal_revision.proposal,proposal_version=item.proposal_version+1,updated_at=now() WHERE item.id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'proposal_revised','anima',v_item.proposal_version,jsonb_build_object('schema_version',1,'data',jsonb_build_object('proposal',proposal,'requested_changes',btrim(requested_changes),'previous_proposal_version',v_previous_version)));"
+      ],
+      "calls": [
+        "private.is_valid_work_proposal",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.review_work_result_versioned(uuid,integer,uuid,work_review_decision,jsonb)",
+      "source": "supabase/migrations/20260928000000_mandated_verifier_review_gate.sql",
+      "line": 406,
+      "definitionSha256": "538d9a4770bd1b58564b3ae77f29d84774379e3e39668e5dd021453ab107f3ad",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items item WHERE item.id=work_item_id AND item.user_id=v_user_id FOR UPDATE;"
+      ],
+      "calls": [
+        "private.mandated_result_verdict",
+        "private.work_item_requires_verifier",
+        "public.review_work_result"
+      ]
+    },
+    {
+      "signature": "public.set_work_focus(uuid)",
+      "source": "supabase/migrations/20260715000002_remediate_work_contracts.sql",
+      "line": 104,
+      "definitionSha256": "fd0028692c7cc1650bd862580b40b24a9a769dd2e40b105234515d14dc562623",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "INSERT INTO public.work_focus(user_id,work_item_id,updated_at) VALUES(v_user_id,v_item.id,now()) ON CONFLICT(user_id) DO UPDATE SET work_item_id=excluded.work_item_id,updated_at=excluded.updated_at;"
+      ],
+      "calls": [
+        "public.work_focus"
+      ]
+    },
+    {
+      "signature": "private.clear_terminal_work_focus()",
+      "source": "supabase/migrations/20260715000002_remediate_work_contracts.sql",
+      "line": 124,
+      "definitionSha256": "f8d98826c32e1281e80465b1cb0988f12169f902e82404a38a8cc0cce62584e2",
+      "disposition": "trigger_inherits_caller_prefix_no_late_lock",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.start_work_execution(uuid,integer,uuid,text)",
+      "source": "supabase/migrations/20260715000004_persist_work_executions.sql",
+      "line": 6,
+      "definitionSha256": "33b55cdf80c6af277140f98fc3fedda4cbeed26df49df20b915fd722bee509d4",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items AS item\n  WHERE item.id = work_item_id\n    AND item.user_id = v_user_id\n  FOR UPDATE;",
+        "INSERT INTO public.work_events (work_item_id, event_type, author, proposal_version, payload)\n  VALUES (\n    v_item.id,\n    'execution_started',\n    'anima',\n    v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'execution_id', execution_id,\n      'executor_id', btrim(executor_id)\n    ))\n  );"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.finish_work_execution(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260812000000_executor_cancelled_provenance.sql",
+      "line": 137,
+      "definitionSha256": "0240a40c40d9d2ad354eec014019b8636184088051532033d34a8d54b95328d9",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items AS item\n  WHERE item.id = work_item_id\n    AND item.user_id = v_user_id\n  FOR UPDATE;",
+        "UPDATE public.work_items AS item\n  SET state = v_target_state,\n      updated_at = now()\n  WHERE item.id = v_item.id\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events (work_item_id, event_type, author, proposal_version, payload)\n  VALUES (\n    v_item.id,\n    v_event,\n    v_author,\n    v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', v_payload)\n  );"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.start_commanded_work_attempt(uuid,integer,uuid,text)",
+      "source": "supabase/migrations/20260721000001_work_claims.sql",
+      "line": 118,
+      "definitionSha256": "34279bed214ded716a330bcfe8386acb7d3b42b8c26a7430f08dadba03a1279e",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_user_id",
+      "explicitStatements": [],
+      "calls": [
+        "private.begin_work_attempt"
+      ]
+    },
+    {
+      "signature": "public.record_commanded_work_terminal(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260928000000_mandated_verifier_review_gate.sql",
+      "line": 173,
+      "definitionSha256": "49b79ca1c4debed519ce6481c32c6ebd2dc2560bec15d41b6391099bb4ef2972",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "UPDATE public.work_items SET state=v_state,updated_at=now() WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,v_event,'executor'::public.work_event_author,\n    v_item.proposal_version,jsonb_build_object('schema_version',1,'data',v_data));"
+      ],
+      "calls": [
+        "private.work_item_requires_verifier",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.begin_work_attempt(uuid,uuid,integer,uuid,text,text,uuid)",
+      "source": "supabase/migrations/20260721000005_commanded_target_exclusivity.sql",
+      "line": 29,
+      "definitionSha256": "42d20a0ecf5cd9538e960459c83a9c49a45c3fedfdf0215e8264df2c26ef643e",
+      "disposition": "proposed_owner_prefix",
+      "identity": "p_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n  WHERE i.id = p_work_item_id AND i.user_id = p_user_id FOR UPDATE;",
+        "PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||p_user_id::text||':'||v_target, 0));",
+        "UPDATE public.work_items SET state='in_progress', updated_at=now() WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n    (v_item.id,'work_started','user',v_item.proposal_version,\n      jsonb_build_object('schema_version',1,'data',\n        jsonb_build_object('reason',p_reason,'attempt_id',p_attempt_id) || v_claim)),\n    (v_item.id,'execution_started','anima',v_item.proposal_version,\n      jsonb_build_object('schema_version',1,'data',\n        jsonb_build_object(\n          'work_item_id',v_item.id,'attempt_id',p_attempt_id,'approved_proposal_version',v_item.proposal_version,\n          'origin','anima','executor_id',btrim(p_executor_id)) || v_claim));"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.acquire_work_claim(uuid,integer,uuid,text,integer)",
+      "source": "supabase/migrations/20260721000004_target_exclusivity.sql",
+      "line": 47,
+      "definitionSha256": "c8207edf3e4174cffbec66b883a43cd3ca2a7e04267e4661a10575d826aa4a6b",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n  WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_user_id::text||':'||v_target, 0));",
+        "SELECT * INTO v_open FROM public.work_claims c\n  WHERE c.work_item_id=v_item.id AND c.released_at IS NULL FOR UPDATE;",
+        "UPDATE public.work_claims SET released_at=v_now, release_reason='expired'\n    WHERE id=v_open.id RETURNING * INTO v_open;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n      (v_item.id,'work_claim_released','system',v_open.approved_proposal_version,\n        jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n          'claim_id',v_open.id,'work_item_id',v_item.id,\n          'approved_proposal_version',v_open.approved_proposal_version,\n          'owner_instance_id',v_open.owner_instance_id,'attempt_id',v_open.attempt_id,\n          'reason','expired','released_at',v_now)));",
+        "SELECT * INTO v_open FROM public.work_claims c\n  WHERE c.user_id=v_user_id AND c.target_reference=v_target AND c.released_at IS NULL\n  FOR UPDATE;",
+        "UPDATE public.work_claims SET released_at=v_now, release_reason='expired'\n    WHERE id=v_open.id RETURNING * INTO v_open;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n      (v_open.work_item_id,'work_claim_released','system',v_open.approved_proposal_version,\n        jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n          'claim_id',v_open.id,'work_item_id',v_open.work_item_id,\n          'approved_proposal_version',v_open.approved_proposal_version,\n          'owner_instance_id',v_open.owner_instance_id,'attempt_id',v_open.attempt_id,\n          'reason','expired','released_at',v_now)));",
+        "INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,owner_instance_id,acquired_at,expires_at,target_reference)\n  VALUES (claim_id,v_item.id,v_user_id,expected_proposal_version,v_owner,v_now,v_now + make_interval(secs => lease_seconds),v_target)\n  RETURNING * INTO v_claim;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n    (v_item.id,'work_claimed','system',v_claim.approved_proposal_version,\n      jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n        'claim_id',v_claim.id,'work_item_id',v_item.id,\n        'approved_proposal_version',v_claim.approved_proposal_version,\n        'owner_instance_id',v_claim.owner_instance_id,'acquired_at',v_claim.acquired_at,\n        'expires_at',v_claim.expires_at,'superseded_claim_id',v_superseded,\n        'target_reference',v_claim.target_reference)));"
+      ],
+      "calls": [
+        "public.work_claims",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.start_claimed_work_attempt(uuid,uuid,text)",
+      "source": "supabase/migrations/20260721000001_work_claims.sql",
+      "line": 251,
+      "definitionSha256": "57f96c80ecafefababee65034307b205757fd6e901d0c2747caa250208a91977",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_claim FROM public.work_claims c\n  WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;",
+        "UPDATE public.work_claims c SET attempt_id=start_claimed_work_attempt.attempt_id\n    WHERE c.id=v_claim.id RETURNING c.* INTO v_claim;"
+      ],
+      "calls": [
+        "private.begin_work_attempt"
+      ]
+    },
+    {
+      "signature": "public.release_work_claim(uuid,text)",
+      "source": "supabase/migrations/20260721000001_work_claims.sql",
+      "line": 304,
+      "definitionSha256": "81de4bdaf59055b1eac2fa54e373be749a1a4d7ce799f568470ba0b843b3f801",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_claim FROM public.work_claims c\n  WHERE c.id=claim_id AND c.user_id=v_user_id FOR UPDATE;",
+        "UPDATE public.work_claims SET released_at=v_now, release_reason=reason\n  WHERE id=v_claim.id RETURNING * INTO v_claim;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n    (v_claim.work_item_id,'work_claim_released','system',v_claim.approved_proposal_version,\n      jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n        'claim_id',v_claim.id,'work_item_id',v_claim.work_item_id,\n        'approved_proposal_version',v_claim.approved_proposal_version,\n        'owner_instance_id',v_claim.owner_instance_id,'attempt_id',v_claim.attempt_id,\n        'reason',reason,'released_at',v_now)));"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.jsonb_is_nonblank_string(jsonb)",
+      "source": "supabase/migrations/20260721000002_autonomous_work_queue.sql",
+      "line": 16,
+      "definitionSha256": "a282fa9ab77b2739cdf1d60e5d67de461992a471fcd2c5389c01160ed6140849",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.jsonb_is_positive_integer(jsonb)",
+      "source": "supabase/migrations/20260721000002_autonomous_work_queue.sql",
+      "line": 20,
+      "definitionSha256": "e3ffcda362e8e84341ef34602d4cda648475c196f025af7bf0d4b9eeb9121d5e",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.jsonb_is_nonblank_string_array(jsonb,integer)",
+      "source": "supabase/migrations/20260721000002_autonomous_work_queue.sql",
+      "line": 25,
+      "definitionSha256": "cd6628970a392b3b725fdd2c058c1bb1e73772ea9348e6b85d132097a4c53d5b",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string"
+      ]
+    },
+    {
+      "signature": "private.is_valid_validation_criteria(jsonb)",
+      "source": "supabase/migrations/20260721000002_autonomous_work_queue.sql",
+      "line": 41,
+      "definitionSha256": "9ef1062a515d28d8689d30c88bd51d82650921fd54b42ccf1f2bd7375778de4e",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string"
+      ]
+    },
+    {
+      "signature": "private.is_valid_execution_limits(jsonb)",
+      "source": "supabase/migrations/20260721000002_autonomous_work_queue.sql",
+      "line": 56,
+      "definitionSha256": "320a9357dedd3bd0e7d981f5302cb45358e67f9b2c367e0698a1755fc8302741",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_positive_integer"
+      ]
+    },
+    {
+      "signature": "private.is_valid_execution_spec(jsonb)",
+      "source": "supabase/migrations/20260721000002_autonomous_work_queue.sql",
+      "line": 74,
+      "definitionSha256": "837c9947f60ea0951b9f20b8d53495c6d124912b1d5db29747a0d67938ff7478",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_execution_limits",
+        "private.is_valid_validation_criteria",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_nonblank_string_array"
+      ]
+    },
+    {
+      "signature": "private.is_autonomously_eligible(work_state,jsonb,jsonb)",
+      "source": "supabase/migrations/20260721000002_autonomous_work_queue.sql",
+      "line": 91,
+      "definitionSha256": "15085ba9fde1a70732d8855e61ad495c3d8faa13c0c29539d81adc30e70b3fa6",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_execution_spec",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_nonblank_string_array"
+      ]
+    },
+    {
+      "signature": "public.autonomous_work_queue()",
+      "source": "supabase/migrations/20260824000006_autonomous_work_dependencies.sql",
+      "line": 29,
+      "definitionSha256": "ab7230593edb27cbf62b5487c0b5403884371d712e9713f0007048056075d06a",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_user_id",
+      "explicitStatements": [],
+      "calls": [
+        "private.autonomous_intelligence_eligibility",
+        "private.autonomous_work_dependencies_satisfied",
+        "private.is_autonomously_eligible"
+      ]
+    },
+    {
+      "signature": "public.reconcile_supervised_work()",
+      "source": "supabase/migrations/20260928000004_pending_verification_human_recovery.sql",
+      "line": 256,
+      "definitionSha256": "242615032b71366a05bf3de66f324ef82bff3b488736a6c035039f924e237595",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "PERFORM pg_advisory_xact_lock(hashtextextended('work_reconciliation:'||v_user_id::text, 0));",
+        "SELECT i.id FROM public.work_items i\n    WHERE i.user_id = v_user_id\n      AND (i.state = 'in_progress'\n           OR EXISTS (SELECT 1 FROM public.work_claims c\n                      WHERE c.work_item_id = i.id AND c.released_at IS NULL))\n    ORDER BY i.id\n  LOOP\n    SELECT * INTO v_item FROM public.work_items i\n    WHERE i.id = v_candidate AND i.user_id = v_user_id FOR UPDATE;",
+        "UPDATE public.work_items SET state=v_target_state, updated_at=v_now\n        WHERE id=v_item.id RETURNING * INTO v_item;",
+        "SELECT * INTO v_claim FROM public.work_claims c\n    WHERE c.work_item_id = v_item.id AND c.released_at IS NULL FOR UPDATE;",
+        "UPDATE public.work_claims SET released_at=v_now, release_reason=v_release_reason\n        WHERE id=v_claim.id RETURNING * INTO v_claim;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n          (v_claim.work_item_id,'work_claim_released','system',v_claim.approved_proposal_version,\n            jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n              'claim_id',v_claim.id,'work_item_id',v_claim.work_item_id,\n              'approved_proposal_version',v_claim.approved_proposal_version,\n              'owner_instance_id',v_claim.owner_instance_id,'attempt_id',v_claim.attempt_id,\n              'reason',v_release_reason,'released_at',v_now)));",
+        "UPDATE public.work_items SET state=v_target_state, updated_at=v_now\n          WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n            (v_item.id,'attempt_abandoned','system',v_item.proposal_version,\n              jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n                'work_item_id',v_item.id,'attempt_id',v_attempt,\n                'approved_proposal_version',v_item.proposal_version,\n                'claim_id',v_lease.id,\n                'origin',CASE WHEN v_lease_bound THEN 'supervised' ELSE 'commanded' END,\n                'reason',v_reason,\n                'attempt_started_at',v_attempt_started,'observed_at',v_now,\n                'lease_expires_at',v_lease.expires_at,\n                'max_duration_minutes',v_duration_minutes)));"
+      ],
+      "calls": [
+        "private.latest_result_event_id",
+        "private.mandated_result_verdict",
+        "private.work_item_requires_verifier",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.is_valid_checkpoint_validations(jsonb)",
+      "source": "supabase/migrations/20260726000001_record_work_checkpoint.sql",
+      "line": 57,
+      "definitionSha256": "015adb5f0983f278bf35f0971cafa574c1b15378251ad6de7acdd29bac3b51c6",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string"
+      ]
+    },
+    {
+      "signature": "private.is_valid_work_checkpoint(jsonb)",
+      "source": "supabase/migrations/20260726000001_record_work_checkpoint.sql",
+      "line": 69,
+      "definitionSha256": "00cd76e7275b7c613af1ffd63c52f0f99530a5ce9475bd0dcab30a99c85bb141",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_checkpoint_validations",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_nonblank_string_array"
+      ]
+    },
+    {
+      "signature": "public.record_work_checkpoint(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260726000001_record_work_checkpoint.sql",
+      "line": 105,
+      "definitionSha256": "77350b705d04a984c6afe90be93f3eb72f4099a514810be1cedcfb424ee5e1b7",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id, event_type, author, proposal_version, payload)\n  VALUES (v_item.id, 'checkpoint_recorded', 'executor', v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'work_item_id', v_item.id,\n      'attempt_id', attempt_id,\n      'approved_proposal_version', expected_proposal_version,\n      'claim_id', v_claim_id,\n      'origin', 'executor',\n      'signal_sequence', v_sequence,\n      'checkpoint', v_checkpoint,\n      'executor_signal', signal)))\n  RETURNING seq INTO v_event_seq;"
+      ],
+      "calls": [
+        "private.is_valid_work_checkpoint",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.latest_work_checkpoint(uuid,uuid)",
+      "source": "supabase/migrations/20260726000002_checkpoint_latest_allowlist.sql",
+      "line": 9,
+      "definitionSha256": "2c3fc703cfca8e17a71a02e73cc747c9301a5846194bca70bd9fddd2428d9784",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_user_id",
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.abandoned_work_resumption_source(uuid)",
+      "source": "supabase/migrations/20260727000000_begin_resumed_work_attempt.sql",
+      "line": 4,
+      "definitionSha256": "97100d35da61f97b6925198da069539b0e2d99cbbd58b8d0ccd859783ff28133",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_uid",
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.begin_resumed_work_attempt(uuid,integer,uuid,bigint,bigint,uuid,uuid,text,integer,text)",
+      "source": "supabase/migrations/20260728000011_allow_adjustment_before_resumption.sql",
+      "line": 3,
+      "definitionSha256": "85d1e959d69cee7af3b234203cf04469736928e0aebf2fbf0272595b93698781",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_uid::text||':'||v_target,0));",
+        "INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,owner_instance_id,\n    acquired_at,expires_at,attempt_id,target_reference)\n  VALUES(claim_id,v_item.id,v_uid,expected_proposal_version,btrim(owner_instance_id),v_now,\n    v_now+make_interval(secs=>lease_seconds),attempt_id,v_target) RETURNING * INTO v_claim;",
+        "UPDATE public.work_items SET state='in_progress',updated_at=v_now WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n    (v_item.id,'work_claimed','system',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('claim_id',claim_id,'work_item_id',v_item.id,'approved_proposal_version',expected_proposal_version,\n        'owner_instance_id',btrim(owner_instance_id),'acquired_at',v_now,'expires_at',v_claim.expires_at,'target_reference',v_target))),\n    (v_item.id,'work_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('reason','resumed_execution','attempt_id',attempt_id,'claim_id',claim_id,\n        'resumed_from_attempt_id',source_attempt_id,'resumed_from_checkpoint_sequence',v_signal_sequence,\n        'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'abandonment_event_seq',abandonment_event_seq))),\n    (v_item.id,'execution_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('work_item_id',v_item.id,'attempt_id',attempt_id,'approved_proposal_version',expected_proposal_version,\n        'origin','anima','executor_id',btrim(executor_id),'claim_id',claim_id,'reason','resumed_execution',\n        'resumed_from_attempt_id',source_attempt_id,'resumed_from_checkpoint_sequence',v_signal_sequence,\n        'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'abandonment_event_seq',abandonment_event_seq)));"
+      ],
+      "calls": [
+        "public.work_claims",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.is_valid_work_intelligence_classification(jsonb)",
+      "source": "supabase/migrations/20260728000001_work_intelligence_classification.sql",
+      "line": 6,
+      "definitionSha256": "6d5497baf583c322412460642d8185c71dae9f7424f979e9692407740c725558",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string"
+      ]
+    },
+    {
+      "signature": "public.record_work_intelligence_classification(uuid,integer,integer,jsonb)",
+      "source": "supabase/migrations/20260728000001_work_intelligence_classification.sql",
+      "line": 73,
+      "definitionSha256": "5774b4d0ac4454bccce5f468a5415edbd1869f52f93744a7034d5c5d4a51c31c",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items i\n  WHERE i.id=p_work_item_id AND i.user_id=v_user_id\n  FOR UPDATE;",
+        "INSERT INTO public.work_events(\n    work_item_id, event_type, author, proposal_version, payload\n  )\n  VALUES (\n    v_item.id,\n    'work_intelligence_classified',\n    v_author,\n    p_expected_proposal_version,\n    jsonb_build_object(\n      'schema_version',1,\n      'data',jsonb_build_object(\n        'work_item_id',v_item.id,\n        'approved_proposal_version',p_expected_proposal_version,\n        'classification_revision',v_revision,\n        'previous_classification_revision',v_last_revision,\n        'supersedes_event_id',CASE WHEN v_last_revision=0 THEN NULL ELSE v_last.id END,\n        'classification',p_classification\n      )\n    )\n  )\n  RETURNING id, seq INTO v_event_id, v_event_seq;"
+      ],
+      "calls": [
+        "private.is_valid_work_intelligence_classification",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.current_work_intelligence_classification(uuid)",
+      "source": "supabase/migrations/20260728000001_work_intelligence_classification.sql",
+      "line": 223,
+      "definitionSha256": "589ede85ece78fca8a8fca6e3bb9ad72c00c77b94e8abe89ec828c119d82a39d",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_user_id",
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_work_intelligence_classification"
+      ]
+    },
+    {
+      "signature": "private.autonomous_intelligence_eligibility(uuid,integer)",
+      "source": "supabase/migrations/20260728000002_autonomous_intelligence_gate.sql",
+      "line": 10,
+      "definitionSha256": "c8503e98e1d2b72503b8d8b2b930fd26ac0327cc853614c010082d8f189970bd",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_work_intelligence_classification"
+      ]
+    },
+    {
+      "signature": "private.enforce_autonomous_intelligence_on_claim()",
+      "source": "supabase/migrations/20260728000002_autonomous_intelligence_gate.sql",
+      "line": 79,
+      "definitionSha256": "87852a66cfda8deec343c1728bb42c63fe7da5e6695db69d4dcd131acbc142ab",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.autonomous_intelligence_eligibility"
+      ]
+    },
+    {
+      "signature": "private.enforce_autonomous_intelligence_on_attempt()",
+      "source": "supabase/migrations/20260728000002_autonomous_intelligence_gate.sql",
+      "line": 101,
+      "definitionSha256": "6e30c257eeb8f379d25c20e5cb6bea868717eecd99fd3e1d0a9c76f0651a92af",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.autonomous_intelligence_eligibility"
+      ]
+    },
+    {
+      "signature": "private.required_work_effort(jsonb)",
+      "source": "supabase/migrations/20260728000004_work_routing_decision.sql",
+      "line": 2,
+      "definitionSha256": "6ca295046d61dad113a2293984e03fe95f5678b9000f170a30a70ff75120c572",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.record_work_routing_decision(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260728000004_work_routing_decision.sql",
+      "line": 136,
+      "definitionSha256": "a48d939705fe4cf9cd1178617211902d4603ac17d672e198f776d90220e12ce3",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items i\n  WHERE i.id=p_work_item_id AND i.user_id=v_user_id\n  FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'work_routing_decided','system',p_expected_proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'work_item_id',v_item.id,\n      'approved_proposal_version',p_expected_proposal_version,\n      'attempt_id',p_attempt_id,\n      'classification_event_id',v_classification_event.id,\n      'decision',p_decision\n    )))\n  RETURNING id,seq INTO v_event_id,v_event_seq;"
+      ],
+      "calls": [
+        "private.autonomous_intelligence_eligibility",
+        "private.is_valid_work_intelligence_classification",
+        "private.is_valid_work_routing_decision",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.work_routing_decision(uuid)",
+      "source": "supabase/migrations/20260728000004_work_routing_decision.sql",
+      "line": 242,
+      "definitionSha256": "16935fd81ba6050ae46e4beabcc1929df0eac04a16829a4609786cd32e20fa18",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_user_id",
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.enforce_autonomous_routing_on_attempt()",
+      "source": "supabase/migrations/20260728000009_enforce_work_routing_adjustment.sql",
+      "line": 28,
+      "definitionSha256": "fb97731d80ef317732618b45ddd31574ecbc81dccc25482220c28d580c2affe9",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_work_intelligence_classification"
+      ]
+    },
+    {
+      "signature": "private.work_routing_adjustment_context(uuid,integer)",
+      "source": "supabase/migrations/20260728000012_exclude_commanded_routing_history.sql",
+      "line": 2,
+      "definitionSha256": "d397f5a6eff2fd607e1afdf8a98ea35f141dc9e19c6cf717c3a36a819c78a3a4",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.expected_work_routing_adjustment(uuid,integer,text)",
+      "source": "supabase/migrations/20260728000008_work_routing_adjustment.sql",
+      "line": 73,
+      "definitionSha256": "6f48fe8164b80b2df3c47fedcd6ca1bf9185093f705976e1110e3290ad17610e",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.work_routing_adjustment_context"
+      ]
+    },
+    {
+      "signature": "public.work_routing_adjustment_context(uuid)",
+      "source": "supabase/migrations/20260728000008_work_routing_adjustment.sql",
+      "line": 124,
+      "definitionSha256": "cf75ac883e68129841ba31ce5c6b58401466ba58b72a910c80c9945e20ca9ed7",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_uid",
+      "explicitStatements": [],
+      "calls": [
+        "private.work_routing_adjustment_context"
+      ]
+    },
+    {
+      "signature": "public.record_work_routing_adjustment(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260728000008_work_routing_adjustment.sql",
+      "line": 145,
+      "definitionSha256": "db480b1e5c1bfd241de957b7e268342f275cbcf4775277c41885dce906103fd2",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'work_routing_adjusted','system',p_expected_proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'work_item_id',v_item.id,'approved_proposal_version',p_expected_proposal_version,\n      'attempt_id',p_attempt_id,'adjustment',p_adjustment)))\n  RETURNING id,seq INTO v_id,v_seq;"
+      ],
+      "calls": [
+        "private.expected_work_routing_adjustment",
+        "private.is_valid_work_intelligence_classification",
+        "private.required_work_effort",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.is_valid_work_routing_decision_v1_baseline(jsonb,work_capability,jsonb)",
+      "source": "supabase/migrations/20260728000004_work_routing_decision.sql",
+      "line": 26,
+      "definitionSha256": "fd76245e0ea1d803ccd3c5aafd672209f6456a85257643db1feea45f05cb0a40",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string",
+        "private.required_work_effort"
+      ]
+    },
+    {
+      "signature": "private.is_valid_work_routing_decision(jsonb,work_capability,jsonb)",
+      "source": "supabase/migrations/20260728000009_enforce_work_routing_adjustment.sql",
+      "line": 4,
+      "definitionSha256": "a7416090fd0ba8d7fb5cce7dd6da59fe3426d7bfa6fd7d09d10af23f73beba84",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_work_routing_decision_v1_baseline",
+        "private.required_work_effort"
+      ]
+    },
+    {
+      "signature": "private.enforce_adjustment_on_routing_decision()",
+      "source": "supabase/migrations/20260728000010_validate_adjusted_routing_decision.sql",
+      "line": 2,
+      "definitionSha256": "b6cc9d26975f79c27becdc3d42b67f6716ecadb77fcb16862149f8b4a0202e7e",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.autonomous_work_budget_usage(uuid,uuid,timestamptz)",
+      "source": "supabase/migrations/20260826000001_restore_paused_runtime_terminal.sql",
+      "line": 13,
+      "definitionSha256": "81db7a362ff1957855d76e72d665ec1daa3334ef292e5e74e218f4d788a9512c",
+      "disposition": "read_only_or_delegated",
+      "identity": "p_user_id",
+      "explicitStatements": [],
+      "calls": [
+        "private.work_item_cost_class"
+      ]
+    },
+    {
+      "signature": "public.autonomous_work_budget_status(uuid)",
+      "source": "supabase/migrations/20260905000003_autonomous_budget_observability.sql",
+      "line": 5,
+      "definitionSha256": "2af8889d31f3a0cf84c4a35d89acd7f5f66d0771a17a04154f1881e40e356f36",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_uid",
+      "explicitStatements": [],
+      "calls": [
+        "private.autonomous_work_budget_decision",
+        "private.work_item_cost_class"
+      ]
+    },
+    {
+      "signature": "private.enforce_autonomous_work_budget()",
+      "source": "supabase/migrations/20260905000000_budget_blocked_human_resume.sql",
+      "line": 137,
+      "definitionSha256": "58d73059f97f280b54396d70a988dbe6c2c736451f228489db3b85599df15ca3",
+      "disposition": "trigger_inherits_caller_prefix_no_late_lock",
+      "identity": null,
+      "explicitStatements": [
+        "PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));",
+        "UPDATE public.work_budget_resume_authorizations SET consumed_at=now(),consumed_attempt_id=(NEW.payload#>>'{data,attempt_id}')::uuid\n     WHERE id=v_grant AND consumed_at IS NULL;"
+      ],
+      "calls": [
+        "private.autonomous_work_budget_decision"
+      ]
+    },
+    {
+      "signature": "public.interrupt_work_on_budget(uuid,integer,uuid)",
+      "source": "supabase/migrations/20260728000014_interrupt_on_work_budget.sql",
+      "line": 3,
+      "definitionSha256": "72c832fc37bd3a2906ec32f1dc6afc13639b970909a05d84b190c45ab2752499",
+      "disposition": "already_budget_first",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));",
+        "SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "UPDATE public.work_items SET state='blocked',updated_at=v_now\n   WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES\n    (v_item.id,'input_requested','anima',v_item.proposal_version,\n      jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n        'reason','persistent_inability_after_limits',\n        'budget_reason',v_reason,\n        'reached_limit',v_limit,\n        'source_state',jsonb_build_object(\n          'work_state','in_progress',\n          'proposal_version',v_item.proposal_version,\n          'attempt_id',p_attempt_id,\n          'checkpoint_event_seq',v_checkpoint.seq),\n        'explanation',CASE\n          WHEN v_reason='user_runtime_budget_exhausted'\n            THEN 'O orçamento global de 120 minutos em 24 horas foi atingido.'\n          ELSE 'A execução parou para preservar 15 minutos da janela para uso interativo.'\n        END))),\n    (v_item.id,'work_blocked','anima',v_item.proposal_version,\n      jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n        'work_item_id',v_item.id,\n        'attempt_id',p_attempt_id,\n        'approved_proposal_version',v_item.proposal_version,\n        'reason',v_reason,\n        'reached_limit',v_limit,\n        'checkpoint_event_seq',v_checkpoint.seq,\n        'observed_at',v_now)));",
+        "SELECT * INTO v_claim FROM public.work_claims c\n   WHERE c.user_id=v_uid AND c.work_item_id=v_item.id\n     AND c.attempt_id=p_attempt_id AND c.released_at IS NULL FOR UPDATE;",
+        "UPDATE public.work_claims SET released_at=v_now,release_reason='attempt_finished'\n     WHERE id=v_claim.id RETURNING * INTO v_claim;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n    VALUES(v_item.id,'work_claim_released','system',v_item.proposal_version,\n      jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n        'claim_id',v_claim.id,'work_item_id',v_item.id,\n        'approved_proposal_version',v_item.proposal_version,\n        'owner_instance_id',v_claim.owner_instance_id,'attempt_id',p_attempt_id,\n        'reason','attempt_finished','released_at',v_now)));"
+      ],
+      "calls": [
+        "private.autonomous_work_budget_decision",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.block_work_on_budget(uuid)",
+      "source": "supabase/migrations/20260821000000_budget_block_honest_and_readmission.sql",
+      "line": 25,
+      "definitionSha256": "43006cd5a15ac6fa981d11f0ec6d7f7c99aeb5825f0c50b48f9489e8b9c5fe5f",
+      "disposition": "already_budget_first",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));",
+        "SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "UPDATE public.work_items SET state='blocked',updated_at=v_now\n   WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES\n    (v_item.id,'input_requested','anima',v_item.proposal_version,\n      jsonb_build_object('schema_version',1,'data',jsonb_strip_nulls(jsonb_build_object(\n        'reason','persistent_inability_after_limits',\n        'budget_reason',v_reason,\n        'reached_limit',v_limit,\n        -- Marcador tipado: a única retomada é a janela do orçamento liberar,\n        -- não uma decisão/resposta humana. Distingue este checkpoint temporal\n        -- dos checkpoints de decisão humana de verdade (UX-02).\n        'resolution','awaits_budget_window',\n        'source_state',jsonb_strip_nulls(jsonb_build_object(\n          'work_state','approved',\n          'proposal_version',v_item.proposal_version,\n          'checkpoint_event_seq',v_checkpoint.seq)),\n        'explanation','O orçamento autônomo foi atingido;"
+      ],
+      "calls": [
+        "private.autonomous_work_budget_decision",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.request_work_control(uuid,integer,uuid,text)",
+      "source": "supabase/migrations/20260728000018_work_control.sql",
+      "line": 45,
+      "definitionSha256": "96dfdb9360a6553e46f8a4844cfa41d6dc255178539fa9f4497a8b6fd6b626e1",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'work_control_requested','user',v_item.proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'work_item_id',v_item.id,'attempt_id',p_attempt_id,\n      'approved_proposal_version',v_item.proposal_version,\n      'action',p_action,'requested_at',now())))\n  RETURNING seq INTO v_seq;"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.apply_work_control_at_checkpoint(uuid,integer,uuid)",
+      "source": "supabase/migrations/20260728000018_work_control.sql",
+      "line": 126,
+      "definitionSha256": "55127a5b19ffe4c995d86c79d91da1f63d49275e98c6ddcfd0879ec4dc9f283e",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "UPDATE public.work_items\n     SET state=CASE WHEN v_action='pause' THEN 'blocked'::public.work_state\n                    ELSE 'cancelled'::public.work_state END,\n         updated_at=v_now\n   WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,v_event,'user',v_item.proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'work_item_id',v_item.id,'attempt_id',p_attempt_id,\n      'approved_proposal_version',v_item.proposal_version,\n      'reason',CASE WHEN v_action='pause' THEN 'paused_by_user' ELSE 'cancelled_by_user' END,\n      'control_request_event_seq',v_request.seq,\n      'checkpoint_event_seq',v_checkpoint.seq,'applied_at',v_now)));",
+        "SELECT * INTO v_claim FROM public.work_claims c\n   WHERE c.user_id=v_uid AND c.work_item_id=v_item.id\n     AND c.attempt_id=p_attempt_id AND c.released_at IS NULL FOR UPDATE;",
+        "UPDATE public.work_claims SET released_at=v_now,release_reason='attempt_finished'\n     WHERE id=v_claim.id RETURNING * INTO v_claim;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n    VALUES(v_item.id,'work_claim_released','system',v_item.proposal_version,\n      jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n        'claim_id',v_claim.id,'work_item_id',v_item.id,\n        'approved_proposal_version',v_item.proposal_version,\n        'owner_instance_id',v_claim.owner_instance_id,'attempt_id',p_attempt_id,\n        'reason','attempt_finished','released_at',v_now)));"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.record_work_decision_required(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260729000003_decision_resumption.sql",
+      "line": 3,
+      "definitionSha256": "9b90a60e02dea6da442b8403a4a91c15db413f21f0a4b16d6baf0699dab41b27",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "SELECT * INTO v_claim FROM public.work_claims c WHERE c.user_id=v_uid AND c.work_item_id=v_item.id\n    AND c.attempt_id=p_attempt_id AND c.released_at IS NULL FOR UPDATE;",
+        "UPDATE public.work_items SET state='blocked',updated_at=v_now WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'input_requested','anima',v_item.proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'work_item_id',v_item.id,'attempt_id',p_attempt_id,'approved_proposal_version',v_item.proposal_version,\n      'input_request',v_input_request,'reason',v_reason,'explanation',p_signal->>'explanation',\n      'source_state',v_input_request->'source_state','options',v_options,'handoff',v_handoff,\n      'checkpoint_reference',v_checkpoint.id,'checkpoint_event_seq',v_checkpoint.seq,\n      'signal_sequence',v_sequence,'executor_signal',p_signal))) RETURNING * INTO v_request;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'work_blocked','anima',v_item.proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'work_item_id',v_item.id,'attempt_id',p_attempt_id,'approved_proposal_version',v_item.proposal_version,\n      'reason','human_input_required','input_requested_event_id',v_request.id,\n      'checkpoint_event_seq',v_checkpoint.seq,'observed_at',v_now)));",
+        "UPDATE public.work_claims SET released_at=v_now,release_reason='attempt_finished'\n    WHERE id=v_claim.id RETURNING * INTO v_claim;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'work_claim_released','system',v_item.proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'claim_id',v_claim.id,'work_item_id',v_item.id,'approved_proposal_version',v_item.proposal_version,\n      'owner_instance_id',v_claim.owner_instance_id,'attempt_id',p_attempt_id,\n      'reason','attempt_finished','released_at',v_now)));"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.respond_to_work_decision(uuid,integer,uuid,text)",
+      "source": "supabase/migrations/20260729000002_work_decisions.sql",
+      "line": 124,
+      "definitionSha256": "d9a97f546dcf35bc5ee6b6681a5d86075d639e58511a995fd19272a02bb1d999",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "UPDATE public.work_items SET state=CASE WHEN v_effect='resume' THEN 'approved'::public.work_state\n    ELSE 'cancelled'::public.work_state END,updated_at=v_now WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'input_provided','user',v_item.proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'input_requested_event_id',v_request.id,'option_id',p_option_id,\n      'option',v_option,'effect',v_effect,'answered_at',v_now))),\n    (v_item.id,CASE WHEN v_effect='resume' THEN 'work_approved'::public.work_event_type\n      ELSE 'work_cancelled'::public.work_event_type END,'user',v_item.proposal_version,\n      jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n        'reason',CASE WHEN v_effect='resume' THEN 'human_decision_resume' ELSE 'human_decision_cancel' END,\n        'input_requested_event_id',v_request.id,'option_id',p_option_id,'answered_at',v_now)));"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.human_decision_resumption_source(uuid)",
+      "source": "supabase/migrations/20260729000003_decision_resumption.sql",
+      "line": 112,
+      "definitionSha256": "1d67167ae203940d69fc5437996fff99c746d83ea04352ac3b60901e8ea792d7",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_uid",
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.begin_human_decision_resumed_attempt(uuid,integer,uuid,uuid,uuid,uuid,text,integer,text)",
+      "source": "supabase/migrations/20260729000003_decision_resumption.sql",
+      "line": 140,
+      "definitionSha256": "9f8c72cde1aef2bc12d471c24984f09210b670f9aab4b70cc684541073a6a5ff",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_uid::text||':'||v_target,0));",
+        "INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,owner_instance_id,\n    acquired_at,expires_at,attempt_id,target_reference)\n  VALUES(claim_id,v_item.id,v_uid,expected_proposal_version,btrim(owner_instance_id),v_now,\n    v_now+make_interval(secs=>lease_seconds),attempt_id,v_target) RETURNING * INTO v_claim;",
+        "UPDATE public.work_items SET state='in_progress',updated_at=v_now WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n    (v_item.id,'work_claimed','system',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('claim_id',claim_id,'work_item_id',v_item.id,'approved_proposal_version',expected_proposal_version,\n        'owner_instance_id',btrim(owner_instance_id),'acquired_at',v_now,'expires_at',v_claim.expires_at,'target_reference',v_target))),\n    (v_item.id,'work_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('reason','human_decision_resumed','attempt_id',attempt_id,'claim_id',claim_id,\n        'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,\n        'resumed_from_checkpoint_event_seq',v_cp.seq,'resumed_from_input_requested_event_id',v_request.id,\n        'resumed_from_input_provided_event_id',v_answer.id))),\n    (v_item.id,'execution_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('work_item_id',v_item.id,'attempt_id',attempt_id,'approved_proposal_version',expected_proposal_version,\n        'origin','anima','executor_id',btrim(executor_id),'claim_id',claim_id,'reason','human_decision_resumed',\n        'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,\n        'resumed_from_checkpoint_event_seq',v_cp.seq,'resumed_from_input_requested_event_id',v_request.id,\n        'resumed_from_input_provided_event_id',v_answer.id)));"
+      ],
+      "calls": [
+        "public.work_claims",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.decide_integration(uuid,integer,uuid,work_integration_decision,text)",
+      "source": "supabase/migrations/20260809000001_integration_decision.sql",
+      "line": 41,
+      "definitionSha256": "bc7bfeb121972bf3f97724b010cb3d6485c49b03a3a4916fa8d650796b50792a",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id, event_type, author, proposal_version, payload)\n  VALUES (v_item.id, 'integration_decided', 'user', v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'work_item_id', v_item.id,\n      'attempt_id', v_attempt_id,\n      'approved_proposal_version', expected_proposal_version,\n      'accepted_result_event_id', accepted_result_event_id,\n      'decision', decision::text,\n      'decision_id', decision_id,\n      'origin', 'user')))\n  RETURNING seq INTO v_event_seq;"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.record_branch_published(uuid,integer,text,jsonb)",
+      "source": "supabase/migrations/20260809000005_branch_publication_recovery.sql",
+      "line": 6,
+      "definitionSha256": "a579ede1ee5a32e4bff3ad58ae35f08b8728784ae30eddbd460799ca07b02fbe",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES(v_item.id,'branch_published','system',expected_proposal_version,jsonb_build_object('schema_version',1,'data',jsonb_build_object('authorization_decision_id',authorization_decision_id,'accepted_result_event_id',v_accept.payload->'data'->>'accepted_result_event_id','attempt_id',v_decision.payload->'data'->>'attempt_id','receipt',receipt))) RETURNING seq INTO v_seq;"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.record_review_request_created(uuid,integer,text,jsonb)",
+      "source": "supabase/migrations/20260813000001_review_request.sql",
+      "line": 10,
+      "definitionSha256": "9d02950f5a1517d063cb16c33a8efd65febafd220f928a493825c8b2dd8ca698",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES(v_item.id,'review_request_created','system',expected_proposal_version,jsonb_build_object('schema_version',1,'data',jsonb_build_object('authorization_decision_id',authorization_decision_id,'accepted_result_event_id',v_accept.payload->'data'->>'accepted_result_event_id','attempt_id',v_decision.payload->'data'->>'attempt_id','receipt',receipt))) RETURNING seq INTO v_seq;"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.is_valid_host_git_diff_files(jsonb)",
+      "source": "supabase/migrations/20260815000001_host_observed_evidence.sql",
+      "line": 45,
+      "definitionSha256": "336c65191de7da3bbccb96b4a082cd2b36f3380e758c657e35e2a49873930292",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string"
+      ]
+    },
+    {
+      "signature": "private.is_valid_host_observed_evidence(jsonb)",
+      "source": "supabase/migrations/20260830000000_host_observed_attempt_delta.sql",
+      "line": 4,
+      "definitionSha256": "d72fc05f26870d708ade79f978f289c8653ebde4b8f8c7e1d526bbd995e72e52",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_host_git_diff_files",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_nonblank_string_array",
+        "private.jsonb_is_positive_integer"
+      ]
+    },
+    {
+      "signature": "public.record_host_observed_evidence(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260928000003_trusted_system_writer.sql",
+      "line": 68,
+      "definitionSha256": "b40eb2c581e33f96833814432526de937e0dcf626936e3aba51b72661fba36d8",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id, event_type, author, proposal_version, payload)\n  VALUES (v_item.id, 'host_observed_evidence_recorded', 'system', expected_proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'work_item_id', v_item.id,\n      'attempt_id', attempt_id,\n      'approved_proposal_version', expected_proposal_version,\n      'origin', 'host',\n      'coverage', jsonb_build_object('git', true, 'gates', false),\n      'evidence', evidence)))\n  RETURNING seq INTO v_event_seq;"
+      ],
+      "calls": [
+        "private.is_valid_host_observed_evidence",
+        "private.trusted_system_writer_owner",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.is_valid_opinion_summary(jsonb)",
+      "source": "supabase/migrations/20260816000001_verifier_opinion.sql",
+      "line": 42,
+      "definitionSha256": "003f15f441a60a7c90f82287c9545b68922e85eb8d320599200cbee0bb6ee73a",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.is_valid_opinion_findings(jsonb)",
+      "source": "supabase/migrations/20260816000001_verifier_opinion.sql",
+      "line": 54,
+      "definitionSha256": "4b249e9dd5d10389655a5626acaa1fdd15987802c5ff733786ebe27a84d8aaae",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string"
+      ]
+    },
+    {
+      "signature": "private.is_valid_verifier_opinion(jsonb)",
+      "source": "supabase/migrations/20260816000004_verifier_opinion_gate_basis.sql",
+      "line": 10,
+      "definitionSha256": "c7373e77a9d7f554384eedc5c3c716efe64521dea4f8a0a41b9678dba90708d5",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_opinion_findings",
+        "private.is_valid_opinion_summary",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_positive_integer"
+      ]
+    },
+    {
+      "signature": "public.record_verifier_opinion(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260928000003_trusted_system_writer.sql",
+      "line": 284,
+      "definitionSha256": "a9a55ee5003d32d623db577b668bef1da78ffebaf0cda82e500a630af166b1e5",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id, event_type, author, proposal_version, payload)\n  VALUES (v_item.id, 'verifier_opinion_recorded', 'system', expected_proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'work_item_id', v_item.id,\n      'attempt_id', attempt_id,\n      'approved_proposal_version', expected_proposal_version,\n      'origin', 'verifier',\n      'verifier_version', v_version,\n      'verdict', opinion->>'verdict',\n      'result_event_id', v_result_id,\n      'observed_event_id', v_observed_id,\n      'observed_gate_event_id', v_gate_id,\n      'opinion', opinion)))\n  RETURNING seq INTO v_event_seq;"
+      ],
+      "calls": [
+        "private.is_valid_verifier_opinion",
+        "private.release_mandated_result",
+        "private.trusted_system_writer_owner",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.is_valid_host_gate_outcomes(jsonb)",
+      "source": "supabase/migrations/20260816000003_host_observed_gate_evidence.sql",
+      "line": 27,
+      "definitionSha256": "8b1742ce37110c211b237f4a82d388b31fa99a242ed2f2345f61ff84ea87c6c1",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string"
+      ]
+    },
+    {
+      "signature": "private.is_valid_host_gate_evidence(jsonb)",
+      "source": "supabase/migrations/20260816000003_host_observed_gate_evidence.sql",
+      "line": 51,
+      "definitionSha256": "506f7d2ebd14130a84f9f0ac862649bb1a5c4dfa7fd4d8239ee06d3f164ac79a",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.is_valid_host_gate_outcomes",
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_positive_integer"
+      ]
+    },
+    {
+      "signature": "public.record_host_observed_gate_evidence(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260928000003_trusted_system_writer.sql",
+      "line": 137,
+      "definitionSha256": "d1367690bcaa0bb3decb5d35b3d3a44c4229f6fc153beb9eac7fc2b45cd103f7",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id, event_type, author, proposal_version, payload)\n  VALUES (v_item.id, 'host_observed_gate_evidence_recorded', 'system', expected_proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'work_item_id', v_item.id,\n      'attempt_id', attempt_id,\n      'approved_proposal_version', expected_proposal_version,\n      'origin', 'host',\n      'coverage', jsonb_build_object('gates', true),\n      'evidence', evidence)))\n  RETURNING seq INTO v_event_seq;"
+      ],
+      "calls": [
+        "private.is_valid_host_gate_evidence",
+        "private.trusted_system_writer_owner",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.is_valid_host_coder_evidence(jsonb)",
+      "source": "supabase/migrations/20260830000002_coder_placement_evidence.sql",
+      "line": 3,
+      "definitionSha256": "4565006d885c4fe2e9a627b10a39dbb6f2a1b06712cd1f0c86d7a47d5c37af36",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string",
+        "private.jsonb_is_positive_integer"
+      ]
+    },
+    {
+      "signature": "public.record_host_observed_coder_evidence(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260928000003_trusted_system_writer.sql",
+      "line": 211,
+      "definitionSha256": "e28f0791eddf199fe224311064f2171287c630e04ac018159370ed3d85e28b45",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id, event_type, author, proposal_version, payload)\n  VALUES (v_item.id, 'host_observed_coder_evidence_recorded', 'system', expected_proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'work_item_id', v_item.id,\n      'attempt_id', attempt_id,\n      'approved_proposal_version', expected_proposal_version,\n      'origin', 'host',\n      'evidence', evidence)))\n  RETURNING seq INTO v_event_seq;"
+      ],
+      "calls": [
+        "private.is_valid_host_coder_evidence",
+        "private.trusted_system_writer_owner",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.readmit_budget_blocked_item(uuid,uuid,timestamptz)",
+      "source": "supabase/migrations/20260821000000_budget_block_honest_and_readmission.sql",
+      "line": 111,
+      "definitionSha256": "37ad594ba9fdb49d71e71fccd184c7c009c4cca16118564fc360a1da7ef44655",
+      "disposition": "proposed_owner_prefix",
+      "identity": "p_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=p_work_item_id AND i.user_id=p_user_id FOR UPDATE;",
+        "UPDATE public.work_items SET state='approved',updated_at=p_observed_at\n   WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'work_approved','system',v_item.proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'reason','budget_window_recovered',\n      'budget_reason',v_reason,\n      'blocked_event_seq',v_block.seq,\n      'readmitted_at',p_observed_at)));"
+      ],
+      "calls": [
+        "private.autonomous_work_budget_decision",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.readmit_budget_blocked_work()",
+      "source": "supabase/migrations/20260821000000_budget_block_honest_and_readmission.sql",
+      "line": 178,
+      "definitionSha256": "26370463fcc5ce320dc8c843a74f860ef87162e599b9829e7e28805d666e723b",
+      "disposition": "already_budget_first",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));"
+      ],
+      "calls": [
+        "private.readmit_budget_blocked_item"
+      ]
+    },
+    {
+      "signature": "private.is_budget_block_reason(text)",
+      "source": "supabase/migrations/20260821000001_budget_interruption_resumption.sql",
+      "line": 22,
+      "definitionSha256": "86d7f8dbe0265ed5028f48730f72dded83ee3fe110779a5fe5d13c4eabafffcf",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.readmit_budget_interrupted_item(uuid,uuid,timestamptz)",
+      "source": "supabase/migrations/20260821000001_budget_interruption_resumption.sql",
+      "line": 33,
+      "definitionSha256": "3a2ebac500d433ade163214415930b94414925c51214dfb43fe4e250c2242cdd",
+      "disposition": "proposed_owner_prefix",
+      "identity": "p_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n   WHERE i.id=p_work_item_id AND i.user_id=p_user_id FOR UPDATE;",
+        "UPDATE public.work_items SET state='approved',updated_at=p_observed_at\n   WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'work_approved','system',v_item.proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'reason','budget_window_recovered','budget_interruption',true,\n      'budget_reason',v_reason,'source_attempt_id',v_attempt,\n      'blocked_event_seq',v_block.seq,'checkpoint_event_seq',v_cp_seq,\n      'readmitted_at',p_observed_at)));"
+      ],
+      "calls": [
+        "private.autonomous_work_budget_decision",
+        "private.is_budget_block_reason",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.readmit_budget_interrupted_work()",
+      "source": "supabase/migrations/20260821000001_budget_interruption_resumption.sql",
+      "line": 80,
+      "definitionSha256": "1170c1cc574809611c5611614920934cdc518c7ce7921bdca2e881b7049a2ab0",
+      "disposition": "already_budget_first",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||v_uid::text,0));"
+      ],
+      "calls": [
+        "private.readmit_budget_interrupted_item"
+      ]
+    },
+    {
+      "signature": "public.budget_interruption_resumption_source(uuid)",
+      "source": "supabase/migrations/20260821000001_budget_interruption_resumption.sql",
+      "line": 112,
+      "definitionSha256": "9b3b4a78b6c5d1ab8fd4b13dadafb914031db0460159cbd02a07ecd583af4717",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_uid",
+      "explicitStatements": [],
+      "calls": [
+        "private.is_budget_block_reason"
+      ]
+    },
+    {
+      "signature": "public.begin_budget_interruption_resumed_attempt(uuid,integer,bigint,bigint,uuid,uuid,text,integer,text)",
+      "source": "supabase/migrations/20260821000001_budget_interruption_resumption.sql",
+      "line": 178,
+      "definitionSha256": "54f53fcd943309830b40882bf883803d711c4269d35e0fbb79d884a12452be5c",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_uid::text||':'||v_target,0));",
+        "INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,owner_instance_id,\n    acquired_at,expires_at,attempt_id,target_reference)\n  VALUES(claim_id,v_item.id,v_uid,expected_proposal_version,btrim(owner_instance_id),v_now,\n    v_now+make_interval(secs=>lease_seconds),attempt_id,v_target) RETURNING * INTO v_claim;",
+        "UPDATE public.work_items SET state='in_progress',updated_at=v_now WHERE id=v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES\n    (v_item.id,'work_claimed','system',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('claim_id',claim_id,'work_item_id',v_item.id,'approved_proposal_version',expected_proposal_version,\n        'owner_instance_id',btrim(owner_instance_id),'acquired_at',v_now,'expires_at',v_claim.expires_at,'target_reference',v_target))),\n    (v_item.id,'work_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('reason','budget_resumed','attempt_id',attempt_id,'claim_id',claim_id,\n        'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,\n        'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'resumed_from_interruption_event_seq',interruption_event_seq))),\n    (v_item.id,'execution_started','anima',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n      jsonb_build_object('work_item_id',v_item.id,'attempt_id',attempt_id,'approved_proposal_version',expected_proposal_version,\n        'origin','anima','executor_id',btrim(executor_id),'claim_id',claim_id,'reason','budget_resumed',\n        'resumed_from_attempt_id',v_source_attempt,'resumed_from_checkpoint_sequence',v_cp_seq,\n        'resumed_from_checkpoint_event_seq',checkpoint_event_seq,'resumed_from_interruption_event_seq',interruption_event_seq)));"
+      ],
+      "calls": [
+        "private.is_budget_block_reason",
+        "public.work_claims",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.work_item_cost_class(jsonb)",
+      "source": "supabase/migrations/20260821000002_local_vs_external_work_budget.sql",
+      "line": 28,
+      "definitionSha256": "07f9d926960cb92392534b4330db624e7346ab1555630a16d40d1433accd6d41",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.auto_approve_autonomous_work(uuid,integer,jsonb)",
+      "source": "supabase/migrations/20260823000001_autonomous_authorization.sql",
+      "line": 24,
+      "definitionSha256": "774bd70b7c2fc4e5672abffe3d12707ba4329ad38a07cf1c2ecf95a2edd2d2fe",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items i\n  WHERE i.id = work_item_id AND i.user_id = v_user\n  FOR UPDATE;",
+        "UPDATE public.work_items i\n  SET state = v_target_state, updated_at = now()\n  WHERE i.id = v_item.id\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events (work_item_id, event_type, author, proposal_version, payload)\n  VALUES (\n    v_item.id, 'work_approved', 'system', v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'decision', 'approve',\n      'decided_proposal_version', v_item.proposal_version,\n      'authority', 'autonomous_policy',\n      'authorization', envelope\n    ))\n  )\n  RETURNING seq INTO v_seq;"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.materialize_project_backlog_proposal(uuid,integer,uuid,text,jsonb)",
+      "source": "supabase/migrations/20260824000004_project_backlog_materialization_replay.sql",
+      "line": 1,
+      "definitionSha256": "a65102a8bf8dd23e5445a60d74f9db3b6e234814a295351f5903c63fbb75d462",
+      "disposition": "proposed_owner_prefix",
+      "identity": "u",
+      "explicitStatements": [
+        "SELECT * INTO p FROM public.project_backlog_proposals x WHERE x.id=proposal_id AND x.user_id=u FOR UPDATE;",
+        "INSERT INTO public.work_items(user_id,source_message_id,state,impact_level,capability,original_request,intent,proposal,proposal_version)\n   SELECT u,confirmation_message_id,'proposed',(s->>'impact_level')::public.work_impact_level,(s->>'capability')::public.work_capability,m.content,(s->'intent')||jsonb_build_object('backlog_provenance',prov),s->'proposal',1 FROM public.ai_conversations m WHERE m.id=confirmation_message_id RETURNING * INTO wi;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES(wi.id,'work_proposed','anima',1,jsonb_build_object('schema_version',1,'data',jsonb_build_object('proposal',wi.proposal)));",
+        "INSERT INTO public.project_backlog_materialized_items(proposal_id,proposal_version,slice_key,position,dependencies,work_item_id) VALUES(p.id,p.version,s->>'slice_key',pos,s->'dependencies',wi.id);",
+        "INSERT INTO public.project_backlog_events(proposal_id,user_id,proposal_version,event_type,actor,idempotency_key,provenance) VALUES(p.id,u,p.version,'materialization_confirmed','user',idempotency_key,provenance||jsonb_build_object('source_message_id',confirmation_message_id)) RETURNING * INTO e;",
+        "INSERT INTO public.project_backlog_events(proposal_id,user_id,proposal_version,event_type,actor,idempotency_key,provenance) VALUES(p.id,u,p.version,'materialized','system',idempotency_key||':materialized',jsonb_build_object('source','host','work_item_ids',ids));"
+      ],
+      "calls": [
+        "private.is_valid_work_proposal",
+        "public.project_backlog_events",
+        "public.project_backlog_materialized_items",
+        "public.work_events",
+        "public.work_items"
+      ]
+    },
+    {
+      "signature": "private.autonomous_work_dependencies_satisfied(uuid,uuid,jsonb)",
+      "source": "supabase/migrations/20260824000006_autonomous_work_dependencies.sql",
+      "line": 4,
+      "definitionSha256": "2e1d4ff93e8bc80251dc605a8e02e11b67affa4c9447d66bfbe001756feb03a2",
+      "disposition": "read_only_or_delegated",
+      "identity": "p_user_id",
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.work_retry_readiness(uuid,uuid)",
+      "source": "supabase/migrations/20260825000000_governed_retry.sql",
+      "line": 7,
+      "definitionSha256": "0d2793dbc5218f1963c410fd086aa61fc13c37b79b6869948de72c0af3f15878",
+      "disposition": "read_only_or_delegated",
+      "identity": "p_user_id",
+      "explicitStatements": [],
+      "calls": [
+        "private.autonomous_intelligence_eligibility",
+        "private.autonomous_work_dependencies_satisfied",
+        "private.is_autonomously_eligible"
+      ]
+    },
+    {
+      "signature": "public.current_work_retry_readiness(uuid)",
+      "source": "supabase/migrations/20260825000000_governed_retry.sql",
+      "line": 56,
+      "definitionSha256": "53e15175dde53a91c45c93a66707c35ce2474b444dc607270d321ab8f7a0261f",
+      "disposition": "read_only_or_delegated",
+      "identity": "v_uid",
+      "explicitStatements": [],
+      "calls": [
+        "private.work_retry_readiness"
+      ]
+    },
+    {
+      "signature": "public.request_work_retry(uuid,integer,uuid,uuid)",
+      "source": "supabase/migrations/20260825000000_governed_retry.sql",
+      "line": 68,
+      "definitionSha256": "be996535f085da2d71808f8fe42653a4ccccbca1baf864f795160499628b656a",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'work_approved','user',v_item.proposal_version,jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n    'decision','retry','authority','retry_authorization','decided_proposal_version',v_item.proposal_version,\n    'retry_request_id',p_retry_request_id,'failure_event_id',p_failure_event_id,\n    'source_attempt_id',v_ready->>'sourceAttemptId','attempts_used',(v_ready->>'attemptsUsed')::integer,\n    'max_attempts',(v_ready->>'maxAttempts')::integer))) RETURNING * INTO v_event;",
+        "UPDATE public.work_items SET state='approved',updated_at=now() WHERE id=v_item.id;"
+      ],
+      "calls": [
+        "private.work_retry_readiness",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.request_autonomous_execution(uuid,integer,uuid)",
+      "source": "supabase/migrations/20260825000000_governed_retry.sql",
+      "line": 101,
+      "definitionSha256": "b7cc6225cca1d147269e4ae25e7a5ff7ffc9603e27f2d33c9c117de90f11109f",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=p_work_item_id AND i.user_id=v_uid FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'work_approved','user',v_item.proposal_version,jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n    'decision','execute','authority','autonomous_execution_request','decided_proposal_version',v_item.proposal_version,'request_id',p_request_id)))\n  RETURNING * INTO v_event;"
+      ],
+      "calls": [
+        "public.autonomous_work_queue",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.record_recovery_successor(uuid,uuid,integer,work_impact_level,work_capability,jsonb,jsonb,text,uuid)",
+      "source": "supabase/migrations/20260829000000_recovery_successor_from_review_correction.sql",
+      "line": 17,
+      "definitionSha256": "bd377409f39e7b484f1c09ea4cbaef833e9abe9b8f74a3c7faec1f80106d2d72",
+      "disposition": "proposed_owner_prefix",
+      "identity": "p_user_id",
+      "explicitStatements": [
+        "PERFORM pg_advisory_xact_lock(hashtextextended(\n    'work_recovery_successor:' || p_user_id::text || ':' || p_idempotency_key::text, 0));",
+        "SELECT * INTO v_original FROM public.work_items i\n    WHERE i.id = p_original_work_item_id AND i.user_id = p_user_id FOR UPDATE;",
+        "INSERT INTO public.work_items(user_id, source_message_id, state, impact_level, capability,\n    original_request, intent, proposal, proposal_version)\n  VALUES (p_user_id, v_original.source_message_id, 'proposed', p_impact_level, p_capability,\n    v_original.original_request, p_intent, p_proposal, 1)\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id, event_type, author, proposal_version, payload)\n  VALUES (v_item.id, 'work_proposed', 'anima', 1,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object('proposal', p_proposal)));",
+        "INSERT INTO public.work_recovery_lineage(user_id, original_work_item_id, successor_work_item_id,\n    recovery_sequence, recovery_reason, satisfies_original_objective, idempotency_key)\n  VALUES (p_user_id, v_original.id, v_item.id, p_recovery_sequence, btrim(p_recovery_reason), false, p_idempotency_key)\n  RETURNING * INTO v_lineage;"
+      ],
+      "calls": [
+        "private.is_valid_work_proposal",
+        "public.work_events",
+        "public.work_items",
+        "public.work_recovery_lineage"
+      ]
+    },
+    {
+      "signature": "public.release_manual_work(uuid,integer)",
+      "source": "supabase/migrations/20260826000003_manual_work_release.sql",
+      "line": 12,
+      "definitionSha256": "2341454fd7298731791475efd3386e9f1e7fb4d68485e2412d1377bbd13a81ea",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT *\n  INTO v_item\n  FROM public.work_items i\n  WHERE i.id=p_work_item_id\n    AND i.user_id=v_uid\n  FOR UPDATE;",
+        "INSERT INTO public.work_events(\n    work_item_id,event_type,author,proposal_version,payload\n  )\n  VALUES(\n    v_item.id,\n    'manual_work_released',\n    'user',\n    v_item.proposal_version,\n    jsonb_build_object(\n      'schema_version',1,\n      'data',jsonb_build_object(\n        'reason','manual_cycle_released',\n        'manual_start_event_id',v_start.id,\n        'manual_start_event_seq',v_start.seq\n      )\n    )\n  );",
+        "UPDATE public.work_items i\n  SET state='approved',\n      updated_at=now()\n  WHERE i.id=v_item.id\n  RETURNING * INTO v_item;"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.is_valid_node_lifecycle_evidence(jsonb)",
+      "source": "supabase/migrations/20260831000006_harden_provider_ref_validation.sql",
+      "line": 4,
+      "definitionSha256": "e8e335ceeaf4180fc6d47a8eb7e955b3b61ecf420cc1af2eb461e02fba997998",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.jsonb_is_nonblank_string"
+      ]
+    },
+    {
+      "signature": "public.record_host_observed_node_lifecycle(uuid,integer,jsonb)",
+      "source": "supabase/migrations/20260830000007_add_node_lifecycle_lease_correlation.sql",
+      "line": 33,
+      "definitionSha256": "f186933f4653419227448332b8770cb061681fc41e05e5c195f97e5ba312d9c8",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload) VALUES(v_item.id,'host_observed_node_lifecycle_recorded','system',expected_proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object('work_item_id',v_item.id,'attempt_id',v_attempt,'node_id',evidence->>'nodeId','lease_id',evidence->>'leaseId','origin','host','evidence',evidence))) RETURNING seq INTO v_seq;"
+      ],
+      "calls": [
+        "private.is_valid_node_lifecycle_evidence",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.revoke_paid_compute_authorization(uuid)",
+      "source": "supabase/migrations/20260903000001_paid_compute_robust_jwt_role.sql",
+      "line": 47,
+      "definitionSha256": "9dd7958a4978f5fd82e68b466c579d9a1df8e8a6a39585dfed615ef49098cac1",
+      "disposition": "paid_boundary_auth_row_then_item_fk",
+      "identity": "v_user",
+      "explicitStatements": [
+        "UPDATE public.paid_compute_authorizations SET revoked_at=COALESCE(revoked_at,now())\n  WHERE id=authorization_id AND user_id=v_user RETURNING * INTO v_row;"
+      ],
+      "calls": []
+    },
+    {
+      "signature": "public.reserve_paid_compute_budget(uuid,text,text,text,text,uuid,text,text,text,numeric)",
+      "source": "supabase/migrations/20260927000001_restore_provider_api_reservation_correlation.sql",
+      "line": 21,
+      "definitionSha256": "3d1c8111b386374643ee78ead7b2876d3d5c81cd5dd265f606b81fe0af1b933c",
+      "disposition": "paid_boundary_auth_row_then_item_fk",
+      "identity": "v_user",
+      "explicitStatements": [
+        "SELECT * INTO v_auth FROM public.paid_compute_authorizations a WHERE a.id=authorization_id AND a.user_id=v_user FOR UPDATE;",
+        "INSERT INTO public.paid_compute_budget_events(user_id,authorization_id,reservation_id,idempotency_key,event_type,provider_id,node_id,\n    resource_class,work_item_id,attempt_id,lease_id,currency,amount)\n  VALUES(v_user,authorization_id,v_reservation,btrim(idempotency_key),'reserved',btrim(provider_id),btrim(node_id),NULLIF(btrim(resource_class),''),\n    work_item_id,NULLIF(btrim(attempt_id),''),btrim(lease_id),v_currency,estimate_amount);"
+      ],
+      "calls": [
+        "public.paid_compute_budget_events"
+      ]
+    },
+    {
+      "signature": "public.void_paid_compute_budget_reservation(uuid,text)",
+      "source": "supabase/migrations/20260910000003_fix_settlement_jwt_role_robust.sql",
+      "line": 77,
+      "definitionSha256": "df1095d1f267ca9d962d864d4160e19db2698793925d0ac18e9de32333f5cf0a",
+      "disposition": "paid_boundary_auth_row_then_item_fk",
+      "identity": "v_user",
+      "explicitStatements": [
+        "PERFORM 1 FROM public.paid_compute_authorizations a WHERE a.id=v_reserved.authorization_id FOR UPDATE;",
+        "INSERT INTO public.paid_compute_budget_events(user_id,authorization_id,reservation_id,idempotency_key,\n    event_type,provider_id,node_id,resource_class,work_item_id,attempt_id,lease_id,currency,amount,reason)\n  VALUES(v_reserved.user_id,v_reserved.authorization_id,v_reserved.reservation_id,v_reserved.idempotency_key,\n    'voided',v_reserved.provider_id,v_reserved.node_id,v_reserved.resource_class,v_reserved.work_item_id,\n    v_reserved.attempt_id,v_reserved.lease_id,v_reserved.currency,v_reserved.amount,reason);"
+      ],
+      "calls": [
+        "public.paid_compute_budget_events"
+      ]
+    },
+    {
+      "signature": "public.withdraw_approved_work(uuid,integer,text)",
+      "source": "supabase/migrations/20260902000000_withdraw_approved_work.sql",
+      "line": 33,
+      "definitionSha256": "c0e553c25596f4e2d1bb0c406ce735f7ca9aa4a57a9d85183ddedafdf7e44b8c",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item\n  FROM public.work_items AS item\n  WHERE item.id = work_item_id\n    AND item.user_id = v_user_id\n  FOR UPDATE;",
+        "UPDATE public.work_items AS item\n  SET state = v_target_state,\n      updated_at = now()\n  WHERE item.id = v_item.id\n  RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events (\n    work_item_id, event_type, author, proposal_version, payload\n  ) VALUES (\n    v_item.id,\n    'work_cancelled',\n    'user',\n    v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', jsonb_build_object(\n      'reason', btrim(reason),\n      'withdrawn_before_execution', true,\n      'withdrawn_from_state', 'approved'\n    ))\n  );"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.replan_strategy(jsonb)",
+      "source": "supabase/migrations/20260902000001_minimal_unit_replan.sql",
+      "line": 25,
+      "definitionSha256": "1a4bce5487de7b8e7c3f7fdf201e851bda4f051a04114c64028795a35383653e",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.replan_failed_work(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260902000001_minimal_unit_replan.sql",
+      "line": 67,
+      "definitionSha256": "af2ce903d09dda30fa8a16b579d0355c0d046c5a36c4caff698d28a695bc7066",
+      "disposition": "proposed_owner_prefix",
+      "identity": "u",
+      "explicitStatements": [
+        "SELECT * INTO i FROM public.work_items WHERE id=p_work_item_id AND user_id=u FOR UPDATE;",
+        "INSERT INTO public.work_replans(user_id,predecessor_id,failure_event_id,gate_event_id,git_event_id,source_attempt_id,\n    diagnosis,strategy,successor_id,lineage_id,predecessor_attempts_used,predecessor_max_attempts,allocated_attempts)\n  VALUES(u,i.id,f.id,g.id,h.id,a,p_diagnosis,strategy,(envelope->>'successorWorkItemId')::uuid,\n    (envelope->>'lineageId')::uuid,used,maximum,remaining) RETURNING * INTO existing;"
+      ],
+      "calls": [
+        "private.record_recovery_successor",
+        "private.replan_strategy",
+        "public.work_replans"
+      ]
+    },
+    {
+      "signature": "private.validate_resume_authorization(jsonb)",
+      "source": "supabase/migrations/20260903000000_human_recovery_authority.sql",
+      "line": 25,
+      "definitionSha256": "d64e97aee79779c6dabf6f5a46446c404a1ef15e0706e0ce39ded324c8206f42",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.authorize_work_resume(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260903000000_human_recovery_authority.sql",
+      "line": 51,
+      "definitionSha256": "1d79bf465cacbc81ae529759e128fa14bc31c018ae643d57610dc87e5f7d8b19",
+      "disposition": "proposed_owner_prefix",
+      "identity": "u",
+      "explicitStatements": [
+        "SELECT * INTO i FROM public.work_items WHERE id=p_work_item_id AND user_id=u FOR UPDATE;",
+        "SELECT * INTO root FROM public.work_items WHERE id=r.predecessor_id AND user_id=u FOR UPDATE;",
+        "INSERT INTO public.work_resume_authorizations(id,user_id,request_id,envelope_root_id,predecessor_id,failure_event_id,source_attempt_id,authority,previous_authorized,previous_consumed,additional_attempts,aggregate_ceiling,successor_id,lineage_id)\n VALUES(grant_id,u,(p_authorization->>'requestId')::uuid,root.id,i.id,f.id,a,p_authorization,r.predecessor_max_attempts,total,1,total+1,(envelope->>'successorWorkItemId')::uuid,(envelope->>'lineageId')::uuid);"
+      ],
+      "calls": [
+        "private.record_recovery_successor",
+        "private.validate_resume_authorization",
+        "public.work_resume_authorizations"
+      ]
+    },
+    {
+      "signature": "private.block_resume_authority_descendants()",
+      "source": "supabase/migrations/20260903000000_human_recovery_authority.sql",
+      "line": 116,
+      "definitionSha256": "236115ae49d08dbb109a4c26934a60f51dd28a2f788c3dbf522cd7472a3cf458",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.validate_budget_blocked_resume_authorization(jsonb)",
+      "source": "supabase/migrations/20260905000000_budget_blocked_human_resume.sql",
+      "line": 23,
+      "definitionSha256": "c3b671f6272ef9388d6a2b2fca7050994e25056a2ecdd951687a61b1c99f2012",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.authorize_work_resume(uuid,integer,jsonb)",
+      "source": "supabase/migrations/20260905000000_budget_blocked_human_resume.sql",
+      "line": 43,
+      "definitionSha256": "4bfc1b3472f7d634fbaf9cbf8b43cf2a8a20df50cd9c47002721791509856125",
+      "disposition": "already_budget_first",
+      "identity": "u",
+      "explicitStatements": [
+        "PERFORM pg_advisory_xact_lock(hashtextextended('autonomous_work_budget:'||u::text,0));",
+        "SELECT * INTO i FROM public.work_items WHERE id=p_work_item_id AND user_id=u FOR UPDATE;",
+        "INSERT INTO public.work_budget_resume_authorizations(id,user_id,work_item_id,request_id,proposal_version,blocked_event_id,budget_reason,authority)\n  VALUES(grant_id,u,i.id,request_id,i.proposal_version,b.id,reason,p_authorization);",
+        "UPDATE public.work_items SET state='approved',updated_at=now() WHERE id=i.id;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(i.id,'work_approved','user',i.proposal_version,jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n    'authority','human_budget_blocked_resume','authorization_id',grant_id,'blocked_event_id',b.id,\n    'budget_reason',reason,'additional_attempts',1,'request_id',request_id)));"
+      ],
+      "calls": [
+        "private.autonomous_work_budget_decision",
+        "private.validate_budget_blocked_resume_authorization",
+        "public.work_budget_resume_authorizations",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.active_work_supervision(uuid,uuid,timestamptz)",
+      "source": "supabase/migrations/20260905000004_human_supervised_work.sql",
+      "line": 21,
+      "definitionSha256": "01af86cefa93db27cc62912811bb3b368df984801f4698837133f92c547a7423",
+      "disposition": "read_only_or_delegated",
+      "identity": "p_user_id",
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.unattended_work_budget_decision(uuid,uuid,timestamptz)",
+      "source": "supabase/migrations/20260905000000_budget_blocked_human_resume.sql",
+      "line": 110,
+      "definitionSha256": "d0f93f0b90e7a4a6aae88db3734af673e7c8ce0fc216e8e44d9178de64283188",
+      "disposition": "read_only_or_delegated",
+      "identity": "p_user_id",
+      "explicitStatements": [],
+      "calls": [
+        "private.autonomous_work_budget_usage"
+      ]
+    },
+    {
+      "signature": "private.autonomous_work_budget_decision(uuid,uuid,timestamptz)",
+      "source": "supabase/migrations/20260905000004_human_supervised_work.sql",
+      "line": 37,
+      "definitionSha256": "43addc3c769f6b43206532ec7b027da5baa13704dc9fd498adee52e4608ad833",
+      "disposition": "read_only_or_delegated",
+      "identity": "p_user_id",
+      "explicitStatements": [],
+      "calls": [
+        "private.active_work_supervision",
+        "private.unattended_work_budget_decision"
+      ]
+    },
+    {
+      "signature": "public.grant_work_supervision(uuid,integer,uuid,integer)",
+      "source": "supabase/migrations/20260905000004_human_supervised_work.sql",
+      "line": 59,
+      "definitionSha256": "de74ca579aa6dbbde2d9872e855316112b40a9f905eac3ad330e925eb9d85069",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items WHERE id=p_work_item_id AND user_id=v_uid FOR UPDATE;",
+        "INSERT INTO public.work_supervision_leases(user_id,work_item_id,proposal_version,request_id,expires_at)\n  VALUES(v_uid,p_work_item_id,p_expected_proposal_version,p_request_id,now()+make_interval(secs=>p_ttl_seconds)) RETURNING * INTO v_lease;"
+      ],
+      "calls": [
+        "public.work_supervision_leases"
+      ]
+    },
+    {
+      "signature": "public.revoke_work_supervision(uuid)",
+      "source": "supabase/migrations/20260905000004_human_supervised_work.sql",
+      "line": 81,
+      "definitionSha256": "88fae79105e91beb6bc6693db9e6d2bc6e524f7929a660c7688621e4d62c8616",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_uid",
+      "explicitStatements": [
+        "UPDATE public.work_supervision_leases SET revoked_at=now()\n   WHERE user_id=v_uid AND work_item_id=p_work_item_id AND revoked_at IS NULL AND expires_at>now();"
+      ],
+      "calls": []
+    },
+    {
+      "signature": "public.record_compute_routing_decision(uuid,integer,uuid,jsonb,uuid)",
+      "source": "supabase/migrations/20260910000000_paid_compute_capability_scope.sql",
+      "line": 33,
+      "definitionSha256": "5eb7db0b0dda8ed205bac994c37aecb7b91b611a4510b6c99ca70380de78f0c9",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n    WHERE i.id=p_work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(p_work_item_id,'compute_routing_decided','system',p_expected_proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'work_item_id',p_work_item_id,'approved_proposal_version',p_expected_proposal_version,\n      'decision_id',p_decision_id,'attempt_id',p_attempt_id,'decision',p_decision))) RETURNING * INTO v_event;"
+      ],
+      "calls": [
+        "private.jsonb_is_nonblank_string",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.grant_paid_compute_authorization(text,text,text,uuid,bigint,text,numeric,timestamptz,timestamptz,jsonb)",
+      "source": "supabase/migrations/20260910000000_paid_compute_capability_scope.sql",
+      "line": 141,
+      "definitionSha256": "b2de9e2575846befcb15f169da20fae2f90f9404f4cb1058ff1523a61b6a5e7f",
+      "disposition": "paid_boundary_auth_row_then_item_fk",
+      "identity": "v_user",
+      "explicitStatements": [
+        "INSERT INTO public.paid_compute_authorizations(user_id,provider_id,node_id,resource_class,capability_scope,work_item_id,\n    max_duration_ms,max_cost_currency,max_cost_amount,valid_from,valid_until)\n  VALUES(v_user,btrim(provider_id),NULLIF(btrim(node_id),''),NULLIF(btrim(resource_class),''),v_scope,work_item_id,\n    max_duration_ms,upper(btrim(max_cost_currency)),max_cost_amount,valid_from,valid_until)\n  RETURNING id INTO v_id;"
+      ],
+      "calls": [
+        "public.paid_compute_authorizations"
+      ]
+    },
+    {
+      "signature": "public.settle_paid_compute_budget_reservation(uuid,text,numeric,text)",
+      "source": "supabase/migrations/20260910000003_fix_settlement_jwt_role_robust.sql",
+      "line": 114,
+      "definitionSha256": "bf04a2ea5c1f56868eac0b661f6a700e36ffff0241d012aef42fc1aed2bc4d6e",
+      "disposition": "paid_boundary_auth_row_then_item_fk",
+      "identity": "v_user",
+      "explicitStatements": [
+        "PERFORM 1 FROM public.paid_compute_authorizations a WHERE a.id=v_reserved.authorization_id FOR UPDATE;",
+        "INSERT INTO public.paid_compute_budget_events(user_id,authorization_id,reservation_id,idempotency_key,\n    event_type,provider_id,node_id,resource_class,work_item_id,attempt_id,lease_id,currency,amount,reason)\n  VALUES(v_reserved.user_id,v_reserved.authorization_id,v_reserved.reservation_id,v_reserved.idempotency_key,\n    'settled',v_reserved.provider_id,v_reserved.node_id,v_reserved.resource_class,v_reserved.work_item_id,\n    v_reserved.attempt_id,v_reserved.lease_id,v_currency,v_released,cost_source);"
+      ],
+      "calls": [
+        "public.paid_compute_budget_events"
+      ]
+    },
+    {
+      "signature": "public.raise_paid_compute_hourly_limit_to_usd_1(uuid)",
+      "source": "supabase/migrations/20260910000002_paid_compute_hourly_limit_amendment.sql",
+      "line": 16,
+      "definitionSha256": "b414db2fd8731d1ee9a0b3d652c6fb1ccbebba62512d979521c16c9f71e50596",
+      "disposition": "paid_boundary_auth_row_then_item_fk",
+      "identity": "v_user",
+      "explicitStatements": [
+        "SELECT * INTO v_auth FROM public.paid_compute_authorizations a WHERE a.id=authorization_id AND a.user_id=v_user FOR UPDATE;",
+        "INSERT INTO public.paid_compute_authorization_events(authorization_id,user_id,event_type,previous_capability_scope,next_capability_scope)\n  VALUES(v_auth.id,v_user,'hourly_limit_raised_to_usd_1',v_auth.capability_scope,v_next) RETURNING id INTO v_event_id;",
+        "UPDATE public.paid_compute_authorizations SET capability_scope=v_next WHERE id=v_auth.id;"
+      ],
+      "calls": [
+        "public.paid_compute_authorization_events"
+      ]
+    },
+    {
+      "signature": "private.stamp_canonical_resident_contract()",
+      "source": "supabase/migrations/20260917000000_canonical_resident_contract_stamp.sql",
+      "line": 39,
+      "definitionSha256": "6909028b5baf5dc2849084a324b33b7ea1e23e4b910edc6a729964bca502103a",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.record_compute_preference(uuid,integer,jsonb)",
+      "source": "supabase/migrations/20260925000001_record_compute_preference.sql",
+      "line": 17,
+      "definitionSha256": "641d2ec6014eb75c8359bbd3817f032833005434b9d999265f72de446283361b",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n    WHERE i.id=p_work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(p_work_item_id,'compute_preference_recorded','user',p_expected_proposal_version,\n    jsonb_build_object('schema_version',1,'data',jsonb_build_object(\n      'work_item_id',p_work_item_id,'proposal_version',p_expected_proposal_version,\n      'preference',v_normalized))) RETURNING * INTO v_event;"
+      ],
+      "calls": [
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.validate_harness_recovery_authorization(jsonb)",
+      "source": "supabase/migrations/20260925000002_harness_defect_recovery.sql",
+      "line": 35,
+      "definitionSha256": "692c24399911e4dc3aad2f655ee8d3de3c01209dcf1d99689ddf2fac2d58cd64",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.authorize_harness_fix_recovery(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20260926000000_harness_recovery_descendants.sql",
+      "line": 3,
+      "definitionSha256": "bde1220e27a8e1fa62e7f8b000acd864ac1279b4000f9d6192f586bff9956e86",
+      "disposition": "proposed_owner_prefix",
+      "identity": "u",
+      "explicitStatements": [
+        "SELECT * INTO i FROM public.work_items WHERE id = p_work_item_id AND user_id = u FOR UPDATE;",
+        "INSERT INTO public.work_harness_recoveries(id, user_id, request_id, predecessor_id, failure_event_id,\n    source_attempt_id, authority, successor_id, lineage_id)\n  VALUES (grant_id, u, (p_authorization->>'requestId')::uuid, i.id, f.id, a, p_authorization,\n    (envelope->>'successorWorkItemId')::uuid, (envelope->>'lineageId')::uuid);"
+      ],
+      "calls": [
+        "private.record_recovery_successor",
+        "private.validate_harness_recovery_authorization",
+        "public.work_harness_recoveries"
+      ]
+    },
+    {
+      "signature": "public.settle_paid_compute_usage_priced_reservation(uuid,text,numeric,jsonb)",
+      "source": "supabase/migrations/20260927000000_provider_api_usage_priced_settlement.sql",
+      "line": 38,
+      "definitionSha256": "18f066073c6eae4869f3e87d7cde45922f4222200ecf6c5b747198c41b5dc9bc",
+      "disposition": "paid_boundary_auth_row_then_item_fk",
+      "identity": "v_user",
+      "explicitStatements": [
+        "PERFORM 1 FROM public.paid_compute_authorizations a WHERE a.id=v_reserved.authorization_id FOR UPDATE;",
+        "INSERT INTO public.paid_compute_budget_events(user_id,authorization_id,reservation_id,idempotency_key,\n    event_type,provider_id,node_id,resource_class,work_item_id,attempt_id,lease_id,currency,amount,reason,settlement_provenance)\n  VALUES(v_reserved.user_id,v_reserved.authorization_id,v_reserved.reservation_id,v_reserved.idempotency_key,\n    'settled',v_reserved.provider_id,v_reserved.node_id,v_reserved.resource_class,v_reserved.work_item_id,\n    v_reserved.attempt_id,v_reserved.lease_id,v_currency,v_released,'usage_priced',provenance);"
+      ],
+      "calls": [
+        "public.paid_compute_budget_events"
+      ]
+    },
+    {
+      "signature": "private.work_item_requires_verifier(jsonb)",
+      "source": "supabase/migrations/20260928000000_mandated_verifier_review_gate.sql",
+      "line": 31,
+      "definitionSha256": "95605d6658aa11b50cfad70649a974a804b58b0713f245f8ad01c89d474ae507",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.latest_result_event_id(uuid)",
+      "source": "supabase/migrations/20260928000000_mandated_verifier_review_gate.sql",
+      "line": 38,
+      "definitionSha256": "2c3a750f598d58ab13ba3eac878da4aebb1170ada183e833e69d031b24e52f3e",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.mandated_result_verdict(uuid,integer,uuid)",
+      "source": "supabase/migrations/20260928000004_pending_verification_human_recovery.sql",
+      "line": 56,
+      "definitionSha256": "624f2ce77db16f85ec6082578bbbb54c896d5f7c6f31ebf2839992e6a9731546",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.latest_result_event_id",
+        "private.pending_verification_resolution"
+      ]
+    },
+    {
+      "signature": "private.release_mandated_result(work_items)",
+      "source": "supabase/migrations/20260928000000_mandated_verifier_review_gate.sql",
+      "line": 125,
+      "definitionSha256": "f3374e1edc321cd08a8766c4b6ea8342c537c902ca80ffab329f20993edf8568",
+      "disposition": "proposed_owner_prefix",
+      "identity": "p_item.user_id",
+      "explicitStatements": [
+        "UPDATE public.work_items SET state = v_target, updated_at = now() WHERE id = p_item.id;"
+      ],
+      "calls": [
+        "private.latest_result_event_id",
+        "private.mandated_result_verdict",
+        "private.work_item_requires_verifier"
+      ]
+    },
+    {
+      "signature": "private.guard_mandated_review_release()",
+      "source": "supabase/migrations/20260928000000_mandated_verifier_review_gate.sql",
+      "line": 151,
+      "definitionSha256": "1f8ebd1c818f01a34d21402e79e967a7bbe9994b5eab536af149bba8783e7373",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.latest_result_event_id",
+        "private.mandated_result_verdict",
+        "private.work_item_requires_verifier"
+      ]
+    },
+    {
+      "signature": "private.is_sha1_hex(text)",
+      "source": "supabase/migrations/20260928000002_integration_effect.sql",
+      "line": 22,
+      "definitionSha256": "63fa064d9ea48b1e7b20b1a52f66784e1560f3fe3456c550248d767b194a60d0",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.authorize_integration_effect(uuid,integer,uuid,text,text,text,text,text)",
+      "source": "supabase/migrations/20261003000000_integration_effect_ff_only.sql",
+      "line": 14,
+      "definitionSha256": "ca0fde07d6f7a0700d063d1b8e59ea52c0914e2b4ec1c98697aee0bd0ed80df2",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'integration_effect_authorized','user',expected_proposal_version,jsonb_build_object('schema_version',1,'data',v_data))\n  RETURNING seq INTO v_seq;"
+      ],
+      "calls": [
+        "private.is_sha1_hex",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "public.record_integration_completed(uuid,integer,text,jsonb)",
+      "source": "supabase/migrations/20261003000000_integration_effect_ff_only.sql",
+      "line": 100,
+      "definitionSha256": "0b9d95fa69d95da28c2385578075b9fc7113c6d4ce60fbabab314ac880d0b7b2",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user FOR UPDATE;",
+        "INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)\n  VALUES(v_item.id,'integration_completed','system',expected_proposal_version,jsonb_build_object('schema_version',1,'data',\n    jsonb_build_object('authorization_id',authorization_id,'operation_key',v_a->>'operation_key',\n      'accepted_result_event_id',v_a->>'accepted_result_event_id','attempt_id',v_a->>'attempt_id','receipt',receipt)))\n  RETURNING seq INTO v_seq;"
+      ],
+      "calls": [
+        "private.is_sha1_hex",
+        "private.trusted_system_writer_owner",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.trusted_system_writer_owner()",
+      "source": "supabase/migrations/20260928000003_trusted_system_writer.sql",
+      "line": 52,
+      "definitionSha256": "0be607335487fa3cd9a3615e3ab769ddf011844dda69cb1d325c0364b61ead6c",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "private.pending_verification_resolution(uuid,uuid)",
+      "source": "supabase/migrations/20260928000004_pending_verification_human_recovery.sql",
+      "line": 42,
+      "definitionSha256": "5ecec580aa26490aef201b52c0c3a7d76c56ad1457512e9aa11d9d728e4f4ea7",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.resolve_pending_verification(uuid,uuid,text,jsonb)",
+      "source": "supabase/migrations/20260928000004_pending_verification_human_recovery.sql",
+      "line": 124,
+      "definitionSha256": "5f721420996c8d4e1435f4a4b938718a5da7cdaf4928f2260b263d2fc0ce692b",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "UPDATE public.work_items SET state = v_target, updated_at = now() WHERE id = v_item.id RETURNING * INTO v_item;",
+        "INSERT INTO public.work_events(work_item_id, event_type, author, proposal_version, payload)\n  VALUES (v_item.id, v_event, 'user', v_item.proposal_version,\n    jsonb_build_object('schema_version', 1, 'data', v_data));"
+      ],
+      "calls": [
+        "private.latest_result_event_id",
+        "private.mandated_result_verdict",
+        "private.pending_verification_resolution",
+        "private.work_item_requires_verifier",
+        "public.work_events"
+      ]
+    },
+    {
+      "signature": "private.guard_trusted_system_fact()",
+      "source": "supabase/migrations/20260929000000_trusted_system_evidence_boundary.sql",
+      "line": 48,
+      "definitionSha256": "97d40d3ef3c3a68e5bba677bbe7ee7a9580b560ecdf4ac802af3ebf200bc95c0",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.trusted_system_writer_owner"
+      ]
+    },
+    {
+      "signature": "private.guard_verifier_requirement_monotonic()",
+      "source": "supabase/migrations/20260929000001_verifier_requirement_monotonic.sql",
+      "line": 12,
+      "definitionSha256": "421f65e8daf214b2b37bd650f29709e8ae6e6ddf6bfbf7be20510956d87c0dd2",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": [
+        "private.work_item_requires_verifier"
+      ]
+    },
+    {
+      "signature": "private.validate_candidate_recovery_authorization(jsonb)",
+      "source": "supabase/migrations/20261004000000_candidate_recovery.sql",
+      "line": 35,
+      "definitionSha256": "6932305d4fbec3558a8dd358bb01e46f5f494ea369f0084fe01f5f25105606fb",
+      "disposition": "read_only_or_delegated",
+      "identity": null,
+      "explicitStatements": [],
+      "calls": []
+    },
+    {
+      "signature": "public.authorize_candidate_recovery(uuid,integer,uuid,jsonb)",
+      "source": "supabase/migrations/20261005000000_checkpoint_relative_candidate_recovery.sql",
+      "line": 1,
+      "definitionSha256": "b7ccaead1cd1b59dfb6769fa3888cf06f12424f6771f96c9d3789fc7915f361b",
+      "disposition": "proposed_owner_prefix",
+      "identity": "u",
+      "explicitStatements": [
+        "SELECT * INTO i FROM public.work_items WHERE id = p_work_item_id AND user_id = u FOR UPDATE;",
+        "INSERT INTO public.work_candidate_recoveries(id, user_id, request_id, predecessor_id, failure_event_id,\n    source_attempt_id, candidate_commit_sha, authority, successor_id, lineage_id)\n  VALUES (grant_id, u, (p_authorization->>'requestId')::uuid, i.id, f.id, a, p_authorization->>'candidateCommitSha',\n    p_authorization, (envelope->>'successorWorkItemId')::uuid, (envelope->>'lineageId')::uuid);"
+      ],
+      "calls": [
+        "private.record_recovery_successor",
+        "private.validate_candidate_recovery_authorization",
+        "public.work_candidate_recoveries"
+      ]
+    },
+    {
+      "signature": "public.acquire_single_item_work_claim(uuid,integer,uuid,text,integer)",
+      "source": "supabase/migrations/20261008000000_single_item_work_claim.sql",
+      "line": 3,
+      "definitionSha256": "9173b64b4403e4fda49e7a8f5a675e30da027520f74db1aef4eb988fe228e15a",
+      "disposition": "proposed_owner_prefix",
+      "identity": "v_user_id",
+      "explicitStatements": [
+        "SELECT * INTO v_item FROM public.work_items i\n    WHERE i.id=work_item_id AND i.user_id=v_user_id FOR UPDATE;",
+        "PERFORM pg_advisory_xact_lock(hashtextextended('work_target:'||v_user_id::text||':'||v_target, 0));"
+      ],
+      "calls": [
+        "public.acquire_work_claim"
+      ]
+    }
+  ]
+}

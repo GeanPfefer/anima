@@ -1,0 +1,171 @@
+--- a/supabase/tests/single_item_proof_preflight.py
++++ b/supabase/tests/single_item_proof_preflight.py
+@@ -6,6 +6,50 @@
+ import argparse
+ import json
+ import re
++
++
++# Defaults públicos observados no digest fixado. Não aceita PATH/locale arbitrário.
++PINNED_IMAGE_ENV = {
++    'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/nix/var/nix/profiles/default/bin',
++    'PGDATA': '/var/lib/postgresql/data',
++    'POSTGRES_HOST': '/var/run/postgresql',
++    'POSTGRES_USER': 'supabase_admin',
++    'POSTGRES_DB': 'postgres',
++    'LANG': 'en_US.UTF-8', 'LANGUAGE': 'en_US:en', 'LC_ALL': 'en_US.UTF-8',
++    'LC_CTYPE': 'C.UTF-8', 'LC_COLLATE': 'C.UTF-8',
++    'LOCALE_ARCHIVE': '/usr/lib/locale/locale-archive',
++}
++
++
++def parse_environment(entries):
++    if not isinstance(entries, list) or any(not isinstance(e, str) or '=' not in e for e in entries):
++        raise ValueError('environment entries invalid')
++    env = dict(entry.split('=', 1) for entry in entries)
++    if len(env) != len(entries):
++        raise ValueError('duplicate environment keys forbidden')
++    return env
++
++
++def validate_image_environment(entries):
++    env = parse_environment(entries)
++    if env != PINNED_IMAGE_ENV:
++        raise ValueError('pinned image environment differs from exact known defaults')
++    return env
++
++
++def expected_container_environment(manifest):
++    validate_manifest(manifest)
++    env = dict(PINNED_IMAGE_ENV)
++    # Initialization defaults must be replaced by the explicit proof identity.
++    # POSTGRES_HOST remains the local UNIX socket, never a TCP destination.
++    env.update(POSTGRES_USER='postgres', POSTGRES_DB=manifest['database'],
++               POSTGRES_HOST_AUTH_METHOD='trust')
++    return env
++
++
++def validate_container_environment(entries, manifest):
++    if parse_environment(entries) != expected_container_environment(manifest):
++        raise ValueError('environment/credentials are not independent or exact')
+ 
+ 
+ def validate_manifest(manifest):
+@@ -49,16 +93,7 @@
+         raise ValueError('exact independent storage destinations required')
+     if set(config.get('Volumes', {})) - {'/var/lib/postgresql/data', '/var/run/postgresql'}:
+         raise ValueError('uncovered image volumes forbidden')
+-    entries = config.get('Env', [])
+-    env = dict(entry.split('=', 1) for entry in entries)
+-    if len(env) != len(entries):
+-        raise ValueError('duplicate environment keys forbidden')
+-    allowed = {'PATH', 'LANG', 'LC_ALL', 'PG_MAJOR', 'PG_VERSION', 'PG_SHA256', 'GOSU_VERSION',
+-               'PGDATA', 'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_HOST_AUTH_METHOD'}
+-    if set(env) - allowed or env.get('PGDATA') != '/var/lib/postgresql/data' \
+-            or env.get('POSTGRES_DB') != manifest['database'] or env.get('POSTGRES_USER') != 'postgres' \
+-            or env.get('POSTGRES_HOST_AUTH_METHOD') != 'trust':
+-        raise ValueError('environment/credentials are not independent')
++    validate_container_environment(config.get('Env', []), manifest)
+     if metadata.get('NetworkSettings', {}).get('Ports') or metadata.get('NetworkSettings', {}).get('Networks'):
+         # Docker network none may expose its own empty "none" entry; no interfaces permitted.
+         networks = metadata.get('NetworkSettings', {}).get('Networks', {})
+--- a/supabase/tests/single_item_concurrency_test.py
++++ b/supabase/tests/single_item_concurrency_test.py
+@@ -9,7 +9,7 @@
+ 
+ from single_item_concurrency import (action, expected_lock, lock_matches, validate_cases,
+                                      validate_facts, Session, prove)
+-from single_item_proof_preflight import validate
++from single_item_proof_preflight import validate, expected_container_environment
+ 
+ 
+ def identity(n):
+@@ -58,8 +58,7 @@
+                         Name='/anima-single-item-proof-'+nonce,
+                         Config={'Labels': {'anima.proof': 'single-item-v1', 'anima.proof.nonce': nonce},
+                                 'Volumes': {'/var/lib/postgresql/data': {}}, 'Env': [
+-                                    'PGDATA=/var/lib/postgresql/data', 'POSTGRES_USER=postgres',
+-                                    'POSTGRES_DB='+manifest['database'], 'POSTGRES_HOST_AUTH_METHOD=trust']},
++                                    f'{key}={value}' for key, value in expected_container_environment(manifest).items()]},
+                         HostConfig={'NetworkMode': 'none', 'IpcMode': 'private'},
+                         Mounts=[{'Type': 'tmpfs', 'Destination': d} for d in
+                                 ('/var/lib/postgresql/data', '/var/run/postgresql')],
+--- /dev/null
++++ b/supabase/tests/single_item_proof_preflight_test.py
+@@ -0,0 +1,76 @@
++"""Env/isolamento determinísticos; não acessa Docker, PostgreSQL ou rede."""
++import unittest
++from single_item_proof_preflight import (PINNED_IMAGE_ENV, validate_image_environment,
++                                         validate_container_environment, validate)
++import single_item_concurrency_test as existing_proofs
++
++
++def entries(values):
++    return [f'{key}={value}' for key, value in values.items()]
++
++
++class EnvironmentBoundary(unittest.TestCase):
++    def environment(self):
++        return existing_proofs.ProofBoundaryTest().environment()
++
++    def test_exact_official_defaults_and_explicit_container_identity(self):
++        self.assertEqual(validate_image_environment(entries(PINNED_IMAGE_ENV)), PINNED_IMAGE_ENV)
++        manifest, metadata = self.environment()
++        self.assertEqual(validate(manifest, metadata), manifest['containerId'])
++        self.assertEqual(dict(e.split('=', 1) for e in metadata['Config']['Env'])['POSTGRES_USER'], 'postgres')
++
++    def test_every_unknown_name_and_wrong_known_value_refused(self):
++        for key in PINNED_IMAGE_ENV:
++            bad = dict(PINNED_IMAGE_ENV, **{key: 'unexpected'})
++            with self.subTest(key=key), self.assertRaises(ValueError):
++                validate_image_environment(entries(bad))
++        for key in ('PGHOST', 'PGPORT', 'PGSERVICE', 'PGSERVICEFILE', 'PGPASSFILE', 'PGPASSWORD',
++                    'POSTGRES_PASSWORD', 'SUPABASE_SERVICE_ROLE_KEY', 'LD_PRELOAD', 'BASH_ENV', 'SSL_CERT_FILE'):
++            with self.subTest(key=key), self.assertRaises(ValueError):
++                validate_image_environment(entries(dict(PINNED_IMAGE_ENV, **{key: 'unexpected'})))
++
++    def test_remote_tcp_resident_port_and_alternate_socket_refused(self):
++        manifest, metadata = self.environment()
++        env = dict(e.split('=', 1) for e in metadata['Config']['Env'])
++        for host in ('remote.example', '100.68.239.78', 'localhost', '127.0.0.1',
++                     '127.0.0.1:54322', '::1', '/resident/socket', '/var/run/postgresql/', ''):
++            with self.subTest(host=host), self.assertRaises(ValueError):
++                validate_container_environment(entries(dict(env, POSTGRES_HOST=host)), manifest)
++
++    def test_container_password_tokens_and_destination_env_refused(self):
++        manifest, metadata = self.environment()
++        for extra in ('PGHOST=/var/run/postgresql', 'PGPORT=5432', 'PGUSER=postgres',
++                      'PGDATABASE=postgres', 'PGPASSWORD=secret', 'POSTGRES_PASSWORD=secret',
++                      'SUPABASE_JWT_SECRET=secret', 'ANIMA_JWT=secret', 'PGOPTIONS=-c role=postgres'):
++            with self.subTest(extra=extra), self.assertRaises(ValueError):
++                validate_container_environment(metadata['Config']['Env'] + [extra], manifest)
++
++    def test_initialization_defaults_cannot_remain_in_proof_container(self):
++        manifest, metadata = self.environment()
++        env = dict(e.split('=', 1) for e in metadata['Config']['Env'])
++        for overrides in (dict(POSTGRES_DB='postgres'), dict(POSTGRES_USER='supabase_admin'),
++                          dict(PGDATA='/etc/postgresql'), dict(POSTGRES_HOST_AUTH_METHOD='md5')):
++            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
++                validate_container_environment(entries(dict(env, **overrides)), manifest)
++
++    def test_duplicates_missing_and_malformed_refused(self):
++        for candidate in (entries(PINNED_IMAGE_ENV) + ['LANG=en_US.UTF-8'],
++                          entries(PINNED_IMAGE_ENV)[:-1], ['malformed'], ['PATH'], None):
++            with self.subTest(candidate=candidate), self.assertRaises(ValueError):
++                validate_image_environment(candidate)
++
++    def test_shared_mount_network_namespace_and_ports_refused(self):
++        for mutation in ('bind', 'volume', 'network', 'ports', 'pid', 'ipc'):
++            manifest, metadata = self.environment()
++            if mutation == 'bind': metadata['HostConfig']['Binds'] = ['/resident:/proof']
++            if mutation == 'volume': metadata['Mounts'][0]['Type'] = 'volume'
++            if mutation == 'network': metadata['HostConfig']['NetworkMode'] = 'bridge'
++            if mutation == 'ports': metadata['HostConfig']['PortBindings'] = {'5432/tcp': [{'HostPort': '54322'}]}
++            if mutation == 'pid': metadata['HostConfig']['PidMode'] = 'host'
++            if mutation == 'ipc': metadata['HostConfig']['IpcMode'] = 'host'
++            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
++                validate(manifest, metadata)
++
++
++if __name__ == '__main__':
++    unittest.main()

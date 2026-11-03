@@ -33,3 +33,25 @@ chamar Ollama e sem materializar TPC-01; rounds, trimming e demais consumidores 
 - **Aceite:** `--reason` passado a `work approve|accept|retry|show|evidence|correct` é uso inválido (parseArgs retorna ok:false), em vez de descartado em silêncio.
 - **Aceite:** As formas válidas existentes continuam funcionando com o mesmo resultado: um único `<id>`, `--json`, `request-changes` e `withdraw` exigindo `--reason` não vazio e trimado, `correct --require-gate`.
 - **Aceite:** Os testes focais de `apps/web/cli/args.test.ts` passam.
+
+## Atualização operacional — 2026-10-01
+
+TPC-01 foi materializado e revisado para v2; predecessor `25c2c047` terminou failed com
+uma attempt `107997e2` por falha de runtime CUDA/flash-attention. O status not_started
+acima descreve o checkpoint anterior à prova, preservado como histórico.
+
+O humano autorizou em 2026-10-01 um recovery successor operacional único, substituindo
+para este incidente a restrição experimental anterior de nenhum successor. RPC canônica
+criou `11a4ec12` proposed v1, zero attempts, preservando intent/proposal integralmente.
+Mesmo qwen3-coder:latest local; Ollama ativo com flash-attention desligado. Aprovação e
+execução são próximas etapas separadas; uma attempt, 30 minutos, Verifier obrigatório.
+Registro: [recovery operacional](../registros/2026-10-01-tpc01-recovery-operacional-flash-off.md).
+
+## Resultado da attempt autorizada — 2026-10-01
+
+Successor `11a4ec12` aprovado e preparado canonicamente; attempt única `ddc6e410`
+terminou failed por ollama_read_round_limit em 123 s. Três searches servidas, zero
+edits, diff vazio, sem gate final/Verifier. Oito chamadas Ollama HTTP 200 com
+flash_attn=disabled. Claim liberada; predecessor intacto; nenhum retry ou novo
+successor, compute pago, integração ou push. Parada terminal cumprida.
+[Registro completo](../registros/2026-10-01-tpc01-attempt-local-flash-off-failed.md).

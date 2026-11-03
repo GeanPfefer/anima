@@ -1,0 +1,21 @@
+# Evolution Autonomy Evidence V1.1 — clareza e visibilidade — attempt e0c34dd5 (REVIEW, verified) — 2026-10-14
+
+Append-only. Base `62d95fc44e3676bccc0bdb76ff3794ee04bd9856` (dev = origin/dev). Origem: `2026-10-14-inspecao-visual-autonomy-evidence-v1.md` (untracked; só referência). Nada aceito, integrado ou publicado.
+
+- Item `f9464a8e-fcd4-4352-831f-22e5931c8b1d` v1 (contrato persistido == `command_aev11.json`; `acceptance_contract:2`; `test_binding` `EvolutionClient.autonomy-summary.test.tsx` min 10; 4 arquivos: `EvolutionClient.tsx`, `.module.css` (escopo ampliado por dependência comprovada: hierarquia, destaque de valores e folga contra o botão do chat), `EvolutionClient.test.tsx`, teste novo; 1 tentativa/35 min; sem resume). Classificação humana 86706 (bounded/low/reversible/clear/normal).
+- Preflight: HEAD==origin/dev==base; índice vazio; lint/elegibilidade sem lacunas; Codex/WSL pronto; servidor de dev parado antes (RAM `permit`); única recusa `user_attempt_budget_exhausted`. Lease E0 `7ee6c184-4dbe-42ee-ba01-7e080abf1b2a` revogado após a attempt.
+- Attempt `e0c34dd5-5c95-4297-9008-8d8ad960a037` 06:06:46Z→06:13:50Z (eventos 86709–86718): checkpoint 86712, result_submitted 86713, **Verifier 86717 `verified` (work-verifier-v6; 14 checagens: 8 attested, 6 independent; 0 lacunas; 0 violações; md5 `dc27adc435ad635edc14f0a078971955`)**, claim liberada 86718. Checkpoint `b6d2dda4550496ec8f5230d73488f014bc95d26c` (1 commit, 0 merges, 4 arquivos, +285/−31, `diff --check` limpo).
+- Revisão independente (worktree temporária removida): `EvolutionClient.autonomy-summary` 15 PASS; `EvolutionClient` + `capability-assessment-read` 3 suítes 79 PASS; `tsc` web 0 erros. Diff só de apresentação: `autonomy-evidence.ts`, leitura, `page.tsx`, Proof Engine, maturidades e Verifier intocados.
+- Inspeção visual do checkpoint (servidor temporário na porta 3001 a partir de worktree, cookie de sessão de localhost reaproveitado, nenhuma credencial lida; encerrado depois):
+  - Desktop 1280x800: resumo é o primeiro filho do `<aside>`, a 19 px do topo, 169 px de altura, visível sem rolar; manchete "Ciclos sem intervenção humana comprovados: 0."; explicação "Sem evidência positiva de execução autônoma. Isso não significa que nenhum ciclo ocorreu. Motivo: o host ainda não registra o modo de execução."; figuras "2,78 atos humanos por item concluído (histórico) · 49 concluídos · 31 com lease E0"; `details` fechado; presente nas 4 lentes e com capacidade selecionada (`data-state="selected"` preservado ao expandir); título em caixa alta 11 px/700, valores em `strong` 700; sem decimal com ponto nem termo em inglês.
+  - Mobile 375x812: sem overflow horizontal; bloco a 1060 px do topo do documento (antes 1656), 169 px de altura, `summary` 44 px, `padding-bottom` de 96 px em `.page`, botão do chat sem sobreposição ao bloco; console e servidor sem erros.
+- Limites: fonte do resumo 11 px (pequena no mobile); no mobile o painel continua abaixo do mapa (~1 viewport de rolagem); `details` aberto ocupa ~710 px e empurra o detalhe da capacidade selecionada; antes/depois visual foi comparado com as capturas da inspeção anterior (inline), não com arquivos salvos.
+- Não realizado: aceite, integração, push, migrations, outro item, retry.
+
+## Aceite, integração e publicação (2026-10-14, mandato posterior)
+
+- Aceite: `work accept` ⇒ `result_accepted` 86719 (resultado `cf23d557-e691-40db-a250-104973ef3006`), item `completed` v1; parecer 86717 inalterado (md5 `dc27adc4…`).
+- Integração em clone dedicado `anima-recovery/anima-integration-f9464a8e` (sem hardlinks, push desabilitado, HEAD destacado na base): 22/22 guards; `integration_effect_authorized` 86720 (auth `f9464a8e-c0de-4e00-8f21-f9464ffee001`) e `integration_completed` 86721; receipt `ff_only`, `effected`, `previousTargetSha` 62d95fc4 → `resultingTargetSha` b6d2dda4, `mergeCommitSha` null.
+- Sync do checkout principal: `merge --ff-only` de `refs/anima/integrated/f9464a8e`; status Git idêntico antes/depois; índice vazio; árvore final `965bd5a9…` = árvore do checkpoint.
+- Publicação: `git push origin dev` normal (62d95fc..b6d2dda); `origin/main` = 99bec54e intacta.
+- Claims/leases vigentes 0/0; 156 migrations; sem nova attempt, lease ou migration.

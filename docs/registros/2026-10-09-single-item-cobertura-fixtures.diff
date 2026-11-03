@@ -1,0 +1,983 @@
+--- antes/supabase/tests/work_budget.test.sql
++++ depois/supabase/tests/work_budget.test.sql
+@@ -1,5 +1,7 @@
+ BEGIN;
+ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
++\ir helpers/routing.inc
++\ir helpers/guarded_history.inc
+ SELECT plan(15);
+ 
+ INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+@@ -64,13 +66,7 @@
+ SELECT public.resolve_approval((SELECT id FROM budget_items WHERE label='runtime'),1,'approve','{}');
+ RESET ROLE;
+ 
+--- As provas abaixo isolam a guarda de orçamento. Classificação e rota têm
+--- suítes próprias e bloqueariam os eventos sintéticos usados para deslocar o
+--- relógio; somente os dois triggers alheios são suspensos nesta transação.
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_intelligence_on_attempt;
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_routing_on_attempt;
+-ALTER TABLE public.work_claims DISABLE TRIGGER enforce_autonomous_intelligence_on_claim;
+-
++-- Fixtures históricas com os quatro triggers ativos; nenhum gate suspenso.
+ SET LOCAL ROLE service_role;
+ -- Três tentativas do mesmo item são permitidas; a quarta é barrada.
+ DO $$
+@@ -78,12 +74,7 @@
+ BEGIN
+   FOR n IN 1..3 LOOP
+     v_attempt:=('83000000-0000-0000-0000-'||lpad(n::text,12,'0'))::uuid;
+-    INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
+-    VALUES(v_item,'execution_started','anima',1,jsonb_build_object('schema_version',1,'data',
+-      jsonb_build_object('attempt_id',v_attempt,'claim_id',gen_random_uuid())),now()-interval '2 hours'+n*interval '1 minute');
+-    INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
+-    VALUES(v_item,'execution_failed','executor',1,jsonb_build_object('schema_version',1,'data',
+-      jsonb_build_object('attempt_id',v_attempt)),now()-interval '2 hours'+n*interval '1 minute'+interval '1 second');
++    PERFORM pg_temp.guarded_history(v_item,v_attempt,now()-interval '2 hours'+n*interval '1 minute');
+   END LOOP;
+ END $$;
+ RESET ROLE;
+@@ -93,6 +84,8 @@
+   'item_attempt_budget_exhausted','três tentativas em 24h esgotam o orçamento do item');
+ SELECT is((public.autonomous_work_budget_status((SELECT id FROM budget_items WHERE label='item'))#>>'{usage,itemAttempts24Hours}')::integer,
+   3,'consumo por item é consultável');
++SELECT pg_temp.prepare_guarded_attempt((SELECT id FROM budget_items WHERE label='item'),'83000000-0000-0000-0000-000000000099');
++SELECT pg_temp.guarded_claim((SELECT id FROM budget_items WHERE label='item'),'83000000-0000-0000-0000-000000000199');
+ SELECT ok((public.block_work_on_budget((SELECT id FROM budget_items WHERE label='item')))->>'blocked'='true',
+   'orçamento negado na admissão materializa o checkpoint humano');
+ SELECT is((SELECT state::text FROM public.work_items WHERE id=(SELECT id FROM budget_items WHERE label='item')),
+@@ -102,7 +95,7 @@
+ SELECT throws_ok(format(
+   $$INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+     VALUES(%L,'execution_started','anima',1,
+-      '{"schema_version":1,"data":{"attempt_id":"83000000-0000-0000-0000-000000000099","claim_id":"83000000-0000-0000-0000-000000000199"}}')$$,
++      '{"schema_version":1,"data":{"attempt_id":"83000000-0000-0000-0000-000000000099","claim_id":"83000000-0000-0000-0000-000000000199","executor_id":"local-runner-v1"}}')$$,
+   (SELECT id FROM budget_items WHERE label='item')),
+   'P0001','item_attempt_budget_exhausted','guarda atômica recusa a quarta tentativa');
+ 
+@@ -114,12 +107,7 @@
+     SELECT id INTO v_item FROM budget_items WHERE budget_items.label=v_label;
+     FOR ignored IN 1..3 LOOP
+       n:=n+1; v_attempt:=('84000000-0000-0000-0000-'||lpad(n::text,12,'0'))::uuid;
+-      INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
+-      VALUES(v_item,'execution_started','anima',1,jsonb_build_object('schema_version',1,'data',
+-        jsonb_build_object('attempt_id',v_attempt,'claim_id',gen_random_uuid())),now()-interval '3 hours'+n*interval '1 minute');
+-      INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
+-      VALUES(v_item,'execution_failed','executor',1,jsonb_build_object('schema_version',1,'data',
+-        jsonb_build_object('attempt_id',v_attempt)),now()-interval '3 hours'+n*interval '1 minute'+interval '1 second');
++      PERFORM pg_temp.guarded_history(v_item,v_attempt,now()-interval '3 hours'+n*interval '1 minute');
+     END LOOP;
+   END LOOP;
+ END $$;
+@@ -134,6 +122,7 @@
+ 
+ -- Uma tentativa aberta há 46 minutos aciona a reserva depois do checkpoint.
+ SET LOCAL ROLE service_role;
++SELECT pg_temp.prepare_guarded_attempt((SELECT id FROM budget_items WHERE label='runtime'),'85000000-0000-0000-0000-000000000002');
+ UPDATE public.work_items SET state='in_progress' WHERE id=(SELECT id FROM budget_items WHERE label='runtime');
+ INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,owner_instance_id,acquired_at,expires_at,attempt_id,target_reference)
+ VALUES('85000000-0000-0000-0000-000000000001',(SELECT id FROM budget_items WHERE label='runtime'),
+@@ -141,7 +130,7 @@
+   '85000000-0000-0000-0000-000000000002','runtime');
+ INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
+ VALUES((SELECT id FROM budget_items WHERE label='runtime'),'execution_started','anima',1,
+-  '{"schema_version":1,"data":{"attempt_id":"85000000-0000-0000-0000-000000000002","claim_id":"85000000-0000-0000-0000-000000000001"}}',
++  '{"schema_version":1,"data":{"attempt_id":"85000000-0000-0000-0000-000000000002","claim_id":"85000000-0000-0000-0000-000000000001","executor_id":"local-runner-v1"}}',
+   now()-interval '46 minutes');
+ INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+ VALUES((SELECT id FROM budget_items WHERE label='runtime'),'checkpoint_recorded','executor',1,
+@@ -173,8 +162,5 @@
+   true,'tempo da tentativa aberta entra no consumo');
+ 
+ RESET ROLE;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_intelligence_on_attempt;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_routing_on_attempt;
+-ALTER TABLE public.work_claims ENABLE TRIGGER enforce_autonomous_intelligence_on_claim;
+ SELECT * FROM finish();
+ ROLLBACK;
+--- antes/supabase/tests/work_budget_local_vs_external.test.sql
++++ depois/supabase/tests/work_budget_local_vs_external.test.sql
+@@ -1,5 +1,7 @@
+ BEGIN;
+ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
++\ir helpers/routing.inc
++\ir helpers/guarded_history.inc
+ SELECT plan(12);
+ 
+ -- INTEL-04 v2 — orçamento consciente de custo (local vs externo/pago).
+@@ -42,17 +44,12 @@
+     'permissions',jsonb_build_array(),'validation_criteria',jsonb_build_array(jsonb_build_object('label','t')),
+     'limits',jsonb_build_object('max_attempts',10,'max_duration_minutes',120))) $$;
+ -- Insere N tentativas (execution_started+failed) no item, > 60 min atrás (fora da
+--- reserva interativa), com a guarda de orçamento SUSPENSA só para o setup sintético.
++-- reserva interativa), com todas as guardas ATIVAS.
+ CREATE FUNCTION pg_temp.attempts(v_item uuid, n integer, seed integer) RETURNS void LANGUAGE plpgsql AS $$
+ DECLARE i integer; a uuid; BEGIN
+   FOR i IN 1..n LOOP
+     a:=('8a000000-0000-0000-0000-'||lpad((seed*100+i)::text,12,'0'))::uuid;
+-    INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
+-    VALUES(v_item,'execution_started','anima',1,jsonb_build_object('schema_version',1,'data',
+-      jsonb_build_object('attempt_id',a,'claim_id',gen_random_uuid())),now()-interval '3 hours'+i*interval '1 minute');
+-    INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
+-    VALUES(v_item,'execution_failed','executor',1,jsonb_build_object('schema_version',1,'data',
+-      jsonb_build_object('attempt_id',a)),now()-interval '3 hours'+i*interval '1 minute'+interval '1 second');
++    PERFORM pg_temp.guarded_history(v_item,a,now()-interval '3 hours'+i*interval '1 minute');
+   END LOOP; END $$;
+ 
+ -- Itens por usuário/classe.
+@@ -62,21 +59,18 @@
+ INSERT INTO lx_items SELECT 'l-helper-b',id FROM public.create_work_proposal('8a000000-0000-0000-0000-000000000102','low','programming',pg_temp.intent('l-b','ollama'),pg_temp.proposal('l-b'));
+ INSERT INTO lx_items SELECT 'l-target',id FROM public.create_work_proposal('8a000000-0000-0000-0000-000000000103','low','programming',pg_temp.intent('l-t','ollama'),pg_temp.proposal('l-t'));
+ INSERT INTO lx_items SELECT 'l-ext',id FROM public.create_work_proposal('8a000000-0000-0000-0000-000000000104','low','programming',pg_temp.intent('l-e','openai'),pg_temp.proposal('l-e'));
+-SELECT public.resolve_approval(id,1,'approve','{}') FROM lx_items WHERE label IN ('l-target','l-ext');
++SELECT public.resolve_approval(id,1,'approve','{}') FROM lx_items WHERE label LIKE 'l-%';
+ SELECT set_config('request.jwt.claim.sub','8a000000-0000-0000-0000-000000000002',true);
+ INSERT INTO lx_items SELECT 'x-helper-a',id FROM public.create_work_proposal('8a000000-0000-0000-0000-000000000105','low','programming',pg_temp.intent('x-a','openai'),pg_temp.proposal('x-a'));
+ INSERT INTO lx_items SELECT 'x-helper-b',id FROM public.create_work_proposal('8a000000-0000-0000-0000-000000000106','low','programming',pg_temp.intent('x-b','openai'),pg_temp.proposal('x-b'));
+ INSERT INTO lx_items SELECT 'x-target',id FROM public.create_work_proposal('8a000000-0000-0000-0000-000000000107','low','programming',pg_temp.intent('x-t','openai'),pg_temp.proposal('x-t'));
+ INSERT INTO lx_items SELECT 'x-local',id FROM public.create_work_proposal('8a000000-0000-0000-0000-000000000108','low','programming',pg_temp.intent('x-l','ollama'),pg_temp.proposal('x-l'));
+-SELECT public.resolve_approval(id,1,'approve','{}') FROM lx_items WHERE label IN ('x-target','x-local');
++SELECT public.resolve_approval(id,1,'approve','{}') FROM lx_items WHERE label LIKE 'x-%';
+ SELECT set_config('request.jwt.claim.sub','8a000000-0000-0000-0000-000000000003',true);
+ INSERT INTO lx_items SELECT 'loop',id FROM public.create_work_proposal('8a000000-0000-0000-0000-000000000109','low','programming',pg_temp.intent('loop','ollama'),pg_temp.proposal('loop'));
+ SELECT public.resolve_approval((SELECT id FROM lx_items WHERE label='loop'),1,'approve','{}');
+ RESET ROLE;
+ 
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_intelligence_on_attempt;
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_routing_on_attempt;
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_work_budget_before_start;
+ SET LOCAL ROLE service_role;
+ -- User local: 6 tentativas LOCAIS (3+3). User external: 6 tentativas EXTERNAS (3+3).
+ -- User loop: 3 tentativas LOCAIS no MESMO item.
+@@ -86,9 +80,6 @@
+ SELECT pg_temp.attempts((SELECT id FROM lx_items WHERE label='x-helper-b'),3,4);
+ SELECT pg_temp.attempts((SELECT id FROM lx_items WHERE label='loop'),3,5);
+ RESET ROLE;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_intelligence_on_attempt;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_routing_on_attempt;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_work_budget_before_start;
+ 
+ -- ---------- LOCAL: 6 tentativas locais NÃO barram execução local ----------
+ SET LOCAL ROLE authenticated;
+--- antes/supabase/tests/budget_blocked_human_resume.test.sql
++++ depois/supabase/tests/budget_blocked_human_resume.test.sql
+@@ -1,10 +1,10 @@
+ BEGIN;
+ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
++\ir helpers/routing.inc
++\ir helpers/guarded_history.inc
+ SELECT plan(16);
+ 
+--- Este teste isola a autoridade/orçamento; classificação e routing têm suítes próprias.
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_intelligence_on_attempt;
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_routing_on_attempt;
++-- Autoridade/orçamento com classificação e routing válidos, sem suspender guardas.
+ 
+ INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at)
+ VALUES('76000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','budget-resume@test.invalid','',now(),now());
+@@ -31,29 +31,27 @@
+  'additionalAttempts',1,'expectedBudgetReason',reason) $$;
+ 
+ CREATE TEMP TABLE ids(label text PRIMARY KEY,id uuid NOT NULL);
+-INSERT INTO ids VALUES ('target','76000000-0000-4000-8000-000000000021'),('other','76000000-0000-4000-8000-000000000022'),('wrong','76000000-0000-4000-8000-000000000023');
++INSERT INTO ids VALUES ('target','76000000-0000-4000-8000-000000000021'),('other','76000000-0000-4000-8000-000000000022'),('wrong','76000000-0000-4000-8000-000000000023'),('history','76000000-0000-4000-8000-000000000024');
+ INSERT INTO public.work_items(id,user_id,source_message_id,state,impact_level,capability,original_request,intent,proposal,proposal_version)
+ SELECT id,'76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000011',
+- CASE WHEN label='other' THEN 'failed'::public.work_state ELSE 'blocked'::public.work_state END,
++ CASE WHEN label IN ('other','history') THEN 'approved'::public.work_state ELSE 'blocked'::public.work_state END,
+  'low','programming','req',pg_temp.intent(),pg_temp.proposal(label),2 FROM ids;
+ INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+-SELECT id,'work_approved','user',2,'{"schema_version":1,"data":{"authority":"autonomous_execution_request"}}' FROM ids WHERE label<>'other';
+-INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+-SELECT id,'work_intelligence_classified','system',2,'{"schema_version":1,"data":{"classification":"test"}}' FROM ids WHERE label<>'other';
++SELECT id,'work_approved','user',2,'{"schema_version":1,"data":{"authority":"autonomous_execution_request"}}' FROM ids;
++SELECT set_config('request.jwt.claim.sub','76000000-0000-4000-8000-000000000001',true);
++SELECT public.record_work_intelligence_classification(id,2,0,
++ '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"guarded-fixture"}}'::jsonb) FROM ids;
+ INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+ SELECT id,'work_blocked','anima',2,jsonb_build_object('schema_version',1,'data',jsonb_build_object(
+  'reason',CASE WHEN label='wrong' THEN 'permission_missing' ELSE 'user_attempt_budget_exhausted' END,
+- 'reached_limit','attempts','resolution','awaits_budget_window')) FROM ids WHERE label<>'other';
++ 'reached_limit','attempts','resolution','awaits_budget_window')) FROM ids WHERE label IN ('target','wrong');
+ 
+ -- Seis attempts históricos continuam no ledger; a concessão não os apaga.
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_work_budget_before_start;
+ DO $$ DECLARE n int; a uuid; BEGIN FOR n IN 1..6 LOOP a:=gen_random_uuid();
+- INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+- VALUES((SELECT id FROM ids WHERE label='other'),'execution_started','anima',2,jsonb_build_object('schema_version',1,'data',jsonb_build_object('attempt_id',a,'claim_id',gen_random_uuid())));
+- INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+- VALUES((SELECT id FROM ids WHERE label='other'),'execution_failed','executor',2,jsonb_build_object('schema_version',1,'data',jsonb_build_object('attempt_id',a,'retryable',false)));
++ PERFORM pg_temp.guarded_history((SELECT id FROM ids WHERE label=CASE WHEN n<=3 THEN 'other' ELSE 'history' END),a,
++  now()-interval '3 hours'+n*interval '1 minute');
+  END LOOP; END $$;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_work_budget_before_start;
++UPDATE public.work_items SET state='failed' WHERE id IN (SELECT id FROM ids WHERE label IN ('other','history'));
+ 
+ SELECT set_config('request.jwt.claim.sub','76000000-0000-4000-8000-000000000001',true);
+ SELECT is(public.autonomous_work_budget_status((SELECT id FROM ids WHERE label='target'))->>'reason','user_attempt_budget_exhausted','pré-condição: teto global segue esgotado');
+@@ -74,19 +72,23 @@
+  '55000','authorization_conflict','versão divergente é recusada até em replay');
+ 
+ RESET ROLE;
++SELECT pg_temp.prepare_guarded_attempt((SELECT id FROM ids WHERE label='target'),'76000000-0000-4000-8000-000000000099');
++SELECT pg_temp.prepare_guarded_attempt((SELECT id FROM ids WHERE label='target'),'76000000-0000-4000-8000-000000000097');
++SELECT pg_temp.guarded_claim((SELECT id FROM ids WHERE label='target'),'76000000-0000-4000-8000-000000000098');
+ INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+ VALUES((SELECT id FROM ids WHERE label='target'),'execution_started','anima',2,jsonb_build_object('schema_version',1,'data',jsonb_build_object(
+- 'attempt_id','76000000-0000-4000-8000-000000000099','claim_id','76000000-0000-4000-8000-000000000098')));
++ 'attempt_id','76000000-0000-4000-8000-000000000099','claim_id','76000000-0000-4000-8000-000000000098','executor_id','local-runner-v1')));
++UPDATE public.work_claims SET attempt_id='76000000-0000-4000-8000-000000000099' WHERE id='76000000-0000-4000-8000-000000000098';
+ SELECT ok((SELECT consumed_at IS NOT NULL FROM public.work_budget_resume_authorizations),'primeiro execution_started consome o token');
+ SELECT is((SELECT consumed_attempt_id::text FROM public.work_budget_resume_authorizations),'76000000-0000-4000-8000-000000000099','consumo correlaciona attempt');
+ INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+ VALUES((SELECT id FROM ids WHERE label='target'),'execution_failed','executor',2,'{"schema_version":1,"data":{"attempt_id":"76000000-0000-4000-8000-000000000099","retryable":true}}');
++SELECT public.release_work_claim('76000000-0000-4000-8000-000000000098','attempt_finished');
++SELECT pg_temp.guarded_claim((SELECT id FROM ids WHERE label='target'),'76000000-0000-4000-8000-000000000096');
+ SELECT throws_ok($$INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+- VALUES((SELECT id FROM ids WHERE label='target'),'execution_started','anima',2,'{"schema_version":1,"data":{"attempt_id":"76000000-0000-4000-8000-000000000097","claim_id":"76000000-0000-4000-8000-000000000096"}}')$$,
++ VALUES((SELECT id FROM ids WHERE label='target'),'execution_started','anima',2,'{"schema_version":1,"data":{"attempt_id":"76000000-0000-4000-8000-000000000097","claim_id":"76000000-0000-4000-8000-000000000096","executor_id":"local-runner-v1"}}')$$,
+  'P0001','user_attempt_budget_exhausted','segunda tentativa extra sem nova autoridade é recusada');
+ SELECT is((SELECT count(*)::int FROM public.work_events WHERE work_item_id=(SELECT id FROM ids WHERE label='target') AND event_type IN ('result_accepted','branch_published','review_request_created')),0,'concessão não integra/publica/aceita');
+ 
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_intelligence_on_attempt;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_routing_on_attempt;
+ SELECT * FROM finish();
+ ROLLBACK;
+--- antes/supabase/tests/work_budget_interruption_resumption.test.sql
++++ depois/supabase/tests/work_budget_interruption_resumption.test.sql
+@@ -1,5 +1,7 @@
+ BEGIN;
+ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
++\ir helpers/routing.inc
++\ir helpers/guarded_history.inc
+ SELECT plan(15);
+ 
+ -- INTEL-04 (coerência V0). Prova viva da retomada de uma tentativa interrompida
+@@ -38,12 +40,8 @@
+ SELECT public.resolve_approval((SELECT id FROM ri_items WHERE label='alvo'),1,'approve','{}');
+ RESET ROLE;
+ 
+--- Gates de classificação/roteamento suspensos só nos inserts sintéticos e no
+--- execution_started da retomada; a guarda de ORÇAMENTO permanece ATIVA para
+--- provar que a retomada revalida o orçamento.
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_intelligence_on_attempt;
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_routing_on_attempt;
+-ALTER TABLE public.work_claims DISABLE TRIGGER enforce_autonomous_intelligence_on_claim;
++-- Classificação/rota preparadas antes do início; orçamento sempre ativo.
++SELECT pg_temp.prepare_guarded_attempt((SELECT id FROM ri_items WHERE label='alvo'),'87000000-0000-0000-0000-0000000000b1');
+ 
+ -- Tentativa aberta há 46 minutos + checkpoint COMPLETO (campos de handoff).
+ SET LOCAL ROLE service_role;
+@@ -55,7 +53,7 @@
+ INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
+ VALUES((SELECT id FROM ri_items WHERE label='alvo'),'execution_started','anima',1,
+   jsonb_build_object('schema_version',1,'data',jsonb_build_object(
+-    'attempt_id','87000000-0000-0000-0000-0000000000b1','claim_id','87000000-0000-0000-0000-0000000000c1')),
++    'attempt_id','87000000-0000-0000-0000-0000000000b1','claim_id','87000000-0000-0000-0000-0000000000c1','executor_id','local-runner-v1')),
+   now()-interval '46 minutes');
+ INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload)
+ VALUES((SELECT id FROM ri_items WHERE label='alvo'),'checkpoint_recorded','executor',1,
+@@ -119,12 +117,11 @@
+   'reexecutar o gate','o handoff carrega o próximo trabalho do checkpoint');
+ 
+ -- ---------- Retomada real DO CHECKPOINT (revalida orçamento na guarda) ----------
+--- Volta ao owner para alternar gatilhos; a claim JWT segue local à transação.
++-- Owner somente para fixture; JWT e todas as guardas seguem ativos.
+ -- As RPCs são SECURITY DEFINER e leem auth.uid() da claim, então funcionam aqui.
+ RESET ROLE;
+ SELECT set_config('request.jwt.claim.sub','87000000-0000-0000-0000-000000000001',true);
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_intelligence_on_attempt;
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_routing_on_attempt;
++SELECT pg_temp.prepare_guarded_attempt((SELECT id FROM ri_items WHERE label='alvo'),'87000000-0000-0000-0000-0000000000b2','worktree-v1');
+ DO $$
+ DECLARE
+   v_item uuid:=(SELECT id FROM ri_items WHERE label='alvo');
+@@ -158,8 +155,5 @@
+   1,'a retomada é idempotente: replay não cria uma segunda tentativa');
+ 
+ RESET ROLE;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_intelligence_on_attempt;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_routing_on_attempt;
+-ALTER TABLE public.work_claims ENABLE TRIGGER enforce_autonomous_intelligence_on_claim;
+ SELECT * FROM finish();
+ ROLLBACK;
+--- antes/supabase/tests/supervisor_reconciliation.test.sql
++++ depois/supabase/tests/supervisor_reconciliation.test.sql
+@@ -10,8 +10,7 @@
+ SELECT plan(65);
+ 
+ -- Esta suíte desloca tentativas sintéticas no relógio para provar reconciliação.
+--- O orçamento tem suíte própria; suspendê-lo aqui preserva o isolamento.
+-ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_work_budget_before_start;
++-- O orçamento permanece ativo; cinco starts sob claim no total ficam abaixo de 6/24h.
+ 
+ INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
+ ('89000000-0000-0000-0000-000000000000','00000000-0000-0000-0000-000000000000','authenticated','authenticated','sup04@test.invalid','',now(),'{}','{}',now(),now());
+@@ -31,7 +30,7 @@
+ \set t2 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"t2"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
+ \set t3 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"t3"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
+ \set t4 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"t4"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
+-\set t5 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"t5"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1}}}'
++\set t5 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"t5"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":2}}}'
+ -- Limite de duração declarado: é ele que delimita a tentativa comandada.
+ \set t6 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"t6"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1,"max_duration_minutes":600}}}'
+ \set t7 '{"execution_spec":{"schema_version":1,"target":{"kind":"project","reference":"t7"},"permissions":[],"validation_criteria":[{"label":"tests"}],"limits":{"max_attempts":1,"max_duration_minutes":5}}}'
+@@ -406,6 +405,7 @@
+   '55000','work target is busy with a running attempt',
+   'o contrato do SUP-05 permanece intacto depois da reconciliação');
+ 
++-- Fixture t5 declara duas attempts: uma abandonada + uma nova, sem bypass de budget.
+ -- Retomada real do alvo liberado: o item abandonado aceita uma tentativa NOVA,
+ -- com claim novo, exatamente como o AUTO-05 exige. A reconciliação não fez isso
+ -- sozinha — foi preciso alguém pedir.
+@@ -431,5 +431,4 @@
+ 
+ SELECT * FROM finish();
+ RESET ROLE;
+-ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_work_budget_before_start;
+ ROLLBACK;
+--- /dev/null
++++ depois/supabase/tests/helpers/guarded_history.inc
+@@ -0,0 +1,54 @@
++-- Somente fixtures transacionais descartáveis. Nenhum bypass de trigger/policy.
++-- Incluir routing.inc antes deste arquivo. Não usar como ferramenta do produto.
++CREATE FUNCTION pg_temp.prepare_guarded_attempt(p_item uuid,p_attempt uuid,p_executor text DEFAULT 'local-runner-v1')
++RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
++DECLARE i public.work_items; saved text:=current_setting('request.jwt.claim.sub',true);
++BEGIN
++  SELECT * INTO STRICT i FROM public.work_items WHERE id=p_item;
++  IF i.state<>'approved' THEN RAISE EXCEPTION 'guarded fixture requires approved item'; END IF;
++  PERFORM set_config('request.jwt.claim.sub',i.user_id::text,true);
++  IF NOT EXISTS(SELECT 1 FROM public.work_events e WHERE e.work_item_id=i.id
++     AND e.proposal_version=i.proposal_version AND e.event_type='work_intelligence_classified') THEN
++    PERFORM public.record_work_intelligence_classification(i.id,i.proposal_version,0,
++      '{"schemaVersion":1,"complexity":"bounded","risk":"low","reversibility":"reversible","planClarity":"clear","urgency":"normal","provenance":{"kind":"human_confirmed","classifiedAt":"2026-07-28T12:00:00Z","classifierId":"guarded-fixture"}}'::jsonb);
++  END IF;
++  PERFORM pg_temp.record_test_route(i.id,p_attempt,p_executor);
++  PERFORM set_config('request.jwt.claim.sub',coalesce(saved,''),true);
++EXCEPTION WHEN OTHERS THEN
++  PERFORM set_config('request.jwt.claim.sub',coalesce(saved,''),true); RAISE;
++END $$;
++
++CREATE FUNCTION pg_temp.guarded_history(p_item uuid,p_attempt uuid,p_started timestamptz,
++  p_claim uuid DEFAULT gen_random_uuid(),p_executor text DEFAULT 'local-runner-v1')
++RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
++DECLARE i public.work_items;
++BEGIN
++  -- Cada admissão passa por classificação, routing e budget ATIVOS.
++  PERFORM pg_temp.prepare_guarded_attempt(p_item,p_attempt,p_executor);
++  SELECT * INTO STRICT i FROM public.work_items WHERE id=p_item;
++  INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,
++    owner_instance_id,acquired_at,expires_at,attempt_id,target_reference,released_at,release_reason)
++  VALUES(p_claim,i.id,i.user_id,i.proposal_version,'guarded-history',p_started,
++    p_started+interval '5 minutes',p_attempt,btrim(i.intent#>>'{execution_spec,target,reference}'),
++    p_started+interval '1 second','attempt_finished');
++  INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
++  VALUES(i.id,'execution_started','anima',i.proposal_version,
++    jsonb_build_object('schema_version',1,'data',jsonb_build_object('work_item_id',i.id,
++      'approved_proposal_version',i.proposal_version,'attempt_id',p_attempt,'claim_id',p_claim,
++      'executor_id',p_executor,'origin','anima','reason','synthetic_history')),p_started);
++  INSERT INTO public.work_events(work_item_id,event_type,author,proposal_version,payload,created_at)
++  VALUES(i.id,'execution_failed','executor',i.proposal_version,
++    jsonb_build_object('schema_version',1,'data',jsonb_build_object('attempt_id',p_attempt,
++      'retryable',false)),p_started+interval '1 second');
++END $$;
++
++CREATE FUNCTION pg_temp.guarded_claim(p_item uuid,p_claim uuid)
++RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
++DECLARE i public.work_items;
++BEGIN
++  SELECT * INTO STRICT i FROM public.work_items WHERE id=p_item;
++  INSERT INTO public.work_claims(id,work_item_id,user_id,approved_proposal_version,
++    owner_instance_id,acquired_at,expires_at,target_reference)
++  VALUES(p_claim,i.id,i.user_id,i.proposal_version,'guarded-candidate',now(),
++    now()+interval '5 minutes',btrim(i.intent#>>'{execution_spec,target,reference}'));
++END $$;
+--- /dev/null
++++ depois/supabase/tests/single_item_lock_audit.py
+@@ -0,0 +1,140 @@
++"""Inventário textual offline; não executa SQL, Docker ou processos.
++
++Não substitui pg_catalog: renames/drops e aliases public são normalizados somente
++para as formas presentes neste corpus. Corpos vigentes são necessários para
++não auditar uma definição substituída. Locks implícitos são anotados na análise.
++"""
++import re
++from pathlib import Path
++
++
++def statements(text):
++    """Split SQL sem partir strings, comentários ou corpos dollar-quoted."""
++    start = index = 0
++    while index < len(text):
++        if text.startswith('--', index):
++            end = text.find('\n', index)
++            index = len(text) if end < 0 else end + 1
++        elif text.startswith('/*', index):
++            level = 1
++            index += 2
++            while level and index < len(text):
++                if text.startswith('/*', index): level += 1; index += 2
++                elif text.startswith('*/', index): level -= 1; index += 2
++                else: index += 1
++            if level: raise ValueError('unterminated SQL comment')
++        elif text[index] in "'\"":
++            quote = text[index]; index += 1
++            while index < len(text):
++                if text[index] == quote:
++                    index += 1
++                    if index < len(text) and text[index] == quote: index += 1
++                    else: break
++                else: index += 1
++            else: raise ValueError('unterminated SQL string')
++        elif text[index] == '$' and (match := re.match(r'\$\w*\$', text[index:])):
++            tag = match[0]; end = text.find(tag, index + len(tag))
++            if end < 0: raise ValueError('unterminated SQL dollar body')
++            index = end + len(tag)
++        elif text[index] == ';':
++            yield start, text[start:index+1]
++            index += 1; start = index
++        else: index += 1
++    if text[start:].strip(): yield start, text[start:]
++
++
++def uncomment(text):
++    # Used only on statement prefix/signature, never on dollar-quoted body.
++    return re.sub(r'/\*.*?\*/|--[^\n]*', '', text, flags=re.S).strip()
++
++
++def signature(name, args):
++    types = []
++    for arg in re.split(r',\s*(?![^()]*\))', args):
++        tokens = re.split(r'\bDEFAULT\b|=', arg, flags=re.I)[0].strip().split()
++        if tokens:
++            typ = ' '.join(tokens[1:] if len(tokens) > 1 else tokens).lower()
++            types.append(typ.replace('public.', ''))
++    return name.lower() + '(' + ','.join(types) + ')'
++
++
++def definitions(directory):
++    result = {}
++    for path in sorted(Path(directory).glob('*.sql')):
++        text = path.read_text()
++        for offset, raw in statements(text):
++            # Remove only leading comments (not literals/bodies).
++            prefix = raw
++            while True:
++                new = re.sub(r'^\s*(?:--[^\n]*(?:\n|$)|/\*.*?\*/)', '', prefix, count=1, flags=re.S)
++                if new == prefix: break
++                prefix = new
++            match = re.match(r'\s*CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+([\w.]+)\s*\((.*?)\)\s*(?:(?:--[^\n]*\n|/\*.*?\*/)\s*)*(RETURNS\b.*?)\bAS\s+(\$\w*\$)(.*?)\4\s*;', prefix, re.I|re.S)
++            if match:
++                key = signature(match[1], uncomment(match[2]))
++                result[key] = dict(name=match[1], args=match[2], header=match[3], body=match[5],
++                    definition=match[0], source=path.name,
++                    line=text[:offset + raw.find(match[0])].count('\n')+1)
++                continue
++            if re.match(r'\s*CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\b',prefix,re.I):
++                raise ValueError('unsupported function definition in '+path.name)
++            match = re.match(r'\s*ALTER FUNCTION\s+([\w.]+)\s*\((.*?)\)\s+RENAME TO\s+(\w+)',prefix,re.I|re.S)
++            if match:
++                key = signature(match[1],match[2])
++                if key not in result: raise ValueError('rename not inventoried: '+key)
++                value=result.pop(key); value={**value,'name':match[1].rsplit('.',1)[0]+'.'+match[3]}
++                value['definition']=value['definition'].replace(match[1],value['name'],1)
++                result[signature(value['name'],value['args'])]=value
++            match = re.match(r'\s*DROP FUNCTION\s+(?:IF EXISTS\s+)?([\w.]+)\s*\((.*?)\)',prefix,re.I|re.S)
++            if match: result.pop(signature(match[1],match[2]),None)
++    return result
++
++
++def trigger_definitions(directory):
++    result={}
++    for path in sorted(Path(directory).glob('*.sql')):
++        for offset,raw in statements(path.read_text()):
++            sql=uncomment(raw)
++            match=re.match(r'CREATE\s+(?:CONSTRAINT\s+)?TRIGGER\s+(\w+)\b(.*?)\bON\s+([\w.]+)\b(.*?)EXECUTE\s+FUNCTION\s+([\w.]+)\s*\(',sql,re.I|re.S)
++            if match:
++                name,table=match[1],match[3]
++                result[(table,name)]={'name':name,'table':table,'callback':match[5],
++                    'source':path.name,'definition':sql}
++            match=re.match(r'DROP TRIGGER\s+(?:IF EXISTS\s+)?(\w+)\s+ON\s+([\w.]+)',sql,re.I)
++            if match:result.pop((match[2],match[1]),None)
++    return [v for v in result.values() if v['table'].startswith(('public.work_','public.paid_compute_'))]
++
++
++def work_definitions(directory):
++    all_defs=definitions(directory)
++    selected={k for k,v in all_defs.items() if 'work_' in v['name'] or 'paid_compute' in v['name'] or re.search(
++        r'\bwork_(?:items|claims|events|budget|supervision)|work_target:|autonomous_work_budget:|work_reconciliation:',v['definition'])}
++    callbacks={v['callback'] for v in trigger_definitions(directory)}
++    selected|={k for k,v in all_defs.items() if v['name'] in callbacks}
++    # Include private callees (validators/triggers/paid scope boundaries), recursively.
++    changed=True
++    while changed:
++        changed=False
++        calls={n for k in selected for n in re.findall(r'\b((?:public|private)\.\w+)\s*\(',all_defs[k]['body'])}
++        for k,v in all_defs.items():
++            if k not in selected and v['name'] in calls:selected.add(k);changed=True
++    return {k:v for k,v in all_defs.items() if k in selected}
++
++
++def cycles(paths):
++    """Todas as classes de ciclos simples no grafo fornecido, não no PostgreSQL."""
++    edges = {}
++    for path in paths:
++        # Locks já detidos, reentrantes, não criam novas dependências.
++        unique=list(dict.fromkeys(path))
++        for a,b in zip(unique,unique[1:]):edges.setdefault(a,set()).add(b)
++    found=set()
++    def visit(start,node,path):
++        for next_node in edges.get(node,()):
++            if next_node==start and len(path)>1:
++                rotations=[tuple(path[i:]+path[:i]) for i in range(len(path))]
++                found.add(min(rotations))
++            elif next_node not in path:visit(start,next_node,path+[next_node])
++    for node in edges:visit(node,node,[node])
++    return sorted(found)
++
+--- /dev/null
++++ depois/supabase/tests/single_item_lock_review_test.py
+@@ -0,0 +1,196 @@
++"""Gates offline de contratos/fixtures e modelo finito de interleavings.
++
++Não são parser PL/pgSQL, prova de catálogo, TAP ou execução PostgreSQL.
++"""
++import hashlib
++import json
++import re
++import unittest
++from pathlib import Path
++
++from single_item_lock_audit import cycles, definitions, statements, work_definitions
++from single_item_pgtap_payload import render_suite, SUITES
++
++ROOT = Path(__file__).resolve().parents[2]
++TESTS = ROOT/'supabase/tests'
++
++
++def assertion_hashes(sql):
++    result=[]
++    for _,statement in statements(sql):
++        match=re.search(r'(?m)^SELECT (?:is|isnt|ok|lives_ok|throws_ok)\(',statement)
++        if match:
++            text=statement[match.start():].replace(',"executor_id":"local-runner-v1"','')
++            text=re.sub(r'\s+',' ',text).strip()
++            result.append(hashlib.sha256(text.encode()).hexdigest())
++    return result
++
++
++def deadlocks(a,b):
++    """Enumera todos os interleavings de 2 transações; recursos exclusivos.
++
++    Recursos de FK representam conflito KEY SHARE vs FOR UPDATE para os pares
++    testados. Owners/chaves/linhas são IDs distintos, não classes colapsadas.
++    """
++    paths=(tuple(a),tuple(b));visited=set()
++    def search(positions,held):
++        state=(positions,tuple(sorted(held.items())))
++        if state in visited:return False
++        visited.add(state)
++        if positions==(len(paths[0])+1,len(paths[1])+1):return False
++        choices=[]
++        for side in (0,1):
++            index=positions[side]
++            if index>len(paths[side]):continue
++            if index==len(paths[side]):
++                changes={r:o for r,o in held.items() if o!=side}
++            else:
++                resource=paths[side][index]
++                if resource in held and held[resource]!=side:continue
++                changes={**held,resource:side}
++            next_positions=list(positions);next_positions[side]+=1
++            choices.append((tuple(next_positions),changes))
++        if not choices:return True
++        return any(search(pos,locks) for pos,locks in choices)
++    return search((0,0),{})
++
++
++class LockReview(unittest.TestCase):
++    def test_all_178_canonical_assertion_properties_preserved(self):
++        contracts=json.loads((TESTS/'fixtures/single_item_assertion_contract.json').read_text())['suites']
++        self.assertEqual(sum(c['count'] for c in contracts.values()),178)
++        for name,contract in contracts.items():
++            with self.subTest(suite=name):
++                actual=assertion_hashes((TESTS/name).read_text())
++                self.assertEqual(len(actual),contract['count'])
++                self.assertEqual(actual,contract['normalizedStatementSha256'])
++
++    def test_five_suites_have_no_guard_bypass(self):
++        names=json.loads((TESTS/'fixtures/single_item_assertion_contract.json').read_text())['suites']
++        for name in names:
++            text=(TESTS/name).read_text()
++            with self.subTest(suite=name):
++                self.assertNotRegex(text,r'(?i)DISABLE\s+TRIGGER|session_replication_role')
++                self.assertIn('ROLLBACK;',text)
++
++    def test_histories_are_correlated_and_go_through_active_gates(self):
++        helper=(TESTS/'helpers/guarded_history.inc').read_text()
++        self.assertIn('public.record_work_intelligence_classification',helper)
++        self.assertIn('pg_temp.record_test_route',helper)
++        self.assertIn('INSERT INTO public.work_claims',helper)
++        self.assertIn("'executor_id',p_executor",helper)
++        self.assertIn('p_started+interval',helper)
++        self.assertNotRegex(helper,r'(?i)DISABLE\s+TRIGGER|session_replication_role|grant_work_supervision|authorize_work_resume')
++
++    def test_budget_histories_do_not_exceed_three_per_item(self):
++        sql=(TESTS/'budget_blocked_human_resume.test.sql').read_text()
++        self.assertIn("CASE WHEN n<=3 THEN 'other' ELSE 'history' END",sql)
++        # Exhaustive fixture plan against current V1 caps, not a SQL emulator.
++        items=['other']*3+['history']*3
++        counts={};total=0
++        for item in items:
++            self.assertLess(counts.get(item,0),3)
++            self.assertLess(total,6)
++            counts[item]=counts.get(item,0)+1;total+=1
++        self.assertEqual(total,6)
++
++    def test_reconciliation_keeps_multi_item_owner_and_admitted_retry(self):
++        sql=(TESTS/'supervisor_reconciliation.test.sql').read_text()
++        self.assertIn("\\set t5",sql)
++        self.assertRegex(sql,r"\\set t5 .*max_attempts\":2")
++        self.assertEqual(len(re.findall(r'^SELECT public.start_claimed_work_attempt\(',sql,re.M)),4)
++        self.assertIn('public.start_claimed_work_attempt',sql)
++        self.assertIn("'supervisor-5b'",sql)
++        self.assertNotIn('grant_work_supervision',sql)
++        self.assertNotIn('authorize_work_resume',sql)
++
++    def test_local_external_divergence_not_rewritten_or_bypassed(self):
++        sql=(TESTS/'work_budget_local_vs_external.test.sql').read_text()
++        self.assertIn('LOCAL com 6 tentativas locais em 24h continua admitido',sql)
++        self.assertIn("'costClass'",sql)
++        current=work_definitions(ROOT/'supabase/migrations')['private.unattended_work_budget_decision(uuid,uuid,timestamptz)']['body']
++        self.assertIn("(v_usage->>'userAttempts24Hours')::integer>=6",current)
++        self.assertNotIn("v_usage->>'externalAttempts24Hours'",current)
++
++    def test_resumption_supplies_routes_for_both_executors(self):
++        sql=(TESTS/'work_budget_interruption_resumption.test.sql').read_text()
++        self.assertIn("'87000000-0000-0000-0000-0000000000b1'",sql)
++        self.assertIn("'87000000-0000-0000-0000-0000000000b2','worktree-v1'",sql)
++        self.assertIn("'executor_id','local-runner-v1'",sql)
++
++    def test_closed_payload_renderer_expands_new_helper_offline(self):
++        for name in SUITES:
++            with self.subTest(suite=name):
++                payload=render_suite(name)
++                self.assertNotIn('\\ir',payload)
++                self.assertEqual(assertion_hashes(payload),assertion_hashes((TESTS/name).read_text()))
++                list(statements(payload))  # lexical strings/dollar bodies complete, not PL/pgSQL compilation
++        with self.assertRaises(ValueError):render_suite('../../resident.sql')
++
++    def test_trigger_inventory_includes_implicit_focus_and_budget(self):
++        manifest=json.loads((ROOT/'docs/planos/045-single-item-lock-inventory.json').read_text())
++        callbacks={t['callback'] for t in manifest['triggers']}
++        self.assertIn('private.clear_terminal_work_focus',callbacks)
++        self.assertIn('private.enforce_autonomous_work_budget',callbacks)
++        self.assertIn('private.guard_verifier_requirement_monotonic',callbacks)
++
++    def test_statement_scanner_preserves_quoted_semicolons(self):
++        sql="-- CREATE FUNCTION fake();\nSELECT ';'; /* nested /* ; */ ok */ SELECT $$a;b$$;"
++        self.assertEqual(len(list(statements(sql))),2)
++        with self.assertRaises(ValueError):list(statements('SELECT $$broken;'))
++
++    def test_current_inventory_pins_definitions_and_handles_overloads(self):
++        actual=work_definitions(ROOT/'supabase/migrations')
++        manifest=json.loads((ROOT/'docs/planos/045-single-item-lock-inventory.json').read_text())
++        self.assertEqual(set(actual),{v['signature'] for v in manifest['functions']})
++        self.assertIn('public.authorize_work_resume(uuid,integer,uuid,jsonb)',actual)
++        self.assertIn('public.authorize_work_resume(uuid,integer,jsonb)',actual)
++        self.assertIn('private.unattended_work_budget_decision(uuid,uuid,timestamptz)',actual)
++        self.assertEqual(actual['public.reconcile_supervised_work()']['source'],
++                         '20260928000004_pending_verification_human_recovery.sql')
++        for v in manifest['functions']:
++            self.assertEqual(hashlib.sha256(actual[v['signature']]['definition'].encode()).hexdigest(),v['definitionSha256'])
++
++    def test_proposal_only_adds_owner_prefix_not_policy_or_validation(self):
++        diff=(ROOT/'docs/planos/045-single-item-lock-review.diff').read_text()
++        added=[line[1:] for line in diff.splitlines() if line.startswith('+') and not line.startswith('+++')]
++        removed=[line for line in diff.splitlines() if line.startswith('-') and not line.startswith('---')]
++        self.assertEqual(len(added),59)
++        self.assertEqual(removed,[])
++        for line in added:self.assertRegex(line,r"^\s*PERFORM pg_advisory_xact_lock\(hashtextextended\('autonomous_work_budget:'\|\|")
++
++    def test_observed_and_inferred_cycles_reproduced_in_model(self):
++        pairs=[(['I','T','C'],['C','I','T']),(['I','B'],['B','I']),
++               (['Ia','T','Cb','Ib'],['Ib','T']),(['I','F'],['F','I']),
++               (['H','Iroot'],['Iroot','H']),(['Iroot','Isuccessor'],['Isuccessor','Iroot'])]
++        for a,b in pairs:
++            with self.subTest(a=a,b=b):self.assertTrue(deadlocks(a,b))
++
++    def test_same_owner_prefix_removes_modeled_wait_cycles(self):
++        paths=[['I','T','C'],['C','I','T','L'],['I','B','L'],['B','I','L'],
++               ['Ia','T','Cb','Ib'],['Ib','T'],['I','F'],['F','I'],
++               ['H','Iroot'],['Iroot','H'],['Iroot','Isuccessor'],['Isuccessor','Iroot'],
++               ['R','I','C'],['I','L']]
++        for a in paths:
++            for b in paths:self.assertFalse(deadlocks(['Bowner']+a,['Bowner']+b),(a,b))
++
++    def test_prefix_is_not_proof_for_nonparticipants_or_multiple_owners(self):
++        self.assertTrue(deadlocks(['Bowner','I','C'],['C','I']))
++        self.assertTrue(deadlocks(['B1','B2'],['B2','B1']))
++        self.assertFalse(deadlocks(['B1','I1','T1'],['B2','I2','T2']))
++
++    def test_static_class_graph_can_still_have_cycles_under_serialization(self):
++        self.assertIn(('C','I','T'),cycles([['B','I','T','C'],['B','C','I','T']]))
++        self.assertEqual(cycles([['B','I','T','C','B','L']]),[])
++
++    def test_scoped_guard_precedes_global_and_has_no_foreign_writes(self):
++        sql=(ROOT/'supabase/migrations/20261008000000_single_item_work_claim.sql').read_text()
++        self.assertLess(sql.index("'single_item_foreign_claim_open'"),sql.index('RETURN public.acquire_work_claim'))
++        self.assertIn('c.work_item_id<>v_item.id',sql)
++        self.assertIn('c.released_at IS NULL',sql)
++        self.assertNotIn('UPDATE public.work_claims',sql)
++        self.assertNotIn('DELETE',sql)
++        self.assertNotIn('c.expires_at',re.sub(r'--[^\n]*','',sql))
++
++
++if __name__=='__main__':unittest.main()
+--- /dev/null
++++ depois/supabase/tests/single_item_pgtap_payload.py
+@@ -0,0 +1,26 @@
++"""Rendering offline fechado das fixtures reformuladas; nenhum executor SQL."""
++import re
++from pathlib import Path
++
++DIRECTORY = Path(__file__).resolve().parent
++SUITES = frozenset(('work_budget.test.sql','work_budget_local_vs_external.test.sql',
++    'budget_blocked_human_resume.test.sql','work_budget_interruption_resumption.test.sql',
++    'supervisor_reconciliation.test.sql','single_item_work_claim.test.sql'))
++HELPERS = frozenset(('helpers/routing.inc','helpers/guarded_history.inc'))
++
++
++def render_suite(name):
++    if name not in SUITES:
++        raise ValueError('suite outside reviewed fixture corpus')
++    sql=(DIRECTORY/name).read_text()
++    def include(match):
++        name=match[1]
++        if name not in HELPERS:raise ValueError('include outside closed allowlist')
++        path=(DIRECTORY/name).resolve()
++        if not path.is_relative_to(DIRECTORY.resolve()):raise ValueError('helper escaped corpus')
++        return path.read_text()
++    sql=re.sub(r'^\\ir\s+([^\r\n]+)\r?$',include,sql,flags=re.M)
++    if re.search(r'^\\(?:ir|i)\b',sql,re.M):raise ValueError('unexpanded include')
++    if re.search(r'DISABLE\s+TRIGGER|session_replication_role',sql,re.I):
++        raise ValueError('guard bypass in payload')
++    return sql
+--- /dev/null
++++ depois/supabase/tests/fixtures/single_item_assertion_contract.json
+@@ -0,0 +1,214 @@
++{
++  "kind": "pre-session-canonical-assertions",
++  "normalization": "whitespace + correlated executor_id addition only",
++  "suites": {
++    "work_budget.test.sql": {
++      "count": 15,
++      "normalizedStatementSha256": [
++        "06978c353aa26050b312f3a5175fa3809e7cfe5f2c42966b3b02383de41a7762",
++        "581ec6691373908bc23b766467d4f13d0da343db3eda6dc81d14e8cf865f92d1",
++        "94319c0230970c8cfb0010d5ea58652b4a4744d574282d4ab04c61639a65bbab",
++        "182736c6d84ea48cb0801cecad519d33d4b7d4e9ced042a99dd39251a2e7ef82",
++        "4442ddaf7bb6c83156a1c66b4cfa4758acc3d9ac7f951ba6fa062ae66b04162c",
++        "26abfaf91c505292f50e32a99bb51fdac7712d853855352c6a9845dcfd508ef0",
++        "4045e9aec0220ee6deb31cb45594dba02b1001f2b50816cf49e264a4c4bcbc99",
++        "722a0a5554d08de6775514db708722a1ad3368c05a219bdc24c47c4c86c6640b",
++        "855bf0db2664691f12d84e5e3ccafd412034304169a7a9fa6198aad238d7f715",
++        "0b360edf39c85b1fb72829bec03020311d1f1c93f1ffc4284d5c34e72fbfb0f3",
++        "92cbe6c7a89f3defc95d27195fb905aaa06d3e5c93d5b82d7ec1371c7a57a386",
++        "020289f3489438890e30f21431286c256ca37eb90d7dfac9c8e6732f11cb40da",
++        "a69be3dad440a1a7f3f4301d919602413c275606edd7ec2928f55825e2becb22",
++        "c86c751c7cf1a6843d890ce23c4f85f714c3d6a9d102be46094a7723ff5cf9a1",
++        "9836d0fb281605bb91d5e93e7855785588f2f4f8f1fb2606ddab1978826d4bae"
++      ]
++    },
++    "work_budget_local_vs_external.test.sql": {
++      "count": 12,
++      "normalizedStatementSha256": [
++        "c9e3f5e404aa186ea5dc08e0599ac420d9592819446a60695b3c8982c5cac6d1",
++        "e01775102295cb655ab9e7913c1c4b2f599be8ddfd049ad49ea4d9118184a7c7",
++        "2c265e192da81ad6c685c8c634ae966cf0db30c82d80472de6f5a7400fdaaf04",
++        "b14b20d02dc11ecdb18594958e23e6987ab7d4b5fdfc7f4b15360e1ad65f1116",
++        "7de32daac55920ed35c0e96bcefa9c65686cfa220782cbc442bcfc70a9588dfa",
++        "1819bfd723753bc8129419da3c5d335ad72bfd86b8098e52e10c26ea1b93d1f7",
++        "1e07effa27d64a86a80e24f3856581a9a845ebd09bfed2f8840692b450702439",
++        "2cf6af28f1b40f7a12a6d828cf2b37309473c79850fbe4f7120ee5bb97c46221",
++        "0ba9d5c9e3b43de1b40a612be5adef2d50b2dae2cc56c3acc5b31bcd709992d8",
++        "242000d496497dd5132a00898273e6724525ebb8cd723bf1970b954a9fe51a4b",
++        "2985d578e5447dd57a012cf9f5e734b0010a9eb437c9e16d376d8b778cadcff0",
++        "dba81951ab0ff5f338052c62d391c510bdea490e2abc4167f72899c5afb2860d"
++      ]
++    },
++    "budget_blocked_human_resume.test.sql": {
++      "count": 16,
++      "normalizedStatementSha256": [
++        "fda44b0f01e0a87c9b1da15c98be0e305bf852674502272efc3650a15ed340c6",
++        "2cee981a6bd0714c4442598e9e40e2eb26536823dd57d906c5f3833fa479107d",
++        "bdca8def8c2d70a65b101c0989dc6981c0418390df010f61c8877ad7a730d932",
++        "2a8897117f9d1f5b00d2b8f5b36957c3cbcd153af20edd3e854feca4f560b903",
++        "9b1d00e5823e5c47e0960c1a6505ac8f0033d3c40740a70d45ac9cc974260a5d",
++        "d9721a8147c4b70f4bf452a7ca53e07425d845d1ff5a76a2bd89f30cd13ffd4f",
++        "fb335af3be7728b04395d5cf365d9feb691185d6bfacf8971f212903a3aab46e",
++        "88e5d35832ab6149d2fd4e9f8c5d79413df6b106eb5f73a2518c59ae2cc470f8",
++        "e0b6d531a2cd411bccbabb903e3c3223a1cd35d2a2ac4b0392beea26bb3b2623",
++        "93ab8cbcbfa48eddfb3f366e91b3ef1e6e1afcdd9cd9cd7d5da66df80e0be950",
++        "9085f97f6f1fedeb48fe0189637ff1c42e38cf2d01fb55a2bc39e442345e983d",
++        "133f9610b66b2a1d4a0bdf237e3cb57cbb30cb2f32ad3710c30710257b2affbd",
++        "cd015a8da8c848b4ee0a686992b1dbd5e8040a2a4c045c1f4616c84ec5e8feff",
++        "09ca0d6c4cce94bee620fec4823ec8eaf614d7bfafc5cac322e86453ba1adac6",
++        "2ba08f2f1e5e0592bb49db9ac08d12fef99256d71a0c4feb9c7a94788ff49e9b",
++        "941d1a4e70b8e892fda89e8ab4ccc8abf1fb8c3fced50c59e86e588c6a160274"
++      ]
++    },
++    "work_budget_interruption_resumption.test.sql": {
++      "count": 15,
++      "normalizedStatementSha256": [
++        "5b927275d46a6e13afd9035b5b9b39c202371b06897e20d4bc22e426c8d70f59",
++        "48f0e131329432991c5e15e1ef56c3b2a7dfcd3e12e1ff7dd4653ef70effe02b",
++        "ea003844d9a6351402adb560284a625c8f1472fc3074912e543056ad08a3bede",
++        "3fdeb0403a68715490c504396c058f0be4f48c5feb54124cc903312d6cc00d63",
++        "20b358226e97cdad6380780ec568c24402d775adb78c66d274b8dd4288471087",
++        "cf0817029ab234b943a924a0ae84196d89e6fd24b4744fc3b668303e21cd2747",
++        "fa515e066e51dc1fdc6d95325dfcb2d2754c81558d5e316d18d514d04d3a11b2",
++        "f07a8cf266a574f3a0ce825633471eff440f439f92ee36960b95884e67e15c09",
++        "e8e9cc1438c458be4545a1f1a4a0505ba2e30acc629bdd101b161e274b1a627e",
++        "b43722553895f032ef795985398e7416c4931fdcfd83d6cb9b9aba7f04882644",
++        "e6e45b4c1686265ad82efd4d867faaa036205eadce3dce999d5f57a34983819f",
++        "123b8a18e35f1ad8dd0a5bbe7d5a5a66645424fea31c4809e9d9e6e37f1d6dbf",
++        "6b036592e610bb199cb08e14b172f318f9e8dbc03805550df35705a300438c9b",
++        "064a01811d5fc335035fa6c5fdfd6f5fa9abd5db0f896e02058d77d3e3d3f36f",
++        "87aacdbad3139a449d73119bf0f37148a94a43c0f65056ca20999080ce72c8b5"
++      ]
++    },
++    "supervisor_reconciliation.test.sql": {
++      "count": 65,
++      "normalizedStatementSha256": [
++        "3b59fe0ec047a8365eae3b77f8e9822943884a6fba476dbc1fb678ca9cb952ad",
++        "437ffa243e118ce9008e798568425e41b1d06970fc6c86e29de3771f6750142a",
++        "9f9100376505f534c8f72098a6210ac661c7ba04c661dbdbf09f95f63d711b3e",
++        "558d64ab4e00badc095e866d7e97c682cdbe13b64ec4233585bc2a2c56048aff",
++        "1c3edf4ced53f7dd70ba73339b232f452980bc17a90b3ace966d53686f8abe7a",
++        "dd693c7130afe6834e68f6c28355d690a8c0184722de08b8e0abc1c9f1b2d659",
++        "9c8f3da9239e8eb05c916a1fd8d12562b13093f739b84d05ff97be8a423a7689",
++        "65ce8725a5ab8c90db2fc6a0d4be41588a06e4a432e9f05f3a84c9bb538d3019",
++        "8c2258474ce72283eeb6ff0c9e8bffa6e88e5f5681f5add5e25b1f4e135b3bdf",
++        "605cec83770ae4324526d31ce3be84ee258a27fbbee8a4d23c2303318ceae9cb",
++        "cb59791853e1c6fdaa479c78869313463bc91e3a8eafefe634f33422f7967929",
++        "09557f5f733d7d0b58d81cbea07aceff11396225a0f7e16fe8691020d7a25a29",
++        "72ed7a48c848124ea97e9189ba7e9704b5c27eaabbc815ffc6e31cbe9f004e3a",
++        "e8f00068897bc84c91684f4b2d16abd9613fc2735879b9f1f184f9ea799f7e01",
++        "761ccdf4dad9e61817e466c6dc8632184385d710843725e03e1c22d3c4b1b826",
++        "a2b1be72648d1ed7bf1b9b22adfef95e77d358a208f4736eecbfa04c1894d6f9",
++        "d6b6718a9e541dc0f808805e0c5ace4234e14e090b74c6f2d7b6a94147aec472",
++        "1033c8f4cfedcc45db56b977dfd1b485c3d81fdb95fb67efe3eea714ab98d4aa",
++        "639e2baad558b0436ef954c6ea2807f4642116aec1402b75abfed5843e62e2f5",
++        "429e5a41c5c7d464b946e00ee30ce38b79f769d245f7a819b9485afec03b76ac",
++        "6a89a97f857a6bafa9aa9bbe7548b6eeae90e3541572deb908dde0a7576efd23",
++        "35f30170012b5b5214256c302399ad30353a5f7bfa3c2c63abf0b806d36b2250",
++        "71186d1fe0f67d68537a55e5febd650a293dbdeaccb4bb6139bb6606b1fc78ad",
++        "fd417fdb83d6bc27f5c6829bdb0dda9e65ab6549197da4ab831c5ec40975fbf5",
++        "01cb0114e899e879cea54a6864cd768ebe341accf0f6048cb71010671794d0ab",
++        "16af286d927a9d080baa2f8cf8a4eaa945bfdadb0e838b6bbf7bc6aa50c3f15c",
++        "13c6a7a4f2626e3be9570fcc1cd1afa997608c6ba588ddbbd3174e2945c38801",
++        "2f5df29c73ab294ddfd3436e7fc324805fea1045d214ab35514f41b21da47880",
++        "834070ff68ab2215e277df129c694e3d16f0a5d33511a2926147098dbe92b441",
++        "c14aec339caedb0058216fdf152885b08b83f1a772547eccd2883478b4e5b4ba",
++        "f62c8213ef5be791d317fc1ae44462b220616149b7b766b7dd08d582d57046da",
++        "1387c2faf27bbffb9f40e6a6af240d7bb5d5fdeafa0500edcb04fa77c80caa19",
++        "65bc3620c804b4811751e6ad782c9c39908892d642faeb2d539999004ac8ac5d",
++        "03d75b77fd729c931ef8361b9de5e62f1732744dad957a9da06fe62ac857b4de",
++        "21a1bf846306fe27d10442081f8b92d1a4dacd553776afd160e9b7df14bba2cd",
++        "5d3735142d076c1ddeabaf6a9c3fdf9b6134fb055ede9b5bed0acd8be47c9140",
++        "d552e5080e4c49e9a2381bc38166dff5ca955f7cfc4a5cdb1c38e4341dda29d3",
++        "dd220c112a43f6eafe5811b0b7c9b956edf8e5ed5dfbd11ff0d2a1897214fbb3",
++        "a8a92d0b34b1319946ac837bf0041fda16740f6073d8630998f6dbce864ea666",
++        "8fc4974bf5fc1d7b3389657d9e287a46b11e4981cbb6dfe3096b7a129e8ed9cf",
++        "3d0b64ae6a73d90757a3f161ad55090a7e4e2ee98b19a570fcf3a27647b4eef0",
++        "661aa10be55f4e9885fef061930d4e4f026f45e82a2efbe0769362832c4256fc",
++        "572023ebeb8ecea65d8ccaa886f89cde220f05075698e3249163965a19560d22",
++        "508b091c1fb15692f3655ab218d8297f1a869ae1bb1611ad3434686f84035da4",
++        "60e5cb0224d708606fc79871460564053c29239866f0abcef0362a5a4c1347d8",
++        "53747da7acd26ff1767a55548eef6d04aea2f8d87573d4bc3b83d969555c20a1",
++        "2d3120eecea524c82e0209a7e959df026e72542787698e8a1e174951af37c8fa",
++        "784836e0f5e66dce2f2d55faee2ad1545dd6ad52c62309616e26adbfe9434b30",
++        "bd97fa970aa3a9a71dde3c2a3d2fbff478a3aa5999840202421c01c034a8a68a",
++        "d841f2eda77a6e35db0e683a9bc06fe8debd3a90ad8389ff941f0cb0758bb407",
++        "82aa7fa396f4a773a23a0ed84ee6eb4f1da594bd8034ecefca09ce610a52e0be",
++        "f5669e4eb9452048f43268f4e023b16acf7f72716c21098b4e840c81333a7ebb",
++        "588d419670be544c23a875d07785c221fa195a0ae026ff3c412f1b2c4faeae1c",
++        "ad6295c18a40dddcd596afe6d7e08416eed365c854b235550ee43a14aa3fb075",
++        "3836b2f43c8e88dbf098e07f5ce925a152bf861c58128b186142d748431eda16",
++        "be71dbe75e8e0b7d4f1045ed571254603414916a4845956fbbf847e86790568d",
++        "e6be0aa2d056c564f500494d8022f6e043e6003030b36e7aa9ed763b27c740a6",
++        "3da3a355c8858934d2757f4c8255d2c21f91902956b67c27171458394ce41025",
++        "6a63f3c251342140b3c07cdf9b923332dad170c53ff10eb135410d091e0d96b9",
++        "ba29cf49fb634673290876c08e1ff842035e29f794f4345f10baafee8015298c",
++        "987819ad3a5dd08e633d85b5d28db01f4214bc49748080044604d0305ed7a157",
++        "c8fc456eb5a6d3659df469fa04ed09ad2327894a0a4138cf23a8da2dc9f4e2b2",
++        "246bb8c175d1771ffcb919765223a87ad37e74be75ca8b855b1f9b7e9801072a",
++        "f83b12b20fdc3367af4500641dded684e7be674bcca5cf533e474977f698118c",
++        "40dd79eae3d66636ef7995e40627a4cba9fe02ab84da98a6a1ae06d20c70e56d"
++      ]
++    },
++    "single_item_work_claim.test.sql": {
++      "count": 55,
++      "normalizedStatementSha256": [
++        "6481e7250f09a3ed04bf089f28dd037e7466222ab4eadda4575cd3ad42cffa75",
++        "128f2cbdf45ed037bad09943df52d49867bd300b5788fa59dd821f87ad41af32",
++        "9e7793f613977543e62a447cbeb1dce7187861d6ccfe35975d65b6294db1f073",
++        "14f404cdde5335ec5e8290d93fa6f3bf0c1fd8aaffe7cb29be58eed433717c7a",
++        "19a0b174ddd5e42a8190a6f7b05e97cc54550ea07327ba4a19f166c354416126",
++        "ce2bd29d9bfac4d5a52583cb8030c385e71b83de76be4b908160394ee60c461b",
++        "bed56150fe773eebabc33bee00f7bc2ea581f8524d95b70467f865f4fb8c05fc",
++        "e29433eef3b15237fdc3c77ff3948f020af2c75f7e3d032273e6c66a92b6e455",
++        "4dc0d6cfeb93de80ef3b49d3af8ea5f5f78731ba4fd4e1faa0d9066224f308b4",
++        "12bb718148950928af2774d85192046f1d396041135e74b2f9df7c8ec027111e",
++        "46941b069b6b3d4453942ea1390a39b544c1bf003744dcad154bdad5ead1fe12",
++        "b18de6a9157d1f5b4ffc1ccb81231619710a7426863fe522f2e6bb60b47b6bd6",
++        "d185a9919f44ec6dd358067e32fb82aa7b8f005e8fc9d1506f6272e528f92dcb",
++        "135eaa32b953bbfbc1d6f1e9cc66583c0058eab452d398e514ba64a7d73d068b",
++        "e3d45a5a95b1f28da959f33b76fadb92f8a6e2e4db650617b7f39fbcfd043c0f",
++        "f08eb3234a2478dcd71aa6f05a574b2983ff1a83a78887c0d836f433656b7cd3",
++        "5a3abcb3d51fcd5b96d1f6839d23438477bc600985a0f18ea95eca08d023a7ff",
++        "6d9515556e3914cf3f0e31449f740ca70bf1fb42853cd6d082c2ac0e983dd2e6",
++        "9c10604611e42e03c6069b426d6cfd56726eb8e7de3288401b653148247eaa7c",
++        "f547fb4e9d97b7d0c43f2db60db0d6579b02356a5c4a7d52a6319459a0219df5",
++        "933c023f24aae16cf9688176026487dd159711efd5546204763ba540e9130c3f",
++        "f094429b8ede2e71dd6c35b40e325b940eab371b960fe6a79f7f9161e5106144",
++        "9f026e0e2cdbe5f23a3bda3d6b70c318ccf4d51d78078b54952e9e92fda13b74",
++        "1e41e4dda5a20369037b582b446cc4dbd34e9a7193e6550b441aaf53c8b67fc0",
++        "a46679b30f31a001fed81f9d55dc28c062bc518b32cf6d99e660e21e317ac437",
++        "8f85fc3bc8e862a901f0ac91c32fb1e881b38f6754c83867e1666df1155e10cc",
++        "58aa05903bf37220d84a03fa4c3790f6030dc015134b43b17548cb00f3b607b7",
++        "114f6f200d05b06bac3e0a38f246217c7d5ef4326cb26bc072f7022af07c3849",
++        "4a3319afe360b88c9c05dde27d9871fbfc89dffe781473bb43498341588687b9",
++        "6287bd78a5fd7902db9f4a8cee6764a6d8440aaa3cc3c7de9330a57c7338671e",
++        "ec292b3f7f174cfca6596448bd5dd3e39520c427058c6af15ad3794042823f79",
++        "4b1df2bea51358f633f72b7d6b295d4e43249c532cf643c8a939a4fba9e245f5",
++        "f4abed563e690170b229a392efaad133602b564454b0a8d2e951ca2aaa21072d",
++        "2c75d3f7ba874b413a8f288b638a8c7e948f55c8b015280d5fa486e76b67a482",
++        "1403a0a193abb3906197d85108716d5813fe088c09feaa452963c20886c307ea",
++        "ad66ec40339d623b85cad5ca9a165a80adc7876c3142129e8ca2d3d473d32e65",
++        "1adf1f70e4ebea240038f798b4f475a9c5b6f3ba4bc3f64d9dd3491a70d6af8a",
++        "6b078a6ba9d25450ecf4b05a5a96accfb55f0a88c1495450c115e925be1d45db",
++        "6ce02b850759b4590ad353678bcb4fdf5d7bdcb501de0e2bcefa6555cc294455",
++        "596c08187bc6dd3bde967515ffa26861282c774af25ee733c1506d5b80f790e3",
++        "bc2f0327b8b3de0c251f684145082189b7ccb580e2365dc3fa6475f1bddaf461",
++        "aca9da7f64a4dde82534fd86e8524880cefc6e90386fed02d0bd0e1060927b8e",
++        "61d3182ba68f87fd6a5f9d8f338370e70aec381c573d190ae43089831c624640",
++        "1c14b9f09d06f6f51972760efada9e95128b7c1c1b42a38da75bc22abb066c9b",
++        "0c6ad7047694db64e24860b455b23a5eb13d0e44753d130878163808f8afe1bd",
++        "859b88b6f58a22262fc1613c468b897be310f9afea7c8e317bd3c60c56faf8ca",
++        "d13f0efa99df2cac28c666d2536ffc0440eeb4c1b85eae23f27aa9099588057b",
++        "152e931b36cd0af19dc252f9ffcc0e68d9ed896f58fed2729595557cbe2fd0fa",
++        "bbe2d0201b672ee459dfcafb5ac1379c1746b0dfe5bd0fd96c0a7fd22481934e",
++        "8dd1e007475ef8f4bc79028c8fa14f30cb7bc9faff8305048361ee6b5434d5eb",
++        "b4ef3555912844af2978a2ec1ecd2cd802f0d4c6f3a72f88573fd977c79bb89c",
++        "2991a2c388f399106233ee5cc9c562c5fe6c89cbbcd84742fb7fc2a998345fa7",
++        "890b1996815112d07652b0664e62d4c263ad6c3b00c2cc480eac0ab90bd40646",
++        "819a445128749918baf675e8dd4a59d424643805aa8850b3cd7748a0d15813b0",
++        "35db4f45875e3531d4d403108bb2d602c405616a69bdbf2020f235aa87b13391"
++      ]
++    }
++  }
++}

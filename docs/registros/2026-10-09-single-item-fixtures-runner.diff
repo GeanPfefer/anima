@@ -1,0 +1,189 @@
+--- antes/supabase/tests/single_item_concurrency.py
++++ depois/supabase/tests/single_item_concurrency.py
+@@ -4,6 +4,7 @@
+ Execução futura: --execute MANIFEST.json FIXTURES.json (quatro casos independentes).
+ """
+ import argparse
++import errno
+ import json
+ import os
+ import queue
+@@ -110,6 +111,19 @@
+         and observation.get('lock') == expected and observation.get('granted') is False
+ 
+ 
++def decode_query_result(output):
++    """psql -At emits native booleans as t/f; all other results must be JSON.
++
++    No truthiness fallback: empty, multi-row or malformed output fails closed.
++    """
++    value = output.strip()
++    if value == 't':
++        return True
++    if value == 'f':
++        return False
++    return json.loads(value)
++
++
+ class Session:
+     """Readers daemon + Queue: nenhuma espera em join de reader bloqueado."""
+     def __init__(self, base, env):
+@@ -162,8 +176,19 @@
+             except subprocess.TimeoutExpired:
+                 self.process.kill()
+                 self.process.wait(timeout=2)
++        errors = []
+         for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
+-            stream.close()
++            try:
++                stream.close()
++            except OSError as error:
++                # Buffered stdin may flush after ON_ERROR_STOP closed the peer.
++                # Ignore only this expected EPIPE after confirmed process exit;
++                # other stream/process/backend cleanup failures remain failures.
++                if not (stream is self.process.stdin and error.errno == errno.EPIPE
++                        and self.process.poll() is not None):
++                    errors.append(error)
++        if errors:
++            raise RuntimeError('client cleanup failed: ' + '; '.join(map(str, errors)))
+ 
+ 
+ class Environment:
+@@ -197,7 +222,7 @@
+         result = subprocess.run(self.base, input=sql, capture_output=True, text=True, timeout=5, env=self.env)
+         if result.returncode:
+             raise RuntimeError(result.stderr)
+-        return json.loads(result.stdout.strip())
++        return decode_query_result(result.stdout)
+ 
+     def facts(self, case):
+         a, b, user = uuid(case['itemA']), uuid(case['itemB']), uuid(case['userId'])
+@@ -309,7 +334,7 @@
+         for session in sessions:
+             try:
+                 session.close()
+-            except (BrokenPipeError, OSError, subprocess.TimeoutExpired) as error:
++            except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+                 cleanup_errors.append(str(error))
+         # Application nonce identifica sessões mesmo se o marker PID não chegou.
+         # Só terminar backends do banco e desta invocação, nunca PIDs desacoplados.
+--- antes/supabase/tests/single_item_concurrency_test.py
++++ depois/supabase/tests/single_item_concurrency_test.py
+@@ -1,5 +1,6 @@
+ """Determinísticos/offline. Não provam comportamento PostgreSQL ou Docker."""
+ import os
++import errno
+ import sys
+ import subprocess
+ from pathlib import Path
+@@ -8,7 +9,7 @@
+ from unittest.mock import patch
+ 
+ from single_item_concurrency import (action, expected_lock, lock_matches, validate_cases,
+-                                     validate_facts, Session, prove)
++                                     validate_facts, Session, prove, Environment, decode_query_result)
+ from single_item_proof_preflight import validate, expected_container_environment
+ 
+ 
+@@ -189,6 +190,72 @@
+             self.assertEqual(code, 3); self.assertIn('55000 expected', error)
+         finally:
+             session.close()
++
++    def test_psql_native_booleans_and_json(self):
++        for raw, value in [('t', True), ('f', False), ('true', True), ('false', False),
++                           ('0', 0), ('[]', []), ('null', None), (' {"a":1}\n', {'a': 1})]:
++            with self.subTest(raw=raw):
++                self.assertEqual(decode_query_result(raw), value)
++        for raw in ('', 'yes', 't\nf', '1\n2', 'NOTICE: x\nt'):
++            with self.subTest(raw=raw), self.assertRaises(ValueError):
++                decode_query_result(raw)
++
++    def test_environment_query_decodes_false_without_truthiness(self):
++        env = object.__new__(Environment)
++        env.base, env.env = [], {}
++        with patch.object(env, 'check'), patch('single_item_concurrency.subprocess.run',
++                return_value=subprocess.CompletedProcess([], 0, 'f\n', '')):
++            self.assertIs(env.query('SELECT EXISTS(...);'), False)
++        with patch.object(env, 'check'), patch('single_item_concurrency.subprocess.run',
++                return_value=subprocess.CompletedProcess([], 3, 't\n', '42501 refused')):
++            with self.assertRaisesRegex(RuntimeError, '42501'):
++                env.query('SELECT EXISTS(...);')
++
++    def cleanup_session(self, failing_stream, error, running=False):
++        from unittest.mock import Mock
++        session = object.__new__(Session)
++        session.process = Mock()
++        session.process.poll.return_value = None if running else 3
++        session.process.stdin, session.process.stdout, session.process.stderr = Mock(), Mock(), Mock()
++        getattr(session.process, failing_stream).close.side_effect = error
++        return session
++
++    def test_cleanup_ignores_only_exited_stdin_epipe(self):
++        session = self.cleanup_session('stdin', BrokenPipeError(errno.EPIPE, 'peer closed'))
++        session.close()
++        for name in ('stdin', 'stdout', 'stderr'):
++            getattr(session.process, name).close.assert_called_once()
++        session.process.terminate.assert_not_called()
++
++    def test_cleanup_other_stream_errors_remain_failure_and_all_close(self):
++        for name, error in [('stdout', BrokenPipeError(errno.EPIPE, 'unexpected')),
++                            ('stdin', OSError(errno.EIO, 'disk failure'))]:
++            session = self.cleanup_session(name, error)
++            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, 'client cleanup failed'):
++                session.close()
++            for stream in ('stdin', 'stdout', 'stderr'):
++                getattr(session.process, stream).close.assert_called_once()
++
++    def test_real_buffered_stdin_epipe_after_process_exit(self):
++        session = Session([sys.executable, '-u', '-c',
++                           "import sys; print('READY=1'); sys.exit(3)"], dict(os.environ))
++        self.assertEqual(session.marker('READY='), '1')
++        code, _ = session.finish()
++        self.assertEqual(code, 3)
++        # Reproduce buffered TextIOWrapper flush on close after peer exit.
++        session.process.stdin.write('pending input')
++        session.close()
++        self.assertTrue(session.process.stdin.closed)
++        self.assertTrue(session.process.stdout.closed)
++        self.assertTrue(session.process.stderr.closed)
++
++    def test_fixture_private_acl_uses_oid_without_grant(self):
++        content = Path(__file__).with_name('single_item_work_claim.test.sql').read_text()
++        self.assertLess(content.index('AS proof_private_begin_oid'), content.index('SET LOCAL ROLE authenticated'))
++        self.assertIn("has_function_privilege('authenticated',:'proof_private_begin_oid'::oid,'EXECUTE')", content)
++        self.assertNotIn('GRANT USAGE ON SCHEMA private', content)
++        self.assertIn("release_work_claim('a1000000-0000-0000-0000-0000000000b2','released_without_attempt')", content)
++        self.assertIn("'P0001','item_attempt_budget_exhausted'", content)
+ 
+     def simulated_proof(self, case, foreign_change=False, ledger_change=False, wrong_error=False):
+         class FakeEnvironment:
+--- antes/supabase/tests/single_item_work_claim.test.sql
++++ depois/supabase/tests/single_item_work_claim.test.sql
+@@ -2,6 +2,8 @@
+ -- AUTO-02 — asserções preparadas; prova PostgreSQL ainda pendente.
+ BEGIN;
+ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
++-- Resolve somente metadata como postgres; a ACL continua medida para authenticated.
++SELECT 'private.begin_work_attempt(uuid,uuid,integer,uuid,text,text,uuid)'::regprocedure::oid AS proof_private_begin_oid \gset
+ \ir helpers/routing.inc
+ SELECT plan(55);
+ 
+@@ -95,7 +97,7 @@
+ SELECT throws_ok($$SELECT public.acquire_single_item_work_claim((SELECT id FROM item),1,'a2000000-0000-0000-0000-0000000000b1','other-user',300)$$,'P0002','work item not found','outro usuário não adquire item alheio');
+ SELECT is((SELECT count(*) FROM public.work_claims WHERE id='a1000000-0000-0000-0000-0000000000b1'),0::bigint,'RLS esconde claim alheio');
+ SELECT ok(NOT has_function_privilege('anon','public.acquire_single_item_work_claim(uuid,integer,uuid,text,integer)','EXECUTE'),'anon não executa RPC');
+-SELECT ok(NOT has_function_privilege('authenticated','private.begin_work_attempt(uuid,uuid,integer,uuid,text,text,uuid)','EXECUTE'),'cliente não acessa início privado');
++SELECT ok(NOT has_function_privilege('authenticated',:'proof_private_begin_oid'::oid,'EXECUTE'),'cliente não acessa início privado');
+ 
+ RESET ROLE;
+ SELECT ok(NOT has_function_privilege('service_role','public.acquire_single_item_work_claim(uuid,integer,uuid,text,integer)','EXECUTE'),'service_role não herda EXECUTE da ACL default');
+@@ -171,7 +173,7 @@
+ -- Não é autorização de retomada do produto: o Supervisor continua recusando histórico.
+ SET LOCAL ROLE authenticated;
+ SELECT set_config('request.jwt.claim.sub','a1000000-0000-0000-0000-000000000000',true);
+-SELECT public.release_work_claim('a1000000-0000-0000-0000-0000000000b2','attempt_finished');
++SELECT public.release_work_claim('a1000000-0000-0000-0000-0000000000b2','released_without_attempt');
+ RESET ROLE;
+ UPDATE public.work_items SET state='in_progress' WHERE id=(SELECT id FROM item);
+ SET LOCAL ROLE authenticated;
