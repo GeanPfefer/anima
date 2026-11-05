@@ -253,6 +253,9 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
     const sourceMessageId = res.headers.get('X-Source-Message-Id');
     const orchestrationHeader = res.headers.get('X-Work-Orchestration');
     const presentedItemsHeader = res.headers.get('X-Anima-Presented-Items');
+    // Mudança de foco pedida explicitamente na conversa: o servidor informa o novo foco ('' = sem foco).
+    const focusChangedHeader = res.headers.get('X-Anima-Focus-Changed');
+    if (focusChangedHeader !== null) setFocusedWorkItemId(decodeURIComponent(focusChangedHeader) || null);
     const autonomousWorkHeader = res.headers.get('X-Anima-Autonomous-Work');
     if (presentedItemsHeader) {
       try {
@@ -297,7 +300,7 @@ export function ChatClient({ isFirstTime, userName, devAuthorized = false }: Pro
         if (metadata.kind === 'work_error') setError(`Não foi possível registrar o trabalho desta mensagem: ${metadata.error?.message ?? 'erro desconhecido'}. Você pode tentar novamente.`);
         // Capacidade ausente, dita pelo servidor (não pelo texto do modelo): sem
         // Orquestração habilitada, nenhuma proposta foi criada — e o cartão não existe.
-        if(metadata.kind==='focus_confirmation_required'&&metadata.candidates){setMessages(previous=>[...previous,{role:'assistant',content:'A qual trabalho você se refere? Escolha abaixo para eu associar sua mensagem ao item certo.'}]);setFocusChoice({sourceMessageId:metadata.sourceMessageId,candidates:metadata.candidates});}
+        if(metadata.kind==='focus_confirmation_required'&&metadata.candidates){setMessages(previous=>[...previous,{role:'assistant',content:'Para continuar, preciso saber a qual trabalho você se refere. Ao escolher abaixo, o foco será definido e sua mensagem será anexada a ele; você pode cancelar sem gravar nada.'}]);setFocusChoice({sourceMessageId:metadata.sourceMessageId,candidates:metadata.candidates});}
       } catch { /* metadado opcional inválido não interrompe o chat */ }
     }
   }

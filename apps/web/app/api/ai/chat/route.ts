@@ -21,7 +21,8 @@ import {
   buildWorkOrchestrationReply,
   type WorkOrchestrationChatKind,
 } from '@/lib/work-orchestration/chat-guidance';
-import { isWorkContinuation, isWorkHistoryQuery, resolveWorkFocus } from '@anima/core';
+import { classifyWorkFocusIntent, isWorkContinuation, isWorkHistoryQuery, resolveWorkFocus } from '@anima/core';
+import { handleWorkFocusIntent } from '@/lib/ai/work-focus-chat';
 import { mapWorkEvent, mapWorkItem } from '@anima/supabase';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { serializeReconstructedWorkPresentation, serializeWorkPresentation } from '@/lib/work-orchestration/serialize';
@@ -147,6 +148,26 @@ export async function POST(req: NextRequest) {
     'X-Anima-Mutation': governedBacklog.kind === 'materialized' ? 'work-proposals-only' : 'project-backlog-only',
     ...(governedBacklog.sourceMessageId ? {'X-Source-Message-Id': governedBacklog.sourceMessageId} : {}),
   } });
+
+  // ACC-01-FIX-02: intenções sobre o FOCO de trabalho têm resposta determinística própria,
+  // antes de qualquer detector, seletor ou provider. Consulta é só leitura (sem seletor, sem
+  // anexar contexto); definir/limpar exigem comando explícito e só valem no Chat Dev.
+  const focusIntent = classifyWorkFocusIntent(message);
+  if (focusIntent.kind !== 'none') {
+    try {
+      const outcome = await handleWorkFocusIntent({ client: supabase, userId: user.id, intent: focusIntent, developmentMode });
+      return new Response(outcome.text, { headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Anima-Capability': 'work-focus-intent-v1',
+        'X-Anima-Mutation': outcome.mutation,
+        ...(outcome.focusChangedTo !== undefined ? { 'X-Anima-Focus-Changed': encodeURIComponent(outcome.focusChangedTo) } : {}),
+      } });
+    } catch {
+      return Response.json({ error: 'Não consegui tratar o foco com segurança agora. Nada foi alterado.' }, {
+        status: 503, headers: { 'X-Anima-Capability': 'work-focus-intent-v1', 'X-Anima-Mutation': 'none' },
+      });
+    }
+  }
 
   // Mandato estreito do Dev. Consulta permanece read-only; execução explícita
   // delega à mesma admission RPC do cartão. Claim/attempt/executor continuam

@@ -35,11 +35,13 @@ export function WorkFocusChoice({ sourceMessageId, candidates, onResolved, onDis
   return (
     <div className={styles.workCard} role="group" aria-label="Escolha do trabalho em foco" aria-busy={busy}>
       <strong>A qual trabalho você se refere?</strong>
+      {/* Efeito explícito: nada é gravado antes do clique, e o clique faz exatamente duas coisas. */}
+      <p>Ao escolher, o trabalho passa a ser o foco e esta mensagem é anexada a ele. Nenhum estado, aprovação ou execução muda. Cancelar não grava nada.</p>
       <div className={styles.workActions}>
         {candidates.map(candidate => (
-          <button key={candidate.id} disabled={busy} onClick={() => choose(candidate)}>{candidate.summary}</button>
+          <button key={candidate.id} disabled={busy} onClick={() => choose(candidate)}>{`Definir como foco e anexar: ${candidate.summary}`}</button>
         ))}
-        <button disabled={busy} onClick={onDismiss}>Nenhum destes</button>
+        <button disabled={busy} onClick={onDismiss}>Cancelar</button>
       </div>
       {error && <p role="alert" className={styles.error}>{error} Você pode tentar novamente.</p>}
     </div>
