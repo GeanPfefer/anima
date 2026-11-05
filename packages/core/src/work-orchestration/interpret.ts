@@ -1,3 +1,4 @@
+import { classifyWorkFocusIntent } from './work-focus-intent';
 import type { Json } from '@anima/types';
 import type { CreateWorkProposalCommand } from './commands';
 import type { WorkCapability, WorkImpactLevel } from './types';
@@ -92,7 +93,13 @@ export const resolveWorkFocus = (candidateIds: readonly string[], currentItemId?
   if (unique.length === 1) return { kind: 'focused', itemId: unique[0]! };
   return { kind: 'confirmation_required', itemIds: unique };
 };
-export const isWorkContinuation=(message:string):boolean=>/\b(?:continue|continuar|retome|retomar|ness[ae]|neste|nesse|tarefa|trabalho|proposta|resultado|ajuste|corrija|correção|isso|esse ponto)\b/i.test(message)&&!/\b(?:hoje|ontem|dormi|corri|treinei|estudei|me senti)\b/i.test(message);
+// ACC-01-FIX-02: continuação EXPLÍCITA exige um verbo de continuação/ajuste. Substantivos e
+// demonstrativos soltos ("trabalho", "tarefa", "proposta", "resultado", "isso", "nesse") NÃO
+// bastam: uma pergunta como "qual trabalho está em foco?" já abriu o seletor mutante de foco.
+// Perguntas (interrogativo inicial) e mensagens sobre o foco ou o histórico nunca são continuação.
+const CONTINUATION_VERB=/\b(?:continue|continuar|continuemos|retome|retomar|prossiga|prosseguir|siga\s+com|ajuste|ajustar|corrija|corrigir)\b/i;
+const QUESTION_OPENING=/^\s*(?:e\s+)?(?:qual|quais|quem|que|cad[eê]|h[aá]|tem|existe|como|onde|quando|por\s*que|o\s+que|mostr\w+|ver|veja|liste|listar|diga|informe)\b/i;
+export const isWorkContinuation=(message:string):boolean=>CONTINUATION_VERB.test(message)&&!QUESTION_OPENING.test(message)&&classifyWorkFocusIntent(message).kind==='none'&&!/\b(?:hoje|ontem|dormi|corri|treinei|estudei|me senti)\b/i.test(message);
 
 // UX-04 — estados NÃO terminais (trabalho ainda em aberto, reencontrável e
 // retomável pela conversa). Fonte única; os terminais são completed/failed/
