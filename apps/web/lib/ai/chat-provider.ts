@@ -4,6 +4,12 @@ import {
   PROJECT_TOOL_CALL_LIMIT,
 } from './project-tools';
 import {
+  executeProjectReadTool,
+  isProjectReadTool,
+  OPENAI_PROJECT_READ_TOOLS,
+  type ProjectReadToolContext,
+} from './project-read-tools';
+import {
   fetchAdmittedOpenAIResponses,
   OpenAIAdmissionDenied,
   type OpenAIAdmissionControl,
@@ -28,6 +34,10 @@ export type ChatProviderRequest = {
   // Dono da chamada, carregado no envelope da admissão OpenAI paga. Interativo:
   // amarra o usuário, nunca um work item forjado.
   userId?: string;
+  // Contexto das ferramentas de LEITURA do projeto (cliente autenticado do usuário).
+  // Só tem efeito junto de `developmentMode`; sem ele (chat pessoal) nenhuma ferramenta
+  // de projeto é anexada, mesmo que o contexto seja passado.
+  projectReadContext?: ProjectReadToolContext;
   structuredOutput?: {
     readonly name: string;
     readonly schema: Record<string, unknown>;
@@ -191,6 +201,10 @@ async function streamOpenAI(
   // Chat pessoal (default): SEM ferramentas e SEM instrução de investigar o
   // repositório. Só o modo de desenvolvimento (explícito + autorizado) as recebe.
   const developmentMode = request.developmentMode === true;
+  const projectTools = developmentMode && request.projectReadContext
+    ? [...OPENAI_PROJECT_TOOLS, ...OPENAI_PROJECT_READ_TOOLS]
+    : OPENAI_PROJECT_TOOLS;
+  const readContext = developmentMode ? request.projectReadContext : undefined;
   const instructions = developmentMode
     ? `${request.systemPrompt}\n\n${DEVELOPMENT_TOOLS_INSTRUCTION}`
     : request.systemPrompt;
@@ -230,7 +244,7 @@ async function streamOpenAI(
           } : {}),
           // Ferramentas SÓ no modo de desenvolvimento e ENQUANTO abaixo do limite.
           // Na resposta final forçada, nenhuma ferramenta é oferecida.
-          ...(developmentMode && !forceFinal ? { tools: OPENAI_PROJECT_TOOLS, tool_choice: 'auto' } : {}),
+          ...(developmentMode && !forceFinal ? { tools: projectTools, tool_choice: 'auto' } : {}),
         },
         signal: timeoutSignal(90_000),
         ...(fetchImpl ? { fetchImpl } : {}),
@@ -278,7 +292,11 @@ async function streamOpenAI(
     const toolOutputs = await Promise.all(calls.map(async call => ({
       type: 'function_call_output',
       call_id: call.call_id,
-      output: await executeProjectTool(call.name, call.arguments),
+      output: isProjectReadTool(call.name)
+        ? (readContext
+          ? await executeProjectReadTool(call.name, call.arguments, readContext)
+          : JSON.stringify({ ok: false, error: 'Ferramenta indisponível neste contexto.' }))
+        : await executeProjectTool(call.name, call.arguments),
     })));
     input = [...input, ...output, ...toolOutputs];
   }

@@ -60,6 +60,8 @@ import {
   selectAutonomousWorkForChat,
 } from '@/lib/ai/autonomous-work-selection';
 import { bindDevelopmentWorkSource, classifyDevelopmentChatIntent } from '@/lib/ai/development-chat-intent';
+import { buildDevelopmentSystemPrompt } from '@/lib/ai/chat-dev-prompt';
+import { readConversationBriefSafe } from '@/lib/ai/project-read-model';
 
 function norm(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -805,7 +807,9 @@ ${contextBlock}`;
     .select('id, role, content, session_id')
     .eq('session_id', activeSession?.id ?? '00000000-0000-0000-0000-000000000000')
     .order('created_at', { ascending: false })
-    .limit(10);
+    // Chat Dev: janela maior (12 turnos) para sustentar planejamento multirrodada;
+    // o chat pessoal mantém 10 mensagens.
+    .limit(developmentMode ? 24 : 10);
 
   // history vem em ordem DESC; a última mensagem da sessão é a primeira aqui.
   const latestMessage = history?.[0] ?? null;
@@ -940,12 +944,19 @@ ${contextBlock}`;
     };
   } else {
     try {
+      // ACC-01-E1: o Chat Dev troca o prompt pessoal por um prompt de planejamento com
+      // o Conversation Brief (leitura RLS do usuário, fail-closed) e recebe as
+      // ferramentas de leitura de projeto. O chat pessoal permanece inalterado.
+      const devSystemPrompt = developmentMode
+        ? buildDevelopmentSystemPrompt({ name, brief: await readConversationBriefSafe(supabase, user.id) })
+        : null;
       providerResult = await streamChatProvider({
         provider,
-        systemPrompt,
+        systemPrompt: devSystemPrompt ?? systemPrompt,
         messages: [...pastMessages, { role: 'user', content: message }],
         developmentMode,
         userId: user.id,
+        ...(developmentMode ? { projectReadContext: { client: supabase, userId: user.id } } : {}),
       });
     } catch (error) {
       const providerError = error instanceof ChatProviderError
