@@ -2648,6 +2648,7 @@ export type Database = {
         Args: { p_work_item_id: string }
         Returns: Json
       }
+      clear_work_focus: { Args: never; Returns: boolean }
       create_project_backlog_proposal: {
         Args: {
           exclusions: Json
