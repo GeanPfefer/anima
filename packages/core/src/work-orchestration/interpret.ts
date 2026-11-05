@@ -22,8 +22,21 @@ const explicitObject = /\b(?:anima|aplicativo|app|site|sistema|c[oó]digo|tela|f
 // Sinal forte de intenção de trabalho: frases que pedem uma proposta/estruturação
 // segura. Determinístico e específico — captura o pedido genuíno mesmo quando o
 // par verbo+objeto não bate, sem transformar conversa comum em trabalho.
-const workIntentPhrase = /\b(?:prepar\w*\s+(?:um[a]?\s+)?proposta|apresent\w*\s+(?:a\s+)?proposta|estrutur\w*\s+(?:esse|este|o)\s+trabalho|organiz\w*\s+(?:esse|este|o)\s+trabalho|proposta\s+antes\s+de\s+come[cç]ar|trabalho\s+de\s+forma\s+segura)\b/i;
-const lifeRecord = /\b(?:hoje|ontem|dormi|corri|treinei|estudei|trabalhei|senti|estou me sentindo)\b/i;
+const workIntentPhrase = /\b(?:(?:cri\w*|mont\w*|prepar\w*|elabor\w*|redij\w*|ger\w*|abr\w*)\s+(?:um[a]?\s+)?(?:nov[ao]\s+)?(?:proposta|mandato)|prepar\w*\s+(?:um[a]?\s+)?proposta|apresent\w*\s+(?:a\s+)?proposta|estrutur\w*\s+(?:esse|este|o)\s+trabalho|organiz\w*\s+(?:esse|este|o)\s+trabalho|proposta\s+antes\s+de\s+come[cç]ar|trabalho\s+de\s+forma\s+segura)\b/i;
+// ACC-01-FIX-04 — sinais de que a mensagem PEDE INFORMAÇÃO/DISCUSSÃO em vez de pedir trabalho:
+//  (1) qualquer interrogação; (2) abertura interrogativa ou de consulta ("quais", "como", "compare",
+//  "explique", "me diga"...); (3) desejo de analisar/entender/saber/discutir ("quero analisar...").
+// Um falso positivo aqui só mantém a conversa (o usuário pode dizer "crie uma proposta..."); um falso
+// negativo cria um work item persistente e gasta o planner — por isso o viés é conversar.
+const QUESTION_SENTENCE_OPENER = /(?:^|[.!;:\n]\s*)(?:e\s+|mas\s+)?(?:qual|quais|quem|quanto|quantos|quantas|como|por\s*qu[eê]|porque|quando|onde|o\s+que|que\s+(?:trabalhos?|itens?|tarefas?|decis[oõ]es)|existe|existem|h[aá]|devemos|deveríamos|vale\s+a\s+pena|faz\s+sentido)\b/i;
+const CONSULTATION_OPENER = /(?:^|[.!;:\n]\s*)(?:por\s+favor,?\s+)?(?:consulte|explique|compare|diferencie|mostre|liste|diga|descreva|conte|opine|discuta|esclare[cç]a|me\s+(?:diga|mostre|explique|conte|ajude\s+a\s+(?:entender|decidir|priorizar)))\b/i;
+const ANALYSIS_DESIRE = /(?:^|[.!;:\n]\s*)(?:eu\s+)?(?:quero|queria|preciso|gostaria\s+de|vamos|precisamos)\s+(?:de\s+)?(?:analisar|entender|saber|ver|avaliar|discutir|conversar|consultar|comparar|priorizar|decidir|conhecer)\b/i;
+const isInformationalRequest = (text: string): boolean =>
+  /\?/.test(text) || QUESTION_SENTENCE_OPENER.test(text) || CONSULTATION_OPENER.test(text) || ANALYSIS_DESIRE.test(text);
+// Mandato estruturado (campos rotulados): é um pedido de trabalho completo mesmo sem imperativo inicial.
+const MANDATE_FIELD = /\b(?:objetivo|escopo(?:\s+funcional)?|provas?\s+m[ií]nimas?|invariantes|crit[eé]rios\s+de\s+aceite)\s*:/gi;
+const isStructuredMandate = (text: string): boolean => (text.match(MANDATE_FIELD) ?? []).length >= 2;
+const lifeRecord =/\b(?:hoje|ontem|dormi|corri|treinei|estudei|trabalhei|senti|estou me sentindo)\b/i;
 // A capacidade distingue **mudar código** de **investigar sem mudar** — e o VERBO
 // decide, não o substantivo. Um pedido para implementar/refatorar/corrigir/
 // desenvolver código é `programming` mesmo quando descreve o diagnóstico ou a
@@ -62,6 +75,11 @@ export function interpretWorkRequest(message: string, sourceMessageId: string): 
   if (/^(?:eu\s+)?(?:quero|gostaria|tenho vontade)\s+(?:de\s+)?(?:algo|melhorar|mudar|criar|fazer)\.?$/i.test(text)) return { kind: 'clarification_required', question: { id: 'objective', question: 'O que você quer construir ou alterar exatamente?', options: [{ value: 'plan', label: 'Planejar primeiro', recommended: true }, { value: 'change', label: 'Alterar algo existente' }, { value: 'investigate', label: 'Investigar um problema' }] } };
   // Candidato a trabalho por par verbo+objeto OU por frase forte de intenção.
   const isWork = (operationalVerb.test(text) && explicitObject.test(text)) || workIntentPhrase.test(text);
+  // ACC-01-FIX-04: criar uma proposta PERSISTENTE exige um pedido de trabalho, não uma consulta.
+  // Verbo operacional + objeto ("analisar ... ANIMA ... backlog") aparece em perguntas, análises e
+  // discussões; sozinho NÃO autoriza escrita. Sem pedido explícito (frase forte de proposta/mandato
+  // ou mandato estruturado), uma mensagem informacional permanece conversa.
+  if (isWork && !workIntentPhrase.test(text) && !isStructuredMandate(text) && isInformationalRequest(text)) return { kind: 'conversation' };
   // Precedência corrigida: o marcador cotidiano só devolve conversa quando é um
   // registro de vida PURO — isto é, quando NÃO há sinal de trabalho explícito.
   // Assim "Hoje corri por 30 minutos" continua conversa, mas "...que existe hoje"
