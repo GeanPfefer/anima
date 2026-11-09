@@ -143,7 +143,7 @@ describe('TrabalhoDetalhe', () => {
 
   test('hospeda o WorkProposalCard existente, mostra código/título/estado e atualiza com onChange', () => {
     render(<TrabalhoDetalhe initial={presentation()} reference="PROOF-01" title="Teto de bônus" />);
-    expect(screen.getByRole('heading')).toHaveTextContent('PROOF-01 Teto de bônus');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('PROOF-01 Teto de bônus');
     expect(screen.getByText(/review · v1 · id 11111111/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '← Todos os trabalhos' })).toHaveAttribute('href', '/trabalhos');
     expect(screen.getByTestId('card')).toHaveAttribute('data-eligible', 'true');

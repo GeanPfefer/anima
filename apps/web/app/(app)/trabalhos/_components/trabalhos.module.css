@@ -1,3 +1,6 @@
+.executors { display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-surface); }
+.executors h2 { margin: 0; font-size: 1.05rem; }
+.executors p, .executors ul { margin: 0; color: var(--text-secondary); }
 .page { width: min(100%, 880px); margin: 0 auto; padding: 24px 16px 48px; display: flex; flex-direction: column; gap: 16px; }
 .header h1 { margin: 0 0 4px; font-size: 1.4rem; }
 .header h1 code { font-size: .8em; }
