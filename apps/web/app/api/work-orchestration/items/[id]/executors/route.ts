@@ -4,7 +4,8 @@ import { serializeWorkItem } from '@/lib/work-orchestration/serialize';
 import { createWorkOrchestrationService } from '@/lib/work-orchestration/server';
 import { createNodeExecutorReadinessDeps, probeAllExecutors } from '@/lib/work-orchestration/executor-readiness';
 import { diagnoseCodexExecutor } from '@/lib/work-orchestration/codex-executor-diagnostics';
-import { discoverWorkItemExecutors, governedExecuteOneCommand } from '@/lib/work-orchestration/work-executor-discovery';
+import { isExternalWorkEnvelope } from '@anima/core';
+import { discoverWorkItemExecutors, governedExecuteOneCommand, nextGovernedSteps } from '@/lib/work-orchestration/work-executor-discovery';
 import { readWorkHumanReference } from '@/lib/work-orchestration/work-reference';
 
 export const runtime = 'nodejs';
@@ -34,6 +35,10 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
       reference: human?.reference ?? null, title: human?.title ?? null,
       ...discovery,
       governedCommand: governedExecuteOneCommand(human?.reference ?? null, item.value.id, item.value.proposalVersion),
+      nextSteps: nextGovernedSteps({
+        state: item.value.state, external: isExternalWorkEnvelope(item.value.intent), reference: human?.reference ?? null,
+        workItemId: item.value.id, proposalVersion: item.value.proposalVersion,
+      }),
     },
   });
 }

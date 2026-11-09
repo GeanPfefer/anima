@@ -40,4 +40,5 @@ test('devolve a descoberta compartilhada e o comando governado, só lendo o item
   expect(body.value.governedCommand).toBe('npm run anima -- work execute-one item-1 --version 3');
   expect(body.value.codex).toEqual({ transport: 'wsl' });
   expect(getItem).toHaveBeenCalledWith('item-1');
+  expect((body.value as unknown as { nextSteps: { command: string }[] }).nextSteps.map(s => s.command)).toEqual(['npm run anima -- work execute-one item-1 --version 3']);
 });

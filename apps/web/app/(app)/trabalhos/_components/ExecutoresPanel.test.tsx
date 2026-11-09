@@ -34,4 +34,13 @@ describe('ExecutoresPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Verificar executores' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Não foi possível verificar'));
   });
+
+  test('com nextSteps lista os atos por responsavel, sem executar nada', async () => {
+    const fetcher = fetcherOf(view({ state: 'proposed', nextSteps: [{ label: 'Aprovar a proposta', actor: 'human', command: 'npm run anima -- work approve u1' }] }));
+    render(<ExecutoresPanel workItemId="u1" fetcher={fetcher} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Verificar executores' }));
+    await waitFor(() => expect(screen.getByText('npm run anima -- work approve u1')).toBeInTheDocument());
+    expect(screen.getByText(/Humano — Aprovar a proposta/)).toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
 });

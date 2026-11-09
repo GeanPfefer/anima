@@ -1,4 +1,4 @@
-import { discoverWorkItemExecutors, governedExecuteOneCommand } from './work-executor-discovery';
+import { discoverWorkItemExecutors, governedExecuteOneCommand, nextGovernedSteps } from './work-executor-discovery';
 import type { ExecutorObservation } from './executor-discovery';
 
 const intent = {} as never;
@@ -29,5 +29,26 @@ describe('governedExecuteOneCommand', () => {
   test('usa a referência humana quando existe e o UUID caso contrário', () => {
     expect(governedExecuteOneCommand('PROOF-03', 'u', 2)).toBe('npm run anima -- work execute-one PROOF-03 --version 2');
     expect(governedExecuteOneCommand(null, 'abc', 1)).toBe('npm run anima -- work execute-one abc --version 1');
+  });
+});
+
+describe('nextGovernedSteps', () => {
+  const base = { reference: null, workItemId: 'abc', proposalVersion: 1 };
+  test('proposed: só a aprovação humana', () => {
+    const steps = nextGovernedSteps({ ...base, state: 'proposed', external: true });
+    expect(steps).toEqual([expect.objectContaining({ actor: 'human', command: 'npm run anima -- work approve abc' })]);
+  });
+  test('approved externo: classificação humana com os valores canônicos (sem unknown) antes do execute-one', () => {
+    const steps = nextGovernedSteps({ ...base, state: 'approved', external: true });
+    expect(steps).toHaveLength(2);
+    expect(steps[0]!.command).toContain('work external classify abc --version 1 --complexity <routine|bounded|complex>');
+    expect(steps[0]!.command).not.toContain('unknown');
+    expect(steps[1]).toMatchObject({ actor: 'supervisor', command: 'npm run anima -- work execute-one abc --version 1' });
+  });
+  test('approved não externo: só execute-one; review externo: revisão antes do aceite; outros estados: nada', () => {
+    expect(nextGovernedSteps({ ...base, state: 'approved', external: false })).toHaveLength(1);
+    expect(nextGovernedSteps({ ...base, state: 'review', external: true }).map(s => s.command)).toEqual([
+      'npm run anima -- work external review abc --version 1', 'npm run anima -- work accept abc']);
+    expect(nextGovernedSteps({ ...base, state: 'completed', external: true })).toEqual([]);
   });
 });

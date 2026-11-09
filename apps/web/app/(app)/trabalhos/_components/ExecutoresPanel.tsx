@@ -15,6 +15,7 @@ export interface ExecutorDiscoveryView {
   recommendation: { backendId: string; rule: string; reason: string } | null;
   noRecommendation: { reason: string } | null;
   governedCommand: string;
+  nextSteps?: { label: string; actor: 'human' | 'supervisor'; command: string }[];
 }
 
 const AVAILABILITY: Record<ExecutorCandidateView['availability'], string> = { ready: 'pronto', unavailable: 'indisponível', unknown: 'não sondado' };
@@ -58,9 +59,20 @@ export function ExecutoresPanel({ workItemId, fetcher }: { workItemId: string; f
             ? <p>Recomendação ({data.recommendation.rule}): <strong>{data.recommendation.backendId}</strong>. {data.recommendation.reason}</p>
             : <p>Sem recomendação: nenhum executor elegível está pronto.</p>}
           <p>Verificado em {data.observedAt}. A recomendação reflete só prontidão, elegibilidade e custo — não a adequação à tarefa.</p>
-          {EXECUTABLE_STATES.has(data.state)
-            ? <p>Para executar uma volta isolada (ato humano governado), rode no terminal: <code>{data.governedCommand}</code></p>
-            : <p>Estado {data.state}: ainda não há volta isolada a executar (a execução exige proposta aprovada).</p>}
+          {data.nextSteps && data.nextSteps.length > 0
+            ? (
+              <div>
+                <p>Próximos atos governados para o estado <strong>{data.state}</strong> (a interface não os executa):</p>
+                <ol>
+                  {data.nextSteps.map(step => (
+                    <li key={step.command}>{step.actor === 'human' ? 'Humano' : 'Supervisor'} — {step.label}: <code>{step.command}</code></li>
+                  ))}
+                </ol>
+              </div>
+            )
+            : EXECUTABLE_STATES.has(data.state)
+              ? <p>Para executar uma volta isolada (ato humano governado), rode no terminal: <code>{data.governedCommand}</code></p>
+              : <p>Estado {data.state}: ainda não há volta isolada a executar (a execução exige proposta aprovada).</p>}
         </>
       )}
     </section>
