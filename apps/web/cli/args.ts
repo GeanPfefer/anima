@@ -19,6 +19,7 @@ export type ParsedCommand =
   | { readonly kind: 'status'; readonly json: boolean }
   | { readonly kind: 'recovery-config-check'; readonly json: boolean }
   | { readonly kind: 'toolchain-check'; readonly json: boolean }
+  | { readonly kind: 'executors-check'; readonly json: boolean }
   | { readonly kind: 'budget-status'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-list'; readonly json: boolean }
   | { readonly kind: 'work-investigation'; readonly id: string; readonly json: boolean }
@@ -187,6 +188,11 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   if (group === 'recovery-config') {
     if (sub !== 'check' || rest.length > 0 || reason !== null) return { ok: false, error: 'Uso: anima recovery-config check [--json]' };
     return { ok: true, command: { kind: 'recovery-config-check', json } };
+  }
+
+  if (group === 'executors') {
+    if (sub !== 'check' || rest.length > 0 || reason !== null) return { ok: false, error: 'Uso: anima executors check [--json]' };
+    return { ok: true, command: { kind: 'executors-check', json } };
   }
 
   if (group === 'toolchain') {
@@ -465,6 +471,7 @@ Uso:
   anima status                                Identidade, conexão e resumo do trabalho
   anima recovery-config check                 Prontidão da configuração recuperável (read-only, sem valores, sem rede)
   anima toolchain check                       Prontidão do toolchain (read-only; só comandos --version; nunca instala)
+  anima executors check                       Prontidão dos executores de coding deste host (read-only; sem work item nem banco; nunca inicia)
   anima budget status <id|REF>                    Orçamento autônomo atual (somente leitura)
   anima work execute-one <UUID> --version N [--json]  Uma volta isolada; exige aprovação/classificação prévias
   anima work propose-investigation --question T --base-sha SHA [--capability research] [--json]

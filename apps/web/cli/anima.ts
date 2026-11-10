@@ -28,6 +28,7 @@ import { recoverFromHarnessDefect } from '@/lib/work-orchestration/harness-recov
 import { recoverFromFailedCandidate } from '@/lib/work-orchestration/candidate-recovery';
 import { runWorkRecoverCandidate } from './app';
 import { ensurePlannedProjectClassification } from '@/lib/work-orchestration/planned-project-classification';
+import { runExecutorsCheck } from './app';
 import { runWorkInvestigation, runBudgetStatus, runStatus, runWorkApprove, runWorkCorrect, runWorkEvidence, runWorkExecutors, runWorkList, runWorkReview, runWorkShow, runWorkSupervise, runWorkUnsupervise, runWorkWithdraw, runWorkResolvePending, runWorkRetry, type CommandResult, type WorkRetryCapability } from './app';
 import { createNodeExecutorReadinessDeps, probeAllExecutors } from '@/lib/work-orchestration/executor-readiness';
 import { diagnoseCodexExecutor } from '@/lib/work-orchestration/codex-executor-diagnostics';
@@ -59,7 +60,7 @@ function jsonFlag(command: ParsedCommand): boolean {
   return command.kind !== 'help' && command.json;
 }
 
-export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config-check' | 'toolchain-check' }>, injection: {
+export async function dispatch(command: Exclude<ParsedCommand, { kind: 'recovery-config-check' | 'toolchain-check' | 'executors-check' }>, injection: {
   readonly resolveIdentity?: () => Promise<IdentityResult>;
   readonly service?: WorkOrchestrationService;
   readonly investigationDeps?: InvestigationPreparationDeps;
@@ -254,6 +255,16 @@ async function main(): Promise<void> {
     const report = checkToolchain({ platform: currentPlatform(), probe: probeCommand, repoFileExists: repoFileExists(root), readRepoFile: readRepoFile(root) });
     process.stdout.write(`${parsed.command.json ? JSON.stringify(report, null, 2) : renderToolchainReport(report)}\n`);
     finish(report.core === 'READY' ? EXIT.OK : EXIT.ERROR);
+    return;
+  }
+
+  // Read-only e local: as sondagens canônicas de readiness (`--version`, login por assinatura,
+  // GET /api/tags do Ollama), sem autenticar, sem work item e sem banco. Nunca inicia executor.
+  if (parsed.command.kind === 'executors-check') {
+    const readiness = createNodeExecutorReadinessDeps();
+    const checked = await runExecutorsCheck(() => probeAllExecutors(readiness), readiness.platform, undefined, observation => diagnoseCodexExecutor(readiness, observation));
+    process.stdout.write(`${parsed.command.json ? JSON.stringify(checked.payload, null, 2) : renderHuman(checked.payload)}\n`);
+    finish(checked.exitCode);
     return;
   }
 
