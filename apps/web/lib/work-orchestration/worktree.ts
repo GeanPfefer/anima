@@ -72,9 +72,13 @@ export function runProcess(
     // Com shell, passa a linha inteira como um único argumento (sem array), a
     // forma recomendada: evita o DeprecationWarning de args não escapados. A
     // segurança vem da allowlist estrita a montante, não do escape.
+    // Fora do Windows o filho vira líder de um grupo de processos próprio
+    // (`detached`), para que o encerramento alcance os netos pelo grupo (ver
+    // `terminate`). Os pipes continuam ligados; nada de `unref`.
+    const detached = process.platform !== 'win32';
     const child = options.shell
-      ? spawn(command, { cwd: options.cwd, shell: true, windowsHide: true, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] })
-      : spawn(file, [...args], { cwd: options.cwd, shell: false, windowsHide: true, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+      ? spawn(command, { cwd: options.cwd, shell: true, windowsHide: true, detached, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn(file, [...args], { cwd: options.cwd, shell: false, windowsHide: true, detached, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', settled = false, timedOut = false, cancelled = false;
     const done = (exitCode: number): void => {
       if (settled) return;
@@ -87,12 +91,19 @@ export function runProcess(
     // Encerramento da ÁRVORE: no Windows com shell, `child.kill()` mata só o cmd.exe e
     // o neto (node/jest) segura o pipe aberto — o timeout não cortava nada e o
     // `close` esperava o processo terminar sozinho. `taskkill /T /F` derruba a árvore.
+    // No POSIX (Linux, WSL, macOS) o mesmo problema existia com `sh -c` e com
+    // wrappers (ai-memory → harness): `child.kill()` matava só o filho direto. A
+    // paridade é `SIGKILL` ao grupo inteiro (`-pid`), equivalente ao `/F`; se o
+    // grupo já não existir, cai no `child.kill('SIGKILL')`.
     // Rede de segurança: se o `close` não vier, resolve mesmo assim após uma folga.
     let forceTimer: ReturnType<typeof setTimeout> | undefined;
     const terminate = (): void => {
       if (process.platform === 'win32' && child.pid !== undefined) {
         try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill()); }
         catch { child.kill(); }
+      } else if (detached && child.pid !== undefined) {
+        try { process.kill(-child.pid, 'SIGKILL'); }
+        catch { child.kill('SIGKILL'); }
       } else {
         child.kill();
       }

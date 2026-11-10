@@ -74,6 +74,73 @@ describe('runProcess — timeout e cancelamento', () => {
   }, 15_000);
 });
 
+describe('runProcess — encerramento da árvore (pai + neto)', () => {
+  // Pai que lança um neto pendurado e registra os dois PIDs. Em qualquer plataforma
+  // o encerramento precisa alcançar o neto (taskkill /T no Windows; grupo no POSIX).
+  let dir: string;
+  beforeAll(async () => { dir = await mkdtemp(join(tmpdir(), 'anima-tree-kill-')); });
+  afterAll(async () => { await rm(dir, { recursive: true, force: true }); });
+  const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const waitDead = async (pid: number): Promise<boolean> => {
+    for (let i = 0; i < 50 && alive(pid); i++) await new Promise(r => setTimeout(r, 100));
+    return !alive(pid);
+  };
+  const tree = async (name: string) => {
+    const pids = join(dir, `${name}.json`);
+    const child = join(dir, `${name}-child.js`);
+    const parent = join(dir, `${name}-parent.js`);
+    await writeFile(child, 'setInterval(() => {}, 1000);');
+    await writeFile(parent, [
+      "const { spawn } = require('child_process'); const fs = require('fs');",
+      `const c = spawn(process.execPath, [${JSON.stringify(child)}], { stdio: 'ignore' });`,
+      `fs.writeFileSync(${JSON.stringify(pids)}, JSON.stringify({ parent: process.pid, child: c.pid }));`,
+      'setInterval(() => {}, 1000);',
+    ].join('\n'));
+    const waitPids = async (): Promise<{ parent: number; child: number }> => {
+      for (let i = 0; i < 50; i++) {
+        try { return JSON.parse(await readFile(pids, 'utf8')) as { parent: number; child: number }; }
+        catch { await new Promise(r => setTimeout(r, 100)); }
+      }
+      throw new Error('o pai não registrou os PIDs');
+    };
+    return { parent, waitPids };
+  };
+  const expectTreeDead = async (seen: { parent: number; child: number }): Promise<void> => {
+    expect(await waitDead(seen.parent)).toBe(true);
+    expect(await waitDead(seen.child)).toBe(true);
+  };
+
+  test('timeout derruba pai e neto (sem shell)', async () => {
+    const { parent, waitPids } = await tree('timeout');
+    const result = await runProcess(process.execPath, [parent], { cwd: dir, timeoutMs: 1_000 });
+    expect(result.timedOut).toBe(true);
+    await expectTreeDead(await waitPids());
+  }, 20_000);
+
+  test('cancelamento derruba pai e neto (sem shell)', async () => {
+    const { parent, waitPids } = await tree('cancel');
+    const controller = new AbortController();
+    const pending = runProcess(process.execPath, [parent], { cwd: dir, timeoutMs: 30_000, signal: controller.signal });
+    const seen = await waitPids();
+    controller.abort();
+    const result = await pending;
+    expect(result.cancelled).toBe(true);
+    await expectTreeDead(seen);
+  }, 20_000);
+
+  test('timeout com shell derruba o shell e toda a descendência', async () => {
+    const { parent, waitPids } = await tree('shell');
+    const result = await runProcess(`"${process.execPath}"`, [`"${parent}"`], { cwd: dir, timeoutMs: 1_000, shell: true });
+    expect(result.timedOut).toBe(true);
+    await expectTreeDead(await waitPids());
+  }, 20_000);
+
+  test('processo que termina sozinho não é afetado (exit 0, sem timeout)', async () => {
+    const result = await runProcess(process.execPath, ['-e', 'process.stdout.write("ok")'], { cwd: dir, timeoutMs: 10_000 });
+    expect(result).toMatchObject({ exitCode: 0, stdout: 'ok', timedOut: false, cancelled: false });
+  }, 20_000);
+});
+
 describe('isTransientWorktreeError — resiliência da criação de worktree', () => {
   // Falhas de filesystem transitórias na criação (Windows: AV/indexador segura o TEMP
   // recém-criado; locks de ref) DEVEM re-tentar. É a causa observada do attempt
