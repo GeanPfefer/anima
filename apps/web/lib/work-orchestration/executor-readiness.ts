@@ -133,24 +133,50 @@ function gitBashLocatable(deps: ExecutorReadinessDeps, env: Record<string, strin
   return false;
 }
 
-async function probeClaude(deps: ExecutorReadinessDeps): Promise<ExecutorObservation> {
+/** Modo de autenticação do Claude Code (`claude auth status` → `authMethod`, valores documentados). */
+export type ClaudeAuthMethod = 'none' | 'claude.ai' | 'oauth_token' | 'api_key' | 'api_key_helper' | 'third_party' | 'unrecognized';
+const CLAUDE_AUTH_METHODS: ReadonlySet<string> = new Set(['none', 'claude.ai', 'oauth_token', 'api_key', 'api_key_helper', 'third_party']);
+
+interface ClaudeProbe { readonly observation: ExecutorObservation; readonly authMethod: ClaudeAuthMethod | null }
+
+async function probeClaudeDetailed(deps: ExecutorReadinessDeps): Promise<ClaudeProbe> {
+  const fail = (reason: string): ClaudeProbe => ({ observation: unavailable('claude-code', reason), authMethod: null });
   const config = resolveClaudeCodeConfig(null, deps.env);
-  if (!config.ok) return unavailable('claude-code', 'executable_is_shell_wrapper');
+  if (!config.ok) return fail('executable_is_shell_wrapper');
   const env = buildClaudeCodeEnvironment(deps.env);
   const versionFailure = await checkVersion(deps, config.value.executable, env);
-  if (versionFailure) return unavailable('claude-code', versionFailure);
-  if (deps.platform === 'win32' && !gitBashLocatable(deps, env)) return unavailable('claude-code', 'git_bash_not_found');
+  if (versionFailure) return fail(versionFailure);
+  if (deps.platform === 'win32' && !gitBashLocatable(deps, env)) return fail('git_bash_not_found');
   const auth = await deps.run(config.value.executable, ['auth', 'status'], { cwd: deps.cwd, timeoutMs: READINESS_AUTH_TIMEOUT_MS, env });
-  if (auth.timedOut) return unavailable('claude-code', 'auth_probe_timeout');
-  let loggedIn: unknown;
+  if (auth.timedOut) return fail('auth_probe_timeout');
+  let parsed: unknown;
+  try { parsed = JSON.parse(auth.stdout.trim()); } catch { return fail('auth_status_invalid'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('auth_status_invalid');
+  const raw = (parsed as { authMethod?: unknown }).authMethod;
+  const authMethod: ClaudeAuthMethod = typeof raw === 'string' && CLAUDE_AUTH_METHODS.has(raw) ? raw as ClaudeAuthMethod : 'unrecognized';
+  return (parsed as { loggedIn?: unknown }).loggedIn === true
+    ? { observation: ready('claude-code'), authMethod }
+    : { observation: unavailable('claude-code', 'claude_not_logged_in'), authMethod };
+}
+
+async function probeClaude(deps: ExecutorReadinessDeps): Promise<ExecutorObservation> {
+  return (await probeClaudeDetailed(deps)).observation;
+}
+
+/**
+ * Readiness ESTRITA do Claude Code para o Single-Item (NOMAD-01-F): além de pronto, a sessão tem de ser de
+ * ASSINATURA (`authMethod: claude.ai`). API key, helper, token avulso, provedor terceiro ou valor desconhecido
+ * ⇒ `claude_login_not_subscription` (paridade com `codex_login_not_subscription`). Sem coding; só `--version` e
+ * `auth status`. A readiness geral (`executors check`, `work executors`) continua a de `probeClaude`.
+ */
+export async function probeClaudeSubscriptionReadiness(deps: ExecutorReadinessDeps): Promise<ExecutorObservation> {
   try {
-    const parsed: unknown = JSON.parse(auth.stdout.trim());
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return unavailable('claude-code', 'auth_status_invalid');
-    loggedIn = (parsed as { loggedIn?: unknown }).loggedIn;
+    const probe = await probeClaudeDetailed(deps);
+    if (probe.observation.availability !== 'ready') return probe.observation;
+    return probe.authMethod === 'claude.ai' ? probe.observation : unavailable('claude-code', 'claude_login_not_subscription');
   } catch {
-    return unavailable('claude-code', 'auth_status_invalid');
+    return unknown('claude-code', 'probe_failed');
   }
-  return loggedIn === true ? ready('claude-code') : unavailable('claude-code', 'claude_not_logged_in');
 }
 
 async function probeOllama(deps: ExecutorReadinessDeps): Promise<ExecutorObservation> {

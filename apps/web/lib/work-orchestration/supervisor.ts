@@ -475,8 +475,9 @@ export async function runSupervisorTurn(dependencies: SupervisorTurnDependencies
       refusal: { code: 'routing_adapter_missing', message: 'A rota selecionada não possui adaptador correspondente.' },
     };
   }
-  if (dependencies.singleItem && (item.value.intent['execution_spec'] as Record<string, unknown>)['coder_backend'] === 'codex-cli'
-      && (configuredRoute.candidate.modelRef !== 'codex-cli:default' || configuredRoute.adapter.id !== 'worktree-v1')) {
+  const singleItemBackend = (item.value.intent['execution_spec'] as Record<string, unknown>)['coder_backend'];
+  if (dependencies.singleItem && (singleItemBackend === 'codex-cli' || singleItemBackend === 'claude-code')
+      && (configuredRoute.candidate.modelRef !== `${singleItemBackend}:default` || configuredRoute.adapter.id !== 'worktree-v1')) {
     return { ...started, outcome: 'routing_refused', refusal: { code: 'single_item_executor_mismatch', message: 'A rota diverge do backend/modelo aprovado.' } };
   }
   const adapter = configuredRoute.adapter;

@@ -18,7 +18,7 @@ export function singleItemExecutionRefusal(scope: SingleItemExecution, item: Wor
   return null;
 }
 
-/** V1 estreita: nenhuma retomada implícita nem backend pago/por default. */
+/** V1 estreita: nenhuma retomada implícita nem backend pago/por default. Por assinatura: Codex CLI e Claude Code. */
 export function singleItemContractRefusal(intent: unknown): string | null {
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)) return 'single_item_contract_invalid';
   const spec = (intent as Record<string, unknown>)['execution_spec'];
@@ -30,7 +30,12 @@ export function singleItemContractRefusal(intent: unknown): string | null {
     || (spec as Record<string, unknown>)['executor'] !== 'worktree')) {
     return 'single_item_codex_contract_invalid';
   }
-  if (backend !== 'ollama' && backend !== 'codex-cli') {
+  // Claude Code (NOMAD-01-F): mesmo envelope estrito do Codex — executor de worktree e modelo da conta.
+  if (backend === 'claude-code' && ((spec as Record<string, unknown>)['model'] !== 'default'
+    || (spec as Record<string, unknown>)['executor'] !== 'worktree')) {
+    return 'single_item_claude_contract_invalid';
+  }
+  if (backend !== 'ollama' && backend !== 'codex-cli' && backend !== 'claude-code') {
     return 'single_item_compute_not_allowed';
   }
   return null;

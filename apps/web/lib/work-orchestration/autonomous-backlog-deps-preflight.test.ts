@@ -153,6 +153,12 @@ describe('Single-Item V1 — compute e retomada antes de efeitos (SQL simulado)'
     expect(rpc).not.toHaveBeenCalled(); expect(runSupervisorTurn).not.toHaveBeenCalled();
     expect(jest.requireMock('./resident-on-demand-node').prepareCloudCoderNode).not.toHaveBeenCalled();
   });
+  test.each([{ model: 'opus' }, { model: undefined }, { executor: 'investigation' }])('Claude Code fora do envelope (%j) recusa antes de cloud/SQL/Supervisor', async patch => {
+    const { rpc, result } = run({ ...intent.execution_spec, coder_backend: 'claude-code', model: 'default', executor: 'worktree', ...patch });
+    expect((await result).refusal?.code).toBe('single_item_claude_contract_invalid');
+    expect(rpc).not.toHaveBeenCalled(); expect(runSupervisorTurn).not.toHaveBeenCalled();
+    expect(jest.requireMock('./resident-on-demand-node').prepareCloudCoderNode).not.toHaveBeenCalled();
+  });
   test.each([null, { commit_sha: 'invalid' }])('checkpoint %j recusa sem reiniciar', async checkpoint => {
     const { rpc, result } = run({ ...intent.execution_spec, resume_from_checkpoint: checkpoint });
     expect((await result).refusal?.code).toBe('single_item_resumption_unproved'); expect(rpc).not.toHaveBeenCalled();

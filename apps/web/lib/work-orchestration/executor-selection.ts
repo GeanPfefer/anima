@@ -230,6 +230,10 @@ const backendFor = (
     if (!config.ok) return { error: config.error };
     const aiMemory = resolveAiMemoryWrapConfig();
     if (!aiMemory.ok) return { error: aiMemory.error };
+    // Single-Item (mesma flag do Codex): modelo da conta e sem wrapper ai-memory — o envelope provado.
+    if (codexSubscriptionOnly && (config.value.model !== 'default' || aiMemory.value)) {
+      return { error: 'Single-Item exige Claude Code default sem ai-memory.' };
+    }
     return new ClaudeCodeCoderBackend({ config: config.value, ...(aiMemory.value ? { aiMemory: aiMemory.value } : {}) });
   }
 

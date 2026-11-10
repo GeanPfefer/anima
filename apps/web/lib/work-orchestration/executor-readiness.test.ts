@@ -1,4 +1,4 @@
-import { probeAllExecutors, probeExecutorReadiness, type ExecutorReadinessDeps, type ReadinessProcessResult } from './executor-readiness';
+import { probeAllExecutors, probeExecutorReadiness, type ExecutorReadinessDeps, type ReadinessProcessResult, probeClaudeSubscriptionReadiness } from './executor-readiness';
 
 const SECRET = 'sk-super-secret-token';
 const EMAIL = 'pessoa@example.com';
@@ -232,4 +232,34 @@ test('coder WSL readiness probes the selected Linux runtime', async () => {
   expect(await probeExecutorReadiness('codex-cli', deps)).toMatchObject({ availability: 'ready' });
   expect(deps.calls).toHaveLength(2);
   expect(deps.calls.every(call => call[0]!.endsWith('wsl.exe') && call.includes('/home/geanteco/.nvm/versions/node/v22.23.3/bin/codex'))).toBe(true);
+});
+
+describe('Claude Code: readiness estrita de assinatura para o Single-Item (NOMAD-01-F)', () => {
+  const claude = (authMethod: unknown, loggedIn: unknown = true) => makeDeps({
+    handler: (_file, args) => args.includes('--version') ? { stdout: '2.1.322 (Claude Code)' } : { stdout: JSON.stringify({ loggedIn, authMethod, subscriptionType: 'pro' }) },
+  });
+  test('sessão claude.ai ⇒ ready, só com --version e auth status (sem coding)', async () => {
+    const deps = claude('claude.ai');
+    expect(await probeClaudeSubscriptionReadiness(deps)).toEqual({ provider: 'claude-code', availability: 'ready', reasonUnavailable: null });
+    expect(deps.calls).toEqual([['claude', '--version'], ['claude', 'auth', 'status']]);
+  });
+  test.each(['api_key', 'api_key_helper', 'oauth_token', 'third_party', 'algo-novo', null])('authMethod %p ⇒ claude_login_not_subscription', async method => {
+    expect(await probeClaudeSubscriptionReadiness(claude(method))).toMatchObject({ availability: 'unavailable', reasonUnavailable: 'claude_login_not_subscription' });
+  });
+  test('a readiness geral não muda: API key logada continua ready em probeExecutorReadiness', async () => {
+    expect(await probeExecutorReadiness('claude-code', claude('api_key'))).toMatchObject({ availability: 'ready' });
+  });
+  test('deslogado, JSON inválido, timeout e ausência falham fechado', async () => {
+    expect(await probeClaudeSubscriptionReadiness(claude('claude.ai', false))).toMatchObject({ reasonUnavailable: 'claude_not_logged_in' });
+    const bad = makeDeps({ handler: (_f, args) => args.includes('--version') ? { stdout: 'v' } : { stdout: 'not json' } });
+    expect(await probeClaudeSubscriptionReadiness(bad)).toMatchObject({ reasonUnavailable: 'auth_status_invalid' });
+    const slow = makeDeps({ handler: (_f, args) => args.includes('--version') ? { stdout: 'v' } : { timedOut: true } });
+    expect(await probeClaudeSubscriptionReadiness(slow)).toMatchObject({ reasonUnavailable: 'auth_probe_timeout' });
+    expect(await probeClaudeSubscriptionReadiness(makeDeps({ handler: () => ({ exitCode: -1 }) }))).toMatchObject({ reasonUnavailable: 'executable_not_found' });
+  });
+  test('Windows sem Git Bash não é ready', async () => {
+    const deps = makeDeps({ platform: 'win32', fileExists: () => false, env: { Path: 'C:\\Windows' },
+      handler: (_f, args) => args.includes('--version') ? { stdout: 'v' } : { stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }) } });
+    expect(await probeClaudeSubscriptionReadiness(deps)).toMatchObject({ reasonUnavailable: 'git_bash_not_found' });
+  });
 });

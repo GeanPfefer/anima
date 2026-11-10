@@ -61,6 +61,16 @@ test('backend observado divergente impede verificação e sucesso',async()=>{
   const i=input(); const r=await finalizeSingleItemTurn({...i,coderObservations:[{backendId:'openai:other',durationMs:1000,outcome:'succeeded'}]});
   expect(r.refusal?.code).toBe('single_item_executor_mismatch'); expect(order).toEqual(['release']);
 });
+test('Claude Code: observação claude-code:default segue para a verificação; outro modelo/backend diverge',async()=>{
+  const i=input(); const claude={...i,contract:{...i.contract,coderBackend:'claude-code'}} as typeof i;
+  const ok=await finalizeSingleItemTurn({...claude,coderObservations:[{backendId:'claude-code:default',durationMs:9000,outcome:'succeeded'}]});
+  expect(ok.refusal?.code).not.toBe('single_item_executor_mismatch'); expect(verifyAndReleaseCandidate).toHaveBeenCalled();
+  for (const backendId of ['claude-code:opus','codex-cli:default']) {
+    (verifyAndReleaseCandidate as jest.Mock).mockClear();
+    const r=await finalizeSingleItemTurn({...claude,coderObservations:[{backendId,durationMs:1000,outcome:'succeeded'}]});
+    expect(r.refusal?.code).toBe('single_item_executor_mismatch'); expect(verifyAndReleaseCandidate).not.toHaveBeenCalled();
+  }
+});
 test('recusa de autorização na liberação é explícita, sem claim falsamente liberada',async()=>{
   const i=input(); (i.client.rpc as jest.Mock).mockResolvedValue({error:{message:'42501'}});
   expect(await finalizeSingleItemTurn(i)).toMatchObject({outcome:'execution_interrupted',claimReleased:false,refusal:{code:'single_item_claim_release_failed'}});
