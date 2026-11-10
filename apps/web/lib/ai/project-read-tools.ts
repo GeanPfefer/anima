@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { singleItemContractRefusal } from '@anima/core';
 import { resolveClaudeCodeConfig } from '@/lib/work-orchestration/claude-code-coder';
 import { resolveCodexCliConfig } from '@/lib/work-orchestration/codex-cli-coder';
 import { resolveOllamaCoderRuntimeConfig } from '@/lib/work-orchestration/ollama-coder-config';
@@ -190,6 +191,29 @@ async function listDecisions(ctx: ProjectReadToolContext, args: JsonObject): Pro
 
 const looksLikePath = (value: string): boolean => /[\\/]/.test(value);
 
+/**
+ * Contrato canônico de Single-Item do Claude Code (o mesmo que `work external propose --backend claude-code` produz).
+ * O suporte é lido da barreira REAL do core (`singleItemContractRefusal`), nunca de uma lista própria.
+ */
+const CLAUDE_SINGLE_ITEM_CONTRACT = { execution_spec: { executor: 'worktree', coder_backend: 'claude-code', model: 'default' } } as const;
+
+/**
+ * Elegibilidade do Claude Code para o Single-Item SÓ com o que dá para afirmar sem processo. Reusa as duas partes
+ * da barreira do `execute-one` (`singleItemCodexRefusal`) que não lançam nada: o contrato do core e a configuração do
+ * executável (`resolveClaudeCodeConfig('default')`). A sessão de assinatura (`authMethod: claude.ai`) só é verificada
+ * pela barreira na execução — aqui ela é sempre `unverified`, nunca "admitida".
+ */
+function claudeSingleItemEligibility(env: NodeJS.ProcessEnv | Record<string, string | undefined>, exists: (path: string) => boolean): {
+  readonly support: 'supported' | 'not_supported';
+  readonly eligibility: 'unverified_runtime_check_required' | 'blocked_executable_invalid' | 'blocked_executable_missing' | 'not_supported';
+} {
+  if (singleItemContractRefusal(CLAUDE_SINGLE_ITEM_CONTRACT) !== null) return { support: 'not_supported', eligibility: 'not_supported' };
+  const config = resolveClaudeCodeConfig('default', env);
+  if (!config.ok) return { support: 'supported', eligibility: 'blocked_executable_invalid' };
+  if (looksLikePath(config.value.executable) && !exists(config.value.executable)) return { support: 'supported', eligibility: 'blocked_executable_missing' };
+  return { support: 'supported', eligibility: 'unverified_runtime_check_required' };
+}
+
 /** Leitura de CONFIGURAÇÃO (env + existência de arquivo). Não lança processo, não toca rede, não grava. */
 export function executorsConfigurationReadiness(ctx: Pick<ProjectReadToolContext, 'env' | 'platform' | 'fileExists'>): unknown {
   const env = ctx.env ?? process.env;
@@ -197,6 +221,7 @@ export function executorsConfigurationReadiness(ctx: Pick<ProjectReadToolContext
   const exists = ctx.fileExists ?? existsSync;
   const codex = resolveCodexCliConfig('default', env, platform);
   const claude = resolveClaudeCodeConfig(null, env);
+  const claudeEligibility = claudeSingleItemEligibility(env, exists);
   const ollama = resolveOllamaCoderRuntimeConfig(env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest', env);
   const wslComplete = env.ANIMA_CODEX_CLI_TRANSPORT === 'wsl'
     && Boolean(env.ANIMA_CODEX_WSL_DISTRO?.trim() && env.ANIMA_CODEX_WSL_USER?.trim() && env.ANIMA_CODEX_WSL_CLI_PATH?.trim());
@@ -230,7 +255,12 @@ export function executorsConfigurationReadiness(ctx: Pick<ProjectReadToolContext
       {
         provider: 'claude-code',
         configuration: !claude.ok ? 'invalid' : nativeMissing(claude.value.executable) ? 'not_configured' : 'configured',
-        singleItem: 'not_admitted',
+        // Quatro níveis distintos (SYNC-04 C3): suporte no código ≠ prontidão do executável ≠ elegibilidade efetiva
+        // no Single-Item ≠ prova governada. Esta ferramenta não verifica login: a elegibilidade fica não verificada.
+        singleItemSupport: claudeEligibility.support,
+        singleItem: claudeEligibility.eligibility,
+        singleItemRequirement: 'Executável nativo (não wrapper) e sessão de assinatura claude.ai, comprovados pela barreira do execute-one antes de qualquer efeito; API key ou outro authMethod é recusado (single_item_claude_authentication_unproved).',
+        runtimeReadiness: 'not_checked',
         governedProof: 'absent',
       },
     ],

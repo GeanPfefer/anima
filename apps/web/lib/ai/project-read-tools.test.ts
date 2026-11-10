@@ -10,6 +10,8 @@ import {
   type ProjectReadToolContext,
 } from './project-read-tools';
 import { readConversationBrief, readConversationBriefSafe, type UserClient } from './project-read-model';
+import { singleItemCodexRefusal } from '@/lib/work-orchestration/single-item-codex-readiness';
+import { probeExecutorReadiness, type ExecutorReadinessDeps } from '@/lib/work-orchestration/executor-readiness';
 
 jest.mock('node:child_process', () => ({ execFile: jest.fn(), spawn: jest.fn(), exec: jest.fn(), execFileSync: jest.fn() }));
 
@@ -223,12 +225,12 @@ describe('project_executors_readiness (somente configuração)', () => {
     ANIMA_CODEX_WSL_CLI_PATH: '/home/geanteco/.local/node/bin/codex',
   };
 
-  test('não inicia processos nem verifica login; Claude Code não admitido e sem prova governada', () => {
+  test('não inicia processos nem verifica login; Claude Code suportado, elegibilidade não verificada e sem prova governada', () => {
     const out = executorsConfigurationReadiness({ env: wslEnv, platform: 'win32', fileExists: () => false }) as any;
     expect(out).toMatchObject({ kind: 'configuration_only', processesStarted: false, loginVerified: false });
     const by = Object.fromEntries(out.executors.map((e: { provider: string }) => [e.provider, e]));
     expect(by['codex-cli']).toMatchObject({ configuration: 'configured', transport: 'wsl', singleItem: 'admitted_with_wsl' });
-    expect(by['claude-code']).toMatchObject({ singleItem: 'not_admitted', governedProof: 'absent', configuration: 'configured' });
+    expect(by['claude-code']).toMatchObject({ singleItemSupport: 'supported', singleItem: 'unverified_runtime_check_required', runtimeReadiness: 'not_checked', governedProof: 'absent', configuration: 'configured' });
     expect(by['openai'].configuration).toBe('not_configured');
     expect((execFile as unknown as jest.Mock)).not.toHaveBeenCalled();
     expect((spawn as unknown as jest.Mock)).not.toHaveBeenCalled();
@@ -244,6 +246,57 @@ describe('project_executors_readiness (somente configuração)', () => {
     expect(by['codex-cli'].configuration).toBe('invalid');
     expect(by['openai'].configuration).toBe('configured');
     expect(JSON.stringify(out)).not.toContain('sk-secret');
+  });
+});
+
+describe('Claude Code no Chat Dev: suporte ≠ prontidão ≠ elegibilidade Single-Item ≠ prova governada (SYNC-04 C3)', () => {
+  const GIT = 'C:\\Program Files\\Git\\cmd';
+  const chat = (env: Record<string, string | undefined>, fileExists: (p: string) => boolean = () => true) =>
+    (executorsConfigurationReadiness({ env, platform: 'win32', fileExists }) as { executors: Array<Record<string, unknown>> })
+      .executors.find(e => e['provider'] === 'claude-code')!;
+  // Barreira REAL do execute-one com processos injetados (sem spawn): a mesma usada por supervisor e backlog.
+  const deps = (auth: unknown, env: Record<string, string | undefined> = {}, exitCode = 0): ExecutorReadinessDeps => ({
+    env: { Path: GIT, ...env }, platform: 'win32', cwd: 'C:/dev/anima', fileExists: () => true, httpGet: jest.fn(),
+    run: jest.fn(async (_file: string, args: readonly string[]) => ({ exitCode, timedOut: false, stderr: '',
+      stdout: args.includes('--version') ? '2.1.322 (Claude Code)' : JSON.stringify(auth) })),
+  });
+  const intent = { execution_spec: { executor: 'worktree', coder_backend: 'claude-code', model: 'default', base_sha: '1'.repeat(40) } };
+
+  test('assinatura claude.ai válida: a barreira admite, mas o Chat Dev só diz "não verificado" (não sonda) e sem prova governada', async () => {
+    expect(await singleItemCodexRefusal(intent, deps({ loggedIn: true, authMethod: 'claude.ai' }))).toBeNull();
+    expect(chat({})).toMatchObject({ singleItemSupport: 'supported', singleItem: 'unverified_runtime_check_required', runtimeReadiness: 'not_checked', governedProof: 'absent' });
+  });
+
+  test('API key: prontidão geral positiva, Single-Item recusado — e o Chat Dev não afirma admissão', async () => {
+    const d = deps({ loggedIn: true, authMethod: 'api_key' });
+    expect(await probeExecutorReadiness('claude-code', d)).toMatchObject({ availability: 'ready' });
+    expect(await singleItemCodexRefusal(intent, deps({ loggedIn: true, authMethod: 'api_key' }))).toBe('single_item_claude_authentication_unproved');
+    const c = chat({});
+    expect(c['singleItem']).toBe('unverified_runtime_check_required');
+    expect(JSON.stringify(c)).not.toMatch(/"singleItem":"admitted/);
+    expect(String(c['singleItemRequirement'])).toContain('claude.ai');
+  });
+
+  test('executável ausente: Chat Dev bloqueia pela configuração; a barreira também recusa', async () => {
+    const env = { ANIMA_CLAUDE_CODE_PATH: 'C:\\x\\claude.exe' };
+    expect(chat(env, () => false)).toMatchObject({ configuration: 'not_configured', singleItem: 'blocked_executable_missing', governedProof: 'absent' });
+    expect(await singleItemCodexRefusal(intent, deps({}, env, -1))).toBe('single_item_claude_authentication_unproved');
+  });
+
+  test('wrapper de shell: mesma regra do executável da barreira (single_item_claude_executable_invalid)', async () => {
+    const env = { ANIMA_CLAUDE_CODE_PATH: 'C:\\npm\\claude.cmd' };
+    expect(chat(env)).toMatchObject({ configuration: 'invalid', singleItem: 'blocked_executable_invalid', governedProof: 'absent' });
+    const d = deps({ loggedIn: true, authMethod: 'claude.ai' }, env);
+    expect(await singleItemCodexRefusal(intent, d)).toBe('single_item_claude_executable_invalid');
+    expect(d.run).not.toHaveBeenCalled();
+  });
+
+  test('prova governada permanece ausente em todos os estados; nenhum processo é iniciado pela ferramenta', () => {
+    for (const env of [{}, { ANIMA_CLAUDE_CODE_PATH: 'C:\\npm\\claude.cmd' }, { ANIMA_CLAUDE_CODE_PATH: 'C:\\x\\claude.exe' }]) {
+      expect(chat(env, () => false)['governedProof']).toBe('absent');
+    }
+    expect((execFile as unknown as jest.Mock)).not.toHaveBeenCalled();
+    expect((spawn as unknown as jest.Mock)).not.toHaveBeenCalled();
   });
 });
 
