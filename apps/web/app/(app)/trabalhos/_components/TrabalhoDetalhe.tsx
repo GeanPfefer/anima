@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { WorkProposalCard, type WorkPresentationView } from '@/app/(app)/chat/_components/WorkProposalCard';
 import { presentWorkReencounter } from '@/app/(app)/chat/_components/work-item-presentation';
+import { ExecutoresPanel } from './ExecutoresPanel';
 import styles from './trabalhos.module.css';
 
 // Detalhe de UM trabalho. Reutiliza o WorkProposalCard e as rotas de ação existentes; este componente só
@@ -46,6 +47,7 @@ export function TrabalhoDetalhe({ initial, reference, title }: { initial: WorkPr
         trackAutonomousProgress={presentation.execution?.status === 'running'}
         correctionUnavailableReason={CORRECTION_CHAT_ONLY}
       />
+      <ExecutoresPanel workItemId={presentation.item.id} />
     </main>
   );
 }

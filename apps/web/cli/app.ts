@@ -33,9 +33,9 @@ import type { WorkOrchestrationErrorCode, WorkOperationResult } from '@anima/cor
 import { parseAutonomyFlag } from '@/lib/resident-host/ports';
 import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
 import { EXIT, type ExitCode } from './exit-codes';
-import { readExecutionContract } from '@/lib/work-orchestration/executor-selection';
+import { discoverWorkItemExecutors } from '@/lib/work-orchestration/work-executor-discovery';
 import type { CodexExecutorDiagnostic } from '@/lib/work-orchestration/codex-executor-diagnostics';
-import { projectExecutorCandidates, recommendExecutor, type ExecutorCandidate, type ExecutorObservation, type ExecutorRecommendation, type NoExecutorRecommendation } from '@/lib/work-orchestration/executor-discovery';
+import { type ExecutorCandidate, type ExecutorObservation, type ExecutorRecommendation, type NoExecutorRecommendation } from '@/lib/work-orchestration/executor-discovery';
 import type { ReplanResult } from '@/lib/work-orchestration/replan-orchestration';
 import type { AuthorizeResumeResult } from '@/lib/work-orchestration/authorize-resume';
 
@@ -993,18 +993,13 @@ export async function runWorkExecutors(
 ): Promise<CommandResult> {
   const item = await service.getItem(id);
   if (!item.ok) return errorResult(item.error.message, item.error.code, exitCodeForError(item.error.code));
-  const contract = readExecutionContract(item.value.intent);
-  const observations = await probe();
-  const codexObservation = observations.find(o => o.provider === 'codex-cli');
-  const codex = diagnoseCodex && codexObservation ? await diagnoseCodex(codexObservation).catch(() => null) : null;
-  const candidates = projectExecutorCandidates({ contract, observations });
-  const outcome = recommendExecutor(candidates, contract);
+  const discovery = await discoverWorkItemExecutors({ item: item.value, probe, diagnoseCodex, now });
   return {
     exitCode: EXIT.OK,
     payload: {
       ok: true, kind: 'work-executors', ...humanReferenceFields(item.value.intent), workItemId: item.value.id, state: item.value.state, proposalVersion: item.value.proposalVersion,
-      contractBackend: contract.coderBackend, observedAt: now().toISOString(), candidates,
-      recommendation: outcome.recommendation, noRecommendation: outcome.noRecommendation, codex,
+      contractBackend: discovery.contractBackend, observedAt: discovery.observedAt, candidates: discovery.candidates,
+      recommendation: discovery.recommendation, noRecommendation: discovery.noRecommendation, codex: discovery.codex,
     },
   };
 }
