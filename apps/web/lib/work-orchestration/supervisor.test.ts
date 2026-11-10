@@ -1611,6 +1611,12 @@ describe('Single-Item V1 — integração preparada sob prova SQL simulada', () 
     expect(result.refusal?.code).toBe('single_item_codex_contract_invalid');
     expect(db.events).toEqual([]); expect(db.calls).toEqual(['select_autonomous_work']);
   });
+  test('Claude Code fora do envelope recusa antes de efeitos (mesma fronteira do Codex)', async () => {
+    const db = database(); const runner = executor(); const item = selected();
+    const result = await turn(db, runner.adapter, [{ ...item, intent: { ...item.intent, execution_spec: { ...(item.intent['execution_spec'] as Record<string, unknown>), coder_backend: 'claude-code', model: 'opus' } } }], ['claim', 'attempt'], undefined, scope, undefined, scope);
+    expect(result.refusal?.code).toBe('single_item_claude_contract_invalid');
+    expect(db.events).toEqual([]); expect(db.calls).toEqual(['select_autonomous_work']); expect(runner.calls).toHaveLength(0);
+  });
   test('backend pago recusa antes do orçamento/eventos', async () => {
     const db = database(); const runner = executor(); const item = selected();
     const result = await turn(db, runner.adapter, [{ ...item, intent: { ...item.intent, execution_spec: { ...(item.intent['execution_spec'] as Record<string, unknown>), coder_backend: 'openai' } } }], ['claim', 'attempt'], undefined, scope, undefined, scope);

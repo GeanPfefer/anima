@@ -112,6 +112,15 @@ describe('parser de argumentos da CLI', () => {
     expect(parseArgs(['work', 'executors', 'a', '--reason', 'x'])).toMatchObject({ ok: false });
   });
 
+  test('executors check é local, aceita só --json e recusa extras', () => {
+    expect(parseArgs(['executors', 'check'])).toEqual({ ok: true, command: { kind: 'executors-check', json: false } });
+    expect(parseArgs(['executors', 'check', '--json'])).toEqual({ ok: true, command: { kind: 'executors-check', json: true } });
+    expect(parseArgs(['executors'])).toMatchObject({ ok: false });
+    expect(parseArgs(['executors', 'list'])).toMatchObject({ ok: false });
+    expect(parseArgs(['executors', 'check', 'x'])).toMatchObject({ ok: false });
+    expect(parseArgs(['executors', 'check', '--reason', 'x'])).toMatchObject({ ok: false });
+  });
+
   test('comando de topo desconhecido → uso inválido', () => {
     expect(parseArgs(['bogus'])).toEqual({ ok: false, error: 'Comando desconhecido: bogus' });
   });

@@ -19,6 +19,7 @@ export type ParsedCommand =
   | { readonly kind: 'status'; readonly json: boolean }
   | { readonly kind: 'recovery-config-check'; readonly json: boolean }
   | { readonly kind: 'toolchain-check'; readonly json: boolean }
+  | { readonly kind: 'executors-check'; readonly json: boolean }
   | { readonly kind: 'budget-status'; readonly id: string; readonly json: boolean }
   | { readonly kind: 'work-list'; readonly json: boolean }
   | { readonly kind: 'work-investigation'; readonly id: string; readonly json: boolean }
@@ -189,6 +190,11 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     return { ok: true, command: { kind: 'recovery-config-check', json } };
   }
 
+  if (group === 'executors') {
+    if (sub !== 'check' || rest.length > 0 || reason !== null) return { ok: false, error: 'Uso: anima executors check [--json]' };
+    return { ok: true, command: { kind: 'executors-check', json } };
+  }
+
   if (group === 'toolchain') {
     if (sub !== 'check' || rest.length > 0 || reason !== null) return { ok: false, error: 'Uso: anima toolchain check [--json]' };
     return { ok: true, command: { kind: 'toolchain-check', json } };
@@ -314,7 +320,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   return { ok: false, error: `Comando desconhecido: ${group}` };
 }
 
-const EXTERNAL_PROPOSE_USAGE = 'Uso: anima work external propose --target ext:<slug> --objective "<texto>" --scope <caminho> [--scope ...] --exclude <caminho> [--exclude ...] --accept A1="<critério>" [--accept A2=...] (cada critério precisa de UMA prova: --gate-covers "A3=npm test" | --bind \'{"covers":["A1"],"file":"src/x.test.js","bound_tests":["nome completo"]}\' | --review A4) [--gate "<npm ...>" gate sem cobertura] --backend ollama|codex-cli [--model M] [--base-sha SHA] [--max-attempts N] [--max-minutes M] [--json]';
+const EXTERNAL_PROPOSE_USAGE = 'Uso: anima work external propose --target ext:<slug> --objective "<texto>" --scope <caminho> [--scope ...] --exclude <caminho> [--exclude ...] --accept A1="<critério>" [--accept A2=...] (cada critério precisa de UMA prova: --gate-covers "A3=npm test" | --bind \'{"covers":["A1"],"file":"src/x.test.js","bound_tests":["nome completo"]}\' | --review A4) [--gate "<npm ...>" gate sem cobertura] --backend ollama|codex-cli|claude-code [--model M] [--base-sha SHA] [--max-attempts N] [--max-minutes M] [--json]';
 const EXTERNAL_REVIEW_USAGE = 'Uso: anima work external review <UUID> --version N [--criterion N --decision accept|reject --diff-digest <sha256> [--reason "..."]] [--json] (sem --decision: só lê o candidato, mostra o diff real e o digest)';
 const EXTERNAL_INTEGRATE_USAGE = 'Uso: anima work external integrate inspect <UUID> [--json] | authorize <UUID> [--json] | execute <UUID> --auth-id <id> [--json] (inspect só lê; authorize só registra a autorização ff_only; execute só executa a autorização informada)';
 const EXTERNAL_TARGETS_USAGE = 'Uso: anima work external targets [--json] (lista, somente leitura, os targets externos configurados neste host e o estado de cada um)';
@@ -465,11 +471,12 @@ Uso:
   anima status                                Identidade, conexão e resumo do trabalho
   anima recovery-config check                 Prontidão da configuração recuperável (read-only, sem valores, sem rede)
   anima toolchain check                       Prontidão do toolchain (read-only; só comandos --version; nunca instala)
+  anima executors check                       Prontidão dos executores de coding deste host (read-only; sem work item nem banco; nunca inicia)
   anima budget status <id|REF>                    Orçamento autônomo atual (somente leitura)
   anima work execute-one <UUID> --version N [--json]  Uma volta isolada; exige aprovação/classificação prévias
   anima work propose-investigation --question T --base-sha SHA [--capability research] [--json]
                                                Cria investiga\u00e7\u00e3o proposed; aprova\u00e7\u00e3o humana posterior
-  anima work external propose --target ext:<slug> --objective T --scope P --exclude X --accept A1=T [--accept A2=T] --gate-covers "A1=CMD" | --bind JSON | --review A2 --backend ollama|codex-cli [--model M] [--json]
+  anima work external propose --target ext:<slug> --objective T --scope P --exclude X --accept A1=T [--accept A2=T] --gate-covers "A1=CMD" | --bind JSON | --review A2 --backend ollama|codex-cli|claude-code [--model M] [--json]
                                                Cria trabalho EXTERNO proposed (identidade do repositório autorizado, sem LLM); aprovação e classificação são atos humanos
   anima work external review <UUID> --version N [--criterion N --decision accept|reject --diff-digest SHA256 [--reason T]]
                                                Revisão HUMANA do candidato externo: lê o diff real e o digest; com --decision registra a decisão de um critério human_review

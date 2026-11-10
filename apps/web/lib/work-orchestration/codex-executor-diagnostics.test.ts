@@ -128,6 +128,8 @@ describe('diagnóstico: transporte nativo', () => {
     const d = await diagnoseCodexExecutor(makeDeps({ platform: 'win32', env: nativeEnv, handler: () => ({ exitCode: -1 }) }), { provider: 'codex-cli', availability: 'unavailable', reasonUnavailable: 'version_check_failed' });
     expect(d).toMatchObject({ transport: 'native', cause: 'executable_not_found', version: null });
     expect(d.hint).toContain('.env.codex-wsl.local');
+    expect(d.hint).toContain('ANIMA_CODEX_CLI_PATH');
+    expect(d.hint).toContain('o Single-Item continua exigindo WSL');
   });
   test('caminho absoluto inexistente não lança processo; wrapper de shell é recusado', async () => {
     const deps = makeDeps({ platform: 'win32', env: { ...nativeEnv, ANIMA_CODEX_CLI_PATH: String.raw`C:\tools\codex.exe` }, fileExists: () => false });

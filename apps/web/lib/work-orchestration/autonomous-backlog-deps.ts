@@ -334,8 +334,8 @@ export function buildProjectBacklogCycleDeps(
         return notExecutable(entry, 'single_item_resumption_unproved', 'V1 exige primeira attempt; retomadas não foram comprovadas.');
       }
       if (!options.singleItem && !history.error) contract = resumeLatestRetryCheckpoint(contract, history.data ?? []);
-      if (options.singleItem && contract.coderBackend !== 'ollama' && contract.coderBackend !== 'codex-cli') {
-        return notExecutable(entry, 'single_item_compute_not_allowed', 'V1 admite somente contrato explícito Ollama local ou Codex CLI; sem fallback.');
+      if (options.singleItem && contract.coderBackend !== 'ollama' && contract.coderBackend !== 'codex-cli' && contract.coderBackend !== 'claude-code') {
+        return notExecutable(entry, 'single_item_compute_not_allowed', 'V1 admite somente contrato explícito Ollama local, Codex CLI ou Claude Code; sem fallback.');
       }
 
       // ── Compute Router V1 — atrás do feature gate explícito de operador ──────────
@@ -376,7 +376,9 @@ export function buildProjectBacklogCycleDeps(
       const routedToOpenAI = computeDecision?.selectedProvider === 'openai';
       const model = computeDecision ? computeDecision.selectedModel! : contract.model ?? process.env.ANIMA_WORKTREE_CODER_MODEL ?? 'qwen3-coder:latest';
       const node = options.singleItem ? null : readExplicitCoderNodeV0(model);
-      let placement = routedToOpenAI || (options.singleItem && contract.coderBackend === 'codex-cli') ? null : decideCoderPlacement({
+      // Executores nativos por assinatura não usam placement de Ollama (não há modelo local a alocar).
+      const nativeSubscriptionCoder = contract.coderBackend === 'codex-cli' || contract.coderBackend === 'claude-code';
+      let placement = routedToOpenAI || (options.singleItem && nativeSubscriptionCoder) ? null : decideCoderPlacement({
         pressure: admittedPressure,
         model,
         nodes: node ? [node] : [],
@@ -437,7 +439,7 @@ export function buildProjectBacklogCycleDeps(
       if (!selection.ok) return notExecutable(entry, selection.error.code, selection.error.message);
 
       let turn: SupervisorTurnResult | null = null;
-      if (options.singleItem && contract.coderBackend === 'codex-cli' && selection.route.candidate.modelRef !== 'codex-cli:default') return notExecutable(entry, 'single_item_executor_mismatch', 'Rota divergente do contrato aprovado.');
+      if (options.singleItem && nativeSubscriptionCoder && selection.route.candidate.modelRef !== `${contract.coderBackend}:default`) return notExecutable(entry, 'single_item_executor_mismatch', 'Rota divergente do contrato aprovado.');
       // Watchdog best-effort: numa lease paga, a volta é abortada no DEADLINE da lease para parar
       // o gasto mais cedo (o teardown/reconciler durável segue como rede de segurança). O
       // `finish` usa o sinal BASE (não este) para garantir teardown mesmo após o abort.

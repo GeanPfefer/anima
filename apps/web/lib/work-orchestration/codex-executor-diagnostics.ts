@@ -35,6 +35,8 @@ export interface CodexExecutorDiagnostic {
   readonly hint: string | null;
 }
 
+/** No Windows o transporte nativo também é válido (diagnóstico, investigação); o Single-Item segue exigindo WSL. */
+const HINT_NATIVE_WIN32 = 'Para o transporte nativo, instale o Codex CLI (codex.exe no PATH) ou defina ANIMA_CODEX_CLI_PATH com o caminho do codex.exe; o Single-Item continua exigindo WSL.';
 const HINT_CONFIG = 'Configure o transporte WSL em apps/web/.env.codex-wsl.local (modelo: .env.codex-wsl.example; veja docs/operacao/codex-wsl-config-persistente.md).';
 
 const first = (text: string): string | null => {
@@ -94,7 +96,7 @@ export async function diagnoseCodexExecutor(deps: ExecutorReadinessDeps, observa
   const result = await deps.run(executable, ['--version'], { cwd: deps.cwd, timeoutMs: READINESS_VERSION_TIMEOUT_MS, env });
   if (result.timedOut) return { ...common, version: null, profileCompatible: null, cause: 'version_probe_timeout', hint: null };
   if (result.exitCode === -1) {
-    return { ...common, version: null, profileCompatible: null, cause: 'executable_not_found', hint: platform === 'win32' ? `Nenhum "codex" nativo foi lançado. ${HINT_CONFIG}` : 'Nenhum "codex" no PATH.' };
+    return { ...common, version: null, profileCompatible: null, cause: 'executable_not_found', hint: platform === 'win32' ? `Nenhum "codex" nativo foi lançado. ${HINT_NATIVE_WIN32} ${HINT_CONFIG}` : 'Nenhum "codex" no PATH.' };
   }
   if (result.exitCode !== 0) return { ...common, version: null, profileCompatible: null, cause: 'version_check_failed', hint: null };
   return { ...common, version: first(result.stdout), profileCompatible: null, cause: observation.availability === 'ready' ? null : observation.reasonUnavailable, hint: null };

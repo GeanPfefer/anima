@@ -150,7 +150,7 @@ export async function finalizeSingleItemTurn(input: PostTurnObservationInput): P
   let verification: MandatedVerificationOutcome | null = null;
   let failure: string | null = null;
   const coder = input.contract?.coderBackend;
-  if (coder === 'codex-cli' && input.coderObservations.some(o => o.backendId !== 'codex-cli:default')) {
+  if ((coder === 'codex-cli' || coder === 'claude-code') && input.coderObservations.some(o => o.backendId !== `${coder}:default`)) {
     failure = 'single_item_executor_mismatch';
   } else {
     try {

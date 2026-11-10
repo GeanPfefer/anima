@@ -51,6 +51,13 @@ describe('parseArgs — work external propose (acceptance_contract v2)', () => {
     ['limite inválido', [...propose, '--max-attempts', '9']],
     ['base-sha curto', [...propose, '--base-sha', 'abc']],
   ])('recusa: %s', (_n, argv) => expect(parseArgs(argv)).toMatchObject({ ok: false }));
+  test('backend claude-code (NOMAD-01-F): aceito sem modelo; modelo diferente de default recusado; ajuda o anuncia', () => {
+    const base = [...head, '--accept', 'A1=um', '--accept', 'A2=dois', '--gate-covers', 'A1,A2=npm test'];
+    expect(parseArgs([...base, '--backend', 'claude-code'])).toMatchObject({ ok: true, command: { kind: 'work-external-propose', backend: 'claude-code' } });
+    expect(parseArgs([...base, '--backend', 'claude-code', '--model', 'opus'])).toMatchObject({ ok: false, error: expect.stringContaining('model_invalid_for_claude_code') });
+    expect(parseArgs([...base, '--backend', 'claude'])).toMatchObject({ ok: false, error: expect.stringContaining('backend_invalid') });
+    expect(USAGE).toContain('--backend ollama|codex-cli|claude-code');
+  });
   test('a mensagem de recusa nomeia o critério sem cobertura', () => {
     expect(parseArgs([...head, '--accept', 'A1=um', '--accept', 'A2=dois', '--gate-covers', 'A1=npm test', ...tail])).toMatchObject({ ok: false, error: expect.stringContaining('acceptance_uncovered:A2') });
   });

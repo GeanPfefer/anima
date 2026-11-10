@@ -180,6 +180,20 @@ export interface WorkExecutorsPayload {
   /** Diagnóstico read-only do Codex CLI (transporte efetivo, distro/usuário/binário/versão e causa específica); null se não coletado. */
   readonly codex: CodexExecutorDiagnostic | null;
 }
+/**
+ * Prontidão dos executores de coding DESTE host, sem work item, banco ou autenticação: as
+ * mesmas sondagens read-only de `work executors` (`--version`, login por assinatura, GET
+ * /api/tags), sem contrato, elegibilidade ou recomendação. Nunca persiste, escolhe ou inicia.
+ */
+export interface ExecutorsCheckPayload {
+  readonly ok: true;
+  readonly kind: 'executors-check';
+  readonly platform: string;
+  readonly observedAt: string;
+  readonly observations: readonly ExecutorObservation[];
+  /** Diagnóstico read-only do Codex CLI; null se não coletado. */
+  readonly codex: CodexExecutorDiagnostic | null;
+}
 export interface StatusPayload {
   readonly ok: true;
   readonly kind: 'status';
@@ -336,7 +350,7 @@ export type CliPayload =
   | (Extract<ExternalWorkPrepareResult, {ok:true}> & {readonly kind:'work-external-propose'})
   | (Extract<ExternalClassificationResult, {ok:true}> & {readonly kind:'work-external-classify'})
   | WorkExternalReviewPayload
-  | WorkInvestigationPayload | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkRecoverCandidatePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
+  | WorkInvestigationPayload | StatusPayload | BudgetStatusPayload | WorkListPayload | WorkShowPayload | WorkEvidencePayload | WorkExecutorsPayload | ExecutorsCheckPayload | ReviewPayload | ApprovePayload | WithdrawPayload | ResolvePendingPayload | RetryPayload | WorkCorrectPayload | WorkSupervisionPayload | WorkAuthorizeComputePayload | WorkSetComputePayload | WorkRecoverHarnessPayload | WorkRecoverCandidatePayload | WorkPrepareAutonomousPayload | ErrorPayload | HelpPayload
   | (Extract<ReplanResult, {ok:true}> & {readonly kind:'work-replan'})
   | (Extract<AuthorizeResumeResult, {ok:true}> & {readonly kind:'work-authorize-resume'});
 
@@ -993,6 +1007,19 @@ export async function runWorkExecutors(
       recommendation: outcome.recommendation, noRecommendation: outcome.noRecommendation, codex,
     },
   };
+}
+
+/** `anima executors check`: readiness do host pelas sondagens canônicas, sem work item. Exit 0 mesmo sem executor pronto. */
+export async function runExecutorsCheck(
+  probe: () => Promise<readonly ExecutorObservation[]>,
+  platform: string,
+  now: () => Date = () => new Date(),
+  diagnoseCodex?: (observation: ExecutorObservation) => Promise<CodexExecutorDiagnostic>,
+): Promise<CommandResult> {
+  const observations = await probe();
+  const codexObservation = observations.find(o => o.provider === 'codex-cli');
+  const codex = diagnoseCodex && codexObservation ? await diagnoseCodex(codexObservation).catch(() => null) : null;
+  return { exitCode: EXIT.OK, payload: { ok: true, kind: 'executors-check', platform, observedAt: now().toISOString(), observations, codex } };
 }
 
 export async function runWorkEvidence(service: WorkOrchestrationPort, id: string): Promise<CommandResult> {

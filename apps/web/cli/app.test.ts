@@ -11,7 +11,7 @@ import type {
 } from '@anima/core';
 import type { ReviewCorrectionResult } from '@/lib/work-orchestration/review-correction-orchestration';
 import type { AuthorizeResumeResult } from '@/lib/work-orchestration/authorize-resume';
-import { runBudgetStatus, runStatus, runWorkApprove, runWorkAuthorizeResume, runWorkCorrect, runWorkExecutors, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
+import { runBudgetStatus, runExecutorsCheck, runStatus, runWorkApprove, runWorkAuthorizeResume, runWorkCorrect, runWorkExecutors, runWorkReview, runWorkShow, type WorkOrchestrationPort } from './app';
 import { renderHuman } from './render';
 import { EXIT } from './exit-codes';
 
@@ -395,6 +395,37 @@ describe('work executors (discovery read-only)', () => {
     expect(result.payload).toMatchObject({ ok: true, codex: null });
   });
 
+  test('executors check (host, sem work item): observações + diagnóstico Codex, exit 0, sem contrato nem recomendação', async () => {
+    const diag = { transport: 'native', configSource: 'default', distro: null, user: null, binary: 'codex',
+      version: null, profileCompatible: null, availability: 'unavailable', reason: 'executable_not_found', cause: 'executable_not_found', hint: null } as const;
+    const probe = jest.fn(async () => observations);
+    const diagnose = jest.fn(async () => diag);
+    const result = await runExecutorsCheck(probe, 'win32', at, diagnose);
+    expect(result.exitCode).toBe(EXIT.OK);
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(diagnose).toHaveBeenCalledWith({ provider: 'codex-cli', availability: 'ready', reasonUnavailable: null });
+    expect(result.payload).toEqual({ ok: true, kind: 'executors-check', platform: 'win32', observedAt: '2026-10-03T12:00:00.000Z', observations, codex: diag });
+    const text = renderHuman(result.payload);
+    expect(text).toContain('Executores de coding deste host (win32)');
+    expect(text).toContain('ollama_unreachable');
+    expect(text).toMatch(/✓ claude-code\s+ready/);
+    expect(text).toContain('Codex CLI: transporte native');
+    expect(text).toContain('binário: codex');
+    expect(text).toContain('anima work executors <id|REF>');
+    expect(text).toContain('Somente leitura: nada foi persistido, escolhido ou iniciado.');
+    expect(text).not.toContain('Recomendado');
+    expect(JSON.stringify(result.payload) + text).not.toContain(SECRET);
+  });
+
+  test('executors check: diagnóstico que falha não derruba o comando; sem codex-cli observado não diagnostica', async () => {
+    const broken = await runExecutorsCheck(async () => observations, 'linux', at, async () => { throw new Error('boom'); });
+    expect(broken).toMatchObject({ exitCode: EXIT.OK, payload: { ok: true, kind: 'executors-check', codex: null } });
+    const diagnose = jest.fn();
+    const none = await runExecutorsCheck(async () => [], 'linux', at, diagnose);
+    expect(diagnose).not.toHaveBeenCalled();
+    expect(none.payload).toMatchObject({ ok: true, observations: [], codex: null });
+  });
+
   test('item inexistente segue o erro operacional e não sonda', async () => {
     const probe = jest.fn(async () => observations);
     const result = await runWorkExecutors(fakePort({ getItem: async () => notFound() }), probe, 'zzz', at);
@@ -588,6 +619,21 @@ describe('entrypoint nativo da CLI', () => {
       expect(child.stdout).toBe(`${renderHuman({ ok: true, kind: 'help', usage: USAGE })}\n`);
     }
   });
+
+  test('executors check pelo entrypoint real: não autentica nem toca banco; sonda os cinco executores', () => {
+    const webRoot = resolve(__dirname, '..');
+    const pkg = JSON.parse(readFileSync(resolve(webRoot, 'package.json'), 'utf8')) as { scripts: { anima: string } };
+    const [, ...args] = pkg.scripts.anima.split(/\s+/);
+    // Sem Supabase no ambiente: qualquer tentativa de identidade/banco falharia com authentication_required.
+    const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    const child = spawnSync(process.execPath, args.concat('executors', 'check', '--json'), { cwd: webRoot, encoding: 'utf8', timeout: 60000, windowsHide: true, env });
+    expect(child.error).toBeUndefined();
+    expect(child.status).toBe(EXIT.OK);
+    const payload = JSON.parse(child.stdout) as { ok: boolean; kind: string; platform: string; observations: { provider: string }[] };
+    expect(payload).toMatchObject({ ok: true, kind: 'executors-check', platform: process.platform });
+    expect(payload.observations.map(o => o.provider).sort()).toEqual(['claude-code', 'codex-cli', 'deepseek-harness', 'ollama', 'openai']);
+    expect(child.stdout + child.stderr).not.toContain('authentication_required');
+  }, 70000);
 
   test('isMainModule compara URLs completas com caminhos relativos e separadores nativos', () => {
     const child = runCliModule(`

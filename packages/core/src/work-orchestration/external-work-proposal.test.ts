@@ -76,6 +76,7 @@ describe('validação de entrada e de provas', () => {
     ['objective_invalid', { objective: '  ' }], ['scope_invalid', { scope: [] }], ['scope_invalid', { scope: ['../x'] }],
     ['excluded_invalid', { excluded: [] }], ['excluded_invalid', { excluded: undefined }],
     ['backend_invalid', { backend: 'openai' }], ['model_required_for_ollama', { backend: 'ollama', model: undefined }], ['model_invalid_for_codex', { model: 'gpt-x' }],
+    ['model_invalid_for_claude_code', { backend: 'claude-code', model: 'opus' }], ['backend_invalid', { backend: 'claude' }], ['backend_invalid', { backend: 'Claude-Code' }],
     ['max_attempts_invalid', { maxAttempts: 4 }], ['max_minutes_invalid', { maxMinutes: 61 }],
     ['gates_invalid', { gates: [] }], ['gates_invalid', { gates: [{ command: 'rm -rf /' }] }], ['gates_invalid', { gates: [{ command: 'npm test && id' }] }],
     ['acceptance_invalid', { acceptance: [] }], ['acceptance_invalid', { acceptance: [{ id: 'x1', text: 't' }] }],
@@ -144,6 +145,26 @@ describe('nomes de teste resolvíveis no arquivo real (sem executar o alvo)', ()
   test.each(Object.values(T))('%s', name => expect(boundTestNameResolvable(CLAMP_TEST_SOURCE, name)).toBe(true));
   test.each(['clamp retorna max quando excede', 'retorna max quando o valor excede o máximo', 'clamp', '', 'outro describe retorna min quando o valor está abaixo do mínimo'])(
     'inexistente: %j', name => expect(boundTestNameResolvable(CLAMP_TEST_SOURCE, name)).toBe(false));
+});
+
+describe('backend claude-code (NOMAD-01-F)', () => {
+  test('aceito com modelo omitido ou default; contrato idêntico ao do Codex exceto o backend', () => {
+    expect(validateExternalWorkInput(clampInput({ backend: 'claude-code' }))).toBeNull();
+    expect(validateExternalWorkInput(clampInput({ backend: 'claude-code', model: 'default' }))).toBeNull();
+    const spec = (c: ReturnType<typeof built>) => (c.intent as unknown as { execution_spec: Record<string, unknown> }).execution_spec;
+    const claude = spec(built(clampInput({ backend: 'claude-code' })));
+    const codex = spec(built(clampInput()));
+    expect(claude).toMatchObject({ coder_backend: 'claude-code', coder_backend_source: 'operator_explicit', model: 'default', executor: 'worktree',
+      verifier_requirement: 'required_fail_closed', permissions: ['workspace_read', 'workspace_write_isolated'] });
+    expect({ ...claude, coder_backend: 'codex-cli' }).toEqual(codex);
+  });
+  test('o contrato produzido passa a fronteira estrita do Single-Item', () => {
+    expect(singleItemContractRefusal(built(clampInput({ backend: 'claude-code' })).intent)).toBeNull();
+  });
+  test('Ollama continua exigindo modelo explícito e o preserva', () => {
+    const spec = (built(clampInput({ backend: 'ollama', model: ' qwen3-coder:latest ' })).intent as unknown as { execution_spec: Record<string, unknown> }).execution_spec;
+    expect(spec).toMatchObject({ coder_backend: 'ollama', model: 'qwen3-coder:latest' });
+  });
 });
 
 describe('buildExternalWorkProposal — acceptance_contract v2', () => {

@@ -23,7 +23,11 @@ import { isValidWorkIntent, isValidWorkProposal } from './validation';
 // ============================================================
 
 export const EXTERNAL_WORK_ORIGIN = 'cli_propose_external_v1' as const;
-export const EXTERNAL_WORK_BACKENDS = ['ollama', 'codex-cli'] as const;
+/**
+ * Backends admitidos no trabalho EXTERNO. Os executores nativos por assinatura (`codex-cli`, `claude-code`) só existem
+ * com modelo `default`: a escolha do modelo é da conta, nunca de um texto do contrato (NOMAD-01-F).
+ */
+export const EXTERNAL_WORK_BACKENDS = ['ollama', 'codex-cli', 'claude-code'] as const;
 export type ExternalWorkBackend = typeof EXTERNAL_WORK_BACKENDS[number];
 
 export const EXTERNAL_WORK_OBJECTIVE_MAX = 4000;
@@ -212,6 +216,7 @@ export function validateExternalWorkInput(input: ExternalWorkInput): string | nu
   if (!(EXTERNAL_WORK_BACKENDS as readonly string[]).includes(input.backend)) return 'backend_invalid';
   if (input.backend === 'ollama' && !text(input.model, 120)) return 'model_required_for_ollama';
   if (input.backend === 'codex-cli' && input.model !== undefined && input.model !== 'default') return 'model_invalid_for_codex';
+  if (input.backend === 'claude-code' && input.model !== undefined && input.model !== 'default') return 'model_invalid_for_claude_code';
   const attempts = input.maxAttempts ?? 1, minutes = input.maxMinutes ?? 30;
   if (!Number.isInteger(attempts) || attempts < 1 || attempts > EXTERNAL_WORK_MAX_ATTEMPTS) return 'max_attempts_invalid';
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > EXTERNAL_WORK_MAX_MINUTES) return 'max_minutes_invalid';
@@ -266,7 +271,7 @@ export function buildExternalWorkProposal(input: ExternalWorkInput, specTarget: 
         executor: 'worktree',
         coder_backend: input.backend,
         coder_backend_source: 'operator_explicit',
-        model: input.backend === 'codex-cli' ? 'default' : input.model!.trim(),
+        model: input.backend === 'ollama' ? input.model!.trim() : 'default',
         base_sha: baseSha,
         permissions: ['workspace_read', 'workspace_write_isolated'],
         validation_criteria: criteria,
