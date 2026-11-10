@@ -64,6 +64,9 @@ async function checkVersion(deps: ExecutorReadinessDeps, executable: string, env
   if (isPathLike(executable) && !deps.fileExists(executable)) return 'executable_not_found';
   const result = await deps.run(executable, ['--version'], { cwd: deps.cwd, timeoutMs: READINESS_VERSION_TIMEOUT_MS, env });
   if (result.timedOut) return 'version_probe_timeout';
+  // Nome sem caminho que nem chega a ser lançado (`runProcess` devolve -1 no `error` do spawn, p.ex. ENOENT):
+  // o executável não está no PATH. Mesma regra do diagnóstico do Codex (V1-04).
+  if (result.exitCode === -1 && !isPathLike(executable)) return 'executable_not_found';
   return result.exitCode === 0 ? null : 'version_check_failed';
 }
 

@@ -48,8 +48,22 @@ describe('readiness: codex-cli', () => {
   });
 
   test('--version falha ⇒ version_check_failed; timeout ⇒ version_probe_timeout', async () => {
-    expect(await probeExecutorReadiness('codex-cli', makeDeps({ handler: () => ({ exitCode: -1 }) }))).toMatchObject({ reasonUnavailable: 'version_check_failed' });
+    expect(await probeExecutorReadiness('codex-cli', makeDeps({ handler: () => ({ exitCode: 1 }) }))).toMatchObject({ reasonUnavailable: 'version_check_failed' });
     expect(await probeExecutorReadiness('codex-cli', makeDeps({ handler: () => ({ exitCode: -1, timedOut: true }) }))).toMatchObject({ reasonUnavailable: 'version_probe_timeout' });
+  });
+
+  test('nome sem caminho que não é lançado (-1) ⇒ executable_not_found, sem sondar login (Codex e Claude)', async () => {
+    const codex = makeDeps({ handler: () => ({ exitCode: -1 }) });
+    expect(await probeExecutorReadiness('codex-cli', codex)).toMatchObject({ availability: 'unavailable', reasonUnavailable: 'executable_not_found' });
+    expect(codex.calls).toEqual([['codex', '--version']]);
+    const claude = makeDeps({ handler: () => ({ exitCode: -1 }) });
+    expect(await probeExecutorReadiness('claude-code', claude)).toMatchObject({ availability: 'unavailable', reasonUnavailable: 'executable_not_found' });
+    expect(claude.calls).toEqual([['claude', '--version']]);
+  });
+
+  test('caminho existente que falha ao lançar (-1) continua version_check_failed', async () => {
+    const deps = makeDeps({ env: { ANIMA_CODEX_CLI_PATH: '/opt/codex' }, fileExists: () => true, handler: () => ({ exitCode: -1 }) });
+    expect(await probeExecutorReadiness('codex-cli', deps)).toMatchObject({ reasonUnavailable: 'version_check_failed' });
   });
 
   test('não logado ⇒ codex_not_logged_in; login por API key ⇒ não é assinatura', async () => {
