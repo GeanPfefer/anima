@@ -1,11 +1,10 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(12);
+SELECT plan(15);
 
--- INTEL-04 v2 — orçamento consciente de custo (local vs externo/pago).
--- Regressões explícitas da decisão ratificada: execução LOCAL não é barrada pela
--- quota de custo (6/24h); execução EXTERNA continua barrada; anti-loop por item
--- e a separação local×externo são provados. A classe vem do contrato tipado
+-- Contrato efetivo V1 com supervisão, sem lease nem concessão pendente.
+-- O teto de tentativas por usuário é agregado. coder_backend informa a classe
+-- e os contadores de custo, mas não isenta nenhuma classe do teto.
 -- `execution_spec.coder_backend`.
 
 INSERT INTO auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
@@ -78,10 +77,22 @@ ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_intelligence_o
 ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_routing_on_attempt;
 ALTER TABLE public.work_events DISABLE TRIGGER enforce_autonomous_work_budget_before_start;
 SET LOCAL ROLE service_role;
--- User local: 6 tentativas LOCAIS (3+3). User external: 6 tentativas EXTERNAS (3+3).
+-- Usuário local: 5 tentativas primeiro, depois 6. Usuário externo: 6.
 -- User loop: 3 tentativas LOCAIS no MESMO item.
 SELECT pg_temp.attempts((SELECT id FROM lx_items WHERE label='l-helper-a'),3,1);
-SELECT pg_temp.attempts((SELECT id FROM lx_items WHERE label='l-helper-b'),3,2);
+SELECT pg_temp.attempts((SELECT id FROM lx_items WHERE label='l-helper-b'),2,2);
+RESET ROLE;
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub','8a000000-0000-0000-0000-000000000001',true);
+SELECT is(public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='l-target'))->>'policyVersion',
+  'autonomous-work-budget-v1-supervision','reader publica a versão vigente do orçamento');
+SELECT is((public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='l-target'))#>>'{usage,userAttempts24Hours}')::integer,
+  5,'fixture está uma tentativa abaixo do teto agregado');
+SELECT is(public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='l-target'))->>'admitted',
+  'true','cinco tentativas ainda admitem um item local novo sem supervisão');
+RESET ROLE;
+SET LOCAL ROLE service_role;
+SELECT pg_temp.attempts((SELECT id FROM lx_items WHERE label='l-helper-b'),1,6);
 SELECT pg_temp.attempts((SELECT id FROM lx_items WHERE label='x-helper-a'),3,3);
 SELECT pg_temp.attempts((SELECT id FROM lx_items WHERE label='x-helper-b'),3,4);
 SELECT pg_temp.attempts((SELECT id FROM lx_items WHERE label='loop'),3,5);
@@ -90,34 +101,34 @@ ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_intelligence_on
 ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_routing_on_attempt;
 ALTER TABLE public.work_events ENABLE TRIGGER enforce_autonomous_work_budget_before_start;
 
--- ---------- LOCAL: 6 tentativas locais NÃO barram execução local ----------
+-- Seis tentativas locais bloqueiam itens novos de ambas as classes.
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','8a000000-0000-0000-0000-000000000001',true);
 SELECT is(public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='l-target'))->>'admitted',
-  'true','LOCAL com 6 tentativas locais em 24h continua admitido (sem quota de custo)');
+  'false','a sexta tentativa local esgota o teto agregado para item local');
 SELECT is(public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='l-target'))->>'reason',
-  NULL,'LOCAL não recebe user_attempt_budget_exhausted');
+  'user_attempt_budget_exhausted','bloqueio local indica o teto do usuário, não o teto por item');
 SELECT is(public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='l-target'))->>'costClass',
   'local','item local é classificado como local pelo coder_backend');
 SELECT is((public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='l-target'))#>>'{usage,userAttempts24Hours}')::integer,
-  6,'as 6 tentativas locais são contadas (observabilidade) mas não são quota de custo');
+  6,'as seis tentativas locais contam para o teto do usuário');
 SELECT is((public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='l-target'))#>>'{usage,externalAttempts24Hours}')::integer,
   0,'tentativas locais não entram no consumo EXTERNO');
--- Separação: um item EXTERNO deste usuário (0 tentativas externas) é admitido.
+-- O usuário tem zero consumo externo, mas o teto agregado está cheio.
 SELECT is(public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='l-ext'))->>'admitted',
-  'true','item EXTERNO admitido quando o usuário não gastou quota externa (as 6 foram locais)');
+  'false','item externo também é bloqueado com seis tentativas locais e zero externas');
 
--- ---------- EXTERNO: 6 tentativas externas barram execução externa ----------
+-- Seis tentativas externas também bloqueiam ambas as classes.
 SELECT set_config('request.jwt.claim.sub','8a000000-0000-0000-0000-000000000002',true);
 SELECT is(public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='x-target'))->>'reason',
-  'user_attempt_budget_exhausted','EXTERNO com 6 tentativas externas em 24h continua barrado (quota de custo)');
+  'user_attempt_budget_exhausted','seis tentativas externas esgotam o mesmo teto para item externo');
 SELECT is(public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='x-target'))->>'costClass',
   'external','item openai é classificado como externo');
 SELECT is((public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='x-target'))#>>'{usage,externalAttempts24Hours}')::integer,
   6,'consumo externo é contado');
--- Separação: um item LOCAL deste usuário é admitido apesar das 6 tentativas externas.
+-- Mudar de classe não contorna o teto agregado.
 SELECT is(public.autonomous_work_budget_status((SELECT id FROM lx_items WHERE label='x-local'))->>'admitted',
-  'true','item LOCAL admitido apesar de 6 tentativas externas do mesmo usuário');
+  'false','item local também é bloqueado quando as seis tentativas anteriores são externas');
 
 -- ---------- ANTI-LOOP: item local que estourou o teto por-item continua fail-closed ----------
 SELECT set_config('request.jwt.claim.sub','8a000000-0000-0000-0000-000000000003',true);

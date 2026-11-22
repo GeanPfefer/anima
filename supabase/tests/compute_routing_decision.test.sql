@@ -30,14 +30,14 @@ RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$ SELECT jsonb_build_object(
   'economicsBasis',jsonb_build_object('used',false,'reason','not_provided','localCostPerVerified',NULL,'openaiCostPerVerified',NULL)); $$;
 
 CREATE TEMP TABLE recorded AS SELECT public.record_compute_routing_decision((SELECT id FROM target),1,
-  '94000000-0000-0000-0000-000000000021','94000000-0000-0000-0000-000000000031',pg_temp.decision('selected','ollama',NULL)) result;
+  '94000000-0000-0000-0000-000000000021',pg_temp.decision('selected','ollama',NULL),'94000000-0000-0000-0000-000000000031') result;
 SELECT is(result->>'action','recorded','registra decisão selecionada antes da tentativa') FROM recorded;
 SELECT is((SELECT event_type::text FROM public.work_events WHERE work_item_id=(SELECT id FROM target) AND event_type='compute_routing_decided'),'compute_routing_decided','usa evento dedicado') ;
 SELECT is((SELECT author::text FROM public.work_events WHERE work_item_id=(SELECT id FROM target) AND event_type='compute_routing_decided'),'system','autoria é sistêmica');
-SELECT is((public.record_compute_routing_decision((SELECT id FROM target),1,'94000000-0000-0000-0000-000000000021','94000000-0000-0000-0000-000000000031',pg_temp.decision('selected','ollama',NULL)))->>'action','replayed','replay idêntico');
-SELECT throws_ok($$SELECT public.record_compute_routing_decision((SELECT id FROM target),1,'94000000-0000-0000-0000-000000000021','94000000-0000-0000-0000-000000000031',pg_temp.decision('selected','openai','auth'))$$,'55000','compute routing decision conflict','divergência conflita');
-SELECT throws_ok($$SELECT public.record_compute_routing_decision((SELECT id FROM target),1,'94000000-0000-0000-0000-000000000022','94000000-0000-0000-0000-000000000032',pg_temp.decision('selected','openai',NULL))$$,'22023','invalid compute routing authority correlation','OpenAI sem authority é recusada');
-SELECT is((public.record_compute_routing_decision((SELECT id FROM target),1,'94000000-0000-0000-0000-000000000023',NULL,pg_temp.decision('waiting_for_human_authorization',NULL,NULL)))->>'action','recorded','waiting sem tentativa é persistido');
+SELECT is((public.record_compute_routing_decision((SELECT id FROM target),1,'94000000-0000-0000-0000-000000000021',pg_temp.decision('selected','ollama',NULL),'94000000-0000-0000-0000-000000000031'))->>'action','replayed','replay idêntico');
+SELECT throws_ok($$SELECT public.record_compute_routing_decision((SELECT id FROM target),1,'94000000-0000-0000-0000-000000000021',pg_temp.decision('selected','openai','auth'),'94000000-0000-0000-0000-000000000031')$$,'55000','compute routing decision conflict','divergência conflita');
+SELECT throws_ok($$SELECT public.record_compute_routing_decision((SELECT id FROM target),1,'94000000-0000-0000-0000-000000000022',pg_temp.decision('selected','openai',NULL),'94000000-0000-0000-0000-000000000032')$$,'22023','invalid compute routing authority correlation','OpenAI sem authority é recusada');
+SELECT is((public.record_compute_routing_decision((SELECT id FROM target),1,'94000000-0000-0000-0000-000000000023',pg_temp.decision('waiting_for_human_authorization',NULL,NULL)))->>'action','recorded','waiting sem tentativa é persistido');
 SELECT is((SELECT count(*) FROM public.work_events WHERE work_item_id=(SELECT id FROM target) AND event_type='execution_started'),0::bigint,'decisão não inicia execução');
 
 SELECT * FROM finish();
